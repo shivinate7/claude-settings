@@ -98,11 +98,19 @@ a turn end in these cases:
     `step:<slug>` (roadmap/data/steps/<slug>.json, resolved by ruling_home.value_resolves), `page:<n>`
     or `not-a-grant`. `noted` and `process-only` are not one. An item is closed by `[closed]` as a
     whole token after the home, with trailing text allowed (CLOSED_TOKEN), or by `[closed]` at the
-    line end. A closed `[question] -> answered` is never checked. Risk kind: likely risk. F88 (a
+    line end. A closed `[question] -> answered` is checked only by answer-finding-needs-home (next entry). Risk kind: likely risk. F88 (a
     closed note with no step, record or answer behind it) is the related incident, not a measured
     one. Cost: git rev-parse, for-each-ref and cat-file, inside the Stop process, per closed note
     homed to a file or a step. When the cwd is in no git repo, the check passes and a systemMessage
     says so;
+  - answer-finding-needs-home (roadmap step answer-finding-needs-step). A `[question] -> answered` item, open or
+    closed, whose text after `->` holds a DEFECT_WORDS word needs a home in that same text: `step:<slug>`
+    whose step file some branch holds, or a debt or ruling file some branch tracks (Homes.problem, read as a
+    task or a ruling home). A home on a sibling item is no home. The item text only; the chat transcript is not
+    read. Risk kind: likely risk. Incident: owner feedback fb-1238-1, Nov 11 12:40 CST, a question answered in
+    chat with a found gap and no step; its verbatim line is not on record, so the test item is reconstructed.
+    Cost: one regex per question item and, per named home, the git reads the task and ruling homes already
+    make, inside the Stop process. No process, file or log. A git or layout read that fails passes the item;
   - an open standing item has an id that is not a whole token in the handoff;
   - the inbox cannot be read. The block names the file: a Stop hook's stderr never reaches the owner,
     so a silent pass would drop feedback. This stays advisory, per decision guard-hooks-fail-closed:
@@ -208,6 +216,8 @@ KIND_WORDS = {"question": "answered", "note": "noted (closed: a tracked file, st
               "repo": "repo:<owner>/<name>"}
 EXAMPLE_KIND = "note"  # a key of KIND_WORDS
 EXAMPLE_HOME = "noted"
+# A `[question] -> answered` item naming one of these (whole words, any case) names a defect or a proposed fix.
+DEFECT_WORDS = re.compile(_WORD % r"gap|wrong|broken|missing|stale|should|needs\s+to|fix", re.IGNORECASE)
 OPEN_KINDS = ("[ruling]", "[task]", "[standing]")
 # Layout keys (lint/layout.json, or a repo's extras file) whose paths may hold each kind's home.
 HOME_KINDS = {"ruling": ("decisions", "rules", "claude-md", "agents-md"),
@@ -519,6 +529,22 @@ class Homes:
         except ruling_home._GitFailure as e:
             return self._stand_down(e, True)
         return self._closed_reason(item_id)
+
+    def question_problem(self, item_id, rest):
+        """None unless a `[question] -> answered` item names a defect (DEFECT_WORDS) and no home that resolves.
+        A home is a `step:<slug>` or a path in the item's own text that `problem` accepts as a task or a ruling
+        home. Never reads another item or the chat."""
+        text = rest.partition("->")[2]
+        if home_word(rest) != "answered" or not DEFECT_WORDS.search(text):
+            return None
+        for word in text.split():
+            word = ruling_home._unwrap(word).split("#", 1)[0].rstrip(":,;.")
+            if not (STEP_HOME.fullmatch(word) or "/" in word):
+                continue
+            if any(self.problem(item_id, kind, "[%s] -> %s" % (kind, word)) is None for kind in ("task", "ruling")):
+                return None
+        return ("%s [question] is answered with a defect or gap and names no home: add `step:<slug>` naming a step "
+                "file that some branch holds, or a debt or ruling file that git tracks" % item_id)
 
     @staticmethod
     def _closed_reason(item_id):
@@ -989,6 +1015,10 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox="", sessio
                     out.append(found)
             elif homes is not None and it[1].startswith(("[ruling]", "[task]")):
                 found = homes.problem(it[0], it[1][1:it[1].index("]")], it[1], grant)
+                if found:
+                    out.append(found)
+            elif homes is not None and it[1].startswith("[question]"):
+                found = homes.question_problem(it[0], it[1])
                 if found:
                     out.append(found)
             elif homes is not None and it[3] and it[1].startswith("[note]"):
