@@ -600,7 +600,7 @@ while True:
         _loading = "guard_kill"
         from guard_kill import (
             DETACHED_LAUNCH_REASON, GIT_ENV_REASON, KILL_PID_REASON, KILL_REASON,
-            PLAYWRIGHT_INSTALL_REASON, PLAYWRIGHT_PATH_REASON, detached_launch_hit, foreign_pid_kill,
+            PLAYWRIGHT_INSTALL_REASON, PLAYWRIGHT_PATH_REASON, agent_pid_kill, detached_launch_hit, foreign_pid_kill,
             git_env_command_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit, kills_group_pid,
             lsof_pids_reach_kill, playwright_command_hit, playwright_install_hit,
         )
@@ -4609,6 +4609,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
             # Every agent shares the main session's id, so only the main session may own by tag.
             matched = foreign_pid_kill(tokens, transcript, "" if agent else session_id)
+            if matched:
+                refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
+            caller = payload.get("agent_id") if agent and isinstance(payload, dict) else ""
+            matched = agent_pid_kill(tokens, caller if isinstance(caller, str) else "")
             if matched:
                 refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
     # The whole call, not one segment: an `lsof -t` pid list reaches a kill across a filter, a loop or a file.

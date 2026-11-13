@@ -17,6 +17,14 @@ try:
 except ImportError:  # same fallback as _nowindow above: no read, so a PPID-1 pid stays foreign
     def holds_session_tag(pid, session_id):
         return False
+try:
+    from proc_env import AGENT_TAG_NAME, entry_value  # the agent marker's name and read (hooks/proc_env.py)
+except ImportError:  # no read, so no live marker answers
+    AGENT_TAG_NAME, entry_value = "CLAUDE_AGENT_ID", None
+try:
+    import agent_procs  # the one home of the per-agent process record (hooks/agent_procs.py)
+except ImportError:  # no record, so only the live marker answers
+    agent_procs = None
 
 from guard_core import (
     QUOTE_MARKS,
@@ -391,6 +399,27 @@ def foreign_pid_kill(tokens, transcript: str = "", session_id: str = "") -> str:
         if pid_is_owned(abs(number) if number < -1 else number, root) is False:
             if _under_init(abs(number)) and holds_session_tag(abs(number), session_id):
                 continue
+            return arg
+    return ""
+
+
+def agent_pid_kill(tokens, agent_id: str) -> str:
+    """Return the first numeric pid a `kill` segment names that another agent started, for a call by AGENT_ID.
+
+    Step agent-owned-processes. Another agent's pid is one whose live exec environment holds a different
+    `CLAUDE_AGENT_ID` (proc_env), or that a record in `agent_procs` lists to another agent with the start it has
+    now (a pid reused since is not listed). A main-session call (AGENT_ID "") judges nothing here. Cost: one
+    environment read and the record folder's files per named pid; no process start."""
+    if not agent_id:
+        return ""
+    for arg in _kill_pids(tokens):
+        pid = abs(int(arg))
+        if pid <= 1:
+            continue
+        marker = entry_value(pid, AGENT_TAG_NAME) if entry_value else None
+        if marker and marker != agent_id:
+            return arg
+        if agent_procs is not None and agent_procs.held_by_others(pid, agent_id):
             return arg
     return ""
 

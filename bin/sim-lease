@@ -30,6 +30,10 @@ under an fcntl.flock on the file lock in the same folder. The lock is held for o
 while sleeping.
 Cost: per call, one `uname`, one `ps` per recorded pid, and one `sysctl` on take and status (take: one `sysctl` per poll). Files written:
 leases.json, only when its content changes, plus the empty lock file. No daemon, no log.
+Agent record: a take by an agent (CLAUDE_AGENT_ID in the environment) also adds the holder to that agent's process
+record as kind "sim-lease" (hooks/agent_procs.py, step agent-owned-processes). It is a reference to the lease: leases.json
+stays the one lease store, and the SubagentStop stop never ends a sim-lease pid. A foreground call carries no marker, so it
+writes none. Cost: one record read and write on a granted take, no process start.
 Reader: the guard calls live_leases() (SLOT_UDID maps a slot to its device) to let a session's MCP launch boot the device
 its own live lease holds. It takes no flock and writes nothing: one read of leases.json and one `ps` per lease.
 macOS only in effect; it runs under python3's standard library alone.
@@ -45,6 +49,10 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+try:
+    import agent_procs  # noqa: E402  the one home of the per-agent process record (hooks/agent_procs.py)
+except ImportError:  # a lease never fails for a missing helper
+    agent_procs = None
 
 MAX_5MIN = 100.0   # a grant needs the 5-minute load under this
 MAX_1MIN = 60.0    # a grant needs the 1-minute load under this
@@ -203,6 +211,13 @@ def shown(slot, args):
     return SLOT_UDID[slot] if args.udid else slot
 
 
+def note_in_agent_record(pid, started):
+    """Add the lease holder to the calling agent's process record as kind "sim-lease". It never fails the take."""
+    agent = os.environ.get("CLAUDE_AGENT_ID")
+    if agent and agent_procs is not None:
+        agent_procs.add_entry(agent, {"pid": pid, "start": started, "owner": agent, "kind": "sim-lease"})
+
+
 def cmd_take(args):
     pid = args.pid
     wait = args.wait if args.wait is not None else float(os.environ.get("SIM_LEASE_WAIT") or 300)
@@ -249,6 +264,8 @@ def cmd_take(args):
                 return 1
             time.sleep(min(poll, deadline - now))
     finally:
+        if granted:
+            note_in_agent_record(pid, started)
         # Not granted (timeout, signal): leave the queue. A granted pid is already out of it.
         if not granted:
             with State(create=True) as st:

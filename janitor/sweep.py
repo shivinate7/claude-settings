@@ -78,6 +78,10 @@ try:
 except ImportError:  # a hook never dies for a missing helper; with no read, no pid is marked and nothing is stopped
     proc_env = None
 try:
+    import agent_procs  # the one home of the per-agent process record (hooks/agent_procs.py)
+except ImportError:  # a hook never dies for a missing helper; with no record, the marker alone proves a pid
+    agent_procs = None
+try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
     _nowindow = subprocess
@@ -829,7 +833,9 @@ def host_child_stops(pids, host: int, tree: str, protected=(), agent_id=None):
     parent is any pid: an orphan sits under PID 1, not under HOST. Cost: one `ps` read per ancestor
     climbed from a marked pid, none for an unmarked pid. A missing AGENT_ID, another agent's marker,
     a pid in PROTECTED (this process and its ancestors) or an unmarked pid no marked pid descends
-    from makes the whole answer None: one pid not proven keeps the tree, and nothing is stopped."""
+    from makes the whole answer None: one pid not proven keeps the tree, and nothing is stopped. The agent's
+    record (`agent_procs.proven_own`) disputes a marked pid whose recorded start differs from its start now, or
+    that another agent's record lists too: that also makes the answer None."""
     if not agent_id:
         return None
     members = list(pids)
@@ -839,6 +845,8 @@ def host_child_stops(pids, host: int, tree: str, protected=(), agent_id=None):
     for pid in members:
         mark = agent_mark(pid)
         if mark == agent_id:
+            if agent_procs is not None and not agent_procs.proven_own(pid, agent_id):
+                return None  # the record disputes it: a reused pid, or another agent's record lists it too
             marked.append(pid)
         elif mark is None:
             unmarked.append(pid)
