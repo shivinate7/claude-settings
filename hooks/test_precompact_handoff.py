@@ -630,13 +630,13 @@ def case_nudge_reads_messages_not_total():
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(284999)])
         check("messages: total 284,999 (messages 199,999) is silent at 85k overhead",
               p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
-        # item 2 (75k drop): checkpoints(299000) = [249k]; the 200k floor is 49k under it, dropped.
+        # item 2 (75k drop): checkpoints(299000) = [249k, 279k]; the 200k floor is 49k under the top, dropped.
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(285000)])
         check("messages: total 285,000 (messages 200,000) is silent: the 200k floor is dropped",
               p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == -1,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(333999)])
-        check("messages: total 333,999 is silent at bucket -1 (the one checkpoint is total 334k)",
+        check("messages: total 333,999 is silent at bucket -1 (the top checkpoint is total 334k)",
               p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == -1,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(334000)])
@@ -805,8 +805,8 @@ def case_checkpoint_ladder():
 
 
 def case_late_checkpoint():
-    """A late checkpoint sits NUDGE_LATE_MARGIN (20k) under the room, after the top one, whenever the
-    top sits 25k or more above it. Measured 2026-11-12 on a cloud lane: 88,069 tokens of start-up load,
+    """A late checkpoint sits NUDGE_LATE_MARGIN (20k) under the room, after the top one, whenever it
+    sits 25k or more past the top. Measured 2026-11-12 on a cloud lane: 88,069 tokens of start-up load,
     threshold 384,000, so room 295,931 gave one checkpoint, [245931], 50k before the line."""
     for room, want in (
             (295931, [245931, 275931]),  # the measured cloud lane: the late one is 20k under the room
@@ -814,6 +814,8 @@ def case_late_checkpoint():
             (299000, [249000, 279000]),
             (100000, [50000, 80000]),  # margin is at its 50k cap here, so the late one is 30k past the top
             (99000, [49500, 79000]),  # margin 49.5k: 29.5k past the top, still 25k or more
+            (90000, [45000, 70000]),  # margin 45k: the late one is exactly 25k past the top, kept
+            (89999, [45000]),  # margin 44,999: 24,999 past the top, one under the gap: none
             (80000, [40000]),  # margin 40k: the late one would be 20k past the top, under 25k: none
             (44000, [22000])):
         try:
@@ -836,6 +838,10 @@ def case_late_checkpoint():
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(364000)])
         check("late: 364,000 (threshold - 20k) blocks at the late bucket",
               is_block(c, p) and stored_bucket(c) == 2,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(380000)])
+        check("late: 380,000 after the late bucket is silent (nothing above it)",
+              p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == 2,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
     finally:
         c.cleanup()

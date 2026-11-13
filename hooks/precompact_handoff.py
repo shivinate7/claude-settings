@@ -855,10 +855,10 @@ def checkpoints(room):
     room - margin, with margin = min(NUDGE_MARGIN, room // 2), so a small room keeps a
     positive top. Below the top: 200k, then +150k while below the top. A step under
     NUDGE_STEP // 2 below the top is dropped, the 200k floor included: two rewrites that
-    close are one too many (room 384k: 200k, 334k; room 299k: 249k). When top <= 200k, only
-    the top. For room <= 0, only room - NUDGE_MARGIN, whatever its sign. After the top comes the late
+    close are one too many (room 384k: 200k, 334k, then late 364k; room 299k: 249k, then late 279k). When
+    top <= 200k, only the top, then the late one when it qualifies. For room <= 0, only room - NUDGE_MARGIN, whatever its sign. After the top comes the late
     checkpoint, room - NUDGE_LATE_MARGIN, when it sits NUDGE_LATE_GAP or more past the top (room 295,931:
-    245,931 and 275,931). The top alone left a cloud session 84k to 108k tokens short of the live line."""
+    245,931 and 275,931). The top alone left one measured cloud session 84k tokens short of the live line."""
     margin = min(NUDGE_MARGIN, room // 2) if room > 0 else NUDGE_MARGIN
     top = room - margin
     late = [room - NUDGE_LATE_MARGIN] if room > 0 and margin - NUDGE_LATE_MARGIN >= NUDGE_LATE_GAP else []
