@@ -4901,11 +4901,11 @@ move_fixture() {
 move_install() {
   if [ "${1:-}" = file ]; then
     out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" \
-          CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" GIT_CEILING_DIRECTORIES="$work" \
+          CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" GIT_CEILING_DIRECTORIES="$work" ${MOVE_ENV:+"$MOVE_ENV"} \
           bash "$co/install.sh" --cloud 2>&1)
   else
     out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" \
-          CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" GIT_CEILING_DIRECTORIES="$work" \
+          CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" GIT_CEILING_DIRECTORIES="$work" ${MOVE_ENV:+"$MOVE_ENV"} \
           bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   fi
   rc=$?
@@ -5173,6 +5173,56 @@ caseM8() {
   if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc on the third install: $(install_problems)"; return; fi
   if ! msg=$(m8_check "the third install (checkout fallback route)"); then bad "$name" "$msg"; return; fi
   ok "$name"
+}
+
+# ---- caseLO1: the global rules load once (step claude-md-load-once). A cloud session whose harness loads CLAUDE.md from every attached
+# source folder (CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1) already loads the session checkout's CLAUDE.md. When the install
+# takes the mirror as its source and the checkout's CLAUDE.md is byte-equal to the mirror's, the import line would load the same
+# rules twice, so the install leaves it out. Every other state writes the import as before, because only then can a read fail
+# without dropping the global rules.
+# lo1_run VARIANT: one cloud install on a session checkout on branch lane. Sets l1_md, the installed CLAUDE.md's text, or returns 1
+# with fix_why set on a fixture fault.
+lo1_run() {
+  fix_why=
+  case "$1" in
+    differ) move_fixture "l1$1" stale ;;
+    *) move_fixture "l1$1" ;;
+  esac
+  git -C "$co" checkout -q -b lane
+  if [ "$1" = ontip ]; then git -C "$co" checkout -q -B main origin/main; fi
+  MOVE_ENV=CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1
+  [ "$1" != noenv ] || MOVE_ENV=
+  [ "$1" != envzero ] || MOVE_ENV=CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=0
+  move_install
+  MOVE_ENV=
+  if [ "$rc" -ne 0 ]; then fix_why="the install exited $rc: $(install_problems)"; return 1; fi
+  lo1_md=$(cat "$h/.claude-cfg/CLAUDE.md" 2>/dev/null)
+  return 0
+}
+caseLO1() {
+  if ! command -v jq >/dev/null 2>&1; then skip "caseLO1" "jq not found"; return; fi
+  name="caseLO1 (skip): mirror source, env var on, checkout CLAUDE.md equal to the mirror's: the pointer line is in a code fence, not an import, and the pointer guard still reads it"
+  if ! lo1_run skip; then bad "$name" "FIXTURE $fix_why"
+  elif [ -n "$(printf '%s\n' "$lo1_md" | awk '/^```/{f=!f; next} !f && /^@/{print}')" ]; then bad "$name" "an import line outside a code fence: [$lo1_md]"
+  elif ! printf '%s\n' "$lo1_md" | grep -q '^@.*/CLAUDE\.md$'; then bad "$name" "no pointer line for the guards to read: [$lo1_md]"
+  elif [ -z "$(cd "$REPO_ROOT/hooks" && HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" python3 -c 'import guard_pointer; print(guard_pointer.pointer_checkout())' 2>/dev/null)" ]; then bad "$name" "pointer_checkout() reads nothing from the written file, so the pointer-keyed guards would go silent"
+  else ok "$name"; fi
+  name="caseLO1 (envzero): the env var is 0: the import line is written"
+  if ! lo1_run envzero; then bad "$name" "FIXTURE $fix_why"
+  elif [ -n "$(printf '%s\n' "$lo1_md" | awk '/^```/{f=!f; next} !f && /^@/{print}')" ]; then ok "$name"
+  else bad "$name" "no import line outside a code fence: [$lo1_md]"; fi
+  name="caseLO1 (noenv): the env var is not set: the import line is written"
+  if ! lo1_run noenv; then bad "$name" "FIXTURE $fix_why"
+  elif printf '%s\n' "$lo1_md" | grep -q '^@.*/CLAUDE\.md$'; then ok "$name"
+  else bad "$name" "no import line: [$lo1_md]"; fi
+  name="caseLO1 (differ): the checkout's CLAUDE.md differs from the mirror's: the import line is written"
+  if ! lo1_run differ; then bad "$name" "FIXTURE $fix_why"
+  elif printf '%s\n' "$lo1_md" | grep -q '^@.*/CLAUDE\.md$'; then ok "$name"
+  else bad "$name" "no import line: [$lo1_md]"; fi
+  name="caseLO1 (ontip): the checkout is the source (no mirror, so no own checkout): the import line is written"
+  if ! lo1_run ontip; then bad "$name" "FIXTURE $fix_why"
+  elif printf '%s\n' "$lo1_md" | grep -q '^@.*/CLAUDE\.md$'; then ok "$name"
+  else bad "$name" "no import line: [$lo1_md]"; fi
 }
 
 # caseM9: no mirror can be made on a first start, because the origin redirect names a repo that is not there. The install
@@ -5780,6 +5830,7 @@ run caseM13
 run caseM14
 run caseM15
 run caseM16
+run caseLO1
 run caseM17
 run caseM18
 run caseM19
