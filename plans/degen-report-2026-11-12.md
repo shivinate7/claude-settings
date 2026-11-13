@@ -83,7 +83,7 @@ Classes: ruled (already ruled or fixed), step (an existing step takes it), new (
 | D5 | No check before a "not worse than main" claim | new | new step claim-vs-main-needs-read, extends #2765 | filed, roadmap 378ff3a35 | none |
 | D6 | CI waits have no enforcer | step + new | wake: step red-job-wakes-runner (#2860); stop: new step ci-wait-stop-needs-checkin | partly in flight | none |
 | D7 | Role-model guard ignores its own override | owner | with D18: guard.py:3836-3849, call_judge.py:32,324-343; step role-model-explore-veto-offer once ruled | ruled 21:59: override lifts the veto; step role-model-explore-veto-offer | none |
-| D8 | Haiku round-1 reviews against Sonnet records | step | step model-table-one-home (#3010), step round1-sonnet-guard-table | in flight | none |
+| D8 | Haiku round-1 reviews against Sonnet records | step | step model-table-one-home (#3010), step round1-sonnet-guard-table | half: #3010 merged in batch 122; round1-sonnet-guard-table doing | #3010 (batch 122, 904f3d5e2) |
 | D9 | builder-test-edit refuses comment-only edits | owner | decision builders-cannot-edit-tests, ruling 437 a; step builder-test-comment-edit once ruled | ruled 21:59: a, comment-only diffs; step builder-test-comment-edit | none |
 | D10 | Live pin fell 439 commits behind | new | new step session-start-pin-skip-log | filed, roadmap 378ff3a35 | none |
 | D11 | Simulator noise list has no shared home | new | new step sim-boot-noise-off (bin/sim-test), one lane with D12 | filed, roadmap 378ff3a35 | none |
