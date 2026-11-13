@@ -4938,6 +4938,22 @@ class IdleLanes(UpkeepFixture):
         self.assertEqual(len(self.joint_for(entries, "session_b")), 1, "control: the stale draft without a review log printed no joint line")
         self.assertEqual(self.joint_for(entries, "session_a"), [], "a draft with a posted review log printed a joint line")
 
+    def test_a_stale_draft_with_no_head_sha_gets_no_joint_line(self):
+        # The ruling: a stale draft with no head sha gets no joint line, and its lane keeps waiting, as it does today.
+        # The head is missing, null or empty in turn. session_b is the control: its draft has a head and prints the line.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        for head in (_ABSENT, None, ""):
+            with self.subTest(head=head):
+                self.publish(sessions=[self.idle_lane("session_a", "c1"), self.idle_lane("session_b", "c2")],
+                             pulls=[self.stale_pull(101, "lane/c1", head=head), self.stale_pull(102, "lane/c2")])
+                entries = self.reported()
+                self.assertEqual(len(self.joint_for(entries, "session_b")), 1,
+                                 "control: the stale draft with a head printed no joint line")
+                self.assertEqual(self.joint_for(entries, "session_a"), [],
+                                 "a stale draft with no head sha printed a joint line")
+                self.assertNotIn("session_a (c1; topic -)", entries,
+                                 "a stale draft with no head sha released its lane as a plain line")
+
     def test_a_stale_draft_whose_title_names_a_doing_step_gets_no_joint_line(self):
         # c5 is doing and the draft's title names it, so the draft is the step's live PR, not a stale one. session_b is
         # the control: its draft names no doing step.
