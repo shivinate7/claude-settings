@@ -15,10 +15,12 @@ This suite never writes to the real `~/Library` and never calls `launchctl`: eve
 """
 import os
 import plistlib
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
@@ -26,7 +28,9 @@ INSTALLER = os.path.join(HERE, "install_launchd.py")
 sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+sys.path.insert(0, os.path.join(REPO_ROOT, "hooks", "test_support"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import cost_probe  # noqa: E402  the shared cost counters (hooks/test_support/cost_probe.py)
 import guard  # noqa: E402
 import install_launchd  # noqa: E402
 
@@ -227,6 +231,63 @@ class RefusesWhenWorktreeStatusIsUnreadable(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         plist_path = os.path.join(lib_dir, "LaunchAgents", install_launchd.LABEL + ".plist")
         self.assertFalse(os.path.isfile(plist_path))
+
+
+# The cost of one install. The installer writes one job file and starts no scheduler; its only child starts are the
+# two git reads of is_worktree. The job is a daily calendar time, with no repeat and no key that starts it at load or
+# on an event. This timer runs once a day: the cases pin its schedule, its trigger and its installer's starts.
+# Each key below starts a launchd job by itself, apart from the calendar time.
+LAUNCHD_TRIGGER_KEYS = ("StartCalendarInterval", "StartInterval", "WatchPaths", "QueueDirectories", "StartOnMount",
+                        "KeepAlive", "Sockets", "MachServices", "LaunchEvents")
+
+
+class CostTests(unittest.TestCase):
+    """What one install costs (rule outcomes-mechanize-rules). The installer runs in process, so
+    cost_probe.children() counts each child it starts. make_repo runs before the count starts."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.base = os.path.join(ROOT, "cost")  # a subfolder of this run's ROOT: the run removes ROOT, not this
+        os.makedirs(cls.base, exist_ok=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.base, ignore_errors=True)
+
+    def install(self):
+        case = tempfile.mkdtemp(dir=self.base)
+        checkout, library, config = (os.path.join(case, name) for name in ("checkout", "library", "config"))
+        make_repo(checkout)
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}), cost_probe.children() as log:
+            code = install_launchd.main(["--repo-root", checkout, "--library-dir", library])
+        return code, log, library, config
+
+    def test_one_job_file_is_written_and_no_scheduler_is_started(self):
+        code, log, library, config = self.install()
+        self.assertEqual(code, 0)
+        self.assertEqual(os.listdir(os.path.join(library, "LaunchAgents")), [install_launchd.LABEL + ".plist"],
+                         "one job file is written")
+        self.assertEqual(cost_probe.leftovers(config), ["janitor"], "the config folder gains its log folder only")
+        names = cost_probe.names(log.argvs)
+        self.assertNotIn("launchctl", names, "the installer never starts launchctl")
+        self.assertEqual(names, ["git", "git"],
+                         "the only starts are the two git reads of is_worktree; got %r" % log.argvs)
+
+    def test_the_job_fires_once_a_day_and_never_repeats(self):
+        code, log, library, config = self.install()
+        with open(os.path.join(library, "LaunchAgents", install_launchd.LABEL + ".plist"), "rb") as handle:
+            data = plistlib.load(handle)
+        self.assertEqual(data["StartCalendarInterval"], {"Hour": 3, "Minute": 17}, "one calendar time a day")
+        self.assertNotIn("StartInterval", data, "no repeat interval")
+
+    def test_the_job_has_no_run_at_load_and_exactly_one_trigger_the_daily_calendar_time(self):
+        code, log, library, config = self.install()
+        with open(os.path.join(library, "LaunchAgents", install_launchd.LABEL + ".plist"), "rb") as handle:
+            data = plistlib.load(handle)
+        self.assertIs(data["RunAtLoad"], False, "the job does not start when it is loaded; got %r" % data["RunAtLoad"])
+        triggers = [key for key in LAUNCHD_TRIGGER_KEYS if key in data]
+        self.assertEqual(triggers, ["StartCalendarInterval"],
+                         "one trigger, the daily calendar time, and no other; got %r" % triggers)
 
 
 if __name__ == "__main__":
