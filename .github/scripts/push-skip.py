@@ -5,17 +5,18 @@ Writes one line to $GITHUB_OUTPUT (stdout when unset): skip=true or skip=false. 
 is a visible success and scope reads its output.
 
 skip=true only when the push commit's tree equals the tree of an integration PR head (a batch-* branch) whose all-jobs-passed check
-run concluded success and whose every suite job concluded success. An integration PR is ready, and its ready run runs the Windows
+run concluded success and whose every check concluded success. An integration PR is ready, and its ready run runs the Windows
 guard, merge and rest jobs in full, and ci-scope.sh sets every scope flag on for a ready pull request from a batch-* branch, so that
 run is the all-flags run: no job or suite skipped on the PR head's diff. Any error from the read, of any type, writes skip=false and
 says "unknown": an unknown state runs everything, never skips.
 
 The result is read from the head's check runs, not from the checks.yml run's own conclusion: a draft run skips every job and
 concludes success, and it must not stand for the ready run. A skipped check run (the draft run's) is not a result. all-jobs-passed
-also passes when jobs were skipped, so it is not enough alone: a reused run counts for a suite only if that suite's job ran and
-concluded success on that tree. The suite jobs are the jobs all-jobs-passed needs, minus the bookkeeping jobs. They are derived from
-checks.yml by lint/all_jobs_passed_rules.py (split_jobs, the one reader), never copied here. The head record's conclusion is success
-only when both hold; else it names the suite jobs that did not succeed.
+fails on a skipped needed job, but a job can succeed while a flag skipped the test steps inside it. The job conclusion hides that, and
+the only guard is the all-flags arm in ci-scope.sh. So all-jobs-passed is not enough alone: a reused run counts for a suite only if that
+suite's job ran and concluded success on that tree. The checks are the jobs all-jobs-passed needs, minus the bookkeeping jobs. They are
+derived from checks.yml by lint/all_jobs_passed_rules.py (split_jobs, the one reader), never copied here. The head record's conclusion
+is success only when both hold; else it names the checks that did not succeed.
 
 Input (env): PUSH_TREE (the push commit's tree sha), REPO (owner/name), GH_TOKEN, HEAD_SHA (the push commit). PRS_JSON is a stand-in
 for the read: a JSON list of integration PR heads, each {"head_branch", "tree", "status", "conclusion"}
@@ -53,9 +54,9 @@ def _nightly_skip():
 
 @functools.lru_cache(maxsize=None)
 def suite_jobs():
-    """The jobs a ready batch run must have run its tests in: every job all-jobs-passed needs, except the bookkeeping jobs that decide,
-    skip or fan in. lint/all_jobs_passed_rules.py is the one reader of checks.yml, loaded by path since lint/ is no package. Unknown
-    when checks.yml cannot be read or yields no suite job, since an empty list would let any run stand."""
+    """The jobs a ready integration PR run must have run its tests in: every job all-jobs-passed needs, except the bookkeeping jobs that
+    decide, skip or fan in. lint/all_jobs_passed_rules.py is the one reader of checks.yml, loaded by path since lint/ is no package.
+    Unknown when checks.yml cannot be read or yields no check, since an empty list would let any run stand."""
     sys.path.insert(0, LINT)
     try:
         spec = importlib.util.spec_from_file_location("all_jobs_passed_rules", os.path.join(LINT, "all_jobs_passed_rules.py"))
@@ -111,13 +112,13 @@ def rollup_result(env, sha, runs=None):
 
 
 def suites_not_success(runs):
-    """The suite jobs whose newest check run that ran is missing or did not complete with success, sorted."""
+    """The checks whose newest check run that ran is missing or did not complete with success, sorted."""
     return sorted(name for name in suite_jobs() if newest_result(runs, name) != ("completed", "success"))
 
 
 def read_heads(env):
     """The batch pull request heads: the stand-in when PRS_JSON is set, else the pull requests the push commit belongs to, each
-    with its head's tree and its result: the all-jobs-passed result, not success when a suite job did not succeed. Raises Unknown on anything that is not a list of records."""
+    with its head's tree and its result: the all-jobs-passed result, not success when a check did not succeed. Raises Unknown on anything that is not a list of records."""
     raw = env.get("PRS_JSON")
     if raw is not None:
         try:
@@ -149,7 +150,7 @@ def read_heads(env):
         runs = check_runs(env, head["sha"])
         status, conclusion = rollup_result(env, head["sha"], runs)
         if (status, conclusion) == ("completed", "success"):
-            # all-jobs-passed passes with skipped jobs, so a green rollup counts only when every suite job also succeeded.
+            # A job can succeed with its test steps skipped by a flag, which all-jobs-passed cannot see, so a green rollup counts only when every check also succeeded.
             missing = suites_not_success(runs)
             if missing:
                 conclusion = "suite jobs not success: " + ", ".join(missing)
