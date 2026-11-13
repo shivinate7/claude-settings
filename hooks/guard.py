@@ -302,6 +302,17 @@ Other tools, in `judge` order:
                        write deletes the file's record) and a read pass. A refused write leaves the record with the first
                        writer; an override that lifts it moves the record. The reason names no path. A call that names no scratchpad touches no file. An override lifts it.
                        (scratchpad-owner)
+  coordinator-scope    deny. A cloud coordinator's own call (no `agent_id`, CLAUDE_CODE_REMOTE true, tier
+                       `coordinator`: the role file for the environment's session id, else the session's own
+                       cs-build tag and its own later tag calls) that
+                       writes a repository path outside the record homes (the kinds of COORDINATOR_KINDS at the
+                       repo's own layout paths, or a record-branch checkout's folders) and its scratchpad:
+                       through an Edit tool, a shell write or python or node script, or a GitHub MCP file-write
+                       tool. A path in no repository passes. Or that spawns an agent (Agent, Task or a Workflow
+                       agent() call) whose type is not one of COORDINATOR_AGENT_ROLES, an empty or missing type
+                       included. Or that merges: `gh pr merge` or the host's merge or auto-merge tool. The
+                       reasons name no target. The tier is read last, only for a call that would be refused.
+                       An override lifts it. (session-tiers, roles-orchestrator-never-builds)
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
                        (haiku < sonnet < opus), or that names no model where the role has no `model:`
                        pin and no default model is set. An Explore whose brief's first line
@@ -2917,6 +2928,7 @@ AGENT_NO_REMOTE_REASON = (
     "that. Finish your own work and put the request in your report so that session can act on it. "
     "(decision lanes-start-as-agents, an agent is not a lane)"
 )
+from shared_names import BUILD_TAG, read_recorded_role, role_path  # noqa: E402  the one home of the cs-build tag prefix and the role file reader, shared with merge/merge.py
 from shared_names import LANE_TAG, grant_line_holds_words  # noqa: E402  the one home of the lane tag and the Grant reader, shared with guard_merge
 LANE_EFFORT_REASON = (
     "A lane starts with the effort field set to `%s` and the whole brief as its prompt. The prompt's "
@@ -6679,6 +6691,270 @@ def readonly_write_hit(command: str, cwd: str, session: str, remote: bool = Fals
     return ""
 
 
+# Rule coordinator-scope (records session-tiers and roles-orchestrator-never-builds; incident: a cloud coordinator
+# edited another repo's instructions file itself and ran review agents). A cloud coordinator briefs lane sessions and
+# writes records. Its own write goes only to a record home, its own scratchpad, or a path in no repository. Its own
+# calls spawn no agent outside COORDINATOR_AGENT_ROLES and merge nothing.
+# A record home is a layout kind of COORDINATOR_KINDS at the paths lint/layout.py gives for THAT repo (`candidates`: the
+# repo's legacy-repos path, then the layout path), or a record-branch folder of a checkout that stands on the record branch
+# (with RECORD_DATA in it). A GitHub MCP write is judged by the repo the call names, not the checkout it runs in
+# (`named_candidates`) unless the checkout's origin is that repo, then by the checkout's own `candidates`.
+# The rule acts only on a call with no agent, in a cloud session (CLAUDE_CODE_REMOTE true), whose tier is `coordinator`:
+# the role file when it names this session, else the cs-build tag of the session's own get_session record plus its own
+# later set_session_tags calls (own_session_read with `applied`). An owner override lifts the rule: it is not in never_lifted.
+# What a shell call writes: the words `_shell_write_hit` reads (a `cp` counts by its destination, an `mv` source counts
+# too, because it is removed) and the python or node scripts `interpreter_write_hit` reads. Not read: `git commit` of a
+# product file, `perl -i`, `dd of=`, a symlink in a target path (debt notes `coordinator-scope-missed-writes`).
+# Cost (rule outcomes-mechanize-rules): the call's tool name is tested first, and the role file is read once per call, only
+# for a call that could write, spawn or merge. The transcript is read once more only when the role file is missing. A
+# coordinator's write call adds lint/layout.json, the repo's extras file and git config (file reads, no process).
+COORDINATOR_KINDS = ("decisions", "debts", "debt-notes", "plans", "specs", "todo", "records-index", "design", "scorecard")
+COORDINATOR_SCOPE_REASON = (
+    "Rule (Roles) coordinator-scope: a coordinator briefs lanes and writes records. It does not change a repository's "
+    "code, settings or instructions itself (decision session-tiers, a coordinator stays in its tier and a guard "
+    "enforces it). Remedy: brief a lane session to make this change, with the files and the check that proves it. "
+    "Write records and your scratchpad yourself."
+)
+# The agent types a coordinator may spawn, compared exactly. Plan, Explore and claude-code-guide gather facts and the
+# refuter argues against a plan (decision coordinator-spawns-refuter); none builds or reviews.
+COORDINATOR_AGENT_ROLES = ("Plan", "Explore", "claude-code-guide", REFUTER_ROLE)
+COORDINATOR_SPAWN_REASON = (
+    "Rule (Roles) coordinator-scope: a coordinator briefs lanes and runs no build or review agent of its own "
+    "(decision session-tiers: a spawn of any type but Plan, Explore, claude-code-guide and refuter is refused). "
+    "Remedy: brief a lane session to do this work, with the files and the check that proves it."
+)
+COORDINATOR_MERGE_REASON = (
+    "Rule (Roles) coordinator-scope: in a coordinator build only the batch runner merges "
+    "(decision session-tiers, only the batch runner runs a merge in a coordinator build). "
+    "Remedy: hand the branch, head and PR to the batch runner, or brief a lane session to do it."
+)
+# The host's tools that merge for a coordinator: the merge tool, and the one that arms a merge to land later. The arming
+# tool stays out of MERGE_TOOLS, so merge-checks does not judge it.
+COORDINATOR_MERGE_TOOLS = MERGE_TOOLS + ("mcp__github__enable_pr_auto_merge",)
+# The host's file-write tools. Each writes a repository path through the GitHub API, so coordinator-scope judges its
+# repo-relative path as it judges an Edit. Not in guard_core WRITE_TOOLS: other rules read that set as local-file writes.
+COORDINATOR_MCP_WRITE_TOOLS = ("mcp__github__create_or_update_file", "mcp__github__push_files",
+                               "mcp__github__delete_file")
+# The record branch of skill project-ops: an orphan branch laid out by its scaffold, its data under roadmap/data.
+RECORD_DATA = "roadmap/data"
+RECORD_FOLDERS = ("roadmap", "briefs", "handoffs")
+_COORDINATOR_ROLE = {}
+_COORDINATOR_PATHS = {}
+_RECORD_CHECKOUTS = {}
+
+
+def coordinator_paths(root, name=None):
+    """[(path, is_file)] of the record homes of a repo, lower case with no edge slash: the checkout at `root` (its
+    `layout.candidates`), or, with no root, the repo `name` a call names (`layout.named_candidates`: the layout file
+    only, never a checkout). [] when no layout is readable: then no repository path passes."""
+    key = (root, name)
+    if key in _COORDINATOR_PATHS:
+        return _COORDINATOR_PATHS[key]
+    found = []
+    try:
+        home = _layout_module()
+        for kind in COORDINATOR_KINDS:
+            spelled = home.candidates(root, kind) if root is not None else home.named_candidates(name, kind)
+            for path in spelled:
+                path = norm(path).strip("/").lower()
+                entry = (path, bool(os.path.splitext(path)[1]))
+                if path and entry not in found:
+                    found.append(entry)
+    except Exception:
+        found = []
+    _COORDINATOR_PATHS[key] = found
+    return found
+
+
+def coordinator_mcp_name(tool_input: dict):
+    """`owner/repo`, lower case, of the repo a GitHub MCP call names; None when it names none."""
+    owner, repo = tool_input.get("owner"), tool_input.get("repo")
+    return (owner + "/" + repo).lower() if isinstance(owner, str) and isinstance(repo, str) and owner and repo else None
+
+
+def coordinator_cwd_root(cwd: str) -> str:
+    """The root of the repository the call runs in: the nearest parent of `cwd` that holds `.git`, else `cwd`."""
+    probe = norm(os.path.normpath(_expanded(os.path.join(cwd or ".", "x"), cwd or "")))
+    rel = repo_rel(probe, cwd or "", outside=False)
+    return probe[:len(probe) - len(rel)] if rel else norm(cwd or "")
+
+
+def coordinator_mcp_root(tool_input: dict, cwd: str):
+    """The root of the checkout a GitHub MCP call runs in, when its origin is the repo the call names; else None.
+    Reads git's config file only (layout.repo_name): no process and no extras file."""
+    name = coordinator_mcp_name(tool_input)
+    if name is None:
+        return None
+    try:
+        root = coordinator_cwd_root(cwd)
+        return root if _layout_module().repo_name(root) == name else None
+    except Exception:
+        return None
+
+
+def coordinator_record_checkout(root: str) -> bool:
+    """True when the checkout at `root` stands on the record branch and holds its data folder. The folder is
+    looked for first, so a checkout without it starts no git process."""
+    if root not in _RECORD_CHECKOUTS:
+        stands = False
+        if os.path.isdir(os.path.join(root, *RECORD_DATA.split("/"))):
+            done = guard_core._git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+            stands = (done is not None and done.returncode == 0
+                      and done.stdout.strip() == record_branch_of(root))
+        _RECORD_CHECKOUTS[root] = stands
+    return _RECORD_CHECKOUTS[root]
+
+
+def coordinator_rel_ok(rel: str, root, name=None) -> bool:
+    """True when a path relative to a repo is a record home: a kind's file, a file inside a kind's folder, or a
+    record-branch folder of a checkout on the record branch. The case is folded, because the folder is one folder on a
+    case-insensitive disk. With a `root`, the repo is the checkout there. With no root, it is the repo `name` a call
+    names, and no record-branch folder passes."""
+    parts = [part for part in norm(rel).lower().split("/") if part]
+    if ".." in parts:
+        return False
+    joined = "/".join(parts)
+    if any(joined == path or (not is_file and joined.startswith(path + "/"))
+           for path, is_file in coordinator_paths(root, name)):
+        return True
+    return root is not None and len(parts) > 1 and parts[0] in RECORD_FOLDERS and coordinator_record_checkout(root)
+
+
+def coordinator_mcp_paths(tool_input: dict) -> list:
+    """The repo-relative paths a GitHub MCP file-write call names: its `path`, and each `files[].path` of push_files.
+    An entry that is no string is skipped: such a call fails at the host."""
+    paths = [tool_input.get("path")]
+    files = tool_input.get("files")
+    if isinstance(files, list):
+        paths += [f.get("path") for f in files if isinstance(f, dict)]
+    return [p for p in paths if isinstance(p, str) and p]
+
+
+def coordinator_path_outside(target: str, where: str, session_id: str) -> bool:
+    """True when `target` sits in a repository, is no record home and is not this session's scratchpad."""
+    try:
+        rel = repo_rel(target, where, outside=False)
+        if rel is None:
+            return False
+        full = norm(os.path.normpath(_expanded(target, where)))
+        return (not coordinator_rel_ok(rel, full[:len(full) - len(rel)])   # rel is the tail of full: the rest is the repo root
+                and not under_session_scratchpad(_expanded(target, where), session_id))
+    except Exception:
+        return False
+
+
+def _own_tag_tier(transcript) -> str:
+    """'coordinator' when the session's own cs-build tag names it, else '': the tags of the newest get_session result
+    for the session's own id plus what the session's own later set_session_tags calls added, read from the transcript in
+    one pass. A transcript with neither reads '' (the /clear gap; debt coordinator-tag-tier-fails-open)."""
+    try:
+        import override
+        import own_session
+        own_id = override.remote_session_id()
+        if own_id and isinstance(transcript, str) and transcript:
+            tags = own_session.own_session_read(transcript, own_id, applied=True)[0]
+            if isinstance(tags, list) and BUILD_TAG + "coordinator" in tags:
+                return "coordinator"
+    except Exception:
+        pass
+    return ""
+
+
+def _cloud_own_call(payload) -> bool:
+    """True for a cloud session's own call: CLAUDE_CODE_REMOTE true, no agent_id, no agent_type. Reads nothing."""
+    return (os.environ.get("CLAUDE_CODE_REMOTE") == "true" and isinstance(payload, dict)
+            and not payload.get("agent_id") and not payload.get("agent_type"))
+
+
+def _cloud_coordinator(payload) -> bool:
+    """True for a cloud session's own call whose tier is `coordinator`. The role file decides when it names this session.
+    When it does not, the tier is the session's own cs-build tag. The answer is kept for one session id, config folder and
+    transcript, so the two coordinator checks share one role-file read and at most one transcript read."""
+    if not _cloud_own_call(payload):
+        return False
+    transcript = payload.get("transcript_path")
+    key = (os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID"), str(role_path()), transcript)
+    if key not in _COORDINATOR_ROLE:
+        recorded = read_recorded_role()
+        _COORDINATOR_ROLE[key] = (recorded == "coordinator" if recorded is not None
+                                  else _own_tag_tier(transcript) == "coordinator")
+    return _COORDINATOR_ROLE[key]
+
+
+def _coordinator_type_refused(agent_type) -> bool:
+    """True when an agent type is not one a coordinator may run: missing, empty, not a string, or not exactly one of
+    COORDINATOR_AGENT_ROLES."""
+    return not isinstance(agent_type, str) or agent_type not in COORDINATOR_AGENT_ROLES
+
+
+def coordinator_act_hit(payload, tool: str, tool_input: dict):
+    """Rule coordinator-scope, the acts: (reason, matched) when a cloud coordinator's own call spawns an agent outside
+    COORDINATOR_AGENT_ROLES, runs a Workflow with such an agent() call, or merges; else ("", ""). The tier is read last,
+    only for a call that would be refused, so a lane's spawn of its own builder reads no role file and no transcript."""
+    is_workflow = tool == "Workflow" and isinstance(tool_input.get("script"), str)
+    if tool not in SPAWN_TOOLS and tool not in COORDINATOR_MERGE_TOOLS and tool not in SHELL_TOOLS and not is_workflow:
+        return "", ""
+    if not _cloud_own_call(payload):
+        return "", ""
+    refusal = ("", "")
+    if tool in SHELL_TOOLS:
+        for segment in split_segments(strip_heredoc_bodies(str(tool_input.get("command", "") or ""))):
+            if segment.strip() and merge_call_of(segment) is not None and "--disable-auto" not in (gh_call_of(segment) or ()):
+                refusal = (COORDINATOR_MERGE_REASON, "gh pr merge")
+                break
+    elif tool in SPAWN_TOOLS:
+        if _coordinator_type_refused(tool_input.get("subagent_type")):
+            refusal = (COORDINATOR_SPAWN_REASON, "spawn " + str(tool_input.get("subagent_type") or "(no type)")[:40])
+    elif is_workflow:
+        for _prompt, bodies in script_agent_calls(tool_input["script"]):
+            keys, unseen = {}, set()
+            for body_keys, body_unseen, _literals in bodies:
+                keys.update(body_keys)
+                unseen |= body_unseen
+            if "agentType" in unseen or "..." in unseen or _coordinator_type_refused(keys.get("agentType")):
+                refusal = (COORDINATOR_SPAWN_REASON, "workflow agent " + str(keys.get("agentType") or "(unread type)")[:40])
+                break
+    else:
+        refusal = (COORDINATOR_MERGE_REASON, "merge tool")
+    return refusal if refusal[0] and _cloud_coordinator(payload) else ("", "")
+
+
+def coordinator_scope_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
+    """Rule coordinator-scope: the log detail when a cloud coordinator's own call writes a repository path that is no
+    record home and not its scratchpad, else ''. The tier is read last, only for a call that writes such a path, so a
+    lane's or a solo session's ordinary call reads no role file and no transcript. The detail is a log field, so a path
+    in it is shortened from its head (guard_core.log_path) after its label: a raw path would be cut from the tail by
+    `record`, and a long temporary root would take the file name with it."""
+    if tool not in WRITE_TOOLS and tool not in SHELL_TOOLS and tool not in COORDINATOR_MCP_WRITE_TOOLS:
+        return ""
+    if not _cloud_own_call(payload):
+        return ""
+    session_id = session_id_of(payload)
+
+    def detail(label: str, path: str) -> str:
+        return label + guard_core.log_path(path, guard_core.LOG_MAX_MATCHED - len(label))
+
+    def outside(word, where):
+        return coordinator_path_outside(word, where, session_id)
+
+    def found() -> str:
+        if tool in WRITE_TOOLS:
+            return next((detail("", target) for target in write_targets(tool_input) if outside(target, cwd)), "")
+        if tool in COORDINATOR_MCP_WRITE_TOOLS:
+            root, named = coordinator_mcp_root(tool_input, cwd), coordinator_mcp_name(tool_input)
+            return next((detail("mcp write: ", rel) for rel in coordinator_mcp_paths(tool_input)
+                         if not coordinator_rel_ok(rel, root, named)), "")
+        raw = str(tool_input.get("command", "") or "")
+        hit = _shell_write_hit(strip_heredoc_bodies(raw), cwd, outside, follow_cd=True, writes_first=True)
+        if hit:
+            return detail("shell write: ", hit)
+        hit = interpreter_write_hit(raw, cwd, outside) if interpreter_may_write(raw) else ""
+        return detail("interpreter write: ", hit) if hit else ""
+
+    hit = found()
+    return hit if hit and _cloud_coordinator(payload) else ""
+
+
 def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     """True when the call holds an act no owner override lifts (decision owner-override): a
     git location variable, a frozen path, a kill of pid 0, 1 or -1, a role or model guard, or a
@@ -6786,6 +7062,15 @@ def judge(payload) -> None:
     session_hit = session_home_hit(payload, tool, tool_input, cwd)
     if session_hit:
         refuse(tool, "deny", "session-home", SESSION_HOME_REASON, session_hit)
+    # 0, coordinator-scope. A cloud coordinator's own write goes only to records, its scratchpad or a path in no
+    # repository, and its own spawns and merges stay in its tier. An override lifts it, and it is not in
+    # never_lifted: the owner may mean the call.
+    scope_hit = coordinator_scope_hit(payload, tool, tool_input, cwd)
+    if scope_hit:
+        refuse(tool, "deny", "coordinator-scope", COORDINATOR_SCOPE_REASON, scope_hit)
+    act_reason, act_matched = coordinator_act_hit(payload, tool, tool_input)
+    if act_reason:
+        refuse(tool, "deny", "coordinator-scope", act_reason, act_matched)
     # 0, pointer-edit. A write into the pointer checkout's own files is live for every session. An override lifts it
     # when the target is a direct pointer path. never_lifted calls is_frozen per target, so a config-dir spelling of a
     # pointer file is not liftable, as with frozen-path.
