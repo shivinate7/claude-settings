@@ -52,7 +52,7 @@ sh("frozen: default-word: :? of DW_DIR set in the command to the config dir, a w
    'DW_DIR="%s"; printf x > "${DW_DIR:?}/hooks/guard.py"' % CFG, "deny", "frozen-path", cwd=NOGIT,
    env={"DW_DIR": None})
 
-# CONTROLS. Each pins a form the guard must allow: a refusal would be a false alarm.
+# CONTROLS. Each pins the verdict of a near form, so the rule grows no wider or narrower.
 # `-` keeps an empty value: the word is not taken, so the target is /hooks/guard.py, which is no frozen path.
 sh("frozen: default-word: - with CLAUDE_CONFIG_DIR set empty keeps the empty value, /hooks/guard.py is allowed",
    'printf x > "${CLAUDE_CONFIG_DIR-/tmp/elsewhere}/hooks/guard.py"', "allow", cwd=NOGIT, env=DW_EMPTY)
