@@ -1686,15 +1686,21 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     return sorted(out)
 
 
+def record_steps(repo, record_branch=None):
+    """(source, steps, why): the record branch of the checkout `repo` and its steps, or None, None and the reason it cannot be read. The one home
+    of that read, for idle_lanes_report and the lost-work rows of `merge --reviewed` (merge.lost_work_rows)."""
+    source, why = record_source(repo, record_branch or default_record_branch(repo))
+    return (source, load(source)["steps"], None) if source is not None else (None, None, why)
+
+
 def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
     """The idle_lanes entries for the checkout `repo`, read as the build reads them (record branch, Step trailers on
     main, the repo's GitHub name, the live file). `merge --idle-lanes` calls this. A read that could not run is one
     `unknown (<why>)` entry, never an empty list."""
     repo = pathlib.Path(repo).resolve()
-    source, why = record_source(repo, record_branch or default_record_branch(repo))
+    source, steps, why = record_steps(repo, record_branch)
     if source is None:
         return ["unknown (%s)" % why]
-    steps = load(source)["steps"]
     ref = main_ref(repo, main_branch)
     marks, _strays, unread = landed_marks(repo, ref, main_branch, steps)
     extra, _where = extras(repo, source)
