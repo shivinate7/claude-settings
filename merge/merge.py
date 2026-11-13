@@ -1633,16 +1633,22 @@ class Host:
         return red, pending, ignored
 
     def head_state(self, n, sha=None):
-        """One read of the head's own checks, for the preview and for rule M3: green, pending: <the required checks still pending>, or red: <name>. Reads only, never waits.
-        Only a required check holds it, as it holds the wait (a pending check that is not required does not). The workflow runs are not read: a required check with no row yet reads pending.
-        `sha` is a head the caller already read (the review list has it from the pull request list); with none, the pull request is read."""
+        """One read of the head's own checks and workflow runs, for the preview and for rule M3: green, pending: <what still holds>, or red: <name>. Reads only, never waits.
+        The judgment is the wait's: any red check or run, required or not, is red; a pending check holds only when it is required, and a pending run holds
+        unless `required_only` shows its workflow has no required job (so a failed run is refused, an ignored workflow does not block, and a pending run of the required
+        workflow is not green). A required check with no row yet reads pending.
+        `sha` is a head the caller already read (the review list has it from the pull request list); with none, the pull request is read.
+        A failed read, a network fault included, is "unknown (...)": the caller never reads it as green."""
         try:
+            sha = sha or self.pr(n)["head"]
             got = self.checks(n, warn=False, sha=sha)
             names = self.required_names()
             red, pending, ignored = self.classify(got, names, self.ignore, self.branch)
+            r_red, r_pending = self.run_state(sha)
         except Stop as e:
             return f"unknown ({e})"
-        held = [k for k in pending if k in names]
+        held = self.required_only(pending + r_pending, names)[0]
+        red = self.settle(red, held, r_red, [])[0]  # a held pending read drops "no check ran": the run the remedy just started is not refused
         s = "red: " + "; ".join(red) if red else "pending: " + ", ".join(held) if held else "green"
         return s + (" (ignored: " + "; ".join(ignored) + ")" if ignored else "")
 
@@ -3100,7 +3106,7 @@ def head_not_green(state):
         return None
     if state.startswith(("red: ", "pending: ")):
         return "a check is " + state
-    return "the read of the head's checks is unknown, not green: " + state
+    return "the read of the head's checks is unknown: " + state
 
 def head_check_red(state):
     """-> the red text of `state` (Host.head_state) when a check of the head failed, else None. A draft's run skips every job, which
@@ -3329,7 +3335,11 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             c, green_sha = git(wt, "rev-parse", "HEAD^")
             if c:
                 raise Stop(f"the head under the claim {info['head'][:9]} cannot be read, so whether its checks are green is unknown: {green_sha}. This run claimed nothing.")
-        not_green = head_not_green(host.head_state(n, green_sha))
+        say("merge: checking the head's checks and runs ...")  # before the read, which can block
+        state = host.head_state(n, green_sha)
+        not_green = head_not_green(state)
+        if not_green and state.startswith("unknown ("):  # a read that could not run, a network fault included, is not a verdict on the head
+            raise Stop(f"{not_green}. Nothing was claimed or pushed.")
         if not_green:
             raise Stop(f"the head's own checks are not green, so nothing was claimed or pushed {GREEN_CITE}: {not_green}.")
         if base != cfg["defaultBranch"]:
