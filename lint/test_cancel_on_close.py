@@ -2,17 +2,24 @@
 """Guard for the PR-close cancel: .github/workflows/cancel-on-close.yml and .github/scripts/cancel_closed_pr_runs.py.
 
 WorkflowShape reads the workflow by line, as lint/test_windows_split.py does, with the step parser of lint/workflow_steps.py.
-ScriptSelects proves select_runs cancels only a queued, in-progress, waiting or pending pull_request run of this PR from
-this repo. ScriptPrClosed proves pr_is_closed reads only "closed". ParserControl and ScannerTraps test the readers in this
-file on text that exists on main, so a red WorkflowShape case points at the workflow, not at the reader.
+ScriptSelects proves select_runs cancels only a queued, in-progress, waiting, pending or requested pull_request run of this
+PR from this repo, and only one whose PR list names this PR and no other. ScriptPrClosed proves pr_is_closed reads only
+"closed". ScriptGhCalls and ScriptMain prove every run list is a GET, main counts the runs it skips for having no PR list,
+and main reads the PR again before it cancels. ParserControl and ScannerTraps test the readers in this file on text that
+exists on main, so a red WorkflowShape case points at the workflow, not at the reader.
 
 Run with:  python3 lint/test_cancel_on_close.py -v
 """
+import contextlib
 import importlib.util
+import io
+import json
 import os
 import re
+import subprocess
 import sys
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.join(HERE, "..")
@@ -299,6 +306,54 @@ def without(run, key):
     return {k: v for k, v in run.items() if k != key}
 
 
+PULLS_ROUTE = f"repos/{REPO_FULL}/pulls/{PR}"
+REPO_ROUTE = f"repos/{REPO_FULL}"
+RUNS_ROUTE = f"repos/{REPO_FULL}/actions/runs"
+CANCEL_RE = re.compile(rf"repos/{re.escape(REPO_FULL)}/actions/runs/(\d+)/cancel")
+
+
+def done(argv, code, out, err=""):
+    return subprocess.CompletedProcess(argv, code, stdout=out, stderr=err)
+
+
+class FakeGh:
+    """Stands in for subprocess.run under the script's gh calls. It records each argv and answers by the exact endpoint
+    token. An endpoint no case names returns rc 1, so a broken fixture reads as a failure. It does not enforce GET: a
+    POST list would then cancel nothing, and a case would fail for a cause other than its own."""
+
+    def __init__(self, runs=(), states=("closed",)):
+        self.runs, self.states = list(runs), list(states)
+        self.reads, self.calls = 0, []
+
+    def __call__(self, argv, *args, **kwargs):
+        self.calls.append(list(argv))
+        if PULLS_ROUTE in argv:
+            state = self.states[min(self.reads, len(self.states) - 1)]
+            self.reads += 1
+            return done(argv, 0, state + "\n")
+        if REPO_ROUTE in argv:
+            return done(argv, 0, DEFAULT + "\n")
+        if RUNS_ROUTE in argv:
+            status = [tok.split("=", 1)[1] for tok in argv if tok.startswith("status=")]
+            lines = [json.dumps(run) + "\n" for run in self.runs if status and run.get("status") == status[0]]
+            return done(argv, 0, "".join(lines))
+        if any(CANCEL_RE.fullmatch(tok) for tok in argv):
+            return done(argv, 0, "")
+        return done(argv, 1, "", "fake gh: no case names this endpoint: " + " ".join(argv))
+
+
+def list_calls(calls):
+    return [argv for argv in calls if RUNS_ROUTE in argv]
+
+
+def cancelled_ids(calls):
+    return [int(CANCEL_RE.fullmatch(tok).group(1)) for argv in calls for tok in argv if CANCEL_RE.fullmatch(tok)]
+
+
+def has_get(argv):
+    return any(argv[i:i + 2] == ["-X", "GET"] for i in range(len(argv)))
+
+
 class ScriptSelects(ScriptCase):
     """select_runs(runs, pr_number, repo, default_branch) -> the run ids to cancel."""
 
@@ -322,8 +377,16 @@ class ScriptSelects(ScriptCase):
     def test_cancels_a_pending_run_of_this_pr(self):
         self.assertEqual(self.select([run_of(status="pending")]), [101])
 
-    def test_cancels_a_run_that_lists_this_pr_among_several(self):
-        self.assertEqual(self.select([run_of(pull_requests=[{"number": 5}, {"number": PR}])]), [101])
+    def test_cancels_a_requested_run_of_this_pr(self):
+        self.assertEqual(self.select([run_of(status="requested")]), [101],
+                         "a requested run of this PR was not selected")
+
+    def test_never_cancels_a_run_listing_several_prs(self):
+        for prs in ([{"number": 5}, {"number": PR}], [{"number": PR}, {"number": 8}]):
+            with self.subTest(pull_requests=prs):
+                self.assertEqual(self.select([run_of(pull_requests=prs)]), [],
+                                 f"a run listing several PRs was selected: closing PR {PR} would cancel "
+                                 "another open PR's run")
 
     def test_never_cancels_a_push_run_on_main(self):
         self.assertEqual(self.select([run_of(event="push", head_branch="main", pull_requests=[])]), [])
@@ -398,6 +461,52 @@ class ScriptPrClosed(ScriptCase):
 
     def test_empty_state_is_not_closed(self):
         self.assertIs(self.closed(""), False, "a failed read reads as closed")
+
+
+class ScriptGhCalls(ScriptCase):
+    """list_active_runs makes each run list call a GET."""
+
+    def test_every_run_list_call_is_a_get(self):
+        mod = self.module()
+        fake = FakeGh()
+        with mock.patch.object(mod.subprocess, "run", fake):
+            mod.list_active_runs(REPO_FULL)
+        lists = list_calls(fake.calls)
+        self.assertTrue(lists, "list_active_runs made no run list call, so there is no argv to check")
+        posts = [argv for argv in lists if not has_get(argv)]
+        self.assertEqual(posts, [], "a run list call has no -X GET, so gh sends a POST and the list fails")
+
+
+class ScriptMain(ScriptCase):
+    """main(argv) reads the PR, cancels what select_runs picks, and reports the runs it skips for having no PR list."""
+
+    def run_main(self, runs, states=("closed",)):
+        mod = self.module()
+        fake = FakeGh(runs, states)
+        err = io.StringIO()
+        with mock.patch.object(mod.subprocess, "run", fake), contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(err):
+            mod.main(["cancel_closed_pr_runs.py", str(PR), REPO_FULL])
+        return err.getvalue(), fake
+
+    def test_prints_the_count_of_runs_with_no_pr_list(self):
+        no_list = [run_of(id=201, pull_requests=[]), run_of(id=202, pull_requests=[])]
+        not_counted = [run_of(id=203, event="push", pull_requests=[]),
+                       run_of(id=204, head_repository={"full_name": "someone/fork"}, pull_requests=[]),
+                       run_of(id=205, head_branch=DEFAULT, pull_requests=[]),
+                       run_of(id=206, pull_requests=[{"number": 8}])]
+        err, fake = self.run_main(no_list + not_counted + [run_of(id=101)])
+        self.assertEqual(cancelled_ids(fake.calls), [101], "scope: the PR's own run was not the one cancelled")
+        self.assertIn("2 run(s) skipped: no PR list", err, "main printed no count of the runs with no PR list")
+
+    def test_cancels_nothing_when_the_pr_is_open_at_the_reread(self):
+        err, fake = self.run_main([run_of(id=101)], states=("closed", "open"))
+        self.assertTrue(list_calls(fake.calls), "scope: main never listed the runs")
+        self.assertEqual(cancelled_ids(fake.calls), [], "main cancelled run 101 after the PR read as open")
+
+    def test_cancels_the_run_when_the_pr_stays_closed_at_the_reread(self):
+        err, fake = self.run_main([run_of(id=101)], states=("closed", "closed"))
+        self.assertEqual(cancelled_ids(fake.calls), [101])
 
 
 class ParserControl(unittest.TestCase):
