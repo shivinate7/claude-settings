@@ -123,6 +123,9 @@ UNKNOWN = "mail unknown: "
 # The refresh notice of a repo whose origin is ORIGIN (decision merge-mail-refreshes-sessions): its path and its body.
 REFRESH_PATH = "mail/refresh/acme-widgets/main.md"
 SHA_A, SHA_B = "a" * 40, "b" * 40
+# The prompt hook's time: the git bounds of one moved turn (TurnBound pins them at 10 s or less), then the install's bound,
+# then this margin. settings.json's UserPromptSubmit timeout must cover all three (PromptHookTimeout).
+GIT_BOUNDS, PROMPT_MARGIN = 10, 5
 # Git's author and committer dates and the Taken-by stamp are pinned, so two takers in one case build one commit.
 SAME_SECOND = {"GIT_AUTHOR_DATE": "1800000000 +0000", "GIT_COMMITTER_DATE": "1800000000 +0000"}
 PINNED_STAMP = "2026-01-01T00:00:00Z"
@@ -495,17 +498,23 @@ def read_lines(path):
         return handle.read().splitlines()
 
 
-def fake_installer(case, name, fail_until=None, hang_for=None):
+def fake_installer(case, name, fail_until=None, hang_for=None, term=None):
     """The install stand-in of a cloud refresh: an executable that appends one `ran` line to its log on each run. With
     fail_until, it exits 3 with a stderr line until that file exists. With hang_for, it writes its pid to <script>.pid,
-    sleeps hang_for seconds, then logs `done`: a run killed at its bound logs `ran` and never `done`. Returns (command
-    path, log path). POSIX only, so a case that runs it skips on Windows with NT_NO_STUB."""
+    sleeps hang_for seconds, then logs `done`: a run killed at its bound logs `ran` and never `done`. With term, it writes
+    its pid to <script>.pid, traps TERM and loops on a short sleep, as an install with an EXIT trap does. On TERM, "exit"
+    writes <script>.term and exits 0; "ignore" writes <script>.term and keeps looping, so only a KILL ends it. Returns
+    (command path, log path). POSIX only, so a case that runs it skips on Windows with NT_NO_STUB."""
     script = os.path.join(case, name)
     log = os.path.join(case, name + ".log")
     lines = ["#!/bin/sh", "printf 'ran\\n' >> %s" % shlex.quote(log)]
     if hang_for is not None:
         lines += ["printf '%%s\\n' $$ > %s" % shlex.quote(script + ".pid"), "sleep %d" % hang_for,
                   "printf 'done\\n' >> %s" % shlex.quote(log)]
+    if term is not None:
+        on_term = 'printf term >> "$MARK"; exit 0' if term == "exit" else 'printf term >> "$MARK"'
+        lines += ["MARK=%s" % shlex.quote(script + ".term"), "printf '%%s\\n' $$ > %s" % shlex.quote(script + ".pid"),
+                  "trap '%s' TERM" % on_term, "while :; do sleep 0.1; done"]
     if fail_until:
         lines.append("if [ ! -e %s ]; then echo 'fake install broke' >&2; exit 3; fi" % shlex.quote(fail_until))
     lines.append("exit 0")
@@ -513,6 +522,29 @@ def fake_installer(case, name, fail_until=None, hang_for=None):
         handle.write("\n".join(lines) + "\n")
     os.chmod(script, 0o755)
     return script, log
+
+
+@contextlib.contextmanager
+def recorded_children():
+    """Every child that the no-window wrapper starts inside the block, in start order, so a case can ask whether it ran on."""
+    children = []
+    real = MAIL_MODULE._nowindow.Popen
+
+    def record(*args, **kwargs):
+        child = real(*args, **kwargs)
+        children.append(child)
+        return child
+
+    with mock.patch.object(MAIL_MODULE._nowindow, "Popen", record):
+        yield children
+
+
+def reap(children):
+    """Kills and reaps each child still running, so a case that fails part-way leaves no install behind."""
+    for child in children:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
 
 
 def git_subcommand(argv):
@@ -1777,6 +1809,106 @@ class RefreshNotice(MailCase):
         self.assertEqual(lines, [], "MAILBOX_REPO unset: a turn start printed lines: %r" % lines)
         self.assertEqual(len(read_lines(log)), 1,
                          "MAILBOX_REPO unset: the install ran again: %d runs" % len(read_lines(log)))
+
+    def test_a_failed_refresh_is_retried_at_the_next_prompt_without_a_ref_move(self):
+        store = self.store()
+        flag = os.path.join(self.case, "install-works-later")
+        script, log = fake_installer(self.case, "install", fail_until=flag)
+        store.publish(REFRESH_PATH, "main moved to %s\n" % SHA_A)
+        receiver = self.cloud_machine(store, "b", "sess-b", script)
+        lines = turn(receiver)
+        self.assertEqual(len(read_lines(log)), 1,
+                         "control: the failing install ran %d times, expected 1" % len(read_lines(log)))
+        self.assertTrue(any(line.startswith(UNKNOWN + "refresh failed: ") for line in lines),
+                        "control: a failed install printed no 'refresh failed' line: %r" % lines)
+        open(flag, "w").close()
+        lines = turn(receiver)
+        self.assertEqual(len(read_lines(log)), 2,
+                         "a prompt with no ref move did not retry the failed install: %d runs" % len(read_lines(log)))
+        self.assertIn("main moved to %s; refreshed" % SHA_A, lines,
+                      "the prompt's retried install printed no 'refreshed' line: %r" % lines)
+
+    def test_a_cut_refresh_is_retried_at_the_next_prompt_without_a_ref_move(self):
+        store = self.store()
+        store.publish(REFRESH_PATH, "main moved to %s\n" % SHA_A)
+        hung, _ = fake_installer(self.case, "install-hung", hang_for=5)
+        fast, fast_log = fake_installer(self.case, "install-fast")
+        receiver = self.cloud_machine(store, "b", "sess-b", hung)
+        with mock.patch.object(MAIL_MODULE, "REFRESH_BOUND", 2):
+            lines = turn(receiver)
+            self.assertTrue(any(line.startswith(UNKNOWN + "refresh failed: the install ran past 2 s") for line in lines),
+                            "control: a cut install printed no 'ran past 2 s' line: %r" % lines)
+            receiver.env["MAILBOX_REFRESH_COMMAND"] = fast
+            lines = turn(receiver)
+        self.assertEqual(len(read_lines(fast_log)), 1,
+                         "a prompt with no ref move did not retry the cut install: %d runs" % len(read_lines(fast_log)))
+        self.assertIn("main moved to %s; refreshed" % SHA_A, lines,
+                      "the prompt's retried install printed no 'refreshed' line: %r" % lines)
+
+
+class InstallStop(MailCase):
+    """A refresh install that runs past its bound is stopped with SIGTERM first, so its EXIT trap can release its lock, and
+    with SIGKILL only after a grace. The stop runs on every exit from the wait, so a caller that raises mid-wait leaves no
+    install running (decision session-messages, "Refresh mail"; hooks/mail.py run_install)."""
+
+    def cut_install(self, script, bound=1):
+        """run_install under a `bound`-second bound: (the children it started, whether it raised MailError)."""
+        env = dict(scrubbed_environ(), MAILBOX_REFRESH_COMMAND=script)
+        with recorded_children() as children, mock.patch.object(MAIL_MODULE, "REFRESH_BOUND", bound):
+            self.addCleanup(reap, children)
+            try:
+                MAIL_MODULE.run_install(env)
+            except MAIL_MODULE.MailError:
+                return children, True
+        return children, False
+
+    def test_a_cut_install_gets_sigterm_first_so_its_exit_trap_runs(self):
+        script, _ = fake_installer(self.case, "install-trap", term="exit")
+        children, cut = self.cut_install(script)
+        self.assertEqual(len(children), 1, "control: the install did not start: %d children" % len(children))
+        self.assertTrue(cut, "control: an install past its bound was not reported as a MailError")
+        self.assertTrue(os.path.exists(script + ".term"),
+                        "a cut install got no SIGTERM, so its EXIT trap never ran")
+
+    def test_an_install_that_ignores_sigterm_is_killed_after_the_grace(self):
+        script, _ = fake_installer(self.case, "install-ignores", term="ignore")
+        children, cut = self.cut_install(script)
+        self.assertEqual(len(children), 1, "control: the install did not start: %d children" % len(children))
+        self.assertTrue(cut, "control: an install past its bound was not reported as a MailError")
+        self.assertTrue(os.path.exists(script + ".term"),
+                        "a cut install got no SIGTERM before the KILL, so the stop was not TERM first")
+        self.assertIsNotNone(children[0].poll(),
+                             "a cut install that ignores SIGTERM is still running after the stop: pid %d" % children[0].pid)
+
+    def test_the_install_is_stopped_when_the_caller_raises_mid_wait(self):
+        script, _ = fake_installer(self.case, "install-raises", term="exit")
+        env = dict(scrubbed_environ(), MAILBOX_REFRESH_COMMAND=script)
+        with recorded_children() as children, \
+                mock.patch.object(MAIL_MODULE, "_wait_bounded", side_effect=RuntimeError("the caller raised mid-wait")):
+            self.addCleanup(reap, children)
+            with self.assertRaises(RuntimeError):
+                MAIL_MODULE.run_install(env)
+        self.assertEqual(len(children), 1, "control: the install did not start: %d children" % len(children))
+        self.assertIsNotNone(children[0].poll(),
+                             "the caller raised mid-wait and the install is still running: pid %d" % children[0].pid)
+
+
+class PromptHookTimeout(unittest.TestCase):
+    """The prompt hook that starts a turn must outlast its git bounds, the refresh install's bound and the margin, so a cut
+    refresh never outlives the hook's timeout in settings.json (decision session-messages, "Refresh mail")."""
+
+    def test_the_refresh_bound_fits_the_prompt_hook_timeout_with_the_git_bounds_and_a_margin(self):
+        with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as handle:
+            settings = json.load(handle)
+        hooks = [hook for group in settings.get("hooks", {}).get("UserPromptSubmit", []) for hook in group.get("hooks", [])
+                 if "local_time" in hook.get("command", "")]
+        self.assertEqual(len(hooks), 1, "settings.json has %d UserPromptSubmit hooks that run the turn start, expected one"
+                         % len(hooks))
+        timeout = hooks[0].get("timeout")
+        self.assertIsNotNone(timeout, "the turn-start prompt hook in settings.json has no timeout")
+        need = GIT_BOUNDS + MAIL_MODULE.REFRESH_BOUND + PROMPT_MARGIN
+        self.assertLessEqual(need, timeout, "a turn start can run %d s (%d s of git, the install's %d s bound, a %d s margin), "
+                             "past the prompt hook's %s s timeout" % (need, GIT_BOUNDS, MAIL_MODULE.REFRESH_BOUND, PROMPT_MARGIN, timeout))
 
 
 class SettingsDefault(unittest.TestCase):
