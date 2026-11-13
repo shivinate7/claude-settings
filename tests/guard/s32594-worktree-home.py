@@ -798,11 +798,25 @@ def _relesc_fixture():
         free_lane, _branch = sh_add_lane(free, "wthomew_lane")   # a linked checkout the no-record agent stands in
         nogit = os.path.join(ROOT, "wthomew_nogit")
         os.makedirs(nogit, exist_ok=True)
+        # A folder outside the clone and the temp root. It is made here, since a cd into a folder that does not
+        # exist is not followed. The home as a relative path from it, and a link in it to the home, where the
+        # platform allows one. A key a row names is left out when it cannot be made, and that row skips.
+        abs_scratch = os.path.join(ROOT, "relesc_scratch")
+        os.makedirs(abs_scratch, exist_ok=True)
+        extra = {"abs_scratch": abs_scratch}
+        if not problems:
+            extra["home_from_scratch"] = os.path.relpath(home, abs_scratch)
+            link = os.path.join(abs_scratch, "lnk")
+            try:
+                os.symlink(home, link, target_is_directory=True)
+                extra["lnk"] = link
+            except OSError:
+                pass
         RELESC_CACHE["folders"] = {
             "primary": primary, "home": home, "sub": os.path.join(home, "sub"), "sib": sib, "scratch": scratch,
             "free": free, "free_src": os.path.join(free, "src"), "nogit": nogit, "free_lane": free_lane,
-            "abs_scratch": os.path.join(ROOT, "relesc_scratch"),
             "abs_outside": os.path.join(ROOT, "relesc_outside"),
+            **extra,
         }
         RELESC_CACHE["problems"] = problems
     return RELESC_CACHE["folders"], RELESC_CACHE["problems"]
@@ -820,14 +834,19 @@ def _relesc_scope(agent, folders):
     return ""
 
 
-def _relesc_add(label, expect, command, cwd_key, agent=RELESC_AGENT, rule=None, any_of=(), tool="Bash"):
+def _relesc_add(label, expect, command, cwd_key, agent=RELESC_AGENT, rule=None, any_of=(), tool="Bash",
+                needs=()):
     """Register one row: `command` as a call of `tool` from folders[cwd_key], as `agent`, judged `expect`.
-    `command` takes the folder paths as %(name)s keys. The row asserts its scope first. The check builds its
+    `command` takes the folder paths as %(name)s keys. The row asserts its scope first. `needs` names the folder
+    keys the fixture may not make on this platform (a symlink); a row missing one skips. The check builds its
     own folders under ROOT and reads no lazy fixture, so it is fixtureless."""
     def check():
         folders, problems = _relesc_fixture()
         if problems:
             return False, "fixture: " + "; ".join(problems)
+        missing = [key for key in needs if key not in folders]
+        if missing:
+            return SKIP, "skipped: the fixture could not make %s on this platform" % ", ".join(missing)
         scope = _relesc_scope(agent, folders)
         if scope:
             return False, scope
@@ -939,9 +958,72 @@ _relesc_add("worktree-home relative escape: cd <home> && mkdir ../tmp, a write t
             any_of=CD_ESCAPE_RULES)
 _relesc_add("worktree-home relative escape: cd <primary checkout> && mkdir probe, a relative write into the "
             "primary checkout, is refused", "deny", "cd %(primary)s && mkdir probe", "home", any_of=CD_ESCAPE_RULES)
-_relesc_add("worktree-home relative escape: cd <primary checkout> && mkdir probe, a relative write into the "
-            "primary checkout, is refused by worktree-home itself", "deny", "cd %(primary)s && mkdir probe", "home",
+_relesc_add("worktree-home relative escape: cd <primary checkout> && mkdir probe, a cd into another checkout, is refused "
+            "by other-checkout's cd act", "deny", "cd %(primary)s && mkdir probe", "home", rule="other-checkout")
+
+
+# The absolute-cd skip. The relative-write clause skips a segment only when (a) the last absolute or `~` cd in
+# the chain landed outside the home and (b) the folder the segment runs in is outside the home. A variable cd,
+# a bare cd, `cd -`, `popd` and an unknown folder reset (a), so the write after them is judged. An absolute cd
+# into the home is judged as a plain relative write from there. One spelling per row, so a failure names one form.
+_relesc_add("worktree-home relative escape: cd ../.. && mkdir x from the home, a relative cd that climbs out of the "
+            "home, is refused", "deny", "cd ../.. && mkdir x", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: cd <home> && cd ../.. && mkdir x, a relative climb out of the home after a "
+            "cd into it, is refused", "deny", "cd %(home)s && cd ../.. && mkdir x", "home",
+            any_of=("worktree-home", "other-checkout"))
+_relesc_add("worktree-home relative escape: cd <home> && cd .. && mkdir x, a relative climb out of the home after a "
+            "cd into it, is refused", "deny", "cd %(home)s && cd .. && mkdir x", "home",
+            any_of=("worktree-home", "other-checkout"))
+_relesc_add("worktree-home relative escape: cd <home> && mkdir ../x, a relative write out of the home after a cd "
+            "into it, is refused", "deny", "cd %(home)s && mkdir ../x", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: cd <scratch> && cd <home>/sub && mkdir ../../x, a relative write out of "
+            "the home after an absolute cd into it, is refused", "deny",
+            "cd %(abs_scratch)s && cd %(sub)s && mkdir ../../x", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: pushd <scratch> && popd && mkdir ../x, a popd resets the skip, so the write "
+            "out of the home is refused", "deny", "pushd %(abs_scratch)s && popd && mkdir ../x", "home",
             rule="worktree-home")
+_relesc_add("worktree-home relative escape: cd $PWD && mkdir ../x, a variable cd resets the skip, so the write out of "
+            "the home is refused", "deny", "cd $PWD && mkdir ../x", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: cd && mkdir ../x, a bare cd resets the skip, so the write out of the home "
+            "is refused", "deny", "cd && mkdir ../x", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: cd <scratch> && cd $PWD && mkdir ../x, a variable cd after an absolute cd "
+            "resets the skip, so the write out of the home is refused", "deny",
+            "cd %(abs_scratch)s && cd $PWD && mkdir ../x", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: cd <scratch> && cd - && mkdir ../x, a cd back with cd - resets the skip, so "
+            "the write out of the home is refused", "deny", "cd %(abs_scratch)s && cd - && mkdir ../x", "home",
+            rule="worktree-home")
+_relesc_add("worktree-home relative escape: cd <scratch> && cd && mkdir ../x, a bare cd after an absolute cd resets the "
+            "skip, so the write out of the home is refused", "deny", "cd %(abs_scratch)s && cd && mkdir ../x", "home",
+            rule="worktree-home")
+_relesc_add("worktree-home relative escape: cd <scratch> && cd <home, relative from the scratch folder> && mkdir ../x, a "
+            "relative cd back into the home, then a climb out, is refused", "deny",
+            "cd %(abs_scratch)s && cd %(home_from_scratch)s && mkdir ../x", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: cd <scratch> && cd lnk && mkdir ../x, a cd through a link to the home, then a "
+            "climb out, is refused", "deny", "cd %(abs_scratch)s && cd lnk && mkdir ../x", "home",
+            rule="worktree-home", needs=("lnk",))
+_relesc_add("worktree-home relative escape: cd <scratch> && cd <nogit> && cd - && mkdir ../x, a cd back with cd - after a "
+            "cd to a folder in no checkout, then a climb out of the home, is refused", "deny",
+            "cd %(abs_scratch)s && cd %(nogit)s && cd - && mkdir ../x", "home", rule="worktree-home")
+# Allowed: the last absolute cd lands outside the home, and the write runs in a folder outside it.
+_relesc_add("worktree-home relative escape: cd <scratch> && mkdir probe, a relative write after an absolute cd to a "
+            "folder outside the clone, is allowed", "allow", "cd %(abs_scratch)s && mkdir probe", "home")
+_relesc_add("worktree-home relative escape: cd <scratch> && mkdir ../x, a climb out of that folder after an absolute cd "
+            "to it, is allowed", "allow", "cd %(abs_scratch)s && mkdir ../x", "home")
+_relesc_add("worktree-home relative escape: cd <scratch>; echo x > out.txt, a redirect after an absolute cd, is allowed",
+            "allow", "cd %(abs_scratch)s; echo x > out.txt", "home")
+_relesc_add("worktree-home relative escape: cd <scratch> && cp a b, a copy after an absolute cd, is allowed",
+            "allow", "cd %(abs_scratch)s && cp a b", "home")
+_relesc_add("worktree-home relative escape: cd ~ && touch f, a relative write after a cd to the home folder, is allowed",
+            "allow", "cd ~ && touch f", "home")
+_relesc_add("worktree-home relative escape: cd ~ && mkdir ../x, a climb out of the home folder after a cd to it, is "
+            "allowed", "allow", "cd ~ && mkdir ../x", "home")
+_relesc_add("worktree-home relative escape: cd \"$TMPDIR\" && mkdir x, a relative write after a variable cd, is allowed",
+            "allow", 'cd "$TMPDIR" && mkdir x', "home")
+_relesc_add("worktree-home relative escape: cd /tmp && cd .. && mkdir x, a relative write after a relative cd from an "
+            "absolute folder, is allowed", "allow", "cd /tmp && cd .. && mkdir x", "home")
+# An absolute target is not the relative-write clause's to judge, so the clause passes it.
+_relesc_add("worktree-home relative escape: mkdir -p <primary>/zz, an absolute target the relative-write clause does not "
+            "judge, is allowed", "allow", "mkdir -p %(primary)s/zz", "home")
 
 
 # The cost pins, measured on the unchanged code: the git spawns and worktree-list spawns each call makes.
