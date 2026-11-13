@@ -42,7 +42,7 @@ jobs:
   nightly-skip:
     if: ${{ github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
-    # Cap 5 min, unmeasured: the job makes one runs read.
+    # Cap 5 min, unmeasured: the job makes two runs reads.
     timeout-minutes: 5
     permissions:
       contents: read
