@@ -6,8 +6,7 @@ Writes one line to $GITHUB_OUTPUT (stdout when unset): skip=true or skip=false. 
 is a visible success and scope reads its output.
 
 skip=true only when the push commit's tree equals the head tree of a pull request the push commit belongs to, and that pull request's
-run passed, in one of two forms (owner ruling own-769-a-narrowed-pr-push: after a passing PR run, narrowed or full, main runs none of
-its suites for that merge):
+run passed, narrowed or full, in one of two forms. Main then runs none of its suites for that merge:
   1. a batch-* head (an integration pull request): its all-jobs-passed check run concluded success and so did every suite job.
   2. any other merged pull request head (a lone lane): its newest checks run is a completed, successful pull request run in which
      all-jobs-passed and every suite job succeeded. A suite step that scope skipped (a narrowed run) does not stop the skip: the

@@ -13,8 +13,7 @@ The contract these cases pin. A change to any of it changes these cases first.
   (the checks.yml runs of a merged pull request head that is not a batch head); actions/runs/<id>/jobs (its jobs, with steps).
 - skip=true when the push tree equals the tree of a batch-* head whose ready run passed every suite job, or of a merged pull
   request head whose newest checks.yml run is a green pull request run: all-jobs-passed and every suite job succeeded. A suite step
-  that scope skipped does not stop the skip (owner ruling own-769-a-narrowed-pr-push: after a passing PR run, narrowed or full,
-  main runs none of its suites for that merge).
+  that scope skipped does not stop the skip: after a passing PR run, narrowed or full, main runs none of its suites for that merge.
 - Any read error, unknown state or unreadable record writes skip=false and says "unknown".
 
 The stand-in PRS_JSON, a JSON list of batch heads, is read by the older cases. The live cases answer the reads through FakeGitHub,
