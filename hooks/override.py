@@ -92,8 +92,8 @@ for the timed file (the every-role file first, narrowed after the scope read). I
       try, through the one typed test (_keyword_typed). A prompt that starts with a notice tag, a payload `source` that is
       not the owner's (system, loop_wakeup, schedule_wakeup) and a peer or task-notification origin in the transcript do
       not end it, so a builder's end-notice cannot cancel an `opus reviewers` ask before the reviewers spawn.
-    - A new ask replaces the file. `opus off` removes both files. The `until` ends the grant only when the removal failed:
-      past it the grant is expired and refused. A corrupt turn file reads as OPUS_UNREAD, and the refusal stands.
+    - A new ask replaces the file. `opus off` removes both files. It also ends at its `until` (2h after the ask),
+      if no typed prompt came first: past it the grant is expired and refused. A corrupt turn file reads as OPUS_UNREAD, and the refusal stands.
     - Cost: one stat of the turn file per owner prompt, and one tail read and one remove only while it exists; one more
       file open only when an Opus spawn is refused. No model call, process or timer.
 A step grant also lifts that ask, and nothing else: the owner's grant that triage writes on the lane's
@@ -131,7 +131,7 @@ except ImportError:  # a missing or stale helper: the keyword grants still run, 
         return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
 
 TURN_FOLDER, TURN_KIND = "opus-turn", "opus-turn"  # the plain ask's turn file: state/override/opus-turn/<session>.json
-TURN_BACKSTOP = timedelta(hours=2)  # a turn file's `until`: the end only when the owner's next prompt cannot remove it
+TURN_BACKSTOP = timedelta(hours=2)  # a turn file's `until`: the grant ends here if no typed prompt came first
 ONCE_WINDOW = timedelta(minutes=10)  # how long a one-act override waits for its act
 CLAIM_KEEP = 2 * ONCE_WINDOW.total_seconds()  # seconds; past it, a marker's override has ended
 # The first word, then one mark (`,` `.` `!` `;` or a dash) that is dropped, then the rest. A mark counts
@@ -319,8 +319,8 @@ def _write_opus(session_id, path, at, length, role, said=None, log=True):
 
 def _write_turn(session_id, path, at, role, said=None, log=True):
     """Write the session's turn file and log it: the grant of a plain Opus ask with no length (ruling own-761-d). It lifts
-    the Opus spawns of the owner's turn only: the owner's next typed prompt removes it (end_turn). Its `until`, TURN_BACKSTOP
-    from `at`, is the end only when that removal fails. A new ask replaces the file. Returns ("opus-turn", until, role)."""
+    the Opus spawns of the owner's turn only: the owner's next typed prompt removes it (end_turn). It also ends at its `until`,
+    TURN_BACKSTOP from `at`, if no typed prompt came first. A new ask replaces the file. Returns ("opus-turn", until, role)."""
     until = at + TURN_BACKSTOP
     stamp = until.astimezone(timezone.utc).isoformat()
     _write(path, {"kind": TURN_KIND, "until": stamp, "role": role})
