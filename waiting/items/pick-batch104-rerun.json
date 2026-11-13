@@ -4,6 +4,11 @@
   "home": "PR #2814 (batch 104)",
   "id": "pick-batch104-rerun",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T03:45:00Z",
+    "choice": "",
+    "note": "moot: Batch 104 merged 14:43 CST Nov 12"
+  },
   "n": 614,
   "options": [
     {
@@ -36,10 +41,11 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
   "ref": "coordinator pick, Nov 12, 13:28 CST",
+  "reply": "Closed 21:45 CST Nov 12 by triage: no longer needed. Batch 104 merged at 14:43 CST today (its pull request, read on GitHub at 21:38 CST), so there is no rerun left to choose.",
   "repo": "shivinate7/claude-settings",
   "short": "Batch 104 runs again until express is ready",
   "stands": true,
-  "status": "open",
+  "status": "closed",
   "title": "Batch 104 runs again now, and an express change cancels it only when ready",
   "why": "A coordinator pick you could not see before."
 }
