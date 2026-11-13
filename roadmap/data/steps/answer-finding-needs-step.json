@@ -1,0 +1,14 @@
+{
+ "id": "answer-finding-needs-step",
+ "title": "A feedback item answered with a found gap must name its home",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "fb-1238-1 (Nov 11 12:40 CST) found the size check counts the wrong thing, but was closed \"answered in chat\" with no step, so nobody owned the fix; the owner met the same mistake again on Nov 13 at 11:00 CST.",
+ "source": "retrospective 11:02 CST Nov 13; owner 11:00 and 11:01 CST",
+ "note": "The feedback check refuses a \"question -> answered\" item whose answer names a defect or gap (\"gap\", \"wrong\", \"broken\", \"missing\", \"stale\", or a proposed fix) unless the item also names a step, debt or ruling home. Red case: fb-1238-1. Express (ruling drain-first-hold part 4: a fix that tracks work goes ahead of the drain). Cost: one more pattern check inside the feedback check already running; no new process or log.",
+ "updatedAt": "2026-11-13T11:03:27-06:00"
+}
