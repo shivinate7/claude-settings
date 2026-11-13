@@ -2275,3 +2275,4 @@
 - routed-waits-skipped: a routed closed item with `waits` is skipped by `kept_answer_lines` before its waits branch.
 - routed-kept-answer-at-unchecked: `kept_answer_lines` skips a routed closed item without comparing the kept answer's `at` to `lastAnswer.at`, so a changed answer on it is silent.
 - kept-answer-skip-wider-than-routed: `stale_pages.py` `kept_answer_lines` skips a closed item on `lane` and `lastAnswer` alone, while `routed_close` in `page_grant.py` also needs a non-blank `home` and a `lastAnswer.at` equal to the answer's `at`; a hand-closed leftover with `lane` and `lastAnswer` but no `home` stays silent in the kept-answer line. Low harm; no code change.
+- routed-stalled-row-only-doing-step: the home step's stalled row for a silent routed receiver shows only when the home is a doing or active step whose lane is the receiver (`skills/roadmap/build.py`, laneless); it does not show for a debt home, a done step or a tier receiver. Low harm.
