@@ -82,15 +82,15 @@ lane_start("lane-start-settings: a product-code lane on opus is denied when its 
 # row names opus. role_list_table and role_list_pointer (s40805) build the fixtures, so each case varies one row.
 DR_SONNET_POINTER = role_list_pointer("dr-sonnet", role_list_table(models={"design-reviewer": "sonnet"}))
 DR_SONNET_CFG = role_config("dr-sonnet", DR_SONNET_POINTER)
-DR_OPUS_POINTER = role_list_pointer("dr-opus", role_list_table())
-DR_OPUS_CFG = role_config("dr-opus", DR_OPUS_POINTER)
+# The design reviewer moved to a sonnet row (own-756), so the opus-row pointer names it explicitly: the drift case below reads it.
+DR_OPUS_POINTER = role_list_pointer("dr-opus", role_list_table(models={"design-reviewer": "opus"}))
 
-role_model_refuse("agent-role-model: a design-reviewer spawn on opus is refused when its row names sonnet", "design-reviewer",
-                  "opus", "Review the screen.", config=DR_SONNET_CFG)
+# An Opus spawn of the design reviewer is refused under agent-model-cap, the rule it really hits: its row names sonnet
+# and the Opus ceiling has no standing grant for it. No row can lift that, so this is an override refusal, not the row's.
+role_opus_refuse("agent-model-cap: a design-reviewer spawn on opus is refused when its row names sonnet", "design-reviewer",
+                 "opus", "Review the screen.", config=DR_SONNET_CFG)
 role_model_allow("agent-role-model: a design-reviewer spawn on sonnet is allowed when its row names sonnet", "design-reviewer",
                  "sonnet", "Review the screen.", config=DR_SONNET_CFG)
-role_model_allow("agent-role-model: a design-reviewer spawn on opus is allowed when its row names opus", "design-reviewer",
-                 "opus", "Review the screen.", config=DR_OPUS_CFG)
 role_model_allow("agent-role-model: a designer spawn on opus stays allowed when the design reviewer's row names sonnet", "designer",
                  "opus", "Design the screen.", config=DR_SONNET_CFG)
 
@@ -101,8 +101,9 @@ def design_reviewer_sonnet_drift_check():
 
 
 def design_reviewer_opus_drift_check():
-    """Control: the three role lists agree with the table when the design reviewer's row names opus."""
-    return role_drift_clean_check(DR_OPUS_POINTER, "the design reviewer on an opus row")
+    """The design reviewer on an opus row drifts OPUS_STANDING_ROLES, which lacks it: the lists follow the table."""
+    return role_drift_names_check(DR_OPUS_POINTER, ("design-reviewer", "OPUS_STANDING_ROLES"),
+                                  "the design reviewer on an opus row")
 
 
 # ---- The builder row (owner ruling own-755-a-builder-by-kind, 2026-11-13 14:01 CST): model sonnet, effort follows the lane kind,
@@ -144,10 +145,31 @@ def builder_effort_check():
     return not missing, "the builder row's effort cell %r does not name %s" % (cells[2], ", ".join(missing) or "the kinds")
 
 
+ROLE_ROW_LABEL_KEYS = ("lane, guard or check", "lane, product code or design", "lane, docs", "batch runner")
+
+
+def role_table_rows_check():
+    """The role table reads each lane row and the batch runner row whole, under its full label, and splits no lane label
+    into a role of its own (`lane`): ROLE_ROW_LABELS is what keeps a comma inside a label from splitting it."""
+    reader = role_model_reader()
+    if reader is None:
+        return False, "the guard has no role_model_table(root) to read the record"
+    table = reader(REPO) or {}
+    missing = [key for key in ROLE_ROW_LABEL_KEYS if table.get(key) != "sonnet"]
+    if missing:
+        return False, "the role table does not read %s whole as a sonnet row: %r" % (", ".join(missing), sorted(table))
+    if "lane" in table:
+        return False, "the role table splits a lane label into a role named 'lane': %r" % (sorted(table),)
+    return True, "the role table reads the three lane rows and the batch runner row whole, as sonnet"
+
+
 for _label, _check in (
+        ("role-model: the role table reads the lane rows and the batch runner row whole, and splits no lane label",
+         role_table_rows_check),
         ("role-model: the design reviewer on a sonnet row adds no drift line, so the Opus allowance follows the table",
          design_reviewer_sonnet_drift_check),
-        ("role-model: the design reviewer on an opus row adds no drift line (control)", design_reviewer_opus_drift_check),
+        ("role-model: the design reviewer on an opus row drifts OPUS_STANDING_ROLES, so the lists follow the table",
+         design_reviewer_opus_drift_check),
         ("role-model: the builder row names sonnet, read through the guard's table reader", builder_model_check),
         ("role-model: the builder row's effort follows the lane kind in the record's text", builder_effort_check),
 ):
