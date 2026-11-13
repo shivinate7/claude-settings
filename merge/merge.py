@@ -70,7 +70,8 @@
                           rollup. No file, process or timer.
   merge --clash           one line per file that more than one open PR changes: `PATH: #A HEADREF, #B HEADREF`, sorted by path, the PRs
                           ascending by number. Reads what --touches reads (the open pull list and each open PR's files); paths are normalised
-                          (`./a` is `a`); a draft counts as open. No file shared prints `no file is touched by more than one open pull request.`
+                          (`./a` is `a`); a draft counts as open. A path is exact after normpath: no rename's previous name (a renamed file
+                          counts under its new name only), no directory, no backslash path. No file shared prints `no file is touched by more than one open pull request.`
                           A failed read, or a program that cannot start, prints only `merge: unknown (...)` on stderr and exits 1, never the
                           none line. Stands alone; takes no lock, merges and posts nothing; any session may run it.
                           Cost per call: API reads only, on demand: the open pull list pages (one call per 100 PRs) and one pulls/N/files read
@@ -4530,7 +4531,8 @@ def clash_lines(h):
     CLASH_NONE line when no file is shared. Paths are posixpath.normpath'd, so `./a` and `a` are one file. Reads the same as touches_lines: the open
     pull list pages and one Host.pull_files per open pull request."""
     by_path = {}
-    for d in sorted(h.pages("pulls", fields={"state": "open"}), key=lambda d: d["number"]):
+    open_pulls = {d["number"]: d for d in h.pages("pulls", fields={"state": "open"})}  # offset paging can list one pull twice: it counts once
+    for d in (open_pulls[n] for n in sorted(open_pulls)):
         for path in {posixpath.normpath(f.get("filename") or "") for f in h.pull_files(d["number"])}:
             by_path.setdefault(path, []).append(d)
     out = [f"{path}: " + ", ".join(f"#{d['number']} {d['head']['ref']}" for d in pulls) for path, pulls in sorted(by_path.items()) if len(pulls) > 1]
