@@ -28,7 +28,7 @@ column. Code finds the table; the model decides whether it compares.
 
 Search totals: a reply that holds `total_count`, `totalCount`, `issueCount`, any `search/<endpoint>` path,
 or a search word (search, searched, searches, searching, as in --search, or joined by "_" as in
-search_issues; not research) within 60 characters of a count word (a digit, none, zero, no), in either
+search_issues; not research) within 120 characters of a count word (a digit, none, zero, no), in either
 order, is judged on every Stop too, so the model can check that a count or a state (open, closed,
 merged, CI status) comes from REST and not from a search total (rule verification-counts-from-rest).
 Code finds the words in the whole reply, before the clip; the model decides. The trigger is a code
@@ -85,8 +85,8 @@ BLOCKED_ON = re.compile(r"\bblocked\s+on\b", re.I)
 SEARCH_WORD = r"(?<![^\W_])search(?:ed|es|ing)?(?![^\W_])"
 COUNT_WORD = r"(?:\d|\b(?:none|zero|no)\b)"  # a digit, or a word that says there is no count
 SEARCH_TOTAL = re.compile(r"total_count|totalCount|issueCount|\bsearch/\w"
-                          r"|" + SEARCH_WORD + r".{0,60}" + COUNT_WORD
-                          + r"|" + COUNT_WORD + r".{0,60}" + SEARCH_WORD, re.I | re.S)
+                          r"|" + SEARCH_WORD + r".{0,120}" + COUNT_WORD
+                          + r"|" + COUNT_WORD + r".{0,120}" + SEARCH_WORD, re.I | re.S)
 JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
                 "output-never-paste-passing-output", "output-never-hand-off-doable-step",
                 "style-table-gold-column", "questions-go-to-owner",
