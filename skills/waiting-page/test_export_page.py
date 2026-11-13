@@ -2096,7 +2096,7 @@ class All(Base):
         self.assertEqual(read_text(os.path.join(queue, "items", "q1.json")), canonical(item(2)), "the queue's item did not land")
         self.assertFalse(os.path.exists(os.path.join(queue, "answers")), "an artifact exported a collection its entry does not list")
 
-    def test_a_bad_rolled_out_mark_still_exports_the_waiting_page_to_waiting(self):
+    def test_a_bad_rolled_out_mark_still_exports_the_page_to_waiting(self):
         """A "rolled-out" that is not JSON true or false: the export reads the waiting folder under either mark, so the
         waiting page still exports to waiting/ and the queue to artifacts/<id>/. The valid mark is the control."""
         for label, mark in (("valid", True), ("bad", "yes")):

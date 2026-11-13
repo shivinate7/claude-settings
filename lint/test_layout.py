@@ -936,7 +936,7 @@ class Registry(Tree):
                 self.assertNotIn(self.tree, problem, "the refusal sentence holds an absolute path of the repo")
                 self.assertIsNone(self.read_reader("mockup_home_problem", inside), "a file inside the design folder was refused under the bad mark")
 
-    def test_set_waiting_page_under_a_bad_mark_writes_the_page_and_keeps_the_mark(self):
+    def test_set_page_under_a_bad_mark_writes_the_page_and_keeps_the_mark(self):
         """A "rolled-out" that is not JSON true or false, with a waiting-page entry that has no export key: set_waiting_page()
         writes the new URL into that entry and leaves the mark as it was. The valid mark is the control. The entry is read for
         its id only, so no folder is read through the mark."""
@@ -948,7 +948,7 @@ class Registry(Tree):
                     held = json.load(handle)
                 self.assertEqual(json.dumps(held.get("rolled-out", "absent")), json.dumps(mark), "the fixture does not hold the mark")  # the scope first
                 try:
-                    wrote = self.layout.set_waiting_page(self.tree, new)
+                    wrote = self.layout.set_waiting_page(self.tree, new)  # glossary-ok: the layout module's own function name
                 except self.layout.LayoutError as err:
                     self.fail("set_waiting_page was refused under the mark %s: %s" % (json.dumps(mark), err))
                 with open(os.path.join(self.tree, *EXTRAS.split("/")), encoding="utf-8") as handle:

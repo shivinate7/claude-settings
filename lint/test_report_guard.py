@@ -2402,7 +2402,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         import layout  # the scope first: the fixture makes the layout raise
         broken = self.make_repo("broken", extras={"kinds": {}, "waiting-page": "https://example.com/x"})
         with self.assertRaises(layout.LayoutError, msg="the fixture does not make the layout raise"):
-            layout.waiting_page(broken)
+            layout.waiting_page(broken)  # glossary-ok: the layout module's own function name
         out = self.stop([human("decide"), assistant_text(self.reply(self.QUESTION))], repo=broken)
         self.assertIsNotNone(out, "the question passed with an unreadable layout: the check swallowed the LayoutError")
         self.assertEqual(out.get("decision"), "block", out)
