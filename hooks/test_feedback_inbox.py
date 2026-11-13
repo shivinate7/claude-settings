@@ -4350,8 +4350,8 @@ def case_question_answer_full_block_names_only_the_homeless_item():
 
 
 def case_question_answer_naming_a_home_passes():
-    """A defect answer that names a home on its line passes: a step on a lane branch only, with its scope read first
-    as the step cases read it, a tracked debt, and a tracked ruling left open. Each passes on main too."""
+    """A defect answer passes when its line names a home: a step on a lane branch only (its scope read first, as the
+    step cases read it), a tracked debt, or a tracked ruling left open."""
     repo = step_repo()
     expect_step_on_lane_only("answer home step", repo)
     p = homed(new_cfg(), "q-step", ("- fb-1238-1 [question] -> answered in chat: the size check counts the wrong "
@@ -4367,8 +4367,7 @@ def case_question_answer_naming_a_home_passes():
 
 def case_question_answer_plain_passes():
     """An answer with no defect word passes: closed, open, or empty (`-> answered` alone). So does a plain answer to
-    an owner question that names a defect, since the check reads the answer and not the question. Each passes on
-    main too."""
+    an owner question that names a defect, since the check reads the answer and not the question."""
     p = homed(new_cfg(), "q-plain", ("- fb-1238-2 [question] -> answered in chat: yes, it counts lines [closed]",),
               text=QUESTION_OWNER)
     expect_silent("answer plain: a closed plain answer passes", p)
@@ -4393,16 +4392,16 @@ LENIENT_HOME_ITEMS = (  # (label, item line): the home word in five forms, each 
 
 def case_question_home_word_is_read_leniently_blocks():
     """A `[question] -> answered` item whose home word is `Answered`, `answered:`, `answered,`, `answered.` or a
-    backticked `answered` is still a question answered with a defect, so it blocks with no home. Red on 3af4f6f3e:
-    question_problem reads the home word exactly, so each form skips the check."""
+    backticked `answered` still names a defect, so it blocks with no home. The home word is read leniently, so none of
+    these forms is a reason to skip the check."""
     for label, line in LENIENT_HOME_ITEMS:
         expect_block("answer home: home word %s with a defect and no home blocks" % label,
                      homed(new_cfg(), "q-lenient", (line,), text=QUESTION_OWNER), named=("fb-1238-1",))
 
 
 def case_question_defect_word_in_upper_case_blocks():
-    """The defect words match in any case, so `WRONG` names a defect and blocks with no home. Green on 3af4f6f3e,
-    which compiles the defect list with IGNORECASE. The case keeps that: a list that drops it lets this through."""
+    """The defect words match in any case, so `WRONG` names a defect and blocks with no home. A defect list that
+    matches case-sensitively would let this answer through."""
     p = homed(new_cfg(), "q-upper", ("- fb-1238-1 [question] -> answered in chat: The check is WRONG [closed]",),
               text=QUESTION_OWNER)
     expect_block("answer home: a defect word in upper case blocks with no home", p, named=("fb-1238-1",))
@@ -4410,7 +4409,7 @@ def case_question_defect_word_in_upper_case_blocks():
 
 def case_question_should_needs_to_and_fix_are_not_defect_words_passes():
     """The defect list is the five words and no others. An answer with should, needs to or fix, and no defect word,
-    passes with no home. Red on 3af4f6f3e: DEFECT_WORDS also holds should, needs to and fix."""
+    passes with no home: those words name a need or a fix, not a defect."""
     for text in ("we should keep it as is", "no fix needed", "yes it needs to be run twice"):
         p = homed(new_cfg(), "q-nondefect", ("- fb-1238-2 [question] -> answered in chat: %s [closed]" % text,),
                   text=QUESTION_OWNER)
@@ -4418,8 +4417,8 @@ def case_question_should_needs_to_and_fix_are_not_defect_words_passes():
 
 
 def case_question_defect_word_needs_a_whole_word_passes():
-    """Control: a defect word inside a longer word is no defect word, so `wrong_unit` passes with no home. Green on
-    3af4f6f3e, which matches whole words only. A list that drops the word boundary turns it red."""
+    """Control: a defect word inside a longer word is no defect word, so `wrong_unit` passes with no home. Matching
+    whole words is what keeps it out of the defect list."""
     p = homed(new_cfg(), "q-unit", ("- fb-1238-2 [question] -> answered in chat: it counts the wrong_unit values "
                                    "[closed]",), text=QUESTION_OWNER)
     expect_silent("answer defect list: a defect word inside wrong_unit names no defect, passes", p)
@@ -4427,8 +4426,8 @@ def case_question_defect_word_needs_a_whole_word_passes():
 
 def case_question_wrapped_home_passes():
     """A real step home wrapped in ( ), ** or [ ] passes. The step is a blob on a lane branch only, and its scope is
-    read first as the step cases read it. Red on 3af4f6f3e: ruling_home._unwrap strips only backticks and quotes, so
-    each wrapper blocks."""
+    read first as the step cases read it. Each wrapper is stripped before the home is read, so the wrapped form names
+    the same home as the bare one."""
     repo = step_repo()
     expect_step_on_lane_only("answer home wrapped", repo)
     for label, wrapped in (("parentheses", "(step:%s)"), ("bold", "**step:%s**"), ("square brackets", "[step:%s]")):
