@@ -20,7 +20,16 @@
    lacks, including unrelated history, is refused: one 'install not run' stderr line, exit 1, nothing installs, the pin does not
    move. Only a failed or impossible fetch (offline, no origin remote) warns and installs local main, as before.
 
-Open: the SessionStart refresh lock has no test. A refresh child that outlives 10 minutes can remove a
+7. The SessionStart pull (`settings.json`, matcher `startup|resume`) writes a line to the install log at each silent exit: no
+   clone path in `CLAUDE.md`, clone not found, another pull holds the lock. A skip never removes a held lock. The cloud exit stays
+   silent. The line names its reason, so a pin that stays stale says why. Cost: at most one line per skip, only on a skip, appended
+   to the install log (`>>` creates the log if absent). The skip runs `date` and `tr`, writes no other file and starts no long-lived
+   process (`merge/test_install_from_main.sh`, cases 46 to 49, pins it). Reader: the session that starts. `hooks/session_start.sh`
+   prints the newest `session-start hook:` line as `last pin-update note`, by a grep and a tail that write no file
+   (`hooks/test_session_start.py` pins it). The no-clone-path and clone-not-found exits always show it, alone, because no pin alarm
+   can. The lock-held exit shows it only beneath a behind-origin or off-main pin alarm.
+
+Open: a refresh child that outlives 10 minutes can remove a
 newer start's lock (debt `refresh-lock-untested`).
 
 Reason: a merge that adds a file must reach `~/.claude` with no hand install. Links to the clone itself would follow its

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" on start, resume and compaction, after one origin fetch per checkout. It prints the grant lines first, so a killed hook still delivers them. On resume it says when the recorded worktree is gone. Names the clone to cd to when the checkout is the live pin. Also warns on: core.worktree set in the shared git config; global rules that differ from this checkout; the claude-settings clone off main or behind origin; the default branch or local main behind or off origin; more than 50 agent worktrees; a check or fetch that could not run; a waiting page or grant file that differs from main's; a disarmed or unknown SessionEnd sweep. Prints the repo's caution level, or says it is unknown.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" on start, resume and compaction, after one origin fetch per checkout. It prints the grant lines first, so a killed hook still delivers them. On resume it says when the worktree is gone. Names the clone to cd to when the checkout is the pin. Also warns on: core.worktree set in the shared git config; global rules that differ from this checkout; the claude-settings clone off main, behind origin or not found (with the log's pin-update note); the default branch or local main behind or off origin; over 50 agent worktrees; a check that could not run; a waiting page or grant file unlike main's; a disarmed or unknown SessionEnd sweep. Prints the repo's caution level, or says unknown.
 # In a git tree it also patches the platform's Stop-hook script once so its unpushed nudge skips a merged branch; it says so when the patch is not applied.
 # Outside a git tree or without git, prints only the tier line. Always exits 0, nothing on stderr.
 
@@ -354,6 +354,16 @@ if [ -f "$global_md" ]; then
   fi
 fi
 
+# pin_update_note: after a pin alarm, prints the newest "session-start hook:" line of the install log. The SessionStart
+# pull writes one when it skips, so the session that starts reads why the pin did not update. Prints nothing when no
+# such line exists. Cost: one grep, one tail, no file written.
+pin_update_note() {
+  pun_log="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/claude-settings-install.log"
+  pun_line=$(grep -F 'session-start hook:' "$pun_log" 2>/dev/null | tail -n 1)
+  [ -n "$pun_line" ] && printf 'claude-settings: last pin-update note: %s\n' "$pun_line"
+  return 0
+}
+
 # The pointer checkout's HEAD must be `main`. `~/.claude/lint/*`, `~/.claude/hooks/*` and
 # `~/.claude/agents/*` are symlinks into that one checkout, so its branch decides which copy
 # of the rules and the guards every session on this machine runs. A branch left checked out
@@ -377,6 +387,7 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
   if [ -n "$pointer_branch" ] && [ "$pointer_branch" != "main" ]; then
     printf 'claude-settings: %s is on %s, not main; global rules and hooks are that branch\n' \
       "$d" "$pointer_branch"
+    pin_update_note
   fi
 
   # Freshness check, only when the pointer clone is on main.
@@ -404,6 +415,7 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
       if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then
         printf 'claude-settings: %s is %s commits behind origin/main; global rules and hooks are stale\n' \
           "$d" "$behind"
+        pin_update_note
         ptr_behind_printed=1
       fi
     else
@@ -414,6 +426,9 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
       fi
     fi
   fi
+else
+  # No clone to name (no pin line, a missing folder, or no .git): the pull's skip line is the only reason on offer.
+  pin_update_note
 fi
 
 # The repo's caution level, once per session: its facts and expected acts, so the session reads them and
