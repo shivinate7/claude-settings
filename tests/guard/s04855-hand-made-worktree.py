@@ -360,6 +360,10 @@ def hand_made_named_red_path_case():
         return False, "the red-run path the refusal names is not absolute: %s" % named
     if not any(hm_under(named, root) for root in (HMMAIN, os.path.realpath(HMMAIN))):
         return False, "the red-run path the refusal names is not under the primary: %s" % named
+    # The fixture root is permitted in a hand-made reason only as part of the agent's own red-run path.
+    rest = reason.replace(named, "")
+    if any(root in rest for root in (ROOT, slash(ROOT))):
+        return False, "the refusal names the fixture root outside its red-run path: %s" % rest[-120:]
     got, reason = decide(dict(from_home, tool_input={"command": HMADD + "--detach " + named + " HEAD"}))
     if got != "allow":
         return False, "git worktree add --detach to the named path, from the agent's home, is %s: %s" % (
@@ -368,6 +372,35 @@ def hand_made_named_red_path_case():
 
 
 LOG_FAMILY[HM_NAMED_LABEL] = FAMILY   # its registration sits in the misc literal (section 33355), which keeps it here
+
+
+# THE WHOLE NO-AGENT REASON. A call with no agent_id is refused the rule text, one space, then the override line.
+# Nothing may sit between them: a path appended to the rule text would pass a substring check, so this one pins the
+# whole printed reason. The override line is read from hooks/override.py, the one home of that line.
+HM_NO_AGENT_LABEL = ("hand-made worktree: a call with no agent_id gets the rule text, one space, then the override "
+                     "line, and no words between them")
+
+
+def hand_made_no_agent_reason_case():
+    """The refusal a call with no agent_id gets ends where the override line begins: the rule text, one space,
+    then the line. A path appended after the rule text is refused."""
+    import override
+    got, reason = decide({
+        "raw": None, "tool": "Bash", "cwd": HMMAIN, "session": None, "env_path": None,
+        "temp": os.path.join(ROOT, "tmp"),
+        "tool_input": {"command": HMADD + "../lane-x"}})
+    if got != "deny":
+        return False, "expected deny, got %s: %s" % (got, reason[:90])
+    head = "hand-made-worktree: " + HM_TODAY_REASON + " "
+    if not reason.startswith(head):
+        return False, "the no-agent reason does not open with the rule text: %s" % reason[:90]
+    tail = reason[len(head):]
+    if tail != override.offer("hand-made-worktree"):
+        return False, "the no-agent reason holds words between the rule text and the override line: %s" % tail[:90]
+    return True, "the no-agent reason is the rule text, one space, then the override line, and nothing else"
+
+
+LOG_FAMILY[HM_NO_AGENT_LABEL] = FAMILY   # registered in the misc literal (section 33355), as the named-path check is
 
 
 # =========================================================================== 2. machine-wide kills
