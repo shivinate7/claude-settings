@@ -69,10 +69,11 @@ never reverts.
 ## Note, not a debt
 
 Out of scope, so not seen in a Bash or PowerShell call: a path built at run time, such as
-`"$d/x.json"`, a Python or Node script that writes JSON, `dd of=`, `cp -t` and `mv` into a
-folder, `install`, `ln`, a download with `curl -o`, `sponge`, `find -exec sed -i`, and a command
-inside `bash -c '...'` such as `bash -c 'sed -i ...'`. A JSONC file with a trailing comma is still
-named: only comments are forgiven.
+`"$d/x.json"`. The same holds for a Python or Node script that writes JSON, `dd of=`, `cp -t`
+and `mv` into a folder. It also holds for `install`, `ln`, a download with `curl -o`, `sponge`
+and `find -exec sed -i`. It also holds for a command inside `bash -c '...'`, such as
+`bash -c 'sed -i ...'`. A JSONC file with a trailing comma is still named: only comments are
+forgiven.
 Write and Edit see every path. A background job that has begun to write a file leaves partial
 text, which the check names as broken. `parse()` reads only the first fence in an inbox
 block, so a lost closer of a second fence there is missed, by this check and the Stop check alike.
