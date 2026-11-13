@@ -1,5 +1,6 @@
 # section 15918
 FAMILY = "cite"
+FAMILIES["cite"] = "cite by id"
 #
 # `git-cite-by-id`. A commit message or a PR body that cites a record by its path is refused. A code
 # path, the word "decisions", a read of a record and a record's own file stay allowed.
@@ -415,3 +416,5 @@ sh("guard-command-position: lane in the third of three plain heredoc bodies deni
    "deny", "lane-by-slug", cwd=NOGIT, config=MERGECFG)
 
 # =========================================================================== 5c-1. a message file in a scratchpad
+LOG_CHECKS_EXTRA.append(("cite-by-id: a -F file that cannot be read is denied with the folders unread too",
+                         cite_unread_folders_case))

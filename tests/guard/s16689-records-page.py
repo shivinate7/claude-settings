@@ -1,5 +1,6 @@
 # section 16689
 FAMILY = "records-page"
+FAMILIES["records-page"] = "a lane commit of the generated records page: refused unless the page is the base's"
 #
 # `records-page`. Owner ruling 2026-10-16 10:28 CDT ("Also add a guard"), decision records-index-at-merge.
 # The page docs/records.md is rebuilt only at merge, by the merge tool. A lane never commits a change

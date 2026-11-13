@@ -1,5 +1,6 @@
 # section 28508
 FAMILY = "rule9"
+FAMILIES["rule9"] = "rule 9, the agent model floor"
 # ---- Rule 9, the agent model floor. Both directions: Haiku in any spelling is denied, and
 # every other model, or none, is allowed.
 # SPAWN_TOOLS lists Task as well as Agent, so Task keeps one floor row. The rest name Agent.

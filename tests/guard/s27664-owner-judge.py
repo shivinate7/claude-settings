@@ -527,3 +527,22 @@ def branch_base_unread_log_case():
 
 
 # --------------------------------------------------------------------------- an option's key is its position's letter
+LOG_CHECKS_EXTRA.append(("log: one line per refusal and none for an allow", log_case))
+LOG_CHECKS_EXTRA.append(("log: a project config edit is allowed and noted", config_edit_log_case))
+LOG_CHECKS_EXTRA.append(("log: a cap lift is asked and logged with its file and value", cap_log_case))
+LOG_CHECKS_EXTRA.append(("log: a cap lift under a deep path still logs the model", cap_deep_path_log_case))
+LOG_CHECKS_EXTRA.append(("cap: the printed reason is bounded, single-line and marks a cut", cap_reason_bound_case))
+LOG_CHECKS_EXTRA.append(("trim: a guard crash fails open and logs a crash line", crash_log_case))
+LOG_CHECKS_EXTRA.append(("log: an unreadable subject is allowed and noted", subject_unread_log_case))
+LOG_CHECKS_EXTRA.append(("log: a hard reset in an agent-owned worktree is allowed and noted, not asked",
+                         agent_worktree_reset_noted_case))
+LOG_CHECKS_EXTRA.append(("log: checkout -- in an agent-owned worktree is allowed and noted, not asked",
+                         agent_worktree_checkout_noted_case))
+LOG_CHECKS_EXTRA.append(("log: an unforced worktree remove with an unreadable subject records no note",
+                         worktree_remove_plain_quiet_case))
+LOG_CHECKS_EXTRA.append(("log: a forced worktree remove with an unreadable subject is still noted",
+                         worktree_remove_force_noted_case))
+LOG_CHECKS_EXTRA.append(("log: a quoted or abbreviated force on a worktree remove is still noted",
+                         worktree_remove_force_forms_noted_case))
+LOG_CHECKS_EXTRA.append(("log: a branch delete with no resolvable base is allowed and noted",
+                         branch_base_unread_log_case))

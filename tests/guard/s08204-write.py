@@ -1,5 +1,6 @@
 # section 8204
 FAMILY = "write"
+FAMILIES["write"] = "the silent write"
 # The throwaway cases below read ROOT/tmp as the system temp. Every other write case keeps its
 # NOGIT, GITMAIN or PROJ cwd outside it, so each stays a real checkout whatever the system temp is.
 TEMP_DIR = os.path.join(ROOT, "tmp")

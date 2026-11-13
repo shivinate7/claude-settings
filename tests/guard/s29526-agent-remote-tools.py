@@ -1,5 +1,6 @@
 # section 29526
 FAMILY = "agent-remote-tools"
+FAMILIES["agent-remote-tools"] = "an agent's call to an outward claude-code-remote tool is refused; the session's own call, an agent_type with no agent_id, and the read tools keep their verdict"
 REMOTE_PREFIX = "mcp__claude-code-remote__"
 AGENT_ID_VALUE = "a1b2c3d4e5f607182"  # 17 hex characters, the measured agent_id shape
 # archive_session is judged by lane-closes-after-records, which refuses a target it cannot read as a non-lane. A

@@ -1,6 +1,10 @@
 # section 38816
 FAMILY = "handoff-checked-stamp"
+FAMILIES["handoff-checked-stamp"] = "a write to a session handoff that restamps a premise's Checked value is refused without evidence in the session's transcript after its last compact boundary: the incident, the evidence forms, the boundary, the agent and handoff reads, the fail-open copies, the non-handoff files, and the cost"
 HCS_RULE = "handoff-checked-stamp"
+# The refusal names the premises it refuses and their Source tokens, and may name the handoff it judges, under the
+# config folder, as handoff-sections does.
+REASON_MAY_NAME["handoff-checked-stamp"] = (ROOT, slash(ROOT), ".claude")
 HCS_SID = "4b8e1d62-0000-4000-8000-00000000c0a1"       # the session that restamps
 HCS_SID_FULL = "4b8e1d62-0000-4000-8000-00000000f0a1"  # a full-size handoff, in the same config folder
 HCS_CFG = os.path.join(ROOT, "hcs-cfg")                # the installed prompt, and both session handoffs

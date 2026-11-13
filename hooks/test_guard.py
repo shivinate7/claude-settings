@@ -8,7 +8,7 @@ Run it from the repository root:
 GUARD_TESTS=windows-slice runs only the cases tagged for Windows (see WINDOWS_SHAPE below); unset
 runs every case. Any other value stops the run before a case runs.
 
-GUARD_FAMILY=<name> runs only one family of cases (FAMILIES, at the top of this file). An unknown
+GUARD_FAMILY=<name> runs only one family of cases (FAMILIES: one row per family, set by its section). An unknown
 name, or a filter that matches no case, fails the run. GUARD_TIMING=1 prints what each fixture
 block cost.
 
@@ -91,82 +91,10 @@ GUARD_TESTS_MODES = ("", "windows-slice")
 
 # GUARD_FAMILY=<name> keeps only the cases of one family, so a change to one rule runs in that
 # family's time. A case takes the family of the nearest FAMILY line above it (one per section),
-# except a case named "rm-var", which is its own family wherever it sits. An unknown name stops the
-# run before any fixture is built, and the message lists these names.
-FAMILIES = {
-    "shared-tree": "stash, reset, restore, checkout and the subject read",
-    "branch-worktree": "branch delete and worktree remove/prune",
-    "two-worktrees-one-branch": "a checkout, switch or worktree add that would take a branch another worktree of the clone holds is refused; the forms that take no such branch, and the holder's own checkout, pass",
-    "worktree-home": "rule 0: an agent's shell call outside its recorded home, and the path forms it reads",
-    "pointer-edit": "the pointer checkout's own files: a Write, Edit, MultiEdit or NotebookEdit into them is refused, naming EnterWorktree; its .git, a linked worktree, a target outside it, a stood-down pointer and the read tools pass",
-    "session-home": "rule session-home: a session whose worktree is gone is refused a write into the primary checkout; its record and its cost",
-    "scratchpad-owner": "rule scratchpad-owner: an agent that runs a script another agent of its session wrote into the shared scratchpad is refused; the write-time record, the run forms, the passes, the reads and the cost",
-    "pointer": "the pointer HEAD checkout",
-    "hand-made-worktree": "a worktree made by hand outside the agent home folder",
-    "kill": "machine-wide kills and detached launches",
-    "stream": "live streams, narrating commands, ln -s, waiter loops and background end conditions",
-    "write": "the silent write",
-    "readonly-shell-write": "a read-only agent's shell write: a redirect, tee, touch or mktemp, in the shell or inside an ssh command, is refused; its own scratchpad, the null devices, the reads, a writing role and a call with no agent pass",
-    "push-delete": "push and delete",
-    "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
-    "env": "environment files",
-    "argv": "process arguments: a ps, pgrep or /proc form that prints other processes' full arguments is refused; pid-and-name forms, quoted or heredoc text and the guard's own readers pass",
-    "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
-    "hook-bypass": "a git commit, merge or push that skips the git hooks: core.hooksPath on the command or in the environment, --no-verify, and -n on commit; the mutation tool's own exemption",
-    "merge": "merge into main, draft pull requests and the merge guard",
-    "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, while a branch of the lane is ahead of its repo's default branch with no pull request, or when the lane's record cannot be read",
-    "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
-    "message-time-matches-clock": "a send_message whose first non-blank line opens with a header stamp (a label of 1 to 4 words, then a comma, a colon or a spaced dash, then H:MM or HH:MM with optional seconds, then CST or CDT in any case) is refused when the stamp is wrong for the clock: a CST or CDT label that is not the clock's zone, a dated stamp more than 1 minute ahead, or an undated stamp 2 to 60 minutes ahead; an undated stamp more than 60 minutes ahead, or behind the clock, passes; a stamp later in the message, mid-line, on a status line, or on another tool passes. A dated ISO instant with an offset more than 1 minute ahead is refused too in `added` of an ArtifactData write to collection items (a whole instant, or a time fragment such as T20:24:00Z), `updatedAt` of a Write to a roadmap step file, each instant an Edit or MultiEdit writes to a roadmap step file (with or without a key), and the last literal `updatedAt` key in a Bash command (bare, quoted, or followed by `]`; then `:`, `=` or jq's `|=`; then a single- or double-quoted value); a time in prose, another field or collection, or a value with no offset passes",
-    "sendmessage-session-id": "SendMessage whose to starts session_: refused, since a session_ id is not an agent name and delivery to one is unmeasured; mcp__claude-code-remote__send_message takes the session_id. Any other to, and that tool, pass this rule",
-    "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
-    "records-page-ready": "a ready pull request whose head holds a stale records page is refused, on the MCP draft:false call and on gh pr ready in each form; a current, non-default, claim-holding, behind-the-base, empty, undo, draft, title-only or non-merge-tool call is allowed; a read that cannot run, or an ancestry unknown in a shallow clone, is refused unknown, and the unknown reason names no --confirm",
-    "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
-    "octopus-push": "a git push whose range adds a merge commit of more than two parents is refused, with a two-parent remedy; a push that writes main keeps its push-main ask",
-    "cite": "cite by id",
-    "scratchpad-message": "a git commit whose -F message file sits in a session scratchpad: an agent's call is refused in every flag form, through a link into the scratchpad, and an orchestrator's call, a heredoc, -m and a gh body file pass",
-    "frozen": "frozen paths",
-    "model-cap": "the agent model cap",
-    "ask-alone": "an ask command chained with other commands denies, except a leading cd, export or an output tail; a lone ask command still asks",
-    "paths": "path rules, builders and the test-author",
-    "diff": "the diff judged at commit, push and stop",
-    "builder-refuse": "a builder's diff refused at commit and push and blocked at the first stop, the deny names no path, and a test-author's diff still allowed",
-    "impeccable": "impeccable is review-only",
-    "port-question": "the page writer: a port question carries a Departs from line and holds nothing",
-    "page-stale": "the waiting page: a publish of a page behind main's page.html is refused, a republish of main's page with empty designData and roadmap blocks is refused, a page with its own title and empty blocks is allowed, and an allowed publish of a page with live data writes the stamp",
-    "uniform-pick": "the page writer: a pick never names an option that widens a shared tool",
-    "press-link": "the page writer: a press in a web app carries a link to the exact page",
-    "command-in-item": "the page writer: a task step never sends the owner to a file for a command",
-    "gh-login-switch": "the page writer: a gh command in a task switches login first, shivinate7 by default and ssemwal-cdc only for a repo shivinate7 cannot reach",
-    "task-names-check": "the page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
-    "owner-judge": "the page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task",
-    "question-departs": "the page writer: a decision says how it departs from main in a Departs from line, not a restatement of main",
-    "option-letter-keys": "the page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, its text names no option by a letter-and-digit key, and an option label that opens with a letter tag (B: x, Option B x) names the key's letter; a closed item is not judged; the page's letters are read from its own source",
-    "rework-off-page": "the page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused",
-    "item-field-rendered": "the page writer: a write names only item fields the page renders (the itemFields block of page.html)",
-    "page-item-design": "the page writer: a design picture that misses its focus, its state or its height is refused at write, and an allowed publish of the waiting page records the published file",
-    "rule9": "rule 9, the agent model floor",
-    "role-model": "agent-role-model: a spawn's model against its role's row in the decision table, the missing-model default, and the fail-open read",
-    "mask-script": "mask_script lexemes",
-    "simulator": "the simulator boot and hold rules",
-    "rm-var": "every case named rm-var, wherever it sits",
-    "session-log": "the session id column of guard.log",
-    "fail-closed": "a missing sibling module refuses the call, and never allows it",
-    "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
-    "override": "the owner override: one act or a timed override, one session, the exclusions it never lifts",
-    "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override",
-    "handoff-sections": "a write that leaves a session's handoff without a section the prompt's marker names is refused, naming the sections; the marker is the one list; the fail-open copies; and the cost",
-    "handoff-checked-stamp": "a write to a session handoff that restamps a premise's Checked value is refused without evidence in the session's transcript after its last compact boundary: the incident, the evidence forms, the boundary, the agent and handoff reads, the fail-open copies, the non-handoff files, and the cost",
-    "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
-    "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
-    "agent-remote-tools": "an agent's call to an outward claude-code-remote tool is refused; the session's own call, an agent_type with no agent_id, and the read tools keep their verdict",
-    "workflow-args": "a Workflow call whose args is, or holds as an array or object value, a placeholder (an all-caps word with an underscore, or __X__) is refused, naming it and the fix; an absent, empty or real args passes, and so does a short all-caps word or a sentence with an env var name",
-    "sections": "the section files: a set the loader refuses (no section file, two files with one number, a log check appended after the LOG_CHECKS_EXTRA join) stops a run before any case",
-    "misc": "anything outside a tagged section",
-}
-GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
-if GUARD_FAMILY and GUARD_FAMILY not in FAMILIES:
-    sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s"
-             % (GUARD_FAMILY, ", ".join(sorted(FAMILIES))))
+# except a case named "rm-var", which is its own family wherever it sits. Each family's row in
+# FAMILIES is set by the section that first sets its FAMILY, right after that line. An unknown name
+# stops the run before any section runs, and the message lists these names.
+FAMILIES = {}
 
 
 # The progress beat (decision stall-watch: a quiet tool owes a line at least every 120 s). The quiet clock
@@ -245,6 +173,11 @@ FAMILY = "misc"  # set at each section header below
 TEMP_DIR = None
 
 
+# The families a case takes by its name, wherever its row sits (_family below). The table check reads this list
+# (lint/test_guard_tables.py), so a row of one of these may sit in any section.
+NAMED_FAMILIES = ("session-log", "argv", "rm-var")
+
+
 def _family(name):
     """The family a case or a log check takes: session-log and argv by prefix, rm-var by name, else FAMILY."""
     if name.startswith("session-log:"):
@@ -263,6 +196,9 @@ class _TaggedLogs(list):
     def append(self, item):
         LOG_FAMILY[item[0]] = _family(item[0])
         list.append(self, item)
+
+
+LOG_CHECKS_EXTRA = _TaggedLogs()
 
 
 # A case this platform does not run is a SKIP row with its reason: never a PASS, never a silent drop.
@@ -348,6 +284,14 @@ def windows_shaped(*parts):
         text = re.sub(re.escape(root) + r"[^\s\"'`;|&]*",
                       lambda m: "<fixture>" + m.group(0)[len(root):].replace("\\", "/"), text)
     return WINDOWS_SHAPE.search(text) is not None
+
+
+# ONE RULE MAY NAME ITS SUBJECT, and only the fragments listed beside it. Rule 8 asks rather than
+# refuses, and the ask exists to tell an approver what is being turned on and where, so the settings
+# path is the point of the message. The exemption is keyed by RULE, never by case, so a new case
+# cannot widen it, and a fragment left off this list, `CLAUDE.md` or `guard.py`, stays forbidden in
+# rule 8's reason too.
+REASON_MAY_NAME = {}
 
 
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
@@ -450,6 +394,15 @@ def chained_ask(name, command, **kw):
 SECTION_DIR = os.path.join(HERE, "..", "tests", "guard")
 
 
+def family_names(text, path):
+    """The family names a section file sets: each `FAMILIES["<name>"] = ...` row, read from the file's syntax tree.
+    A syntax error names `path`, as the loader's compile does."""
+    return {node.slice.value for node in ast.walk(ast.parse(text, filename=path))
+            if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store)
+            and isinstance(node.value, ast.Name) and node.value.id == "FAMILIES"
+            and isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str)}
+
+
 def load_sections(section_dir):
     """Run each section file of section_dir here, in n order. No file, or two files with one n, stops the run."""
     found = []
@@ -469,11 +422,23 @@ def load_sections(section_dir):
     for n in sorted(set(numbers)):
         if numbers.count(n) > 1:
             sys.exit("fixture setup failed: section number %d is on %d section files" % (n, numbers.count(n)))
+    # A GUARD_FAMILY that no section sets is refused here, before any section runs: a section can start a process
+    # (the kill section's sleep), and a refusal after the sections would leave it running. The names are read from
+    # the files' FAMILIES rows, the rows the sections set when they run.
+    family = os.environ.get("GUARD_FAMILY", "")
+    known = set(FAMILIES).union(*(family_names(text, path) for _, path, text in found))
+    if family and family not in known:
+        sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s" % (family, ", ".join(sorted(known))))
     for _, path, text in sorted(found):
         exec(compile(text, path, "exec"), globals())
 
 
+FAMILIES["sections"] = "the section files: a set the loader refuses (no section file, two files with one number, a log check appended after the LOG_CHECKS_EXTRA join) stops a run before any case"
 load_sections(os.environ.get("GUARD_SECTION_DIR") or SECTION_DIR)
+GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
+if GUARD_FAMILY and GUARD_FAMILY not in FAMILIES:
+    sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s"
+             % (GUARD_FAMILY, ", ".join(sorted(FAMILIES))))
 # A log check appended to LOG_CHECKS_EXTRA after its join is in no run. Refuse that, rather than drop it.
 UNJOINED = [label for label, check in LOG_CHECKS_EXTRA if (label, check) not in LOG_CHECKS]
 if UNJOINED:

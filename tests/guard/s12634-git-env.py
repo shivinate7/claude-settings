@@ -1,5 +1,6 @@
 # section 12634
 FAMILY = "git-env"  # GIT_ENV_RULE, the rule id, is set in the shared-tree section above
+FAMILIES["git-env"] = "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE"
 _GIT_ENV_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
 
 # A per-file restore from a worktree, with a GIT_WORK_TREE setter in front of it: a bash prefix row,

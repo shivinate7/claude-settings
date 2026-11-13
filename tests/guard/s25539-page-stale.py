@@ -1,5 +1,6 @@
 # section 25539
 FAMILY = "page-stale"
+FAMILIES["page-stale"] = "the waiting page: a publish of a page behind main's page.html is refused, a republish of main's page with empty designData and roadmap blocks is refused, a page with its own title and empty blocks is allowed, and an allowed publish of a page with live data writes the stamp"
 #
 # Rule page-stale (hooks/guard.py, the Artifact tool). A republish of this repo's waiting page is refused
 # when its file is behind main's skills/waiting-page/page.html, and when it is main's own page (main's title)

@@ -1,5 +1,6 @@
 # section 26952
 FAMILY = "task-names-check"
+FAMILIES["task-names-check"] = "the page writer: a task carries a Why yours line naming the check that showed only the owner can do it"
 #
 # Decision task-names-its-check: a waiting-page task carries a "Why yours:" line naming the check that
 # showed no session could do the act. The fixture is a task with a cloud refusal in context and no Why

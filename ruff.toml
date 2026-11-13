@@ -2,7 +2,12 @@
 # F = Pyflakes (unused imports, undefined names, empty f-strings). E9 = syntax and read errors.
 # No target-version: ruff then checks syntax against its newest Python, so a newer file never
 # reads as an error on an older default.
-extend-exclude = ["skills/impeccable"]  # vendored; not ours to lint
+extend-exclude = [
+  "skills/impeccable",  # vendored; not ours to lint
+  # Sections bind names at exec time; lint/test_guard_joined_f821.py (checks.yml) lints them joined.
+  "hooks/test_guard.py",
+  "tests/guard/*",
+]
 
 [lint]
 select = ["F", "E9"]
@@ -12,7 +17,3 @@ select = ["F", "E9"]
 # deletes the import and this line together.
 "hooks/test_sendmessage_state.py" = ["F401"]  # contextlib, io
 "lint/test_check_skill_model_rows.py" = ["F401"]  # glob
-# Bandaid: the runner execs each section file in its own globals (names bind at exec time), so ruff reads every
-# name a section uses from the runner as undefined. The follow-up is a ruff step over the joined sections in order.
-"hooks/test_guard.py" = ["F821"]
-"tests/guard/*" = ["F821"]

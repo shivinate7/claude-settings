@@ -351,6 +351,12 @@ jobs:
       - name: Windows split guard
         run: python3 lint/test_windows_split.py
 
+      - name: Guard joined-order lint (F and E9 across the guard sections)
+        run: python3 lint/test_guard_joined_f821.py
+
+      - name: "Guard tables (FAMILIES, LOG_CHECKS, REASON_MAY_NAME: placement and compare)"
+        run: python3 lint/test_guard_tables.py
+
       - name: all-jobs-passed needs every pull-request job
         run: python3 lint/test_all_jobs_passed.py
 

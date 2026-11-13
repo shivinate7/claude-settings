@@ -42,9 +42,11 @@ these is one finding, on the line of its count word: `<record>:<line>: count in 
 
 The report is one line per token and line: `<record>:<line>: <token> named in a Cost sentence with no pin`.
 Exit 1 when there is a finding, 0 when there is none. Only the decision records (kind `decisions` in lint/layout.json)
-are read: a debt's Cost line is not. Each test file is read once per run.
+are read: a debt's Cost line is not. Each test file is read once per run. A runner that assigns `SECTION_DIR`
+(`hooks/test_guard.py`) holds the text of the section files in that folder too.
 """
 import argparse
+import ast
 import collections
 import glob
 import os
@@ -53,6 +55,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
+import rule_audit  # noqa: E402  the one reader of a runner's SECTION_DIR
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -246,11 +249,28 @@ def read(path):
         return None
 
 
+def sections(path, text):
+    """The text of each section file of a runner that assigns `SECTION_DIR` (hooks/test_guard.py keeps its
+    cases in tests/guard/), so a name held in a section file pins as one held in the runner. The folder comes
+    from rule_audit, the one reader of that assignment. A runner with none, or that does not parse, adds nothing."""
+    if not path.endswith(".py"):
+        return ""
+    try:
+        folder = rule_audit._section_dir(ast.parse(text), path)
+    except SyntaxError:
+        return ""
+    if not folder or not os.path.isdir(folder):
+        return ""
+    return "\n".join(read(os.path.join(folder, name)) or "" for name in sorted(os.listdir(folder)) if name.endswith(".py"))
+
+
 def held(candidate, root, texts):
-    """The text of a test file under the root, read once per run, or None when it is absent."""
+    """The text of a test file under the root (and of its section files), read once per run, or None when it is absent."""
     rel = bare(candidate)
     if rel not in texts:
-        texts[rel] = read(os.path.join(root, *rel.split("/")))
+        path = os.path.join(root, *rel.split("/"))
+        text = read(path)
+        texts[rel] = None if text is None else text + "\n" + sections(path, text)
     return texts[rel]
 
 

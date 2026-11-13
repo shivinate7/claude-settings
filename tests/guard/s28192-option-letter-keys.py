@@ -1,5 +1,6 @@
 # section 28192
 FAMILY = "option-letter-keys"
+FAMILIES["option-letter-keys"] = "the page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, its text names no option by a letter-and-digit key, and an option label that opens with a letter tag (B: x, Option B x) names the key's letter; a closed item is not judged; the page's letters are read from its own source"
 #
 # Rule option-letter-keys (decision option-keys-are-letters), built against a named incident: waiting item 77,
 # Oct 30 15:09 CDT, and item 44 (key none), Oct 28 12:47 CDT. The page shows an option by its position, as a

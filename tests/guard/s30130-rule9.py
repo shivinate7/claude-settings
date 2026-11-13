@@ -234,30 +234,6 @@ add("floor: Workflow haiku after i-- divided, then a path string, is denied", "d
 FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT),"settings.json", "CLAUDE.md", "guard.py",
                          ".claude", "app.log", "sleep", "haiku", VCS + " checkout", VCS + " switch")
 
-# ONE RULE MAY NAME ITS SUBJECT, and only the fragments listed beside it. Rule 8 asks rather than
-# refuses, and the ask exists to tell an approver what is being turned on and where, so the settings
-# path is the point of the message. The exemption is keyed by RULE, never by case, so a new case
-# cannot widen it, and a fragment left off this list, `CLAUDE.md` or `guard.py`, stays forbidden in
-# rule 8's reason too.
-REASON_MAY_NAME = {
-    "agent-model-cap": (ROOT, slash(ROOT), "settings.json", ".claude"),
-    # The refusal names the handoff the session must read: under the config folder, which is ROOT here
-    # and ~/.claude in a session. That path is the remedy, so the rule may name its folder.
-    "handoff-unread": (ROOT, slash(ROOT), ".claude"),
-    # The refusal names the now-central helper a session reads the time from, ~/.claude/bin/now-central. That path
-    # is the remedy, so the rule may name its folder, as handoff-unread does. The other fragments stay forbidden.
-    "message-time-matches-clock": (".claude",),
-    # The two-worktrees-one-branch remedy names `git switch -c <new-branch> <start>`: a branch of the
-    # caller's own. The forbidden target is the held branch's checkout, not that create form. The check
-    # matches a fragment as text, so this one entry permits `git switch` as a whole in this rule's reason.
-    TWO_RULE: (VCS + " switch",),
-    # The refusal names the missing sections and may name the handoff it judges: under the config folder.
-    "handoff-sections": (ROOT, slash(ROOT), ".claude"),
-    # The refusal names the premises it refuses and their Source tokens, and may name the handoff it judges, under the
-    # config folder, as handoff-sections does.
-    "handoff-checked-stamp": (ROOT, slash(ROOT), ".claude"),
-}
-
 
 def playwright_remedy_case():
     """The playwright refusal names the real check and points nowhere else.
@@ -2463,3 +2439,38 @@ FIXTURELESS_CHECKS.update((
 #
 # Each row is its own case, so a failure names one cause. A refusal row is red on a guard that lets the
 # act through.
+LOG_CHECKS_EXTRA.append(("log: the refused file is named in the log and nowhere else", log_env_case))
+LOG_CHECKS_EXTRA.append(("merge-checks: a merge tool that cannot load is unknown, and denies", merge_tool_missing_case))
+LOG_CHECKS_EXTRA.append(("merge-checks: a merge tool that exits at import is unknown or pending, and denies",
+                         merge_import_exits_case))
+LOG_CHECKS_EXTRA.append(("merge-checks: a gh that never answers still denies, well inside the hook's 60s budget",
+                         merge_hang_timeout_case))
+LOG_CHECKS_EXTRA.append(("powershell: a backslash path survives tokenizing, a Bash one does not", powershell_backslash_case))
+LOG_CHECKS_EXTRA.append(("wsl: a PowerShell script tag keeps its backslashes in segment_tokens", wsl_script_tag_keeps_backslash_case))
+LOG_CHECKS_EXTRA.append(("wsl: a split segment keeps the PowerShell tag its script had", wsl_split_tag_keeps_backslash_case))
+LOG_CHECKS_EXTRA.append(("stack: the refusal never names the action it refused", stack_reason_hygiene_case))
+LOG_CHECKS_EXTRA.append(("playwright: the refusal names the stale __dirlock and pgrep, and no other path",
+                         playwright_remedy_case))
+LOG_CHECKS_EXTRA.append(("split_segments: a comment starting a word ends its line, "
+                         "letter-before-# and quoted-# stay literal", split_segments_comment_case))
+LOG_CHECKS_EXTRA.append(("liveness: process_start_ms splits alive/dead/unreadable apart", process_start_ms_case))
+LOG_CHECKS_EXTRA.append(("liveness: process_start_ms reads a repeated-hour start (01:30 CDT) as its instant, in Chicago",
+                         process_start_ms_repeated_hour_cdt_case))
+LOG_CHECKS_EXTRA.append(("liveness: process_start_ms reads a repeated-hour start (01:30 CST) as its instant, in Chicago",
+                         process_start_ms_repeated_hour_cst_case))
+LOG_CHECKS_EXTRA.append(("liveness: windows arm splits dead (error 87) from unreadable (error 5)",
+                         process_start_ms_windows_case))
+LOG_CHECKS_EXTRA.append(("liveness: session_is_live carries True/False/None, never coercing unreadable to False",
+                         session_is_live_case))
+LOG_CHECKS_EXTRA.append(("liveness: session_is_live says True for a repeated-hour start (01:30 CDT) in Chicago",
+                         session_is_live_repeated_hour_cdt_case))
+LOG_CHECKS_EXTRA.append(("liveness: session_is_live says True for a repeated-hour start (01:30 CST) in Chicago",
+                         session_is_live_repeated_hour_cst_case))
+LOG_CHECKS_EXTRA.append(("liveness: worktree_live_session answers None on an unreadable record under target",
+                         worktree_live_session_unreadable_case))
+LOG_CHECKS_EXTRA.append(("liveness: worktree_live_session matches two spellings of one identity as under target",
+                         worktree_live_session_two_spellings_case))
+LOG_CHECKS_EXTRA.append(("liveness: worktree_live_session answers None when the identity fallback can't tell",
+                         worktree_live_session_path_unresolvable_case))
+LOG_CHECKS_EXTRA.append(("liveness: session_is_live reads an implied backwards clock step as unreadable, not dead",
+                         session_is_live_backwards_clock_step_case))

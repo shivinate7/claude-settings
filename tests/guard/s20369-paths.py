@@ -1,5 +1,6 @@
 # section 20369
 FAMILY = "paths"
+FAMILIES["paths"] = "path rules, builders and the test-author"
 
 for ordinary in (
     "npm test",

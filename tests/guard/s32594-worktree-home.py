@@ -1,5 +1,6 @@
 # section 32594
 FAMILY = "worktree-home"
+FAMILIES["worktree-home"] = "rule 0: an agent's shell call outside its recorded home, and the path forms it reads"
 XCL_ORIGIN = "https://github.com/example-owner/claude-settings.git"  # the own clone's origin
 XCL_PRIMARY = os.path.join(ROOT, "xcl_primary")                     # the own clone, with that origin
 XCL_LANE = os.path.join(XCL_PRIMARY, ".claude", "worktrees", "lane-a")  # its own linked worktree

@@ -1,5 +1,6 @@
 # section 28433
 FAMILY = "rework-off-page"
+FAMILIES["rework-off-page"] = "the page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused"
 #
 # Rule rework-off-page (decision rework-leaves-page), built against a named incident: waiting item 97, Oct 30
 # 15:40 CDT. Item 97 was being reworked while still open and answerable, so the owner could answer options that

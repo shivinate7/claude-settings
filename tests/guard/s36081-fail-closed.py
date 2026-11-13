@@ -1,5 +1,6 @@
 # section 36081
 FAMILY = "fail-closed"  # the family the cases below had before this section
+FAMILIES["session-log"] = "the session id column of guard.log"
 
 
 # --------------------------------------------------------------------------- session-log

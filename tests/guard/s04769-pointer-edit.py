@@ -1,5 +1,6 @@
 # section 4769
 FAMILY = "pointer-edit"
+FAMILIES["pointer-edit"] = "the pointer checkout's own files: a Write, Edit, MultiEdit or NotebookEdit into them is refused, naming EnterWorktree; its .git, a linked worktree, a target outside it, a stood-down pointer and the read tools pass"
 #
 # Rule pointer-edit: a Write, Edit, MultiEdit or NotebookEdit whose TARGET is one of the pointer
 # checkout's own files is refused, and the remedy names the EnterWorktree tool. Every session on this

@@ -1,5 +1,6 @@
 # section 40805
 FAMILY = "role-model"
+FAMILIES["role-model"] = "agent-role-model: a spawn's model against its role's row in the decision table, the missing-model default, and the fail-open read"
 ROLE_RULE = "agent-role-model"
 ROLE_REMEDY = "drop the model field, or name the role's model"
 ROLE_DEFAULT_REMEDY = "name the role's model (sonnet)"
