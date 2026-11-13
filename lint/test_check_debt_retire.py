@@ -15,7 +15,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
 import check_debt_retire as D  # noqa: E402  the module under test
 import layout  # noqa: E402  the one layout: where the debts folder is (lint/layout.py)
-from workflow_steps import CHECKS_SUITE_JOBS, gating_text, job_block, run_body, step_blocks, step_key  # noqa: E402  the one step parser
+from workflow_steps import CHECKS_SUITE_JOBS, gating_text, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one step parser
 
 RUN = os.path.realpath(_test_temp.run_folder())
 atexit.register(shutil.rmtree, RUN, True)
@@ -591,6 +591,19 @@ CHECKS = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 RETIRE_RUN_STEP = re.compile(r"(?:^|\s)lint/check_debt_retire\.py(?:\s|$)", re.M)  # the CLI, not test_check_debt_retire.py
 
 
+def job_permissions(block):
+    """A job's own `permissions:` map as {scope: value}: its 6-space keys under the 4-space header, read to the next 4-space key."""
+    found, inside = {}, False
+    for line in block.split("\n"):
+        if re.match(r"^    permissions:[ \t]*$", line):
+            inside = True
+        elif inside and (m := re.match(r"^      ([\w-]+):[ \t]*(\S+)[ \t]*$", line)):
+            found[m.group(1)] = m.group(2)
+        elif inside and line.strip() and not line.startswith("      "):
+            inside = False
+    return found
+
+
 class CiEntry(Case):
     """The CI entry is the CLI on a pull request. It reads the PR body from GitHub's event payload (GITHUB_EVENT_PATH), so a
     Retire-run cite in the body reaches the check in CI as it does at merge (decision debt-close-runs-retire)."""
@@ -649,13 +662,15 @@ class CiWorkflow(unittest.TestCase):
 class CiStepRunsMainCopy(Case):
     """The Retire step runs the classifier as main has it, with the modules it imports, never the copy the PR head holds: a PR
     cannot rewrite the check that judges its own close (decision debt-close-runs-retire). The step's python3 is a stand-in that
-    keeps a copy of the folder of each .py script it is given, so the case reads which copy ran."""
+    keeps a copy of the folder of each .py script it is given, so the case reads which copy ran. It also appends the GH_REPO it
+    was run with to STAND_IN_ENV, so a case reads which repository the cited-run read names."""
 
     MAIN = "# main's classifier\n"
     MAIN_LAYOUT = "# main's layout module\n"
     PR = "# the PR head's classifier: passes every close\n"
     PR_LAYOUT = "# the PR head's layout module\n"
     STAND_IN = ("#!/bin/sh\n"
+                "printf 'GH_REPO=%s\\n' \"${GH_REPO-<unset>}\" >> \"$STAND_IN_ENV\"\n"
                 "for arg in \"$@\"; do\n"
                 "  case \"$arg\" in\n"
                 "    *.py) mkdir -p \"$STAND_IN_KEPT\" && cp -R \"$(dirname \"$arg\")/.\" \"$STAND_IN_KEPT/\" ;;\n"
@@ -683,15 +698,21 @@ class CiStepRunsMainCopy(Case):
         self.assertTrue(steps, "scope: checks.yml has no step that runs the Retire classifier")
         return steps[0]
 
-    def run_step(self, body):
-        """The step's run body under bash, in the PR head's checkout, with the env the step gives it and the stand-in first on PATH."""
+    def stand_in_env(self):
+        """The file the stand-in appends the GH_REPO it was run with to, one line per run."""
+        return os.path.join(self.folder, "stand-in.env")
+
+    def run_step(self, body, **env):
+        """The step's run body under bash, in the PR head's checkout, with the env the step gives it and the stand-in first on PATH.
+        The runner's own GH_REPO and GITHUB_REPOSITORY never reach a case: `env` names the ones it sets."""
         bindir = os.path.join(self.folder, "stand-in")
         kept = os.path.join(self.folder, "kept")
         put(os.path.join(bindir, "python3"), self.STAND_IN)
         os.chmod(os.path.join(bindir, "python3"), 0o755)
-        env = {**os.environ, "PATH": bindir + os.pathsep + os.environ.get("PATH", ""), "STAND_IN_KEPT": kept,
-               "BASE_REF": "main", "HEAD_SHA": self.head, "GH_TOKEN": "fixture-token"}
-        return subprocess.run(["bash", "-e", "-c", body], cwd=self.dir, capture_output=True, text=True, env=env), kept
+        inherited = {k: v for k, v in os.environ.items() if k not in ("GH_REPO", "GITHUB_REPOSITORY")}
+        run_env = {**inherited, "PATH": bindir + os.pathsep + os.environ.get("PATH", ""), "STAND_IN_KEPT": kept,
+                   "STAND_IN_ENV": self.stand_in_env(), "BASE_REF": "main", "HEAD_SHA": self.head, "GH_TOKEN": "fixture-token", **env}
+        return subprocess.run(["bash", "-e", "-c", body], cwd=self.dir, capture_output=True, text=True, env=run_env), kept
 
     def test_c6_the_ci_step_runs_the_main_copy_of_the_classifier_and_its_modules(self):
         self.fixture()
@@ -702,6 +723,22 @@ class CiStepRunsMainCopy(Case):
             self.assertEqual(f.read(), self.MAIN, "the Retire step ran the PR head's classifier, not main's")
         with open(os.path.join(kept, "layout.py"), encoding="utf-8") as f:
             self.assertEqual(f.read(), self.MAIN_LAYOUT, "the Retire step ran the PR head's layout module, not main's")
+
+    def test_c7_the_ci_step_exports_the_runner_repository_and_its_token_and_the_checks_job_can_read_actions(self):
+        """The cited-run read runs under GH_REPO set from GITHUB_REPOSITORY, so gh does not find the repository from the scratch folder.
+        The step's env carries GH_TOKEN, and the checks job grants `actions: read`, so the token can read the cited run."""
+        self.fixture()
+        step = self.retire_step()
+        got, _ = self.run_step(run_body(step), GITHUB_REPOSITORY="fixture/repo")
+        self.assertTrue(os.path.isfile(self.stand_in_env()), "scope: the Retire step ran no stand-in python3: " + got.stdout + got.stderr)
+        with open(self.stand_in_env(), encoding="utf-8") as f:
+            seen = f.read().splitlines()
+        self.assertEqual(seen, ["GH_REPO=fixture/repo"], "the Retire step did not export GH_REPO from GITHUB_REPOSITORY, so the cited-run read names no repository")
+        self.assertIn("GH_TOKEN", step_env(step), "the Retire step's env carries no GH_TOKEN, so the cited-run read has no token")
+        with open(CHECKS, encoding="utf-8") as f:
+            block = job_block(gating_text(f.read()), "checks") or ""
+        self.assertTrue(any(RETIRE_RUN_STEP.search(run_body(st) or "") for st in step_blocks(block)), "scope: the checks job holds no Retire step")
+        self.assertEqual(job_permissions(block).get("actions"), "read", "the checks job does not grant actions: read, so the cited-run read cannot reach the run")
 
 
 class ChildEnv(Case):
