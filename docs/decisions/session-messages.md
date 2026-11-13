@@ -3,7 +3,7 @@
 Kind: build
 Plan: docs/decisions/session-messages.md#build-in-work-order (all)
 
-Status: the mailbox build is on main (line 7). Two checks are still open. Build step 2 (the measures) is partly done. The cloud, Mac and Windows round trips passed. Whether the hostname matches `list_computer_folders` `computer_name` has no record (unmeasured). A local desktop session's `send_message` to the cloud was "not found" once (platform not named; triage outbox, 11:40 CST Nov 12), so Mac and Windows are unmeasured. The 20-message trial (step 5) has not run: no record of it on main or on branch roadmap, read 2026-11-13. Q1 to Q4, page item 153 (the mailbox ruling) and page item 308 (the store) are answered.
+Status: the mailbox build is on main (line 7). Two checks are still open. Build step 2 (the measures) is partly done. The cloud, Mac and Windows round trips passed. Whether the hostname matches `list_computer_folders` `computer_name` has no record (unmeasured). A local desktop session's `send_message` to the cloud was "not found" (platform not named; triage outbox, 11:40 CST Nov 12). So a local Mac or Windows `send_message` to the cloud is unmeasured. The 20-message trial (step 5) has not run: no record of it on main or on branch roadmap, read 2026-11-13. Roadmap step `session-mailbox-followups` holds it. Q1 to Q4, page item 153 (the mailbox ruling) and page item 308 (the store) are answered.
 The mailbox build is on main: PR #1371 merged 2026-11-08 inside batch-65g (PR #2236). Follow-up PR #2484 merged 2026-11-10 in batch 71.
 A Windows round trip passed (request 8933ab505319 to the cloud, reply
 7292c549f4ee, both taken, 11:52 CST Nov 12; record: branch roadmap, commit b21c5d3dc). Cloud works for the owner's account; ssemwal-cdc is unmeasured.
