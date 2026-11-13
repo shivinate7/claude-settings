@@ -2005,7 +2005,7 @@ def _apply_call(tokens, index: int, at: str):
 def _apply_options(words):
     """(strip, directory prefix, writes nothing, patch files, stdin file, here-strings, reads a heredoc) of the
     arguments of one `git apply`. A redirect is no patch file; the file after `<` is stdin."""
-    strip, prefix, apply_flag, quiet, heredoc = 1, "", False, False, False
+    strip, prefix, apply_flag, quiet, heredoc, ended = 1, "", False, False, False, False
     files, stdin_file, here_strings = [], "", []
     index = 0
     while index < len(words):
@@ -2023,9 +2023,10 @@ def _apply_options(words):
                 here_strings.append(value)
             elif operator.startswith("<<"):
                 heredoc = True
+        elif ended:   # after `--` every word is a file name, but a redirect (matched above) is still a redirect
+            files.append(word)
         elif word == "--":
-            files += words[index:]
-            break
+            ended = True
         elif word.startswith("--"):
             name, glued, value = word.partition("=")
             if long_flag_abbrev(name, "--apply", "--ap"):
@@ -2053,13 +2054,56 @@ def _apply_options(words):
     return strip, prefix, quiet and not apply_flag, files, stdin_file, here_strings, heredoc
 
 
-def _apply_patch_texts(raw, segments, ends, number, at, files, stdin_file, here_strings, heredoc):
+_ESCAPE_PAIR = re.compile(r"\\(.)", re.S)
+
+
+def _printed_text(tokens) -> str:
+    """The text an `echo` or `printf` command in `tokens` prints, else '': its words up to the first redirect, with
+    the `\\n`-style escapes of `echo -e` and `printf` read. A `printf` format with no `%b` or `%s` is the text itself."""
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) not in ("echo", "printf"):
+        return ""
+    words = []
+    for word in tokens[index + 1:]:
+        if _APPLY_REDIRECT.match(word):
+            break
+        words.append(word)
+    while words and re.match(r"^-[a-zA-Z]+$", words[0]):
+        words.pop(0)
+    if basename(tokens[index]) == "printf" and len(words) > 1 and re.search(r"%[bs]", words[0]):
+        words = words[1:]
+    return _ESCAPE_PAIR.sub(lambda m: {"n": "\n", "t": "\t", "\\": "\\"}.get(m.group(1), m.group(0)), "".join(words))
+
+
+def _written_patch_texts(raw, segments, ends, number, path, cwd) -> list:
+    """The text each earlier segment of this command writes to `path`: a heredoc body (`_heredoc_scripts`), or the
+    text an `echo` or `printf` prints into it with a redirect or through a pipe into `tee`. A patch that this command
+    writes and then applies is not on disk when the guard reads the command, so its headers are read from here."""
+    texts = [body for made, body in _heredoc_scripts(raw, segments, ends, cwd).get(path, ()) if made < number]
+    for made in range(number):
+        match = _HEREDOC_TARGET.search(segments[made])
+        if not match or "<<" in segments[made]:
+            continue
+        target = next(group for group in match.groups() if group)
+        if _script_path(target, dir_before_segment(segments, made, cwd, ends) or cwd) != path:
+            continue
+        feed = made - 1 if made > 0 and ends[made - 1] == "|" and not _printed_text(segment_tokens(segments[made])) else made
+        text = _printed_text(segment_tokens(segments[feed]))
+        if text:
+            texts.append(text)
+    return texts
+
+
+def _apply_patch_texts(raw, segments, ends, number, at, files, stdin_file, here_strings, heredoc, cwd=""):
     """The text of each patch one `git apply` reads, as far as the guard can read it."""
     texts = []
     stdin = not files or "-" in files
     for name in files:
         if name != "-":
-            texts.append(_read_script(_script_path(name, at)))
+            path = _script_path(name, at)
+            texts.append(_read_script(path))
+            if path:
+                texts += [(text, False) for text in _written_patch_texts(raw, segments, ends, number, path, cwd or at)]
     if stdin and stdin_file:
         texts.append(_read_script(_script_path(stdin_file, at)))
     if stdin:
@@ -2106,7 +2150,7 @@ def _git_apply_hit(raw: str, cwd: str, predicate) -> str:
         if quiet:
             continue
         # The names count from the repository's top folder; a patch run outside one counts from the folder.
-        for text in _apply_patch_texts(raw, segments, ends, number, at, *sources):
+        for text in _apply_patch_texts(raw, segments, ends, number, at, *sources, cwd=cwd):
             for name in _patch_names(text, strip):
                 name = prefix.rstrip("/") + "/" + name if prefix else name
                 if any(predicate(name, base) for base in dict.fromkeys((_apply_root(at), at))):
