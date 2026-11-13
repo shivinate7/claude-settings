@@ -9,7 +9,8 @@ One case reads the real agents/plan.md: its "Premises first" paragraph cites the
 The lane session row of docs/decisions/agent-model-cap.md must start its effort cell with medium.
 A drift between the guard's role lists and the role table fails the check (the guard's role_list_drift).
 An agent file's `model:` pin must equal its role's row in the role table. The role is the frontmatter `name:`,
-as the guard keys it. A file with no pin, or a name with no row, is not flagged by that rule.
+as the guard keys it. A name with no row is not flagged by that rule. Every agents/*.md file must carry a pin: a file with
+none inherits the session model (the agent-model-cap decision, incident two).
 Every agent file that can run Bash names TaskStop in its body, and its tools: allowlist lists it (debt
 agent-reports-with-live-watcher). The test reads each agents/*.md file, not a list of names.
 An agent body must not state the agent's own model in fixed text: a sentence with `your ... model` and a model name
@@ -67,6 +68,12 @@ def verdict(relpath, model=None, closed=True, text=None, relative=False, name="x
         finally:
             os.chdir(before)
         return code, out.getvalue()
+
+
+def agent_file(role, *lines, body="body\n"):
+    """A fixture agents/<role>.md: closed frontmatter with the name, the remote withheld and the given lines, no pin."""
+    return "---\nname: %s\ndisallowedTools: mcp__claude-code-remote__*\n%s---\n%s" % (
+        role, "".join(line + "\n" for line in lines), body)
 
 
 class Haiku(unittest.TestCase):
@@ -134,11 +141,45 @@ class PinEqualsRow(unittest.TestCase):
                 self.assertRow(role, row)
                 self.assertEqual(self.agent(role, model), (0, ""))
 
-    def test_file_with_no_model_pin_is_not_flagged(self):
-        for role in ("builder", "reviewer"):
-            with self.subTest(role=role):
-                self.assertRow(role, "sonnet" if role == "builder" else "haiku")
-                self.assertEqual(verdict("agents/%s.md" % role, name=role, pinned=False), (0, ""))
+    def pin_missing(self, role, text, what):
+        """The fixture has no pin value (scope), and the check flags its file with a line that names the file and `model`."""
+        keys, _, problem = agent_parts(text)
+        self.assertIsNone(problem, "fixture error: %s" % problem)
+        self.assertEqual(C.scalar(keys.get("model", "")), "", "fixture error: %s has a model: value" % what)
+        code, out = verdict("agents/%s.md" % role, text=text)
+        self.assertEqual(code, 1, "%s passes the check: %r" % (what, out))
+        self.assertTrue(names(out, "%s.md" % role, "model"), "no line names %s.md and its model pin: %r" % (role, out))
+
+    def test_agent_file_with_no_model_pin_is_flagged(self):
+        # Case 1. An agent file with no `model:` key inherits the session model, so every agent file must pin one.
+        for role in ("builder", "plan"):
+            for size, lines in (("short", ()), ("full-size", tuple("note%03d: filler" % n for n in range(200)))):
+                with self.subTest(role=role, size=size):
+                    self.pin_missing(role, agent_file(role, *lines), "an agent file with no model: pin")
+
+    def test_empty_model_pin_is_flagged(self):
+        # An empty pin names no model, so the file inherits the session model as one with no pin does.
+        for line in ("model:", 'model: ""'):
+            with self.subTest(line=line):
+                self.pin_missing("builder", agent_file("builder", line), "an empty pin, %s" % line)
+
+    def test_decoy_model_lines_are_not_a_pin(self):
+        # Source-text cases (building-scanner-respects-strings): a comment line, an indented block-scalar line, a body line
+        # and a description with a lone quote and a comment opener each name sonnet. None of them is the frontmatter pin.
+        decoys = (("comment line", agent_file("builder", "# model: sonnet")),
+                  ("indented block-scalar line", agent_file("builder", "description: |", "  model: sonnet")),
+                  ("body line", agent_file("builder", body="model: sonnet\n")),
+                  ("description with a lone quote", agent_file("builder", "description: Don't pin # model: sonnet")))
+        for label, text in decoys:
+            with self.subTest(label=label):
+                self.pin_missing("builder", text, "a decoy %s" % label)
+
+    def test_sonnet_pin_on_builder_passes(self):
+        # Case 2, the green control beside case 1: the same file with `model: sonnet` on the builder row passes.
+        self.assertRow("builder", "sonnet")
+        for size, lines in (("short", ()), ("full-size", tuple("note%03d: filler" % n for n in range(200)))):
+            with self.subTest(size=size):
+                self.assertEqual(verdict("agents/builder.md", text=agent_file("builder", "model: sonnet", *lines)), (0, ""))
 
     def test_role_with_no_table_row_is_not_flagged(self):
         self.assertNotIn("some-role", C._guard.role_model_table(C.ROOT) or {})
@@ -373,7 +414,7 @@ class TaskStopLine(unittest.TestCase):
                                     "%s can run Bash and has a tools: allowlist with no TaskStop, so it cannot follow the stop line" % name)
 
 
-# The self-model rules read an agent file's body. The fixtures are agents/fixture.md with a name and no model pin, so
+# The self-model rules read an agent file's body. The fixtures are agents/fixture.md with a name and a sonnet pin, so
 # the pin and floor rules stay quiet and only the body rules can fail.
 PHRASE_LINE = "You are powered by the model named in your system prompt."
 SLOT = "Under Done, the first line is `PASS, round 1 of 3, <model>`."
@@ -381,8 +422,8 @@ BARE_SLOT = "Under Done, the first line is PASS, FAIL, or PARTIAL, then the roun
 
 
 def agent_text(body, description=None):
-    """A fixture agent file: a frontmatter block with a name, an optional description, then the body."""
-    keys = ["name: fixture", "disallowedTools: mcp__claude-code-remote__*"] + (
+    """A fixture agent file: a frontmatter block with a name, a sonnet pin, an optional description, then the body."""
+    keys = ["name: fixture", "model: sonnet", "disallowedTools: mcp__claude-code-remote__*"] + (
         ["description: %s" % description] if description else [])
     return "---\n%s\n---\n%s" % ("\n".join(keys), body)
 
@@ -531,12 +572,47 @@ class RealAgentFiles(unittest.TestCase):
                 self.assertEqual(out.getvalue(), "", "agents/%s exits 0 but prints a finding" % name)
 
 
+class BuilderPinReal(unittest.TestCase):
+    # Case 3. The repo's own builder file must pin sonnet. A builder spawn with no model reads the file's pin, and with no
+    # pin it served the session model (the agent-model-cap decision, incident two).
+    def test_real_builder_file_pins_sonnet(self):
+        with open(os.path.join(ROOT, "agents", "builder.md"), encoding="utf-8-sig") as handle:
+            keys, _, problem = agent_parts(handle.read())
+        self.assertIsNone(problem, "agents/builder.md: %s" % problem)
+        self.assertIn("model", keys, "agents/builder.md has no model: pin, so a builder spawn with no model serves the session model")
+        self.assertEqual(C.scalar(keys["model"]), "sonnet", "agents/builder.md pins %r, not sonnet" % keys["model"])
+
+
+class PinControls(unittest.TestCase):
+    # Case 4. Skills carry no pin, so a skill with none still passes, and a skill named like a role is still a skill. Every
+    # other agent file pins already, so the full real-tree run is green once builder pins.
+    def test_skill_file_with_no_model_pin_passes(self):
+        for skill in ("deploy", "builder"):
+            with self.subTest(skill=skill):
+                text = "---\nname: %s\ndescription: A skill.\n---\nbody\n" % skill
+                keys, _, problem = agent_parts(text)
+                self.assertIsNone(problem, "fixture error: %s" % problem)
+                self.assertEqual(C.scalar(keys.get("model", "")), "", "fixture error: the skill fixture has a model: value")
+                self.assertEqual(verdict("skills/%s/SKILL.md" % skill, text=text), (0, ""))
+
+    def test_every_other_real_agent_file_pins_a_model(self):
+        folder = os.path.join(ROOT, "agents")
+        files = sorted(name for name in os.listdir(folder) if name.endswith(".md") and name != "builder.md")
+        self.assertTrue(files, "agents/ holds no agent file other than builder.md")
+        for name in files:
+            with self.subTest(agent=name):
+                with open(os.path.join(folder, name), encoding="utf-8-sig") as handle:
+                    keys, _, problem = agent_parts(handle.read())
+                self.assertIsNone(problem, "%s: %s" % (name, problem))
+                self.assertTrue(C.scalar(keys.get("model", "")), "agents/%s has no model: pin" % name)
+
+
 REMOTE = "mcp__claude-code-remote"
 
 
 def agent_with(*lines, body="body\n"):
-    """A fixture agent file, agents/fixture.md: a frontmatter block with a name and the given lines, then the body."""
-    return "---\n%s\n---\n%s" % ("\n".join(("name: fixture",) + lines), body)
+    """A fixture agent file, agents/fixture.md: a name, a sonnet pin, the given lines, then the body."""
+    return "---\n%s\n---\n%s" % ("\n".join(("name: fixture", "model: sonnet") + lines), body)
 
 
 def server_withheld(keys):
