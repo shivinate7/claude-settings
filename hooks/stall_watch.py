@@ -66,15 +66,17 @@ Stop: stall_watch.py --stop
   running agent, one tail read per quiet agent. Any error, or stop_hook_active true, prints nothing and exits 0. No posix check.
   CI-wait check: the same Stop run reads the transcript once more, one record at a time. The newest
   ready call (`gh pr ready <N>` in Bash or PowerShell, outside quotes, heredoc bodies and `#` comments, not
-  --undo; or MCP update_pull_request with draft false) opens a wait. A later user or queued message with a
+  --undo; or MCP update_pull_request with draft false) opens a wait. A `gh` global flag before `pr`
+  (`gh -R o/r pr ready 5`) is skipped. A later user or queued message with a
   `CI green|cancelled on <sha>` line closes it; a `CI unknown` line leaves it open. A merge or close that
   names the waited PR number closes it (bin/merge N, merge N, gh pr merge N, gh pr close N in Bash or
-  PowerShell, same scanner rules; MCP merge_pull_request with that pullNumber). The number is the call's
-  first all-digit word or the N of a /pull/N URL, so flag values such as -R o/r, -C /repo, --body "x" or
-  --session lane are skipped; with no number, the first non-dash word (a branch) is the PR named. A gh pr
-  merge or close that names no PR at all, only flags, closes any open wait; an MCP merge with no pullNumber
-  closes none. A wait whose ready call named no number (bare gh pr ready) closes on a merge or
-  close of any PR. A
+  PowerShell, same scanner rules; MCP merge_pull_request with that pullNumber). The ready call's PR and a
+  merge's are read alike (pr_ref): the first all-digit word or the N of a /pull/N URL, with each flag and its
+  value (CI_VALUE_FLAGS: -R o/r, -C /repo, --body "x", --body-file f, --subject "Fix", --session lane)
+  skipped; with no number, the first non-dash word (a branch) is the PR named. A gh pr merge or close with no
+  PR word, only flags and their values, closes any open wait; so does one whose PR word is a $var, an unknown
+  number. A gh pr merge with --auto closes nothing, and an MCP merge with no pullNumber closes none. A wait
+  whose ready call named no number (bare gh pr ready, or a $var) closes on a merge or close of any PR. A
   `CI red` line keeps it open and voids the check-ins before it. A later send_later, create_trigger,
   CronCreate or ScheduleWakeup call covers it, unless its tool_result has is_error true. An open wait with no check-in prints
   {"decision": "block", "reason": ...} naming the PR (the systemMessage of any stale job rides in the same
@@ -532,6 +534,8 @@ CI_CHECKIN_TOOLS = ("send_later", "create_trigger", "CronCreate", "ScheduleWakeu
 CI_SEGMENT = re.compile(r"[;&|\n]+")
 PR_NUMBER = re.compile(r"[0-9]+\Z")
 PR_URL = re.compile(r"/pull/([0-9]+)")
+CI_VALUE_FLAGS = frozenset(("-R", "--repo", "--hostname", "-C", "--session", "-b", "--body", "-F", "--body-file",
+                            "-t", "--subject", "-A", "--author-email", "--match-head-commit"))
 CI_REMEDY = ("Set a one-time send_later check-in for this wait (rule git-ci-wait-checks-in), then stop. "
              "Set the next one after each red CI verdict, wider apart.")
 
@@ -570,16 +574,45 @@ def shell_calls(command):
 
 
 def pr_ref(words):
-    """The PR a merge or close call names: its first all-digit word, or the number in a /pull/<N> URL, so a
-    flag value before it (-R o/r, -C /repo, --body "x", --session lane) is skipped. With no number, its first
-    non-dash word (a branch name), which matches no numbered wait. '' when every word is a flag."""
+    """The PR a ready, merge or close call names: its first all-digit word, or the number in a /pull/<N> URL.
+    A flag and the value it takes (CI_VALUE_FLAGS: -R o/r, -C /repo, --body "x", --session lane) are skipped.
+    With no number, its first non-dash word (a branch name), which matches no numbered wait. '' when the
+    call names no PR: only flags, or a PR word that is a shell variable or empty quotes, whose number is
+    unknown. A call with no PR word is bare."""
+    words = list(flag_free(words))
     for w in words:
         if PR_NUMBER.match(w):
             return w
         m = PR_URL.search(w)
         if m:
             return m.group(1)
-    return next((w for w in words if not w.startswith("-")), "")
+    return next((w for w in words if not w.startswith(("$", "'", '"'))), "")
+
+
+def flag_free(words):
+    """The words with each flag and the value it takes dropped. A flag in --name=value form is one word."""
+    skip = False
+    for w in words:
+        if skip:
+            skip = False
+        elif w.startswith("-"):
+            skip = w in CI_VALUE_FLAGS
+        else:
+            yield w
+
+
+def gh_pr_call(words):
+    """('ready'|'merge'|'close', the words after it) for a `gh pr <sub>` call, global flags such as
+    `-R o/r` before `pr` skipped; None for any other call."""
+    if not words or words[0] != "gh":
+        return None
+    rest = list(words[1:])
+    i = 0
+    while i < len(rest) and rest[i].startswith("-"):
+        i += 2 if rest[i] in CI_VALUE_FLAGS else 1
+    if rest[i:i + 1] == ["pr"] and rest[i + 1:i + 2] and rest[i + 1] in ("ready", "merge", "close"):
+        return rest[i + 1], rest[i + 2:]
+    return None
 
 
 def ci_events(rec):
@@ -619,12 +652,14 @@ def ci_events(rec):
             events.append(("ready", str(inp.get("pullNumber") or "")))
         elif isinstance(inp.get("command"), str) and name in ("Bash", "PowerShell"):
             for words in shell_calls(inp["command"]):
-                if words[:3] == ["gh", "pr", "ready"] and "--undo" not in words:
-                    refs = [w for w in words[3:] if not w.startswith("-")]
-                    events.append(("ready", refs[0] if refs else ""))
-                elif words[:3] in (["gh", "pr", "merge"], ["gh", "pr", "close"]):
-                    pr = pr_ref(words[3:])
-                    events.append(("merge", pr) if pr else ("mergeany",))
+                gh = gh_pr_call(words)
+                if gh and gh[0] == "ready":
+                    if "--undo" not in gh[1]:
+                        events.append(("ready", pr_ref(gh[1])))
+                elif gh:
+                    if "--auto" not in gh[1]:  # --auto only queues the merge: nothing has merged yet
+                        pr = pr_ref(gh[1])
+                        events.append(("merge", pr) if pr else ("mergeany",))
                 elif words[0] == "merge" or words[0].replace("\\", "/").endswith("bin/merge"):
                     pr = pr_ref(words[1:])
                     if pr:
