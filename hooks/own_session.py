@@ -15,12 +15,14 @@ import re
 _OTHER_SESSION = re.compile(
     r'<other-session nonce="([0-9A-Fa-f]+)" untrusted="true">(.*)</other-session nonce="\1">', re.DOTALL)
 _CREATED_ID = re.compile(r"session_[A-Za-z0-9_-]+")
+_CREATED_LINE = re.compile(r"Created session (" + _CREATED_ID.pattern + ")")
 
 
-def _created_session_id(body):
-    """The id a create_session result names: the `id` or `session_id` of a JSON object, else the first
-    `session_...` word of the body. None when the result names none."""
-    if not isinstance(body, str):
+def _created_session_id(body, is_error=False):
+    """The id a successful create_session result names: the `id` or `session_id` string of a JSON object, or a
+    `Created session <id>` line. None for an errored result, and for any other text, so a session word in an error
+    names no session."""
+    if is_error or not isinstance(body, str):
         return None
     try:
         parsed = json.loads(body)
@@ -30,8 +32,9 @@ def _created_session_id(body):
         for key in ("id", "session_id"):
             if isinstance(parsed.get(key), str):
                 return parsed[key]
-    found = _CREATED_ID.search(body)
-    return found.group(0) if found else None
+        return None
+    found = _CREATED_LINE.match(body.strip())
+    return found.group(1) if found else None
 
 
 def _record_json(body):
@@ -139,7 +142,7 @@ def _scan(transcript, own_id, created, made=None):
                     if isinstance(body, list):
                         body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
                     if block.get("tool_use_id") in creates:
-                        made_id = _created_session_id(body)
+                        made_id = _created_session_id(body, block.get("is_error") is True)
                         if made is not None and made_id:
                             made[made_id] = creates[block.get("tool_use_id")][0]
                         if made_id == own_id:
