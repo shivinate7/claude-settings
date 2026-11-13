@@ -1121,13 +1121,17 @@ function tileFor(img) {
 let iconSeq = 0;
 function applyIcon(src) {
   const seq = ++iconSeq, m = $("mark");
-  if (!iconOk(src)) return;
+  // data-icon-runs counts finished icon passes, shown or dropped, so a caller can wait on a decode with no clock.
+  const done = () => { m.dataset.iconRuns = (+m.dataset.iconRuns || 0) + 1; };
+  if (!iconOk(src)) return done();
   const img = new Image(); img.alt = ""; img.src = src;
   img.decode().then(() => {
-    if (seq !== iconSeq || !img.naturalWidth) return;
-    const t = tileFor(img); if (t) m.style.setProperty("--tile", t);
-    m.textContent = ""; m.append(img); m.classList.add("icon"); m.hidden = false;
-  }, () => {});
+    if (seq === iconSeq && img.naturalWidth) {
+      const t = tileFor(img); if (t) m.style.setProperty("--tile", t);
+      m.textContent = ""; m.append(img); m.classList.add("icon"); m.hidden = false;
+    }
+    done();
+  }, done);
 }
 // With no valid brand the neutral defaults in the style block stay, so no colour is drawn here.
 function applyIdentity() {
