@@ -2271,3 +2271,4 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- rule-mechanisms-softening-clause: lint/rule_mechanisms.json marks the whole style-question-form anchor as a guard; its softening-option clause (pick 743 a) is a writing rule only, so the reason text does not say so.
