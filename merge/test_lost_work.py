@@ -474,6 +474,33 @@ class LostWorkRows(LostWorkFixture):
         self.publish()
         self.assertEqual(len(branch_rows(self.block(self.host()), BRANCH)), 1, "no state-f row for %s beside an archive/ branch and an open pull request" % BRANCH)
 
+    def test_f_branch_at_any_pull_request_head_lists_no_row(self):
+        # The control is the incident branch, which has no pull request and lists. Pull request #9 is closed unmerged, and #10 is merged by a
+        # squash, so its branch tip is not on main. Each head ref holds its branch's tip, and neither branch lists. The heads are read through
+        # refs/pull/*/head with local git, so the gh calls of the review read do not change with them.
+        self.pr(7, record=None, session=None)
+        self.publish()
+        without_heads = self.host(count_gh=True)
+        self.block(without_heads)
+        closed = self.commit_on(self.main, {"docs/closed.md": "c\n"})
+        roadmap.git(self.repo, "push", "-q", str(self.bare), "%s:refs/pull/9/head" % closed)
+        self.push_branch("claude/closed-pr", closed)
+        squashed = self.commit_on(self.main, {"docs/squashed.md": "s\n"})
+        roadmap.git(self.repo, "push", "-q", str(self.bare), "%s:refs/pull/10/head" % squashed)
+        self.push_branch("claude/squashed-pr", squashed)
+        self.main = self.commit_on(self.main, {"docs/squashed.md": "s\n"}, "Squash pull request 10")
+        roadmap.git(self.repo, "push", "-q", str(self.bare), "%s:refs/heads/main" % self.main)
+        self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
+        self.publish()
+        with_heads = self.host(count_gh=True)
+        lines = self.block(with_heads)
+        self.assertEqual(len(branch_rows(lines, BRANCH)), 1, "control: no state-f row for %s, ahead of main with no pull request: %r" % (BRANCH, lines))
+        for name in ("claude/closed-pr", "claude/squashed-pr"):
+            with self.subTest(branch=name):
+                self.assertEqual(branch_rows(lines, name), [], "a state-f row for %s, whose tip is the head of a pull request: %r" % (name, lines))
+        self.assertEqual(with_heads.gh_calls, without_heads.gh_calls,
+                         "the pull request heads add gh calls to the review read: %r over %r" % (with_heads.gh_calls, without_heads.gh_calls))
+
     def test_f_main_and_integration_branches_are_never_listed(self):
         self.branches.append({"name": "main"})
         self.push_branch("batch-132", self.commit_on(self.main, {"docs/batch-note.md": "batch\n"}))
