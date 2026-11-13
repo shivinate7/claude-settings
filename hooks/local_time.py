@@ -23,6 +23,7 @@ UserPromptSubmit prompt is appended verbatim to <config dir>/handoffs/<session_i
 Central time, in a backtick fence longer than any backtick run in the text. No word opens or closes
 capture. A notice or an agent hand-back (a prompt that starts with a shared_names.MACHINE_TAGS
 entry) is never saved.
+A bash-input echo (a prompt that starts with shared_names.BASH_INPUT_TAG) is never saved either.
 After a save, capture writes `<session_id>.inbox.repo` once, when the payload cwd is inside a git
 repo (a `.git` found by walking up; no process starts): the real path of the cwd. The Stop guard reads
 it to find other sessions' inboxes of the same repo (decision owner-feedback-inbox, "Repeats"). Cost:
@@ -227,11 +228,13 @@ def capture(raw, stamp):
     if paths is None or not isinstance(prompt, str):
         return
     try:
-        from shared_names import MACHINE_TAGS  # stdlib only: this hook loads no guard module
+        from shared_names import BASH_INPUT_TAG, MACHINE_TAGS  # stdlib only: this hook loads no guard module
     except ImportError:  # missing or stale helper: only the notice check degrades; capture and the grant run on
-        MACHINE_TAGS = ()
+        BASH_INPUT_TAG, MACHINE_TAGS = None, ()
     if MACHINE_TAGS and prompt.strip().startswith(MACHINE_TAGS):
         return  # a notice is not an owner message
+    if BASH_INPUT_TAG and prompt.strip().startswith(BASH_INPUT_TAG):
+        return  # the echo of a command the owner ran with `!`, not feedback
     err = save_message(paths[0], stamp, prompt)
     if err is not None:
         print(not_saved("message", err))

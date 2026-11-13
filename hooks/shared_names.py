@@ -37,6 +37,9 @@ MACHINE_TAGS = ("<system-reminder>", TASK_NOTIFICATION_TAG) + _HAND_BACK_TAGS + 
     for frame in ("Another Claude session sent a message:",
                   "Another Claude session sent a message while you were working:")
     for tag in _HAND_BACK_TAGS) + _PEER_FRAME_TAGS
+# The echo of a shell command the owner ran with `!`: a prompt that starts with this tag is never an owner message
+# (decision owner-feedback-inbox, Notices). Its own constant, apart from MACHINE_TAGS, which test_shared_names pins.
+BASH_INPUT_TAG = "<bash-input>"
 # More notice frames that the plain Opus ask cuts (hooks/override.py). Kept apart from MACHINE_TAGS: the inbox skip
 # of MACHINE_TAGS is ruled one tag at a time (debt inbox-saves-other-notices), and test_shared_names pins its copy.
 NOTICE_FRAMES = tuple(tag + end for tag in ("<webhook-payload", "<wake", "<teammate-message")
