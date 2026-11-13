@@ -1,0 +1,14 @@
+{
+ "id": "red-gate-reads-suite-run",
+ "title": "The no-merge-onto-red-main gate reads the newest run that ran its suites, not the newest run",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL2oxYMVKoXseeKacVG",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A run of one success and 28 skipped reads green, so the gate lets merges go onto a red parent.",
+ "source": "Coordinator 16:05 CST Nov 13: run 43515441901 on ab27336489 is 1 success and 28 skipped, so the gate read green above a red parent. The coordinator's mistake below.",
+ "note": "Filed 16:06 CST Nov 13. The gate reads the newest run; it must read the newest run that ran its suites. Relation: steps push-skip-proven-tree (a skipped push run is now ruled for a passing PR run, so a hollow green main run will become common: the gate must read the run that proved the tree, not the skipped one), cancelled-run-blame-unknown, blame-on-finished-red-job. A check change: test-author red case first (a 1 success and 28 skipped run over a red parent reads red or unknown), builder, reviewer. Lane session_013NEJL2oxYMVKoXseeKacVG (the coordinator's order); not started by triage. MISTAKE (coordinator, own report): it lifted the hold on that hollow green at 16:01 and sent a 29-PR go; it paused the runner at 16:05. The guard that would have stopped it is this step. Past rulings not checked.",
+ "updatedAt": "2026-11-13T16:06:23-06:00"
+}

@@ -1,0 +1,14 @@
+{
+ "id": "hook-catalog-regen-main",
+ "title": "Regenerate the stale hook catalog on main after the forced merges, in one small PR ahead of the CI stack",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL2oxYMVKoXseeKacVG",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Main's hook catalog check goes red after the forced merges, so every lane meets a red check it did not cause.",
+ "source": "Coordinator 16:05 CST Nov 13; the consultant read run 43509070895, lint/test_hook_catalog.py, 3 fails; the coordinator did not confirm it (the run read queued).",
+ "note": "Filed 16:06 CST Nov 13. Lane merge-flow-after-anthropic (session_013NEJL2oxYMVKoXseeKacVG): it checks first, then opens one small regeneration PR ahead of the CI stack. The 3 failures are the consultant's read, unconfirmed. Overlaps: hook_catalog check in lint (docs/records.md regen, item (a) of the merge-flow fix-after). A generated-file change: lane lint and a record as the repo requires. Past rulings not checked.",
+ "updatedAt": "2026-11-13T16:06:23-06:00"
+}
