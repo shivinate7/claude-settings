@@ -16066,16 +16066,17 @@ class ReleaseCheck(ReviewEnv):
 # of merge.GUARD_PATHS and under each file entry of merge.GUARD_FILES. The cases read the entries from merge and check them against these keys,
 # so an entry with no example fails.
 GUARD_EXAMPLES = {"hooks/": "hooks/guard.py", "lint/": "lint/check_x.py", "bin/": "bin/merge", "actions/": "actions/stamp/stamp.mjs",
-                  ".github/": ".github/workflows/checks.yml", "merge/": "merge/merge.py", "githooks/": "githooks/pre-commit", "settings.json": "settings.json"}
+                  ".github/": ".github/workflows/checks.yml", "merge/": "merge/merge.py", "githooks/": "githooks/pre-commit", "agents/": "agents/builder.md",
+                  "settings.json": "settings.json"}
 # The PR template stays a guard path with no exception: CI's excuse checks read the PR bodies it seeds. Its folder form is a hit too.
 PR_TEMPLATE, PR_TEMPLATE_FORM = ".github/pull_request_template.md", ".github/PULL_REQUEST_TEMPLATE/x.md"
 
 class ReviewGuardPaths(unittest.TestCase):
-    """merge.GUARD_PATHS: the rule dirs of lint/stale_cites.py, then merge/ and githooks/, folder prefixes only. merge.GUARD_FILES: settings.json,
+    """merge.GUARD_PATHS: the rule dirs of lint/stale_cites.py, then merge/, githooks/ and agents/, folder prefixes only. merge.GUARD_FILES: settings.json,
     matched exactly. The rule dirs are read from stale_cites, so the guard follows the module and never a copy of its tuple."""
 
-    def test_the_entries_are_the_rule_dirs_then_merge_and_githooks(self):
-        self.assertEqual(review_fn(self, "GUARD_PATHS"), (*stale_cites.RULE_DIRS, "merge/", "githooks/"))
+    def test_the_entries_are_the_rule_dirs_then_merge_githooks_and_agents(self):
+        self.assertEqual(review_fn(self, "GUARD_PATHS"), (*stale_cites.RULE_DIRS, "merge/", "githooks/", "agents/"))
 
     def test_the_file_entry_is_settings_json(self):
         self.assertEqual(getattr(merge, "GUARD_FILES", None), ("settings.json",), "merge.GUARD_FILES must be ('settings.json',), matched exactly")
@@ -16090,7 +16091,7 @@ class ReviewGuardPaths(unittest.TestCase):
                 "print(repr(getattr(merge, 'GUARD_PATHS', None)))\n")
         r = subprocess.run([sys.executable, "-c", code], cwd=os.path.dirname(HERE), capture_output=True, text=True, timeout=300)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout.strip(), repr(("zzz/", "merge/", "githooks/")), "merge.GUARD_PATHS does not read stale_cites.RULE_DIRS")
+        self.assertEqual(r.stdout.strip(), repr(("zzz/", "merge/", "githooks/", "agents/")), "merge.GUARD_PATHS does not read stale_cites.RULE_DIRS")
 
 class ReviewGuardHits(unittest.TestCase):
     """merge.guard_hits(paths): the paths that start with a GUARD_PATHS entry, or equal a GUARD_FILES entry, sorted. A folder entry holds the
@@ -16353,7 +16354,12 @@ class ReviewDocsOnlyDiff(ReviewGuardEnv):
         self.assert_docs_refused(*self.run_docs("skills/waiting-page/SKILL.md"), "skills/waiting-page/SKILL.md")
 
     def test_an_agent_file_refuses_the_docs_only_record(self):
-        self.assert_docs_refused(*self.run_docs("agents/builder.md"), "agents/builder.md")
+        # agents/ is a guard folder, so the guard refuses the path before the kind is checked.
+        rc, out, err = self.run_docs("agents/builder.md")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(out, "", "the refused docs-only record printed on stdout")
+        self.assertIn("Guard or check", err, "the refusal does not hold on Guard or check\n" + err)
+        self.assertIn("agents/builder.md", err)
 
     def test_a_readme_in_a_folder_refuses_the_docs_only_record(self):
         # Only the root README.md is a doc. A README in a folder is not under docs/ either.
