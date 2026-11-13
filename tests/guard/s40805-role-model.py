@@ -634,6 +634,22 @@ def role_pin_unreadable_first_check():
     return role_pin_check(pointer, None, "an unreadable a.md sorts before a pinned b.md")
 
 
+# ---- G2: role_has_model_pin reads a pin's value through frontmatter_scalar (decision agent-model-cap). A value that is
+# only a comment, an unquoted `~` or `null`, or empty holds no model, so its line is no pin. A bare name, or a quoted
+# name with a trailing comment, is a pin. Each case is one frontmatter line in one agents/ file.
+def role_pin_line_check(name, line, want):
+    """role_has_model_pin gives `want` for an agents/ file whose frontmatter holds the one line `line`."""
+    pointer = role_table(name, files={"reviewer.md": "---\nname: reviewer\n%s\n---\n# reviewer\n" % line})
+    return role_pin_check(pointer, want, "a reviewer file with the frontmatter line %r" % line)
+
+
+def role_pin_line_case(name, line, want):
+    """The check for one frontmatter line: role_has_model_pin gives `want` for it."""
+    def check():
+        return role_pin_line_check(name, line, want)
+    return check
+
+
 # ---- H: role_model_rank(model) reads the family a model value holds (decision agent-model-cap, the pin reader's family
 # step). A family word is read from the value, never from a trailing comment, so `haiku  # sonnet` holds haiku. The
 # control reads bare names only, so a red comment case is the trailing comment alone.
@@ -767,6 +783,20 @@ for _label, _check in (
     ("role-model: an unreadable decision file logs one unread line and allows the spawn", role_unread_bad_check),
     ("role-model: a pinned agent file sorts before an unreadable one, so the pin reads True", role_pin_first_check),
     ("role-model: an unreadable agent file sorts before a pinned one, so the read gives None", role_pin_unreadable_first_check),
+    ("role-model: a pin of only a comment (`model: # sonnet`) is no pin, so role_has_model_pin is False",
+     role_pin_line_case("pinline-comment-only", "model: # sonnet", False)),
+    ("role-model: a pin of `model: ~` is no pin, so role_has_model_pin is False",
+     role_pin_line_case("pinline-tilde", "model: ~", False)),
+    ("role-model: a pin of `model: null` is no pin, so role_has_model_pin is False",
+     role_pin_line_case("pinline-null", "model: null", False)),
+    ("role-model: a pin of empty quotes (`model: \"\"`) is no pin, so role_has_model_pin is False",
+     role_pin_line_case("pinline-empty-quotes", 'model: ""', False)),
+    ("role-model: a pin with no value (`model:`) is no pin, so role_has_model_pin is False",
+     role_pin_line_case("pinline-empty", "model:", False)),
+    ("role-model: a bare pin (`model: sonnet`) is a pin, so role_has_model_pin is True",
+     role_pin_line_case("pinline-bare", "model: sonnet", True)),
+    ("role-model: a quoted pin with a trailing comment (`model: \"sonnet\" # note`) is a pin, so role_has_model_pin is True",
+     role_pin_line_case("pinline-quoted-note", 'model: "sonnet" # note', True)),
     ("role-model: role_model_rank reads a bare model name's family, sonnet 1 and haiku 0", role_model_rank_bare_check),
     ("role-model: role_model_rank does not read sonnet from a trailing comment, so haiku # sonnet is 0",
      role_model_rank_comment_check),
