@@ -22,6 +22,9 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
+sys.path.append(os.path.join(os.path.dirname(HERE), "skills", "roadmap"))  # append: no roadmap module shadows one this suite imports
+import test_build as roadmap  # noqa: E402  the roadmap fixture: STEP, session_row, BUCKET_* (one home: skills/roadmap/test_build.py)
+from datetime import datetime as _datetime, timedelta as _timedelta, timezone as _timezone  # noqa: E402  the live file's readAt against the merge commit's time (ConfirmIdleLanes)
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
 from workflow_steps import job_block  # noqa: E402  the one workflow reader (lint/workflow_steps.py)
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
@@ -944,6 +947,309 @@ class ConfirmHead(Env):
         self.assertFalse(getattr(self.host, "merged", False), out + err)
         self.assertEqual(self.claims(), 0, "a claim was pushed for a bad head")
         self.assertFalse(self.lock_ref(), "the lock was left behind")
+
+class LandedHost(FakeHost):
+    """The fake host with the step after a batch merge: triage commits the live file once the merge lands. `after` is called
+    with the merge commit's sha, and only when the merge lands. A refused merge calls nothing."""
+    after = None
+
+    def merge(self, n, method, sha):
+        commit, msg = super().merge(n, method, sha)
+        if commit and self.after:
+            self.after(commit)
+        return commit, msg
+
+# The roadmap a case pushes: one done step, and the repo's GitHub name, which the lane rows' cs-repo tag must match.
+ROADMAP_BASE = {"roadmap/extras.json": json.dumps({"github": "owner/fixture"}),
+                "roadmap/data/steps/c1.json": json.dumps(dict(roadmap.STEP, order=1, status="done"))}
+IDLE_LANE = roadmap.session_row("session_a", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1", "cs-repo:owner/fixture",
+                                status_bucket=roadmap.BUCKET_COMPLETED)
+NO_STEP_LANE = roadmap.session_row("session_nostep", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-repo:owner/fixture",
+                                   status_bucket=roadmap.BUCKET_COMPLETED)
+WORKING_LANE = roadmap.session_row("session_b", "SESSION_STATUS_RUNNING", "cs-build:lane", "cs-step:c1", "cs-repo:owner/fixture",
+                                   status_bucket=roadmap.BUCKET_WORKING)
+OWED_WORD = re.compile(r"owed|idle[- ]lanes")  # the owed line names the pass; no other line of a merge does
+ARCHIVE_SUMMARY = re.compile(r"^merge: \d+ lanes to archive\b")
+
+def live_json(read_at, *sessions):
+    """The live file as triage writes it: readAt, the sessions, and the empty lists the reader needs beside them."""
+    return json.dumps({"readAt": read_at, "threads": [], "pulls": [], "items": [], "sessions": list(sessions)})
+
+class ConfirmIdleLanes(Env):
+    """After a landed batch merge, `merge --confirm` reads the live file on origin's roadmap branch (roadmap/live/live.json,
+    fetched). If its readAt is later than the merge commit's time, the report of `merge --idle-lanes` prints after the merged
+    line. Otherwise one line says the pass is owed and the file is stale or unread. An origin that cannot be read when the pass
+    runs owes the line too, saying unread. A refused merge prints neither. With no roadmap branch on origin, or a merge onto a
+    base that is not the default, no pass line prints at all. The exit code of a landed merge is 0, as before. Each case runs `merge 7 --confirm` once: the live file is committed after the merge,
+    as triage commits it at each batch merge."""
+
+    def setUp(self):
+        super().setUp()
+        self.host = LandedHost(self.co, self.other)
+        self.host.after = self.publish_live
+        self.live_at = None  # a case's function: the merge commit's time -> the live file's text, or None for no file
+        self.live_text = None  # the text publish_live last pushed
+
+    def push_roadmap(self, files):
+        """Commit `files` ({path: text}) on origin's roadmap branch, on top of its tip when it has one, and push. The commit is
+        made in a scratch repo of its own, so no checkout of this case moves."""
+        scratch = os.path.join(self.t, "roadmap-push")
+        if not os.path.isdir(scratch):
+            sh(self.t, "git", "init", "-q", scratch)
+            sh(scratch, "git", "remote", "add", "origin", self.bare)
+        if sh(scratch, "git", "ls-remote", "origin", "refs/heads/roadmap"):
+            sh(scratch, "git", "fetch", "-q", "origin", "roadmap")
+            sh(scratch, "git", "checkout", "-q", "-B", "roadmap", "FETCH_HEAD")
+        else:
+            sh(scratch, "git", "checkout", "-q", "--orphan", "roadmap")
+        for path, text in files.items():
+            put(os.path.join(scratch, path), text)
+        sh(scratch, "git", "add", "-A")
+        sh(scratch, "git", "commit", "-q", "-m", "roadmap")
+        sh(scratch, "git", "push", "-q", "origin", "roadmap")
+
+    def publish_live(self, commit):
+        """Triage's step after a batch merge: the live file, as live_at gives it for the merge commit's time, goes on origin's roadmap."""
+        at = _datetime.fromisoformat(sh(self.other, "git", "show", "-s", "--format=%cI", commit))
+        self.live_text = self.live_at(at) if self.live_at else None
+        if self.live_text is not None:
+            self.push_roadmap({"roadmap/live/live.json": self.live_text})
+
+    def confirm(self, live_at=None, base=True, merged_at=None):
+        """`merge 7 --confirm`, with the roadmap base pushed first unless base is False. merged_at, an aware datetime, is the
+        committer time the merge commit is written with (its offset too). -> (rc, stdout lines, stderr lines)."""
+        if base:
+            self.push_roadmap(ROADMAP_BASE)
+        self.live_at = live_at
+        if merged_at is not None:
+            self.merge_at(merged_at)
+        rc, out, err = self.run_args("7", "--confirm")
+        return rc, out.splitlines(), err.splitlines()
+
+    def merge_at(self, when):
+        """Make the merge commit's committer time `when`, offset included, for the merge call only. The host writes the merge
+        commit inside its merge(), so GIT_COMMITTER_DATE is set there and popped after it."""
+        real, stamp = self.host.merge, when.replace(microsecond=0).isoformat()
+
+        def merge(n, method, sha):
+            os.environ["GIT_COMMITTER_DATE"] = stamp
+            try:
+                return real(n, method, sha)
+            finally:
+                os.environ.pop("GIT_COMMITTER_DATE", None)
+        self.host.merge = merge
+
+    def temp_folder(self):
+        """The folder this case points the temp files at: a child of the case's own folder, so the run folder's teardown removes it."""
+        folder = os.path.join(self.t, "tmp")
+        os.makedirs(folder, exist_ok=True)
+        return folder
+
+    def confirm_in_folder(self, folder, live_at):
+        """`confirm` with the temp folder at `folder`. TMPDIR is read once per process, so the case sets tempfile.tempdir to the
+        value TMPDIR would give. -> (rc, out, err, made): made lists each merge-live temp file as tempfile.mkstemp returned it."""
+        made, real = [], tempfile.mkstemp
+
+        def spy(*a, **k):
+            fd, path = real(*a, **k)
+            made.append(path)
+            return fd, path
+        with unittest.mock.patch.object(tempfile, "tempdir", folder), unittest.mock.patch.object(tempfile, "mkstemp", spy):
+            rc, out, err = self.confirm(live_at=live_at)
+        return rc, out, err, [p for p in made if os.path.basename(p).startswith("merge-live-")]
+
+    def report_for(self, live_text):
+        """The lines `merge --idle-lanes --live` prints for `live_text` in this checkout: the report a confirm must print."""
+        path = os.path.join(self.t, "idle-lanes-live.json")
+        put(path, live_text)
+        sh(self.co, "git", "fetch", "-q", "origin", "roadmap:refs/remotes/origin/roadmap")
+        rc, out, err = self.run_args("--idle-lanes", "--live", path)
+        self.assertEqual(rc, 0, "the reference run of --idle-lanes failed: %s" % err)
+        return out.splitlines()
+
+    def assert_report_after_merge(self, rc, out, err):
+        """A landed merge that exits 0, then the report `merge --idle-lanes` prints for the same live file, in order after the merged line."""
+        merged = [i for i, line in enumerate(out) if line.startswith("merge: #7 merged as ")]
+        self.assertEqual(len(merged), 1, "the merge did not land: out %r, err %r" % (out, err))
+        self.assertEqual(rc, 0, "a landed merge exits %r: %s" % (rc, err))
+        report = self.report_for(self.live_text)
+        self.assertTrue(report and ARCHIVE_SUMMARY.match(report[-1]), "the reference report has no summary line: %r" % report)
+        self.assertIn(report[0], out, "no idle-lanes report is printed after the merge: %r" % out)
+        start = out.index(report[0])
+        self.assertGreater(start, merged[0], "the idle-lanes report is printed before the merged line: %r" % out)
+        self.assertEqual(out[start:start + len(report)], report, "the report after the merge is not the merge --idle-lanes report")
+
+    def assert_landed(self, rc, out, err):
+        """The merge of #7 landed and exits 0."""
+        merged = [line for line in out if line.startswith("merge: #7 merged as ")]
+        self.assertEqual(len(merged), 1, "the merge did not land: out %r, err %r" % (out, err))
+        self.assertEqual(rc, 0, "a landed merge exits %r: %s" % (rc, err))
+
+    def assert_no_pass_line(self, out, err):
+        """A landed merge that owes no pass prints no idle-lanes line on either stream: no owed line, no report line."""
+        noise = [line for line in out + err if OWED_WORD.search(line) or ARCHIVE_SUMMARY.match(line) or line.startswith(("hold (", "session_"))]
+        self.assertEqual(noise, [], "a merge that owes no pass printed an idle-lanes line: %r" % (out + err))
+
+    def assert_owed_after_merge(self, rc, out, err):
+        """A landed merge that exits 0, then exactly one line, on either stream, that says the pass is owed and the file is stale
+        or unread. No report line prints with it."""
+        self.assert_landed(rc, out, err)
+        owed = [line for line in out + err if OWED_WORD.search(line)]
+        self.assertEqual(len(owed), 1, "the idle-lanes owed line is not printed once after the merge: %r" % (out + err))
+        self.assertIn("owed", owed[0])
+        self.assertRegex(owed[0], r"stale|unread")
+        self.assertFalse([line for line in out if ARCHIVE_SUMMARY.match(line) or line.startswith(("hold (", "session_"))],
+                         "a report line prints with the owed line: %r" % out)
+
+    def test_fresh_live_file_prints_the_idle_lanes_report_after_the_merge(self):
+        # readAt one second after the merge commit: one idle lane and one held lane, so the report has both kinds of line.
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE, NO_STEP_LANE))
+        self.assert_report_after_merge(rc, out, err)
+
+    def test_fresh_live_file_with_no_idle_lane_prints_the_zero_summary(self):
+        # The empty state: a live lane that is still working is not idle, so the report is the zero summary alone.
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), WORKING_LANE))
+        self.assert_report_after_merge(rc, out, err)
+
+    def test_fresh_live_file_with_an_unknown_report_still_exits_0(self):
+        # The file is fresh, but its one session row carries an unarchived_epoch of -5, so the report reads unknown: one unknown
+        # line, no summary, and the report's own exit is 1. The merge landed, so the confirm exits 0 as before.
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(),
+                                                                 dict(IDLE_LANE, unarchived_epoch=-5)))
+        self.assertEqual(len([line for line in out if line.startswith("merge: #7 merged as ")]), 1,
+                         "the merge did not land: out %r, err %r" % (out, err))
+        # Scope first: the unknown line comes from the fresh read, so no owed line prints.
+        self.assertEqual([line for line in out + err if OWED_WORD.search(line)], [],
+                         "scope: the owed path ran, not the fresh read: %r" % (out + err))
+        unknown = [line for line in out + err if line.startswith("unknown (")]
+        self.assertEqual(len(unknown), 1, "the fresh read did not print one unknown line: %r" % (out + err))
+        self.assertFalse([line for line in out if ARCHIVE_SUMMARY.match(line)], "a summary printed for an unknown report: %r" % out)
+        self.assertEqual(rc, 0, "the report's exit 1 became the merge's exit code: rc %r, err %r" % (rc, err))
+
+    def test_stale_live_file_prints_the_owed_line(self):
+        # readAt one minute before the merge commit: the file was read before the batch landed.
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_stale_owed_line_cites_its_decision(self):
+        # The owed line tells the batch runner why the pass is owed, so it cites the decision that owes it.
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)  # scope: the stale read took the owed path
+        owed = [line for line in out + err if OWED_WORD.search(line)][0]
+        self.assertIn("(decision session-tiers", owed, "the stale owed line cites no decision: %r" % owed)
+
+    def test_read_at_equal_to_the_merge_time_prints_the_owed_line(self):
+        # The boundary: "later than" is strict, so a readAt at the merge commit's own second is owed.
+        rc, out, err = self.confirm(live_at=lambda at: live_json(at.isoformat(), IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_missing_live_file_prints_the_owed_line(self):
+        rc, out, err = self.confirm(live_at=None)
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_unreadable_live_file_prints_the_owed_line(self):
+        # The file is cut off mid-object, so it is not JSON.
+        rc, out, err = self.confirm(live_at=lambda at: '{"readAt": "' + at.isoformat())
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_malformed_read_at_prints_the_owed_line(self):
+        rc, out, err = self.confirm(live_at=lambda at: live_json("yesterday at noon", IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_read_at_without_a_time_zone_prints_the_owed_line(self):
+        # A naive time has no offset, so it cannot be put before or after the merge commit's time.
+        rc, out, err = self.confirm(live_at=lambda at: live_json(at.replace(tzinfo=None).isoformat(), IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_no_roadmap_branch_on_origin_prints_no_pass_line(self):
+        # No live file exists to read, so no pass is owed and none is printed. Scope first: origin has no roadmap branch.
+        self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/heads/roadmap"), "", "scope: origin has a roadmap branch")
+        rc, out, err = self.confirm(live_at=None, base=False)
+        self.assert_landed(rc, out, err)
+        self.assert_no_pass_line(out, err)
+
+    def test_a_refused_merge_prints_no_report_and_no_owed_line(self):
+        # The refusal lands nothing, so no live file is read after it. The file is on origin already, so a pass that ran
+        # before the refusal would find one and print. The exit code of a refused merge is 1, as before.
+        self.push_roadmap(dict(ROADMAP_BASE, **{"roadmap/live/live.json": live_json("2026-11-13T00:00:00-06:00", IDLE_LANE)}))
+        self.host.refuse = "refused by the test"
+        rc, out, err = self.confirm(base=False)
+        self.assertEqual([line for line in out if line.startswith("merge: #7 merged as ")], [], "the refused merge landed: %r" % out)
+        self.assertEqual(rc, 1, "a refused merge exits %r: %s" % (rc, err))
+        noise = [line for line in out + err if OWED_WORD.search(line) or ARCHIVE_SUMMARY.match(line) or line.startswith(("hold (", "session_"))]
+        self.assertEqual(noise, [], "a refused merge printed an idle-lanes line")
+
+    # The two cases below anchor on the real clock, as the cases above do: idle_lanes reads the live file's age against it, so a
+    # readAt fixed in the past would read stale. Only the offsets are fixed.
+
+    def test_a_read_earlier_by_instant_prints_the_owed_line_across_offsets(self):
+        # The merge is stamped -06:00 and the read is UTC. The read is 54 min 32 s before the merge, but its wall clock reads
+        # 5 h 5 min 28 s later than the merge's. By instant it is owed; by wall clock it would not be.
+        landed = _datetime.now(_timezone.utc).replace(microsecond=0) - _timedelta(minutes=5)
+        read_text = (landed - _timedelta(minutes=54, seconds=32)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rc, out, err = self.confirm(live_at=lambda at: live_json(read_text, IDLE_LANE),
+                                    merged_at=landed.astimezone(_timezone(_timedelta(hours=-6))))
+        self.assert_owed_after_merge(rc, out, err)
+
+    def test_a_read_later_by_instant_prints_the_report_across_offsets(self):
+        # The merge is stamped +14:00 and the read is -06:00. The read is 30 min after the merge by instant, but the merge's wall
+        # clock reads 19 h 30 min later than the read's. By instant it is later, so the report prints.
+        read = _datetime.now(_timezone.utc).replace(microsecond=0) - _timedelta(minutes=5)
+        read_text = read.astimezone(_timezone(_timedelta(hours=-6))).isoformat()
+        rc, out, err = self.confirm(live_at=lambda at: live_json(read_text, IDLE_LANE),
+                                    merged_at=(read - _timedelta(minutes=30)).astimezone(_timezone(_timedelta(hours=14))))
+        self.assert_report_after_merge(rc, out, err)
+
+    def test_a_merge_onto_a_base_that_is_not_the_default_prints_no_pass_line(self):
+        # The pull request targets integ, not main, so the merge lands on integ. A fresh live file would print the report after a
+        # merge onto main; a merge onto integ owes no pass, so no line prints.
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/integ")
+        self.host.base = "integ"
+        before = self.head("integ")
+        rc, out, err = self.confirm(live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE))
+        self.assertNotEqual(self.head("integ"), before, "scope: the merge did not move integ, so it did not land on the non-default base")
+        self.assert_landed(rc, out, err)
+        self.assert_no_pass_line(out, err)
+
+    def test_a_fresh_confirm_removes_the_live_temp_file_it_made(self):
+        folder = self.temp_folder()
+        rc, out, err, made = self.confirm_in_folder(folder, live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE))
+        self.assert_report_after_merge(rc, out, err)  # scope: the fresh read took the path that makes a temp file
+        self.assertEqual(len(made), 1, "scope: the fresh read named %d temp files, not one: %r" % (len(made), made))
+        self.assertEqual(os.path.dirname(made[0]), folder, "scope: the temp file was not made in the case folder: %r" % made[0])
+        self.assertFalse(os.path.exists(made[0]), "the fresh read left its temp file behind: %r" % made[0])
+        self.assertEqual([n for n in os.listdir(folder) if fnmatch.fnmatch(n, "merge-live-*.json")], [], "a merge-live file is left in the case folder")
+
+    def test_a_stale_confirm_leaves_no_live_temp_file(self):
+        folder = self.temp_folder()
+        rc, out, err, _ = self.confirm_in_folder(folder, live_at=lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), IDLE_LANE))
+        self.assert_owed_after_merge(rc, out, err)  # scope: the stale read took the owed path
+        self.assertEqual([n for n in os.listdir(folder) if fnmatch.fnmatch(n, "merge-live-*.json")], [], "a merge-live file is left in the case folder")
+
+    def test_an_origin_gone_before_the_idle_pass_owes_one_unread_line(self):
+        # The merge lands and ff_main moves local main while origin is reachable. Origin is gone when the idle-lane pass runs: its
+        # fetch of origin/roadmap and its listing both fail, so the one owed line says unread, and the merge still exits 0.
+        # Scope first: origin holds the roadmap branch, so no "no roadmap branch" reading explains the owed line.
+        self.push_roadmap(ROADMAP_BASE)
+        self.assertNotEqual(sh(self.t, "git", "ls-remote", self.bare, "refs/heads/roadmap"), "", "scope: origin has no roadmap branch")
+        passes, real_pass = [], merge.idle_lanes_after_merge
+
+        def origin_gone_then_pass(root, commit):
+            passes.append(commit)
+            sh(self.co, "git", "remote", "set-url", "origin", os.path.join(self.t, "gone.git"))  # the pass finds origin unreachable
+            return real_pass(root, commit)
+
+        with unittest.mock.patch.object(merge, "idle_lanes_after_merge", origin_gone_then_pass):
+            rc, out, err = self.confirm(base=False, live_at=lambda at: live_json((at + _timedelta(seconds=1)).isoformat(), IDLE_LANE))
+        self.assertEqual(len(passes), 1, "scope: the idle-lane pass did not run after the merge: out %r, err %r" % (out, err))
+        self.assert_landed(rc, out, err)
+        self.assertRegex([line for line in out if line.startswith("merge: #7 merged as ")][0], r"^merge: #7 merged as [0-9a-f]{9}\.$")
+        owed = [line for line in out + err if OWED_WORD.search(line)]
+        self.assertEqual(len(owed), 1, "the idle-lanes owed line is not printed once after the merge: %r" % (out + err))
+        self.assertIn("unread (the fetch of origin/roadmap failed)", owed[0], "the owed line does not say the fetch failed: %r" % owed[0])
+        self.assertFalse([line for line in out if ARCHIVE_SUMMARY.match(line) or line.startswith(("hold (", "session_"))],
+                         "a report line prints with the owed line: %r" % out)
 
 class ShallowMain(unittest.TestCase):
     """ff_main in a shallow clone of origin. The commit it moves to is on origin/main, but the clone cuts the history

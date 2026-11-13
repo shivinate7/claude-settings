@@ -9,7 +9,11 @@ no cs-step tag; a step off the record branch with no Step trailer on main; or a 
 not landed on main. A waiting lane prints no line. A whole-read failure prints one `unknown (` line and exits 1. It
 takes its steps, marks and repo name from the checkout, as the roadmap build does. It stands alone: no other flag, and
 no merge role in a cloud session. A missing --live file exits 1 and prints no summary, so an unread list never reads
-as an empty one.
+as an empty one. A session whose id is in keepSessions prints no line and is not counted; a keepSessions that is not a
+list, or whose entry has no id, reads as unknown, never as an empty keep list. A padded keepSessions id still skips its
+session. A non-archived session whose unarchived_epoch is an int above 0 prints one hold line, never a lane line, unless
+it waits: a waiting lane prints no line, unarchived or not. A working session prints no line whatever its epoch. An
+unarchived_epoch that is a bool, is not an int, or is negative, reads the whole list as unknown.
 
 Each case runs merge.py as a subprocess in a roadmap fixture checkout, the way bin/merge runs it. The fixture is the
 roadmap suite's make_repo (skills/roadmap/test_build.py), imported and not copied.
@@ -55,10 +59,12 @@ def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
-def lane(sid, step, bucket=roadmap.BUCKET_COMPLETED, status="SESSION_STATUS_IDLE"):
-    """A lane row of this repo. step=None leaves out the cs-step tag."""
+def lane(sid, step, bucket=roadmap.BUCKET_COMPLETED, status="SESSION_STATUS_IDLE", **extra):
+    """A lane row of this repo. step=None leaves out the cs-step tag. `extra` adds keys to the row, such as unarchived_epoch."""
     step_tags = ("cs-step:" + step,) if step else ()
-    return roadmap.session_row(sid, status, "cs-build:lane", *step_tags, REPO, status_bucket=bucket)
+    row = roadmap.session_row(sid, status, "cs-build:lane", *step_tags, REPO, status_bucket=bucket)
+    row.update(extra)
+    return row
 
 
 class IdleLanesCli(unittest.TestCase):
@@ -75,10 +81,20 @@ class IdleLanesCli(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def publish(self, sessions, read_at=None):
-        """Write the --live file. Its readAt is five minutes old by default."""
-        value = {"readAt": read_at or roadmap.iso_ago(5), "threads": [], "pulls": [], "items": [], "sessions": list(sessions)}
+    def publish(self, sessions, read_at=None, keep=None, pulls=(), items=()):
+        """Write the --live file. Its readAt is five minutes old by default. `keep` is the file's keepSessions value, written
+        only when given, so a case can name a value that is not a list. `pulls` and `items` are the file's pulls and items rows."""
+        value = {"readAt": read_at or roadmap.iso_ago(5), "threads": [], "pulls": list(pulls), "items": list(items),
+                 "sessions": list(sessions)}
+        if keep is not None:
+            value["keepSessions"] = keep
         self.live.write_text(json.dumps(value), encoding="utf-8")
+
+    def commit_step(self, sid, step):
+        """Write steps/<sid>.json on the fixture's record branch and commit it."""
+        (self.repo / "roadmap" / "data" / "steps" / (sid + ".json")).write_text(json.dumps(step), encoding="utf-8")
+        roadmap.git(self.repo, "add", "-A")
+        roadmap.git(self.repo, "commit", "-q", "-m", "step " + sid)
 
     def run_merge(self, *argv, extra_env=None):
         """(exit code, stdout, stderr) of `merge.py <argv>`, run in the fixture checkout."""
@@ -205,15 +221,188 @@ class IdleLanesCli(unittest.TestCase):
         self.publish([lane("session_a", "c1")])
         _, before, _ = self.run_merge("--idle-lanes", "--live", str(self.live))
         self.assertEqual(before.splitlines()[-1:], [SUMMARY_ONE], "scope: session_a is not idle before c3 is doing")
-        step = dict(roadmap.STEP, order=3, status="doing", lane="session_a")
-        (self.repo / "roadmap" / "data" / "steps" / "c3.json").write_text(json.dumps(step), encoding="utf-8")
-        roadmap.git(self.repo, "add", "-A")
-        roadmap.git(self.repo, "commit", "-q", "-m", "step c3")
+        self.commit_step("c3", dict(roadmap.STEP, order=3, status="doing", lane="session_a"))
         code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
         self.assertEqual(code, 0, err)
         self.assertRegex(out, r"(?m)^hold \(step c3 ", "a doing step under a completed lane printed no hold line: %r" % out)
         self.assertEqual(out.splitlines(), [DOING_HOLD % ("c3", "session_a"), HELD_ONE],
                          "the hold line is not the pinned text: %r" % out)
+
+    def test_a_kept_idle_lane_prints_no_line_and_is_not_counted(self):
+        # The control is the same idle lane with no keep list: it is listed, and the summary counts it. Then keepSessions
+        # names it: no line for it, and the summary counts no lane to archive.
+        self.publish([lane("session_a", "c1")])
+        _, before, _ = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(before.splitlines()[-1:], [SUMMARY_ONE], "scope: session_a is not idle before it is kept: %r" % before)
+        self.publish([lane("session_a", "c1")], keep=[{"id": "session_a", "reason": "kept for a reader"}])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines(), [SUMMARY_ZERO], "a kept idle lane printed a line or was counted: %r" % out)
+
+    def test_a_kept_hold_lane_prints_no_hold_line_and_is_not_counted_as_held(self):
+        # The control is a lane with no cs-step tag: it prints a hold line and the summary counts one held lane. Then
+        # keepSessions names it: no hold line, and no held lane in the summary.
+        self.publish([lane("session_nostep", None)])
+        _, before, _ = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(before.splitlines()[-1:], [HELD_ONE], "scope: session_nostep is not held before it is kept: %r" % before)
+        self.publish([lane("session_nostep", None)], keep=[{"id": "session_nostep", "reason": "kept for a reader"}])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines(), [SUMMARY_ZERO], "a kept hold lane printed a hold line or was counted as held: %r" % out)
+
+    def test_a_kept_idle_lane_is_skipped_and_a_non_kept_idle_lane_beside_it_still_prints(self):
+        # The control lists both idle lanes: the summary counts two. Then keepSessions names session_a only: session_c still
+        # prints, and the summary counts one lane to archive.
+        self.publish([lane("session_a", "c1"), lane("session_c", "c2")])
+        _, before, _ = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertRegex(before.splitlines()[-1], r"^merge: 2 lanes to archive\.", "scope: both lanes are not idle: %r" % before)
+        self.publish([lane("session_a", "c1"), lane("session_c", "c2")], keep=[{"id": "session_a", "reason": "kept for a reader"}])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        lines = out.splitlines()
+        self.assertEqual([line.split(" ", 1)[0] for line in lines[:-1]], ["session_c"], "a kept lane printed, or session_c did not: %r" % out)
+        self.assertEqual(lines[-1:], [SUMMARY_ONE], "the summary counts a kept lane: %r" % out)
+
+    def test_malformed_keep_list_reads_as_unknown_not_as_an_empty_keep_list(self):
+        # The control is the same idle lane with no keepSessions: it is listed and the command exits 0. Then keepSessions is
+        # not a list, or an entry has no id. Either reads as unknown: one unknown line, no lane line, no summary, exit 1.
+        self.publish([lane("session_a", "c1")])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual((code, out.splitlines()[-1:]), (0, [SUMMARY_ONE]), "scope: session_a is not listed before the keep list: %r" % out)
+        for keep in ("session_a", [{"reason": "no id"}]):
+            with self.subTest(keep=keep):
+                self.publish([lane("session_a", "c1")], keep=keep)
+                code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+                lines = out.splitlines()
+                self.assertTrue(any(line.startswith("unknown (") for line in lines),
+                                "a malformed keepSessions printed no unknown line: out %r, err %r" % (out, err))
+                self.assertFalse(any(line.startswith("session_a") for line in lines),
+                                 "a malformed keepSessions read as an empty keep list: %r" % out)
+                self.assertEqual(code, 1, "a malformed keepSessions exits %d, so a caller reads the list as read: %s" % (code, err))
+                self.assertNotRegex(out, SUMMARY_LINE)
+
+    def test_a_padded_keep_id_still_skips_its_lane(self):
+        # The control is the idle lane with no keep list: it is listed. Then keepSessions names it with a space before its id,
+        # then with one after. The id is stripped, so the lane prints no line and the summary counts none.
+        self.publish([lane("session_a", "c1")])
+        _, before, _ = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(before.splitlines()[-1:], [SUMMARY_ONE], "scope: session_a is not idle before it is kept: %r" % before)
+        for padded in (" session_a", "session_a "):
+            with self.subTest(padded=padded):
+                self.publish([lane("session_a", "c1")], keep=[{"id": padded, "reason": "kept for a reader"}])
+                code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+                self.assertEqual(code, 0, err)
+                self.assertEqual(out.splitlines(), [SUMMARY_ZERO], "a padded keepSessions id %r did not skip its lane: %r" % (padded, out))
+
+    def test_a_keep_id_that_matches_no_row_is_not_an_error(self):
+        # The control is the idle lane with no keep list: it prints its lane line and the summary counts it. keepSessions names
+        # an id no row carries: the lane still prints, and the command exits 0.
+        self.publish([lane("session_a", "c1")], keep=[{"id": "session_gone", "reason": "no longer listed"}])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, "an unmatched keepSessions id exits %d: %s" % (code, err))
+        self.assertEqual(out.splitlines(), ["session_a (c1; topic -)", SUMMARY_ONE], "an unmatched keepSessions id changed the list: %r" % out)
+
+    def test_an_unarchived_lane_prints_a_hold_line_and_counts_it_held(self):
+        # The control is the same idle lane with no unarchived_epoch: it is listed. Then the row carries an int epoch above 0:
+        # the lane is held, its one hold line names the session, and the summary counts one held lane and no lane to archive.
+        self.publish([lane("session_u", "c1")])
+        _, before, _ = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(before.splitlines()[-1:], [SUMMARY_ONE], "scope: session_u is not idle before its unarchived_epoch: %r" % before)
+        self.publish([lane("session_u", "c1", unarchived_epoch=1763000000)])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        lines = out.splitlines()
+        self.assertFalse(any(line.startswith("session_u") for line in lines), "an unarchived lane printed a lane line: %r" % out)
+        self.assertEqual(len(lines), 2, "an unarchived lane printed more than its hold line and the summary: %r" % out)
+        self.assertTrue(lines[0].startswith("hold (") and lines[0].endswith("; lane session_u)"), "the hold line does not name session_u: %r" % out)
+        self.assertEqual(lines[1], HELD_ONE, "the summary does not count the unarchived lane as held: %r" % out)
+
+    def test_an_unarchived_epoch_of_zero_or_absent_leaves_the_lane_line(self):
+        # An epoch above 0 holds a lane. Absent, or 0, is no hold: the lane prints its lane line and the summary counts it.
+        for extra in ({}, {"unarchived_epoch": 0}):
+            with self.subTest(extra=extra):
+                self.publish([lane("session_u", "c1", **extra)])
+                code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+                self.assertEqual(code, 0, err)
+                self.assertEqual(out.splitlines(), ["session_u (c1; topic -)", SUMMARY_ONE], "the lane line changed for %r: %r" % (extra, out))
+
+    def test_a_kept_session_with_an_unarchived_epoch_is_skipped_entirely(self):
+        # The row is idle and not archived, so without the keep list it would be held. keepSessions skips it first: no lane
+        # line, no hold line, and the summary counts neither.
+        self.publish([lane("session_u", "c1", unarchived_epoch=1763000000)], keep=[{"id": "session_u", "reason": "kept for a reader"}])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines(), [SUMMARY_ZERO], "a kept session with an unarchived_epoch printed a line or was counted: %r" % out)
+
+    def test_a_bad_unarchived_epoch_reads_the_whole_list_unknown(self):
+        # The control is the idle lane with no unarchived_epoch: it is listed and the command exits 0. A text epoch, a negative
+        # one or a bool (True and False are ints to Python) reads the whole list unknown: one line, no lane line, no summary, exit 1.
+        self.publish([lane("session_a", "c1")])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual((code, out.splitlines()[-1:]), (0, [SUMMARY_ONE]), "scope: session_a is not listed before the epoch: %r" % out)
+        for epoch in ("1763000000", -5, True, False):
+            with self.subTest(epoch=epoch):
+                self.publish([lane("session_a", "c1", unarchived_epoch=epoch)])
+                code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+                lines = out.splitlines()
+                self.assertEqual(len(lines), 1, "a bad unarchived_epoch %r did not read the whole list as one line: out %r, err %r" % (epoch, out, err))
+                self.assertTrue(lines[0].startswith("unknown ("), "a bad unarchived_epoch %r printed no unknown line: %r" % (epoch, out))
+                self.assertEqual(code, 1, "a bad unarchived_epoch %r exits %d, so a caller reads the list as read: %s" % (epoch, code, err))
+                self.assertNotRegex(out, SUMMARY_LINE)
+
+    def test_a_kept_session_with_a_bad_unarchived_epoch_is_skipped_before_the_epoch_check(self):
+        # The control is the same row with no keep list: a bad epoch reads the whole list unknown. Then keepSessions names it: the
+        # keep list skips the row before the epoch check, so no unknown line prints and the summary counts none.
+        keep = [{"id": "session_u", "reason": "kept for a reader"}]
+        for epoch in (True, -5):
+            with self.subTest(epoch=epoch):
+                self.publish([lane("session_u", "c1", unarchived_epoch=epoch)])
+                _, before, _ = self.run_merge("--idle-lanes", "--live", str(self.live))
+                self.assertTrue(before.startswith("unknown ("), "scope: the bad epoch %r is not unknown without its keep: %r" % (epoch, before))
+                self.publish([lane("session_u", "c1", unarchived_epoch=epoch)], keep=keep)
+                code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+                self.assertEqual(out.splitlines(), [SUMMARY_ZERO],
+                                 "a kept session with unarchived_epoch %r printed an unknown line or was counted: %r" % (epoch, out))
+                self.assertEqual(code, 0, err)
+
+    def test_an_unarchived_lane_that_waits_prints_no_line_and_is_not_counted_held(self):
+        # A waiting lane is not a hold, unarchived or not. Scope first: the same unarchived lane with nothing left to wait for
+        # prints its hold line, and the summary counts it held. Then each reason it waits, one at a time: its step is not done,
+        # its pull is open, or a page item it answers or owns is open. Each prints no line and counts no lane and no held lane.
+        self.commit_step("c3", dict(roadmap.STEP, order=3, status="todo"))
+        epoch = {"unarchived_epoch": 1763000000}
+        self.publish([lane("session_u", "c1", **epoch)])
+        _, before, _ = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(before.splitlines()[-1:], [HELD_ONE], "scope: the unarchived lane is not held with nothing to wait for: %r" % before)
+        open_pull = {"number": 1, "title": "lane c1", "branch": "lane/c1", "draft": False}
+        waits = {
+            "its step is not done": ([lane("session_u", "c3", **epoch)], [], []),
+            "its pull is open": ([lane("session_u", "c1", **epoch)], [open_pull], []),
+            "a page item answers its step": ([lane("session_u", "c1", **epoch)], [], [{"n": 1, "status": "open", "home": "c1", "lane": "c1"}]),
+            "a page item is owned by it": ([lane("session_u", "c1", **epoch)], [], [{"n": 2, "status": "open", "home": "c1", "lane": None, "owner": "session_u"}]),
+        }
+        for why, (sessions, pulls, items) in waits.items():
+            with self.subTest(why=why):
+                self.publish(sessions, pulls=pulls, items=items)
+                code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+                self.assertEqual(code, 0, err)
+                self.assertEqual(out.splitlines(), [SUMMARY_ZERO], "an unarchived lane that waits (%s) printed a line or was counted held: %r" % (why, out))
+
+    def test_a_working_lane_with_an_unarchived_epoch_prints_no_line(self):
+        # A working lane is never listed or held, whatever its epoch. Scope first: an idle lane beside a working lane with no epoch
+        # prints one lane line, and the summary counts one lane. Then the working lane carries an int epoch above 0: the output is
+        # the same, so the working lane prints no line and is not counted held.
+        idle = lane("session_c", "c2")
+
+        def working(**extra):
+            return lane("session_b", "c1", bucket=roadmap.BUCKET_WORKING, status="SESSION_STATUS_RUNNING", **extra)
+        self.publish([idle, working()])
+        _, before, _ = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(before.splitlines(), ["session_c (c2; topic -)", SUMMARY_ONE], "scope: the idle lane and the working lane read differently: %r" % before)
+        self.publish([idle, working(unarchived_epoch=1763000000)])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines(), ["session_c (c2; topic -)", SUMMARY_ONE], "a working lane with an unarchived_epoch printed a line or was counted held: %r" % out)
 
 
 if __name__ == "__main__":
