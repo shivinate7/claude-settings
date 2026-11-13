@@ -24,7 +24,9 @@ A spawner is a session that starts its own agents. Each session role is a set of
   At each publish, triage builds the roadmap block from the head of the record branch, with `--block`
   and `--live`. The `--live` file carries a `sessions` key: each `list_sessions` row (every page) with
   `id`, `session_status` and `tags`. The roadmap build script reads it to list steps in progress with no live lane.
-  Each pull row carries `createdAt`, so the roadmap build script can list a stale draft. Each item row carries
+  Each pull row carries `createdAt`, so the roadmap build script can list a stale draft. It also carries `held` (true when
+  the batch runner's hand-in or hold list names the pull) and `reviewLog` (true when the pull has a posted review log),
+  JSON bools, omitted when false or unknown. Each item row carries
   `lane` when the page item has one, so it can list an item whose lane is gone.
   The file also carries `landedPulls`: each pull request closed in the last 14 days whose base is the default
   branch, with `number`, `branch`, `head` and `merged`. The build marks a step landed from it when no `Step:` trailer is on main.
@@ -125,15 +127,15 @@ parent, or miss a message while busy.
 - Never wait on the owner. A step that needs the owner's answer gets a note line
   `Deferred (owner, <date>): <why>`, and waits. All other work runs, in roadmap order.
 - A lane that hits a question for the owner parks that part, and goes on.
-- A lane posts its review record on its PR after each round (claude-settings record
+- A lane posts its review log on its PR after each round (claude-settings record
   `pr-review-record`). The batch runner finds it. The lane first runs `merge --lane-lint <pr>`. The batch
   runner runs it again on each lane head before the join, and refuses a red lane (claude-settings record
   `lanes-run-no-full-ci-job`). A lane never rebases onto main and never merges.
 - A record that files an owner ruling gets a round 1 review before it merges. Round 1 checks two things only (claude-settings decision `docs-only-prs-skip-review`).
-- Nobody pushes to a PR's head once a done review record is posted for that head, until the merge
+- Nobody pushes to a PR's head once a done review log is posted for that head, until the merge
   result is back. The exception is the fix that a FAIL round calls for, such as the round-1 fix on a
   `delete-only` change with Guard or check `no`, which reads done (claude-settings record
-  `pr-review-record`). That push makes the record stale, so the lane posts a new review record for the
+  `pr-review-record`). That push makes the record stale, so the lane posts a new review log for the
   new head. When the repo holds a standing merge grant, the batch runner merges under it. The owner is
   not asked.
 - A session that waits on CI sets a one-time check-in when it starts to wait, and again after each red job, each wider apart.
