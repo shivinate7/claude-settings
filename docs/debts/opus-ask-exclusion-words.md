@@ -1,6 +1,6 @@
 # Exclusion words in a plain Opus ask grant the excluded roles
 
-**What.** A plain Opus ask that names two or more roles, joined to an exclusion the scope read does not list, grants exactly the excluded roles for 2h. Examples: "everything but builders and reviewers", "other than", "apart from", "aside from", "leave out", "builders and reviewers stay on sonnet". Main refused any two-role ask. Reachable in normal work, by code read. The `NEGATIONS` set is a fixed list, so any other exclusion word passes. Harm: Opus spend on the excluded roles. The grant line announces it, and `opus off` ends it. Found by review round 3, 2026-11-04.
+**What.** A plain Opus ask that names two or more roles, joined to an exclusion the scope read does not list, grants exactly the excluded roles. The grant reaches only the agents spawned for that ask. It ends at the owner's next typed prompt or 2h after the ask, whichever comes first. Examples: "everything but builders and reviewers", "other than", "apart from", "aside from", "leave out", "builders and reviewers stay on sonnet". Main refused any two-role ask. Reachable in normal work, by code read. The `NEGATIONS` set is a fixed list, so any other exclusion word passes. Harm: Opus spend on the excluded roles. The grant line announces it, and `opus off` ends it. Found by review round 3, 2026-11-04.
 
 **Where.** The plain-ask scope read `_ask_scope` and its `NEGATIONS` set in `hooks/override.py`. The judge it calls, `opus_ask`, sits in `hooks/call_judge.py`.
 
