@@ -41,7 +41,7 @@ holds a qualifying act (`questions-reach-page`: every question goes to the page 
 turn it is asked, no clock). The turn is every record after the last
 incoming message, a peer's included; the ack of a send this turn made to the writer or the parent
 starts no turn. Owner-facing session: a send to
-the page writer (the `writer` in the newest meta/page read, else the repo's extras key `page-writer`), or an ArtifactData set, update or batch under
+the page writer (the `writer` in the newest meta/page read, else the repo's extras key `page-writer`; a label such as `Triage (session_X)` counts only through the id it names), or an ArtifactData set, update or batch under
 collection items to this repo's page; the question box (main session) counts only in a repo with no page. Lane (own get_session record tagged cs-build:lane, or with a
 parent, and not tagged cs-build:triage, the page writer): a send to @parent, the parent id or the writer; @parent counts only in a lane. A promise or a page link passes nothing. A
 repo with no waiting page gets a systemMessage and no block, unless the session is a lane. This check
@@ -167,7 +167,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
     ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender,
-    read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
+    read_transcript, records_after_last_human, send_targets, tool_results, tool_uses, writer_ids)
 import layout  # noqa: E402
 import _clause  # noqa: E402
 
@@ -1210,7 +1210,8 @@ def question_problem(records, turn, text, hook):
     sentence), judged on `turn`, the records after the last incoming message (questions-reach-page). The
     ack of a send this turn made to the writer or the parent starts no turn.
     Owner-facing: a send to the page writer, or an items write to this repo's page. The writer is the newest
-    meta/page read's; with no such read at all, the layout's `page-writer` (its ack starts no turn either).
+    meta/page read's; a label such as `Triage (session_X)` counts only through the id it names (writer_ids).
+    With no such read at all, the layout's `page-writer` (its ack starts no turn either).
     The key's writer counts only for a send whose own result shows delivery (`delivered_tool_use_ids`); a send
     with no result, a failed result or a non-delivered one does not. A transcript writer counts on the send alone.
     A read whose result names no writer keeps the refusal's old text. The question box counts
@@ -1225,9 +1226,10 @@ def question_problem(records, turn, text, hook):
     if not (offers_a_pick(text) or asks_a_question(text)):
         return "", ""
     writer = page_writer_id(records)
-    acks = {writer: {writer}} if writer else {}
+    named = writer_ids(writer) or ({writer} if writer else set())
+    acks = {i: {i} for i in named}
     uses, sends = _turn_acts(records, turn, acks)
-    if writer and any(writer in t for t in sends):
+    if any(x in named for t in sends for x in t):
         return "", ""
     _hooks_on_path()
     from override import remote_session_id
@@ -1237,7 +1239,7 @@ def question_problem(records, turn, text, hook):
         if parent:
             acks[parent] = {parent} | PARENT_TARGETS
             uses, sends = _turn_acts(records, turn, acks)
-        wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
+        wanted = ({parent} if parent else set()) | named | PARENT_TARGETS
         if any(t & wanted for t in sends):
             return "", ""
         if not _is_page_writer(hook.get("transcript_path")):

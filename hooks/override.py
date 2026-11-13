@@ -698,7 +698,11 @@ def _take_opus(session_id, spawn_role, at):
 
 def remote_session_id():
     """The session record id (session_<x>) the env names as cse_<x>, or None when the env is unset or of another shape."""
-    remote = os.environ.get(LANE_ENV) or ""
+    return record_id(os.environ.get(LANE_ENV) or "")
+
+
+def record_id(remote):
+    """The session record id (session_<x>) a remote id cse_<x> names, or None for a value of another shape."""
     rest = remote[len(LANE_ENV_PREFIX):] if remote.startswith(LANE_ENV_PREFIX) else ""
     return LANE_PREFIX + rest if rest else None
 
