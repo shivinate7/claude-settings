@@ -126,7 +126,7 @@ SPAWN_PROMPT = (
     "tells a lane to write, post or add a waiting-page item: the lane puts its question in its report, and "
     "the orchestrator writes the item (questions-go-to-owner). A brief that forbids the lane to write a waiting-page item is fine; never flag it. Block only on "
     "a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or "
-    "{\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
+    "{\"ok\": false, \"reason\": \"<rule id, then `Remedy:` and the fix, one line>\"}."
 )
 # Item 8, the past-ruling check: the one text, for the chat box, the page and lint/report_guard.py (a relayed
 # question). The candidate rulings follow the reply line, built by question_form.candidates_block.
@@ -217,7 +217,7 @@ def __getattr__(name):  # PEP 562: the module constant WIDENING_RULE costs no im
 # tool name -> (prompt, model, timeout, rule, fallback reason)
 JUDGES = {
     "Agent": (SPAWN_PROMPT, SPAWN_MODEL, SPAWN_TIMEOUT, SPAWN_RULE,
-              "the spawn brief breaks roles-brief-contents or the Explore row of agent-model-cap "
+              "the spawn brief breaks roles-brief-contents or the Explore row of agent-model-cap. Remedy: fix the brief "
               "(an audit Explore: model sonnet or opus with effort high, and `" + EXPLORE_AUDIT_MARKER
               + "` on the brief's first non-blank line)."),
     "AskUserQuestion": (QUESTION_PROMPT, QUESTION_MODEL, QUESTION_TIMEOUT, QUESTION_RULE,
@@ -357,7 +357,7 @@ PAST_RULING_REMEDY = ("Remedy: do not ask; act on the cited ruling. A re-ask tha
                       "`Based on (ruling): <the id above>` line names it.")
 
 UNVETTED_REMEDY = (
-    "the past-ruling check could not run (%s), so this question would reach the owner unchecked. Add the line "
+    "the past-ruling check could not run (%s), so this question would reach the owner unchecked. Remedy: add the line "
     "`Unvetted: <why it could not be checked>` to the question (a page item: to `context`) and send it again. "
     "The owner then reads it marked as unchecked.")
 

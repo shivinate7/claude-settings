@@ -1415,30 +1415,30 @@ ARCHIVE_LANE_TAG = LANE_TAG
 ARCHIVE_STEP_PREFIX, ARCHIVE_REPO_PREFIX = "cs-step:", "cs-repo:"
 ARCHIVE_NO_RECORD_REASON = (
     "this session's or this agent's transcript holds no get_session record of the target, so the guard cannot tell whether "
-    "the target is a lane with records still to land. Run get_session on the target alone, in its own turn, "
+    "the target is a lane with records still to land. Remedy: run get_session on the target alone, in its own turn, "
     "then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_OPEN_REASON = (
-    "the lane's records pull request is still open, so closing the lane now strands its records. Wait until "
+    "the lane's records pull request is still open, so closing the lane now strands its records. Remedy: wait until "
     "that pull request merges or is closed as replaced, then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_TAGS_REASON = (
     "the target's record is a lane with no cs-step tag or no cs-repo tag, so the guard cannot find its "
-    "records pull request. Fix the lane's tags, run get_session on the target alone, then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "records pull request. Remedy: fix the lane's tags, run get_session on the target alone, then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_READ_REASON = (
     "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "
-    "records have landed. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "records have landed. Remedy: retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_NO_PR_REASON = (
     "a branch of the lane is ahead of its repo's default branch and has no pull request that covers it, so closing "
-    "the lane now strands that work. Either open a pull request for that branch and hand it to the batch runner, or "
+    "the lane now strands that work. Remedy: either open a pull request for that branch and hand it to the batch runner, or "
     "push an archive copy of it under archive/, then retry. "
     "(decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_BRANCH_READ_REASON = (
     "the lane's branches or their pull requests could not be read, so the guard cannot tell whether any work of "
-    "the lane is stranded. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "the lane is stranded. Remedy: retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_STRANDED_MATCH = "archive of a lane with a branch that has no pull request"
 _REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
@@ -1724,43 +1724,43 @@ _BRIEF_LINE = re.compile(
     re.IGNORECASE)
 BRIEF_NO_RECORD_REASON = (
     "this session's transcript holds no get_session or create_session record of the target, so the guard "
-    "cannot tell which topic the lane holds. Run get_session on the target alone, in its own turn, then retry. "
+    "cannot tell which topic the lane holds. Remedy: run get_session on the target alone, in its own turn, then retry. "
     "(decision session-tiers, a lane holds one topic)"
 )
 BRIEF_STALE_REASON = (
     "a set_session_tags call on the target followed this session's newest record of it, so the guard cannot tell "
-    "which topic or steps the lane holds now. Run get_session on the target alone, in its own turn, then retry. "
+    "which topic or steps the lane holds now. Remedy: run get_session on the target alone, in its own turn, then retry. "
     "(decision session-tiers, a lane holds one topic)"
 )
 BRIEF_TOPIC_REASON = (
     "this brief names a topic the lane does not hold. A lane holds one topic, and a brief's first line is "
-    "`Lane brief: <step>. Topic: <topic>.` with the lane's own cs-topic. Work on another topic goes to a new "
-    "lane: start one with create_session. (decision session-tiers, a lane holds one topic)"
+    "`Lane brief: <step>. Topic: <topic>.` with the lane's own cs-topic. Remedy: send this work to a new "
+    "lane: start one with create_session, or put the lane's own topic on the brief's first line. (decision session-tiers, a lane holds one topic)"
 )
 BRIEF_STEP_REASON = (
     "this brief names a step the lane does not carry, and the lane has no cs-topic tag to judge its Topic by. "
-    "Work on another step goes to a new lane: start one with create_session. "
+    "Remedy: send work on another step to a new lane: start one with create_session. "
     "(decision session-tiers, a lane holds one topic)"
 )
 BRIEF_START_TOPIC_REASON = (
-    "this start's brief names a topic that the start's cs-topic tag does not hold. A lane holds one topic. Set the "  # glossary-ok: session-tiers is the decision's file name
+    "this start's brief names a topic that the start's cs-topic tag does not hold. A lane holds one topic. Remedy: set the "  # glossary-ok: session-tiers is the decision's file name
     "cs-topic tag to the brief's Topic, or put the lane's own topic on the brief's first line: "
     "`Lane brief: <step>. Topic: <topic>.` (decision session-tiers, a lane holds one topic)"
 )
 BRIEF_START_STEP_REASON = (
-    "this start carries no cs-topic tag, and no cs-step tag for the brief's step, to judge its brief by. Add a "  # glossary-ok: session-tiers is the decision's file name
+    "this start carries no cs-topic tag, and no cs-step tag for the brief's step, to judge its brief by. Remedy: add a "  # glossary-ok: session-tiers is the decision's file name
     "cs-topic tag that matches the brief's Topic, or a cs-step tag for its step. "
     "(decision session-tiers, a lane holds one topic)"
 )
 BRIEF_PLACE_REASON = (
     "this start's prompt holds a `Lane brief:` line that is not the first line after the Grant line, so no reader "  # glossary-ok: session-tiers is the decision's file name
-    "judges its topic. Move that line up: the first line after the Grant line is "
+    "judges its topic. Remedy: move that line up: the first line after the Grant line is "
     "`Lane brief: <step>. Topic: <topic>.` (decision session-tiers, a lane holds one topic)"
 )
 
 BRIEF_GRANT_REASON = (
     "this brief opens with a Grant line that is empty or a placeholder: it holds a `<`, or no letter or digit, "
-    "after `Grant:`. A template placeholder is no grant. Put the grant and its time after `Grant:`, as the "
+    "after `Grant:`. A template placeholder is no grant. Remedy: put the grant and its time after `Grant:`, as the "
     "owner gave them. (decision agent-model-cap, the lane start)"
 )
 

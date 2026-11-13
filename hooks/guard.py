@@ -1421,7 +1421,8 @@ CAP_ASK_REASON = (
     "Rule (configuration): this write sets the agent model cap, which the owner's user settings "
     "hold. A project settings file overrides user settings, so the write lifts the cap for every "
     "agent started there. Requested: {change}. File: {where}. "
-    "Approve it only when a model above Sonnet is wanted for this project. "
+    "Remedy: drop the model keys from this write, or approve it only when a model above Sonnet is wanted "
+    "for this project. "
     "(decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
 )
 
@@ -1960,21 +1961,21 @@ def disables_tests(new_lines, old_lines) -> bool:
             return True
     return False
 BUILDER_TEST_REASON = (
-    "A builder does not change tests or test config. Report the needed test change in your "
-    "report. The orchestrator assigns it to a test-author."
+    "A builder does not change tests or test config. Remedy: do not write the test by another route. "
+    "Report the needed test change to your orchestrator, who hands it to a test-author."
     " A merge conflict in a test file takes the same route."
     " (decision builders-cannot-edit-tests, a builder never changes a test or test config)"
 )
 AUTHOR_SCOPE_REASON = (
-    "A test-author changes only tests and test config. Report the needed product change in your "
+    "A test-author changes only tests and test config. Remedy: write only tests and test config. Report the needed product change in your "
     "report. The orchestrator assigns it to a builder."
 )
 WRITER_SCOPE_REASON = (
-    "A record-writer changes only Markdown (*.md) files. Report the needed change to any other "
+    "A record-writer changes only Markdown (*.md) files. Remedy: change only *.md files. Report the needed change to any other "
     "file in your report. The orchestrator assigns it to a builder."
 )
 DESIGNER_SCOPE_REASON = (
-    "A designer changes only files in the repo's design folder. Report the needed change to any "
+    "A designer changes only files in the repo's design folder. Remedy: change only files in that folder. Report the needed change to any "
     "other file in your report. The orchestrator assigns it to a builder."
 )
 
@@ -2875,25 +2876,25 @@ LANE_EFFORT = "medium"
 AGENT_NO_REMOTE_REASON = (
     "An agent never starts, messages, tags, interrupts or archives sessions, and never sets scheduled tasks, "
     "watches, pull request subscriptions, repos, computer folders or the owner's trust card. The session that spawned this agent does "
-    "that. Finish your own work and put the request in your report so that session can act on it. "
+    "that. Remedy: finish your own work and put the request in your report so that session can act on it. "
     "(decision lanes-start-as-agents, an agent is not a lane)"
 )
 from shared_names import LANE_TAG, grant_line_holds_words  # noqa: E402  the one home of the lane tag and the Grant reader, shared with guard_merge
 LANE_EFFORT_REASON = (
     "A lane starts with the effort field set to `%s` and the whole brief as its prompt. The prompt's "
-    "first non-blank line is `Grant: <the grant>, <time>`, the owner's grant that starts this lane. Set the "
+    "first non-blank line is `Grant: <the grant>, <time>`, the owner's grant that starts this lane. Remedy: set the "
     "effort field, and put the Grant line first in the prompt (decision agent-model-cap)." % LANE_EFFORT
 )
 # A template: %s is the tag the call must carry, `cs-repo:` plus the checkout's repo, or `cs-repo:<owner>/<name>`
 # when no repo reads.
 LANE_REPO_TAG_REASON = (
-    "A lane carries the full `cs-repo` tag of the checkout that starts it. Add `%s` to the lane's "  # glossary-ok: session-tiers is the decision's file name, and Tier tags its heading
+    "A lane carries the full `cs-repo` tag of the checkout that starts it. Remedy: add `%s` to the lane's "  # glossary-ok: session-tiers is the decision's file name, and Tier tags its heading
     "tags. A roll-out lane carries this repo's tag beside its target's (decision session-tiers, Tier tags)."
 )
 # A lane start names the model and the repo it works in. The reason names both fields and says why.
 LANE_START_SETTINGS_REASON = (
     "A lane's start names `model` and `source_url`. With no repo a lane has nothing to work in; with no "
-    "model it starts on the coordinator's model, not the model its row in decision agent-model-cap names. Pass "
+    "model it starts on the coordinator's model, not the model its row in decision agent-model-cap names. Remedy: pass "
     "`model` (the model that row names) and `source_url` (the repo) on create_session."
 )
 # A repo tag with no origin to compare to: the full form, one owner and one name.
@@ -2901,12 +2902,12 @@ FULL_REPO_TAG = re.compile(r"[^/\s]+/[^/\s]+")
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
 HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer", "record-writer")
 MODEL_FLOOR_REASON = (
-    "Sonnet is the floor for this role. Start the agent or session with model sonnet, "
+    "Sonnet is the floor for this role. Remedy: start the agent or session with model sonnet, "
     "or name no model and let the default apply."
 )
 # A lane start may not drop the model (rule lane-start-settings), so its remedy names both required inputs.
 LANE_MODEL_FLOOR_REASON = (
-    "Sonnet is the floor for a lane. Start the lane with model sonnet and the source_url of its repo."
+    "Sonnet is the floor for a lane. Remedy: start the lane with model sonnet and the source_url of its repo."
 )
 AGENT_CALL = re.compile(r"\bagent\s*\(")
 SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
@@ -3200,7 +3201,7 @@ BRIEF_CLAIM_COMMAND = re.compile(
     r"(?:\S*/)?(?:python3?|git|verdict|bash|sh|node|npm|npx|pytest|gh|grep|rg|jq)(?=\s|$)")
 BRIEF_CLAIM_INLINE = re.compile(r"`([^`]+)`(.*)$")
 BRIEF_CLAIM_REASON = (
-    "The brief says what main, origin/main or today does with an input, and carries no probe for it. Add the probe, "
+    "The brief says what main, origin/main or today does with an input, and carries no probe for it. Remedy: add the probe, "
     "or drop the claim. The probe is the command you ran, on a line of its own, that holds the input in quotes (in a "
     "fence, in backticks, or after `$ `): for example `python3 ...`, `git show origin/main:<path>` piped into it, or "
     "`verdict ...`; and its result line right under it. Each input with no probe: %s. "
@@ -3423,7 +3424,7 @@ BRIEF_DESTRUCTIVE_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 BRIEF_DESTRUCTIVE_SKIP = ("branch-delete", "worktree-remove", "worktree-prune")
 BRIEF_DESTRUCTIVE_REASON = (
     "The brief orders a command that throws away work in a checkout other sessions share, and no step puts it back. "
-    "Drop the order from the brief, or move that work to a scratch repo under the session's scratchpad. "
+    "Remedy: drop the order from the brief, or move that work to a scratch repo under the session's scratchpad. "
     "(rule shared-trees-no-destructive-git; decision guard-guards-mistakes-only, a guard stops Claude's mistakes)"
 )
 
@@ -3565,13 +3566,13 @@ def step_up_reason(prompt: str, role, model) -> str:
     for kind, n in brief_markers(prompt):
         kind = kind.lower()
         if role == "reviewer" and kind == "round" and n == "2" and "sonnet" not in model:
-            return "Reviewer round 2 runs on Sonnet. Spawn it with model sonnet."
+            return "Reviewer round 2 runs on Sonnet. Remedy: spawn it with model sonnet."
         if role == "reviewer" and kind == "round" and n == "3" and "sonnet" not in model and "opus" not in model:
-            return "Reviewer round 3 runs on Sonnet. Spawn it with model sonnet."
+            return "Reviewer round 3 runs on Sonnet. Remedy: spawn it with model sonnet."
     if role == "reviewer" and ("fixcheck", None) in marker_hits(prompt) and (not model or "haiku" in model):
-        return "Reviewer fix verifier runs on Sonnet. Spawn it with model sonnet."
+        return "Reviewer fix verifier runs on Sonnet. Remedy: spawn it with model sonnet."
     if role == "builder" and builder_third_round(prompt) and "opus" not in model:
-        return "Builder round 3 runs on Opus. Spawn it with model opus."
+        return "Builder round 3 runs on Opus. Remedy: spawn it with model opus."
     return ""
 
 
@@ -4938,7 +4939,7 @@ def page_design_hit(writes, tool_input, cwd):
 #
 # SendMessage addresses an agent by name. A `session_...` id is no agent name, and auto mode refused such a call, so
 # the hand-off could go missing. Whether it would deliver is unmeasured.
-SENDMESSAGE_REASON = ("A session_ id is not an agent name, so this SendMessage may never be delivered. Send it with "
+SENDMESSAGE_REASON = ("A session_ id is not an agent name, so this SendMessage may never be delivered. Remedy: send it with "
                       "mcp__claude-code-remote__send_message, passing the id as session_id, the sure route. "
                       "Rule sendmessage-session-id "
                       "(decision sendmessage-session-id-refused, a SendMessage names an agent, not a cloud session).")
