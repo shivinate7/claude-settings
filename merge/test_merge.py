@@ -7252,6 +7252,19 @@ RETIRE_TEST = "Delete the fixture. Check: `tests/test_retire_target.py`."
 PROSE_RETIRE = "Confirm it on a phone."  # names no runnable check: the close needs a cited run
 
 
+def land_debts(o, debts):
+    """main gains one debt file per slug of `debts` ({slug: Retire line}), in one commit, with the layout extras that mark the repo rolled out.
+    main then moves on, so a branch cut from main later holds the debts, and no main commit is a reversal of one. Call once per case: `o` is the other clone."""
+    sh(o, "git", "fetch", "-q", "origin")
+    sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+    put(os.path.join(o, ".claude/layout-extras.json"), json.dumps({"kinds": {}, "rolled-out": True}))
+    for slug, retire in debts.items():
+        put(os.path.join(o, "docs/debts", slug + ".md"), DEBT_FIXTURE % retire)
+    sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: a debt"); sh(o, "git", "push", "-q", "origin", "main")
+    put(os.path.join(o, "main-moves.txt"), "main moves on\n")  # feat is cut from a later main, so the debt commit is not one it left
+    sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: moves on"); sh(o, "git", "push", "-q", "origin", "main")
+
+
 def names_kind(test, out, slug, kind):
     """The printed line that names debt `slug` must also name its kind."""
     line = printed(out, slug)
@@ -7267,13 +7280,7 @@ class DebtRetire(Env):
         """main gains a debt file. feat is cut from that main, adds the pending record and the test, and then either deletes
         the debt (closes) or edits it in place. feat is cut from main after the debt lands, so no main commit is a reversal of it."""
         o = self.other
-        sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
-        put(os.path.join(o, ".claude/layout-extras.json"), json.dumps({"kinds": {}, "rolled-out": True}))
-        put(os.path.join(o, "docs/debts/retire-target.md"), DEBT_FIXTURE % retire)
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: a debt"); sh(o, "git", "push", "-q", "origin", "main")
-        put(os.path.join(o, "main-moves.txt"), "main moves on\n")  # feat is cut from a later main, so the debt commit is not one it left
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: moves on"); sh(o, "git", "push", "-q", "origin", "main")
+        land_debts(o, {"retire-target": retire})
         sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main")
         put(os.path.join(o, "docs/decisions/second.md"), record("pending", "second"))
         put(os.path.join(o, "tests/test_retire_target.py"), test_text or "import sys\nsys.exit(%d)\n" % test_exit)
@@ -19096,26 +19103,33 @@ class BatchFreeze(CloudSession):
         return self.lane_commit(n, os.path.join("lanes", f"{n}-more.txt"), "more\n", f"lane {n}, second commit")
 
     def lane_commit(self, n, path, text, message):
-        """Lane PR #n gets one commit of its own that adds `path` with `text`: its head on origin moves, and its diff against main touches
-        `path`. -> the new head."""
+        """Lane PR #n gets one commit of its own that adds `path` with `text`, or deletes `path` when `text` is None: its head on origin moves,
+        and its diff against main touches `path`. -> the new head."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", f"lane-{n}", f"origin/lane-{n}")
-        put(os.path.join(o, path), text)
+        if text is None:
+            sh(o, "git", "rm", "-q", path)
+        else:
+            put(os.path.join(o, path), text)
         sh(o, "git", "add", "-A")
         sh(o, "git", "commit", "-q", "-m", message)
         sh(o, "git", "push", "-q", "origin", f"lane-{n}")
         self.heads[n] = self.head(f"lane-{n}")
         return self.heads[n]
 
-    def bump(self, branch):
-        """One commit of its own on origin's `branch`, as a claim or a heal leaves it: the head moves. -> the new head."""
+    def bump(self, branch, remove=None):
+        """One commit of its own on origin's `branch`, as a claim or a heal leaves it: the head moves. With `remove`, a path, the commit deletes
+        that path instead of adding a heal file, as a hand edit of the batch branch can. -> the new head."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{branch}")
-        put(os.path.join(o, "lanes", f"{branch.replace('/', '-')}-heal.txt"), "heal\n")
+        if remove:
+            sh(o, "git", "rm", "-q", remove)
+        else:
+            put(os.path.join(o, "lanes", f"{branch.replace('/', '-')}-heal.txt"), "heal\n")
         sh(o, "git", "add", "-A")
-        sh(o, "git", "commit", "-q", "-m", f"{branch}: heal")
+        sh(o, "git", "commit", "-q", "-m", f"{branch}: removes {remove}" if remove else f"{branch}: heal")
         sh(o, "git", "push", "-q", "origin", branch)
         return self.head(branch)
 
@@ -20911,6 +20925,96 @@ class BatchFreeze(CloudSession):
 
     def test_a_base_red_reason_is_accepted_beside_batch_build(self):
         self.assert_accepted_beside_build("--base-red-ok", "the batch carries the fix")
+
+    # Blame by debt refusal: a debt-close refusal of a batch integration PR names the one frozen lane whose diff closes the debt, and stores
+    # that lane as Blamed, so --batch-drop may take it off. A refusal that names no lane, or two, stores nothing. The debts carry PROSE_RETIRE,
+    # which names no runnable check, so each finding is a prose one and no test runs.
+
+    def debt_batch(self, closes, numbers, blamed=()):
+        """Debts retire-a and retire-b are on main. Lanes `numbers` are cut from main, and `closes` maps a lane number to the debt its commit
+        deletes. -> the integration pull request of the ready batch `nightly` that freezes them, with `blamed` as its stored blames."""
+        land_debts(self.other, {"retire-a": PROSE_RETIRE, "retire-b": PROSE_RETIRE})
+        for n in numbers:
+            self.lane(n)
+            if n in closes:
+                self.lane_commit(n, f"docs/debts/{closes[n]}.md", None, f"lane {n}: closes {closes[n]}")
+        return self.frozen_batch("nightly", numbers, blamed=blamed)
+
+    def assert_debt_refusal_stores_nothing(self, pr, argv, slugs):
+        """The run `argv` is refused by the debt check on each of `slugs`, and it writes nothing: set_body is never called, and pull request pr
+        keeps its body."""
+        snap = self.body(pr)
+        with unittest.mock.patch.object(self.host, "set_body", wraps=self.host.set_body) as set_body:
+            rc, out = self.run_batch(*argv)
+        self.assertEqual(rc, 1, "the debt refusal of %s exited %s, not 1: %s" % (argv, rc, out))
+        for slug in slugs:
+            names_kind(self, out, slug, "prose")
+        self.assertEqual(set_body.call_count, 0, "the debt refusal of %s wrote a pull request body, so it stored a blame: %s" % (argv, out))
+        self.assertEqual(self.body(pr), snap, "the debt refusal of %s changed the body of #%s: %s" % (argv, pr, out))
+
+    def test_a_debt_refusal_of_the_integration_pr_stores_the_one_lane_that_closes_the_debt_as_blamed(self):
+        pr = self.debt_batch({101: "retire-a"}, [101, 102])
+        self.assertEqual(self.stored_blamed(pr), [], "setup: the batch already holds a Blamed line")
+        rc, out = self.run_batch(str(pr))
+        self.assertEqual(rc, 1, "the debt refusal of the integration pull request exited %s, not 1: %s" % (rc, out))
+        names_kind(self, out, "retire-a", "prose")
+        self.assertEqual(self.stored_blamed(pr), [101],
+                         "the refusal names one lane, #101, whose diff closes retire-a, but the batch stores no blame for it: %s" % out)
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-drop", "nightly", "101")
+        self.assertNotIn("stores no blame", out, "the drop of #101 is still refused for want of a blame: %s" % out)
+        self.assertEqual(rc, 0, "the drop of #101, which the debt refusal blamed, exited %s, not 0: %s" % (rc, out))
+        self.assertFalse(self.on_origin(self.heads[101], "batch-nightly"), "the drop did not take lane #101 off batch-nightly: %s" % out)
+
+    def test_a_debt_refusal_of_the_integration_pr_on_confirm_stores_the_blame_and_claims_and_pushes_nothing(self):
+        pr = self.debt_batch({101: "retire-a"}, [101, 102])
+        before = self.refs()
+        rc, out = self.run_batch(str(pr), "--confirm")
+        self.assertEqual(rc, 1, "the debt refusal of the integration pull request on --confirm exited %s, not 1: %s" % (rc, out))
+        names_kind(self, out, "retire-a", "prose")
+        self.assertEqual(self.stored_blamed(pr), [101],
+                         "the confirm refused by retire-a names one lane, #101, but the batch stores no blame for it: %s" % out)
+        self.assertEqual(self.refs(), before, "the refused confirm pushed: %s" % out)
+        self.assertEqual(self.claims(), 0, "the refused confirm claimed a record number: %s" % out)
+
+    def test_a_debt_closed_by_no_frozen_lane_stores_nothing_and_leaves_the_block_alone(self):
+        pr = self.debt_batch({}, [101, 102])
+        self.bump("batch-nightly", remove="docs/debts/retire-a.md")  # a hand edit of the batch branch closes the debt; no lane's diff does
+        self.assert_debt_refusal_stores_nothing(pr, (str(pr),), ["retire-a"])
+        self.assertEqual(self.stored_blamed(pr), [], "a debt that no frozen lane closes stored a blame: the block holds Blamed lines")
+
+    def test_a_debt_closed_by_two_lanes_stores_nothing(self):
+        pr = self.debt_batch({101: "retire-a", 102: "retire-a"}, [101, 102])  # both lanes delete the one debt file
+        self.assert_debt_refusal_stores_nothing(pr, (str(pr),), ["retire-a"])
+
+    def test_a_refusal_naming_two_debts_that_two_lanes_close_stores_nothing(self):
+        pr = self.debt_batch({101: "retire-a", 102: "retire-b"}, [101, 102])
+        self.assert_debt_refusal_stores_nothing(pr, (str(pr),), ["retire-a", "retire-b"])
+
+    def test_a_lane_pr_refused_by_the_debt_its_own_commit_closes_stores_nothing_in_the_batch(self):
+        pr = self.debt_batch({101: "retire-a"}, [101, 102])
+        self.assert_debt_refusal_stores_nothing(pr, ("101",), ["retire-a"])
+
+    def test_a_debt_blame_keeps_a_stored_blame_and_adds_the_lane_in_order_without_a_duplicate(self):
+        pr = self.debt_batch({101: "retire-a"}, [101, 102, 103], blamed=(103,))
+        self.assertEqual(self.stored_blamed(pr), [103], "setup: the batch does not hold #103's stored blame")
+        rc, out = self.run_batch(str(pr))
+        self.assertEqual(rc, 1, "the debt refusal of the integration pull request exited %s, not 1: %s" % (rc, out))
+        names_kind(self, out, "retire-a", "prose")
+        self.assertEqual(self.stored_blamed(pr), [101, 103],
+                         "the refusal adds #101 beside the stored #103 in order, but the block holds %s: %s" % (self.stored_blamed(pr), out))
+        self.run_batch(str(pr))  # the same refusal again: the stored blames stay as they are
+        self.assertEqual(self.stored_blamed(pr), [101, 103], "a second refusal of retire-a changed the stored blames: %s" % self.stored_blamed(pr))
+
+    def test_a_debt_blame_prints_the_same_refusal_and_one_line_naming_the_blame_and_its_drop_command(self):
+        pr = self.debt_batch({101: "retire-a"}, [101, 102])
+        rc, out = self.run_batch(str(pr))
+        self.assertEqual(rc, 1, "the debt refusal of the integration pull request exited %s, not 1: %s" % (rc, out))
+        names_kind(self, out, "retire-a", "prose")
+        self.assertIn("closes a debt without proof that its Retire check holds", out, "the debt refusal's own text is no longer printed: %s" % out)
+        line = printed(out, "merge --batch-drop nightly 101")
+        self.assertTrue(line, "no line prints the drop command for #101, whose blame the refusal stored: %s" % out)
+        self.assertIn("blame", line.lower(), "the line that prints the drop command for #101 does not name the stored blame: %s" % line)
 
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
