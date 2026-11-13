@@ -1,0 +1,14 @@
+{
+ "id": "merge-3049-after-2793-2819",
+ "title": "Merge #3049 (act 4) only after #2793 and #2819 are on main and live",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator stood pick, 12:36 CST Nov 13: the design's order (approved 09:48 CST Nov 12, ruling ow-05) puts the stable branch (#2793) and the installers (#2819) before act 4.",
+ "source": "coordinator 12:36 CST Nov 13 (a stood pick, not an owner word)",
+ "note": "Todo, stood pick for owner veto. #3049 (act 4: drops the batch brake and the small-move run) merges only after #2793 (stable branch) and #2819 (installers) are on main and live; no order waiver. Its PR also retires decisions no-merge-during-batch-ci and batch-freeze-lane-set, after act 5 merges. Lane fan-prose-debts could not find #3049: it is this act-4 PR. The coordinator's message time is a clock-drift suspect (step stamp-clock-check-everywhere); the 12:36 stamp is the sender's.",
+ "updatedAt": "2026-11-13T12:37:01-06:00"
+}
