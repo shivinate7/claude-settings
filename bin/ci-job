@@ -92,8 +92,9 @@
 # tree has no .git, so ci-job fetches the stable branch's head (STABLE_BRANCH, "stable", R42 part 2) from the clone's origin and
 # passes it with the clone (STE_CHANGED_COMPARE_TO, STE_CHANGED_CLONE), and ste-changed judges the pin's ste-lint files against it.
 # A stale pin exits 3, which reads FAIL: the run exits 1 under --step, and 3 under --lint when stale pins are its only FAILs (any
-# other FAIL makes it 1). A stable head that cannot be read makes the step unknown, never a pass. Only a ste-lint step that runs
-# the local copy (a local uses:) passes with a note. Cost: one `git fetch origin stable` per run, when a ste-lint step holds a sha pin.
+# other FAIL makes it 1). With no stable branch to read, the clone's own copy (its HEAD) judges the pin instead; a clone that
+# cannot serve the pin makes the step unknown, never a pass. Only a ste-lint step that runs the local copy (a local uses:) passes
+# with a note. Cost: one `git fetch origin stable` per run, when a ste-lint step holds a sha pin.
 # Under --lint, lint CI steps run at once, up to N workers: CI_JOB_LINT_WORKERS when it is a positive integer, else min(CPU count, 4),
 # at least 1 (a lane runs only the checks its change needs, decision lanes-run-no-full-ci-job; one CI step at a time, the lint run outlasted
 # merge's 1200 s bound). N=1 is the serial run. An install CI step is
@@ -495,7 +496,7 @@ def fetch_ref(clone, ref):
 
 def stable_head(clone):
     """(sha, None): the commit the stable branch of `clone`'s origin names now, fetched once per run; (None, why) when it cannot
-    be read. A pin is judged against it: a stale pin cannot read as a pass when the head is unknown."""
+    be read (no origin, no stable branch there). A pin is judged against it; unread, the clone's own HEAD judges."""
     if clone not in STABLE_HEADS:
         why = clone_problem(STABLE_BRANCH, clone, True)
         sha = None
@@ -804,13 +805,10 @@ def main(argv):
             for n, (own, _) in need.items():
                 if own == sha and why:  # no tree to run in: a step run against other code would be a guess
                     blocked[n] = why
-        for n, (own, why) in need.items():  # a ste-lint step at a sha is judged against the stable branch's head: unread, it is unknown
+        for n, (own, why) in need.items():  # a ste-lint step at a sha is judged against the stable branch's head, else against the clone's own copy
             if not why and not dry and n not in blocked and known_action(steps[n]) == "ste-lint" and COMMIT_SHA.fullmatch(own or ""):
-                head, why = stable_head(clone)
-                if why:
-                    blocked[n] = "pin %s: the stable branch head cannot be read, so drift is unknown: %s" % (pin_label(own), why)
-                else:
-                    drift_env[n] = {"STE_CHANGED_CLONE": clone, "STE_CHANGED_COMPARE_TO": head}
+                head, _ = stable_head(clone)  # unreadable: the clone's HEAD judges, the tree made from that clone, so it is a clone
+                drift_env[n] = {"STE_CHANGED_CLONE": clone, **({"STE_CHANGED_COMPARE_TO": head} if head else {})}
         for n, (_, why) in need.items():
             if why:
                 blocked[n] = why
