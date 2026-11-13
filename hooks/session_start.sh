@@ -1,5 +1,6 @@
 #!/bin/sh
 # Prints "checkout <toplevel> on <branch>, <n> dirty files" on start, resume and compaction, after one origin fetch per checkout. It prints the grant lines first, so a killed hook still delivers them. On resume it says when the recorded worktree is gone. Names the clone to cd to when the checkout is the live pin. Also warns on: core.worktree set in the shared git config; global rules that differ from this checkout; the claude-settings clone off main or behind origin; the default branch or local main behind or off origin; more than 50 agent worktrees; a check or fetch that could not run; a waiting page or grant file that differs from main's; a disarmed or unknown SessionEnd sweep. Prints the repo's caution level, or says it is unknown.
+# With TMPDIR unset it also appends a conditional TMPDIR export to CLAUDE_ENV_FILE, except on Windows.
 # In a git tree it also patches the platform's Stop-hook script once so its unpushed nudge skips a merged branch; it says so when the patch is not applied.
 # Outside a git tree or without git, prints only the tier line. Always exits 0, nothing on stderr.
 
@@ -21,6 +22,32 @@ tier_line() {
     printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick solo, one lane or coordinator from the request. Before you act as coordinator, read every page of list_sessions for a session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo whose session_status is not archived; if one is found, coordinate with it, else proceed. Merge role: this sentence is for a session whose own tag is cs-build:batch-runner, and for no other. Such a session first runs get_session with no argument, in a turn of its own, then runs `~/.claude/bin/merge --role batch-runner`, at session start and after each resume, because a guard checks its tags in that result and a fresh container loses the role file. A lane, the coordinator or any other tier never runs it, and this line is no instruction to it. A session tagged cs-build:batch-runner, and no other, runs `~/.claude/bin/merge --idle-lanes --live FILE` after each merge, with the live file built by the steps in roadmap/livework/README.md on the record branch, then runs get_session on each listed lane alone and archives that lane, but skips any lane that shows a HOLD marker or needs judgment (unpushed work, records on another head, a lane waiting on the owner) and names each skipped lane in its report. A coordinator the owner started tags itself cs-build:coordinator with set_session_tags on its own id at start. The coordinator never merges. A solo or one-lane session the owner started, with no parent_session_id, merges its own PR under the repo merge grant or the owner named act. A lane session (tag cs-build:lane, with a parent_session_id) hands its reviewed branch, head and PR to the batch runner (list_sessions, tag cs-build:batch-runner, same repo) and never merges.'
   fi
 }
+
+# With TMPDIR unset, `$TMPDIR/x` lands at `/x`, so the hook gives the session a TMPDIR through CLAUDE_ENV_FILE.
+# The written lines are conditional, so a shell that already has TMPDIR keeps it.
+# CLAUDE_SETTINGS_TMP_CANDIDATE is the seam for the /tmp default.
+# On Windows (MINGW, MSYS, CYGWIN) /tmp always exists, so nothing is written.
+tmpdir_os=$(uname -s 2>/dev/null)
+case "$tmpdir_os" in MINGW*|MSYS*|CYGWIN*) tmpdir_os=windows ;; esac
+if [ "$tmpdir_os" != windows ] && [ -z "${TMPDIR:-}" ] && [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+  tmpdir_pick="${CLAUDE_SETTINGS_TMP_CANDIDATE:-/tmp}"
+  if ! { [ -d "$tmpdir_pick" ] && [ -w "$tmpdir_pick" ]; }; then
+    tmpdir_pick=$(python3 -c 'import tempfile; print(tempfile.gettempdir())' 2>/dev/null)
+  fi
+  # Only an absolute, writable dir that is neither `/` nor the cwd, both resolved. tempfile falls back to the cwd
+  # when no temp dir works, so the cwd is refused. A path with a single quote is skipped, so the quoted export
+  # stays valid.
+  case "$tmpdir_pick" in
+    *"'"*) ;;
+    /?*)
+      tmpdir_real=$(cd "$tmpdir_pick" 2>/dev/null && pwd -P)
+      if [ -n "$tmpdir_real" ] && [ "$tmpdir_real" != / ] && [ "$tmpdir_real" != "$(pwd -P)" ] && [ -w "$tmpdir_pick" ]; then
+        # The export has its own line inside the `if`, so the env file reads `export TMPDIR=` at a line start.
+        { printf 'if [ -z "${TMPDIR:-}" ]; then\nexport TMPDIR='"'%s'"'\nfi\n' "$tmpdir_pick" >>"$CLAUDE_ENV_FILE"; } 2>/dev/null
+      fi
+      ;;
+  esac
+fi
 
 command -v git >/dev/null 2>&1 || { tier_line; exit 0; }
 
