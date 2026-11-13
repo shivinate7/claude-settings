@@ -189,6 +189,15 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        that holds a `<` or no letter or digit is a refusal. A lane `create_session` whose prompt has the marker
                        line is judged the same way against its own tags, with no transcript read. A message without the marker reads no transcript. An
                        override lifts it.
+  pick-reaches-page   deny. A send_message from a coordinator (its own get_session record, read from the transcript,
+                       is tagged cs-build:coordinator) with a line that opens `Coordinator pick`, after optional markdown
+                       lead characters and in any case, outside a fenced block, sent to a session that is not the page writer
+                       (the newest meta/page read's `writer`, else the layout's `page-writer` key), unless a send to the
+                       writer since the last human message names the same pick key (the rest of the line, casefolded, with
+                       its markdown and full stop cut). A pick sent to the writer passes. A lane's send, a send with no
+                       own record, no own id, no transcript or no known writer, and a message with no marker pass. Cost:
+                       a message with no marker reads no transcript; a marker message from a session with an own id adds
+                       one own-record read and one transcript read; no file, no process, no timer. An override lifts it.
   message-time-matches-clock
                        deny. A send_message whose first non-blank line opens with a header stamp: a label of 1 to 4 words,
                        then `,` or `:` or a dash spaced on both sides, an optional date, then `H:MM` or `HH:MM`, an
@@ -583,7 +592,7 @@ while True:
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, pick_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
         _loading = "guard_frozen"
@@ -6929,6 +6938,14 @@ def judge(payload) -> None:
     stamped = stamp_hit(tool, tool_input)
     if stamped:
         refuse(tool, "deny", "message-time-matches-clock", stamped[1], stamped[0])
+
+    # A coordinator's pick sent on before the page writer has had it (rule pick-reaches-page).
+    if tool == "mcp__claude-code-remote__send_message":
+        import override
+        picked = pick_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",
+                          override.remote_session_id(), cwd)
+        if picked:
+            refuse(tool, "deny", "pick-reaches-page", picked[1], picked[0])
 
     # A written time off the clock: `added` in items, a step's `updatedAt`, a literal `updatedAt` in a command.
     written = written_time_hit(tool, tool_input, cwd)

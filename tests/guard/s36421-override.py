@@ -92,17 +92,18 @@ def ov_type(config, session, prompt, seconds=0):
 
 
 def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agent_type=None,
-            temp=None, env=None, load=None, env_path=None):
+            temp=None, env=None, load=None, env_path=None, transcript=None):
     """One guard call at OV_T0 + seconds. Returns (decision, reason). `temp` is the folder the guard
     reads as the system temp: a git write under it is a throwaway, and silent-write skips it. `env`
     adds variables to this one guard run. `load` is the machine reading a start call meets
-    (LB_NORMAL when None). `env_path` is the PATH of this one guard run (None keeps the runner's)."""
+    (LB_NORMAL when None). `env_path` is the PATH of this one guard run (None keeps the runner's).
+    `transcript` is the payload's transcript_path (None sends none), for a rule that reads the session's record."""
     fixed = {"LOCAL_TIME_NOW": ov_clock(seconds)}
     fixed.update(env or {})
     return decide({
         "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": env_path,
         "config": config, "agent_id": agent_id, "agent_type": agent_type, "temp": temp,
-        "env": fixed, "tool_input": tool_input, "load": load,
+        "env": fixed, "tool_input": tool_input, "load": load, "transcript": transcript,
     })
 
 

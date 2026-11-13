@@ -5,11 +5,13 @@ Other files reach these names through `guard`.
 """
 import contextlib
 import fnmatch
+import importlib
 import io
 import json
 import os
 import re
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 
 from guard_core import (
@@ -1827,6 +1829,156 @@ def brief_hit(tool: str, tool_input, transcript: str):
     if tagged_after:  # a set_session_tags call on the target followed its record, so the topic or steps may have changed
         return "lane brief to a target whose record is stale", BRIEF_STALE_REASON
     return topic_hit(first, tags)
+
+
+# ---- send_message: a coordinator's pick reaches the owner's page (rule pick-reaches-page)
+PICK_MARKER = "Coordinator pick"  # a line of a coordinator's message that opens `Coordinator pick(s): <key>` states a pick
+COORDINATOR_TAG = BUILD_TAG + "coordinator"
+# After markdown lead characters and an optional list lead (`-`, `+`, `1.`, `1)`; `*` is a markdown lead character),
+# the marker, then optional spaces and emphasis marks, then a terminator: `:`, `.`, `,`, `;`, a dash and a space, or
+# the line's end. So `Coordinator pick summary:` and `Coordinator pick-up:` are no marker.
+_PICK_LINE = re.compile(
+    _MARKDOWN_LEAD + r"(?:(?:[-+]|\d+[.)])\s+" + _MARKDOWN_LEAD + r")?" + re.escape(PICK_MARKER)
+    + r"s?[\s*_]*(?::|[.,;]|-(?:\s|$)|$)(?P<rest>.*)", re.IGNORECASE)
+_FENCE_LINE = re.compile(r"\s*(```|~~~)")
+PICK_REASON = (
+    "this message states a pick (`Coordinator pick: {key}`) to a session that is not the page writer, and the "
+    "page writer has had no send naming that pick since the owner's last message. The owner overrules a pick on "
+    "the waiting page, so the pick reaches the page first. Send the same `Coordinator pick: {key}` line to the "
+    "page writer in this turn (skill waiting-page, \"Add an item\"), then retry "
+    "this send. (decision pick-reaches-page, a coordinator's pick reaches the owner's page)"
+)
+PICK_SELF_REASON = (
+    "this message states a pick (`Coordinator pick: {key}`) to a session that is not the page writer, and this "
+    "session is the page writer, so it cannot send to itself. It has written no item naming that pick since the "
+    "owner's last message. Write the item with a `Coordinator pick: {key}` line to the items collection in this "
+    "turn (skill waiting-page, \"Add an item\"), then retry this send. "
+    "(decision pick-reaches-page, a coordinator's pick reaches the owner's page)"
+)
+
+
+def _fence_marker(line):
+    """The fence marker (``` or ~~~) a line opens or closes, else None. A line with two of the marker, such as
+    \"```a``` note\", is a one-line span, not a fence edge."""
+    found = _FENCE_LINE.match(line)
+    return found.group(1) if found and line.count(found.group(1)) == 1 else None
+
+
+def _pick_keys(text):
+    """[(line, key)] for each `Coordinator pick` line of the message `text` outside a closed fenced block. The key
+    is the rest of the line after the marker's terminator, with its leading `:`, `.`, `,`, `;`, `*`, `_`, dash and
+    spaces and its trailing `.`, `*`, `_`, backtick and spaces cut off, casefolded: one pick has one key, whichever
+    markdown or full stop wraps it. A fence hides its lines from its opening line to the next line with the same
+    marker. A fence with no closing line hides nothing, so a stray fence cannot hide a later pick. Read line by
+    line, so a lone quote, backtick or comment opener in prose before the marker hides nothing."""
+    found, lines, i = [], text.splitlines(), 0
+    while i < len(lines):
+        marker = _fence_marker(lines[i])
+        if marker:
+            close = next((j for j in range(i + 1, len(lines)) if _fence_marker(lines[j]) == marker), None)
+            if close is not None:
+                i = close + 1
+                continue
+        hit = _PICK_LINE.match(lines[i]) if not marker else None
+        if hit:
+            key = re.sub(r"^[\s:.,;*_\u002d\u2013\u2014]+|[\s.*_`]+$", "", hit.group("rest")).casefold()
+            found.append((lines[i].strip(), key))
+        i += 1
+    return found
+
+
+def _lint_module(name):
+    """A module of lint/, beside this file's folder, imported at call time: a send with no pick marker pays no
+    import, and lint/ is not on this hook's import path. Not the only loader of lint/ readers: decision_watch.py's
+    `_shared_transcript` does the same for its hook. No circular import forces this: lint/_transcript and
+    lint/layout import only the standard library."""
+    lint = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    return importlib.import_module(name)
+
+
+def _page_writer(transcript_lib, records, cwd):
+    """The page writer's session id: the newest meta/page read's `writer`, else the layout's `page-writer` key
+    of the repo that holds `cwd`. None when neither names one."""
+    writer = transcript_lib.page_writer_id(records)
+    if writer or not cwd:
+        return writer
+    import local_time
+    root = local_time.repo_root(cwd)
+    return _lint_module("layout").page_writer_key(root) if root else None
+
+
+def _strings(node):
+    """Each string in a nested dict or list, the keys of a dict left out."""
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, dict):
+        for child in node.values():
+            yield from _strings(child)
+    elif isinstance(node, list):
+        for child in node:
+            yield from _strings(child)
+
+
+def _turn_records(lib, records):
+    """The records since the last human message, or every record when the transcript holds no human one."""
+    if any(lib.is_last_human(rec) for rec in records):
+        return lib.records_after_last_human(records)
+    return records
+
+
+def pick_hit(tool: str, tool_input, transcript: str, own_id, cwd=None):
+    """Return (matched, reason) when this send_message is a coordinator's pick that the owner's page has not been
+    told of, else None. The mistake it stops: a coordinator takes undoable picks and sends them only to
+    lanes, so none reaches the page the owner overrules picks on (decision pick-reaches-page).
+    A message is judged only when a line opens, after markdown lead characters and an optional list lead, with
+    PICK_MARKER (any case, plural allowed) and a terminator, outside a closed fenced block (_pick_keys). The
+    sender is judged next: only a session whose own record (own_session) holds COORDINATOR_TAG, so a lane's pick,
+    and a session with no own record or no own id, pass. A pick whose target is the page writer passes. Else
+    each pick key must be named since the last human message (an earlier turn does not count; with no human
+    message in the transcript, the whole transcript is the turn). Named means a send to the page writer whose
+    message has the key's pick line, or, when this session is itself the page writer and cannot send to itself,
+    its own set, update or batch to the items collection (lint/_transcript items_write) whose text has the
+    key's pick line. The writer is the newest meta/page read's, else the layout's key; with none known, the
+    send passes.
+    Cost: nothing past the text scan for a message with no marker. A marker message from a session with an own
+    id adds one own-record read and one transcript read, and, when the transcript names no writer, the layout's
+    extras-file read; no file written, no process, no timer. Fails open: every unreadable record, missing id or
+    missing writer lets the send through, since the page is the owner's safeguard and a gap here costs the owner
+    a visible pick, not a lost one."""
+    if tool != BRIEF_TOOL or not isinstance(tool_input, dict) or not isinstance(tool_input.get("message"), str):
+        return None
+    picks = _pick_keys(tool_input["message"])
+    if not picks or not own_id or not isinstance(transcript, str) or not transcript:
+        return None
+    try:
+        tags = own_session.own_session_read(transcript, own_id)[0]
+        if not tags or COORDINATOR_TAG not in tags:
+            return None
+        lib = _lint_module("_transcript")
+        records = lib.read_transcript(transcript)
+        writer = _page_writer(lib, records, cwd)
+        if not writer or tool_input.get("session_id") == writer:
+            return None
+        named, itself = set(), writer == own_id
+        for rec in _turn_records(lib, records):
+            if rec.get("isSidechain"):
+                continue
+            for use in lib.tool_uses(rec):
+                body = use.get("input")
+                if itself:
+                    if isinstance(body, dict) and lib.items_write(body):
+                        for text in _strings(body):
+                            named.update(key for _, key in _pick_keys(text))
+                elif isinstance(body, dict) and writer in lib.send_targets(use) and isinstance(body.get("message"), str):
+                    named.update(key for _, key in _pick_keys(body["message"]))
+    except Exception:
+        return None
+    for line, key in picks:
+        if key not in named:
+            return line[:120], (PICK_SELF_REASON if itself else PICK_REASON).format(key=key)
+    return None
 
 
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)
