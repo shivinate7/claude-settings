@@ -356,6 +356,16 @@ class JudgmentKindTests(unittest.TestCase):
                             for p in problems), problems)
 
 
+class CountsFromRestMechanismTests(unittest.TestCase):
+    """verification-counts-from-rest is a judgment: a model reads the reply, and no test proves its verdict.
+    Its map row must read `judgment`, not `check`."""
+
+    def test_counts_from_rest_row_is_a_judgment(self):
+        with open(rule_audit.MAP_FILE, encoding="utf-8") as f:
+            rules = json.load(f)["rules"]
+        self.assertEqual(rules["verification-counts-from-rest"]["mechanism"]["kind"], "judgment")
+
+
 SIBLING_MAP = {
     "rules": {
         "shared-trees-no-destructive-git": {"mechanism": {"kind": "guard", "ref": "sibling-rule"}}
