@@ -64,11 +64,11 @@ CITED = (
     (INCIDENT, "get_session at 11:43 CST: idle"),
     (LANE_NEAR, "list_events at 11:43 CST: last event idle"),
     (LANE_NEAR, "live read at 11:43 CST: idle"),
-    (LANE_NEAR, "REST at 11:43 CST: idle"),
+    (LANE_NEAR, "REST read at 11:43 CST: idle"),
     (BATCH_WAIT, "pull_request_read on #2888: open, checks pending"),
     (BATCH_WAIT, "list_pull_requests: 1 open"),
     (BATCH_WAIT, "https://github.com/shivinate7/claude-settings/pull/2888"),
-    (BATCH_WAIT, "read at 11:43 CST"),
+    (BATCH_WAIT, "pull_request_read at 11:43 CST: open"),
 )
 
 # Lines that say "unmeasured", "not read" or "unknown" in place of a read. Each passes.
