@@ -10864,13 +10864,16 @@ LINKS_WORKFLOW = "\n".join([
 ]) + "\n"
 
 
-def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml", sha=None, run_attempt=1, message=None):
+def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml", sha=None, run_attempt=1, message=None, tree=None):
     """One run on main, as `GET actions/runs` lists it. Its head is `sha`, or a sha of its own id. A re-run keeps its id, at `run_attempt` 2 or more.
-    `message` is the head commit's message, as GitHub gives it in `head_commit` and `display_title`: a merge commit names its pull request in it."""
+    `message` is the head commit's message, as GitHub gives it in `head_commit` and `display_title`: a merge commit names its pull request in it.
+    `tree` is the head commit's tree, as `head_commit.tree_id` gives it."""
     run = {"id": id_, "name": name, "path": path, "event": event, "status": status, "conclusion": conclusion if status == "completed" else None,
            "head_sha": sha or f"{id_:040x}", "html_url": f"https://github.com/o/r/actions/runs/{id_}", "run_attempt": run_attempt}
     if message is not None:
         run["display_title"], run["head_commit"] = message.splitlines()[0], {"message": message}
+    if tree is not None:
+        run.setdefault("head_commit", {})["tree_id"] = tree
     return run
 
 
@@ -10906,15 +10909,21 @@ def live_nightly():
 class MainRunsHost(FakeHost, merge.Host):
     """FakeHost for the flow; the real Host.base_state over scripted REST. `main_runs`: main's push runs, newest first. `jobs`: run id -> jobs.
     `runs_fail` / `jobs_fail`: that read fails with this text. `jobs_fail_of`: run id -> the text its jobs read fails with.
-    `texts`: head sha -> the workflow file's text on that head (a head not in it reads as NO_IF_WORKFLOW). `text_fail`: every file read fails with this text."""
+    `texts`: head sha -> the workflow file's text on that head (a head not in it reads as NO_IF_WORKFLOW). `text_fail`: every file read fails with this text.
+    `pr_runs`: the pull-request runs, served to any `GET actions/runs` that does not ask for main (None: such a read is an assert, as before)."""
     base_state = getattr(merge.Host, "base_state", None)
 
-    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None, texts=None, text_fail=None):
+    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None, texts=None, text_fail=None, pr_runs=None):
         FakeHost.__init__(self, root, other)
         self.ignore, self.cwd, self.warned = {}, root, set()
         self.main_runs, self.jobs, self.runs_fail, self.jobs_fail, self.reads = main_runs, jobs, runs_fail, jobs_fail, []
         self.jobs_fail_of = jobs_fail_of or {}
         self.texts, self.text_fail = texts or {}, text_fail
+        self.pr_runs = pr_runs
+
+    def pr_runs_for(self, fields):
+        """The pull-request runs a query names: those of its event and head_sha, when it sends either."""
+        return [r for r in self.pr_runs if all(fields.get(k) in (None, r.get(k)) for k in ("event", "head_sha"))]
 
     def file_at_head(self, rel, extra, fields):
         """`contents/<path>` read at a head: the ref is a field or a query. Raw when the Accept header asks for raw, else the JSON reply with base64 content."""
@@ -10931,6 +10940,12 @@ class MainRunsHost(FakeHost, merge.Host):
         self.reads.append(rel)
         if rel.startswith("contents/"):
             return self.file_at_head(rel, extra, fields or {})
+        if self.pr_runs is not None and rel == "actions/runs" and (fields or {}).get("branch") != "main":
+            assert method == "GET", (rel, method)
+            if self.runs_fail:
+                return 1, self.runs_fail
+            runs = self.pr_runs_for(fields or {})
+            return 0, json.dumps({"total_count": len(runs), "workflow_runs": runs})
         assert (rel, method, fields.get("branch")) == ("actions/runs", "GET", "main"), (rel, fields)
         if self.runs_fail:
             return 1, self.runs_fail
@@ -10939,6 +10954,8 @@ class MainRunsHost(FakeHost, merge.Host):
 
     def pages(self, rel, key=None, fields=None):
         self.reads.append(rel)
+        if self.pr_runs is not None and rel == "actions/runs" and (fields or {}).get("branch") != "main":
+            return self.pr_runs_for(fields or {})
         m = re.fullmatch(r"actions/runs/(\d+)/jobs", rel)
         assert m and key == "jobs", rel
         fail = self.jobs_fail_of.get(int(m.group(1)), self.jobs_fail)
@@ -11903,6 +11920,87 @@ class RedMainBrake(Env):
         """Main's head, as the other clone reads it after a fetch: the commit the PR head reverts."""
         sh(self.other, "git", "fetch", "-q", "origin")
         return sh(self.other, "git", "rev-parse", "origin/main")
+
+
+# A push run whose suite jobs were all skipped (only `scope` ran) reads success: the pull-request run of its tree proved it (decision no-merge-onto-red-main).
+# The gate reads it green only with a green pull-request run of its own tree. Otherwise it reads the newest run on main that ran its suites.
+SKIPPED_SUITES = ("checks", "checks-guard", "checks-shoot", "checks-windows-merge-3")  # suite jobs of checks.yml, sampled: each needs scope
+TREE_PUSHED, TREE_OTHER, TREE_EARLIER = "ab" * 20, "cd" * 20, "12" * 20  # the trees of commits on main; a squash commit keeps its pull request's tree
+PR_HEAD = "ef" * 20  # the head of a pull request whose squash commit is on main
+PAGE_RUNS = 50  # one page of `GET actions/runs`
+
+
+def skipped_suites_jobs():
+    """A push run that ran only `scope`: the suite jobs and nightly-skip skipped."""
+    return [main_job("nightly-skip", "skipped"), main_job("scope", "success")] + [main_job(n, "skipped") for n in SKIPPED_SUITES]
+
+
+def ran_suites_jobs(conclusion="success"):
+    """A run that ran its suites: all passed, or the first suite failed."""
+    suites = [main_job(n, "success", 20) for n in SKIPPED_SUITES]
+    if conclusion == "failure":
+        suites[0] = main_job(SKIPPED_SUITES[0], "failure", 20)
+    return [main_job("nightly-skip", "skipped"), main_job("scope", "success")] + suites
+
+
+def pr_run(id_, conclusion, tree):
+    """A pull-request run of `tree`, on the pull request's own head."""
+    return main_run(id_, conclusion, event="pull_request", path=CHECKS_PATH, sha=PR_HEAD, tree=tree)
+
+
+class SkippedPushRun(unittest.TestCase):
+    """decision no-merge-onto-red-main: a skipped push run reads green only with a green pull-request run of its own tree. Otherwise the gate
+    reads the newest run on main that ran its suites, and a run that ran them keeps today's verdict. base_state is the read the gate uses."""
+    def read(self, runs, jobs, pr_runs=()):
+        """-> (verdict, detail) of main's runs and their jobs. `pr_runs`: the pull-request runs the read is served; none when empty."""
+        host = MainRunsHost("co", "other", runs, jobs, pr_runs=list(pr_runs))
+        return host.base_state("main", [CHECKS_PATH])
+
+    def test_a_skipped_push_run_reads_green_with_a_green_pull_request_run_of_its_tree(self):
+        runs = [main_run(2002, "success", tree=TREE_PUSHED, path=CHECKS_PATH), main_run(2001, "failure", tree=TREE_EARLIER, path=CHECKS_PATH)]
+        jobs = {2002: skipped_suites_jobs(), 2001: ran_suites_jobs("failure"), 3001: ran_suites_jobs()}
+        verdict, detail = self.read(runs, jobs, [pr_run(3001, "success", TREE_PUSHED)])
+        self.assertEqual(verdict, "green", f"a skipped push run with a green pull-request run of its own tree must read green, not {verdict}: {detail}")
+
+    def test_a_green_pull_request_run_of_another_tree_does_not_clear_a_skipped_push_run(self):
+        runs = [main_run(2002, "success", tree=TREE_PUSHED, path=CHECKS_PATH), main_run(2001, "failure", tree=TREE_EARLIER, path=CHECKS_PATH)]
+        jobs = {2002: skipped_suites_jobs(), 2001: ran_suites_jobs("failure"), 3001: ran_suites_jobs()}
+        verdict, detail = self.read(runs, jobs, [pr_run(3001, "success", TREE_OTHER)])
+        self.assertEqual(verdict, "red", f"a pull-request run of another tree does not cover a skipped push run, so the read must walk back, not read {verdict}: {detail}")
+        self.assertIn("run 2001 ", detail, "the red read must name the older run that ran its suites")
+
+    def test_a_skipped_push_run_without_a_pull_request_run_reads_the_red_run_that_ran_its_suites(self):
+        runs = [main_run(2002, "success", tree=TREE_PUSHED, path=CHECKS_PATH), main_run(2001, "failure", tree=TREE_EARLIER, path=CHECKS_PATH)]
+        jobs = {2002: skipped_suites_jobs(), 2001: ran_suites_jobs("failure")}
+        verdict, detail = self.read(runs, jobs)
+        self.assertEqual(verdict, "red", f"a skipped push run with no pull-request run of its tree must walk back to the red run that ran its suites, not read {verdict}: {detail}")
+        self.assertIn("run 2001 ", detail, "the red read must name the older run that ran its suites")
+
+    def test_a_skipped_push_run_without_a_pull_request_run_reads_the_green_run_that_ran_its_suites(self):
+        runs = [main_run(2002, "success", tree=TREE_PUSHED, path=CHECKS_PATH), main_run(2001, "success", tree=TREE_EARLIER, path=CHECKS_PATH)]
+        jobs = {2002: skipped_suites_jobs(), 2001: ran_suites_jobs()}
+        verdict, detail = self.read(runs, jobs)
+        self.assertEqual(verdict, "green", f"a skipped push run with no pull-request run of its tree must walk back to the green run that ran its suites, not read {verdict}: {detail}")
+
+    def test_a_skipped_push_run_with_no_earlier_run_that_ran_its_suites_is_unknown_not_green(self):
+        runs = [main_run(2100 - i, "success", tree=f"{2100 - i:040x}", path=CHECKS_PATH) for i in range(PAGE_RUNS)]  # a full page, every run skipped
+        jobs = {r["id"]: skipped_suites_jobs() for r in runs}
+        verdict, detail = self.read(runs, jobs)
+        self.assertEqual(verdict, "unknown", f"no run on the page ran its suites, so main is unknown, never green: got {verdict}: {detail}")
+
+    def test_a_push_run_that_ran_its_suites_and_passed_reads_green_as_before(self):
+        runs = [main_run(2001, "success", tree=TREE_PUSHED, path=CHECKS_PATH), main_run(2000, "failure", tree=TREE_EARLIER, path=CHECKS_PATH)]
+        jobs = {2001: ran_suites_jobs(), 2000: ran_suites_jobs("failure")}
+        verdict, detail = self.read(runs, jobs)
+        self.assertEqual(verdict, "green", f"a push run that ran its suites and passed keeps its green verdict, not {verdict}: {detail}")
+
+    def test_a_push_run_that_ran_its_suites_and_failed_reads_red_as_before(self):
+        runs = [main_run(2001, "failure", tree=TREE_PUSHED, path=CHECKS_PATH), main_run(2000, "success", tree=TREE_EARLIER, path=CHECKS_PATH)]
+        jobs = {2001: ran_suites_jobs("failure"), 2000: ran_suites_jobs()}
+        verdict, detail = self.read(runs, jobs)
+        self.assertEqual(verdict, "red", f"a push run that ran its suites and failed keeps its red verdict, not {verdict}: {detail}")
+        self.assertIn("run 2001 ", detail, "the red read must name the push run that ran its suites")
+
 
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
