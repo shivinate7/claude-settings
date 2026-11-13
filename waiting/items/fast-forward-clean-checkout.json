@@ -10,7 +10,7 @@
       "gain": "Matches your ask.",
       "how": "No change; the running guard fix covers the harm.",
       "id": "report-only",
-      "key": "a",
+      "key": "k",
       "label": "Keep reporting only (recommended)",
       "lose": "Other stale reads remain."
     },
@@ -18,13 +18,13 @@
       "gain": "Fresher reads everywhere.",
       "how": "At start, a checkout with no changes and no commits of its own moves to the newest main.",
       "id": "fast-forward",
-      "key": "b",
+      "key": "l",
       "label": "Fast-forward clean checkouts",
       "lose": "Reverses your ask."
     }
   ],
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
-  "pick": "a",
+  "pick": "k",
   "ref": "retrospective 21:53 CST Nov 12; Degen report plans/degen-report-2026-11-12.md",
   "repo": "shivinate7/claude-settings",
   "short": "Fast-forward clean checkouts at start",

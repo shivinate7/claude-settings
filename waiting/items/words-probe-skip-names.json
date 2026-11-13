@@ -10,7 +10,7 @@
       "gain": "Matches your ruling.",
       "how": "The probe reports added lines only, as the check does. Already filed.",
       "id": "keep-reading",
-      "key": "a",
+      "key": "c",
       "label": "Keep reading them; report only what the check flags (recommended)",
       "lose": "None known."
     },
@@ -18,13 +18,13 @@
       "gain": "Fewer hits.",
       "how": "The probe ignores slugs and code names.",
       "id": "skip-names",
-      "key": "b",
+      "key": "d",
       "label": "Also skip slugs and code names",
       "lose": "An ad-hoc word inside a slug slips by."
     }
   ],
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
-  "pick": "a",
+  "pick": "c",
   "ref": "retrospective 21:53 CST Nov 12; Degen report plans/degen-report-2026-11-12.md",
   "repo": "shivinate7/claude-settings",
   "short": "Words probe skips slugs and names",

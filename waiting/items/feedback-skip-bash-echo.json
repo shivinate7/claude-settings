@@ -10,7 +10,7 @@
       "gain": "Fewer blocked turns.",
       "how": "The feedback guard skips a message that is only the echo of a command you ran.",
       "id": "skip-echoes",
-      "key": "a",
+      "key": "m",
       "label": "Skip command echoes only (recommended)",
       "lose": "None known; they are your own commands."
     },
@@ -18,7 +18,7 @@
       "gain": "Fewer items.",
       "how": "As a, plus one item may cover several messages in a row.",
       "id": "skip-and-group",
-      "key": "b",
+      "key": "n",
       "label": "Also let one item cover a run of messages",
       "lose": "A ruling inside a run can hide."
     },
@@ -26,13 +26,13 @@
       "gain": "No change.",
       "how": "No change.",
       "id": "keep",
-      "key": "c",
+      "key": "o",
       "label": "Keep logging every message",
       "lose": "Blocked turns go on."
     }
   ],
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
-  "pick": "a",
+  "pick": "m",
   "ref": "retrospective 21:53 CST Nov 12; Degen report plans/degen-report-2026-11-12.md",
   "repo": "shivinate7/claude-settings",
   "short": "Feedback log skips command echoes",

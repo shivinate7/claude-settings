@@ -10,7 +10,7 @@
       "gain": "A real test of the fix, with nothing lost.",
       "how": "A Mac session installs the runtime and creates the device. The skill's device names move only after it proves out.",
       "id": "install-27-2",
-      "key": "a",
+      "key": "i",
       "label": "Install 27.2 and make a new Duo beside the old (recommended)",
       "lose": "Download time and disk on your Mac."
     },
@@ -18,13 +18,13 @@
       "gain": "No change on your Mac.",
       "how": "No change.",
       "id": "wait",
-      "key": "b",
+      "key": "j",
       "label": "Wait",
       "lose": "The crashes go on."
     }
   ],
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
-  "pick": "a",
+  "pick": "i",
   "ref": "retrospective 21:53 CST Nov 12; Degen report plans/degen-report-2026-11-12.md",
   "repo": "shivinate7/claude-settings",
   "short": "iOS 27.2 runtime and a new Duo",
