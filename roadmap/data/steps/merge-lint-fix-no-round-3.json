@@ -1,7 +1,7 @@
 {
  "id": "merge-lint-fix-no-round-3",
  "title": "merge --reviewed stops owing round 3 after a lint-only fix that follows a round-1 PASS (guard or check change)",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -10,5 +10,5 @@
  "why": "Owner 13:21 CST Nov 13, item 741 a (ruling own-741-a-lint-fix-no-r3). On PR #3185 the tool still said it owed the final round after lint-only edits.",
  "source": "owner 741 a; coordinator 13:24 CST Nov 13 asked whether the tool needs a change",
  "note": "Todo. Yes, a tool change: the merge tool counts any fix check as a fixed change (item 741 context, coordinator report on #3185). It must treat a fix check whose edits only fix lint, with no finding fixed, as not fixed, so a change that passed round 1 is done. Open: how the tool tells a lint-only fix from a finding fix. Hold the start until the retrospective answers the owner's wider question (does every change skip round 3 once a round passes it?), since the answer may widen this step. A guard or check change: test-author red cases first, builder, reviewer. Related: rounds-rules-one-record. Retrospective 13:24 CST answered the owner's wider question: every change is done at the first round it passes; the one exception is a guard or check change that failed a round and was fixed, which still waits for round 3. A lint-only fix after a round-1 PASS is not that case, so the tool change stands and the hold on starting it is lifted. Flag: the retrospective says round 3 still runs the net-value test for that exception, but R9 limits the net-value test to an unclear case that cannot finish; #2888 (batch 137) is to fix the CLAUDE.md wording. Related question, runner 10 via coordinator 13:30 CST Nov 13: the tool also counts a catch-up merge of main as a fix, so guard PRs #3111, #2783 and #3023 owe round 3 though their own diff is unchanged. Page item 750 asks the owner (recommended: exempt it). If he picks a, it joins this step. Past rulings (R9, items 613, 741 a, 401 a) do not name a merge of main.",
- "updatedAt": "2026-11-13T13:30:10-06:00"
+ "updatedAt": "2026-11-13T13:31:04-06:00"
 }

@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Coordinator 12:17 CST Nov 13: page item 729 option a (one CI skip form for every repo) was flagged as widening a shared tool.",
  "source": "coordinator 12:17 CST Nov 13",
- "note": "Todo. The guard reads a shared form that every repo takes as \"a second form\". The coordinator thinks it is a false alarm. Until judged, item 729 a carries the widens label and is not recommended. Read the guard record (verification-cry-wolf-guard-is-spent) before changing it. Owner 12:20 CST Nov 13 (coordinator relay): \"im pretty sure that flag is gonna go away properly as soon as the merges from batch runner occurs\". Parked. After batches 137 and 135 merge, re-run the flag on item 729's wording. Clears: close this note. Still fires: it becomes a debt with that run as its incident.",
- "updatedAt": "2026-11-13T12:22:06-06:00"
+ "note": "Todo. The guard reads a shared form that every repo takes as \"a second form\". The coordinator thinks it is a false alarm. Until judged, item 729 a carries the widens label and is not recommended. Read the guard record (verification-cry-wolf-guard-is-spent) before changing it. Owner 12:20 CST Nov 13 (coordinator relay): \"im pretty sure that flag is gonna go away properly as soon as the merges from batch runner occurs\". Parked. After batches 137 and 135 merge, re-run the flag on item 729's wording. Clears: close this note. Still fires: it becomes a debt with that run as its incident. Another sighting 13:31 CST Nov 13: item 750 (a catch-up merge exemption) got the widening label on option a, though a changes the rule for every repo, not a per-repo exception (runner 10 and the coordinator, 13:31). Item 750 is withdrawn, but the pattern matches item 729.",
+ "updatedAt": "2026-11-13T13:31:04-06:00"
 }
