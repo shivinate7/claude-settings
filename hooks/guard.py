@@ -3893,7 +3893,7 @@ LOAD_BUSY_REASON = "the machine is busy (%s). %s " + LOAD_CITE
 LOAD_BUSY_REMEDY = "Remedy: "
 LOAD_BUSY_AGENT_FORM = ", or make this an Agent call that leaves run_in_background out or sets it false"
 LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
-LOAD_FULL_REASON = "the machine is full (%s). No new lane or agent starts until the load drops. Remedy: A lane session ends its turn now and waits for the load to drop. Any other session waits with `bin/wait-until <time>` until the load drops, then retries. " + LOAD_CITE
+LOAD_FULL_REASON = "the machine is full (%s). No new lane or agent starts until the load drops. Remedy: A lane ends its turn now and waits for the load to drop. Any other session waits with `bin/wait-until <time>` until the load drops, then retries. " + LOAD_CITE
 
 
 def _read_memory():
