@@ -183,6 +183,7 @@ default_branch="${default_branch#origin/}"
 # exits. It is bounded by git's own run (an ls-remote, or a fetch of one or two refs) and is never a daemon. No other
 # timer. The hook itself keeps no file; that late git writes only its own refs, objects and FETCH_HEAD.
 gm_unref=""
+gm_differs=""
 gm_remote_read=""
 gm_default="$default_branch"
 if (cd "$toplevel" 2>/dev/null && git remote 2>/dev/null | grep -qx origin); then
@@ -231,10 +232,12 @@ if [ -n "$gm_out" ]; then
     gm_note=""
     [ -n "$gm_unref" ] && gm_note="; $gm_ref is unrefreshed"
     if [ "$gm_head1" != "$gm_ref1" ]; then
+      gm_differs=1
       printf 'checkout %s: CLAUDE.md differs from %s at %.12s; read the standing grants with git show %s:CLAUDE.md%s\n' \
         "$toplevel" "$gm_ref" "$gm_tip" "$gm_ref" "$gm_note"
     fi
     if [ "$gm_head2" != "$gm_ref2" ]; then
+      gm_differs=1
       printf 'checkout %s: .claude/CLAUDE.md differs from %s at %.12s; read the standing grants with git show %s:.claude/CLAUDE.md%s\n' \
         "$toplevel" "$gm_ref" "$gm_tip" "$gm_ref" "$gm_note"
     fi
@@ -252,8 +255,8 @@ fi
 # agent worktree is another session's, so it is never moved. The live pin is skipped: merge-reinstalls-from-main owns it.
 # Up to date, or ahead only: no line (the later ahead check covers that). The default is $gm_default, the branch the
 # refresh fetched, so no second fetch runs. A merge that fails says so and leaves git's own state.
-# Cost: one git rev-list per startup start, plus one git rev-parse for the in-progress files when the checkout is
-# behind, plus (only when it moves) two git rev-parse and one git merge. All local, no network, no file written by the
+# Cost: one git rev-list per startup start, plus one git rev-parse for the in-progress files and one git diff for the
+# added paths when the checkout is behind, plus (only when it moves) two git rev-parse and one git merge. All local, no network, no file written by the
 # hook; the merge writes the working tree, index and HEAD of this checkout only.
 ff_done=""
 if [ "$source" = startup ] && [ "${gm_fetch_rc:-1}" -eq 0 ] 2>/dev/null && [ -n "$gm_default" ]; then
@@ -289,6 +292,12 @@ EOF
             ff_reason="uncommitted changes"
           elif [ "$ff_ahead" -gt 0 ] 2>/dev/null; then
             ff_reason="diverged"
+          else
+            # A file the move adds that already exists is an ignored one (a non-ignored one made the tree dirty above);
+            # git would overwrite it, so the move does not run.
+            ff_hit=$(cd "$toplevel" 2>/dev/null && git diff -z --name-only --diff-filter=A HEAD "origin/$gm_default" 2>/dev/null \
+              | tr '\0' '\n' | while IFS= read -r ff_p; do if [ -e "$ff_p" ] || [ -L "$ff_p" ]; then echo 1; break; fi; done)
+            [ -n "$ff_hit" ] && ff_reason="an ignored file is in the way"
           fi
         fi
       fi
@@ -298,7 +307,10 @@ EOF
         ff_old=$(cd "$toplevel" 2>/dev/null && git rev-parse --short=12 HEAD 2>/dev/null)
         ff_new=$(cd "$toplevel" 2>/dev/null && git rev-parse --short=12 "origin/$gm_default" 2>/dev/null)
         if (cd "$toplevel" 2>/dev/null && git merge --ff-only --quiet "origin/$gm_default" >/dev/null 2>&1); then
-          printf 'checkout %s: fast-forwarded %s %s -> %s, %s commits\n' "$toplevel" "$branch" "$ff_old" "$ff_new" "$ff_behind"
+          ff_note=""
+          # The grant lines printed above compared the old files; after the move they match origin's.
+          [ -n "$gm_differs" ] && ff_note="; the grant lines above are now current"
+          printf 'checkout %s: fast-forwarded %s %s -> %s, %s commits%s\n' "$toplevel" "$branch" "$ff_old" "$ff_new" "$ff_behind" "$ff_note"
           ff_done=1
         else
           printf 'checkout %s: not fast-forwarded, the merge failed\n' "$toplevel"
