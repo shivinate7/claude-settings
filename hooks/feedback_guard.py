@@ -116,8 +116,11 @@ a turn end in these cases:
     shell run (Bash or PowerShell) of export_page.py printed a line `same`, or `<page id>: same`
     under --all, anywhere in its output. No commit on the folder at all counts as older. This session is the writer when the newest
     meta/page get names the hook's session id or the id the remote env names (override.remote_session_id). A
-    writer named there decides alone. Only when none is named does an interpreter run of export_page.py
-    (EXPORT_RUN) before the write make this session the writer. A session that is not the writer, or whose
+    writer named there decides alone. When none is named, this session is the writer when the extras key
+    layout.page_writer_key equals the hook's session id or the remote id, or when an interpreter run of
+    export_page.py (EXPORT_RUN) comes before the newest exported write to any artifact or the newest page wake. The
+    key names a writer and never exempts one. A wake (a Send's banner) counts only when its `Artifact:` url is the
+    waiting page's. A session that is not the writer, or whose
     writer cannot be told, passes with no note: receipts and answers are not its to export. Incident: the waiting/ copy of
     the roadmap went stale from 06:41 to 19:04 CST on Nov 5 while the page took items 261 to 271. Harm: a lost
     or moved page then loses those items (decision waiting-data-in-repo). The reason names export_page.py and
@@ -921,7 +924,8 @@ def grant_problem(b, text, items):
     return "the message at %s (%s) holds a grant word and has no home for it: add %s" % (b["stamp"], head, GRANT_HOMES)
 
 
-PAGE_BANNER = re.compile(r"\[Artifact comment sent to Claude\]\s*\nArtifact:[ \t]*(\S+)")  # a block's start, and its page
+WAKE_HEADER = "[Artifact comment sent to Claude]"  # the banner a Send opens its turn with
+PAGE_BANNER = re.compile(re.escape(WAKE_HEADER) + r"\s*\nArtifact:[ \t]*(\S+)")  # a block's start, and its page
 PAGE_QUOTE = re.compile(r"^=== BEGIN ARTIFACT COMMENT (\S+) ===\n(.*?)\n=== END ARTIFACT COMMENT \1 ===", re.M | re.S)
 SAVED_WAKE = "Saved on the waiting page"
 UNDONE_WAKE = "Undone on the waiting page"  # page.html builds it with a tail, so its items carry no note
@@ -1294,14 +1298,20 @@ def _exported_write(inp, collections):
 
 
 def _scan_transcript(records, collections):
-    """(writes, exports, results) of the non-sidechain records. `writes` is [(epoch, id, url)] for each
+    """(writes, exports, results, wakes) of the non-sidechain records. `writes` is [(epoch, id, url)] for each
     ArtifactData write of an exported collection; `exports` is [(epoch, id)] for each shell call naming
-    export_page.py; `results` maps a tool_use id to (is_error, the non-blank lines of its tool_result)."""
-    writes, exports, results = [], [], {}
+    export_page.py; `results` maps a tool_use id to (is_error, the non-blank lines of its tool_result); `wakes`
+    is [(epoch, url)] for each user record whose text begins with the PAGE_BANNER (a Send on a page), url being the
+    page its `Artifact:` line names. A banner with no such line is no wake."""
+    writes, exports, results, wakes = [], [], {}, []
     for rec in records:
         if rec.get("isSidechain"):
             continue
         when = _ts(rec)
+        text = _transcript.owner_text(rec)
+        banner = PAGE_BANNER.match(text.lstrip()) if text is not None else None
+        if when is not None and banner is not None:
+            wakes.append((when, banner.group(1)))
         for use in _transcript.tool_uses(rec):
             inp, name = use.get("input"), str(use.get("name", ""))
             if not isinstance(inp, dict) or when is None:
@@ -1314,7 +1324,7 @@ def _scan_transcript(records, collections):
         for block in _transcript.tool_results(rec):
             lines = [ln.strip() for ln in _transcript.result_text(block).splitlines() if ln.strip()]
             results[block.get("tool_use_id")] = (bool(block.get("is_error")), lines)
-    return writes, exports, results
+    return writes, exports, results, wakes
 
 
 def _cleared(exports, results, newest, page_id):
@@ -1331,40 +1341,51 @@ def _cleared(exports, results, newest, page_id):
 
 def export_check(cwd, transcript_path, session_id):
     """(reason, note) of the export check (roadmap step waiting-export-check). `reason` is the block text
-    when this session is the page writer and the transcript holds a successful ArtifactData write of an
-    exported collection to the repo's waiting page that is newer than the newest commit on origin/<record
-    branch> touching the waiting copy folder, and no later shell run of export_page.py cleared it (a line
-    `same`, or `<page id>: same` under --all, anywhere in its output). This session is the writer when the newest meta/page get names
-    `session_id` or the id the remote env names (override.remote_session_id). A writer named there decides
-    alone. Only when none is named does an interpreter run of export_page.py (EXPORT_RUN) before the write
-    make this session the writer. A session that is not the writer, or whose writer cannot be told, passes
-    with no note. `note` is the systemMessage text only after a page write was found and a read of the repo
+    when this session is the page writer and the transcript holds a page write or a page wake (below) that is
+    newer than the newest commit on origin/<record branch> touching the waiting copy folder, and no later shell
+    run of export_page.py cleared it (a line `same`, or `<page id>: same` under --all, anywhere in its output).
+    A page write is a successful ArtifactData write of an exported collection to the repo's waiting page. This
+    session is the writer when the newest meta/page get names `session_id` or the id the remote env names
+    (override.remote_session_id). A writer named there decides alone. Only when none is named does the extras key
+    or an interpreter run of export_page.py (EXPORT_RUN), as the last sentence says, make this session the
+    writer. A session that is not the writer, or whose writer cannot be told, passes
+    with no note. `note` is the systemMessage text only after a page write or a wake was found and a read of the repo
     or the layout failed: that is never a block. A transcript that cannot be read gives neither. The whole
-    transcript is read and timestamps decide, so a write in an earlier turn still counts."""
+    transcript is read and timestamps decide, so a write in an earlier turn still counts. A wake (a user record
+    whose text begins with PAGE_BANNER: a Send on a page) counts as a page write at its time when its `Artifact:`
+    url is the waiting page's (layout.is_waiting_page_url), so each Send's wake ends with an export. With no writer
+    named in the transcript, an extras key layout.page_writer_key that names this session makes it the writer, and
+    the export run before the newest exported write (any artifact) or page wake makes it the writer whatever the key
+    names."""
     try:
         records = _transcript.read_transcript(transcript_path)
         import layout
     except (OSError, TypeError, ValueError, ImportError):
         return None, None  # no transcript to read (a hook run with none is normal), or no layout
-    writes, exports, results = _scan_transcript(records, layout.WAITING_COLLECTIONS)
+    writes, exports, results, wakes = _scan_transcript(records, layout.WAITING_COLLECTIONS)
     writes = [w for w in writes if w[1] in results and not results[w[1]][0]]
-    if not writes:
-        return None, None  # nothing is read from the repo before a write is found
+    if not writes and not wakes:
+        return None, None  # nothing is read from the repo before a write or a wake is found
     writer = _transcript.page_writer_id(records)
-    if writer:
-        is_writer = writer in (session_id, override.remote_session_id())
-    else:
-        is_writer = any(e[0] < max(w[0] for w in writes) for e in exports)
-    if not is_writer:
+    if writer and writer not in (session_id, override.remote_session_id()):
         return None, None  # receipts and answers are not this session's to export
     try:
         root = Homes(cwd)._cwd_root()
         if root is None:
             return None, None
-        is_page = {url: layout.is_waiting_page_url(root, url) for url in {w[2] for w in writes}}
-        wrote = [w[0] for w in writes if is_page[w[2]]]
+        is_page = {url: layout.is_waiting_page_url(root, url) for url in {w[2] for w in writes} | {w[1] for w in wakes}}
+        page_wakes = [w[0] for w in wakes if is_page[w[1]]]
+        wrote = [w[0] for w in writes if is_page[w[2]]] + page_wakes
         if not wrote:
             return None, None
+        if not writer:
+            # The key can only add this session as writer: an export run before the newest exported write to any
+            # artifact, or before a page wake, makes this session the writer whatever the key names.
+            clock = max([w[0] for w in writes] + page_wakes)
+            key = layout.page_writer_key(root)
+            mine = bool(key) and key in (session_id, override.remote_session_id())
+            if not mine and not any(e[0] < clock for e in exports):
+                return None, None
         newest = max(wrote)
         waiting = [e for e in layout.artifacts(root) if e["role"] == layout.WAITING_ROLE]
         if _cleared(exports, results, newest, waiting[0]["id"] if waiting else ""):
