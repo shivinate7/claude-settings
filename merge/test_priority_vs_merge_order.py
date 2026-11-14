@@ -7,8 +7,9 @@ Run: python3 merge/test_priority_vs_merge_order.py
 WHAT IT PROVES. With FILE, the confirm reads each priority row with priority_row and priority_verdict. It refuses to merge PR N when N is
 not a row's own PR and some row's PR is ok (ready, clean, newest runs green), and it names that row's slug and PR. Otherwise it merges
 and prints one line that says why: a row is flag, waiting or unknown. With no FILE it prints that nothing was checked. An empty or
-missing FILE is not clear, and its line says so. A refusal lands nothing: no merge, no claim on main, no lock held, no ref moved. A
-priority pull request costs at most two reads per run, and its runs only when its verdict needs them.
+missing FILE is not clear, and its line says so. A row the reader cannot parse refuses too, and the refusal says it cannot be read. A
+refusal lands nothing: no merge, no claim on main, no lock held, no ref moved. A priority pull request costs at most two reads per run,
+and its runs only when its verdict needs them.
 
 Each case runs the real --confirm flow in-process on the fixture of merge/test_merge.py (Env, FakeHost), imported and not copied.
 PriorityHost scripts the reads of the priority pull requests. The verdict is merge.Host.judge_runs itself.
@@ -19,6 +20,7 @@ import pathlib
 import re
 import sys
 import unittest
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -30,11 +32,14 @@ SLUG = "ci-speed-stack-4"  # the row of the #3302 sequence
 OTHER_SLUG = "ci-speed-stack-5"
 ROW_3302 = "priority: %s | pr: %s#3302\n" % (SLUG, REPO)
 ROW_3303 = "priority: %s | pr: %s#3303\n" % (OTHER_SLUG, REPO)
+BRANCH_ROW = "priority: %s | branch: feat-3302\n" % SLUG  # the same pull request, named by its head branch
+MALFORMED_SLUG = "ci-speed"  # its pr has no owner/repo, so no row reads it
+MALFORMED_ROW = "priority: %s | pr: #3302\n" % MALFORMED_SLUG
 LOWER = 3314  # the combined PR the runner merges first
 HEAD_3302, HEAD_3303 = "a" * 40, "c" * 40
 NO_ROWS_LINE = "priority: no rows given, not checked"
 NOT_CLEAR = re.compile(r"(?<!not )\bclear\b")
-USAGE = "usage:"  # argparse's first line when it refuses; the old parser refuses --priority-rows with a PR number
+USAGE = "usage:"  # argparse's first line; it prints that line when it refuses the flags, and then no check runs
 VERDICT_START = re.compile(r"\s*(ok|flag|waiting|done|unknown)\b")  # a row's verdict line starts with its verdict
 
 
@@ -62,18 +67,23 @@ def words(line):
 
 class PriorityHost(tm.FakeHost):
     """The fake host with each priority pull request's reads scripted. `prio` maps a number to its pr() fields, `prio_runs` a head sha to
-    its run rows, `prio_fail` holds the numbers whose pull request read fails. Each read is logged in `reads`: `pr N`, `runs <sha>`."""
+    its run rows, `prio_fail` holds the numbers whose pull request read fails, and `prio_error` maps a number to the exception its read
+    raises. `prio_open`, when set, is the open pull list a branch row reads; unset, the fake's own list is read. Each read is logged in
+    `reads`: `pr N`, `runs <sha>`, `open_prs`."""
     repo = REPO
     judge_runs = staticmethod(merge.Host.judge_runs)  # the real judge, bound and not copied
 
     def __init__(self, root, other):
         super().__init__(root, other)
         self.reads, self.prio, self.prio_runs, self.prio_fail = [], {}, {}, set()
+        self.prio_error, self.prio_open = {}, None
 
     def pr(self, n):
         self.reads.append(f"pr {n}")
         if n in self.prio_fail:
             raise merge.Stop(f"reading the pull request failed: HTTP 404: Not Found (#{n})")
+        if n in self.prio_error:
+            raise self.prio_error[n]
         if n in self.prio:
             return dict(self.prio[n])
         return super().pr(n)
@@ -81,6 +91,10 @@ class PriorityHost(tm.FakeHost):
     def runs(self, sha):
         self.reads.append(f"runs {sha}")
         return list(self.prio_runs.get(sha, []))
+
+    def open_prs(self):
+        self.reads.append("open_prs")
+        return super().open_prs() if self.prio_open is None else list(self.prio_open)
 
 
 class PriorityBeforeMerge(tm.Env):
@@ -98,7 +112,7 @@ class PriorityBeforeMerge(tm.Env):
         return self.run_args(str(pr), "--confirm", "--priority-rows", str(self.rows))
 
     def assert_reached_check(self, out, err):
-        """Scope first: the flags reached the check. The old parser refuses --priority-rows with a PR number and prints its usage line."""
+        """Scope first: the flags reached the check. A usage line means argparse refused them, so no priority check ran."""
         last = (err.strip().splitlines() or [""])[-1]  # the parser's error line, not its usage block
         self.assertFalse(USAGE in err, "the parser refuses --priority-rows with a PR number, so no priority check ran: " + last)
 
@@ -133,6 +147,11 @@ class PriorityBeforeMerge(tm.Env):
                         "an empty or missing FILE must say it is not clear: " + out + err)
         for line in lines:
             self.assertIsNone(NOT_CLEAR.search(line), "the line reads as clear: " + line)
+
+    def assert_cannot_be_read(self, out, err):
+        """A row the reader cannot parse: the refusal says the row cannot be read, and that nothing is clear."""
+        self.assertIn("cannot be read", out + err, "a row the reader cannot parse must say it cannot be read: " + out + err)
+        self.assertIn("not clear", out + err, "a row the reader cannot parse must say it is not clear: " + out + err)
 
     def lower_goes_with(self, info, runs, status, why):
         """Priority PR 3302 reads as `info`, with `runs` on its head. The lower PR goes, and the row's line says `status` and `why`."""
@@ -231,8 +250,12 @@ class PriorityBeforeMerge(tm.Env):
     def test_merging_row_pr_3302_passes_while_row_3303_is_ok(self):
         self.both_rows_ok_merge(3302)
 
-    def test_merging_row_pr_3303_passes_while_row_3302_is_ok(self):
+    def test_rows_carry_no_rank_the_second_listed_row_passes_past_an_ok_row(self):
+        """Rows carry no rank: a row's own pull request goes while another row reads ok, and no other row is read for it."""
         self.both_rows_ok_merge(3303)
+        for n, reads in enumerate(self.run_reads, 1):
+            for read in ("pr 3302", "runs " + HEAD_3302):
+                self.assertNotIn(read, reads, "run %d read %r, but a row's own pull request reads no other row" % (n, read))
 
     def test_a_ready_priority_pr_costs_at_most_two_reads_per_run(self):
         self.host.prio[3302] = pr_fields(HEAD_3302)
@@ -281,6 +304,35 @@ class PriorityBeforeMerge(tm.Env):
         self.refusal_names(out, err, SLUG, "#3302")
         self.assert_refused_lands_nothing(rc, refs0, claims0)
 
+    # A row the reader cannot parse refuses the merge: the check cannot tell which row is ready, so it says so and merges nothing.
+
+    def test_a_malformed_row_refuses_the_merge_and_says_it_cannot_be_read(self):
+        refs0, claims0 = self.refs(), self.claims()
+        rc, out, err = self.confirm(LOWER, MALFORMED_ROW)
+        self.assert_reached_check(out, err)
+        self.assertNotEqual(rc, 0, "a row the reader cannot parse must refuse the merge: " + out + err)
+        self.assert_refused_lands_nothing(rc, refs0, claims0)
+        self.refusal_names(out, err, MALFORMED_SLUG, "#3302")
+        self.assert_cannot_be_read(out, err)
+
+    def test_a_rows_file_with_no_priority_row_refuses_as_not_clear(self):
+        refs0, claims0 = self.refs(), self.claims()
+        rc, out, err = self.confirm(LOWER, "notes for the wake, with no row in them\n")
+        self.assert_reached_check(out, err)
+        self.assertNotEqual(rc, 0, "a rows file with no priority row must refuse the merge: " + out + err)
+        self.assert_refused_lands_nothing(rc, refs0, claims0)
+        self.assert_not_clear_line(out, err)
+
+    def test_a_mixed_rows_file_with_a_malformed_row_refuses_though_no_row_is_ready(self):
+        self.host.prio[3280] = pr_fields("e" * 40, branch="feat-3280", state="MERGED")  # step-done reads done, not ok
+        refs0, claims0 = self.refs(), self.claims()
+        rc, out, err = self.confirm(LOWER, "priority: step-done | pr: %s#3280\n" % REPO + MALFORMED_ROW)
+        self.assert_reached_check(out, err)
+        self.assertNotEqual(rc, 0, "a malformed row must refuse the merge even with no ready row: " + out + err)
+        self.assert_refused_lands_nothing(rc, refs0, claims0)
+        self.refusal_names(out, err, MALFORMED_SLUG, "#3302")
+        self.assert_cannot_be_read(out, err)
+
     # Controls: these pass on the old code too, and show that the fixture means what each case says.
 
     def test_control_the_standing_reader_reads_the_3302_row_ok(self):
@@ -296,6 +348,43 @@ class PriorityBeforeMerge(tm.Env):
     def test_control_a_plain_confirm_of_a_ready_pr_merges(self):
         rc, out, err = self.run_args(str(LOWER), "--confirm", host=self.host)
         self.assert_merged(rc, out, err)
+
+    def test_control_a_network_error_on_a_priority_pr_read_is_unknown_and_the_lower_pr_goes(self):
+        """Any error from the read is caught, not only a Stop: the row reads unknown, says why, and does not block the merge."""
+        self.host.prio_error[3302] = ConnectionError("network unreachable")
+        rc, out, err = self.confirm(LOWER, ROW_3302)
+        self.assert_reached_check(out, err)
+        line = self.line_with(out, err, SLUG)  # an unread PR has no number on its line
+        self.assertIn("unknown", words(line), "want unknown on the row's line: " + line)
+        self.assertIn("network unreachable", line, "the line says why the read failed: " + line)
+        self.assertNotIn("ok", words(line), "unknown must never read as ok: " + line)
+        self.assertIsNone(NOT_CLEAR.search(line), "the row's line reads as clear: " + line)
+        self.assert_merged(rc, out, err)
+
+    def script_ready_branch_row(self):
+        """Branch feat-3302 is one open pull request, #3302, ready and green: the branch row names it."""
+        info = pr_fields(HEAD_3302, branch="feat-3302")
+        self.host.prio[3302] = info
+        self.host.prio_open = [(3302, info)]
+        self.host.prio_runs[HEAD_3302] = green(HEAD_3302)
+
+    def test_control_a_ready_branch_row_refuses_a_lower_pr_and_names_the_row(self):
+        self.script_ready_branch_row()
+        refs0, claims0 = self.refs(), self.claims()
+        rc, out, err = self.confirm(LOWER, BRANCH_ROW)
+        self.assert_reached_check(out, err)
+        self.refusal_names(out, err, SLUG, "#3302")
+        self.assert_refused_lands_nothing(rc, refs0, claims0)
+
+    def test_control_the_stdin_form_refuses_a_lower_pr_for_a_ready_branch_row(self):
+        """One run only: a stdin that is read to the end cannot serve the second step of a passing confirm."""
+        self.script_ready_branch_row()
+        refs0, claims0 = self.refs(), self.claims()
+        with mock.patch.object(sys, "stdin", io.StringIO(BRANCH_ROW)):
+            rc, out, err = self.run_args(str(LOWER), "--confirm", "--priority-rows", "-")
+        self.assert_reached_check(out, err)
+        self.refusal_names(out, err, SLUG, "#3302")
+        self.assert_refused_lands_nothing(rc, refs0, claims0)
 
 
 if __name__ == "__main__":
