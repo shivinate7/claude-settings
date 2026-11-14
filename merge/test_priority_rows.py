@@ -7,8 +7,9 @@ WHAT IT PROVES. The command prints one line per row, then a summary, and exits 0
 A row names its pull request by `pr: owner/repo#N` or by `branch: name`. A row that names neither is flagged with no read.
 A closed pull request that did not merge is flagged, never done. A draft, a dirty head and a red newest run are flagged. A
 pending run is waiting. A read that fails, a row on another repo and a merge state GitHub has not computed are unknown, never
-ok. Cost: a pr: row makes two reads (its pull request and the runs on its head). A branch: row adds one shared read of the
-open pull requests per wake, read to its last page. A row with neither makes none. The mode writes nothing and takes no lock.
+ok. Cost: a pr: row makes at most two reads (its pull request, and the runs on its head only when the verdict needs them). A
+branch: row adds one shared read of the open pull requests per wake, read to its last page. A row with neither makes none.
+Malformed and non-priority lines are unknown; comment and blank lines are skipped. The mode writes nothing and takes no lock.
 
 Each case runs merge.py as a subprocess in a checkout whose origin is github.com/shivinate7/claude-settings, with a fake gh on
 PATH. The fake answers `gh api` reads and `gh run list` from a state file that the case writes. Its REST answers come from the
@@ -207,13 +208,16 @@ class PriorityRowsCli(unittest.TestCase):
         env["FAKE_GH_DIR"] = str(self.state_dir)
         return env
 
+    def run_mode(self, source, stdin_text=None):
+        """The mode on `source`, a path or `-` with `stdin_text`. -> (exit code, stdout, stderr)."""
+        done = subprocess.run([sys.executable, str(MERGE), "--priority-rows", source], cwd=str(self.repo), capture_output=True,
+                              text=True, env=self.env(), input=stdin_text, timeout=120)
+        return done.returncode, done.stdout, done.stderr
+
     def wake(self, rows, stdin=False):
         """One wake: the rows as a file, or on stdin when `stdin`. -> (exit code, stdout, stderr)."""
         self.rows_file.write_text(rows, encoding="utf-8")
-        done = subprocess.run([sys.executable, str(MERGE), "--priority-rows", "-" if stdin else str(self.rows_file)],
-                              cwd=str(self.repo), capture_output=True, text=True, env=self.env(),
-                              input=rows if stdin else None, timeout=120)
-        return done.returncode, done.stdout, done.stderr
+        return self.run_mode("-" if stdin else str(self.rows_file), rows if stdin else None)
 
     def calls(self):
         """The fake gh's calls of the last wake, one line each, oldest first."""
@@ -414,7 +418,7 @@ class PriorityRowsCli(unittest.TestCase):
         self.assertEqual(code, 0, "an ok row exits 0: " + err)
         self.assertEqual(self.paths().count(PULLS), 2, "101 open pull requests are two pages, read once each: %s" % self.paths())
 
-    def test_a_pr_row_costs_exactly_two_reads(self):
+    def test_an_open_clean_pr_row_costs_exactly_two_reads(self):
         self.put_pr(3302, SHA_A, runs=green(SHA_A), mergeable=True, mergeable_state="clean")
         code, out, err = self.wake(ROW_3302)
         self.row_line(out, err, SLUG)
@@ -422,7 +426,7 @@ class PriorityRowsCli(unittest.TestCase):
         paths = self.paths()
         self.assertEqual(paths.count(PULL_3302), 1, "one read of the pull request: %s" % paths)
         self.assertEqual(sum(p in RUN_READS for p in paths), 1, "one read of the runs on its head: %s" % paths)
-        self.assertEqual(len(paths), 2, "a pr row costs exactly two reads: %s" % paths)
+        self.assertEqual(len(paths), 2, "an open clean pr row costs exactly two reads: %s" % paths)
 
     def test_two_branch_rows_share_one_open_list_read_and_a_no_branch_row_reads_nothing(self):
         self.put_open((3302, SHA_A, "feat-x"), (3303, SHA_B, "feat-y"))
@@ -464,6 +468,93 @@ class PriorityRowsCli(unittest.TestCase):
                 path = os.path.join(base, name)
                 found[os.path.relpath(path, self.repo)] = pathlib.Path(path).read_bytes()
         return found
+
+    def test_another_repo_row_is_unknown_beside_a_local_pr_with_the_same_number(self):
+        self.put_pr(12, SHA_A, runs=green(SHA_A), mergeable=True, mergeable_state="clean")
+        code, out, err = self.wake("priority: other-repo-step | pr: someone/else#12\n")
+        line = self.row_line(out, err, "other-repo-step")
+        self.assert_unknown(line)
+        self.assertEqual(code, 1, "an unknown row exits 1: " + err)
+        reads = self.paths()
+        self.assertNotIn(REPO + "/pulls/12", reads, "the row names another repo's #12, so the local #12 is never read")
+        self.assertFalse(set(reads) & set(RUN_READS), "the local #12 gets no run read either: %s" % reads)
+
+    def test_a_ready_clean_head_with_no_run_is_unknown_never_ok(self):
+        self.put_pr(3302, SHA_A, runs=(), mergeable=True, mergeable_state="clean")
+        code, out, err = self.wake(ROW_3302)
+        line = self.row_line(out, err, SLUG)
+        self.assert_unknown(line)
+        self.assertEqual(code, 1, "an unknown row exits 1: " + err)
+
+    def test_a_behind_pr_is_flagged_behind_its_base(self):
+        self.put_pr(3302, SHA_A, runs=green(SHA_A), mergeable=True, mergeable_state="behind")
+        code, out, err = self.wake(ROW_3302)
+        line = self.row_line(out, err, SLUG)
+        self.assert_flag(line, "behind base")
+        self.assertEqual(code, 1, "a flagged row exits 1: " + err)
+
+    def test_no_rows_exits_one_and_says_no_rows(self):
+        cases = {"an empty file": "", "a file of comments and blank lines": "# nothing for this wake\n\n", "a missing file": None}
+        for name, text in cases.items():
+            with self.subTest(source=name):
+                if text is None:
+                    code, out, err = self.run_mode(str(pathlib.Path(self.tmp.name) / "missing.txt"))
+                else:
+                    self.rows_file.write_text(text, encoding="utf-8")
+                    code, out, err = self.run_mode(str(self.rows_file))
+                self.assertIn("no rows", out + err, "want the words no rows: " + out + err)
+                self.assertEqual(code, 1, "no rows exits 1, never clear: " + err)
+
+    def test_two_open_prs_on_one_branch_are_unknown_never_one_of_them(self):
+        self.put_open((41, SHA_A, "feat-x"), (42, SHA_B, "feat-x"))
+        self.put_pr(41, SHA_A, runs=green(SHA_A), mergeable=True, mergeable_state="clean")
+        self.put_pr(42, SHA_B, runs=green(SHA_B), mergeable=True, mergeable_state="clean")
+        code, out, err = self.wake("priority: %s | branch: feat-x\n" % SLUG)
+        line = self.row_line(out, err, SLUG)
+        self.assert_unknown(line)
+        self.assertEqual(code, 1, "an unknown row exits 1: " + err)
+
+    def test_a_malformed_pr_value_is_unknown_never_ok(self):
+        self.put_pr(3302, SHA_A, runs=green(SHA_A), mergeable=True, mergeable_state="clean")
+        for value in ("%s#3302x" % REPO, REPO, "3302", "%s#" % REPO):
+            with self.subTest(pr=value):
+                code, out, err = self.wake("priority: %s | pr: %s\n" % (SLUG, value))
+                line = self.row_line(out, err, SLUG)
+                self.assert_unknown(line)
+                self.assertEqual(code, 1, "an unknown row exits 1: " + err)
+
+    def test_a_line_without_the_priority_prefix_is_unknown(self):
+        self.put_pr(3302, SHA_A, runs=green(SHA_A), mergeable=True, mergeable_state="clean")
+        code, out, err = self.wake("%s | pr: %s#3302\n" % (SLUG, REPO))
+        line = self.row_line(out, err, SLUG)
+        self.assert_unknown(line)
+        self.assertEqual(code, 1, "an unknown row exits 1: " + err)
+
+    def test_comment_and_blank_lines_are_skipped_and_name_no_row(self):
+        self.put_pr(3302, SHA_A, runs=green(SHA_A), mergeable=True, mergeable_state="clean")
+        self.put_pr(9, SHA_B, runs=green(SHA_B), mergeable=True, mergeable_state="clean")
+        rows = ("# the owner's priorities for this wake\n"
+                "\n"
+                "   \n"
+                "# priority: old-step | pr: %s#9\n"
+                "priority: %s | pr: %s#3302\n") % (REPO, SLUG, REPO)
+        code, out, err = self.wake(rows)
+        line = self.row_line(out, err, SLUG)
+        self.assert_ok(line)
+        self.assertEqual(code, 0, "the one row is ok, so the wake exits 0: " + err)
+        self.assertIn("of 1 rows", out + err, "only the priority row counts")
+        self.assertNotIn("old-step", out + err, "a commented row is no row")
+        self.assertNotIn(REPO + "/pulls/9", self.paths(), "a commented row is never read")
+
+    def test_a_blocked_or_unstable_head_with_every_run_green_is_ok(self):
+        for state in ("blocked", "unstable"):
+            with self.subTest(merge_state=state):
+                self.reset_state()
+                self.put_pr(3302, SHA_A, runs=green(SHA_A), mergeable=True, mergeable_state=state)
+                code, out, err = self.wake(ROW_3302)
+                line = self.row_line(out, err, SLUG)
+                self.assert_ok(line)
+                self.assertEqual(code, 0, "an ok row exits 0: " + err)
 
     def test_stdin_dash_reads_the_rows_as_the_file_does(self):
         self.put_pr(3302, SHA_A, runs=green(SHA_A), mergeable=True, mergeable_state="clean")
