@@ -1,0 +1,10 @@
+{
+  "id": "own-826-a-now-build-b",
+  "at": "2026-11-14T02:14:00-06:00",
+  "title": "Per-lane merge by priority now; build the combine train as designed and automated meanwhile; switch only when its numbers beat per-lane",
+  "ruling": "Owner 02:14 CST Nov 14, answering item 826 (pick-pause-combine-tournament) in chat; it did not land on the page, so triage read it from the consultant's relay (02:15) and the coordinator's (02:15): \"can\u2019t we do a while work on building b\". Reading (the consultant's, the coordinator's the same; the wording is open to another reading, and the owner can reopen it): do a now (runner 10 keeps merging per lane by priority under own-ready-by-priority, with the quick dry checks before each ready mark; no hand-built combines) while a lane builds b: the combine train as designed and automated (continuous dry folds behind next-in-line, fast checks every round, per-batch numbers, a review after 3 batches), proven on a dry run, and switch to it only once it runs and its measured numbers beat per-lane. Supersedes triage's earlier open reading of item 826. Homes: steps fast-checks-before-ready (the quick checks, now) and combine-train-tool (the build); neighbours: combine-tournament (the hand-run Workflow) and batch-runner-rolling-train (the duty text); rulings own-combine-tournament-idea (21:45 CST Nov 13) and own-rolling-combine-train (21:48 CST Nov 13) stand: the train is kept, built, and held back until measured.",
+  "quote": "can\u2019t we do a while work on building b",
+  "source": "Owner, typed in chat 02:14 CST Nov 14, relayed by the consultant at 02:15 CST and the coordinator at 02:15 CST (triage did not read the chat; the page held no answer)",
+  "status": "open",
+  "step": "combine-train-tool"
+}

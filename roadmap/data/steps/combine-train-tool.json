@@ -1,0 +1,14 @@
+{
+ "id": "combine-train-tool",
+ "title": "A tool runs the combine train as designed: continuous dry folds, fast checks every round, per-batch numbers; switch to it only when its numbers beat per-lane",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner ruling own-826-a-now-build-b (02:14 CST Nov 14, relayed): \"can’t we do a while work on building b\" read as: do per-lane now while building the combine train as designed and automated. Consultant 02:13 CST (relayed from runner 10): the tournament ran one dry fold, by hand, once; no continuous folds; fast checks per round did not run; per-batch numbers were never posted.",
+ "source": "Neighbours: combine-tournament (doing: a Workflow of Sonnet agents merging combined PRs pairwise on dry trees, run by hand), batch-runner-rolling-train (doing: the duty text in session-tiers and the template; #3341 and #3357 recorded), fast-checks-before-ready (the per-round checks come from it), own-rolling-combine-train and own-combine-tournament-idea (the owner's ideas). Coordinator 02:15 CST asks for a step with a tracker and a path to main before a lane starts (owner 20:41 CST Nov 13).",
+ "note": "Triage 02:18 CST Nov 14: tracker: the coordinator. Path to main: its own PR, path ALONE, a tool (script plus tests), draft first (grant Lane draft PR; the batch runner marks ready, by priority). Build lane: test-author, builder, reviewer (a tool the batch runner relies on; the lane says whether it touches a guard or check verdict). Done check: the tool runs continuous dry folds behind the next-in-line PR, runs the fast checks (fast-checks-before-ready) every round, posts per-batch numbers (members in, members left out, clash rate, dry-round minutes, lint minutes, CI minutes), and is proven on a dry run on a real queue with no push; then a review after 3 batches against per-lane merges: does it beat per-lane on measured numbers. The switch from per-lane to the train waits for that review; until then runner 10 merges per lane by priority. First act of the lane: read the combine-tournament Workflow's one run and its logs, and the runner 10 dry-run numbers (46 of 62 members clean for combine-m2, 17 of 990 pairs clashing in set 1; unmeasured by triage). Depends on: fast-checks-before-ready for the fast checks (the tool can start with the design). Not started; the coordinator starts it.",
+ "updatedAt": "2026-11-14T02:18:00-06:00"
+}
