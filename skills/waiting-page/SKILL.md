@@ -119,7 +119,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
       On such an item `recommended` is a list of option keys, in the recommended order when `ranked`. It is not empty, has no repeat, and each key is a key of `options`. The page shows and saves an unranked `recommended` in option order. `why` stays one text.
       A `recommended` that does not fit the kind of item is not shown: no star. A list `recommended` on a pick-one item is one such value.
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
-  - A decision carries the question form of rule `style-question-form`. The lines go in `context`, and each option has a non-empty
+  - A decision carries the question form (decision `question-form`). The lines go in `context`, and each option has a non-empty
     `gain` and `lose`. `context` also has a line that starts "Departs from: <what on main> — <what changes>"; a change that restates main does not count. The writer refuses a decision without it (guard rules `question-form`, `owner-judge` and `question-departs`). A decision with
     `status: "closed"` needs none; decision `question-form` holds the other exemptions. An update that
     carries `kind: decision` and `context` carries the lines again, and one that carries `options` carries each `gain` and `lose` again:
