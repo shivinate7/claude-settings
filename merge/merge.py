@@ -2605,7 +2605,7 @@ def ci_job_run(wt, *args, notes=None):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
-MUTATE_JOB, MUTATE_STEP = "checks-mutate-guard", "Guard mutation test"  # the job and step of checks.yml whose run: line and timeout-minutes the lint reads at the head
+MUTATE_JOB, MUTATE_STEP = "checks-mutate-guard", "Guard mutation test"  # the old one-job head: its job and step, whose run: line and timeout-minutes the lint reads. A sharded head names each step MUTATE_STEP + ", shard i/M", one job each
 MUTATE_TEST_FILE = re.compile(r"hooks/mutate_[^/]*\.(?:py|mjs)")
 MUTATE_SKIPPED = "mutation test run skipped here: it runs at the lane's hand-off lint"  # printed wherever the lint skips the run: a pre-join lint whose hand-off PASS names the head
 
@@ -2627,53 +2627,96 @@ def mutate_report_counts(out):
     return (0, 0, 0, unread, False, 0) if unread else None
 
 def mutate_run_check(wt):
-    """Run the head's checks-mutate-guard command in the tree `wt`. -> (summary, failures): one line of wall time and counts, and the reasons the
-    lint fails (empty on a pass). The command and the cap come from the head's checks.yml, through the step parser and job_caps: no copy of either.
-    A workflow, step or cap that cannot be read stops the lint."""
+    """Run the head's mutation test in the tree `wt`: each shard job of checks.yml one after another (step "Guard mutation test, shard i/M"), or the
+    old one job (step "Guard mutation test") once when the head has no shard step. -> (summary, failures): one line of wall time and counts, and the
+    reasons the lint fails (empty on a pass). A shard that fails or times out ends the run, so no later shard starts, and its failures name its job.
+    The command, the MUTATE_SHARD env and the cap of each run come from the head's checks.yml, through the step parser and job_caps: no copy of any.
+    A workflow, step or cap that cannot be read, and a shard that is absent, stop the lint before the first run."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
-    from workflow_steps import job_block, run_body, step_blocks, step_key  # the one home of the step parser
+    from workflow_steps import job_block, run_body, step_blocks, step_env, step_key  # the one home of the step parser
     try:
         with open(os.path.join(wt, ".github", "workflows", "checks.yml"), encoding="utf-8") as f:
             text = f.read()
     except (OSError, UnicodeError) as e:
         raise Stop(f"the head's checks.yml cannot be read ({type(e).__name__}), so its mutation test run cannot start. {LANE_LINT_REMEDY}")
-    step = next((st for st in step_blocks(job_block(text, MUTATE_JOB)) if step_key(st, "name") == MUTATE_STEP), None)
-    body = (run_body(step) or "").strip() if step else ""
-    cap = job_caps([text]).get(MUTATE_JOB)
-    if not body or "\n" in body or not cap:
-        raise Stop(f"the head's checks.yml has no one-line run: for CI step {MUTATE_STEP!r} of job {MUTATE_JOB}, or no timeout-minutes on that job, so its mutation test run cannot start. {LANE_LINT_REMEDY}")
-    start = time.monotonic()
-    start_error = ""
-    try:
-        c, out = sh(shlex.split(body), cwd=wt, env=no_github_env(), timeout=cap * 60, live_stderr=True)
-    except subprocess.TimeoutExpired:
-        c, out = None, ""
-    except (OSError, ValueError) as e:  # the command could not start (no such program, not executable, a bad quote): a FAIL, never a traceback or a pass
-        c, out, start_error = None, "", f"{type(e).__name__}: {e}"
-    wall = round(time.monotonic() - start) if c is not None else cap * 60
-    counts = mutate_report_counts(out)
-    killed, survived, unknown, unread, tally, wrong = counts or (0, 0, 0, 0, False, 0)
-    failures = []
-    if start_error:
-        return "mutation test run did not start", [f"the mutation test command could not start ({start_error}), so no mutation test run was made"]
-    if c is None or wall > cap * 60:
-        failures.append(f"the mutation test run took {wall} s, past the {cap}-minute cap of job {MUTATE_JOB}")
-    if counts is None:
-        failures.append(f"the mutation test run exited {'at its timeout' if c is None else c} and printed no report that can be read")
-    # A table is judged on its counts at any exit code. A tally is the command's own verdict, so CI is red on its nonzero exit, and run_mutants exits 1 on any survivor, wrong cause or unknown.
-    if tally and c:
-        failures.append(f"the mutation test run exited {c} on a tally of killed {killed}, survived {survived}, wrong cause {wrong}, unknown {unknown}, and CI fails the job on that exit")
-    if survived:
-        failures.append(f"{survived} mutant{'s' if survived != 1 else ''} survived")
-    if wrong:
-        failures.append(f"wrong cause {wrong}: the tally counts a mutant whose red lines miss its required case, and CI fails the run on any")
-    if unknown:
-        failures.append(f"unknown {unknown}: {unknown} mutant{'s' if unknown != 1 else ''} could not be read (crashed or timed out), and CI fails the run on any")
-    if unread:
-        failures.append(f"{unread} file{'s' if unread != 1 else ''} read no mutant (UNKNOWN row)")
-    if failures and tally:
-        failures.append("the run's own tally: " + re.search(r"^\d+ of \d+ mutations killed \(.*\)\s*$", out, re.M).group(0).strip())
-    return f"mutation test run {wall} s, killed {killed}, survived {survived}, unknown {unknown}, {'fail' if failures else 'pass'}", failures
+    shard_step = re.compile(rf"{re.escape(MUTATE_STEP)}, shard (\d+)/(\d+)")
+    shards, counts = {}, set()  # shard number -> (job, step), and the shard counts M that the step names carry
+    for job in re.findall(r"^  ([\w-]+):\s*$", text, re.M):
+        for st in step_blocks(job_block(text, job)):
+            m = shard_step.fullmatch(step_key(st, "name") or "")
+            if m:
+                if int(m.group(1)) in shards:
+                    raise Stop(f"the head's checks.yml has shard {m.group(1)}/{m.group(2)} of the mutation test in both job {shards[int(m.group(1))][0]} and job {job}, so its mutation test run cannot start. {LANE_LINT_REMEDY}")
+                shards[int(m.group(1))] = (job, st)
+                counts.add(int(m.group(2)))
+    sharded = bool(shards)
+    if sharded:
+        if len(counts) != 1:
+            raise Stop(f"the head's checks.yml names shard counts {sorted(counts)} for the mutation test, so its mutation test run cannot start. {LANE_LINT_REMEDY}")
+        total = next(iter(counts))
+        absent = [f"{n}/{total}" for n in range(1, total + 1) if n not in shards]
+        if absent or set(shards) - set(range(1, total + 1)):
+            raise Stop(f"the head's checks.yml has no job with the step for shard {', '.join(absent) or 'numbers in 1 to ' + str(total)} of the mutation test (shard N of {total} absent), so its mutation test run cannot start. {LANE_LINT_REMEDY}")
+        steps = [(shards[n][0], shards[n][1], f"{n}/{total}") for n in range(1, total + 1)]
+    else:
+        steps = [(MUTATE_JOB, next((st for st in step_blocks(job_block(text, MUTATE_JOB)) if step_key(st, "name") == MUTATE_STEP), None), None)]
+    caps = job_caps([text])
+    plan = []  # every run is read before the first starts, so a job whose run or cap cannot be read stops the lint with no run made
+    for job, step, shard in steps:
+        body = (run_body(step) or "").strip() if step else ""
+        cap = caps.get(job)
+        if not body or "\n" in body or not cap:
+            raise Stop(f"the head's checks.yml has no one-line run: for CI step {(step_key(step, 'name') if step else MUTATE_STEP)!r} of job {job}, or no timeout-minutes on that job, so its mutation test run cannot start. {LANE_LINT_REMEDY}")
+        env = no_github_env()
+        if shard:
+            if step_env(step).get("MUTATE_SHARD") != shard:
+                raise Stop(f"the step for shard {shard} of job {job} in the head's checks.yml does not set MUTATE_SHARD to {shard}, so its mutation test run cannot start. {LANE_LINT_REMEDY}")
+            env["MUTATE_SHARD"] = shard
+        plan.append((job, body, cap, env))
+
+    def run_one(job, body, cap, env):
+        start = time.monotonic()
+        start_error = ""
+        try:
+            c, out = sh(shlex.split(body), cwd=wt, env=env, timeout=cap * 60, live_stderr=True)
+        except subprocess.TimeoutExpired:
+            c, out = None, ""
+        except (OSError, ValueError) as e:  # the command could not start (no such program, not executable, a bad quote): a FAIL, never a traceback or a pass
+            c, out, start_error = None, "", f"{type(e).__name__}: {e}"
+        wall = round(time.monotonic() - start) if c is not None else cap * 60
+        counts = mutate_report_counts(out)
+        killed, survived, unknown, unread, tally, wrong = counts or (0, 0, 0, 0, False, 0)
+        failures = []
+        if start_error:
+            return "mutation test run did not start", [f"the mutation test command could not start ({start_error}), so no mutation test run was made"]
+        if c is None or wall > cap * 60:
+            failures.append(f"the mutation test run took {wall} s, past the {cap}-minute cap of job {job}")
+        if counts is None:
+            failures.append(f"the mutation test run exited {'at its timeout' if c is None else c} and printed no report that can be read")
+        # A table is judged on its counts at any exit code. A tally is the command's own verdict, so CI is red on its nonzero exit, and run_mutants exits 1 on any survivor, wrong cause or unknown.
+        if tally and c:
+            failures.append(f"the mutation test run exited {c} on a tally of killed {killed}, survived {survived}, wrong cause {wrong}, unknown {unknown}, and CI fails the job on that exit")
+        if survived:
+            failures.append(f"{survived} mutant{'s' if survived != 1 else ''} survived")
+        if wrong:
+            failures.append(f"wrong cause {wrong}: the tally counts a mutant whose red lines miss its required case, and CI fails the run on any")
+        if unknown:
+            failures.append(f"unknown {unknown}: {unknown} mutant{'s' if unknown != 1 else ''} could not be read (crashed or timed out), and CI fails the run on any")
+        if unread:
+            failures.append(f"{unread} file{'s' if unread != 1 else ''} read no mutant (UNKNOWN row)")
+        if failures and tally:
+            failures.append("the run's own tally: " + re.search(r"^\d+ of \d+ mutations killed \(.*\)\s*$", out, re.M).group(0).strip())
+        return f"mutation test run {wall} s, killed {killed}, survived {survived}, unknown {unknown}, {'fail' if failures else 'pass'}", failures
+
+    summaries = []
+    for job, body, cap, env in plan:
+        summary, failures = run_one(job, body, cap, env)
+        if not sharded:
+            return summary, failures
+        summaries.append(f"{job}: {summary}")
+        if failures:  # a failed or timed-out shard decides the lint: no later shard starts
+            return "; ".join(summaries), [f"job {job}: {f}" for f in failures]
+    return "; ".join(summaries), []
 
 TOUCHED_SELECTOR = ".github/scripts/touched-tests.py"  # the lint worktree's own selector, so the head's tests are chosen by the head's rules
 TOUCHED_RUNNERS = {".py": sys.executable, ".sh": "bash", ".mjs": "node", ".js": "node"}  # bash, not sh: the suites use bashisms
