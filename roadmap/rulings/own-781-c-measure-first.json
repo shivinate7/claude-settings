@@ -1,0 +1,10 @@
+{
+ "id": "own-781-c-measure-first",
+ "at": "2026-11-13T22:58:00-06:00",
+ "title": "Measure how old main's newest test-running run is, then pick a or b",
+ "ruling": "Owner, saved on the waiting page 19:42 CST Nov 13, item 781, pick c: measure first, then choose between a (judge only runs that ran the tests) and b (a, plus a full test run on main when the judged run is old). PR #3297 waits until the measure is read. The a-or-b pick comes back to the owner with the number.",
+ "quote": "C: Measure first, then choose between a and b (triage recommends)",
+ "source": "Owner page save 19:42 CST Nov 13 (01:42:37Z), read by triage in the answers store 22:58 CST Nov 13; filed late by triage.",
+ "status": "open",
+ "step": "red-gate-reads-suite-run"
+}
