@@ -300,7 +300,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   The live file's optional `keepSessions` (`[{id, reason}]`, the lanes the owner keeps) names the sessions to leave. A kept session that
   would be read as idle prints one `hold (kept: <reason>; lane <session id>)` line, never a lane line, and is not counted among the lanes to archive.
   An absent key keeps nothing. A `keepSessions` that is not a list of rows with a text `id` makes the whole list unknown, never an empty keep list.
-  A live lane row whose `unarchived_epoch` is an int below 0 also makes the whole list unknown, except a row of a kept session (keepSessions), which the owner holds and the check skips.
+  A live lane row whose `unarchived_epoch` is an int below 0 also makes the whole list unknown. A row of a kept session (keepSessions) is the exception: the owner holds it and the check skips it.
   After a landed merge onto the default branch, `merge --confirm` reads `roadmap/live/live.json` on origin's roadmap branch and prints this
   report when its `readAt` is later than the merge commit's time. Otherwise it prints one line saying the pass is owed because the file is stale
   or unread, then one `check this lane (...)` line for each lane behind the merged steps (the step record's `lane`, else the session link at the
