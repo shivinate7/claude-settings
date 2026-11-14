@@ -1193,11 +1193,11 @@ class ClaudeMdFlag(Env):
     def unreadable(self, fail):
         """Patch merge.sh so the PR-paths read fails: `fail(args)` returns (rc, text) or raises. -> the list of args it saw."""
         real_sh, seen = merge.sh, []
-        def stub(args, cwd=None, input=None, env=None):
+        def stub(args, cwd=None, input=None, env=None, **k):
             if "diff" in args and any("..." in a for a in args):
                 seen.append(args)
                 return fail(args)
-            return real_sh(args, cwd=cwd, input=input, env=env)
+            return real_sh(args, cwd=cwd, input=input, env=env, **k)
         patch = unittest.mock.patch.object(merge, "sh", stub)
         patch.start(); self.addCleanup(patch.stop)
         return seen
@@ -1265,6 +1265,43 @@ class ClaudeMdFlag(Env):
         self.pr_writes({".Claude/claude.md": "rules\n", "Output-Styles/A.md": "a\n", "notes/Output-Styles/b.md": "b\n"})
         rc, out = self.run_merge("7", "--confirm")
         self.assert_flagged(rc, out, ".Claude/claude.md", "Output-Styles/A.md")
+
+class GitLockReadsStdoutOnly(Env):
+    """GitLock.read of the ls-remote listing. A stderr line on a successful call is no lock, and only a 40-hex sha names one."""
+    def listing(self, stdout, stderr="", rc=0):
+        real = merge._nowindow.run
+        def run(args, *a, **k):
+            if "ls-remote" in args:
+                return subprocess.CompletedProcess(args, rc, stdout, stderr)
+            return real(args, *a, **k)
+        p = unittest.mock.patch.object(merge._nowindow, "run", run)
+        p.start(); self.addCleanup(p.stop)
+
+    def test_a_stderr_line_with_an_empty_listing_is_no_lock(self):
+        self.listing("", "warning: redirecting to https://example.invalid/repo.git\n")
+        self.assertIsNone(self.lock.read("main"))
+
+    def test_a_listing_whose_first_token_is_no_sha_stops(self):
+        self.listing("not-a-sha\trefs/heads/merge-lock/main\n")
+        with self.assertRaises(merge.Stop):
+            self.lock.read("main")
+
+    def test_a_41_hex_or_a_64_hex_first_token_stops(self):
+        for tok in ("a" * 41, "a" * 64):
+            self.listing(f"{tok}\trefs/heads/merge-lock/main\n")
+            with self.assertRaises(merge.Stop, msg=tok):
+                self.lock.read("main")
+
+    def test_origin_head_ignores_a_stderr_line_on_an_empty_listing(self):
+        self.listing("", "warning: redirecting\n")
+        self.assertEqual(merge.origin_head(self.co, "feat"), "")
+
+    def test_a_stderr_line_beside_a_real_listing_leaves_the_sha_alone(self):
+        sha = "a" * 40
+        self.listing(f"{sha}\trefs/heads/merge-lock/main\n", "warning: noise\n")
+        real_git = merge.git
+        with unittest.mock.patch.object(merge, "git", lambda cwd, *a, **k: (1, "") if "fetch" in a else real_git(cwd, *a, **k)):  # the fetch of its message fails: the read keeps the sha
+            self.assertEqual(self.lock.read("main")[0], sha)
 
 class Race(Env):
     def test_two_runs_one_lock(self):
@@ -1454,11 +1491,11 @@ class LockRetake(Env):
         Other git calls run for real. -> (the patch, the list that receives each faked push)."""
         self.assertTrue(merge.is_net(128, self.NET_DROP), "scope: the faked push output is no network error line")
         real, pushes = merge.git, []
-        def git(cwd, *args, input=None):
+        def git(cwd, *args, input=None, **k):
             if args[:1] == ("push",):
                 pushes.append(args)
                 return 128, self.NET_DROP
-            return real(cwd, *args, input=input)
+            return real(cwd, *args, input=input, **k)
         return unittest.mock.patch.object(merge, "git", side_effect=git), pushes
 
     def assert_dropped_push_is_net_stop(self, pushes):
@@ -2636,10 +2673,10 @@ class ClaimSurvivesUnknown(Env):
             self.main_moves()
         self.host.on_claim = main_moves_during_the_wait
         real_git = merge.git
-        def base_unreadable(cwd, *a, input=None):
+        def base_unreadable(cwd, *a, input=None, **k):
             if claimed and a == ("rev-parse", "origin/main"):
                 return 128, "fatal: ambiguous argument 'origin/main': unknown revision"
-            return real_git(cwd, *a, input=input)
+            return real_git(cwd, *a, input=input, **k)
         with unittest.mock.patch.object(merge, "git", base_unreadable), tempfiles_in_run_folder():
             rc, out = self.run_merge("7", "--confirm")
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
@@ -2649,10 +2686,10 @@ class ClaimSurvivesUnknown(Env):
         claimed = []
         self.host.on_claim = lambda: claimed.append(self.head())
         real_git = merge.git
-        def listing_unreadable(cwd, *a, input=None):
+        def listing_unreadable(cwd, *a, input=None, **k):
             if claimed and a[:3] == ("ls-tree", "--name-only", "origin/main"):
                 return 128, "fatal: not a tree object"
-            return real_git(cwd, *a, input=input)
+            return real_git(cwd, *a, input=input, **k)
         with unittest.mock.patch.object(merge, "git", listing_unreadable):
             rc, out = self.run_merge("7", "--confirm")
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
@@ -2662,10 +2699,10 @@ class ClaimSurvivesUnknown(Env):
         claimed = []
         self.host.on_claim = lambda: claimed.append(self.head())
         real_git = merge.git
-        def config_unreadable(cwd, *a, input=None):
+        def config_unreadable(cwd, *a, input=None, **k):
             if claimed and a == ("show", "origin/main:.github/stamp.json"):
                 return 128, "fatal: path '.github/stamp.json' does not exist"
-            return real_git(cwd, *a, input=input)
+            return real_git(cwd, *a, input=input, **k)
         with unittest.mock.patch.object(merge, "git", config_unreadable):
             rc, out = self.run_merge("7", "--confirm")
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
@@ -2675,10 +2712,10 @@ class ClaimSurvivesUnknown(Env):
         claimed = []
         self.host.on_claim = lambda: claimed.append(self.head())
         real_git = merge.git
-        def merge_fails_without_a_conflict(cwd, *a, input=None):
+        def merge_fails_without_a_conflict(cwd, *a, input=None, **k):
             if claimed and "--no-commit" in a:  # the records proof's merge: it fails, and leaves no unmerged file
                 return 1, "fatal: unable to write new index file"
-            return real_git(cwd, *a, input=input)
+            return real_git(cwd, *a, input=input, **k)
         with unittest.mock.patch.object(merge, "git", merge_fails_without_a_conflict):
             rc, out = self.run_merge("7", "--confirm")
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
@@ -4061,10 +4098,10 @@ class GhHalf(Env):
         def push(wt, branch):
             pushed.append(branch)
             return real_push(wt, branch)
-        def git_fails(cwd, *a, input=None):
+        def git_fails(cwd, *a, input=None, **k):
             if pushed and a[:2] == ("fetch", "-q") and a[-1] == "+refs/heads/main:refs/remotes/origin/main":
                 return 1, msg
-            return real_git(cwd, *a, input=input)
+            return real_git(cwd, *a, input=input, **k)
         with unittest.mock.patch.object(merge, "push_branch", push), unittest.mock.patch.object(merge, "git", git_fails):
             return self.go()
 
@@ -4198,9 +4235,9 @@ class GhHalf(Env):
         def sh_answer(args, *a, **k):
             reply = gh(args) if gh and claimed and args[0] == "gh" else None
             return reply if reply is not None else real_sh(args, *a, **k)
-        def git_answer(cwd, *a, input=None):
+        def git_answer(cwd, *a, input=None, **k):
             reply = git_call(a) if git_call and claimed else None
-            return reply if reply is not None else real_git(cwd, *a, input=input)
+            return reply if reply is not None else real_git(cwd, *a, input=input, **k)
         with unittest.mock.patch.object(merge, "push_branch", push), unittest.mock.patch.object(merge, "sh", sh_answer), \
                 unittest.mock.patch.object(merge, "git", git_answer):
             rc, out = self.go(**gh_kw)
@@ -4427,11 +4464,11 @@ class GhHalf(Env):
         # Windows credential manager: ls-remote of the lock ref fails once, then works
         real_git = merge.git
         hits = []
-        def flaky(cwd, *a, input=None):
+        def flaky(cwd, *a, input=None, **k):
             if a[:1] == ("ls-remote",) and a[-1] == "refs/heads/merge-lock/main" and not hits:
                 hits.append(1)
                 return 1, "unexpected end of JSON input"
-            return real_git(cwd, *a, input=input)
+            return real_git(cwd, *a, input=input, **k)
         with unittest.mock.patch.object(merge, "git", flaky):
             rc, out = self.go()
         self.assertEqual(hits, [1])  # the first read failed
@@ -7877,7 +7914,7 @@ class GitLockReadExhaustion(unittest.TestCase):
     def read_fails(self, reply):
         """-> (the Stop the read raised, its ls-remote calls, its retry pauses)."""
         calls, pauses = [], []
-        def fake_git(cwd, *a, input=None):
+        def fake_git(cwd, *a, input=None, **k):
             calls.append(a)
             return reply
         with unittest.mock.patch.object(merge, "git", fake_git):
@@ -10405,14 +10442,14 @@ class GitLockExtendsForRateWaits(Env):
         self.token = self.glock.acquire("main", ttl)
         self.gh_calls, self.gh, self.cmds, self.lose_push = 0, [(0, "[]")], [], False  # cmds: every non-gh command after the take
         real = merge.sh
-        def fake_sh(args, cwd=None, input=None, env=None):
+        def fake_sh(args, cwd=None, input=None, env=None, **k):
             if args[0] != "gh":
                 self.cmds.append(list(args))
                 if self.lose_push and "push" in args and not args[-1].startswith(":"):  # the next ref update lands on origin, and its reply is lost
                     self.lose_push = False
-                    real(args, cwd=cwd, input=input, env=env)
+                    real(args, cwd=cwd, input=input, env=env, **k)
                     return 128, NET_HOST
-                return real(args, cwd=cwd, input=input, env=env)
+                return real(args, cwd=cwd, input=input, env=env, **k)
             self.gh_calls += 1
             return self.gh[min(self.gh_calls, len(self.gh)) - 1]
         p = unittest.mock.patch.object(merge, "sh", fake_sh)

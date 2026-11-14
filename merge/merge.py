@@ -291,7 +291,9 @@ def shared_deadline(seconds):
     finally:
         _READ_DEADLINE = prior
 
-def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
+SHA_HEX = r"[0-9a-f]{40}"  # the one home of a full commit sha's form
+
+def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False, stdout_only=False):
     args = [resolve_program(args[0], env), *args[1:]]
     limits = [t for t in (SH_TIMEOUT, timeout) if t is not None]
     timeout = max(0.05, _READ_DEADLINE - time.monotonic()) if _READ_DEADLINE is not None else min(limits) if limits else None
@@ -299,10 +301,12 @@ def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
         r = _nowindow.run(args, cwd=cwd, input=input, env=env, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", timeout=timeout)
         return r.returncode, r.stdout.strip()
     r =_nowindow.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    if stdout_only and not r.returncode:  # a failed call keeps both streams, so is_net still reads a network error
+        return 0, r.stdout.strip()
     return r.returncode, (r.stdout + r.stderr).strip()
 
-def git(cwd, *a, input=None):
-    return sh(["git", "-C", cwd, *a], input=input)
+def git(cwd, *a, input=None, stdout_only=False):
+    return sh(["git", "-C", cwd, *a], input=input, **({"stdout_only": True} if stdout_only else {}))
 
 def ancestor(cwd, tip, base):
     """True when `tip` is reachable from `base`, False when it is not, None when git could not tell. A shallow clone
@@ -735,11 +739,13 @@ class GitLock(Lock):
 
     def read(self, b, ref=None):
         ref = ref or lock_ref(b)
-        c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref), self.pause, what=f"the lock read {ref}")
+        c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref, stdout_only=True), self.pause, what=f"the lock read {ref}")
         if c:
             raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock " + LOCK_CITE + ": " + out)
         if not out:
             return None
+        if not re.match(SHA_HEX + r"(?:\s|$)", out):
+            raise Stop("the merge lock listing does not start with a 40-hex sha " + LOCK_CITE + ": " + out)
         if git(self.root, "fetch", "-q", "origin", ref)[0]:
             return out.split()[0], float("inf"), ""
         msg = git(self.root, "log", "-1", "--format=%B", "FETCH_HEAD")[1]
@@ -1992,7 +1998,7 @@ def push_branch(wt, branch, lease=None, cite=""):
         raise Stop(f"the push of {branch} was refused. Nothing is on origin from this run. Run again.{' ' + cite if cite else ''}\n{out}")
 
 def origin_head(root, branch):
-    return git(root, "ls-remote", "origin", f"refs/heads/{branch}")[1].split("\t")[0]
+    return git(root, "ls-remote", "origin", f"refs/heads/{branch}", stdout_only=True)[1].split("\t")[0]
 
 def revert_claim(root, wt, branch, claim_sha):
     """Revert only while the origin head is the claim commit. Else the claim commit can be gone."""
@@ -2137,7 +2143,7 @@ def read_lanes(wt, base_ref, sha):
         if len(parts) != 3:
             continue
         h, parents, body = parts
-        for r in re.findall(r"This reverts commit ([0-9a-f]{40})", body):
+        for r in re.findall(rf"This reverts commit ({SHA_HEX})", body):
             undone[r] = h
         for t in parents.split()[1:]:
             took.setdefault(t, []).append(h)
