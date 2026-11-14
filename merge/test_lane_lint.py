@@ -2646,13 +2646,16 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
 
     def test_a_declared_step_that_fails_on_a_non_default_base_still_stops_the_draft(self):
         self.base_stamp("integ", ["check invariants"])
+        self.assertFalse(self.contains(self.head("feat"), self.head("integ")), "precondition: the head holds the base's tip, so the merge is the head and the case probes nothing")
         self.use_ci_job([("FAIL", "check invariants")], 1)
         rc, out = self.draft_confirm()
         runs = self.lint_calls()
         self.assertEqual(len(runs), 1, "the ready check did not run on a non-default base: " + out)
         self.assertIn("--base", runs[0]["argv"], out)
         self.assertEqual(runs[0]["argv"][runs[0]["argv"].index("--base") + 1], "origin/integ", out)
-        self.assertEqual(runs[0]["head"], self.head("feat"), "the ready check ran on a tree other than the PR head")
+        parents = tm.sh(self.co, "git", "rev-list", "--parents", "-n", "1", runs[0]["head"]).split()[1:]
+        self.assertEqual(parents, [self.head("feat"), self.head("integ")],
+                         "the ready check ran on %s, not on the dry merge of the PR head with integ: %s" % (runs[0]["head"][:9], out))
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.host.readies, [], out)
 
