@@ -11282,14 +11282,14 @@ class RedMainBrake(Env):
         rc, out = self.run_merge("7", *(["--confirm"] if confirm else []), *flags)
         return rc, out, before
 
-    def refused(self, rc, out, before):
-        self.assertEqual(rc, 1, out)
+    def refused(self, rc, out, before, why=""):
+        self.assertEqual(rc, 1, f"{why}\n{out}" if why else out)  # `why` leads the message, as `merged` does
         self.assertFalse(getattr(self.host, "merged", False), out)
         self.assertEqual(self.refs(), before, "a refused run claims and pushes nothing")
         self.assertFalse(self.lock_ref(), "the lock is freed")
 
-    def merged(self, rc, out):
-        self.assertEqual(rc, 0, out)
+    def merged(self, rc, out, why=""):
+        self.assertEqual(rc, 0, f"{why}\n{out}" if why else out)  # `why` leads the message: a runner shows its first line, and merge's notes come first in `out`
         self.assertTrue(getattr(self.host, "merged", False), out)
 
     # Oct 13-14: the latest main run has one failed job among passes, and a job cancelled at its cap.
@@ -12022,6 +12022,266 @@ class RedMainBrake(Env):
         self.assertIn("run 1601", out)
         self.assertNotIn("gh run rerun 1601", out, "the cancelled run 1601 is on a commit that is not the base's head, so no re-run is named")
 
+    # The revert clear: a red run clears once a revert of its head is on main. The revert is a commit
+    # reachable from origin/main, other than the red run's head, with a line `This reverts commit <head>.`, and it is not net-reverted. Each red run
+    # needs its own revert. A red run whose revert has not merged still refuses. The revert's own run may be in progress, queued or absent.
+    # The seam: each revert is a real commit on origin's main, made by the other clone and fetched into self.co. base_state reads it with git on
+    # origin/<base>, the ref base_workflows reads. The host's `api` answers only `actions/runs` and `contents/`, so a read of commits there fails the case.
+    RED_RUN, REVERT_RUN, OTHER_RUN = 2401, 2402, 2403
+    RED_SHA = "5e1f" * 10  # the red run's head: a sha of its own, never a sha of its id
+    NOT_CLEARED = "the merge is refused though a revert of the red run is on main"
+
+    def land_on_main(self, subject, body, via_branch=None, later=0):
+        """A commit on origin's main, made by the other clone and fetched into self.co, with the PR branch brought up to main as a lane does.
+        `via_branch`: the commit is made on that branch and reaches main by a --no-ff merge, as merge.py lands a pull request. `later`: that many
+        empty commits follow it on main. -> the commit's sha (not the merge's)."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        if via_branch:
+            sh(o, "git", "checkout", "-q", "-B", via_branch, "origin/main")
+        sh(o, "git", "commit", "-q", "--allow-empty", "-m", subject, "-m", body)
+        commit = sh(o, "git", "rev-parse", "HEAD")
+        if via_branch:
+            sh(o, "git", "checkout", "-q", "main")
+            sh(o, "git", "merge", "-q", "--no-ff", "-m", f"merge {via_branch}", via_branch)
+        for i in range(later):
+            sh(o, "git", "commit", "-q", "--allow-empty", "-m", f"unrelated commit {i}")
+        sh(o, "git", "push", "-q", "origin", "main")
+        head_takes_base(self)
+        return commit
+
+    def revert_of(self, sha, via_branch=None, later=0):
+        """The revert git writes for commit `sha`, landed on main. -> the revert's sha."""
+        return self.land_on_main('Revert "the breaking commit"', f"This reverts commit {sha}.", via_branch, later)
+
+    def red_only(self):
+        """-> (runs, jobs): main's one red run, RED_RUN on RED_SHA, and no other run."""
+        return [main_run(self.RED_RUN, "failure", sha=self.RED_SHA)], {self.RED_RUN: [main_job("checks", "failure", 20)]}
+
+    def revert_case(self, rev_status=None, rev_conclusion=None, confirm=True):
+        """-> (rc, out, before, rev): the red run, its revert merged on main, and the revert's own run in `rev_status` (None: no run of it).
+        A completed revert run reads its one job, which passes unless `rev_conclusion` is failure."""
+        rev = self.revert_of(self.RED_SHA)
+        runs, jobs = self.red_only()
+        if rev_status is not None:
+            runs.insert(0, main_run(self.REVERT_RUN, rev_conclusion, status=rev_status, sha=rev))
+            jobs[self.REVERT_RUN] = [main_job("checks", rev_conclusion or "success", 20)]
+        rc, out, before = self.go(runs, jobs, confirm=confirm)
+        return rc, out, before, rev
+
+    def test_control_a_red_run_with_no_revert_refuses(self):
+        # the control beside the clears below: the same red run and no revert, which refuses on the old code and on the new
+        rc, out, before = self.go(*self.red_only())
+        self.refused(rc, out, before)
+        self.assertIn(f"run {self.RED_RUN} of checks", out)
+
+    def test_a_red_run_clears_when_its_revert_merges_and_the_revert_run_is_in_progress(self):
+        rc, out, _, rev = self.revert_case("in_progress")
+        self.merged(rc, out, self.NOT_CLEARED)
+        self.assertIn(rev[:7], out, "the clear does not name the revert's sha")
+        self.assertIn(f"run {self.RED_RUN}", out, "the clear does not name the red run it clears")
+
+    def test_a_red_run_clears_when_its_revert_merges_and_the_revert_run_is_queued(self):
+        rc, out, _, rev = self.revert_case("queued")
+        self.merged(rc, out, self.NOT_CLEARED)
+        self.assertIn(rev[:7], out, "the clear does not name the revert's sha")
+        self.assertIn(f"run {self.RED_RUN}", out, "the clear does not name the red run it clears")
+
+    def test_a_red_run_clears_when_its_revert_merges_and_the_revert_has_no_run(self):
+        rc, out, _, rev = self.revert_case(None)
+        self.merged(rc, out, self.NOT_CLEARED)
+        self.assertIn(rev[:7], out, "the clear does not name the revert's sha")
+        self.assertIn(f"run {self.RED_RUN}", out, "the clear does not name the red run it clears")
+
+    def test_a_revert_whose_own_completed_run_is_red_refuses_naming_that_run(self):
+        # a revert whose completed run is red is a new red run on main, so it needs its own revert
+        rc, out, before, _ = self.revert_case("completed", "failure")
+        self.refused(rc, out, before)
+        self.assertIn(f"run {self.REVERT_RUN} of checks", out, "the refusal does not name the revert's red run")
+
+    def test_a_revert_naming_another_sha_does_not_clear_the_red_run(self):
+        # a sha one digit off shares 39 digits with the head; a short sha is no full revert line, as git writes the full sha
+        runs, jobs = self.red_only()
+        for what, named in (("a sha one digit off", self.RED_SHA[:-1] + "0"), ("a short sha", self.RED_SHA[:7])):
+            with self.subTest(named=what):
+                self.revert_of(named)
+                rc, out, before = self.go(runs, jobs)
+                self.refused(rc, out, before)
+                self.assertIn(f"run {self.RED_RUN} of checks", out)
+
+    def test_a_revert_of_the_revert_leaves_the_red_run_red(self):
+        v1 = self.revert_of(self.RED_SHA)
+        self.revert_of(v1)  # undoes the revert: the red run has no live revert
+        rc, out, before = self.go(*self.red_only())
+        self.refused(rc, out, before)
+        self.assertIn(f"run {self.RED_RUN} of checks", out)
+
+    def test_an_odd_chain_of_reverts_clears_the_red_run_through_its_live_revert(self):
+        # revert, revert of it, revert of that: the first revert is live again, so it clears the red run
+        v1 = self.revert_of(self.RED_SHA)
+        self.revert_of(self.revert_of(v1))
+        rc, out, _ = self.go(*self.red_only())
+        self.merged(rc, out, self.NOT_CLEARED)
+        self.assertIn(v1[:7], out, "the clear does not name the live revert of the red run")
+
+    def test_with_two_red_runs_only_the_reverted_one_clears(self):
+        self.revert_of(self.RED_SHA)  # the revert covers RED_RUN alone
+        other_red = {"another workflow file": (LINKS_PATH, "links", "readme-links"),
+                     "another event group of the same file": (CHECKS_PATH, "checks", "checks")}
+        for what, (path, name, job) in other_red.items():
+            with self.subTest(case=what):
+                runs = [main_run(self.RED_RUN, "failure", sha=self.RED_SHA), main_run(self.OTHER_RUN, "failure", name=name, path=path, event="schedule")]
+                jobs = {self.RED_RUN: [main_job("checks", "failure", 20)], self.OTHER_RUN: [main_job(job, "failure", 20)]}
+                rc, out, before = self.go(runs, jobs)
+                self.refused(rc, out, before)
+                self.assertIn(f"run {self.OTHER_RUN} of {name}", out, "the red run with no revert is not named")
+                self.assertNotIn(f"run {self.RED_RUN} of checks", out, "the reverted red run is still named red")
+
+    # The red chain: two red runs of one group, with no green run of that group between them. Each red run since the group's last
+    # green run needs its own revert (decision no-merge-onto-red-main). Runs are listed newest first, as GET actions/runs lists them.
+    CHAIN_OLD, CHAIN_NEW, CHAIN_GREEN, CHAIN_DISPATCH = 2411, 2412, 2413, 2414
+    CHAIN_OLD_SHA, CHAIN_NEW_SHA = "a1d0" * 10, "b2e1" * 10
+    CHAIN_GREEN_PARENT = 2415  # a green run under CHAIN_GREEN: the red runs sit on a green run whose own parent is green
+
+    def chain_pair(self):
+        """-> (runs, jobs): the newer red run, then the older one, both red on their own head, in the push group of checks."""
+        runs = [main_run(self.CHAIN_NEW, "failure", sha=self.CHAIN_NEW_SHA), main_run(self.CHAIN_OLD, "failure", sha=self.CHAIN_OLD_SHA)]
+        return runs, {self.CHAIN_NEW: [main_job("checks", "failure", 20)], self.CHAIN_OLD: [main_job("checks", "failure", 20)]}
+
+    def test_red_chain_older_red_run_stands_when_only_the_newer_one_is_reverted(self):
+        self.revert_of(self.CHAIN_NEW_SHA)  # the revert covers the newer run alone
+        rc, out, before = self.go(*self.chain_pair())
+        self.refused(rc, out, before, why="the merge is not refused: a revert of the newer red run lifted the older red run of the same group, which has no revert")
+        self.assertIn(f"run {self.CHAIN_OLD} of checks", out, "the refusal does not name the older red run that still stands")
+
+    def test_red_chain_clears_when_each_red_run_has_its_own_revert(self):
+        old_rev = self.revert_of(self.CHAIN_OLD_SHA)
+        new_rev = self.revert_of(self.CHAIN_NEW_SHA)
+        rc, out, _ = self.go(*self.chain_pair())
+        self.merged(rc, out, "the merge is refused though each red run of the group has its own revert on main")
+        self.assertIn(f"run {self.CHAIN_OLD} of checks", out, "the clear does not name the older red run, which its own revert clears")
+        self.assertIn(old_rev[:7], out, "the clear does not name the revert of the older red run")
+        self.assertIn(f"run {self.CHAIN_NEW} of checks", out, "the clear does not name the newer red run, which its own revert clears")
+        self.assertIn(new_rev[:7], out, "the clear does not name the revert of the newer red run")
+
+    def test_red_chain_red_run_under_a_later_green_run_needs_no_revert(self):
+        # the older red run sits under a green run of its group, so only the red run above that green run needs a revert
+        self.revert_of(self.CHAIN_NEW_SHA)
+        runs = [main_run(self.CHAIN_NEW, "failure", sha=self.CHAIN_NEW_SHA), main_run(self.CHAIN_GREEN, "success"),
+                main_run(self.CHAIN_OLD, "failure", sha=self.CHAIN_OLD_SHA)]
+        jobs = {self.CHAIN_NEW: [main_job("checks", "failure", 20)], self.CHAIN_GREEN: [main_job("checks", "success", 20)],
+                self.CHAIN_OLD: [main_job("checks", "failure", 20)]}
+        rc, out, _ = self.go(runs, jobs)
+        self.merged(rc, out, "the merge is refused though the older red run sits under a green run of its group")
+
+    def test_red_chain_two_red_runs_on_one_head_sha_clear_with_one_revert(self):
+        # a dispatch of a red push run's commit is the same head: the two runs share one revert, which names that head
+        rev = self.revert_of(self.CHAIN_OLD_SHA)
+        runs = [main_run(self.CHAIN_DISPATCH, "failure", event="workflow_dispatch", sha=self.CHAIN_OLD_SHA),
+                main_run(self.CHAIN_OLD, "failure", sha=self.CHAIN_OLD_SHA)]
+        jobs = {self.CHAIN_DISPATCH: [main_job("checks", "failure", 20)], self.CHAIN_OLD: [main_job("checks", "failure", 20)]}
+        rc, out, _ = self.go(runs, jobs)
+        self.merged(rc, out, "the merge is refused though one revert of the head both red runs share is on main")
+        self.assertIn(rev[:7], out, "the clear does not name the revert of the shared head")
+        self.assertIn(f"run {self.CHAIN_DISPATCH} of checks", out, "the clear does not name the dispatch run it clears")
+        self.assertIn(f"run {self.CHAIN_OLD} of checks", out, "the clear does not name the push run it clears")
+
+    def test_red_chain_control_two_red_runs_with_no_revert_refuses(self):
+        # the control beside the clears above: the same two red runs and no revert, which refuses on the old code and on the new
+        rc, out, before = self.go(*self.chain_pair())
+        self.refused(rc, out, before)
+        self.assertIn(f"run {self.CHAIN_NEW} of checks", out, "the refusal does not name the newest red run")
+
+    def test_red_chain_in_flight_older_run_under_a_reverted_newer_red_run_is_not_dropped(self):
+        # the older run is a re-run still going: it is not judged, and an unjudged run under a red run must hold the merge as unknown
+        self.revert_of(self.CHAIN_NEW_SHA)  # the revert covers the newer red run alone
+        runs = [main_run(self.CHAIN_NEW, "failure", sha=self.CHAIN_NEW_SHA),
+                main_run(self.CHAIN_OLD, None, status="in_progress", run_attempt=2, sha=self.CHAIN_OLD_SHA)]
+        rc, out, before = self.go(runs, {self.CHAIN_NEW: [main_job("checks", "failure", 20)]})
+        self.refused(rc, out, before, why="the merge is not refused: the older re-run still going under a reverted red run was dropped, so nothing holds the merge")
+        self.assertIn(f"run {self.CHAIN_OLD} of checks", out, "the refusal does not name the older re-run that is still going")
+
+    def test_red_chain_breaking_line_is_named_once_when_two_red_runs_stand(self):
+        # two red runs of one group stand over a green run: the group's walk starts once, so its breaking-line segment is named once
+        for what, conclusion, red_jobs in (("failed jobs", "failure", [main_job("checks", "failure", 20)]), ("no job", "startup_failure", [])):
+            with self.subTest(reds=what):
+                runs = [main_run(self.CHAIN_NEW, conclusion, sha=self.CHAIN_NEW_SHA), main_run(self.CHAIN_OLD, conclusion, sha=self.CHAIN_OLD_SHA),
+                        main_run(self.CHAIN_GREEN, "success"), main_run(self.CHAIN_GREEN_PARENT, "success")]
+                jobs = {self.CHAIN_NEW: red_jobs, self.CHAIN_OLD: red_jobs,
+                        self.CHAIN_GREEN: [main_job("checks", "success", 20)], self.CHAIN_GREEN_PARENT: [main_job("checks", "success", 20)]}
+                verdict, detail = merge.base_verdict(self.co, MainRunsHost(self.co, self.other, runs, jobs), "main")
+                self.assertEqual(verdict, "red", detail)
+                seg = f"run {self.CHAIN_OLD} is the first red run after a green one"  # the first red run with a green parent, as breaking_line names it
+                self.assertIn(seg, detail, "the detail names no breaking line, so the fixture does not reach the walk")
+                self.assertEqual(detail.count(seg), 1, "the breaking line of one red group is named more than once: a red run of the group started its own walk")
+
+    def test_a_revert_never_clears_an_unknown_run(self):
+        self.revert_of(self.RED_SHA)
+        cases = {
+            "a cancelled run with no job": ([main_run(self.RED_RUN, "cancelled", sha=self.RED_SHA)], {self.RED_RUN: []}, {}),
+            "a run whose jobs cannot be read": (*self.red_only(), {self.RED_RUN: "HTTP 500: Internal Server Error"}),
+            "a re-run still going": ([main_run(self.RED_RUN, None, status="in_progress", run_attempt=2, sha=self.RED_SHA)], {}, {}),
+        }
+        for what, (runs, jobs, jobs_fail_of) in cases.items():
+            with self.subTest(case=what):
+                rc, out, before = self.go(runs, jobs, jobs_fail_of=jobs_fail_of)
+                self.refused(rc, out, before)
+                self.assertIn("UNKNOWN", out, "a revert read as a clear for an unknown run")
+                self.assertIn(f"runs/{self.RED_RUN}", out, "the unknown read does not name the red run")
+
+    def test_the_preview_names_the_revert_and_the_red_run_it_clears(self):
+        rc, out, before, rev = self.revert_case("in_progress", confirm=False)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.refs(), before, "a preview presses nothing")
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)  # the scope first: the base line is there
+        self.assertNotIn("--confirm refuses it", line[0], "the base line says --confirm refuses a merge that the revert clears")
+        self.assertIn(rev[:7], out, "the preview does not name the revert's sha")
+        self.assertIn(f"run {self.RED_RUN}", out, "the preview does not name the red run it clears")
+
+    def test_a_revert_on_a_branch_that_main_does_not_hold_does_not_clear_the_red_run(self):
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "revert-side", "origin/main")
+        sh(o, "git", "commit", "-q", "--allow-empty", "-m", 'Revert "the breaking commit"', "-m", f"This reverts commit {self.RED_SHA}.")
+        sh(o, "git", "push", "-q", "origin", "revert-side")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        rc, out, before = self.go(*self.red_only())
+        self.refused(rc, out, before)
+        self.assertIn(f"run {self.RED_RUN} of checks", out)
+
+    def test_a_revert_that_reached_main_through_a_merge_commit_clears_the_red_run(self):
+        # merge.py lands a pull request with a --no-ff merge: the revert is the merge's second parent, off main's first-parent line
+        rev = self.revert_of(self.RED_SHA, via_branch="revert-pr")
+        rc, out, _ = self.go(*self.red_only())
+        self.merged(rc, out, self.NOT_CLEARED)
+        self.assertIn(rev[:7], out, "the clear does not name the revert's sha")
+
+    def test_a_revert_under_thirty_newer_commits_on_main_still_clears_the_red_run(self):
+        # full size: the revert is not on the newest commits of main, and the clear still finds it
+        rev = self.revert_of(self.RED_SHA, later=30)
+        rc, out, _ = self.go(*self.red_only())
+        self.merged(rc, out, self.NOT_CLEARED)
+        self.assertIn(rev[:7], out, "the clear does not name the revert's sha")
+
+    def test_a_failed_read_of_the_reverts_on_the_base_is_unknown_and_refuses_the_clear(self):
+        # the revert is on main, so only the failed log read keeps the clear from running. A failed read is unknown, never red
+        # and never a clear: a red verdict here would name the run without saying the read failed
+        rev = self.revert_of(self.RED_SHA)
+        self.assertEqual(sh(self.co, "git", "rev-parse", "origin/main"), rev, "the revert is not on origin/main, so the case proves nothing")
+        real = merge.git
+        def git(cwd, *a, **k):  # only the read of the base's reverts fails: every other git call runs for real
+            if a[:1] == ("log",) and "--grep=This reverts commit" in a:
+                return 128, "fatal: injected by the test: the log of the base cannot be read"
+            return real(cwd, *a, **k)
+        with unittest.mock.patch.object(merge, "git", git):
+            rc, out, before = self.go(*self.red_only())
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out, "a failed read of the reverts is not unknown")
+        self.assertIn("the read failed", out, "the refusal does not say the read failed")
+        self.assertIn("reading the reverts on origin/main failed", out, "the refusal does not name the failed read")
+
     # The breaking merge (decision no-merge-onto-red-main, the revert route): a red push run whose parent run is green is the run a merge broke.
     # The refusal names that run's commit and its pull request, read from the run's head commit message. A first red names its re-run first,
     # and blames nothing until that re-run is red again.
@@ -12207,7 +12467,7 @@ class RedMainBrake(Env):
         rc, out, before = self.go(runs, self.page_jobs(runs))
         self.refused(rc, out, before)
         self.assertIn("#2650", out, "the refusal does not name breaking run 905's pull request while the revert's run is pending")
-        self.assertIn("run on main is green", out, "the refusal does not say merges resume once the revert's run on main is green")
+        self.assertIn("Merges resume once the revert merges", out, "the refusal does not say merges resume once the revert merges, while the revert's own run is still going")
 
     def revert_route_refusal(self, above=(), below=(), jobs=None):
         """-> (rc, out, before) of a red main whose breaking run 903 is red again on its re-run: the refusal that names the revert route.
@@ -12221,11 +12481,11 @@ class RedMainBrake(Env):
         _, out, _ = self.revert_route_refusal()
         self.assertRegex(out, r"(?i)revert[^.\n]*--base-red-ok|--base-red-ok[^.\n]*revert", "the refusal does not name --base-red-ok as the route for the revert PR")
 
-    def test_the_revert_route_says_merges_resume_once_the_revert_run_on_main_is_green(self):
-        # the revert's own run is pending after the revert merges: merges resume when that run is green, not when the revert merges
+    def test_the_revert_route_says_merges_resume_once_the_revert_merges(self):
+        # merges resume when the revert merges, not when its run on main is green: that run may still be going then
         _, out, _ = self.revert_route_refusal()
-        self.assertIn("run on main is green", out, "the refusal does not say merges resume once the revert's run on main is green")
-        self.assertNotIn("merges resume once the revert merges", out, "the refusal says merges resume once the revert merges, which is false while the revert's run is pending")
+        self.assertIn("Merges resume once the revert merges", out, "the refusal does not say merges resume once the revert merges")
+        self.assertNotIn("run on main is green", out, "the refusal still holds merges until the revert's run on main is green")
 
     def test_the_revert_route_does_not_say_drops_lines_is_needed_only_for_deleted_files(self):
         # the silent-undo check flags a revert of a merge for each file it deletes and for each file it restores
