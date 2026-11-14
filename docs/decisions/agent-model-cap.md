@@ -29,7 +29,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | reviewer | haiku | xhigh |
 | reviewer, per round (the round rows below) | the round rows: haiku on a round 1 of a change with no guard or check, sonnet from round 2, on a guard or check change, and on a fix verifier; set per spawn, which overrides the frontmatter `haiku` | the round rows |
 | record-writer (`agents/record-writer.md`) | haiku | xhigh |
-| builder | sonnet | medium (the frontmatter default). Effort follows the lane kind: a guard or check lane spawns its builder at high, a product code, design or docs lane at medium (owner, 2026-11-13 14:01 CST, item 755, own-755-a-builder-by-kind) |
+| builder | sonnet | medium (the frontmatter default). Effort follows the lane kind. A guard or check lane spawns its builder at high, a product code, design or docs lane at medium (owner, 2026-11-13 14:01 CST, item 755, own-755-a-builder-by-kind) |
 | builder, try 3 after a FAIL at review round 2 | sonnet, the builder row above (owner, 2026-11-13 14:24 CST, item 758 b, own-758-b-third-try-builder-row) | the builder row above |
 | Plan (`agents/plan.md`) | opus | high |
 | designer (`agents/designer.md`) | opus, the owner's standing grant of 2026-10-26 | high |
