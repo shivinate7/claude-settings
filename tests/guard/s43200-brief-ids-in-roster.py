@@ -2,7 +2,7 @@
 FAMILY = "brief-ids-in-roster"  # the family of the bare-id check on lane briefs and lane starts
 
 # ---- Brief ids. A lane brief or a lane start that names a session id is refused, roster ids included. A brief names a
-# slug or a role, and the lane looks the id up in the roster (owner ruling, 2026-11-14 00:19 CST). The check reads no
+# slug or a role, and the lane looks the id up in the roster (decision brief-ids-in-roster). The check reads no
 # roster and no git ref, so a repo with no roster is judged the same as one with a roster. Every case runs the real
 # guard as a child, so each deny fails on old code as an assert ("expected deny, got allow") and never as an import
 # error, which P3 does not allow for a new feature. Each allow case is a green control on old code.
