@@ -1,0 +1,14 @@
+{
+ "id": "test-sections-no-branch-numbers",
+ "title": "Test sections never take a number on a branch: order by file slug or claim at merge, so two branches cannot collide",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 23:24 CST Nov 13 (relayed by the consultant, 23:25; triage did not see it): \"“same test section number” dont we have so many rules that fix this? amateur hour mistake no?\" Two lanes (#3223, #3102) each took section 21305 in hooks/test_guard.py on their own branch; a duplicate stops the whole run at fixture setup (consultant's read, line ~587, unchecked by triage).",
+ "source": "Consultant message 23:25 CST Nov 13 (relayed). Rule git-slug-then-claim-number already forbids a number on a branch for records; it was never applied to test sections.",
+ "note": "Triage 23:26 CST Nov 13: the guard that would have stopped this mistake (rule building-mistake-names-its-guard). Fix: sections order by file slug, or claim the number at merge as records do, so two branches cannot collide. Red case first: two branches each add a section, the merged tree runs and fails on main. Check first whether the done step test-guard-split-per-rule (one file per guard rule) already removed the number; if so, the hole is only in whatever still carries \"# section <n>\". Fast-check fold rounds catch it meanwhile. A lane builds it, not triage. Not started.",
+ "updatedAt": "2026-11-13T23:26:00-06:00"
+}
