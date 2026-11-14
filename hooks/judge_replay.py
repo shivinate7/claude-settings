@@ -50,7 +50,7 @@ import layout  # noqa: E402  the one home of the record folders
 # The waiting-page item that carries the owner's step of adding the CI secret.
 PAGE_ITEM = "283"
 UNKNOWN_AUTH_LINE = ("UNKNOWN: model calls cannot authenticate. Add repo secret CLAUDE_CODE_OAUTH_TOKEN "
-                     "(owner, waiting page item %s)." % PAGE_ITEM)
+                     "(owner, page item %s)." % PAGE_ITEM)
 
 CORPUS_DIR = ".github/judge-replay/corpus"  # out of hooks/: the installer lands hooks/ but not its subfolders
 SEAM = "hooks/decision_watch.py"
@@ -187,7 +187,7 @@ def spawn(case_input, calls):
 
 
 def waiting_url():
-    return layout.waiting_page(REPO)
+    return layout.waiting_page(REPO)  # glossary-ok: lint/layout.py keeps this reader's name, and its callers use it
 
 
 def question(case_input, calls):
