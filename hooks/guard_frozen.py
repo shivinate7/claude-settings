@@ -9,9 +9,9 @@ import re
 import guard_core
 from guard_core import (
     HEREDOC_HEADER, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT, SCRIPT_HEADERS,
-    PowerShellScript, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
+    PowerShellScript, _RUNNER, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
     dir_before_segment, heredoc_delimiter, interpreter_bodies, is_powershell, nested_script, norm, resolve_command,
-    segment_tokens, split_segments, strip_heredoc_bodies,
+    _walk_wrappers, segment_tokens, split_segments, strip_heredoc_bodies,
 )
 from guard_env import _quoted_words, _substitutions, script_spots
 
@@ -1215,6 +1215,81 @@ def _cp_start(raw) -> int:
     return start if start is not None and _name(raw[start]) == "cp" else -1
 
 
+# Words that name no written path, for a caller that judges every word of a write command as a path
+# (`_shell_write_hit(skip_non_targets=True)`): an input redirect or heredoc operator (`<`, `<<EOF`) and its operand,
+# `chmod`'s mode word, `truncate`'s size word, `install`'s mode word and its source operands. `<>` opens for write
+# and `<(` is a substitution, so neither is skipped. A glued `<file` is one word and a bare operator takes the next.
+_INPUT_WORD = re.compile(r"\d*<(?![>(])")
+_INPUT_OPERATOR = re.compile(r"\d*<{1,3}-?")
+_REDIRECT_START = re.compile(r"[\d&]*[<>]")
+_REDIRECT_OPERATOR = re.compile(r"[\d&]*[<>]+[&\d-]*|&")
+_CHMOD_FLAGS = re.compile(r"-[Rfvch]+")
+_TRUNCATE_SIZE = re.compile(r"-[co]*s|--size")
+_NO_VALUED = re.compile(r"(?!)")
+_INSTALL_VALUED = re.compile(r"-[mogSt]|--(?:mode|owner|group|suffix|target-directory)")
+_INSTALL_DIRS = re.compile(r"-[^-]*[dt][^-]*|--(?:directory|target-directory)(?:=.*)?")
+
+
+def _plain_operands(raw, start, valued):
+    """The indexes of the words after `start` that are no option, no redirect and no option value (a word after an
+    option `valued` matches). `--` ends the options."""
+    operands, index, options = [], start, True
+    while index < len(raw):
+        word = _unquoted(raw[index])
+        if _REDIRECT_OPERATOR.fullmatch(raw[index]):
+            index += 1 if raw[index] == "&" else 2
+            continue
+        if _REDIRECT_START.match(raw[index]):
+            index += 1
+            continue
+        if options and word == "--":
+            options = False
+        elif options and word.startswith("-") and len(word) > 1:
+            index += 1 if valued.fullmatch(word) else 0
+        else:
+            operands.append(index)
+        index += 1
+    return operands
+
+
+def _non_target_words(raw) -> set:
+    """The indexes of the words of one segment that name no written path (see `_INPUT_WORD`)."""
+    start, chain = _walk_wrappers(tuple(raw))
+    # xargs takes its operands from stdin, and a shell, an interpreter or a wrapper runs its stdin as a script
+    # (`_RUNNER`): the guard cannot read either, so every word stays judged
+    if any(wrapper == "xargs" for wrapper, _ in chain) or (start is not None and _RUNNER(_name(raw[start]))):
+        return set()
+    skip = set()
+    for index, word in enumerate(raw):
+        if _INPUT_WORD.match(word) and raw[index + 1:index + 2] not in ([">"], [">>"]):   # `<>` is split in two words
+            skip.add(index)
+            if _INPUT_OPERATOR.fullmatch(word):
+                skip.add(index + 1)
+    if start is None:
+        return skip
+    verb = _name(raw[start])
+    if verb == "chmod":
+        words = [_unquoted(word) for word in raw]
+        if not any(word.startswith("--reference") for word in words[start + 1:]):   # else every operand is a file
+            for index in range(start + 1, len(raw)):
+                if words[index].startswith("--") or _CHMOD_FLAGS.fullmatch(words[index]) or index in skip:
+                    continue
+                if _plain_operands(raw, index + 1, _NO_VALUED):   # the first other word is the mode, `-x` included
+                    skip.add(index)   # with no file after it, the word may be the file
+                break
+    elif verb == "truncate":
+        for index in range(start + 1, len(raw)):
+            if _TRUNCATE_SIZE.fullmatch(_unquoted(raw[index])) and _plain_operands(raw, index + 2, _NO_VALUED):
+                skip.add(index + 1)
+    elif verb == "install":
+        skip |= {index + 1 for index in range(start + 1, len(raw)) if _unquoted(raw[index]) in ("-m", "--mode")}
+        operands = _plain_operands(raw, start + 1, _INSTALL_VALUED)
+        # `-d` makes directories and `-t DIR` takes every operand as a source: neither has a lone destination
+        if len(operands) > 1 and not any(_INSTALL_DIRS.fullmatch(_unquoted(word)) for word in raw[start + 1:]):
+            skip |= set(operands[:-1])
+    return skip
+
+
 def _copy_reads(raw, predicate, cwd):
     """The indexes of the words of a `cp` segment that are only read, else an empty set."""
     words = [_unquoted(word) for word in raw]
@@ -1330,13 +1405,15 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 
 
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
-                     command_position=False, predicate_command=False, script_data=False, writes_first=False) -> str:
+                     command_position=False, predicate_command=False, script_data=False, writes_first=False,
+                     skip_non_targets=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
     when that folder cannot be told. `predicate_command` also hands `predicate` the segment's command
     name as a third argument (`''` when none). `script_data` reads the script of a `python -c` or a
-    `node -e` as data, for a caller that reads its shell spots on its own (`shell_write_hit`). `writes_first`
+    `node -e` as data, for a caller that reads its shell spots on its own (`shell_write_hit`). `skip_non_targets`
+    leaves an input operand, a mode word and a size word unjudged (`_non_target_words`). `writes_first`
     asks `writes_to` before `predicate`, for a `predicate` that reads files: a word that is no write target never
     reaches it. The default keeps the cheap `predicate` first, because `writes_to` scans the whole text for each word
     and a command of thousands of words scales with the square of its length."""
@@ -1363,6 +1440,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         if linked:
             return linked
         data = set() if closed else _copy_reads(raw, predicate, cwd)
+        if skip_non_targets and not closed:
+            data = data | _non_target_words(raw)
         sed = None if closed else _sed_operands(raw)
         files = set()
         if sed:
@@ -1418,7 +1497,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         for nested in _powershell_scripts_of(segments[number]):
             # a script pwsh, `cmd /c` or iex runs is PowerShell text: judge it by PowerShell's rules too
             hit = _shell_write_hit(nested, at, predicate, holds, follow_cd, command_position, predicate_command,
-                                   writes_first=writes_first)
+                                   writes_first=writes_first, skip_non_targets=skip_non_targets)
             if hit:
                 return hit
         position = _segment_command(script) if command_position else (None, ())
@@ -1434,7 +1513,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             elif accepts() and writes_to(word, text, *position, written):
                 return word
     for text in inner:
-        hit = _shell_write_hit(text, cwd, predicate, holds, follow_cd, command_position)
+        hit = _shell_write_hit(text, cwd, predicate, holds, follow_cd, command_position,
+                               skip_non_targets=skip_non_targets)
         if hit:
             return hit
     return ""
