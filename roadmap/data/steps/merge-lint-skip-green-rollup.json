@@ -1,14 +1,14 @@
 {
  "id": "merge-lint-skip-green-rollup",
  "title": "The merge skips lane lint when the head's all-jobs-passed rollup is green, and decision lanes-run-no-full-ci-job line 11 is rewritten in place",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL1k9L6aaoYwt9rkang",
  "owner": "triage",
  "blockedBy": [],
- "why": "Owner answered a to the lint-skip question (item 799). Gain per the consultant: about 9 min per lane merge, no re-lint after each main merge-in. Lose: the lint's checks run only in CI at merge.",
+ "why": "Owner answered a to the lint-skip question (item 799). Gain per the consultant: about 9 min per lane merge, no re-lint after each main merge-in. Lose: the lint's checks run only in CI at merge. MERGED 06:47 CST Nov 14: #3377, main 9f44f200bb2b (runner 10, relayed). Done on merge. Not proven: that a lane lint run is skipped on a green rollup in the next merge; reopen if a green rollup still draws a lint run on a head after main carries this.",
  "source": "Owner 21:01 CST Nov 13, relayed by the consultant (triage did not see it); ruling own-lint-skip-green-rollup-a.",
  "note": "Triage 21:02 CST Nov 13: coordinator (21:01) added it to lane merge-tool-audit-fixes (session_013NEJL1k9L6aaoYwt9rkang), which also rewrites line 11 of the decision. The 9 min figure is the consultant's, unmeasured by triage. Red case first: a head with a green rollup skips lane lint; a head with no rollup, or a red one, still runs it.",
- "updatedAt": "2026-11-13T21:02:16-06:00"
+ "updatedAt": "2026-11-14T06:47:00-06:00"
 }

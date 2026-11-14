@@ -1,0 +1,14 @@
+{
+ "id": "review-carries-own-record-commits",
+ "title": "A review that passed on a head carries to a head that differs only by the merge tool's own records-page and record-claim commits",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Ask of runner 12 via the coordinator (06:46 CST Nov 14, relayed; runner 12's own numbers, one sample, the coordinator read no runs): q_max #1174 (merged 06:42 CST) needed three recorded heads: 7b69870d (rounds 1, 2 FAIL, 3 PASS), then the records-page commit 0a550055 and the record-claim commit f3ac50a6, each with its own sonnet fix check PASS. The records step and the claim step each push a commit, so a batch gets two extra fix checks and two extra CI runs (about 17 and 24 min each, n=1, unread by triage). Wanted: the merge tool carries the earlier review across the commits it writes itself, when the diff since the reviewed head is only those tool-written files. Kin, not the same: review-carries-by-tree (a re-cut PR with an equal tree), fix-check-records-carry (a fix-check FAIL on a records-only diff), records-page-before-ready and owner item 830 (open: whether a lane runs the records push before ready). A guard or check change if the tool starts to accept a diff unreviewed: round 3 applies; the diff must be only the tool's own records and claim files, which the tool can prove. Do not start before owner item 830 is answered: its answer decides whether the extra commits stay.",
+ "source": "coordinator 06:46 CST Nov 14, relaying runner 12",
+ "note": "Filed 06:47 CST Nov 14 by triage. Tracker: the coordinator. Waits on owner item 830 (pick-records-page-merge-stale).",
+ "updatedAt": "2026-11-14T06:47:00-06:00"
+}

@@ -7,8 +7,8 @@
  "lane": "session_013NEJL2kn4M9V1b83qU2W7x",
  "owner": "triage",
  "blockedBy": [],
- "why": "Two false stalls (batch 138, batch 139 build 4) cost runner time and trust in the watcher.",
+ "why": "Two false stalls (batch 138, batch 139 build 4) cost runner time and trust in the watcher. SIGHTING 06:47 CST Nov 14 (runner 10, 06:44, relayed): the merge tool took 28 min 35 s on #3377 with no progress line after 06:15; cause unmeasured. This is the silent phase the step addresses; one sample, n=1.",
  "source": "Owner \"B\" 14:09 CST Nov 13 via the retrospective; ruling own-stall-beat-and-cpu-b.",
  "note": "Filed 14:10 CST Nov 13. Do both: (a) merge.py beats every 120 s in every phase via STALL_WATCH_BEAT, with a test that a silent batch-build phase draws no STALL; (b) the stall watcher reads the CPU time of the job's process tree, and a tree whose CPU time advanced in the quiet window is no stall. Rewrite decision stall-watch in place. Red cases: batch 138, batch 139 build 4. Keep the playwright lock-wait hang (no CPU) as a still-a-stall test. Retrospective's line numbers (merge.py 965, 1489, 1525 on main fccff95e6) are unread by triage. Cost of the CPU read goes in the record (reads per check) with a test, per outcomes-mechanize-rules. Lane started 14:12 CST Nov 13 (coordinator): session_013NEJL2kn4M9V1b83qU2W7x, Sonnet medium, express. Overlap named in its brief: open #2680 already \"counts child CPU time as life\" (maybe half of part b), plus #2862, #2800, #3012, #2697, #2949.",
- "updatedAt": "2026-11-13T14:12:33-06:00"
+ "updatedAt": "2026-11-14T06:47:00-06:00"
 }
