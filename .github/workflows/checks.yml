@@ -812,7 +812,6 @@ jobs:
         run: python3 lint/test_agent_push_form.py
 
       - name: Skill model rows check
-        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/check_skill_model_rows.py
 
       - name: Skill model rows fixture suite
