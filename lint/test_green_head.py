@@ -34,6 +34,7 @@ PR = "7"
 HEAD_SHA = "aa" * 20
 GREEN_SHA = "bb" * 20
 MIDDLE_SHA = "cc" * 20
+FOREIGN_SHA = "dd" * 20
 # This module's run folder (test-temp-standard). read() makes its case folders under it; the module teardown removes it.
 RUN_DIR = None
 
@@ -63,10 +64,10 @@ def tearDownModule():
     tracked_tree.rm_tree(RUN_DIR)
 
 
-def checks_run(run_id, head_sha, conclusion="success", status="completed", created="2026-11-14T15:00:00Z"):
-    """One `checks` workflow run, as the runs endpoint lists it."""
+def checks_run(run_id, head_sha, conclusion="success", status="completed", created="2026-11-14T15:00:00Z", prs=None):
+    """One `checks` workflow run, as the runs endpoint lists it. `prs` lists its pull requests; the default is the asked PR."""
     return {"id": run_id, "name": "checks", "event": "pull_request", "head_sha": head_sha,
-            "head_branch": "ci-scope-records-only-push", "pull_requests": [{"number": int(PR)}],
+            "head_branch": "ci-scope-records-only-push", "pull_requests": [{"number": int(PR)}] if prs is None else prs,
             "status": status, "conclusion": conclusion, "created_at": created}
 
 
@@ -158,6 +159,26 @@ class GreenHead(unittest.TestCase):
         fx = green_fixture()
         fx["job_lists"] = {2: jobs(passed="failure")}
         self.assert_prints(read(**fx), [""], "the earlier run's all-jobs-passed job failed")
+
+    def test_other_prs_run_is_not_read(self):
+        self.assert_green_control()
+        # A newer green run of pull request 8 would print FOREIGN_SHA if the reader did not filter by pull request.
+        fx = {"runs": [checks_run(3, HEAD_SHA, None, "in_progress", "2026-11-14T15:10:00Z"),
+                       checks_run(4, FOREIGN_SHA, prs=[{"number": int(PR) + 1}], created="2026-11-14T15:05:00Z"),
+                       checks_run(2, GREEN_SHA, "failure", created="2026-11-14T15:00:00Z")],
+              "job_lists": {4: jobs()}}
+        self.assert_prints(read(**fx), [""],
+                           "the newest earlier run of this pull request concluded failure; a newer green run of another "
+                           "pull request is not read")
+
+    def test_run_with_no_pull_requests_is_not_read(self):
+        self.assert_green_control()
+        # A fork pull request's run lists no pull requests, so it belongs to no pull request the reader can ask for.
+        fx = {"runs": [checks_run(3, HEAD_SHA, None, "in_progress", "2026-11-14T15:10:00Z"),
+                       checks_run(2, GREEN_SHA, prs=[], created="2026-11-14T15:00:00Z")],
+              "job_lists": {2: jobs()}}
+        self.assert_prints(read(**fx), [""],
+                           "the only earlier green run lists no pull requests, so it is not this pull request's run")
 
 
 if __name__ == "__main__":
