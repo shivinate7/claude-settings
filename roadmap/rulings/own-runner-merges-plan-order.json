@@ -1,10 +1,10 @@
 {
   "id": "own-runner-merges-plan-order",
   "at": "2026-11-13T21:06:00-06:00",
-  "title": "Runner 10 merges under the standing merge grant; no new grant line",
-  "ruling": "Consultant 21:06 CST Nov 13, after triage asked for the owner's verbatim: the 21:05 request for a standing grant is covered by decision standing-merge-grant. The coordinator holds the grant in every owner repo and the batch runner merges under it. The per-PR go was the coordinator's own red-main hold, lifted when main went green. Triage read the decision and it says this. The owner's words behind the earlier 21:04 relay were never seen by triage. No CLAUDE.md line is written.",
-  "quote": "decision standing-merge-grant already covers it (the coordinator holds the grant in every owner repo; the batch runner merges under it). The per-PR go was the coordinator's own red-main hold, now lifted.",
-  "source": "Consultant 21:06 CST Nov 13; decision standing-merge-grant read by triage; filed by triage.",
+  "title": "Runner 10 merges plan PRs under decision standing-merge-grant; the owner granted nothing new",
+  "ruling": "Consultant 21:07 CST Nov 13: the owner did not grant \"merge every clear PR with no per-PR go\". That was the consultant's reading of decision standing-merge-grant, which says the coordinator holds the grant in every owner repo and the batch runner merges under it (owner 2026-11-01 17:37 and 21:34 CST; switch merge.standingGrant in .github/stamp.json, absent = holds). Triage read the decision; the coordinator read it on origin/main at 21:05. The owner's 21:04 CST words were a question (see step hold-names-its-end). The per-PR go was the coordinator's own red-main hold, lifted. The merge order #3302, #3269, #3323, #3314, then the combined PRs is the coordinator's plan order, not an owner ruling. No CLAUDE.md line is written.",
+  "quote": "decision standing-merge-grant: \"a batch runner runs every merge under the coordinator's grant\" (owner, 2026-11-01 21:34 CST)",
+  "source": "Consultant 21:06 and 21:07 CST Nov 13; coordinator 21:06 and 21:07 CST; decision standing-merge-grant read by triage; filed by triage.",
   "status": "closed",
   "step": "runner-merges-plan-order-grant"
 }

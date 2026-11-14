@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "The coordinator's \"merge nothing without a go\" outlived main going green at 20:12 CST by about 50 minutes; the owner asked at 21:04 CST whether that was a bug in the batch runner or correct.",
  "source": "Consultant 21:06 CST Nov 13, from the owner's 21:04 chat question.",
- "note": "Triage 21:06 CST Nov 13: rule outcomes-judge-by-outcome. Fix: a hold a session sets (in a handoff, a message or a record) states its end event in the same line; a check refuses a hold line with no end. Red case first. Times are the consultant's, unchecked by triage. Existing hold steps to compare: lane-hold-end-trigger (closed page item) and drain-first-hold.",
- "updatedAt": "2026-11-13T21:06:41-06:00"
+ "note": "Triage 21:06 CST Nov 13: rule outcomes-judge-by-outcome. Fix: a hold a session sets (in a handoff, a message or a record) states its end event in the same line; a check refuses a hold line with no end. Red case first. Times are the consultant's, unchecked by triage. Existing hold steps to compare: lane-hold-end-trigger (closed page item) and drain-first-hold. Owner 21:04 CST Nov 13 (chat, verbatim via the consultant): \"is this a bug on batch runner or correct? “The coordinator’s standing hold says I mark nothing ready and merge nothing until a go names the PR and its full head, and none names #3269 yet.”\" It was a question, not a grant.",
+ "updatedAt": "2026-11-13T21:07:40-06:00"
 }
