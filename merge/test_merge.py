@@ -11728,6 +11728,7 @@ class RedMainBrake(Env):
     # green run needs its own revert (decision no-merge-onto-red-main). Runs are listed newest first, as GET actions/runs lists them.
     CHAIN_OLD, CHAIN_NEW, CHAIN_GREEN, CHAIN_DISPATCH = 2411, 2412, 2413, 2414
     CHAIN_OLD_SHA, CHAIN_NEW_SHA = "a1d0" * 10, "b2e1" * 10
+    CHAIN_GREEN_PARENT = 2415  # a green run under CHAIN_GREEN: the red runs sit on a green run whose own parent is green
 
     def chain_pair(self):
         """-> (runs, jobs): the newer red run, then the older one, both red on their own head, in the push group of checks."""
@@ -11777,6 +11778,29 @@ class RedMainBrake(Env):
         rc, out, before = self.go(*self.chain_pair())
         self.refused(rc, out, before)
         self.assertIn(f"run {self.CHAIN_NEW} of checks", out, "the refusal does not name the newest red run")
+
+    def test_red_chain_in_flight_older_run_under_a_reverted_newer_red_run_is_not_dropped(self):
+        # the older run is a re-run still going: it is not judged, and an unjudged run under a red run must hold the merge as unknown
+        self.revert_of(self.CHAIN_NEW_SHA)  # the revert covers the newer red run alone
+        runs = [main_run(self.CHAIN_NEW, "failure", sha=self.CHAIN_NEW_SHA),
+                main_run(self.CHAIN_OLD, None, status="in_progress", run_attempt=2, sha=self.CHAIN_OLD_SHA)]
+        rc, out, before = self.go(runs, {self.CHAIN_NEW: [main_job("checks", "failure", 20)]})
+        self.refused(rc, out, before, why="the merge is not refused: the older re-run still going under a reverted red run was dropped, so nothing holds the merge")
+        self.assertIn(f"run {self.CHAIN_OLD} of checks", out, "the refusal does not name the older re-run that is still going")
+
+    def test_red_chain_breaking_line_is_named_once_when_two_red_runs_stand(self):
+        # two red runs of one group stand over a green run: the group's walk starts once, so its breaking-line segment is named once
+        for what, conclusion, red_jobs in (("failed jobs", "failure", [main_job("checks", "failure", 20)]), ("no job", "startup_failure", [])):
+            with self.subTest(reds=what):
+                runs = [main_run(self.CHAIN_NEW, conclusion, sha=self.CHAIN_NEW_SHA), main_run(self.CHAIN_OLD, conclusion, sha=self.CHAIN_OLD_SHA),
+                        main_run(self.CHAIN_GREEN, "success"), main_run(self.CHAIN_GREEN_PARENT, "success")]
+                jobs = {self.CHAIN_NEW: red_jobs, self.CHAIN_OLD: red_jobs,
+                        self.CHAIN_GREEN: [main_job("checks", "success", 20)], self.CHAIN_GREEN_PARENT: [main_job("checks", "success", 20)]}
+                verdict, detail = merge.base_verdict(self.co, MainRunsHost(self.co, self.other, runs, jobs), "main")
+                self.assertEqual(verdict, "red", detail)
+                seg = f"run {self.CHAIN_OLD} is the first red run after a green one"  # the first red run with a green parent, as breaking_line names it
+                self.assertIn(seg, detail, "the detail names no breaking line, so the fixture does not reach the walk")
+                self.assertEqual(detail.count(seg), 1, "the breaking line of one red group is named more than once: a red run of the group started its own walk")
 
     def test_a_revert_never_clears_an_unknown_run(self):
         self.revert_of(self.RED_SHA)
