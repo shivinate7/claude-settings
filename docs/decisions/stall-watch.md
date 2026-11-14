@@ -50,7 +50,16 @@ guard rule, so the watcher does the waiting and the session is told once.
   three short `ps` reads per ancestor level and at most one process-table read (unmeasured count). While it waits, four `/proc` reads a second
   on Linux, one `ps` a second elsewhere (unmeasured). Unmeasured: no test pins the cost.
 - A tool that is quiet by design must print a short progress line at least every 120 seconds. The merge
-  tool prints `merge: waiting on ...` while it waits on checks, and while GitHub still shows the head before
+  tool beats in every phase (`phase_beat` in `merge/merge.py`): while a run is in progress, a thread appends
+  `merge: still working, Ns` to `STALL_WATCH_BEAT` every `MERGE_HEARTBEAT` seconds (default 120), so a silent
+  phase of a batch build draws no STALL (batch 138, batch 139 build 4; `merge/test_merge_beat.py`). It does
+  nothing when the variable is unset. Cost: at most one thread a run and at most one append every 120 s, no process, pinned by
+  `test_cost_one_thread_and_one_append_per_beat`. Limit: the thread beats while the main thread waits, so a
+  merge run hung in a `gh` or `git` call shows life and draws no STALL. Those calls have no timeout in a real run
+  (`SH_TIMEOUT` is set only by the guard's preview reads), so nothing bounds it (note `merge-beat-masks-hung-call`;
+  how often it happens is unmeasured). The merge tool's own 60 s scan line goes to stdout, the beat to
+  the beat file, so a redirect of stdout hides only the first. The merge
+  tool also prints `merge: waiting on ...` while it waits on checks, and while GitHub still shows the head before
   the push. `verdict` prints a `still running` line to stderr every 120 seconds, so a pipe on stdout does not hide it.
   It also appends the line to the beat file, which the hook names next to its log, exports to the job as
   `STALL_WATCH_BEAT`, and passes to the watcher as `--beat`. The watcher relays the file's new bytes to its
@@ -66,13 +75,37 @@ guard rule, so the watcher does the waiting and the session is told once.
   (`named_logs`): the target of `> F`, `>> F`, `&> F`, `>& F`, each `tee` file, and `--log F`. shlex reads
   the command, so a path in quotes or a comment is text. A change of size or mtime on any of them resets the
   quiet time. A job with no named log, or whose logs stop changing, stalls as before. The redirection is the
-  signal because it is the act; a declared note can be wrong, and an unnamed file is not read. Limit: a
-  relative path after a `cd` resolves against the shell's directory, so that job can still stall falsely.
+  signal because it is the act; a declared note can be wrong, and an unnamed file is not read.
+  A relative log after a `cd` or `pushd` is joined to its target when the hook builds the wrapper. The same
+  tokenizer reads the cd, so a cd in quotes, a comment or a heredoc body is text. Only a cd that surely
+  runs in the main shell moves the directory: the first command of a list item, or one that follows only
+  cds joined by `&&`. A cd behind `||`, `&`, `|` or `then`, a cd that ends in `&`, `|` or `||` (also before a newline), or inside `{ }`, leaves it unknown.
+  A list that ends in `&` runs in a background subshell, so after the `&` the directory is the list's start.
+  Limit: `builtin cd`, `command cd` and `eval "cd ..."` are not read as a cd.
+  Limit: a cd inside a shell heredoc body (`bash <<EOF`) is read as moving the main shell.
+  The hook never refuses for this (coordinator ruling, 2026-11-08). It leaves that log out of `--also`,
+  passes it as `--unwatched`, and the STALL report names it. A refusal on `cd "$REPO" && make > log`
+  costs more than a missed log.
+  CPU time is life too (coordinator ruling, 2026-11-08 05:02 CST): a child with no output, such as
+  `cmd | tail -1`, is working while its CPU time advances. Any process under the job's shell counts;
+  the shell's own time does not.
+  Each process also carries the CPU time of the children it has already waited for (`reaped_seconds`:
+  cutime and cstime in `/proc/PID/stat`, Linux only). `ps` shows whole seconds and only live
+  processes, so a silent parent that runs short children one after another (batch 139 build 4) drew a
+  false STALL until this time counted. The job shell's own time stays out, its reaped children's time is in.
+  Cost: no new process, timer or file. The once-a-second `ps` that reads the job's state reads the
+  process table with CPU time, and the watcher compares each process to its last reading. Each check also
+  reads `/proc/PID/stat` once for the job's shell and once for each process under it, so N processes
+  cost N + 1 reads a second (pinned by case 25f in `hooks/test_stall_watch.py`; one `ps` pinned by 25e).
+  Where `/proc` is absent the reads give 0. A fork-polling hang (`while ! mkdir lock; do sleep 1; done`) may read as life from its ended children's reaped time; unmeasured, and no test covers it. On Linux ps gives whole seconds, so a live child under 1/SECS of a core
+  (0.33% at 300 s) that has not ended may still stall. A job that `exec`s has no child to count.
+  Red cases: batch 138 (a silent parent with a busy child, case 25c) and batch 139 build 4 (a serial chain, case 25d).
+  Kept as a stall: a child that holds a lock and does nothing, no CPU (the `playwright install` hang, case 4).
   The watcher reports a stall only on a job state and named-log sample from the same pass. A sample
   from the once-a-second check can be a second old, and miss a write or the job's end.
-  Each background job starts one watcher process. Its process cost is open: owner Cockpit item 180 holds
-  it (plan `docs/plans/align-watchers.md`). Each named log gets one stat a second in the watcher's own loop,
-  one more before each stall report, and one at each Stop check. The beat file costs one append per
+  Each background job starts at most one watcher process, unmeasured. Its process cost is open: owner Cockpit item 180 holds
+  it (plan `docs/plans/align-watchers.md`, unmeasured). Each named log gets at most one stat a second in the watcher's own loop,
+  one more before each stall report, and one at each Stop check, not pinned. The beat file costs at most one append per
   heartbeat. The watcher reads it on each 0.2 s loop pass.
 - The job removes its log and beat file when it ends, also after a STALL report (the job keeps writing
   until then, so nothing is removed at stall time), and when the original calls `exit N` (the exit code is
@@ -91,7 +124,7 @@ guard rule, so the watcher does the waiting and the session is told once.
 When a turn ends, a Stop hook runs `hooks/stall_watch.py --stop`. It reads the session transcript and
 lists each open background shell and background agent that has been quiet longer than the age.
 For a shell, the signal is its output file, and each log its
-command names must be quiet too. A relative log resolves against the call record's `cwd`. A shell whose
+command names must be quiet too. A relative log resolves against the call record's `cwd`, after any sure `cd` the command makes (`named_logs`, above). A shell whose
 output file is not found is listed as unknown. It prints one systemMessage that tells the model to stop
 the shell or tell the owner. A job is listed once per crossing, at the first Stop after its stall crossed (see below).
 
@@ -111,7 +144,23 @@ previous Stop was listed there, so it is silent now. A job that goes quiet again
 again. An unknown job (no output file) is listed once, at the first Stop after its call: its call record's
 time must be later than the previous Stop. Limit: a job whose output file existed at the previous Stop and
 is gone now is not listed. With no summary, or a summary with no readable timestamp,
-every quiet job is listed. The state is the transcript: no file is written and no process is started.
+every quiet job is listed. The state is the transcript: no file is written.
+Stop-side CPU rule: a shell job about to be listed is dropped when a process under it burns CPU, the
+watcher's rule (posix with lsof only; `busy_outputs`). The job has no pid at Stop, so its processes are
+those that hold its output file as stdout or stderr. Two `ps` reads 1.5 s apart tell whether CPU time advanced.
+Stop-side unresolved-log rule: a listed job whose named log has an unknown directory says that log is
+not watched, as the watcher's report does. The job is still listed when quiet. Limit: a spinning child is
+never reported (the watcher counts CPU as life). A builtin spin in the job's shell is reported by the
+watcher only: in a hook-wrapped job `tree_cpu` counts the job subshell, so Stop does not list it. Limit: a job
+dropped as busy at its crossing Stop has used up its one listing, so a job busy and then hung is never listed by
+Stop (the watcher still catches a hook-wrapped one). Limit (partial fix): one 1.5 s sample at whole-second `ps` resolution
+reliably spares only CPU-bound jobs; a job at about 25% CPU can still be listed as quiet. Time bound: one
+deadline of 6 s (`BUSY_BUDGET`) covers `lsof`, both `ps` reads and the wait. Each call's timeout is the time left.
+Past the deadline the check returns none, and every job is listed as before. The Stop hook is killed at 10 s, so the check
+stays well under it. Cost: no process
+that lives on, no file, no timer. A quiet shell job whose output file a process holds costs at most one `lsof`,
+two `ps` reads and a 1.5 s wait at that Stop. The `ps` reads run only when a process holds the file. A Stop that lists no shell job costs none.
+
 Cost: one more JSON parse per `stop_hook_summary` line (one a Stop run), in the one pass that `scan_jobs`
 already makes, at each Stop (unmeasured).
 
