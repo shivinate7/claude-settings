@@ -24,7 +24,7 @@ Rule `brief-ids-in-roster` in `hooks/guard.py` refuses a lane brief that names a
 - Mail route: a brief sent by `mail send` (a Bash command, the git mailbox route of decision `session-messages`) with a bare session id is not read. The check reads only `send_message` and a lane `create_session` prompt. Follow-up step `brief-ids-mail-route` is for triage to file.
 - A false alarm: a file name or prose such as `session_2026-11-14.md` or `session_1` is refused as an id. Quote the id itself, with a backtick or a double quote on each side of it, to lift the refusal. A quote around the whole file name does not count, since the id ends before the dash.
 
-Protected by the `brief-ids-in-roster:` cases in `tests/guard/s43200-brief-ids-in-roster.py`, red before the rule read every bare id.
+Protected by the `brief-ids-in-roster:` cases in `tests/guard/s43300-brief-ids-in-roster.py`, red before the rule read every bare id.
 
 Kind: process
 Home: hooks/guard_merge.py
