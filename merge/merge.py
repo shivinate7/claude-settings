@@ -88,6 +88,11 @@
                           Cost: one `pulls/N` read per PR and one read of the repo's comments since the oldest PR (every page), one fetch per
                           distinct base, one merge-tree per PR (tree objects, no ref), and a fetch of a PR head the clone lacks; no new
                           process kept, file or timer.
+  merge --batch-label <pr>
+                          add the `batch` label to a batch's integration pull request, so the ledger reads it as a batch run (decision pr-ledger). The PR
+                          must be open and its head branch must start with `batch-`; any other PR is refused with nothing written, and a failed read or
+                          add exits 1. Stands alone. Takes no lock, no lint and no merge role, and merges and pushes nothing; the batch runner runs it
+                          after the batch head's lane lint, which writes no label. Cost: at most one `pulls/N` read and one label POST per call.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"] [--with PR,PR,...] [--touched-tests]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
@@ -1208,6 +1213,12 @@ class Host:
         c, out = self.api(f"issues/{n}/comments", method="POST", body={"body": body})
         if c:
             raise Stop(f"posting the comment on #{n} failed {LANE_LINT_CITE}: {out}")
+
+    def add_label(self, n, label):
+        """Add `label` to pull request n (REST POST issues/n/labels, through gh; GitHub makes a missing label). The one home of a label write. A failed add is a Stop."""
+        c, out = self.api(f"issues/{n}/labels", method="POST", body={"labels": [label]})
+        if c:
+            raise Stop(f"adding the `{label}` label to #{n} failed {BATCH_LABEL_CITE}: {out}")
 
     def review_comments(self, since):
         """-> {PR number: [review record bodies, oldest first]}: review_records without the timestamps."""
@@ -5448,6 +5459,25 @@ def batch_blame(root, h, name, number, url):
         f"  merge --batch-drop {name} {number}")
     return 0
 
+BATCH_LABEL_CITE = "(decision pr-ledger, the `batch` label is its own write, `merge --batch-label`, and `merge --lane-lint` writes no label)"
+
+def batch_label(host, n):
+    """merge --batch-label PR: add PR_BATCH_LABEL to an open pull request whose head branch starts with BATCH_PREFIX, the integration PR of a batch, so the
+    ledger reads it as a batch run (decision pr-ledger). Any other PR is a Stop with nothing written: a lane PR labelled by mistake would read `batch run`.
+    Reads the PR once, writes one label, takes no lock and no lint. A failed read or add is a Stop. Returns 0."""
+    try:
+        info = host.pr(n)
+    except Stop as e:
+        raise Stop(f"{e} {BATCH_LABEL_CITE}")
+    if info["state"] != "OPEN":
+        raise Stop(f"#{n} is {info['state'].lower()}, not open: only an open integration pull request takes the `{PR_BATCH_LABEL}` label. Nothing was labelled. {BATCH_LABEL_CITE}")
+    if not info["branch"].startswith(BATCH_PREFIX):
+        raise Stop(f"#{n} has the head branch {info['branch']}, not `{BATCH_PREFIX}NAME`: only a batch's integration pull request takes the `{PR_BATCH_LABEL}` label. "
+                   f"Nothing was labelled. {BATCH_LABEL_CITE}")
+    host.add_label(n, PR_BATCH_LABEL)
+    say(f"merge: added the `{PR_BATCH_LABEL}` label to #{n} (head branch {info['branch']}).")
+    return 0
+
 def batch_drop(root, h, name, number):
     """merge --batch-drop NAME PR: PR and each frozen lane whose head contains PR's head come off batch-NAME. Returns 0, or 1 when a batch stacked on it could not be rebuilt."""
     branch = integration_branch(name)
@@ -5609,6 +5639,7 @@ def build_parser():
     p.add_argument("-C", "--repo-dir", default=None, metavar="PATH", help="act in the checkout at PATH, not the one the process stands in; the last value wins")
     p.add_argument("--confirm", action="store_true")
     p.add_argument("--express", action="store_true", help="with --confirm: merge a prose-only PR whose body names a ruling in origin/roadmap's store; any other PR refuses")
+    p.add_argument("--batch-label", action="store_true", help="add the `batch` label to a batch's integration pull request (an open PR whose head branch starts with `batch-`); takes a PR number, no lock, no lint, no merge role; stands alone")
     p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
@@ -5711,7 +5742,10 @@ def main(argv, host=None, lock=None, hosts=None):
                                  "config", "session", "undo_check_unknown_ok", "base_red_ok"))
                   or (a.batch_build and a.batch_drop)):
         p.error("--batch-build and --batch-drop each stand alone")
-    if a.idle_lanes or a.touches or a.release_check:
+    if a.batch_label:
+        if a.pr is None or not a.pr.isdigit() or any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("batch_label", "pr", "repo_dir")):
+            p.error("--batch-label takes one pull request number and stands alone")
+    elif a.idle_lanes or a.touches or a.release_check:
         pass  # stands alone: checked above
     elif batch:
         name, *numbers = a.batch_build or a.batch_drop
@@ -5786,6 +5820,8 @@ def main(argv, host=None, lock=None, hosts=None):
             return 0
         if a.idle_lanes:
             return idle_lanes(a.live, a.repo_dir)  # before the role check and any lock: it reads, merges and posts nothing
+        if a.batch_label:
+            return batch_label(host or Host(cwd=a.repo_dir), int(a.pr))  # before the role check and any lock: it merges and pushes nothing, and the target check is its guard
         if a.lane_lint:
             c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=a.repo_dir)
             if c:
