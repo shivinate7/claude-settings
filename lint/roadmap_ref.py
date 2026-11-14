@@ -6,7 +6,7 @@
 Returns "" when the local ref origin/roadmap is fresh or was just fetched, else a note that starts "read as of". The
 ref is fresh only when the repo's FETCH_HEAD holds a `branch 'roadmap' of` line (git writes one per fetched branch, so
 a fetch of main says nothing about the roadmap), its mtime is within MAX_AGE seconds, and its sha is the tip of the
-local ref. A plain `git fetch origin roadmap` in a single-branch clone writes the line and leaves the ref where it was,
+local ref, read from the ref's files. A plain `git fetch origin roadmap` in a single-branch clone writes the line and leaves the ref where it was,
 so a line that names another commit is stale, and so is a line with no local ref to compare. Anything else is stale
 too, and a stale ref gets one `git fetch` of the roadmap branch, bounded at FETCH_TIMEOUT seconds. A fetch that fails,
 times out or has no origin gives the note and never raises: the caller reads the ref as it is.
@@ -31,9 +31,9 @@ does not outlive the wait. It reads no stdin, and it never prompts: GIT_TERMINAL
 the caller set GIT_SSH_COMMAND, ssh in BatchMode. Git runs with LC_ALL=C, so the fetch's error text matches
 NOTHING_TO_FETCH in any locale.
 
-Cost: a ref with no fresh roadmap line costs one stat and one small read of FETCH_HEAD, and no other process. A fresh
-roadmap line adds one `git rev-parse` of the ref's tip, so a fresh ref costs one git start. A repo whose `.git` is
-neither a folder nor a `gitdir:` file adds one `git rev-parse` to find FETCH_HEAD. A stale ref adds one `git fetch`,
+Cost: a fresh ref costs one stat and one small read of FETCH_HEAD, one read of the ref's loose file (or of packed-refs),
+and no process. A repo whose `.git` is neither a folder nor a `gitdir:` file adds one `git rev-parse` to find
+FETCH_HEAD. A repo whose refs are not files (no loose file, no packed-refs) adds one `git rev-parse` of the ref's tip. A stale ref adds one `git fetch`,
 up to FETCH_TIMEOUT seconds, and, after a failure that was not a timeout and with no fresh roadmap line on record, one
 `git log` of the ref's tip. No file is written but the ones git writes (FETCH_HEAD and the ref), no timer, no log.
 """
@@ -181,8 +181,48 @@ def _roadmap_fetch(path):
     return None
 
 
-def _ref_tip(repo_dir):
-    """The sha the local roadmap ref names, or None when it does not resolve or git cannot be read."""
+def _common_dir(git_dir):
+    """The folder that holds the refs: git_dir itself, or the one its `commondir` file names (a linked worktree)."""
+    try:
+        with open(os.path.join(git_dir, "commondir"), encoding="utf-8") as f:
+            named = f.readline().strip()
+        return os.path.join(git_dir, named) if named else git_dir
+    except OSError:
+        return git_dir
+
+
+def _read_ref_files(git_dir):
+    """The sha the local roadmap ref names, read from its loose file, else from packed-refs, with no process. "" when
+    the refs are files and none names the ref. None when they cannot be read this way: no loose file and no
+    packed-refs file (another ref storage), or a loose file that is not a sha."""
+    common = _common_dir(git_dir)
+    try:
+        with open(os.path.join(common, *REF.split("/")), encoding="utf-8") as f:
+            loose = f.readline().strip()
+        return loose if len(loose) >= 40 and all(c in "0123456789abcdef" for c in loose) else None
+    except FileNotFoundError:
+        pass
+    except (OSError, UnicodeDecodeError):
+        return None
+    try:
+        with open(os.path.join(common, "packed-refs"), encoding="utf-8") as f:
+            for line in f:
+                sha, _, name = line.strip().partition(" ")
+                if name == REF:
+                    return sha
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError):
+        return None
+    return ""
+
+
+def _ref_tip(repo_dir, fetch_head):
+    """The sha the local roadmap ref names, or None when it does not resolve or git cannot be read. It reads the ref's
+    files; only a repo whose refs are not files gets one `git rev-parse`."""
+    tip = _read_ref_files(os.path.dirname(fetch_head))
+    if tip is not None:
+        return tip or None
     try:
         done = _run_git(repo_dir, ["rev-parse", "--verify", "--quiet", REF], FETCH_TIMEOUT)
         return done.stdout.strip() or None if done.returncode == 0 else None
@@ -216,7 +256,7 @@ def fresh_ref(repo_dir, now=None, fetch=None):
         line = _roadmap_fetch(head)
         last = line[0] if line else None
         if line and now - last <= MAX_AGE:
-            if line[1] == _ref_tip(repo_dir):
+            if line[1] == _ref_tip(repo_dir, head):
                 return ""
             last = None  # the line is recent, but the ref is not at it: only the ref's own commit time says how old it is
         timed_out = nothing = False
