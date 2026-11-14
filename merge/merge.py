@@ -15,7 +15,8 @@
                           or `<job>:<step>` for a step of another job, such as "checks-rest:project-ops skill scaffold suite")
                           gets them run first: one `bin/ci-job <job> --step NAME ... --base origin/<base>` per job in a temporary worktree on the tree
                           the step would push, before any push and before the ready mark, on every path (default base, other base,
-                          Record-claim head). A FAIL or an unknown stops the step with the step lines and the log: nothing pushed, not
+                          Record-claim head). A declared step that job's workflow in that tree lacks reads its own `unknown NAME: not run: ...` line,
+                          is not sent to ci-job, and stops the step like any unknown. A FAIL or an unknown stops the step with the step lines and the log: nothing pushed, not
                           marked ready, and no flag lifts it. A repo with no list runs no ready check, and one line says so.
                           Cost per draft-step ready: one ci-job run per job of the list, and one worktree; the run time is unmeasured for a step subset
                           (the 3600 s lint bound applies). No new file but ci-job's own log.
@@ -132,7 +133,8 @@
                           checks, push the page, ask the host to mark the PR ready) and nothing more. A PR that is ready already is left as it is. It
                           never merges, takes no lock and needs no merge role. A red head or a head that conflicts with the base is not marked ready.
                           A repo with merge.readyChecks gets the pre-ready run: the checks, the debt-close lint and the open-PR clash (the head against every
-                          other open PR on its base), each one line `pass NAME`, `fail NAME: why` or `unknown NAME: why`, before any push. A PR on a base
+                          other open PR on its base), each one line `pass NAME`, `fail NAME: why` or `unknown NAME: why`, before any push. A declared step the
+                          job's workflow in the tree lacks reads `unknown NAME: not run: ...` and is never sent to ci-job. A PR on a base
                           other than the default branch is checked on the merge of its head with that base.
   merge <pr> --fast-checks  the pre-ready run alone, on a dry merge of the PR onto its base (a temporary worktree and one commit object, no ref). Read-only means no lock,
                           no push, no ready mark, no comment, no records page; it still fetches (writes refs and FETCH_HEAD) and adds a worktree (.git/worktrees).
@@ -176,6 +178,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # required_check, pin_note and git_reads, loaded below
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
+import workflow_steps  # noqa: E402  the one home of the workflow step parser (lint/workflow_steps.py), as bin/ci-job reads steps; the lint dir is on sys.path from the records import above
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 
@@ -3568,22 +3571,49 @@ def ready_job_groups(checks):
         groups.setdefault(m.group(1) if m else "checks", []).append((entry, m.group(2) if m else entry))
     return groups
 
+def job_step_names(wt, job):
+    """-> (names, None): the step names of `job` in the workflow of the tree `wt`, read with the step parser bin/ci-job runs by (lint/workflow_steps.py), or
+    (None, why) in plain words when the workflow or the job cannot be read. A step with no `name:` is `step N`, as ci-job names it."""
+    path, why = workflow_steps.job_workflow(wt, job)
+    if why:
+        return None, why
+    try:
+        with open(path, encoding="utf-8") as f:
+            block = workflow_steps.job_block(f.read(), job)
+    except (OSError, UnicodeError) as e:
+        return None, f"cannot read the workflow {path}: {e}"
+    if block is None:
+        return None, f"no job '{job}' in {path}"
+    return [workflow_steps.step_key(st, "name") or f"step {i}" for i, st in enumerate(workflow_steps.step_blocks(block), 1)], None
+
 def pre_ready_rows(wt, n, base, checks, pre):
     """The pre-ready run: one ci-job run per job of `merge.readyChecks` `checks` in the tree `wt` (ready_job_groups), then, when `pre` is (root, host, info), the debt-close lint
     on `wt` and the open-PR clash of the PR's head, each once. Prints one verdict line per check, `pass NAME`, `fail NAME: why` or `unknown NAME: why`, all before any
     refusal; NAME is the declared entry.
     -> (rows, (state, lines, log)): rows of (verdict, name, detail), and the jobs' ci_job_run answers combined: state fail over unknown over pass, lines and log joined.
+    Each job's step names are read from the workflow in `wt` (job_step_names), so a declared step the tree lacks reads its own `unknown ... not run` row, is never sent
+    to ci-job, and makes the state at least unknown. A job with no present step runs no ci-job; a job whose workflow cannot be read reads every check unknown.
     Each job's steps are read from that job's own lines, so a step name two jobs hold reads only its own job.
-    Cost: one ci-job run per job, one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees."""
+    Cost: one ci-job run per job with a present step, one workflow read per job, one debt-close lint (a scratch worktree and one Retire test run per closed debt),
+    one cross_measure; no file but ci-job's log and the temporary worktrees."""
     rows, states, lines, log = [], [], [], []
     for job, group in ready_job_groups(checks).items():
-        raw = []
-        args = [job, "--pinned", *[a for _, bare in group for a in ("--step", bare)], "--base", f"origin/{base}"]
-        state, job_lines, job_log, _ = ci_job_run(wt, *args, raw=raw)
+        names, why = job_step_names(wt, job)
+        absent = {declared: why or f"not run: no step of job '{job}' has this name" for declared, bare in group if names is None or bare not in names}
+        present = [(declared, bare) for declared, bare in group if declared not in absent]
+        job_rows = {}
+        state = "unknown" if absent else "pass"
+        if present:
+            raw = []
+            args = [job, "--pinned", *[a for _, bare in present for a in ("--step", bare)], "--base", f"origin/{base}"]
+            ran, job_lines, job_log, _ = ci_job_run(wt, *args, raw=raw)
+            state = "fail" if "fail" in (state, ran) else "unknown" if "unknown" in (state, ran) else "pass"
+            lines += job_lines
+            log += job_log
+            job_rows = {declared: (v, declared, d) for (declared, _), (v, _, d) in zip(present, step_verdicts(raw, [bare for _, bare in present], ran))}
         states.append(state)
-        lines += job_lines
-        log += job_log
-        rows += [(v, declared, d) for (v, _, d), (declared, _) in zip(step_verdicts(raw, [bare for _, bare in group], state), group)]
+        lines += [f"unknown {declared}: {d}" for declared, d in absent.items()]
+        rows += [job_rows[declared] if declared in job_rows else ("unknown", declared, absent[declared]) for declared, _ in group]
     state = "fail" if "fail" in states else "unknown" if "unknown" in states else "pass"
     if pre:
         root, host, info = pre
@@ -3594,7 +3624,7 @@ def pre_ready_rows(wt, n, base, checks, pre):
 def run_ready_checks(wt, n, base, checks, remedy="Fix it on the branch, push, and run --confirm again.", pre=None):
     """The ready checks of the draft step: run the repo's `merge.readyChecks` through ci-job in the tree `wt`, which holds what the step
     would push (the merge of the head with the base, for a PR whose base is not the default branch: open_merge_worktree). One ci-job run per job.
-    Returns on a pass; a FAIL or an unknown raises Stop, and no flag lifts it. `checks` is a non-empty list.
+    Returns on a pass; a FAIL or an unknown raises Stop, and no flag lifts it. `checks` is a non-empty list. A declared step the tree's workflow lacks is an unknown.
     `remedy` is the route the refusal names: the draft step's by default.
     A FAIL is a LintFail, with the step lines and the log; an unknown is a plain Stop.
     `pre` is (root, host, info) for the pre-ready run: it also reads the debt-close lint and the open-PR clash (pre_ready_rows), and any of them
