@@ -1,0 +1,14 @@
+{
+ "id": "priority-table-reads-pr",
+ "title": "A tracked-priority row names its branch and reads its PR by REST at each wake",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The consultant's handoff said \"no PR yet\" while #3302 existed.",
+ "source": "Consultant 20:27 CST Nov 13; triage did not check #3302 or the handoff.",
+ "note": "Filed 20:28 CST Nov 13. Fix: each tracked-priority row in a standing session's handoff or table carries its branch, and the wake reads that branch's PR state by REST (counts and states from REST, rule verification-counts-from-rest) before a \"no PR yet\" claim stands. Pairs with priority-vs-merge-order. Duplicate check owed: similar steps in the handoff family (handoff-ledger-step-one, cite-check-covers-handoffs); the lane reads them first. Needs a lane.",
+ "updatedAt": "2026-11-13T20:28:11-06:00"
+}

@@ -1,0 +1,14 @@
+{
+ "id": "priority-vs-merge-order",
+ "title": "A runner's merge order is checked against the owner's priority rulings",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Runner 10 followed the coordinator's 18:42 CST \"stack after combined PR\" against the owner's 15:56 CST top priority; #3302 sat as a draft 18:40-20:27.",
+ "source": "Consultant 20:27 CST Nov 13, quoting its own reads; the owner's ask 20:25 CST: \"how has the ci speed stack with top prio still not landed?\". Triage did not verify the order, the times or the rulings.",
+ "note": "Filed 20:28 CST Nov 13. Gap: nothing sets the owner's priority rulings against the order in which a runner places PRs. Fix: a line (a check in the merge tool or the runner's wake) that names each tracked owner priority with its branch or PR and refuses or warns when the runner places a lower-priority PR first; priority-table-reads-pr supplies the PR state. A check change: lane measures first (which rulings carry a priority, how many are open), then test-author red case with the #3302 sequence, builder, reviewer. Answer owed to the owner on his 20:25 question: the coordinator or runner 10 says why the stack with top priority had not landed; triage has not found the cause. Needs a lane.",
+ "updatedAt": "2026-11-13T20:28:11-06:00"
+}

@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Retro 12:17 CST Nov 13: it skipped the post-compaction audit (handoff Next 5, ruling audit-reads-main-every-role) and the owner caught it; no check starts it before the first reply.",
  "source": "retrospective 12:17 CST Nov 13",
- "note": "Todo. Extend the handoff-unread guard so a session's first reply after a compaction is refused until an `Audit:` agent has started. Guard that would have stopped the miss. Check the guard record (building-guard-needs-incident) first: incident = the retro's skipped audit this compaction.",
- "updatedAt": "2026-11-13T12:22:06-06:00"
+ "note": "Todo. Extend the handoff-unread guard so a session's first reply after a compaction is refused until an `Audit:` agent has started. Guard that would have stopped the miss. Check the guard record (building-guard-needs-incident) first: incident = the retro's skipped audit this compaction. Consultant 20:28 CST Nov 13 (20:27; asked for slug handoff-audit-ran; folded here, same family): new incident: runner 10 skipped the Audit: Explore spawn after its compaction at 20:19 CST and nothing caught it. The consultant's variant: a Stop-hook check that an Audit: Explore spawn followed each compaction before the handoff write. The lane picks the hook point (refuse the first reply, or check at Stop before the handoff write); the red case is runner 10's skip. Needs a lane.",
+ "updatedAt": "2026-11-13T20:28:11-06:00"
 }
