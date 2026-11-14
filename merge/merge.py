@@ -2433,7 +2433,7 @@ def refuse_unstacked_head(root, head, base):
         raise Stop(f"the lint of {head[:9]} FAILs: the head lacks {base}'s current head {tip[:9]}. "
                    f"Merge {base} into the lane with an ordinary merge commit, push, and run `merge --lane-lint` again. {LANE_LINT_CITE}")
 
-LANE_SESSION = re.compile(r"claude\.ai/code/(session_[A-Za-z0-9_-]+)")  # the session URL line a lane's PR body carries: the key of "same lane"
+SESSION_URL = re.compile(r"claude\.ai/code/(session_[A-Za-z0-9_-]+)")  # the session URL line a lane's PR body carries: the key of "same lane"
 
 def parse_with(value, own):
     """-> the PR numbers of a --with comma list, each once, in order. A blank or non-digit item, or the linted PR's own number, is a Stop:
@@ -2493,12 +2493,12 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     `integration` is true for a batch integration PR (is_integration_pr): a clash that would count is a report line instead, for the lane rebases after the merge.
     A PR that --with names and that is not open is a Stop here: never a pass. --lint-unknown-ok lifts none of it. A PR posted under another
     session id is found only through --with."""
-    lane = set(LANE_SESSION.findall(body or ""))
+    lane = set(SESSION_URL.findall(body or ""))
     rows = {d["number"]: d for d in host.open_pulls() if d["number"] != n}
     for m in with_prs:
         if m not in rows:
             raise Stop(f"--with names PR #{m}, which is not an open pull request (closed, merged or not found), so its head cannot be compared: unknown, not a pass. {LANE_LINT_CITE}")
-    picked = sorted({m for m, d in rows.items() if lane & set(LANE_SESSION.findall(d.get("body") or ""))} | set(with_prs))
+    picked = sorted({m for m, d in rows.items() if lane & set(SESSION_URL.findall(d.get("body") or ""))} | set(with_prs))
     if not picked:
         return [], [], ""
     c, out = fetch_branch_heads(root)
@@ -2547,6 +2547,17 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     elif unknown:
         stop = "\n".join([f"the cross-measure of {head[:9]} is unknown, not a pass:", *unknown, "Run again. " + LANE_LINT_REMEDY])
     return fails, reports, stop
+
+def commit_sessions(root, head, base):
+    """-> (sorted distinct Claude-Session ids on the first-parent commits of origin/<base>..head, "") or (None, why) when git cannot read the range.
+    First-parent only: a combined PR's member commits are second parents of the combiner's merge commits, so they drop out and the PR counts its own lane commits.
+    A named limit: a lane that merges another open PR's head also drops that head's commits.
+    Only a real trailer counts, so a session id quoted in a message body is no commit session. A commit with no trailer names no session.
+    A merge commit with no trailer stays uncounted (a known limit): a lane merges base into itself with an ordinary merge commit, which names no session of its own."""
+    c, out = git(root, "log", "--first-parent", "--format=%(trailers:key=Claude-Session,valueonly,separator=%x0a)", f"origin/{base}..{head}")
+    if c:
+        return None, f"git log origin/{base}..{head[:9]} failed: {' '.join(out.split())[:200]}"
+    return sorted(set(SESSION_URL.findall(out))), ""
 
 def ci_job_run(wt, *args, notes=None):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
@@ -2695,6 +2706,14 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         if target.isdigit():
             cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None, is_integration_pr(info))
             fails += cross_fails
+            if not is_integration_pr(info):  # an integration PR holds many lanes' commits by design
+                sessions, why_sessions = commit_sessions(root, head, base)
+                if sessions is None:  # unknown, but the FAIL blocks already collected stay in the one refusal
+                    unread = f"the session check of {head[:9]} is unknown, not a pass: {why_sessions}."
+                    stop = f"{stop}\n{unread} {LANE_LINT_CITE}" if stop else f"{unread} Run again. {LANE_LINT_REMEDY}"
+                elif len(sessions) > 1:
+                    fails.append(f"its commits name {len(sessions)} sessions ({', '.join(sessions)}), so more than one session worked this PR. "
+                                 f"A PR has one session, the lane's session: rebuild the lane as one new PR in one session.")
             # one check-runs read: the draft's Windows and macOS runs, which this Linux lint never runs. A batch integration PR has no draft run of its own
             # (a lane's run is the proof), so it reads none.
             draft, draft_lines = ("pass", []) if is_integration_pr(info) else host.draft_run_state(head)
