@@ -6,13 +6,17 @@
 #   The `checks` lint job and the checks-merge-install job always run, so they have no flag (their suites carry `code`).
 #   checks_macos gates both checks-macos and checks-macos-b.
 #   checks_windows_rest_2 repeats checks_windows_rest's value (R62). No job reads it: checks-windows-rest-2 runs every step on a ready pull_request, so the output is kept only for the tests that derive it.
+# doc groups (set by a changed .md path, in the doc-group `case` below; a non-.md path sets none): doc_decisions (docs/decisions/), doc_rules (CLAUDE.md, .claude/CLAUDE.md,
+#   output-styles/), doc_skills (skills/), doc_agents (agents/*.md), doc_glossary (GLOSSARY.md, README.md), doc_map (docs/map/), doc_other (any other docs/ .md, mods/*/README.md),
+#   doc_any (any .md). A `checks` step that reads only .md files takes the scope condition of the groups it reads (lint/test_checks_step_scope.py DOC_STEPS pins each).
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
-# script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
+# script or the workflow (the doc groups too), and on any path the table below does not name. Inputs (env): EVENT,
 # BASE_SHA, HEAD_REF.
 set -u
 JOBS="checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos pointer_windows"
-ALL="$JOBS checks_guard code mods guard sweep shoot"
+DOCS="doc_decisions doc_rules doc_skills doc_agents doc_glossary doc_map doc_other doc_any"
+ALL="$JOBS checks_guard code mods guard sweep shoot $DOCS"
 range=""
 [ "${EVENT:-}" = pull_request ] && [ -n "${BASE_SHA:-}" ] && range="$BASE_SHA...HEAD"
 on=" "
@@ -91,6 +95,21 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       *.md) ;;
       *) on="$on $ALL " ;;
     esac
+    # The doc groups: one group per .md path (the first arm that matches), and doc_any for every .md. A non-.md path sets none, and ALL above
+    # sets them all. This is a separate case so the arms above keep the job and suite flags each path sets.
+    case "$f" in
+      docs/decisions/*.md) on="$on doc_decisions " ;;
+      CLAUDE.md|.claude/CLAUDE.md|output-styles/*.md) on="$on doc_rules " ;;
+      skills/*.md) on="$on doc_skills " ;;
+      agents/*/*.md) ;;
+      agents/*.md) on="$on doc_agents " ;;
+      GLOSSARY.md|README.md) on="$on doc_glossary " ;;
+      docs/map/*.md) on="$on doc_map " ;;
+      docs/*.md) on="$on doc_other " ;;
+      mods/*/*/*.md) ;;
+      mods/*/README.md) on="$on doc_other " ;;
+    esac
+    case "$f" in *.md) on="$on doc_any " ;; esac
     # shoot also covers the files the waiting page export suite (skills/waiting-page/test_export_page.py) imports, lazy
     # imports included: page_check.py reaches the guard family (guard_merge.py imports ci_wake.py), question_form.py, _nowindow.py, report_guard.py and its lint/_clause.py;
     # the suite's run folder is lint/_test_temp.py; layout.artifacts reads lint/layout.json at run time; SKILL.md and every file in reference/ hold the steps it and the page suite read. This is a second case, so the
