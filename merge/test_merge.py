@@ -15304,7 +15304,7 @@ class ReviewNoRestart(ReviewEnv):
         rc, out, err = self.run_args(*self.review_argv(*self.THREE_FAILED_ARGV), host=self.host_with(earlier))
         self.assert_accepted(rc, out, err)
 
-    def test_a_refused_restart_names_fix_check_and_the_earlier_head(self):
+    def test_a_refused_restart_names_fix_verifier_and_the_earlier_head(self):
         # The control is the route the remedy names: a fix check at the earlier head over a record with no Fix check line is accepted. The refusal
         # after it must name that command, so the remedy never points at a route the tool refuses.
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",), guard="yes")
@@ -15318,7 +15318,7 @@ class ReviewNoRestart(ReviewEnv):
         self.assertNotIn("only way out", err, "the remedy says a new branch with a new PR is the only way out, which no record rule says:\n" + err)
         self.assertNotIn("new branch with a new PR", err, "the remedy names a new branch with a new PR, which no record rule says:\n" + err)
 
-    def test_a_refused_restart_after_a_failed_fix_check_names_the_fresh_full_review(self):
+    def test_a_refused_restart_after_a_failed_fix_verifier_names_the_fresh_full_review(self):
         # The control is the route the remedy names: a fresh full review of three rounds is accepted after the same earlier record. A FAIL fix
         # check closes the fix verifier route, so the remedy names that review and no --fix-check.
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",), fix=(fix_verifier_line(verdict="FAIL", head=self.EARLIER_FIX_FROM),))
@@ -15337,7 +15337,7 @@ class ReviewNoRestart(ReviewEnv):
         self.assertNotIn(REVIEW_MARKER, out + err, "a refused record printed its body, which a lane would post as its review:\n" + out + err)
 
     def test_a_refused_restart_under_a_granted_round_four_names_the_grant_and_no_round_above_four(self):
-        # Control: rounds 1 to 4 again with --grant, the route the remedy names, are accepted over the granted round 4 with no fix check. No
+        # Control: posting rounds 1 to 4 with --grant, the route the remedy names, is accepted over the record that grants a fourth pass, with no fix check. No
         # record can post a round above 4, so that route is the one the remedy names.
         earlier = self.granted_round_four()
         rc, out, err = self.run_args(*self.review_argv(*self.THREE_FAILED_ARGV, "4:reviewer:opus:PASS", grant=self.GRANT), host=self.host_with(earlier))
@@ -15347,7 +15347,7 @@ class ReviewNoRestart(ReviewEnv):
         self.assertNotIn("above 4", err, "the remedy under a granted round 4 names a record above round 4, which no record can post:\n" + err)
         self.assertIn("--grant", err, "the remedy under a granted round 4 does not name --grant, the route that posts rounds 1 to 4 again:\n" + err)
 
-    def test_a_refused_restart_under_a_granted_round_four_after_a_fail_fix_check_names_the_grant(self):
+    def test_a_refused_restart_under_a_granted_round_four_after_a_fail_fix_verifier_names_the_grant(self):
         # Control: rounds 1 to 4 again with --grant are accepted after the FAIL fix check. A FAIL fix check closes the fix verifier route, so the
         # remedy names the grant route and no --fix-check.
         earlier = self.granted_round_four(fix=(fix_verifier_line(verdict="FAIL", head=self.EARLIER_FIX_FROM),))
@@ -15359,8 +15359,8 @@ class ReviewNoRestart(ReviewEnv):
         self.assertNotIn("--fix-check", err, "the remedy after a FAIL fix check under a granted round 4 names --fix-check, which a FAIL fix check closes:\n" + err)
         self.assertIn("--grant", err, "the remedy after a FAIL fix check under a granted round 4 does not name --grant, the route that posts rounds 1 to 4 again:\n" + err)
 
-    def test_a_refused_restart_at_the_earlier_head_names_no_fix_check(self):
-        # Control: round 2 after round 1 at the same head is accepted, so a route past the earlier top round exists. A fix check at the earlier head
+    def test_a_refused_restart_at_the_earlier_head_names_no_fix_verifier(self):
+        # Control: a second round posted at the same head, after the first recorded one, is accepted, so a route past the earlier top round exists. A fix check at the earlier head
         # is refused here, because that head is the live --head and --review-record takes a fix check only from another head.
         earlier = record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, FAIL",), guard="yes")
         rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS"), host=self.host_with(earlier))
