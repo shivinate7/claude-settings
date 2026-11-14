@@ -37,8 +37,8 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import workflow_steps as ws  # noqa: E402  the one home of the step parser
 from test_ci_scope import DOC_CASES, DOC_FLAGS, doc_groups, run as scope_run  # noqa: E402  ci-scope.sh run in a temp repo, and the doc groups
 from test_windows_split import (  # noqa: E402  the one home of the `if:` evaluator, the scope conditions and the doc condition builder
-    LINUX_SUITES, NO_MD_SCOPE_CONDITION, SCOPE_DOC_AGENTS, SCOPE_DOC_ANY, SCOPE_DOC_DECISIONS, SCOPE_DOC_DECISIONS_OTHER,
-    SCOPE_DOC_DECISIONS_RULES, SCOPE_DOC_DECISIONS_RULES_OTHER, SCOPE_DOC_GLOSSARY, SCOPE_DOC_MAP, SCOPE_DOC_RULES,
+    LINUX_SUITES, NO_MD_SCOPE_CONDITION, SCOPE_DOC_AGENTS, SCOPE_DOC_ANY, SCOPE_DOC_DECISIONS, SCOPE_DOC_DECISIONS_MAP_OTHER,
+    SCOPE_DOC_DECISIONS_OTHER, SCOPE_DOC_DECISIONS_RULES, SCOPE_DOC_DECISIONS_RULES_OTHER, SCOPE_DOC_RULES,
     SCOPE_DOC_SKILLS, SCOPE_DOC_SKILLS_AGENTS, SCOPE_DOC_SKILLS_DECISIONS, SCOPE_DOC_SKILLS_OTHER, doc_scope_condition,
     eval_if, run_lines)
 
@@ -153,8 +153,8 @@ MUST_STAY_UNSCOPED = [
     'Handoff wave-2 fixture suite',
     'Daily note fixture suite',
     'Layout fixture suite',
-    'Mod version fixture suite',  # reads mods/ paths, which set `mods` and no code or doc flag, so no doc flag can keep it on
-    'Mod version bump',  # the same: a change to a mod's .mjs sets only `mods`
+    'Mod version fixture suite',  # reads mods/ paths, which set `mods` (and `code` for a non-.md path): no doc flag covers them, so it stays unscoped
+    'Mod version bump',  # the same: a change to a mod's .mjs sets `mods` and `code`, and no doc flag covers it
     'Code check',
     'Workflow supply-chain audit (zizmor)',
     'Debt retire fixture suite',
@@ -186,10 +186,6 @@ DOC_STEPS = {
     'project-ops skill scaffold suite': ("skills",),
     'ios-apps skill starter suite': ("skills",),
     'Agent brief fixture suite': ("agents",),
-    'Stop-hook guard fixture suite': ("agents",),
-    'Glossary homes and avoided names': ("glossary",),
-    'Glossary fixture suite': ("glossary",),
-    'Map check': ("map",),
     # Several groups.
     'Blind brief fixture suite': ("skills", "agents"),
     'Git mailbox wait suite': ("skills", "decisions"),
@@ -198,7 +194,13 @@ DOC_STEPS = {
     'Route judge measure fixture suite': ("decisions", "rules", "other"),
     'Artifact cite check': ("decisions", "other"),
     'Waiting page park relay prose suite': ("skills", "other"),
+    'Map check': ("decisions", "map", "other"),  # MAP10 reads every decision and debt record
     # Any .md: the read is wider than the groups above, or not verified.
+    # lint/report_guard.py reaches hooks/question_form.py past_rulings, which opens docs/decisions and docs/debts; whether its verdict
+    # depends on their content is unmeasured, so the step fails safe on every doc group.
+    'Stop-hook guard fixture suite': ("any",),
+    'Glossary homes and avoided names': ("any",),  # reads every home (decisions, rule anchors, agents, debts) and any .md path
+    'Glossary fixture suite': ("any",),
     'STE lint': ("any",),
     'STE lint action fixture suite': ("any",),
     'Retired names, one word per meaning': ("any",),
@@ -234,12 +236,11 @@ SCOPE_OF = {
     frozenset(["rules"]): SCOPE_DOC_RULES,
     frozenset(["skills"]): SCOPE_DOC_SKILLS,
     frozenset(["agents"]): SCOPE_DOC_AGENTS,
-    frozenset(["glossary"]): SCOPE_DOC_GLOSSARY,
-    frozenset(["map"]): SCOPE_DOC_MAP,
     frozenset(["skills", "agents"]): SCOPE_DOC_SKILLS_AGENTS,
     frozenset(["decisions", "rules"]): SCOPE_DOC_DECISIONS_RULES,
     frozenset(["decisions", "rules", "other"]): SCOPE_DOC_DECISIONS_RULES_OTHER,
     frozenset(["decisions", "other"]): SCOPE_DOC_DECISIONS_OTHER,
+    frozenset(["decisions", "map", "other"]): SCOPE_DOC_DECISIONS_MAP_OTHER,
     frozenset(["skills", "other"]): SCOPE_DOC_SKILLS_OTHER,
     frozenset(["skills", "decisions"]): SCOPE_DOC_SKILLS_DECISIONS,
 }
@@ -489,7 +490,7 @@ ALLOWED = {
     "lint/test_ci_job.py": (["AGENTS.md", "CLAUDE.md"], "written into temp roots"),
     "lint/test_ci_scope.py": ([
         "README.md", "reference/copies-and-accounts.md", "reference/repo-pages.md", "skills/ci-hygiene/SKILL.md",
-        "CLAUDE.md", ".claude/CLAUDE.md", "GLOSSARY.md", "output-styles/shiv-stylisms.md",
+        "CLAUDE.md", ".claude/CLAUDE.md", "GLOSSARY.md", "output-styles/shiv-stylisms.md", "AGENTS.md",
         "skills/waiting-page/SKILL.md", "skills/waiting-page/reference/copies-and-accounts.md",
         "skills/waiting-page/reference/designs.md", "skills/waiting-page/reference/repo-pages.md",
         "skills/waiting-page/reference/republish.md", "skills/waiting-page/reference/routing-and-sessions.md",
@@ -803,6 +804,23 @@ class DocsOnlyPullRequest(ChecksStepBase):
         st = self.named(self.steps(), STE_LINT)
         self.assertEqual(if_of(st), expected_if(("any",)), "STE lint: if is %r, want the doc_any scope condition" % if_of(st))
         self.assertTrue(runs_on(if_of(st), got), "STE lint does not run on a docs-only pull request: %r" % got)
+
+
+class WholeTreeReadersOnAModsChange(ChecksStepBase):
+    """The whole-tree readers run on a mods-only pull request. A non-.md path under mods/ sets `code` (lint/test_ci_scope.py pins the
+    flags), and each reader runs on `code` or a doc flag. Named failure: a mods-only change skips the retired-names, retired-repo,
+    glossary and hook-catalog readers, which read every tracked file."""
+    PATH = "mods/plain-diff/check.mjs"
+    READERS = ("Retired repo fixture suite", "Retired names, one word per meaning", "Glossary homes and avoided names", "Hook catalog check")
+
+    def test_each_whole_tree_reader_runs_on_a_mods_only_change(self):
+        got = scope_run([self.PATH], existing=[self.PATH])
+        self.assertIn("code", got, "output code missing: %r" % got)  # scope first: which steps run means nothing without the flags
+        self.assertEqual(got["mods"], "true", "the mods change did not set mods: %r" % got)
+        steps = self.steps()
+        for name in self.READERS:
+            with self.subTest(step=name):
+                self.assertTrue(runs_on(if_of(self.named(steps, name)), got), "step %r skips a mods-only change: %r" % (name, got))
 
 
 class MdNamesInText(unittest.TestCase):

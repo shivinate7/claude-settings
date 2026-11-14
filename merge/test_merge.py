@@ -12505,6 +12505,24 @@ class BatchBrake(Env):
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(self.host, "merged", False))
 
+
+def script_line(key):
+    """The text of ci-scope.sh's own `KEY="..."` line (JOBS, DOCS, ALL), read from the real script, so a stub cannot drift from it."""
+    with open(SCOPE_SCRIPT, encoding="utf-8") as f:
+        found = re.search(r'^%s="([^"]*)"' % key, f.read(), re.M)
+    return found.group(1) if found else ""
+
+JOBS_LINE, DOCS_LINE, ALL_LINE = script_line("JOBS"), script_line("DOCS"), script_line("ALL")
+
+def flags_prelude(on=""):
+    """A stub ci-scope.sh body for stub_scope: the script's own JOBS, DOCS and ALL lines, then one echo per name ALL expands to, `true`
+    for each name in `on` (space-separated) and `false` for the rest, then exit 0. The names are the real script's, so each flag the
+    express reader expects is written."""
+    return ('JOBS="%s"\nDOCS="%s"\nALL="%s"\nON=" %s "\n'
+            'for n in $ALL; do case "$ON" in *" $n "*) v=true ;; *) v=false ;; esac; echo "$n=$v" >> "$GITHUB_OUTPUT"; done\n'
+            'exit 0\n') % (JOBS_LINE, DOCS_LINE, ALL_LINE, on)
+
+
 class ExpressPath(ScopedRepo, Env):
     """confirm with a bare --express: a prose-only pull request whose body names a ruling in the store (origin/roadmap's rulings) goes on
     to the merge. Every other case refuses before anything is pushed."""
@@ -12513,8 +12531,7 @@ class ExpressPath(ScopedRepo, Env):
     FLAG_ARGV = ("7", "--confirm", "--express")
     FAIL_PRELUDE = 'for n in code mods; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 3\n'  # for stub_scope: prints two flags off, then fails
     SILENT_PRELUDE = "exit 0\n"  # for stub_scope: exits 0 and writes no flag
-    ALL_OFF_PRELUDE = ('for n in checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos '
-                       'pointer_windows checks_guard code mods guard sweep shoot; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n')  # for stub_scope: every flag off, exits 0
+    ALL_OFF_PRELUDE = flags_prelude()  # for stub_scope: every flag the script's ALL line names, off, exits 0
 
     def setUp(self):
         super().setUp()
@@ -12524,13 +12541,20 @@ class ExpressPath(ScopedRepo, Env):
         """origin/roadmap holds rulings/<id>.json for each id. The branch is made after co's clone, so a read that does not fetch it sees no entry."""
         self.on("roadmap", {f"roadmap/rulings/{i}.json": json.dumps({"id": i}) + "\n" for i in ids}, start="main")
 
-    def stub_scope(self, prelude, branch="feat"):
+    def stub_scope(self, prelude, branch="feat", docs_line=None):
         """ci-scope.sh is main's, with `prelude` put in after its shebang line, committed to `branch`. Only an insertion: the silent-undo
         check reads no removed line. On main, feat then merges it: the classifier runs origin/main's copy, and a head that touches the
-        script turns every flag on through main's own arm, so the head must not diff the script against main."""
+        script turns every flag on through main's own arm, so the head must not diff the script against main. docs_line, when given,
+        replaces the script's DOCS="..." line instead (prelude is then unused): the reader finds no such line to expand."""
         with open(SCOPE_SCRIPT, encoding="utf-8") as f:
-            first, rest = f.read().split("\n", 1)
-        self.on(branch, {".github/scripts/ci-scope.sh": first + "\n" + prelude + rest})
+            text = f.read()
+        if docs_line is None:
+            first, rest = text.split("\n", 1)
+            text = first + "\n" + prelude + rest
+        else:
+            text, n = re.subn(r'^DOCS="[^"]*"$', lambda m: docs_line, text, count=1, flags=re.M)
+            self.assertEqual(n, 1, "ci-scope.sh has no DOCS=\"...\" line to replace")
+        self.on(branch, {".github/scripts/ci-scope.sh": text})
         if branch == "main":
             o = self.other
             sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
@@ -12573,8 +12597,9 @@ class ExpressPath(ScopedRepo, Env):
 
     @staticmethod
     def turned_on(flags):
-        """The flags that are on, not counting mutation_report (it is set only for a batch branch)."""
-        return sorted(k for k, v in flags.items() if k != "mutation_report" and v != "false")
+        """The job and suite flags that are on: not mutation_report (set only for a batch branch), and not the doc_* flags, which a prose
+        change sets and the express check lets through."""
+        return sorted(k for k, v in flags.items() if k != "mutation_report" and not k.startswith("doc_") and v != "false")
 
     def assert_prose_only(self):
         rc, flags = self.scope_run()
@@ -12668,6 +12693,46 @@ class ExpressPath(ScopedRepo, Env):
         self.assertEqual(rc, 0, out)
         self.assertTrue(self.host.merged, out)
         self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
+
+    def test_a_prose_pr_across_two_doc_groups_merges(self):
+        """A rules file and a docs file set two doc flags and no job flag: the express check reads the doc flags as prose and merges."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"CLAUDE.md": "# Rules\n", "docs/shared.md": "one\ntwo\nthree\nfour\nsix\n"})
+        self.assert_prose_only()
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
+
+    def test_a_job_flag_beside_a_doc_flag_refuses_and_names_only_the_job_flag(self):
+        """A stub script that turns checks_windows and doc_any on: the refusal names checks_windows, and does not name doc_any, a doc flag."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope(flags_prelude("checks_windows doc_any"), branch="main")
+        rc_scope, flags = self.scope_run(base=True)
+        self.assertEqual(rc_scope, 0, "the stub scope script does not exit 0: %d" % rc_scope)
+        self.assertEqual((flags.get("checks_windows"), flags.get("doc_any")), ("true", "true"),
+                         "the stub does not turn both flags on, so the case proves nothing: %r" % flags)
+        self.on("feat", {"CLAUDE.md": "# Rules\n"})
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "turns on checks_windows for", "CLAUDE.md")
+        self.assertNotIn("doc_any", out, "the refusal names doc_any, a doc flag, as a job: %s" % out)
+
+    def test_a_script_whose_all_names_docs_with_no_docs_line_is_refused_as_unknown(self):
+        """Control: the reader already refuses a name it cannot expand, so this holds without the fix too. It keeps that refusal when the
+        DOCS= line goes. DOCS moves to DOC_LIST and is set from it, so bash still runs the script and the refusal is the reader's, not bash's."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope("", branch="main", docs_line='DOC_LIST="%s"\nDOCS=$DOC_LIST' % DOCS_LINE)
+        rc_scope, flags = self.scope_run(base=True)
+        self.assertEqual(rc_scope, 0, "the stub scope script does not exit 0: %d" % rc_scope)
+        self.assertTrue(any(k.startswith("doc_") for k in flags), "the stub script writes no doc flag, so the case proves nothing: %r" % flags)
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "unknown", "$DOCS")
 
     def test_a_code_file_in_the_pr_is_refused(self):
         self.store(self.RULINGS)

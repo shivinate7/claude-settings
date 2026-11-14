@@ -102,10 +102,9 @@ SCOPE_DOC_DECISIONS = doc_scope_condition(("decisions",))
 SCOPE_DOC_RULES = doc_scope_condition(("rules",))
 SCOPE_DOC_SKILLS = doc_scope_condition(("skills",))
 SCOPE_DOC_AGENTS = doc_scope_condition(("agents",))
-SCOPE_DOC_GLOSSARY = doc_scope_condition(("glossary",))
-SCOPE_DOC_MAP = doc_scope_condition(("map",))
 SCOPE_DOC_DECISIONS_RULES = doc_scope_condition(("decisions", "rules"))
 SCOPE_DOC_DECISIONS_OTHER = doc_scope_condition(("decisions", "other"))
+SCOPE_DOC_DECISIONS_MAP_OTHER = doc_scope_condition(("decisions", "map", "other"))
 SCOPE_DOC_DECISIONS_RULES_OTHER = doc_scope_condition(("decisions", "rules", "other"))
 SCOPE_DOC_SKILLS_OTHER = doc_scope_condition(("skills", "other"))
 SCOPE_DOC_SKILLS_DECISIONS = doc_scope_condition(("skills", "decisions"))
@@ -147,7 +146,7 @@ LINUX_SUITES = {
     "python3 hooks/test_scratchpad_owner.py": (None, None),
     "python3 hooks/test_checks_never_raise.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_session_start.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 lint/test_report_guard.py": (SCOPE_DOC_AGENTS, None),
+    "python3 lint/test_report_guard.py": (SCOPE_DOC_ANY, None),
     "python3 lint/test_ste_autofix.py": (LINUX_CODE, None),
     "python3 hooks/test_ruling_home.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_ruling_census.py": (NO_MD_SCOPE_CONDITION, None),
@@ -192,7 +191,7 @@ LINUX_SUITES = {
     "python3 lint/test_check_ios_mockup.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_compliance_probes.py": (SCOPE_DOC_ANY, None),
     "python3 lint/test_check_claude_md_size.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 lint/test_check_glossary.py": (SCOPE_DOC_GLOSSARY, None),
+    "python3 lint/test_check_glossary.py": (SCOPE_DOC_ANY, None),
     "python3 lint/test_retired_names.py": (SCOPE_DOC_ANY, None),
     "python3 skills/project-ops/tests/test_scaffold.py": (SCOPE_DOC_SKILLS, None),
     "python3 skills/ios-apps/tests/test_new_app.py": (SCOPE_DOC_SKILLS, None),
