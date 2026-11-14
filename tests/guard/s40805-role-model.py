@@ -102,6 +102,9 @@ ROLE_UNREADABLE_CFG = role_config("unreadable", role_table("unreadable", ROLE_TA
 ROLE_LIVE_POINTER = role_table("live", ROLE_TABLE_TEST_AUTHOR_HAIKU)
 ROLE_LIVE_CFG = role_config("live", ROLE_LIVE_POINTER)
 ROLE_RULES_POINTER = role_table("rules", ROLE_TABLE_RULES)
+# The repository's builder pins sonnet, so a case that needs a builder with no model pin reads this fixture folder.
+ROLE_UNPINNED_POINTER = role_table("unpinned", ROLE_TABLE_RULES, agents=("builder",))
+ROLE_UNPINNED_CFG = role_config("unpinned", ROLE_UNPINNED_POINTER)
 
 
 def role_input(role, model, prompt):
@@ -377,7 +380,8 @@ def workflow_opus_override_check():
 
 # ---- D: no model, and no `model:` pin in the role's agent file. The guard's default env decides it.
 role_model_refuse("role-model: builder with no model is denied when the default is unset",
-          "builder", None, "Fix the failing case.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
+          "builder", None, "Fix the failing case.", config=ROLE_UNPINNED_CFG, carries=(ROLE_DEFAULT_REMEDY,),
+          env=UNSET_DEFAULT)
 role_model_refuse("role-model: general-purpose with no model is denied when the default is unset",
           "general-purpose", None, "Find the file.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
 role_model_refuse("role-model: claude with no model is denied when the default is unset",
@@ -385,10 +389,11 @@ role_model_refuse("role-model: claude with no model is denied when the default i
 role_model_refuse("role-model: a spawn with no role and no model is denied when the default is unset",
           None, None, "Find the file.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
 role_model_refuse("role-model: a Task builder with no model is denied when the default is unset",
-          "builder", None, "Fix the failing case.", tool="Task", carries=(ROLE_DEFAULT_REMEDY,),
-          env=UNSET_DEFAULT)
+          "builder", None, "Fix the failing case.", tool="Task", config=ROLE_UNPINNED_CFG,
+          carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
 role_model_refuse("role-model: builder with no model is denied when the default is empty",
-          "builder", None, "Fix the failing case.", carries=(ROLE_DEFAULT_REMEDY,), env=EMPTY_DEFAULT)
+          "builder", None, "Fix the failing case.", config=ROLE_UNPINNED_CFG, carries=(ROLE_DEFAULT_REMEDY,),
+          env=EMPTY_DEFAULT)
 role_model_allow("role-model: builder with no model is allowed when the default is sonnet",
            "builder", None, "Fix the failing case.", env=SONNET_DEFAULT)
 role_model_allow("role-model: reviewer with no model is allowed when the default is unset (its file pins haiku)",
@@ -440,7 +445,7 @@ def role_override_lift_check():
 def role_override_no_model_check():
     """The no-model refusal stays never-lifted: under an override it is still refused and spends none, so the
     override that follows still lifts a test-author on sonnet."""
-    config, session = role_config("ov-no-model", REPO), "role-ov-no-model"
+    config, session = role_config("ov-no-model", ROLE_UNPINNED_POINTER), "role-ov-no-model"
 
     def call(seconds, spawn, env=None):
         return ov_call("Agent", dict(spawn), NOGIT, config, session, seconds, env=env)
@@ -629,6 +634,53 @@ def role_pin_unreadable_first_check():
     return role_pin_check(pointer, None, "an unreadable a.md sorts before a pinned b.md")
 
 
+# ---- G2: role_has_model_pin reads a pin's value through frontmatter_scalar (decision agent-model-cap). A value that is
+# only a comment, an unquoted `~` or `null`, or empty holds no model, so its line is no pin. A bare name, or a quoted
+# name with a trailing comment, is a pin. Each case is one frontmatter line in one agents/ file.
+def role_pin_line_check(name, line, want):
+    """role_has_model_pin gives `want` for an agents/ file whose frontmatter holds the one line `line`."""
+    pointer = role_table(name, files={"reviewer.md": "---\nname: reviewer\n%s\n---\n# reviewer\n" % line})
+    return role_pin_check(pointer, want, "a reviewer file with the frontmatter line %r" % line)
+
+
+def role_pin_line_case(name, line, want):
+    """The check for one frontmatter line: role_has_model_pin gives `want` for it."""
+    def check():
+        return role_pin_line_check(name, line, want)
+    return check
+
+
+# ---- H: role_model_rank(model) reads the family a model value holds (decision agent-model-cap, the pin reader's family
+# step). A family word is read from the value, never from a trailing comment, so `haiku  # sonnet` holds haiku. The
+# control reads bare names only, so a red comment case is the trailing comment alone.
+def role_model_rank_check(value, want, what):
+    """role_model_rank(value) gives `want`, an index into ROLE_MODEL_RANK."""
+    reader = getattr(_load_guard_module(), "role_model_rank", None)
+    if reader is None:
+        return False, "the guard has no role_model_rank(model) to read a model name's family"
+    try:
+        got = reader(value)
+    except Exception as exc:
+        return False, "%s: role_model_rank(%r) raised %r" % (what, value, exc)
+    if got != want:
+        return False, "%s: role_model_rank(%r) gives %r, want %r" % (what, value, got, want)
+    return True, "%s: role_model_rank(%r) gives %r" % (what, value, want)
+
+
+def role_model_rank_bare_check():
+    """Control: a bare model name reads its family. claude-sonnet-5-5 is sonnet (1) and Haiku is haiku (0)."""
+    for value, want in (("claude-sonnet-5-5", 1), ("Haiku", 0)):
+        ok, detail = role_model_rank_check(value, want, "a bare model name")
+        if not ok:
+            return ok, detail
+    return True, "a bare model name reads its family: claude-sonnet-5-5 is 1, Haiku is 0"
+
+
+def role_model_rank_comment_check():
+    """`haiku  # sonnet is above the row` holds haiku (0). The trailing comment names sonnet, and the reader must not read it."""
+    return role_model_rank_check("haiku  # sonnet is above the row", 0, "a trailing comment that names sonnet")
+
+
 # ---- F: the three role lists agree with the role table (decision agent-model-cap). role_list_drift(pointer_root)
 # in hooks/guard.py returns one line per disagreement, and [] when all agree. The lists are constants, and the table
 # is read from the pointer at run time. A real role is an agents/ file's `name`, or a built-in name. The junk rows
@@ -731,6 +783,23 @@ for _label, _check in (
     ("role-model: an unreadable decision file logs one unread line and allows the spawn", role_unread_bad_check),
     ("role-model: a pinned agent file sorts before an unreadable one, so the pin reads True", role_pin_first_check),
     ("role-model: an unreadable agent file sorts before a pinned one, so the read gives None", role_pin_unreadable_first_check),
+    ("role-model: a pin of only a comment (`model: # sonnet`) is no pin, so role_has_model_pin is False",
+     role_pin_line_case("pinline-comment-only", "model: # sonnet", False)),
+    ("role-model: a pin of `model: ~` is no pin, so role_has_model_pin is False",
+     role_pin_line_case("pinline-tilde", "model: ~", False)),
+    ("role-model: a pin of `model: null` is no pin, so role_has_model_pin is False",
+     role_pin_line_case("pinline-null", "model: null", False)),
+    ("role-model: a pin of empty quotes (`model: \"\"`) is no pin, so role_has_model_pin is False",
+     role_pin_line_case("pinline-empty-quotes", 'model: ""', False)),
+    ("role-model: a pin with no value (`model:`) is no pin, so role_has_model_pin is False",
+     role_pin_line_case("pinline-empty", "model:", False)),
+    ("role-model: a bare pin (`model: sonnet`) is a pin, so role_has_model_pin is True",
+     role_pin_line_case("pinline-bare", "model: sonnet", True)),
+    ("role-model: a quoted pin with a trailing comment (`model: \"sonnet\" # note`) is a pin, so role_has_model_pin is True",
+     role_pin_line_case("pinline-quoted-note", 'model: "sonnet" # note', True)),
+    ("role-model: role_model_rank reads a bare model name's family, sonnet 1 and haiku 0", role_model_rank_bare_check),
+    ("role-model: role_model_rank does not read sonnet from a trailing comment, so haiku # sonnet is 0",
+     role_model_rank_comment_check),
     ("role-list: the three role lists agree with the real decision record", role_list_real_check),
     ("role-list: the junk keys the reader yields on the record cause no drift", role_list_junk_check),
     ("role-list: test-author moved from a haiku row to sonnet drifts HAIKU_ROLES", role_list_haiku_check),
