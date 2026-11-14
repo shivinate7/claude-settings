@@ -13,7 +13,7 @@ cases are in tests/guard/s71834-agent-owned-kill.py, and the simulator lease cas
 visible-window rule, which take injected process lists so they run on Linux. Those cases have no entry point on the
 base, so they FAIL there on `hooks/agent_procs.py does not exist yet`. That failure is not a red (test-practices P3);
 the post-build mutant is what proves them. The kill check's in-process cases (its start and marker reads patched, and the
-kill verbs `taskkill` and `Stop-Process`) are in classes KillCheckWithoutReads and KillVerbs below: a guard case runs the
+kill verbs `taskkill` and `Stop-Process`, and the taskkill spellings) are in classes KillCheckWithoutReads, KillVerbs and KillVerbControls below: a guard case runs the
 hook as a subprocess, so it cannot patch a read.
 
 The cost case is a control: it passes on the base, because the recording adds nothing to the tool-call path today.
@@ -193,6 +193,14 @@ class KillCheckWithoutReads(KillCheckBase):
         self.assertEqual(answer, "", "control: a pid in no record was refused under the failed reads")
 
 
+def taskkill_spellings(pid):
+    """The `taskkill` spellings of one pid that the kill check must read: Git Bash's `//PID` and `//F`, the image name
+    `taskkill.exe`, and the glued `/PID=<n>` form. Keyed by a label that names the spelling."""
+    return {"taskkill //PID //F": ["taskkill", "//PID", str(pid), "//F"],
+            "taskkill.exe /PID": ["taskkill.exe", "/PID", str(pid)],
+            "taskkill /PID=": ["taskkill", "/PID=%d" % pid]}
+
+
 @unittest.skipUnless(sys.platform.startswith("linux"), "the record's start ticks are read from /proc, which only Linux has")
 class KillVerbs(KillCheckBase):
     """Finding 4: `taskkill /PID <n>` and `Stop-Process -Id <n>` reach the same agent check as `kill <n>`. The pid is
@@ -218,6 +226,45 @@ class KillVerbs(KillCheckBase):
         answer = guard_kill.agent_pid_kill(["Stop-Process", "-Id", str(self.child.pid)], AGENT)
         self.assertEqual(answer, str(self.child.pid), "Stop-Process -Id of pid %d, recorded to another agent, was allowed"
                          % self.child.pid)
+
+    def test_git_bash_double_slash_taskkill_of_another_agents_pid_is_refused(self):
+        answer = guard_kill.agent_pid_kill(["taskkill", "//PID", str(self.child.pid), "//F"], AGENT)
+        self.assertEqual(answer, str(self.child.pid), "taskkill //PID //F of pid %d, recorded to another agent, was allowed"
+                         % self.child.pid)
+
+    def test_taskkill_exe_by_pid_of_another_agents_pid_is_refused(self):
+        answer = guard_kill.agent_pid_kill(["taskkill.exe", "/PID", str(self.child.pid)], AGENT)
+        self.assertEqual(answer, str(self.child.pid), "taskkill.exe /PID of pid %d, recorded to another agent, was allowed"
+                         % self.child.pid)
+
+    def test_taskkill_equals_form_of_another_agents_pid_is_refused(self):
+        answer = guard_kill.agent_pid_kill(["taskkill", "/PID=%d" % self.child.pid], AGENT)
+        self.assertEqual(answer, str(self.child.pid), "taskkill /PID=<n> of pid %d, recorded to another agent, was allowed"
+                         % self.child.pid)
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "the record's start ticks are read from /proc, which only Linux has")
+class KillVerbControls(KillCheckBase):
+    """Controls for the taskkill spellings: a pid the calling agent owns, and a pid in no record, are allowed in every
+    spelling. They pass on the old code, which reads none of these spellings. They hold the fix to allowing an own or
+    unrecorded pid, so it cannot pass by refusing every taskkill."""
+
+    def test_control_an_own_pid_is_allowed_in_each_taskkill_spelling(self):
+        self.record(AGENT, agent_procs.start_ticks(self.child.pid))
+        self.assertEqual(agent_procs.recorded_owners(self.child.pid), [AGENT],
+                         "scope: the record does not name pid %d to the calling agent" % self.child.pid)
+        for label, tokens in taskkill_spellings(self.child.pid).items():
+            with self.subTest(spelling=label):
+                answer = guard_kill.agent_pid_kill(tokens, AGENT)
+                self.assertEqual(answer, "", "control: %s of pid %d, recorded to the calling agent, was refused"
+                                 % (label, self.child.pid))
+
+    def test_control_an_unrecorded_pid_is_allowed_in_each_taskkill_spelling(self):
+        self.assertEqual(agent_procs.all_records(), {}, "scope: a record lists pid %d" % self.child.pid)
+        for label, tokens in taskkill_spellings(self.child.pid).items():
+            with self.subTest(spelling=label):
+                answer = guard_kill.agent_pid_kill(tokens, AGENT)
+                self.assertEqual(answer, "", "control: %s of pid %d, in no record, was refused" % (label, self.child.pid))
 
 
 if __name__ == "__main__":

@@ -32,8 +32,10 @@ Cost: per call, one `uname`, one `ps` per recorded pid, and one `sysctl` on take
 leases.json, only when its content changes, plus the empty lock file. No daemon, no log.
 Agent record: a take by an agent (CLAUDE_AGENT_ID in the environment) also adds the holder to that agent's process
 record as kind "sim-lease" (hooks/agent_procs.py, step agent-owned-processes). It is a reference to the lease: leases.json
-stays the one lease store, and the SubagentStop stop never ends a sim-lease pid. A foreground call carries no marker, so it
-writes none. Cost: one record read and write on a granted take, no process start.
+stays the one lease store, and the SubagentStop stop never ends a sim-lease pid. A give by that agent marks the entry
+ended, so the released pid names no owner. A foreground call carries no marker, so it writes none. Cost: one record
+read and write on a granted take; one record read on a give, plus one write only when a live entry matched; no
+process start.
 Reader: the guard calls live_leases() (SLOT_UDID maps a slot to its device) to let a session's MCP launch boot the device
 its own live lease holds. It takes no flock and writes nothing: one read of leases.json and one `ps` per lease.
 macOS only in effect; it runs under python3's standard library alone.
@@ -218,6 +220,13 @@ def note_in_agent_record(pid, started):
         agent_procs.add_entry(agent, {"pid": pid, "start": started, "owner": agent, "kind": "sim-lease"})
 
 
+def end_in_agent_record(pid):
+    """Mark the calling agent's sim-lease entry for PID ended. It never fails the give."""
+    agent = os.environ.get("CLAUDE_AGENT_ID")
+    if agent and agent_procs is not None:
+        agent_procs.end_entry(agent, pid, "sim-lease")
+
+
 def cmd_take(args):
     pid = args.pid
     wait = args.wait if args.wait is not None else float(os.environ.get("SIM_LEASE_WAIT") or 300)
@@ -278,6 +287,7 @@ def cmd_give(args):
         return 0
     with State(create=False) as st:
         st.drop(pid)
+    end_in_agent_record(pid)
     return 0
 
 
