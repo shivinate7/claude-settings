@@ -2086,6 +2086,9 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- stamp-readme-wait-item: actions/stamp/README.md item 4 says "The wait leaves out a check". confirm has no wait under the lock now, so the word may be stale. Unverified.
+- tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR (`_guard_section_sources` returns no file on a parse error, or when `rule_audit._section_dir` finds no folder). Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
+- scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. The owner rule (`scratchpad_owner_write` in `hooks/guard.py`) keys its records per file. Decision: scratchpad-owner (the pattern).
 
 ## Watcher cost and test-proxy notes
 
@@ -2102,11 +2105,8 @@
 - watch-lifetime-ruled: ruled by `stall-watch-exceptions-180a` (page item 180, pick a). The stall watcher, ci_wake and the daily job stay as named exceptions, each with a cost and a cost test. The ruling file still reads status open; triage to flip it. Decisions: stall-watch, ci-wait-reads-run-status.
 - feedback-inbox-cost-checks: hooks/test_feedback_inbox.py keeps older `cost:` checks (for example "page filing cost" and "repo cost") that repeat `CostTests`. Kept, noted. Decision: haiku-prompt-hooks.
 - stall-watch-lower-bound: the watch test's lower bound (hooks/test_stall_watch.py, `span / 2`) accepts one ps read every 2 s. Decision: stall-watch.
-- cost-counter-second-home: cost_probe.py is not the only counter home. hooks/test_feedback_inbox.py keeps its own snapshot of mtime and bytes (line 3272). Decision: haiku-prompt-hooks.
+- cost-counter-second-home: cost_probe.py is not the only counter home. hooks/test_feedback_inbox.py keeps its own snapshot of mtime and bytes (`snapshot`). Decision: haiku-prompt-hooks.
 - root-claude-md-timer-clause: pending. Root CLAUDE.md outcomes-mechanize-rules still says a timer starts no new long-lived process, without naming the exceptions. Step claude-md-timer-exceptions needs the owner's exact text. Decision: stall-watch-exceptions-180a.
-- stamp-readme-wait-item: actions/stamp/README.md item 4 says "The wait leaves out a check". confirm has no wait under the lock now, so the word may be stale. Unverified.
-- tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR (`_guard_section_sources` returns no file on a parse error, or when `rule_audit._section_dir` finds no folder). Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
-- scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. The owner rule (`scratchpad_owner_write` in `hooks/guard.py`) keys its records per file. Decision: scratchpad-owner (the pattern).
 - round-text-left-in-two-files: old round text left in docs/decisions/standing-merge-grant.md (net test after round 3 for every guard change) and agents/reviewer.md (round 1 with no safety hole skips rounds 2 and 3). Found by the rounds-rules-one-record round 1 review; pre-existing. Decision: roles-findings-are-debts-or-notes.
 - readonly-for-case-refused: a read-only agent's shell call is refused for `for ((i=5; i>0; i--)); do ...; done`, `case x in a) [[ a > b ]] && echo y ;; esac` and `f() { [[ a > b ]]; }; f`, though each writes nothing. `_command_start` (the read-only shell rule in hooks/guard.py) starts no command after `for`, after a case arm's `)` or after `f()`, so the `>` reads as a redirect. Decision: guard-guards-mistakes-only (a guard stops Claude's mistakes, not an attacker's). Fix: none — rare and harmless. Until: 2026-11-27
 - readonly-xargs-touch-unread: `echo f | xargs touch` writes a file for a read-only agent and is not refused. `xargs` takes its targets from stdin, so the read-only shell rule reads no path (`_verb_written_paths` in hooks/guard.py). Decision: guard-guards-mistakes-only (a guard stops Claude's mistakes, not an attacker's). Fix: none — rare and harmless. Until: 2026-11-27

@@ -56,7 +56,7 @@ small, M medium, L large).
 
 | Mechanism | On main | Change | Q | Size |
 |---|---|---|---|---|
-| Stall watcher (`hooks/stall_watch.py --watch-pid`) | The hook rewrites each background Bash call to start one python watcher. The watcher loops every 0.2 s (line 278) and runs `ps` about once a second. It exits 3 after a stall (hook command, line 17). | Replace, cap or keep. Q1a keeps it, so do not delete it. | 1 | L |
+| Stall watcher (`hooks/stall_watch.py --watch-pid`) | The hook rewrites each background Bash call to start one python watcher. The watcher loops every 0.2 s (`watch`) and runs `ps` about once a second. It exits 3 after a stall (hook command, line 17). | Replace, cap or keep. Q1a keeps it, so do not delete it. | 1 | L |
 | Stall temp files | The hook exits 3 before `rm -f LOG BEAT`. A stalled job leaves `.log` and `.beat` files (line 17). | Remove them on every exit path. | no | S |
 | Stall Stop check (`--stop`) | Lists each quiet job once per crossing: at the first Stop after its stall crossed, against the previous Stop (`stop()`, `scan_jobs`). A job that goes quiet again after new output is listed again. | None. Test `each_stale_job_is_listed_once` holds it. | no | - |
 | `wait-pid` (`bin/wait-pid`) | One process per wait. Ownership reads run at start (record `stall-watch`; code unchecked). | Add the cost test. | no | S |
