@@ -1349,7 +1349,7 @@ def export_check(cwd, transcript_path, session_id):
     (override.remote_session_id). A writer named there decides alone. Only when none is named does the extras key
     or an interpreter run of export_page.py (EXPORT_RUN), as the last sentence says, make this session the
     writer. A session that is not the writer, or whose writer cannot be told, passes
-    with no note. `note` is the systemMessage text only after a page write was found and a read of the repo
+    with no note. `note` is the systemMessage text only after a page write or a wake was found and a read of the repo
     or the layout failed: that is never a block. A transcript that cannot be read gives neither. The whole
     transcript is read and timestamps decide, so a write in an earlier turn still counts. A wake (a user record
     whose text begins with PAGE_BANNER: a Send on a page) counts as a page write at its time when its `Artifact:`
