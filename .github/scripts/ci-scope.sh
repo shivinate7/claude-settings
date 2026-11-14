@@ -3,7 +3,7 @@
 #   per job: checks_guard (set when code and guard are both set, or directly by a path the checks-guard job installs from: actions/playwright-setup, .github/shoot), checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep (the janitor sweep suites, set with checks_windows_rest) checks_macos shell_macos pointer_windows, and shoot (below)
 #   per suite: code (any non-docs file changed), mods (a path under mods/, or a .md path under skills/plain-english-map/: the mod tests and the
 #   map skill tests, one CI step in each of the `checks`, `checks-windows` and `checks-macos` jobs), guard (guard mutation test), sweep (janitor mutation test), shoot (the checks-shoot and checks-waiting-page jobs: the bin/shoot suite and the page suites, which install a browser).
-#   The `checks` lint job and the checks-merge-install job always run, so they have no flag (their suites carry `code`).
+#   The `checks` lint job and the checks-merge-install, checks-install-checkout and checks-merge-git jobs always run, so they have no flag (their suites carry `code`).
 #   checks_macos gates both checks-macos and checks-macos-b.
 #   checks_windows_rest_2 repeats checks_windows_rest's value (R62). No job reads it: checks-windows-rest-2 runs every step on a ready pull_request, so the output is kept only for the tests that derive it.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event.

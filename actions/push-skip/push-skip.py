@@ -11,6 +11,10 @@ run passed, narrowed or full, in one of two forms. Main then runs none of its su
   2. any other merged pull request head (a lone lane): its newest checks run is a completed, successful pull request run in which
      all-jobs-passed and every suite job succeeded. A suite step that scope skipped (a narrowed run) does not stop the skip: the
      suites the diff left out are not re-run on main until a later change touches them.
+A suite job that the run skipped (conclusion skipped) is proven, never a gap, only when all three hold: its name is a key of the
+calling workflow's all-jobs-passed scope-skips input, the same run's scope job succeeded, and the same run's all-jobs-passed
+succeeded. The map is read from the caller's workflow file with the rules reader (scope_skips_map), never from testing/, since a
+pinned copy of this action has no testing/. Any other skipped job is not proven.
 Anything else runs everything: a direct push, an admin merge with no green run, a tree mismatch, a red, draft, cancelled or
 in-progress run, a run of another head or workflow. A schedule or workflow_dispatch run (EVENT) never skips. Any error from the read,
 of any type, writes skip=false and says "unknown": an unknown state runs everything, never skips.
@@ -27,7 +31,7 @@ GITHUB_WORKSPACE (the calling checkout; unset reads this repo), WORKFLOW (the ca
 .github/workflows/checks.yml). PRS_JSON is a stand-in for the read: a JSON list of integration PR heads, each {"head_branch",
 "tree", "status", "conclusion"} (lint/test_push_skip.py). Cost per push: one pull request list read; per batch head its commit and
 one page of its check runs; per merged lone-lane head its commit, and, only when its tree is the push's tree, one runs read and one
-jobs read; plus one read of the workflow file. No file written, no process kept.
+jobs read; plus one read of the workflow file (the suite jobs and the scope-skips map come from the same text). No file written, no process kept.
 """
 import functools
 import importlib.util
@@ -96,6 +100,21 @@ def suite_jobs(env):
     return _suite_jobs(os.path.join(env.get("GITHUB_WORKSPACE") or ROOT, workflow_path(env)))
 
 
+@functools.lru_cache(maxsize=None)
+def _scope_skips(file):
+    """The jobs the calling workflow's all-jobs-passed scope-skips input names. Unknown when the file or the reader cannot be read."""
+    try:
+        with open(file, encoding="utf-8") as handle:
+            return frozenset(_rules().scope_skips_map(handle.read()))
+    except Exception as ex:
+        raise Unknown("the scope-skips map could not be read from %s (%s: %s)" % (file, type(ex).__name__, ex))
+
+
+def scope_skips(env):
+    """The names in the calling workflow's scope-skips input: a skipped job of one of them may be proven by its scope run."""
+    return _scope_skips(os.path.join(env.get("GITHUB_WORKSPACE") or ROOT, workflow_path(env)))
+
+
 def get(path, query, env):
     api = _nightly_skip()
     url = "%s/repos/%s/%s" % (api.API, env["REPO"], path)
@@ -135,8 +154,18 @@ def rollup_result(env, sha, runs=None):
 
 
 def suites_not_success(runs, env):
-    """The checks whose newest check run that ran is missing or did not complete with success, sorted."""
-    return sorted(name for name in suite_jobs(env) if newest_result(runs, name) != ("completed", "success"))
+    """The checks whose newest check run that ran is missing or did not complete with success, sorted. A check the run skipped is no
+    gap when the caller's scope-skips map names it and the same head's scope check run succeeded. The caller has read the head's
+    all-jobs-passed as success, which is the third condition."""
+    skippable = scope_skips(env) if newest_result(runs, "scope") == ("completed", "success") else frozenset()
+    return sorted(name for name in suite_jobs(env) if newest_result(runs, name) != ("completed", "success")
+                  and not (name in skippable and skipped_only(runs, name)))
+
+
+def skipped_only(runs, name):
+    """True when `name` has a check run, and every one concluded skipped: it never ran, as opposed to missing from the run."""
+    rows = [r for r in runs if isinstance(r, dict) and r.get("name") == name]
+    return bool(rows) and all(r.get("conclusion") == "skipped" for r in rows)
 
 
 def pull_request_run_gap(env, sha):
@@ -162,10 +191,19 @@ def pull_request_run_gap(env, sha):
         raise Unknown("the jobs read has no jobs list")
     if len(jobs) >= PAGE:
         raise Unknown("the jobs read is a full page, so a job may be missing")
+    def conclusions(name):
+        return [(j.get("status"), j.get("conclusion")) for j in jobs if j.get("name") == name]
+
+    def succeeded(name):
+        return bool(conclusions(name)) and all(c == ("completed", "success") for c in conclusions(name))
+
+    skippable = scope_skips(env) if succeeded("scope") else frozenset()
     gaps = []
     for name in (ROLLUP,) + suite_jobs(env):
-        rows = [j for j in jobs if j.get("name") == name]
-        if not rows or any((j.get("status"), j.get("conclusion")) != ("completed", "success") for j in rows):
+        # A suite job the run skipped is proven by the map and this run's scope job. The rollup is never skippable: it must succeed.
+        proven_skip = (name in skippable and name != ROLLUP and bool(conclusions(name))
+                       and all(c == ("completed", "skipped") for c in conclusions(name)))
+        if not succeeded(name) and not proven_skip:
             gaps.append("%s did not succeed" % name)
     return "; ".join(gaps) if gaps else None
 
