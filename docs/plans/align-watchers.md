@@ -37,7 +37,7 @@ Eight rules. A rule becomes a check when a check exists. Until then it is a plai
    or `send_later`. It does not wait on a polling process we start. Two mechanisms break this rule today,
    the stall watcher and `ci_wake`. Q1a and Q3 name them as exceptions.
 4. **Cost.** Each record states its cost: process starts, files written, and how often (rule `outcomes-mechanize-rules`). Decision `cost-line-pinned` and its checker check each file and count that a Cost line names.
-5. **Proof.** One shared test helper proves the stated cost (`hooks/test_support/cost_probe.py`, added by this change). It counts child processes, files written and
+5. **Proof.** One shared test helper proves the stated cost (`testing/cost_probe.py`, added by this change). It counts child processes, files written and
    sleep passes. The test is the proof. A cost claim with no test is not proven.
 6. **Logs.** Each log names its reader in its record. Each log has a size cap. A cap rotates the file. It
    never trims the file, because a trim can remove rows a reader needs (the `crash` lines that
@@ -114,7 +114,7 @@ Nothing here is deleted before its owner question is ruled. Each delete names it
 
 1. **Text only (this change).** Fix stale prose in the decision records, debts, `docs/*.md` and
    `janitor/GUIDE.md`. Size S. It needs no owner answer.
-2. **Cost tests for the cheap mechanisms.** One shared helper, `hooks/test_support/cost_probe.py`, added by this change. Size S.
+2. **Cost tests for the cheap mechanisms.** One shared helper, `testing/cost_probe.py`, added by this change. Size S.
 3. **Stall defects.** Remove the temp files on every exit path. Dedupe the Stop message. Size S. The
    watcher stays (Q1a, decided).
 4. **Log readers.** Name a reader for each log, with no delete (Q5, ruling `watchers-log-reader-249b`). Size S.
