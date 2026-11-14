@@ -199,10 +199,12 @@ class FakeGitHub:
     check runs are the defaults. `pulls` is the list the push commit's pull request read returns, `trees` maps a head sha to its tree,
     `workflow_runs` are the runs of the repo (filtered by head_sha and event when the read names them) and `jobs` maps a run id to its
     jobs. check_name filters the check runs; per_page (default 30) and page cut every list. `fail` is raised by every check-runs read,
-    `runs_fail` by the runs read and `jobs_fail` by the jobs read. A URL no case expects goes to `unexpected`, which the case asserts
-    empty; `reads` keeps every path asked, in order."""
+    `runs_fail` by the runs read and `jobs_fail` by the jobs read. `ignore_run_filters` returns every run whatever head_sha and event
+    the runs read names, as a read that answers wider than it was asked does, so the decision's own check of the head and the event
+    must hold alone. A URL no case expects goes to `unexpected`, which the case asserts empty; `reads` keeps every path asked, in order."""
 
-    def __init__(self, runs=(), fail=None, pulls=None, trees=None, workflow_runs=None, jobs=None, runs_fail=None, jobs_fail=None):
+    def __init__(self, runs=(), fail=None, pulls=None, trees=None, workflow_runs=None, jobs=None, runs_fail=None, jobs_fail=None,
+                 ignore_run_filters=False):
         self.runs = list(runs or [])
         self.fail = fail
         self.pulls = [{"head": {"ref": BATCH, "sha": HEAD}}] if pulls is None else pulls
@@ -210,6 +212,7 @@ class FakeGitHub:
         self.workflow_runs = [] if workflow_runs is None else workflow_runs
         self.jobs = {} if jobs is None else jobs
         self.runs_fail, self.jobs_fail = runs_fail, jobs_fail
+        self.ignore_run_filters = ignore_run_filters
         self.unexpected, self.reads = [], []
 
     @staticmethod
@@ -239,8 +242,9 @@ class FakeGitHub:
             if self.runs_fail is not None:
                 raise self.runs_fail
             runs = [r for r in self.workflow_runs
-                    if ("head_sha" not in query or r["head_sha"] == query["head_sha"][0])
-                    and ("event" not in query or r["event"] == query["event"][0])]
+                    if self.ignore_run_filters
+                    or (("head_sha" not in query or r["head_sha"] == query["head_sha"][0])
+                        and ("event" not in query or r["event"] == query["event"][0]))]
             return {"total_count": len(runs), "workflow_runs": self.page(runs, query)}
         if path.startswith("actions/runs/") and path.endswith("/jobs"):
             if self.jobs_fail is not None:
@@ -513,17 +517,17 @@ def job_row(name, conclusion="success", steps=None, status="completed"):
     return {"name": name, "status": status, "conclusion": conclusion, "steps": [step("Run")] if steps is None else steps}
 
 
-def full_run_jobs(changes=None):
+def full_run_jobs(changes=None, extra=()):
     """The jobs of a full, ready pull request run of checks.yml: every job passed with its steps, and the jobs that never run on a pull
     request are skipped with no steps. `changes` maps a job name to the job_row keyword arguments it gets instead, or to None to leave
-    that job out."""
+    that job out. `extra` adds rows after them, such as a second row of one name from a re-run."""
     jobs = {name: job_row(name, "skipped", steps=[]) if name in OFF_ON_PR else job_row(name) for name in ALL_RUN_JOBS}
     for name, change in (changes or {}).items():
         if change is None:
             jobs.pop(name, None)
         else:
             jobs[name] = job_row(name, **change)
-    return list(jobs.values())
+    return list(jobs.values()) + list(extra)
 
 
 def skipped_suite_steps(jobs):
@@ -656,6 +660,89 @@ class MergedPullRequest(LiveHead):
                           trees={HEAD: TREE, LANE_HEAD: TREE}, workflow_runs=[pull_request_run(1)], jobs={1: jobs})
         value, _ = self.skip_on(fake=fake)
         self.assertEqual(value, "true", "a green batch head with the push's tree still skips, whatever a narrowed merged pull request says")
+
+    def test_a_merged_pull_request_whose_all_jobs_passed_row_is_missing_runs(self):
+        # all-jobs-passed fans in the suite jobs, so a run without its row has not been shown to pass.
+        jobs = full_run_jobs({ROLLUP_NAME: None})
+        self.assertEqual([j for j in jobs if j["name"] == ROLLUP_NAME], [],
+                         "the fixture must leave all-jobs-passed out, or it proves nothing")
+        value, _ = self.skip_on(fake=self.lane_fake([pull_request_run(1)], {1: jobs}))
+        self.assertEqual(value, "false", "a green run with no all-jobs-passed row does not prove the merged pull request: skip=false")
+
+    def test_a_merged_pull_request_whose_all_jobs_passed_was_cancelled_runs(self):
+        jobs = full_run_jobs({ROLLUP_NAME: {"conclusion": "cancelled"}})
+        self.assertEqual([j["conclusion"] for j in jobs if j["name"] == ROLLUP_NAME], ["cancelled"],
+                         "the fixture must cancel all-jobs-passed, or it proves nothing")
+        value, _ = self.skip_on(fake=self.lane_fake([pull_request_run(1)], {1: jobs}))
+        self.assertEqual(value, "false", "all-jobs-passed was cancelled in the merged pull request's run: skip=false")
+
+    def test_a_push_run_on_the_head_does_not_prove_the_merged_pull_request(self):
+        # The runs read asks for event=pull_request, and the decision checks no event of its own, so the query keeps a push run out.
+        fake = self.lane_fake([pull_request_run(1, event="push")], {1: full_run_jobs()})
+        self.assertEqual(fake.workflow_runs[0]["event"], "push", "the fixture's run must be a push run, or it proves nothing")
+        value, _ = self.skip_on(fake=fake)
+        self.assertIn("actions/runs", fake.reads, "push-skip never read the head's runs, so the push run was not in play")
+        self.assertEqual(value, "false", "a green push run on the head is no pull request run, so it proves nothing: skip=false")
+
+    def test_a_green_run_on_another_head_that_the_read_returns_does_not_prove_this_head(self):
+        # The API filters by head_sha, but the decision must hold its own head check when a read returns a run on another head.
+        fake = self.lane_fake([pull_request_run(1, head=OTHER_HEAD)], {1: full_run_jobs()}, ignore_run_filters=True)
+        self.assertEqual(fake.workflow_runs[0]["head_sha"], OTHER_HEAD, "the fixture's run must be on another head, or it proves nothing")
+        value, _ = self.skip_on(fake=fake)
+        self.assertIn("actions/runs", fake.reads, "push-skip never read the runs, so the other head's run was not in play")
+        self.assertEqual(value, "false", "a green run on another head does not prove this pull request head: skip=false")
+
+    def test_a_newest_run_that_failed_was_cancelled_or_is_running_runs_though_its_jobs_passed(self):
+        # The run's own verdict is the result. Its jobs are all green here, so only the run's status and conclusion can stop the skip.
+        for status, conclusion in (("completed", "failure"), ("completed", "cancelled"), ("in_progress", None)):
+            with self.subTest(run="%s/%s" % (status, conclusion)):
+                runs = [pull_request_run(1, created_at=EARLY),
+                        pull_request_run(2, conclusion=conclusion, status=status, created_at=LATE)]
+                jobs = {1: full_run_jobs(), 2: full_run_jobs()}
+                self.assertTrue(all(j["conclusion"] in ("success", "skipped") for j in jobs[2]),
+                                "the fixture's newest run must have every job green, or it proves nothing")
+                value, _ = self.skip_on(fake=self.lane_fake(runs, jobs))
+                self.assertEqual(value, "false", "the newest run on the head is %s/%s, so an older green run stands for nothing: skip=false"
+                                 % (status, conclusion))
+
+    def test_a_full_page_of_jobs_on_the_run_runs_though_every_required_job_passed(self):
+        # A page of 100 may hide a row past it, so the read is unknown and the decision runs everything.
+        jobs = full_run_jobs()
+        jobs += [job_row("padding-%03d" % i) for i in range(100 - len(jobs))]
+        self.assertEqual(len(jobs), 100, "the fixture must fill a page of 100 jobs, or it proves nothing")
+        self.assertTrue({ROLLUP_NAME, *SUITE_JOBS} <= {j["name"] for j in jobs},
+                        "a required job is missing from the fixture, so the case proves nothing")
+        value, _ = self.skip_on(fake=self.lane_fake([pull_request_run(1)], {1: jobs}))
+        self.assertEqual(value, "false", "a full page of jobs may hide a row past it, so the read is unknown: skip=false")
+
+    def test_a_jobs_page_one_short_of_full_still_skips(self):
+        jobs = full_run_jobs()
+        jobs += [job_row("padding-%03d" % i) for i in range(99 - len(jobs))]
+        self.assertEqual(len(jobs), 99, "the fixture must leave one row short of a full page, or it proves nothing")
+        value, text = self.skip_on(fake=self.lane_fake([pull_request_run(1)], {1: jobs}))
+        self.assertEqual(value, "true",
+                         "a page of 99 jobs is not full, and every required job passed: skip=true (%s)" % text.strip()[-200:])
+
+    def test_a_failed_row_of_a_job_blocks_the_skip_beside_its_passed_row_in_either_order(self):
+        # The rule kept here: any non-success row of a job name blocks the skip. A newer passed row does not clear an older failed one.
+        name = "checks-windows-rest"
+        self.assertIn(name, SUITE_JOBS, "%s is not a suite job of checks.yml, so this case probes the wrong job" % name)
+        failed = job_row(name, "failure")
+        orders = {"failed row first": [failed] + full_run_jobs(), "passed row first": full_run_jobs(extra=[failed])}
+        for order, jobs in orders.items():
+            with self.subTest(order=order):
+                self.assertEqual(sum(1 for j in jobs if j["name"] == name), 2,
+                                 "the fixture must hold two rows of %s, or it proves nothing" % name)
+                value, _ = self.skip_on(fake=self.lane_fake([pull_request_run(1)], {1: jobs}))
+                self.assertEqual(value, "false", "a failed row of %s blocks the skip beside its passed row: skip=false" % name)
+
+    def test_two_passed_rows_of_one_job_still_skip(self):
+        name = "checks-windows-rest"
+        jobs = full_run_jobs(extra=[job_row(name)])
+        self.assertEqual(sum(1 for j in jobs if j["name"] == name), 2, "the fixture must hold two rows of %s, or it proves nothing" % name)
+        value, text = self.skip_on(fake=self.lane_fake([pull_request_run(1)], {1: jobs}))
+        self.assertEqual(value, "true", "two passed rows of %s are no failure, so every job passed and the push skips (%s)"
+                         % (name, text.strip()[-200:]))
 
 
 def scope_skip_changes(extra=None):
@@ -958,6 +1045,14 @@ class PushSkipWiring(unittest.TestCase):
         block = job_block(self.text, JOB) or ""
         self.assertIn("timeout-minutes:", block, f"{JOB} has no timeout-minutes cap")
         self.assertIn("contents: read", block, f"{JOB} does not restate contents: read")
+
+    def test_push_skip_pins_actions_read_so_the_runs_read_is_not_refused(self):
+        # The lone-lane path reads actions/runs. Without actions: read GitHub refuses that read, and the decision then writes skip=false
+        # with no red, so the pin is the only thing that keeps the skip working.
+        block = job_block(self.text, JOB) or ""
+        self.assertIn("permissions:", block, f"{JOB} has no permissions block to pin actions: read in")
+        self.assertRegex(block, r"(?m)^      actions: read$",
+                         f"{JOB} does not pin actions: read, so the runs read is refused and the skip never fires")
 
     def test_scope_needs_push_skip_so_a_skipped_push_skips_every_job_through_needs(self):
         needs = needs_of(job_block(self.text, "scope")) or []
