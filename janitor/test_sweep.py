@@ -5694,7 +5694,7 @@ class AgentOwnedProcessTests(_AgentEndFixture):
         with self.subTest(arm="kind"):
             self.assertTrue(entry.get("kind"), "the entry has no kind")
 
-    def test_a_hidden_process_of_the_agent_ends_at_subagent_stop(self):
+    def test_a_hidden_process_of_the_agent_ends_when_the_agent_stops(self):
         """Item 2: a marked process left running outside the agent's worktree is gone after SubagentStop, and
         the record lists it."""
         proc = self.spawn(self.AGENT)
