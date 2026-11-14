@@ -188,7 +188,7 @@
         ]
       },
       {
-        "matcher": "startup|resume|compact",
+        "matcher": "startup|resume|compact|clear|fork",
         "hooks": [
           {
             "type": "command",
