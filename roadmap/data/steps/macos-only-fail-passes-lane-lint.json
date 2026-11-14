@@ -1,14 +1,14 @@
 {
  "id": "macos-only-fail-passes-lane-lint",
  "title": "A macOS-only failure cannot pass the lane lint while batch CI runs, or the lint says it is unknown",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1UP3V2iAHiHZZWSnf",
  "owner": "triage",
  "blockedBy": [],
- "why": "Finding 1 on #2970 (lane review; coordinator 11:06 CST Nov 14, relayed; triage read neither the review nor the code): a failure that only the macOS job shows can pass the lane lint during batch CI. The lint reads the draft run through `draft_run_state`; why a macOS-only red slips through is unread by triage. Coordinator's pick, its own and undoable: (a) accept it for #2970, state it under Limits, file a debt, and queue the `draft_run_state` fix as its own lane. The coordinator says: tell it if the owner wants option (b) first; what (b) is was not sent, so triage does not know it. No owner item posted: nothing owner-only is open. Kin: red-ready-pr-back-to-draft, push-rollup-skipped-reads (both read `draft_run_state`), ci-mac-once-per-batch, ci-batch-mac-runner. A check change: if its verdict changes, round 3 applies. First act of a lane: reproduce, red then green: a macOS-only red in a batch run reads unknown or red in the lane lint, never pass. WAIT 13:08 CST Nov 14 (coordinator 13:08): the draft_run_state macOS-row lane waits for #3405 to merge. Unstarted.",
+ "why": "Finding 1 on #2970 (lane review; coordinator 11:06 CST Nov 14, relayed; triage read neither the review nor the code): a failure that only the macOS job shows can pass the lane lint during batch CI. The lint reads the draft run through `draft_run_state`; why a macOS-only red slips through is unread by triage. Coordinator's pick, its own and undoable: (a) accept it for #2970, state it under Limits, file a debt, and queue the `draft_run_state` fix as its own lane. The coordinator says: tell it if the owner wants option (b) first; what (b) is was not sent, so triage does not know it. No owner item posted: nothing owner-only is open. Kin: red-ready-pr-back-to-draft, push-rollup-skipped-reads (both read `draft_run_state`), ci-mac-once-per-batch, ci-batch-mac-runner. A check change: if its verdict changes, round 3 applies. First act of a lane: reproduce, red then green: a macOS-only red in a batch run reads unknown or red in the lane lint, never pass. WAIT 13:08 CST Nov 14 (coordinator 13:08): the draft_run_state macOS-row lane waits for #3405 to merge. Unstarted. LANE STARTED 14:16 CST Nov 14 (coordinator 14:17): lane session_013NEJL1UP3V2iAHiHZZWSnf, created 14:15 CST, Sonnet, medium. First act: measure why a macOS-only red slips through `draft_run_state`, then red then green; no verdict may turn a refusal into a pass.",
  "source": "coordinator 11:06 CST Nov 14, from #2970 finding 1",
  "note": "Filed 11:10 CST Nov 14 by triage. Tracker: the coordinator. No lane yet (the coordinator queued it as its own lane).",
- "updatedAt": "2026-11-14T13:08:00"
+ "updatedAt": "2026-11-14T14:16:00"
 }
