@@ -11,6 +11,7 @@
 #     lint_ruling_kind (Ruling kind check: a path under docs/decisions/, and the rule files CLAUDE.md and output-styles/shiv-stylisms.md),
 #     lint_comment_narration (Comment narration check: any non-.md path; the checker reads no .md file).
 #   lint/layout.py, lint/layout.json and .claude/layout-extras.json set all four: each lint finds its record folders through them.
+#   checks_windows_rest_2 repeats checks_windows_rest's value (R62). No job reads it: checks-windows-rest-2 runs every step on a ready pull_request, so the output is kept only for the tests that derive it.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
@@ -155,6 +156,8 @@ echo "CI scope: event=${EVENT:-} range=${range:-none} on=$on"
 for n in $ALL; do
   case "$on" in *" $n "*) v=true ;; *) v=false ;; esac
   echo "$n=$v" >> "$GITHUB_OUTPUT"
+  # checks-windows-rest-2 is the second half of the rest suites (R62). Its output repeats the rest flag; no job reads it (the job runs every step on a ready pull_request).
+  [ "$n" = checks_windows_rest ] && echo "checks_windows_rest_2=$v" >> "$GITHUB_OUTPUT"
 done
 # mutation_report: the mutation-report job runs on a pull request from a `batch-` branch (HEAD_REF), and on any other event, where the
 # action skips a push or a schedule itself. It is outside ALL: a change to this script or the workflow must not start it on any other PR.
