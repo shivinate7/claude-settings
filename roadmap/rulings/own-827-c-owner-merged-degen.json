@@ -1,0 +1,10 @@
+{
+ "id": "own-827-c-owner-merged-degen",
+ "at": "2026-11-14T15:03:43-06:00",
+ "title": "The owner merged the six degen PRs; the build finishes degen fast, fully done, and hands it to him.",
+ "ruling": "Owner, page item 827 (pick-who-merges-degen), option c, saved on the page at 15:03 CST Nov 14: \"It was you, or a session you started: say which, and nothing changes\". His note, verbatim: \"it was me, nothing on degens merging rn but ideally u finish up on degen fast and hand it off to me (but get it fully done)\". Facts: he merged degen #700, #693, #682, #676, #688 and #684 himself (07:35 to 07:43 UTC Nov 14); nothing of his is merging in degen now. Triage's reading, not his words: \"u\" is the build (runner 11 and the coordinator), who finish the open degen work quickly and fully, then hand degen to him. What \"hand it off to me\" covers (the merging, the whole repo, or a status report) is not stated; it is asked of the coordinator below. The standing ruling own-degen-home-switch-now (runner 11 merges degen per lane) is not withdrawn by this answer.",
+ "quote": "it was me, nothing on degens merging rn but ideally u finish up on degen fast and hand it off to me (but get it fully done)",
+ "source": "waiting/answers/pick-who-merges-degen.json (21:03:43Z Nov 14, choice c, optionId it-was-me). Owner.",
+ "status": "open",
+ "step": "switch-decisions-name-degen-home"
+}

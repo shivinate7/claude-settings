@@ -1,0 +1,10 @@
+{
+ "id": "own-838-a-accept-pr-head-script",
+ "at": "2026-11-14T15:01:47-06:00",
+ "title": "The batch-macOS skip step may run the PR's own script with the repo token.",
+ "ruling": "Owner, page item 838 (pick-mac-runner-script-trust), option a, saved on the page at 15:01 CST Nov 14 with no note: accept. The skip step in lane-touched-tests.yml keeps running the PR's own `batch-macos-skip.py` with `github.token` (the lane's option A and its recommendation). The grant covers that step only. `MAC_RUNNER_READ_TOKEN` in checks.yml reaches PR code the same way and is not touched by this answer. The risk is documented, not measured; GitHub's fork-run approval and the runner's repo scope are unverified (the lane could not read them). Draft PR #3409 is no longer held for this item.",
+ "quote": "a",
+ "source": "waiting/answers/pick-mac-runner-script-trust.json (21:01:48Z Nov 14, choice a, optionId accept-pr-head-script). Owner.",
+ "status": "open",
+ "step": "ci-batch-mac-runner"
+}

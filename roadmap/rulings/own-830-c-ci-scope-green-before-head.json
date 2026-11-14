@@ -1,0 +1,10 @@
+{
+ "id": "own-830-c-ci-scope-green-before-head",
+ "at": "2026-11-14T15:02:55-06:00",
+ "title": "CI scope skips every job on a push that changes only docs/records.md when the head before the push was fully green.",
+ "ruling": "Owner, page item 830 (pick-records-page-merge-stale), option c, saved on the page at 15:02 CST Nov 14 with no note: let CI scope skip every job on a push that changes only docs/records.md when the head before the push was fully green. The option text carried the line \"Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo\" and widens:true, so the owner chose the widening knowingly. The grant covers that one case: a push whose only change is docs/records.md, after a head whose run was fully green. Per the option text: ci-scope.sh reads the push's before-head, checks that head's run was fully green and the push changed docs/records.md alone, then sets every job flag false; all-jobs-passed counts those skipped jobs as passed; it changes ci-scope.sh, checks.yml and lint/test_ci_scope.py; it edits the script's own fail-safe list, so it needs review round 3 and the net-value test. The merged tree rests on a green run of the head before the push, read from GitHub, not a run of that tree; the gain is unmeasured. Options a and b are not chosen: the merge tool keeps refusing a ready PR with a stale page, and the ready push of a records page stays.",
+ "quote": "c",
+ "source": "waiting/answers/pick-records-page-merge-stale.json (21:02:55Z Nov 14, choice c, optionId ci-scope-reuses-green-before-head). Owner.",
+ "status": "open",
+ "step": "ci-scope-skips-records-only-push"
+}

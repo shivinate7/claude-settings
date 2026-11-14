@@ -1,0 +1,14 @@
+{
+ "id": "record-round1-model-row-bug",
+ "title": "The review record names the model that ran round 1 (haiku for #3005), not the one that ran round 2",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Owner note on page item 832 (15:02 CST Nov 14, verbatim): \"its not even wrong. message retrospective theres just a bug that needs patching here its transcript has it\". Known so far (the lane of #3005 and the coordinator, relayed; triage read none): the posted record on #3005 (comment 6876422660, head 013e6d573d61) shows round 1 sonnet FAIL and round 2 sonnet PASS, while round 1's real reviewer was haiku. Triage's reading, not the owner's words: the record tool or the way the lane passes the model writes the wrong row. Unread: where the row comes from (the tool's default, the lane's flag, or the agent's reported model), and the transcript the owner points to, which triage does not have. Kin: step record-after-each-round (a lane account that round 1 reviewers ran haiku, the role model). Rule: reports-done-names-models. First act of a lane: get the retrospective session's transcript through the coordinator, find the bug, then red then green: a record row names the model the reviewer ran, and a mismatch is refused or flagged. A record check change: round 3 applies if a verdict moves.",
+ "source": "owner page item 832 note, 15:02 CST Nov 14",
+ "note": "Filed 15:04 CST Nov 14 by triage. Tracker: the coordinator. The coordinator asks the retrospective session for the transcript; triage has no id for that session.",
+ "updatedAt": "2026-11-14T15:04:00"
+}

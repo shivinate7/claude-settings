@@ -1,0 +1,10 @@
+{
+ "id": "own-833-a-done-at-fix-check",
+ "at": "2026-11-14T15:01:58-06:00",
+ "title": "A guard or check change is done at its fix check pass, even after a round 1 fail.",
+ "ruling": "Owner, page item 833 (pick-r3-after-failed-fix-check), option a, saved on the page at 15:01 CST Nov 14 with no note: done at the fix check pass. Rewrite the root clause of roles-review-cap-three in place to match R9 and the merge tool: a guard or check change that failed round 1 and passed its fix check gets no round 3 and no net-value test after it. The failed-then-fixed case is unmeasured (the option said so). Round 3 still runs after a round 2 fail. Item 739 (withdrawn 12:32 CST Nov 13) is answered by this.",
+ "quote": "a",
+ "source": "waiting/answers/pick-r3-after-failed-fix-check.json (21:01:58Z Nov 14, choice a, optionId done-at-fix-check). Owner.",
+ "status": "open",
+ "step": "root-clause-done-at-fix-check"
+}
