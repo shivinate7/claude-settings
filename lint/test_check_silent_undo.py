@@ -807,6 +807,11 @@ class Flips(unittest.TestCase):
             with self.subTest(result=result):
                 self.red("", a_line, result)
 
+    def test_a_bare_negation_on_a_verb_stays_a_reversal(self):
+        """`deploy now.` to `deploy now, never.` is a reversal, not an appended clause: the tail holds no word beside
+        the negation. The tail rule in `extends` is the gate that flags it."""
+        self.red("", "deploy now.", "deploy now, never.")
+
 
 class MainLineDrop:
     """The one home of the fixture for a case that merges main into a feat branch and drops lines main added to
