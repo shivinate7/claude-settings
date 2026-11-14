@@ -714,8 +714,9 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 # --numstat -z`, so a push costs one more `git log`, and nothing else when no commit is a gap. A push that
 # carries a gap costs more: the rollout's `git ls-tree` (the source, then each flagged commit's parent), the
 # default base's reads (once, in `memo`), and a second `git log` without the default base's commits, which a
-# merge or a rebase brings in and which are not the lane's. The guard passes its own `is_test_rel`, so the
-# lazy import of check_red_run loads no second guard. A commit in the same call as the push lands after the
+# merge or a rebase brings in and which are not the lane's, then one `git rev-parse` of the source, and one
+# `git merge-base --is-ancestor` (one `git rev-parse --is-shallow-repository` more when it says no). The
+# guard passes its own `is_test_rel`, so the lazy import of check_red_run loads no second guard. A commit in the same call as the push lands after the
 # guard reads: its `-m` paragraphs are read as its message (an `--amend` with none keeps the commit's own),
 # and the test lines it stages are read the way the marker read reads its tree (`_commit_test_adds`: one
 # `git diff --numstat`, and one `git ls-files --others` for each add that names paths). Only a commit with a
@@ -739,13 +740,15 @@ RED_RUN_PUSH_REASON = (
     "Rule (Git, red-run; decision red-run-trailer-on-test-commits): this push would send test commits with no "
     "valid Red-run trailer: {flagged}. Remedy: {fix}"
 )
-# A flagged commit below the tip: a trailer-only commit named `amend! <sha>` carries the new message, and the
-# autosquash rebase folds it into that commit. No editor opens (`fixup -C`), so a session can drive it. The
-# sha is the one the refusal lists for the flagged commit.
+# A flagged commit that is not the tip: a trailer-only commit named `amend! <sha>` carries the new message, and
+# the autosquash rebase folds it into that commit. No editor opens (`fixup -C`, and `merge -C` for a merge), so a
+# session can drive it. `--rebase-merges` keeps a merge in the range: without it the rebase flattens the merge
+# and replays main's commits under new shas, which the check then judges as the lane's. The sha is the one the
+# refusal lists for the flagged commit.
 RED_RUN_BELOW_FIX = (
     "Reword each flagged commit by its sha, listed above: `git commit --allow-empty -m \"amend! <sha>\" "
     "-m \"<subject>\" -m \"Red-run: ...\"`, then `GIT_SEQUENCE_EDITOR=true GIT_EDITOR=false git rebase -i "
-    "--autosquash <sha>^`, then `git push`."
+    "--autosquash --rebase-merges <sha>^`, then `git push`."
 )
 # A branch rewritten since it was pushed: the remote holds an earlier form of the flagged commits, so a reword
 # changes pushed history, which no session does.
@@ -931,29 +934,31 @@ def _red_run_found(where, source, base, memo, is_test_rel, virtual):
 
 
 def red_run_reason(matched):
-    """`(reason, shown)` for a red-run hit `(found, last, rewritten)`: the refusal text, and the first flagged commit
-    for the log. The remedy is the first two lines of check_red_run's own (`REMEDY`); the third names a branch
-    switch, which a refusal never names. A commit below the last one prints the trailer line of `REMEDY` and
-    RED_RUN_BELOW_FIX in place of the amend, which reaches only the last commit. A rewritten branch (`rewritten`)
-    prints RED_RUN_PUSHED_FIX alone: no command rewrites pushed history."""
-    found, last, rewritten = matched
+    """`(reason, shown)` for a red-run hit `(found, tip, rewritten)`: the refusal text, and the first flagged commit
+    for the log. `tip` is the pushed source's own short sha, or `new` for a commit of the same call. The remedy is
+    the first two lines of check_red_run's own (`REMEDY`); the third names a branch switch, which a refusal never
+    names. A flagged commit that is not the tip (a commit under a merge at the tip included) prints the trailer line
+    of `REMEDY` and RED_RUN_BELOW_FIX in place of the amend, which reaches only the tip. A rewritten branch
+    (`rewritten`) prints RED_RUN_PUSHED_FIX alone: no command rewrites pushed history."""
+    found, tip, rewritten = matched
     check_red_run = _red_run_module()
     rows = ["%s %s: adds lines to %s" % row for row in found[:RED_RUN_SHOWN]]
     more = " and %d more" % (len(found) - RED_RUN_SHOWN) if len(found) > RED_RUN_SHOWN else ""
     lines = [line.removeprefix("check_red_run: ")[:1].upper() + line.removeprefix("check_red_run: ")[1:]
              for line in check_red_run.REMEDY[:2]]
-    below = any(row[0] not in (last, "new") for row in found)
+    below = any(row[0] not in (tip, "new") for row in found)
     fix = RED_RUN_PUSHED_FIX if rewritten else " ".join(lines[:1] + [RED_RUN_BELOW_FIX] if below else lines)
     return RED_RUN_PUSH_REASON.format(flagged=cap_safe("; ".join(rows), 600) + more, fix=fix), cap_safe(rows[0], 120)
 
 
 def _rewritten(where, tracking, base, source):
     """True when the range base is the destination's remote-tracking ref and `source` no longer holds it: the branch
-    was rewritten after it was pushed, so its flagged commits are copies of pushed ones. A failed read is False."""
+    was rewritten after it was pushed, so its flagged commits are copies of pushed ones. An unknown answer (a failed
+    read, or a shallow clone that cut the history) is False."""
     if not tracking or base != tracking:
         return False
-    done = _git(where, "merge-base", "--is-ancestor", base, source)
-    return done is not None and done.returncode == 1
+    import git_reads  # branch_is_ancestor is the one home of the ancestry read and its shallow-clone unknown
+    return git_reads.branch_is_ancestor(where, source, base) is False
 
 
 def _push_hit(segment, stripped, cwd, args, is_test_rel=None, virtual=None):
@@ -962,8 +967,9 @@ def _push_hit(segment, stripped, cwd, args, is_test_rel=None, virtual=None):
     (`_red_run_found`), else `("", "")`. For each ref the push names, the range is the merge base with the
     destination's remote-tracking tip, else the source's upstream, else the default base, up to the local
     source ref: in the usual case one `git diff --check`, with no read of the top folder, the source or a base
-    first. The red-run check then adds one `git log` over the same base, and on a hit one `git merge-base
-    --is-ancestor`: a destination tracking ref the source no longer holds is a branch rewritten since its push."""
+    first. The red-run check then adds one `git log` over the same base, and on a hit one `git rev-parse` of the
+    source (the tip an amend reaches) and one `git merge-base --is-ancestor`, plus one shallow probe when that says
+    no: a destination tracking ref the source no longer holds is a branch rewritten since its push."""
     virtual = virtual or {"tip": None, "pending": [], "unreadable": False}
     for where, source, _dest, tracking, _remote, memo in _push_refs(segment, stripped, cwd, args):
         done, source, base = _checked_range(where, source, tracking, memo)
@@ -974,7 +980,9 @@ def _push_hit(segment, stripped, cwd, args, is_test_rel=None, virtual=None):
             return "push", name
         found, last = _red_run_found(where, source, base, memo, is_test_rel, virtual)
         if found:
-            return "red-run", (found, last, _rewritten(where, tracking, base, source))
+            # `last` is the newest non-merge commit, which a merge at the tip sits above; an amend reaches only the tip.
+            tip = last if last == "new" else _ref_sha(where, source)[:7]
+            return "red-run", (found, tip, _rewritten(where, tracking, base, source))
     return "", ""
 
 
