@@ -1684,9 +1684,9 @@ def _fragment_strings(text):
 
 
 def _local_allow_fragment(text):
-    """Allow rules a JSON-like fragment holds: a string element of an `"allow": [...]` list, or, in a list or
-    at the top of a fragment that names no list key, a string shaped like a permission rule. An element under
-    a `deny` or `ask` key is never one."""
+    """Allow rules a JSON-like fragment holds: a string element of an `"allow": [...]` list, or, in a list of
+    unknown key or at the top of a fragment, a string shaped like a permission rule. An element under any
+    other named key (`deny`, `ask`, `additionalDirectories`, ...) is never one."""
     tokens = _fragment_strings(text)
     found, stack = [], []   # stack: the key of each open `[`, "" for a list of unknown key, None for `{`
     for index, (kind, value) in enumerate(tokens):
@@ -1708,7 +1708,7 @@ def _local_allow_fragment(text):
         key = stack[-1] if stack else ""
         if key in ("deny", "ask"):
             continue
-        if key == "allow" or LOCAL_ALLOW_RULE_SHAPE.fullmatch(value):
+        if key == "allow" or (key == "" and LOCAL_ALLOW_RULE_SHAPE.fullmatch(value)):
             found.append(value)
     return found
 
