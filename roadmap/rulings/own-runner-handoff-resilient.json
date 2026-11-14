@@ -1,0 +1,10 @@
+{
+  "id": "own-runner-handoff-resilient",
+  "at": "2026-11-13T22:48:38-06:00",
+  "title": "The batch runner's state must survive its own compaction",
+  "ruling": "Owner 22:47 CST Nov 13, relayed by the consultant at 22:49 (triage did not see it): \"the batch runner seems like it had amnesia post compaction im a little confused shudnt its handoff be resillient to tbis\". Read as a requirement: after a compaction the batch runner picks up its queue, holds and promises without loss. Causes on record, as the consultant lists them (unchecked): runner 10 rewrote its handoff after its 20:19 compaction without the required audit; the owner's asks without inbox ids were dropped (guards: steps compaction-audit-before-reply and inbox-owner-message-gets-fb-id); and the runner's working state lives only in its handoff. Filed as step runner-queue-on-record.",
+  "quote": "the batch runner seems like it had amnesia post compaction im a little confused shudnt its handoff be resillient to tbis",
+  "source": "Consultant 22:49 CST Nov 13 (quoting the owner); filed by triage.",
+  "status": "open",
+  "step": "runner-queue-on-record"
+}
