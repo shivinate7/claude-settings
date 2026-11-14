@@ -1,0 +1,14 @@
+{
+ "id": "lane-never-closes-a-pr",
+ "title": "A lane cannot close a PR; the runner is the only closer, after the archive copy",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane ci-mac-once-per-batch closed #3088 before the coordinator's line reached it (coordinator 22:44 CST Nov 13, relayed, unchecked). Branch drop-nightly-schedule is intact on origin at 4344c60c07; nothing lost.",
+ "source": "Coordinator 22:44 CST Nov 13 (relayed).",
+ "note": "Triage 22:44 CST Nov 13: guard idea, not built. The rule says runner 10 is the only closer and archive-first applies; no check stops a lane from closing a PR. Mistake it stops: a lane closing a PR on its own. Harm if repeated: a stacked PR closed with its base branch not archived. Check candidate: the GitHub close act (MCP update_pull_request with state closed) refuses in a lane session and names the runner. Triage read the rule from the coordinator's text, not the decision; needs a past-ruling and guard-record read, and a look at how often lanes close PRs on the record, before any build.",
+ "updatedAt": "2026-11-13T22:44:11-06:00"
+}
