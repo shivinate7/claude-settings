@@ -804,7 +804,7 @@ jobs:
     needs: scope
     # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Newest 30 push runs on main (to run 43164094808):
     # 29 green, slowest green 26.7 min (run 43148329817); run 43164094808 attempt 1 ended at the old cap, 30.2 min, cancelled (attempt 2 was green, 25.1 min).
-    # Slow steps: the install.sh checkout-detection suite (own cap below) and the Merge tool git-half fixture suite, 689 s (run 43164094808). The stopgap ends with roadmap step time-pinned-tests-go.
+    # The two slow suites, install.sh checkout detection and the merge tool git half, moved to checks-install-checkout and checks-merge-git (step ci-merge-install-split). The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -830,10 +830,6 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_launch.py
 
-      - name: Merge tool git-half fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' }}
-        run: python3 merge/test_merge.py
-
       - name: Merge tool grant review-record fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_merge_grant.py
@@ -858,15 +854,52 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: sh merge/test_install_from_main.sh
 
+      - name: cloud-setup.sh suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: sh hooks/test_cloud_setup.sh
+
+  # The install.sh checkout-detection suite, split off checks-merge-install for wall time (step ci-merge-install-split):
+  # that job took 29.4 min and this suite 13.8 of them (retrospective CI audit 14:12 CST Nov 12, in the step's why). Same step, `if:` and own cap as before.
+  checks-install-checkout:
+    runs-on: ubuntu-latest
+    needs: scope
+    # 75, the old checks-merge-install cap (interim stopgap, decision ci-job-caps). Unmeasured for this job: a draft lane PR runs no CI, so a measured cap waits for the batch run.
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
+
       - name: install.sh checkout-detection suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         # Own cap, 30 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Green max 12.6 min (754 s, run 43164094808 attempt 2). Run 43164094808 attempt 1 ran this step 888 s (14.8 min) and the old job cap cut it there, so 14.8 is a floor. 30 min is about twice that floor.
         timeout-minutes: 30
         run: sh hooks/test_install_src.sh
 
-      - name: cloud-setup.sh suite
+  # The merge tool git-half fixture suite, split off checks-merge-install for wall time (step ci-merge-install-split): 10.7 min (same audit).
+  checks-merge-git:
+    runs-on: ubuntu-latest
+    needs: scope
+    # 75, the old checks-merge-install cap (interim stopgap, decision ci-job-caps). Unmeasured for this job: a draft lane PR runs no CI, so a measured cap waits for the batch run.
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Merge tool git-half fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
-        run: sh hooks/test_cloud_setup.sh
+        run: python3 merge/test_merge.py
 
   # The guard fixture suite, shard 1 of 2. checks-guard-2 runs shard 2; hooks/test_guard.py holds the shard switch.
   checks-guard:
@@ -2175,6 +2208,8 @@ jobs:
       - checks-hooks
       - checks-rest
       - checks-merge-install
+      - checks-install-checkout
+      - checks-merge-git
       - checks-guard
       - checks-guard-2
       - checks-shoot
@@ -2224,6 +2259,8 @@ jobs:
       - checks-hooks
       - checks-rest
       - checks-merge-install
+      - checks-install-checkout
+      - checks-merge-git
       - checks-guard
       - checks-guard-2
       - checks-shoot
