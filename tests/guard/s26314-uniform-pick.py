@@ -23,10 +23,10 @@ def up_item(**over):
     return with_stake({k: v for k, v in item.items() if v is not None})
 
 
-def up(name, expected, item, action="set", **extra):
+def up(name, expected, item, action="set", rule="uniform-pick", **extra):
     kw = dict(action=action, collection="items", doc_id="banchi-titles", data=with_shown(item))
     kw.update(extra)
-    add("uniform pick: " + name, expected, "uniform-pick" if expected == "deny" else None,
+    add("uniform pick: " + name, expected, rule if expected == "deny" else None,
         tool="ArtifactData", cwd=PQ_REPO, **{"url": PQ_URL, **kw})
 
 
@@ -40,8 +40,11 @@ up("a stood pick of a widening option is denied", "deny", up_item(stands=True))
 up("an update that carries options and a widening pick is denied", "deny",
    {"options": [UP_WIDE, UP_MATCH], "pick": "a"}, action="update")
 up("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
-# A task now needs its Why yours line (task-names-check, below). The line keeps this case on the pick rule.
-up("a task is not judged", "allow", up_item(kind="task", context="Banchi's titles differ from the shared form.\n" + TN_WHY))
+# A task with options is refused by task-options (rule task-options, section 26700), so a task here keeps its options
+# and is named by that rule. The pick rule does not judge a task, and it runs before task-options, so a refusal
+# named task-options proves the pick rule passed the task. The Why yours line keeps task-names-check off it.
+up("a task with a widening pick is refused as task-options, not uniform-pick", "deny",
+   up_item(kind="task", context="Banchi's titles differ from the shared form.\n" + TN_WHY), rule="task-options")
 up("an items set to another artifact is allowed", "allow", up_item(), url="https://claude.ai/artifact/other")
 add("uniform pick: a batch with today's item among the sets is denied", "deny", "uniform-pick",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
@@ -80,9 +83,9 @@ up("an update that carries options and a widening list pick is denied", "deny",
    {"multi": True, "options": UP_THREE, "pick": ["b", "a"]}, action="update")
 up("an update that carries options and a non-widening list pick is allowed", "allow",
    {"multi": True, "options": UP_THREE, "pick": ["b", "c"]}, action="update")
-up("a task with a list pick is not judged", "allow",
+up("a task with a list pick is refused as task-options, not uniform-pick", "deny",
    up_item(kind="task", multi=True, options=UP_THREE, pick=["a", "b"],
-           context="Banchi's titles differ from the shared form.\n" + TN_WHY))
+           context="Banchi's titles differ from the shared form.\n" + TN_WHY), rule="task-options")
 # A list that holds a non-string member still names its string members. The page reads such a list as
 # not valid and shows no pick, but the writer judges the keys it can read, not the list's shape.
 up("a multi item whose list pick holds the widening key and a null is denied", "deny",
