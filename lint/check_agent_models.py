@@ -193,11 +193,11 @@ def role_list_problems() -> list:
 
 
 def round_row_problems() -> list:
-    """One line per round row of the model record whose model the guard cannot rank (the guard's role_round_drift), named by the record's
-    path, and one line when the record holds its role table and no round row (a missing table, or a header with no row): the guard then reads
+    """One line per round row of the model record whose model the guard cannot rank (the guard's role_round_drift) and per malformed review
+    row (review_policy_drift), each named by the record's path, and one line when the record holds its role table and no round row (a missing table, or a header with no row): the guard then reads
     no round row and runs on its fallback. [] when the record cannot be read: role_list_problems reports that as unknown."""
     record = os.path.join(ROOT, LANE_RECORD)
-    lines = ["%s: %s." % (record, line) for line in _guard.role_round_drift(ROOT)]
+    lines = ["%s: %s." % (record, line) for line in _guard.role_round_drift(ROOT) + _guard.review_policy_drift(ROOT)]
     if _guard.role_model_table(ROOT) is not None and _guard.role_round_table(ROOT) is None:
         lines.append("%s: the record holds no round row, so the guard runs on its built-in fallback." % record)
     return lines

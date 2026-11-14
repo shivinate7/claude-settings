@@ -88,6 +88,16 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | reviewer | fix verifier | sonnet | xhigh |
 | builder | 3 | opus | high |
 
+The review rows. A second table gives each change's review policy by its `Kind` and `Guard or check`. The merge tool's `review_state` and `--review-record` read it through `review_policy_table` in `hooks/guard.py`, beside the round reader, so a changed row changes their verdicts with no code edit. `Rounds owed after a pass` is the round a PASS must reach to end the review (0: a change with no round recorded is done). `Last round` is the final round, 1 to 3 (rule `roles-review-cap-three`). A failed final round ends the review. The exception is a `yes` in the `Net value owed after a failed last round` cell: that keeps the review open until the net value is zero or positive (negative holds the change). A row that is missing or malformed falls back to `REVIEW_POLICY_FALLBACK` in `hooks/guard.py`, which equals the rows below. `lint/check_agent_models.py` fails a malformed row, a repeated `Kind` and `Guard or check` key, and a record with no review row (a missing table or a renamed header). Owner item 741 (2026-11-13 13:29 CST): every change is done at the first round or fix verifier that passes. Round 3 follows only a failed round 2 (rule `roles-review-cap-three`). Net value is owed only after a failed final round on a guard or check change. A delete-only change with no guard or check ends at round 1, pass or fail. A docs-only change owes no round and has no guard or check. It has no `yes` row. The merge tool refuses `Kind: docs-only` with `Guard or check: yes`, and `lint/check_agent_models.py` fails a docs-only `yes` row.
+
+| Kind | Guard or check | Rounds owed after a pass | Last round | Net value owed after a failed last round |
+|---|---|---|---|---|
+| normal | no | 1 | 3 | no |
+| normal | yes | 1 | 3 | yes |
+| delete-only | no | 1 | 1 | no |
+| delete-only | yes | 1 | 3 | yes |
+| docs-only | no | 0 | 3 | no |
+
 Reasons and rulings. Round 1 on a guard or check diff runs Sonnet (owner R9, item 359 a, Nov 10 15:44 CST). A fix verifier runs Sonnet on every PR (owner item 444 a, 2026-11-08 15:04 CST); the merge tool refuses a record that names another model. Round 2 on opus: the step-up refuses it, and no override lifts that. Round 3 on opus: the Opus ceiling refuses it, and the owner's typed override lifts it (2026-11-01 17:25 CST, item 127, pick a). Round 2 effort is set per spawn; the other reviewer rows take the frontmatter's xhigh. The builder's third try runs Opus by the owner's standing grant.
 
 The Agent prompt judge refuses an audit Explore (a brief that asks it to audit, review, judge, rate or

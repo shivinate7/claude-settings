@@ -240,27 +240,34 @@ class RoleListDrift(unittest.TestCase):
 
 
 class RoundRowDrift(unittest.TestCase):
-    """The record's round rows are read by the guard (one home, decision agent-model-cap). A row the guard cannot read is drift:
-    the check fails and names that row. A readable row passes, and so does the real record (test_main_with_no_args_passes_on_the_real_repo)."""
+    """The record's round rows and review rows are read by the guard and the merge tool (one home, decision agent-model-cap). A row
+    the guard cannot read is drift: the check fails and names that row. A readable row passes, and so does the real record
+    (test_main_with_no_args_passes_on_the_real_repo)."""
     ROLE_ROWS = "| Point | Model | Effort |\n|---|---|---|\n| reviewer | haiku | xhigh |\n| builder | sonnet | high |\n"
     ROUND_HEAD = "| Role | Round | Model | Effort |\n|---|---|---|---|\n"
+    POLICY_HEAD = ("| Kind | Guard or check | Rounds owed after a pass | Last round | Net value owed after a failed last round |\n"
+                   "|---|---|---|---|---|\n")
+    POLICY_ROW_OK = "| normal | no | 1 | 3 | no |"  # one well-formed review row; the merge suite's fixture states all six
 
-    def write_fixture(self, round_row, round_table=True):
+    def write_fixture(self, round_row, round_table=True, policy_row=POLICY_ROW_OK, policy_head=None):
         """A pointer folder whose record holds the role rows, the round table with `round_row` (or no round table when
-        `round_table` is false), and the lane row. Returns the folder's root."""
+        `round_table` is false), the lane row, and the review rows table with `policy_row` under `policy_head` (the shipped header
+        when None; none when `policy_row` is None). Returns the folder's root."""
         root = tempfile.mkdtemp(dir=RUN_FOLDER)
         os.makedirs(os.path.join(root, "agents"))
         record = os.path.join(root, RECORD_RELPATH)
         os.makedirs(os.path.dirname(record))
         rounds = self.ROUND_HEAD + round_row + "\n" if round_table else ""
+        head = self.POLICY_HEAD if policy_head is None else policy_head
+        policy = "\n" + head + policy_row + "\n" if policy_row else ""
         with open(record, "w", encoding="utf-8") as handle:
-            handle.write(self.ROLE_ROWS + "\n" + rounds + LANE_RECORD % "medium")
+            handle.write(self.ROLE_ROWS + "\n" + rounds + LANE_RECORD % "medium" + policy)
         return root
 
-    def check_fixture(self, round_row, round_table=True):
+    def check_fixture(self, round_row, round_table=True, policy_row=POLICY_ROW_OK, policy_head=None):
         """The check run over write_fixture's folder: (code, stdout). The role lists are patched out, so only the round rows
-        can fail the check."""
-        root = self.write_fixture(round_row, round_table)
+        and the review rows can fail the check."""
+        root = self.write_fixture(round_row, round_table, policy_row, policy_head)
         out = io.StringIO()
         with mock.patch.object(C, "ROOT", root), contextlib.redirect_stdout(out), \
                 mock.patch.object(C._guard, "role_list_drift", lambda pointer_root: [], create=True):
@@ -300,6 +307,63 @@ class RoundRowDrift(unittest.TestCase):
     def test_the_real_record_round_table_holds_the_round_one_other_row(self):
         # Control: the guard reads the real record's round table, with the reviewer's first-round other row, so the real repo's pass is a read.
         self.assertIn(("reviewer", "1", "other"), C._guard.role_round_table(C.ROOT) or {})
+
+    def assert_policy_row_fails(self, policy_row, cause):
+        """The check fails the record whose review rows table holds `policy_row`, and names that row."""
+        code, out = self.check_fixture("| reviewer | 2 | sonnet | high |", policy_row=policy_row)
+        self.assertEqual(code, 1, "a review row with %s passes the check: %r" % (cause, out))
+        self.assertTrue(names(out, "agent-model-cap.md", policy_row), "the check does not name the review row it flags: %r" % out)
+
+    def test_a_review_row_with_a_kind_outside_the_review_kinds_fails_the_check(self):
+        self.assert_policy_row_fails("| normal-change | no | 1 | 3 | no |", "a kind outside the review kinds")
+
+    def test_a_review_row_with_a_guard_word_other_than_yes_or_no_fails_the_check(self):
+        self.assert_policy_row_fails("| normal | maybe | 1 | 3 | no |", "a Guard or check word other than yes or no")
+
+    def test_a_review_row_with_a_round_cell_that_is_not_a_number_fails_the_check(self):
+        self.assert_policy_row_fails("| normal | no | two | 3 | no |", "a round cell that is not a number")
+
+    def test_a_review_row_with_a_last_round_above_the_cap_fails_the_check(self):
+        self.assert_policy_row_fails("| normal | no | 1 | 4 | no |", "a last round above three")
+
+    def test_a_well_formed_review_row_passes_and_the_round_and_role_readers_read_the_record_as_before(self):
+        # Control: the review rows table changes neither reader, so the readers agree with and without it.
+        with_table = self.write_fixture("| reviewer | 2 | sonnet | high |")
+        without = self.write_fixture("| reviewer | 2 | sonnet | high |", policy_row=None)
+        self.assertEqual(C._guard.role_round_table(with_table), C._guard.role_round_table(without), "the review rows table changes the round rows")
+        self.assertEqual(C._guard.role_model_table(with_table), C._guard.role_model_table(without), "the review rows table changes the role rows")
+        self.assertEqual(self.check_fixture("| reviewer | 2 | sonnet | high |"), (0, ""), "a well-formed review row fails the check")
+
+    def test_a_renamed_review_rows_header_fails_the_check(self):
+        # The header names the five columns the guard reads. With it renamed, the guard reads no review row, so the check must fail the record.
+        renamed = self.POLICY_HEAD.replace("Rounds owed after a pass", "Rounds owed")
+        self.assertIn("| Rounds owed |", renamed, "fixture: the header was not renamed")
+        self.assertEqual(self.check_fixture("| reviewer | 2 | sonnet | high |"), (0, ""), "control: the shipped header fails the check")
+        code, out = self.check_fixture("| reviewer | 2 | sonnet | high |", policy_head=renamed)
+        self.assertEqual(code, 1, "a renamed review rows header passes the check: %r" % out)
+        self.assertIn("agent-model-cap.md", out, "the check does not name the record it flags: %r" % out)
+
+    def test_a_record_with_no_review_rows_table_fails_the_check(self):
+        # Control: the same record with its review rows table passes the check. With no table, the guard reads no review row.
+        self.assertEqual(self.check_fixture("| reviewer | 2 | sonnet | high |"), (0, ""), "control: a record with its review rows table fails the check")
+        code, out = self.check_fixture("| reviewer | 2 | sonnet | high |", policy_row=None)
+        self.assertEqual(code, 1, "a record with no review rows table passes the check: %r" % out)
+        self.assertIn("agent-model-cap.md", out, "the check does not name the record it flags: %r" % out)
+
+    def test_two_review_rows_with_the_same_kind_and_guard_fail_the_check(self):
+        # Control: one row for normal, Guard or check no passes the check. A second row for the same kind and Guard or check is a duplicate key.
+        self.assertEqual(self.check_fixture("| reviewer | 2 | sonnet | high |", policy_row="| normal | no | 1 | 3 | no |"), (0, ""),
+                         "control: one row for normal, Guard or check no fails the check")
+        rows = "| normal | no | 1 | 3 | no |\n| normal | no | 0 | 3 | no |"
+        code, out = self.check_fixture("| reviewer | 2 | sonnet | high |", policy_row=rows)
+        self.assertEqual(code, 1, "two review rows for one kind and Guard or check pass the check: %r" % out)
+        self.assertTrue(names(out, "agent-model-cap.md", "normal", "no"), "the check does not name the duplicate key: %r" % out)
+
+    def test_a_docs_only_review_row_with_guard_or_check_yes_fails_the_check(self):
+        # Control: a docs-only row with Guard or check no passes the check, so the refusal below comes from the yes on the row alone.
+        self.assertEqual(self.check_fixture("| reviewer | 2 | sonnet | high |", policy_row="| docs-only | no | 0 | 3 | no |"), (0, ""),
+                         "control: a docs-only row with Guard or check no fails the check")
+        self.assert_policy_row_fails("| docs-only | yes | 0 | 3 | no |", "a docs-only row with Guard or check yes")
 
 
 class RunFolder(unittest.TestCase):

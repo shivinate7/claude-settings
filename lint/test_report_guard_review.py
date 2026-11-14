@@ -435,10 +435,10 @@ class ReviewRecordTests(unittest.TestCase):
         self.assert_record_blocks_claim(record(rounds=[(1, "reviewer", "sonnet", "PASS"),
                                                        (2, "reviewer", "sonnet", "FAIL")]))
 
-    def test_fix_pass_with_no_round_blocks(self):
-        # Catches: a fix check PASS passing a record with no round recorded. The fix re-reviews a round, so it needs
-        # one. The fix names an earlier head, so its diff is not empty.
-        self.assert_record_blocks_claim(record(rounds=[], fix=(OLD, "reviewer", "sonnet", "PASS")))
+    def test_fix_pass_with_no_round_is_done(self):
+        # owner, page item 741, 14:01 CST: a fix check that passes with no round recorded reads done, as the first passing check. The fix
+        # names an earlier head, so its diff is not empty.
+        self.assert_record_satisfies_claim(record(rounds=[], fix=(OLD, "reviewer", "sonnet", "PASS")))
 
     def assert_open_guard_record_blocks_with_its_why(self, body):
         """A PASS claim on a record that merge reads open is refused. The reason carries review_state's why for the live head, and it
