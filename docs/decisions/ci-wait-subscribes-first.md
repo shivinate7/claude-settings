@@ -9,7 +9,7 @@ Owner, 2026-11-13 21:39 CST, in a batch runner's chat (relayed by the runner and
 - It never sets a permissionDecision, so it never refuses the ready mark. Whether the model receives a PreToolUse `additionalContext` is unmeasured (step `ci-wait-warning-cry-wolf-count`): no other PreToolUse hook in this repo emits one. It fails open and silent on bad input, a missing transcript or any error.
 - A call in a sidechain record counts. A subscribe that sits only in a resumed `api-request-blob` copy does not, because the shared reader yields no call from one. `hooks/test_ready_subscribe_warn.py` pins both (the blob case is the owner lane's ruling).
 
-Owner, 2026-11-13 22:24 CST (page item 804, option a; relayed by triage and the coordinator): ship pull request #3346 now and measure after. Ruling `own-cry-wolf-count-waived` waives the pre-ship cry-wolf count for that pull request only. Still owed under step `ci-wait-warning-cry-wolf-count`: the cry-wolf count and the reach test.
+Owner, 2026-11-13 22:24 CST (page item 804, option a; relayed by triage and the coordinator): ship pull request #3346 now and measure after. Ruling `own-cry-wolf-gate-waived` waives the pre-ship cry-wolf count for that pull request only. Still owed under step `ci-wait-warning-cry-wolf-count`: the cry-wolf count and the reach test. <!-- glossary-ok: the ruling's id as filed; renaming it would break the cite -->
 
 ## The mistake and the harm
 
