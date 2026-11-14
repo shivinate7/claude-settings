@@ -758,7 +758,6 @@ def make_repo(name, rulings=None, ref="roadmap", origin_extra=None):
     git_out(repo, "add", "README.md")
     main = git_out(repo, "commit-tree", git_out(repo, "write-tree").stdout.strip(), "-m", "main").stdout.strip()
     git_out(repo, "update-ref", "refs/heads/main", main)
-    fixture.write_fetch_head(repo, "roadmap")  # a fresh roadmap fetch, so the store read does not fetch
     store = main
     if rulings is not None:
         folder = os.path.join(repo, "roadmap", "rulings")
@@ -818,8 +817,16 @@ def store(kind):
     return STORES[kind]
 
 
+def prime(kind):
+    """A fresh roadmap FETCH_HEAD in the repo of store `kind`, written by each run. One written at build time ages past
+    roadmap_ref.MAX_AGE on a slow runner, and the run then reads the ref as stale."""
+    if kind != "plain":  # the plain folder is no repository
+        fixture.write_fetch_head(store(kind), "roadmap")
+
+
 def past_run(text, kind, **kwargs):
     """Run the hook on `text`, the payload's cwd in store `kind`, the child's own cwd in the plain folder."""
+    prime(kind)
     return run_hook(hook_input(message=text, cwd=store(kind)), reader_mode="idle", cwd=store("plain"), **kwargs)
 
 
@@ -950,6 +957,26 @@ def case_absent_store_allows_silently():
         r = past_run(settled_text(SETTLING[0][1], "`decision %s`" % SLUG), kind)
         check("absent store (%s): allow silently (exit 0, no output, no stderr), the send reaches the judge" % label,
               r.code == 0 and r.out == "" and r.err == "" and len(r.wording_calls) == 1, detail(r))
+
+
+def case_a_store_aged_by_a_slow_runner_reads_fresh():
+    """A slow runner can leave a store's FETCH_HEAD more than roadmap_ref.MAX_AGE old by the time a case reads it.
+    The run primes its own store first, so a FETCH_HEAD aged 61 s still reads fresh: the read denies, starts no fetch
+    and says nothing on stderr."""
+    repo = store("full")
+    head = fixture.fetch_head(repo)
+    last = os.stat(head).st_mtime
+    os.utime(head, (last - 61, last - 61))  # 61 s before its last write: stale by roadmap_ref.MAX_AGE
+    try:
+        r = past_run(settled_text(SETTLING[0][1], "`decision %s`" % SLUG), "full")
+    finally:
+        fixture.write_fetch_head(repo, "roadmap")  # the shared store is left fresh for the cases after this one
+    reason = denied(r) or ""
+    check("aged store: the read reaches the store (deny naming %s and r44)" % SLUG,
+          reason.startswith("past-ruling: ") and SLUG in reason and "r44" in reason, detail(r))
+    check("aged store: no fetch starts, the run primed the ref", not [a for a in r.git_starts if "fetch" in a],
+          detail(r) + " git=%r" % r.git_starts)
+    check("aged store: nothing on stderr", r.err == "", detail(r))
 
 
 def case_broken_store_fails_open_with_one_stderr_line():
@@ -1188,6 +1215,7 @@ def case_hook_runs():
                  case_settled_citing_nothing_is_allowed_with_no_git,
                  case_cite_forms_are_caught,
                  case_absent_store_allows_silently,
+                 case_a_store_aged_by_a_slow_runner_reads_fresh,
                  case_broken_store_fails_open_with_one_stderr_line,
                  case_free_text_decision_is_not_superseded,
                  case_prefix_slug_does_not_match,
