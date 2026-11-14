@@ -1,8 +1,8 @@
 # Keep the handoff current
 
 A Stop-hook checkpoint asks you to update the handoff while you still have full context.
-After a compaction, the reorient message asks again. Each time, rewrite the whole file.
-Never append to it.
+After a compaction, the reorient message asks again. Each time, a Sonnet subagent rewrites
+the whole file (steps 3 and 4). Never append to it. The Stop hook refuses until it has.
 Read each time you write from `~/.claude/bin/now-central --full`, never from memory.
 
 ## 1. Read the prior handoff first
@@ -23,6 +23,15 @@ Change it only in a PR, never as this update.
 
 ## 3. Gather your sources
 
+Spawn one Sonnet subagent (the Agent tool, `model: "sonnet"`) to write the handoff. You
+do not write it yourself. Its brief's first line must not be `Audit:`, which marks the
+audit agent below. The brief names the handoff path (step 2), the session transcript path
+(below), and this file's steps 3 and 4. The subagent reads the transcript from the
+handoff's last write to the end and the prior handoff (step 1), then rewrites the file
+whole (step 4). After a compaction, run the audit below first and put its report in the
+brief: the subagent rewrites from it too. Wait for the subagent, then check that the
+handoff's mtime moved. If its write failed, spawn it again.
+
 Use the compaction summary above. Read the digest file the reorient message named, when
 it named one. Together they cover the work since the handoff's last write.
 
@@ -40,7 +49,7 @@ agent per compaction, never per Stop checkpoint.
 
 ## 4. Rewrite the whole file
 
-Write the file again from the top, with one whole-file write. Never append a block, a
+The Sonnet subagent of step 3 writes the file again from the top, with one whole-file write. Never append a block, a
 dated line, or a "CURRENT STATE" section below the old ones. Keep only what is true now,
 in the fewest words. Drop work that landed on main and text that a later fact replaced.
 Git and the transcript keep the history. Never make a dated copy.
