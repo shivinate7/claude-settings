@@ -18,9 +18,9 @@ the items that have no home, each with whom it is handed to. Never copy a list t
 <One row for each owner ruling that ranks work, copied from that ruling, in this form:>
 
 priority: <slug> | pr: <owner>/<repo>#<N>
-priority: <slug> | branch: <name>
+priority: <slug> | branch: <name> | repo: <owner>/<repo>
 
-<The batch runner runs `merge --priority-rows FILE` on these rows in each wake. A row that names no pr and no branch is a flag, because the check cannot read it. Drop a row when its pull request has merged and the owner has seen it.>
+<A branch row may leave out `repo:`; it then means this repo, and a `repo:` of another repo is not read. A row names one pr or one branch, never two. The batch runner runs `merge --priority-rows FILE` on these rows in each wake. A row that names no pr and no branch is a flag, because the check cannot read it. Drop a row when its pull request has merged and the owner has seen it.>
 
 ## Deferred for the owner
 
