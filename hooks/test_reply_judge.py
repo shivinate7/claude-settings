@@ -1552,6 +1552,64 @@ def case_prompt_still_widens_names_the_same_items():
               % ("present" if rule else "missing", len(hits), item, len(lacking)))
 
 
+# One wording in both judges. The widening sentence names a change that makes the shared tool accept what it refused
+# before. The one-rule carve-out holds only for a change that keeps what the tool accepts the same or narrows it. Each
+# sentence that carries the list names all three items. The widening sentences flag an option only when it is
+# recommended or offered without the label, so a labelled option the owner did not recommend is not flagged.
+ACCEPT_REFUSED = (("accept what it refused before",), ("widen",))
+CARVE_OUT_CONDITION = "same or narrow"
+
+
+def case_prompt_accept_what_it_refused_widens():
+    # Case 19: the style-question-form rule names a change that makes the shared tool accept what it refused before as widening.
+    rule = style_rule_text(widens_prompt_head())
+    hits = sentences_with(rule, *ACCEPT_REFUSED)
+    check("prompt: the style-question-form rule says a change that makes the shared tool accept what it refused before widens it",
+          bool(rule) and len(hits) >= 1,
+          "style-question-form rule %s; sentences naming such a change as widening: %d (want at least 1)"
+          % ("present" if rule else "missing", len(hits)))
+
+
+def case_prompt_carve_out_keeps_the_same_or_narrow_condition():
+    # Case 20: the every-repo carve-out holds only for a change that keeps what the tool accepts the same or narrows it.
+    rule = style_rule_text(widens_prompt_head())
+    hits = sentences_with(rule, *NOT_WIDENING_ONE_CHANGE)
+    lacking = [s for s in hits if CARVE_OUT_CONDITION not in s]
+    check("prompt: the every-repo carve-out holds only for a change that keeps what the tool accepts the same or narrows it",
+          bool(rule) and bool(hits) and not lacking,
+          "style-question-form rule %s; every-repo not-widening sentences: %d (want at least 1); lacking '%s': %d"
+          % ("present" if rule else "missing", len(hits), CARVE_OUT_CONDITION, len(lacking)))
+
+
+def case_prompt_each_list_sentence_names_all_three_items():
+    # Case 21: each sentence that carries the list names all three items, one check per item: the sentence that names a
+    # change that makes the tool accept what it refused before, the every-repo carve-out, and the tighten-and-also sentence.
+    rule = style_rule_text(widens_prompt_head())
+    for role, groups in (("accepts-refused", ACCEPT_REFUSED), ("carve-out", NOT_WIDENING_ONE_CHANGE),
+                         ("tighten-and-also", TIGHTEN_AND_ADDS)):
+        hits = sentences_with(rule, *groups)
+        for item in STILL_WIDENING_ITEMS:
+            lacking = [s for s in hits if item not in s]
+            check("prompt: the style-question-form rule's %s sentence names '%s'" % (role, item),
+                  bool(rule) and bool(hits) and not lacking,
+                  "style-question-form rule %s; %s sentences: %d (want at least 1); lacking '%s': %d"
+                  % ("present" if rule else "missing", role, len(hits), item, len(lacking)))
+
+
+def case_prompt_widening_sentences_flag_when_recommended_or_unlabelled():
+    # Case 22: the widening sentence and the still-widens sentence each say to flag the option when it is recommended,
+    # or offered without the label. Each check names one word, so a missing condition names its cause.
+    rule = style_rule_text(widens_prompt_head())
+    for role, groups in (("accepts-refused", ACCEPT_REFUSED), ("still-widens", TIGHTEN_AND_ADDS)):
+        hits = sentences_with(rule, *groups)
+        for word in ("recommended", "label"):
+            lacking = [s for s in hits if word not in s]
+            check("prompt: the style-question-form rule's %s sentence says to flag it when '%s'" % (role, word),
+                  bool(rule) and bool(hits) and not lacking,
+                  "style-question-form rule %s; %s sentences: %d (want at least 1); lacking '%s': %d"
+                  % ("present" if rule else "missing", role, len(hits), word, len(lacking)))
+
+
 # --------------------------------------------------------------------------- d9
 # A pick between visual options needs a picture of each option in the reply. A reply that asks the
 # owner to pick and only links to the mockups (a folder, a repo or a file) is flagged.
@@ -2335,6 +2393,10 @@ CASES = (
     case_prompt_says_every_repo_not_widening_names_its_limit,
     case_prompt_says_a_change_that_tightens_and_adds_still_widens,
     case_prompt_still_widens_names_the_same_items,
+    case_prompt_accept_what_it_refused_widens,
+    case_prompt_carve_out_keeps_the_same_or_narrow_condition,
+    case_prompt_each_list_sentence_names_all_three_items,
+    case_prompt_widening_sentences_flag_when_recommended_or_unlabelled,
     case_prompt_flags_a_pick_one_question_whose_options_could_combine,
     case_route_cite_carries_cited_same_act_and_alternate_rows,
     case_route_cite_skips_other_acts_in_a_full_rows_file,

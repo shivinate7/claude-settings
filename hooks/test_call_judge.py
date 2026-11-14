@@ -1541,6 +1541,49 @@ def case_widening_still_widens_names_the_same_items():
               % ("present" if region else "missing", len(hits), item, len(lacking)))
 
 
+# The widening sentence names a change that makes the shared tool accept what it refused before. The one-rule carve-out
+# holds only for a change that keeps what the tool accepts the same or narrows it. Each sentence that carries the list
+# of three items names all three, one check per item. The reply judge's file pins the same wording.
+ACCEPT_REFUSED = (("accept what it refused before",), ("widen",))
+CARVE_OUT_CONDITION = "same or narrow"
+
+
+def case_widening_accept_what_it_refused_widens():
+    # Case 19: a sentence names a change that makes the shared tool accept what it refused before as widening.
+    region = set_prompt_region()
+    hits = sentences_with(region, *ACCEPT_REFUSED)
+    check("widening accepts-refused: a change that makes the shared tool accept what it refused before is named widening",
+          bool(region) and len(hits) >= 1,
+          "widening slot %s; sentences naming such a change as widening: %d (want at least 1)"
+          % ("present" if region else "missing", len(hits)))
+
+
+def case_widening_carve_out_keeps_the_same_or_narrow_condition():
+    # Case 20: the every-repo carve-out holds only for a change that keeps what the tool accepts the same or narrows it.
+    region = set_prompt_region()
+    hits = sentences_with(region, *NOT_WIDENING_ONE_CHANGE)
+    lacking = [s for s in hits if CARVE_OUT_CONDITION not in s]
+    check("widening carve-out: the every-repo carve-out holds only for a change that keeps what the tool accepts the same or narrows it",
+          bool(region) and bool(hits) and not lacking,
+          "widening slot %s; every-repo not-widening sentences: %d (want at least 1); lacking '%s': %d"
+          % ("present" if region else "missing", len(hits), CARVE_OUT_CONDITION, len(lacking)))
+
+
+def case_widening_each_list_sentence_names_all_three_items():
+    # Case 21: each sentence that carries the list names all three items, one check per item: the sentence that names a
+    # change that makes the tool accept what it refused before, the every-repo carve-out, and the tighten-and-also sentence.
+    region = set_prompt_region()
+    for role, groups in (("accepts-refused", ACCEPT_REFUSED), ("carve-out", NOT_WIDENING_ONE_CHANGE),
+                         ("tighten-and-also", TIGHTEN_AND_ADDS)):
+        hits = sentences_with(region, *groups)
+        for item in STILL_WIDENING_ITEMS:
+            lacking = [s for s in hits if item not in s]
+            check("widening list: the %s sentence names '%s'" % (role, item),
+                  bool(region) and bool(hits) and not lacking,
+                  "widening slot %s; %s sentences: %d (want at least 1); lacking '%s': %d"
+                  % ("present" if region else "missing", role, len(hits), item, len(lacking)))
+
+
 def case_fail_open():
     for label, inp, kwargs in (
         ("a model failure on a spawn", spawn_input("builder", model="sonnet"), {"model_fail": True}),
@@ -1978,6 +2021,8 @@ def main():
                  case_widening_old_count_carve_out_is_gone, case_widening_carve_out_reads_whatever_it_says_about_repos,
                  case_widening_every_repo_not_widening_names_its_limit, case_widening_tighten_and_add_still_widens,
                  case_widening_still_widens_names_the_same_items,
+                 case_widening_accept_what_it_refused_widens, case_widening_carve_out_keeps_the_same_or_narrow_condition,
+                 case_widening_each_list_sentence_names_all_three_items,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
