@@ -42,6 +42,14 @@ Part 2, hooks/reread_check.py (new file):
                  and the reason names the handoff path. Otherwise exits 0 and blocks nothing.
                  Flags are per session.
 
+Part 4, the compaction audit (hooks/reread_check.py and hooks/guard.py, rule compaction-audit,
+decision precompact-handoff, item 9). After a compaction the main session must spawn one Agent whose
+prompt's first non-blank line starts with `Audit:` before the guard passes its next call. Until then
+the guard refuses each call the main session makes under compaction-audit, and --stop blocks once
+after the handoff is read, naming the same remedy. The flag is <config dir>/state/handoff/<sid>.audit.
+The guard is a seam too: one JSON payload on stdin, the decision on stdout. An agent's payload
+(`agent_id`) is never refused and clears nothing.
+
 Bad stdin. Every mode of both modules exits 0 on empty stdin, a JSON list, JSON null, or
 text that is not JSON. reread_check.py imports precompact_handoff.py; if that import fails,
 every reread_check mode still exits 0.
@@ -75,6 +83,7 @@ from test_precompact_handoff import (  # noqa: E402
 PRECOMPACT = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(
     HERE, "precompact_handoff.py")
 READ_CHECK = os.environ.get("READ_CHECK_UNDER_TEST") or os.path.join(HERE, "reread_check.py")
+GUARD = os.path.join(HERE, "guard.py")
 PROMPT_NAME = os.path.join("hooks", "precompact_handoff_prompt.md")
 
 # Copied verbatim from mods/session-board/hooks/register.mjs (HANDOFF_PY, the .join('\n')).
@@ -1048,6 +1057,299 @@ def case_unreadable_stdin_reread_exits_zero():
         c.cleanup()
 
 
+# --------------------------------------------------------------------------- part 4
+# The compaction audit (hooks/reread_check.py, hooks/guard.py). Each case reads the seams' output and
+# files only, so a missing name in the code under test is a failed check, never a crash.
+
+AUDIT_RULE = "compaction-audit"
+HANDOFF_RULE = "handoff-unread"
+SID = "5b1d7e90-0000-4000-8000-0000000c0a11"   # the main session in every part 4 case
+AGENT_ID = "a7f3c9e10b2d4e58"   # an agent's id on the payload
+ENV_DROP = ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID",
+            "CLAUDE_PROJECT_DIR", "PYTHONPATH")
+BASH = {"command": "echo hi"}
+AUDIT_SPAWN = {"description": "audit", "subagent_type": "Explore", "model": "sonnet",
+               "prompt": "Audit: check the handoff against the repo."}
+PLAIN_SPAWN = {"description": "look", "prompt": "Read the repo and list its tests."}
+QUOTED_SPAWN = {"description": "look", "subagent_type": "Explore", "model": "sonnet",
+                "prompt": "Read the repo.\n\nAudit: this line is quoted, not the first one."}
+BLANK_SPAWN = {"description": "audit", "subagent_type": "Explore", "model": "sonnet",
+               "prompt": "\n\n   Audit: check after blank lines\nmore text"}
+
+
+def step(name, why):
+    """One step of a case: check() with the one cause on its failing line. True when the step holds,
+    so a case stops at a scope that was not reached."""
+    check(name, not why, why)
+    return not why
+
+
+def exit_why(proc):
+    return "" if proc.returncode == 0 else "rc=%r err=%r" % (proc.returncode, tail(proc.stderr))
+
+
+def audit_flag(c, sid):
+    """The flag PostCompact writes beside the reread flag."""
+    return c.state("%s.audit" % sid)
+
+
+def write_call(c):
+    return {"file_path": os.path.join(c.proj, "notes.md"), "content": "x"}
+
+
+def guard_call(c, sid, tool, tool_input, agent_id=None):
+    """One PreToolUse payload through hooks/guard.py, as Claude Code sends it: (decision, reason).
+    An empty stdout is an allow. `agent_id` is set on a call made from inside an agent."""
+    body = {"hook_event_name": "PreToolUse", "session_id": sid, "tool_name": tool,
+            "tool_input": tool_input, "cwd": c.proj}
+    if agent_id:
+        body["agent_id"] = agent_id
+    env = c.env()
+    for name in ENV_DROP:
+        env.pop(name, None)
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    proc = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True,
+                          text=True, env=env, cwd=c.proj, timeout=120)
+    out = (proc.stdout or "").strip()
+    if proc.returncode != 0:
+        return "exit %d" % proc.returncode, tail(proc.stderr)
+    if not out:
+        return "allow", ""
+    try:
+        block = json.loads(out)["hookSpecificOutput"]
+        return block["permissionDecision"], block["permissionDecisionReason"]
+    except (ValueError, KeyError, TypeError):
+        return "unparsable", out[:120]
+
+
+def allowed_why(got):
+    """'' when the guard let the call through, with no reason printed."""
+    decision, reason = got
+    return "" if decision == "allow" else "%s: %s, want allowed" % (decision, reason[:80])
+
+
+def refused_by(got, rule):
+    """'' when the guard refused the call under `rule`: a deny whose reason opens with `<rule>:`."""
+    decision, reason = got
+    if decision != "deny":
+        return "%s: %s, want a refusal by %s" % (decision, reason[:80], rule)
+    if not reason.startswith(rule + ":"):
+        return "refused by %s, want %s" % (reason.split(":", 1)[0][:40], rule)
+    return ""
+
+
+def names_remedy(got):
+    """'' when the refusal names the Audit: marker, the remedy that clears it."""
+    return "" if "Audit:" in got[1] else "the refusal does not name the Audit: remedy: %s" % got[1][:80]
+
+
+def compact(c, sid, read=True):
+    """A handoff on disk, then PostCompact, then (when `read`) a Read of that handoff. Returns the
+    PostCompact run and the Read run, or None for a Read that was not made."""
+    c.seed_handoff(sid)
+    post = c.post_compact(sid)
+    rd = c.read(sid, c.handoff(sid)) if read else None
+    return post, rd
+
+
+def case_compaction_audit_refuses_bash_and_write():
+    """After compaction and a Read of the handoff, a Bash or Write call with no Audit: spawn is refused by
+    compaction-audit, and the refusal names the Audit: remedy. The Read clears the reread flag only."""
+    c = Case("refuse")
+    try:
+        post, rd = compact(c, SID)
+        if not step("--post-compact exits 0", exit_why(post)):
+            return
+        if not step("the Read of the handoff exits 0", exit_why(rd)):
+            return
+        step("the Read of the handoff clears the reread flag",
+             "" if not os.path.isfile(c.state("%s.reread" % SID)) else "the reread flag is still set after the Read")
+        bash = guard_call(c, SID, "Bash", BASH)
+        step("after the read, a Bash call is refused by compaction-audit",
+             refused_by(bash, AUDIT_RULE) or names_remedy(bash))
+        write = guard_call(c, SID, "Write", write_call(c))
+        step("after the read, a Write call is refused by compaction-audit",
+             refused_by(write, AUDIT_RULE) or names_remedy(write))
+    finally:
+        c.cleanup()
+
+
+def case_audit_spawn_clears_flag_and_writes_pass():
+    """An Audit: spawn from the main session is allowed and clears the audit flag. After it, Bash, Write
+    and Stop all pass."""
+    c = Case("clears")
+    try:
+        post, rd = compact(c, SID)
+        if not step("--post-compact wrote the audit flag, so the Audit: spawn has a flag to clear",
+                    "" if os.path.isfile(audit_flag(c, SID)) else "no %s.audit flag after --post-compact" % SID):
+            return
+        spawn = guard_call(c, SID, "Agent", AUDIT_SPAWN)
+        if not step("the Audit: spawn from the main session is allowed", allowed_why(spawn)):
+            return
+        step("the Audit: spawn clears the audit flag",
+             "" if not os.path.isfile(audit_flag(c, SID)) else "the audit flag is still set after the Audit: spawn")
+        step("after the spawn, a Bash call is allowed", allowed_why(guard_call(c, SID, "Bash", BASH)))
+        step("after the spawn, a Write call is allowed", allowed_why(guard_call(c, SID, "Write", write_call(c))))
+        stop = c.stop(SID)
+        step("after the spawn, Stop is quiet",
+             "" if passes(stop) else "Stop blocked: %r" % tail(stop.stdout))
+    finally:
+        c.cleanup()
+
+
+def case_no_compaction_never_refused():
+    """With no compaction no flag is set, and no call is refused: Bash, Write, a plain Agent spawn and an
+    Audit: spawn all pass. The Audit: spawn writes no audit flag."""
+    c = Case("clean")
+    try:
+        c.seed_handoff(SID)
+        step("with no compaction, neither flag is set",
+             "" if not (os.path.isfile(c.state("%s.reread" % SID)) or os.path.isfile(audit_flag(c, SID)))
+             else "a flag is set with no compaction")
+        step("with no compaction, a Bash call is allowed", allowed_why(guard_call(c, SID, "Bash", BASH)))
+        step("with no compaction, a Write call is allowed",
+             allowed_why(guard_call(c, SID, "Write", write_call(c))))
+        step("with no compaction, a plain Agent spawn is allowed",
+             allowed_why(guard_call(c, SID, "Agent", PLAIN_SPAWN)))
+        step("with no compaction, an Audit: spawn is allowed",
+             allowed_why(guard_call(c, SID, "Agent", AUDIT_SPAWN)))
+        step("with no compaction, an Audit: spawn writes no audit flag",
+             "" if not os.path.isfile(audit_flag(c, SID)) else "an audit flag appeared with no compaction")
+    finally:
+        c.cleanup()
+
+
+def case_post_compact_writes_audit_flag():
+    """PostCompact still sets the reread flag, and also writes the audit flag beside it."""
+    c = Case("flag-file")
+    try:
+        post, _ = compact(c, SID, read=False)
+        if not step("--post-compact exits 0", exit_why(post)):
+            return
+        step("--post-compact still sets the reread flag",
+             "" if os.path.isfile(c.state("%s.reread" % SID)) else "no reread flag after --post-compact")
+        step("--post-compact writes the audit flag, state/handoff/<sid>.audit",
+             "" if os.path.isfile(audit_flag(c, SID)) else "no %s.audit flag after --post-compact" % SID)
+    finally:
+        c.cleanup()
+
+
+def case_quoted_or_plain_spawn_is_refused_and_clears_nothing():
+    """An Agent whose Audit: line is not its first non-blank line, or that has no Audit: line, is refused by
+    compaction-audit. The refused spawns clear nothing: a Bash call is still refused after them."""
+    c = Case("quoted")
+    try:
+        post, rd = compact(c, SID)
+        if not step("--post-compact and the Read exit 0", exit_why(post) or exit_why(rd)):
+            return
+        quoted = guard_call(c, SID, "Agent", QUOTED_SPAWN)
+        step("an Agent whose Audit: line is quoted on a later line is refused by compaction-audit",
+             refused_by(quoted, AUDIT_RULE) or names_remedy(quoted))
+        plain = guard_call(c, SID, "Agent", PLAIN_SPAWN)
+        step("a plain Agent spawn with no Audit: line is refused by compaction-audit",
+             refused_by(plain, AUDIT_RULE) or names_remedy(plain))
+        step("after the refused spawns, a Bash call is still refused by compaction-audit",
+             refused_by(guard_call(c, SID, "Bash", BASH), AUDIT_RULE))
+    finally:
+        c.cleanup()
+
+
+def case_agent_payload_never_refused_or_clears():
+    """A call whose payload carries agent_id is never refused by compaction-audit and clears nothing: the
+    main session's Bash call is still refused after an agent's Bash call and an agent's Audit: spawn."""
+    c = Case("agent")
+    try:
+        post, rd = compact(c, SID)
+        if not step("--post-compact and the Read exit 0", exit_why(post) or exit_why(rd)):
+            return
+        step("the main session's Bash call is refused by compaction-audit",
+             refused_by(guard_call(c, SID, "Bash", BASH), AUDIT_RULE))
+        step("a Bash call whose payload carries agent_id is allowed",
+             allowed_why(guard_call(c, SID, "Bash", BASH, agent_id=AGENT_ID)))
+        step("an Audit: spawn whose payload carries agent_id is allowed",
+             allowed_why(guard_call(c, SID, "Agent", AUDIT_SPAWN, agent_id=AGENT_ID)))
+        step("the agent's Audit: spawn clears nothing: the main session's Bash call is still refused",
+             refused_by(guard_call(c, SID, "Bash", BASH), AUDIT_RULE))
+    finally:
+        c.cleanup()
+
+
+def case_unread_handoff_is_refused_first():
+    """While the handoff is unread, handoff-unread refuses first, for a Bash call and for an Audit: spawn, and
+    the refused spawn leaves the audit flag set. Once the handoff is read, compaction-audit refuses."""
+    c = Case("unread-first")
+    try:
+        post, _ = compact(c, SID, read=False)
+        if not step("--post-compact exits 0", exit_why(post)):
+            return
+        step("with the handoff unread, a Bash call is refused by handoff-unread",
+             refused_by(guard_call(c, SID, "Bash", BASH), HANDOFF_RULE))
+        step("with the handoff unread, an Audit: spawn is refused by handoff-unread",
+             refused_by(guard_call(c, SID, "Agent", AUDIT_SPAWN), HANDOFF_RULE))
+        step("the refused Audit: spawn leaves the audit flag set",
+             "" if os.path.isfile(audit_flag(c, SID)) else "no %s.audit flag after --post-compact" % SID)
+        rd = c.read(SID, c.handoff(SID))
+        if not step("the Read of the handoff exits 0", exit_why(rd)):
+            return
+        step("once the handoff is read, a Bash call is refused by compaction-audit",
+             refused_by(guard_call(c, SID, "Bash", BASH), AUDIT_RULE))
+    finally:
+        c.cleanup()
+
+
+def case_stop_blocks_for_audit_after_read():
+    """Stop blocks while the handoff is unread, and names the handoff. Once the handoff is read, Stop blocks
+    and names the Audit: remedy. With stop_hook_active set, Stop is quiet."""
+    c = Case("stop-audit")
+    try:
+        compact(c, SID, read=False)
+        unread = c.stop(SID)
+        step("with the handoff unread, Stop blocks and names the handoff path",
+             "" if blocks(c, unread, SID) else "rc=%r out=%r" % (unread.returncode, tail(unread.stdout)))
+        c.read(SID, c.handoff(SID))
+        first = c.stop(SID)
+        obj = json_or_none(first.stdout)
+        reason = str(obj.get("reason", "")) if isinstance(obj, dict) else ""
+        step("after the read, Stop blocks and names the Audit: remedy",
+             "" if (first.returncode == 0 and isinstance(obj, dict) and obj.get("decision") == "block"
+                    and "Audit:" in reason)
+             else "rc=%r out=%r, want a block that names Audit:" % (first.returncode, tail(first.stdout)))
+        again = c.stop(SID, active=True)
+        step("Stop with stop_hook_active set is quiet",
+             "" if passes(again) else "Stop blocked again: %r" % tail(again.stdout))
+    finally:
+        c.cleanup()
+
+
+def case_stop_quiet_without_compaction():
+    """With no compaction, Stop is quiet: the audit does not reach a session that never compacted."""
+    c = Case("stop-clean")
+    try:
+        c.seed_handoff(SID)
+        stop = c.stop(SID)
+        step("with no compaction, Stop is quiet",
+             "" if passes(stop) else "Stop blocked: %r" % tail(stop.stdout))
+    finally:
+        c.cleanup()
+
+
+def case_audit_marker_after_blank_lines_clears():
+    """The Audit: marker counts on the first non-blank line, after blank lines and spaces. That spawn clears
+    the audit flag."""
+    c = Case("blank-lines")
+    try:
+        post, rd = compact(c, SID)
+        if not step("--post-compact wrote the audit flag, so the spawn has a flag to clear",
+                    "" if os.path.isfile(audit_flag(c, SID)) else "no %s.audit flag after --post-compact" % SID):
+            return
+        spawn = guard_call(c, SID, "Agent", BLANK_SPAWN)
+        step("an Audit: spawn whose marker follows blank lines is allowed", allowed_why(spawn))
+        step("that spawn clears the audit flag",
+             "" if not os.path.isfile(audit_flag(c, SID)) else "the audit flag is still set after the spawn")
+    finally:
+        c.cleanup()
+
+
 def main() -> int:
     print("Part 1: SessionEnd pointer, SessionStart reorient (hooks/precompact_handoff.py)")
     case_session_end_clear_writes_pointer()
@@ -1082,6 +1384,18 @@ def main() -> int:
 
     print("Part 3: bad stdin and live controls, both modules")
     case_bad_stdin_and_live_control_per_mode()
+
+    print("Part 4: the compaction audit (hooks/guard.py rule compaction-audit, hooks/reread_check.py)")
+    case_compaction_audit_refuses_bash_and_write()
+    case_audit_spawn_clears_flag_and_writes_pass()
+    case_no_compaction_never_refused()
+    case_post_compact_writes_audit_flag()
+    case_quoted_or_plain_spawn_is_refused_and_clears_nothing()
+    case_agent_payload_never_refused_or_clears()
+    case_unread_handoff_is_refused_first()
+    case_stop_blocks_for_audit_after_read()
+    case_stop_quiet_without_compaction()
+    case_audit_marker_after_blank_lines_clears()
 
     if FAILED:
         print()
