@@ -6201,6 +6201,47 @@ class SilentUndo(Env):
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
 
+    def lane_undo_on_feat(self):
+        """feat gains a test file of eight lines, and a later commit deletes the file: a lane undo finding, and no main finding.
+        The branch is pushed, and co is checked out on it."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        put(os.path.join(o, "tests", "test_card.py"), "".join("assert card line %d\n" % i for i in range(1, 9)))
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "A: add eight test lines")
+        sh(o, "git", "rm", "-q", "tests/test_card.py"); sh(o, "git", "commit", "-qm", "B: delete the test file")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        sh(self.co, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+
+    def test_a_lane_undo_finding_alone_does_not_refuse_undo_check(self):
+        self.lane_undo_on_feat()
+        sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+        import check_silent_undo as undo
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            undo.main(["--repo", self.co, "--upstream", "origin/main"])
+        self.assertIn("lane undo", out.getvalue(), "premise: the check reads a lane undo finding on feat")
+        merge.UNDO_MEMO.clear()
+        self.addCleanup(merge.UNDO_MEMO.clear)
+        with contextlib.redirect_stdout(io.StringIO()):
+            try:
+                got = merge.undo_check(self.co, "origin/main")
+            except merge.Stop as e:
+                self.fail("a lane undo finding alone refused undo_check: %s" % e)
+        self.assertIsNone(got, "undo_check returned a value for a branch with only a lane undo finding: %r" % (got,))
+
+    def test_a_main_finding_still_refuses_undo_check_beside_a_lane_undo_finding(self):  # control
+        self.lane_undo_on_feat()
+        self.stale_feat()
+        sh(self.co, "git", "fetch", "-q", "origin")
+        sh(self.co, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        merge.UNDO_MEMO.clear()
+        self.addCleanup(merge.UNDO_MEMO.clear)
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(merge.Stop) as cm:
+                merge.undo_check(self.co, "origin/main")
+        self.assertIn("first.md", str(cm.exception), "the refusal does not name main's finding: %s" % cm.exception)
+
     def test_the_check_runs_again_after_the_wait_and_a_red_reverts_the_claim(self):
         calls = []
         real = merge.undo_check

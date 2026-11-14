@@ -4,7 +4,7 @@
     python3 lint/check_silent_undo.py [--upstream BASE] [--head HEAD] [--strict]   # no BASE: the branch's tracked upstream; its own pushed copy, a gone upstream or none: origin/main
     python3 lint/check_silent_undo.py --history [REV] [--window 60]   # audit, always exit 0
 
-Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
+Four reads, one verdict. Three of them (lost lines, reversal, revived) fail the run; the lane undo read only reports. Design: docs/decisions/silent-undo-check-design.md.
 
   lost lines  A merge commit M (in upstream..head) loses a line one parent added since the
               merge base: the line is absent from every base, M holds fewer copies than that
@@ -20,6 +20,16 @@ Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               first-parent line left main, up, that commit included. Catches
               `git revert`, a stale copy, and a rebase that took its own side (caught
               when the lost work is the rebase-base commit or later).
+  lane undo   (report-only: its findings print marked `report-only`, and never set the exit code or refuse a merge.)
+              A non-merge commit C of the branch undoes an earlier non-merge commit E of the same branch, in two shapes
+              only. (1) C puts a file, or a -U0 hunk, back to the text E's parent held, when E changed BLOCK_LINES (6)
+              lines or more there: the whole file within one non-blank line, or one hunk on all but one line. Off a
+              test path it needs the file on both sides. (2) On a test path (hooks/guard.py is_test_rel), a hunk of C
+              takes out more of the lines E added than it adds back, and not every one is a rewrite (`rewritten`). Only
+              lines C takes out that E added count: in (1) while head still holds fewer of them than C's parent did,
+              in (2) only a line with no copy left in the whole file at head. A file E or C renames is read across
+              the rename, so a move adds and puts back nothing. Not read here: merges, and a file renamed by a third
+              commit between E and C. The line names the path, C and E; a Drops-lines trailer still excuses it.
   revived     A note the branch deleted is back at head. The notes file merges by union (decision
               notes-merge-union), so a merge of the base can put a deleted note back with no conflict. A note is
               its slug (`- <slug>:` at line start), so a reworded copy counts; a `- ` line with no slug form is its
@@ -49,7 +59,7 @@ in the body, and CI's way out is a Drops-lines commit trailer. Each use prints
 the commit, plus the branch it merged for a reversal.
 
 A read that cannot run prints UNKNOWN. Exit 0 locally, exit 1 when env CI is set or with
---strict, and exit 1 always when the UNKNOWN carries a finding (ruling: unknown in CI is red).
+--strict, and exit 1 always when the UNKNOWN carries a finding other than a report-only lane undo line (ruling: unknown in CI is red).
 """
 import argparse
 import collections
@@ -69,6 +79,8 @@ except ImportError:  # a hook loads this file; a missing helper never stops that
 TRAILER = "Drops-lines"
 ZERO = "0" * 40
 WORD = re.compile(r"[A-Za-z0-9]")
+REPORT_ONLY = "lane undo (report-only),"  # the start of every lane undo line: check() keeps it in its list, and main() and merge's undo_check read it to leave it out of the verdict
+BLOCK_LINES = 6  # a lane commit that changed this many lines in a file, or in one hunk, is a block: putting it back is an undo
 
 
 class Unknown(Exception):
@@ -154,7 +166,7 @@ def last_paragraph(pr_body):
 def allowed(cwd, rng, pr_body=""):
     """{path: reason} from `Drops-lines: <path> -- <reason>` trailers on any commit of the range
     (a rev or a..b), and from such lines in pr_body (its last_paragraph). A line with no reason excuses nothing."""
-    _, out = git(cwd, "log", "--format=%(trailers:key=" + TRAILER + ",valueonly,unfold)", rng)
+    _, out = git(cwd, "log", "--no-show-signature", "--format=%(trailers:key=" + TRAILER + ",valueonly,unfold)", rng)
     body = re.findall(r"^" + TRAILER + r":(.*)$", last_paragraph(pr_body), re.I | re.M | re.ASCII)
     res = {}
     for line in out.splitlines() + body:
@@ -321,7 +333,7 @@ def branch_only_lines(cwd, p, bases, path, lines, refs):
     a merge's own resolution show up. The oldest marked commit is the real adder: a line from main
     always has main's own commit in the range, older than any merge that carried it."""
     try:
-        _, out = git(cwd, "log", "-m", "-p", "-U0", "--no-color", "--no-ext-diff", "--format=%x00%H", p, "--not", *bases, "--", path)
+        _, out = git(cwd, "log", "--no-show-signature", "-m", "-p", "-U0", "--no-color", "--no-ext-diff", "--format=%x00%H", p, "--not", *bases, "--", path)
     except Unknown:
         return set()
     commits = []  # (sha, the set of that diff's normalized changed lines)
@@ -519,9 +531,26 @@ class Commit:
             self._files = raw_files(self.cwd, *([self.parent] if self.parent else ["--root"]), self.sha)
         return self._files
 
+    @property
+    def pairs(self):
+        """{old path: (new path, old blob, new blob)}: the files this commit renames (see renamed)."""
+        if not hasattr(self, "_pairs"):
+            self._pairs = renamed(self.cwd, self.parent, self.sha, self.files) if self.parent else {}
+        return self._pairs
 
-def first_parent(cwd, rev, limit=0):
-    a = ["log", "--first-parent", "--format=%H %P%x02%s"] + (["-n%d" % limit] if limit else []) + [rev]
+    def side(self, path):
+        """(name before, name after, -U0 hunks) of this commit's change to path. A renamed file is read across its two
+        names, from either name: its hunks are its edits, so a pure move has none."""
+        for old, (new, ob, nb) in self.pairs.items():
+            if path in (old, new):
+                return old, new, hunks(self.cwd, ob, nb)
+        return path, path, hunks(self.cwd, self.parent, self.sha, path)
+
+
+def first_parent(cwd, rev, limit=0, walk="--first-parent"):
+    """The commits of rev, newest first, each with its first parent. walk is the log's own selector: the first-parent
+    line by default, `--no-merges` for every non-merge commit (the lane undo read)."""
+    a = ["log", "--no-show-signature", walk, "--format=%H %P%x02%s"] + (["-n%d" % limit] if limit else []) + [rev]
     _, out = git(cwd, *a)
     res = []
     for line in out.splitlines():
@@ -603,6 +632,102 @@ def fmt_lost(m, path, p, lost):
     return "%s: merge %s drops %d line(s) that parent %s added%s" % (path, m[:9], len(lost), p[:9], shown)
 
 
+# ------------------------------------------------------------------- lane undo
+
+_is_test = None
+
+
+def is_test(path):
+    """True for a test path, by the one rule of the guard (hooks/guard.py is_test_rel). A rule that cannot be read is Unknown."""
+    global _is_test
+    if _is_test is None:
+        try:
+            import guard
+            _is_test = guard.is_test_rel
+        except Exception as e:
+            raise Unknown("the test-path rule (hooks/guard.py is_test_rel) cannot be read: %s" % e)
+    return _is_test(path)
+
+
+_texts = {}
+
+
+def text_counts(cwd, rev, path):
+    if (cwd, rev, path) not in _texts:
+        _texts[cwd, rev, path] = counts(blob(cwd, rev, path))
+    return _texts[cwd, rev, path]
+
+
+def distance(x, y):
+    """How far two texts (line counters) are apart: the larger of the lines x has more of and the lines y has more of."""
+    return max(sum((x - y).values()), sum((y - x).values()))
+
+
+def lane_reads(cwd, e, c, path, at_head):
+    """(how, lines of e that c takes out) for each way commit c undoes earlier commit e in path, before the head check.
+    Each commit is read across a rename it makes (Commit.side): E's text before is at its old name, C's text after at its
+    new name. A line counts toward lane lines lost only when no copy of it is left in the file at head (at_head)."""
+    e_before, _, theirs = e.side(path)
+    _, c_after, mine = c.side(path)
+    added = collections.Counter(l for _, n in theirs for l in n)
+    test = is_test(path) or is_test(c_after)
+    want, now = text_counts(cwd, e.parent, e_before), text_counts(cwd, c.sha, c_after)
+    if (test or (want and now)) and sum(len(o) + len(n) for o, n in theirs) >= BLOCK_LINES:
+        d = distance(now, want)
+        lost = collections.Counter(l for o, _ in mine for l in o) & added
+        if lost and d <= 1 and d < distance(text_counts(cwd, c.parent, path), want):
+            yield "whole file put back", lost
+    if test or (want and now):
+        for o, n in theirs:
+            for co, cn in mine:
+                lost = collections.Counter(co) & collections.Counter(n)
+                if len(o) + len(n) >= BLOCK_LINES and lost and misses(n, co) + distance(collections.Counter(o), collections.Counter(cn)) <= 1:
+                    yield "hunk put back", lost
+    if test:
+        for co, cn in mine:
+            lost = collections.Counter({l: k for l, k in (collections.Counter(co) & added).items() if not at_head[l]})
+            if sum(lost.values()) > len(cn) and any(not rewritten(l, [(co, cn)], modified=True) for l in lost):
+                yield "lane lines lost", lost
+
+
+def lane_undos(cwd, upstream, head):
+    """[(path, how, earlier commit, undoing commit)]: a non-merge commit of upstream..head that undoes an earlier non-merge
+    commit of the same range (see lane_reads), while head still holds fewer of the lines than the undoing commit's parent did.
+    One finding per undoing commit and path, naming the newest earlier commit it undoes. A lane of one commit has nothing to read.
+    A file C renames is read at its old name, the one earlier commits name, and judged across the rename; its new name is not
+    read again. Head's copy is read at C's name after, or at the name a later rename gave it."""
+    lane = [c for c in first_parent(cwd, "%s..%s" % (upstream, head), walk="--no-merges") if c.parent]
+    touched = collections.Counter(p for c in lane for p in c.files)
+    found = []
+    for c in lane:
+        targets = {new for new, _, _ in c.pairs.values()}
+        paths = sorted(p for p in c.files if touched[p] > 1 and p not in targets)
+        if not paths:
+            continue
+        ancestors = set(git(cwd, "rev-list", "--no-merges", "%s..%s" % (upstream, c.parent))[1].split())
+        earlier = [e for e in lane if e.sha in ancestors]
+        later = None
+        for path in paths:
+            after = c.side(path)[1]
+            at_head = text_counts(cwd, head, after)
+            if not at_head:  # gone at head under this name: a later rename moved it, or nothing is left
+                if later is None:
+                    later = renamed(cwd, c.sha, head, raw_files(cwd, c.sha, head))
+                if after in later:
+                    at_head = text_counts(cwd, head, later[after][0])
+            pre = text_counts(cwd, c.parent, path)
+            for e in (e for e in earlier if path in e.files):
+                how = next((how for how, lost in lane_reads(cwd, e, c, path, at_head) if not all(at_head[l] >= pre[l] for l in lost)), None)
+                if how:
+                    found.append((path, how + ("" if after == path else " (renamed to %s)" % after), e, c))
+                    break
+    return found
+
+
+def fmt_lane(path, how, e, c):
+    return REPORT_ONLY + " %s: %s by %s, undoing %s %s; excuse with a \"%s: %s -- <why>\" trailer" % (path, how, c.sha[:9], e.sha[:9], e.subject[:60], TRAILER, path)
+
+
 # --------------------------------------------------------------------- revived
 
 NOTE = re.compile(r"^- ([^\s:]+):")
@@ -645,7 +770,7 @@ def revived_notes(cwd, upstream, head):
             continue
         # --full-history: a merge that brought the file back is TREESAME to the base's side, and default history
         # simplification would then drop the branch's own delete commit from the walk.
-        _, out = git(cwd, "log", "--no-merges", "--full-history", "--reverse", "--format=%H %P", "%s..%s" % (upstream, head), "--", path)
+        _, out = git(cwd, "log", "--no-show-signature", "--no-merges", "--full-history", "--reverse", "--format=%H %P", "%s..%s" % (upstream, head), "--", path)
         commits = [line.split() for line in out.splitlines() if line.strip()]
         if not commits:
             continue
@@ -807,6 +932,7 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     n = int(git(cwd, "rev-list", "--count", "--first-parent", "%s..%s" % (base, upstream))[1]) + 1  # +1: the fork commit
     earlier = first_parent(cwd, upstream, n)
     items += [(x[0], fmt_rev(*x)) for x in reversals(cwd, old, new, files, earlier)]
+    items += [(x[0], fmt_lane(*x)) for x in lane_undos(cwd, upstream, h)]
     page, same = generated_page(cwd, h, {p for p, _ in items if p not in ok}, upstream, tool)
     if same:
         ok = dict(ok, **{page: "the page is the generator's output for the head"})
@@ -843,11 +969,24 @@ def history(cwd, rev, window):
     return len(line), out
 
 
+def failing(problems):
+    """The problem lines that fail the run: every line but a report-only lane undo one."""
+    return [p for p in problems if not p.startswith(REPORT_ONLY)]
+
+
 def say(line):
     """The one home for printed output. A non-UTF-8 name holds surrogates, which a strict stream cannot encode:
     write them as backslash escapes, so the finding prints and the exit code holds."""
     enc = getattr(sys.stdout, "encoding", None) or "utf-8"
     print(line.encode(enc, "backslashreplace").decode(enc))
+
+
+def emit(problems):
+    """Print each problem line: FAIL for a failing one, the bare line for a report-only one; the remedy follows only when a FAIL printed."""
+    for p in problems:
+        say("silent-undo: " + ("" if p.startswith(REPORT_ONLY) else "FAIL: ") + p)
+    if failing(problems):
+        say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
 
 
 def main(argv):
@@ -873,19 +1012,13 @@ def main(argv):
     except Unknown as e:
         for n in e.notes:
             say("silent-undo: " + n)
-        for p in e.problems:
-            say("silent-undo: FAIL: " + p)
-        if e.problems:
-            say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
+        emit(e.problems)
         say("silent-undo: UNKNOWN: %s" % e)
-        return 1 if (e.problems or a.strict or os.environ.get("CI")) else 0
+        return 1 if (failing(e.problems) or a.strict or os.environ.get("CI")) else 0
     for n in notes:
         say("silent-undo: " + n)
-    for p in problems:
-        say("silent-undo: FAIL: " + p)
-    if problems:
-        say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
-    return 1 if problems else 0
+    emit(problems)
+    return 1 if failing(problems) else 0
 
 
 if __name__ == "__main__":
