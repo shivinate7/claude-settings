@@ -41,6 +41,8 @@ JOB = "checks"
 SPLIT_JOBS = ("checks", "checks-hooks", "checks-rest")  # the old checks job split into these three; the rest of CHECKS_SUITE_JOBS were never part of it
 SCOPE_CONDITION = "${{ %s }}" % NO_MD_SCOPE_CONDITION
 PR_ONLY_IF = "${{ github.event_name == 'pull_request' }}"
+# The same if, narrowed by one lint flag that ci-scope.sh sets (step ci-skip-untouched-steps slice 1).
+PR_ONLY_LINT_IF = re.compile(r"^\$\{\{ github\.event_name == 'pull_request' && needs\.scope\.outputs\.lint_\w+ == 'true' \}\}$")
 STE_LINT = "STE lint"
 DOC = "docs/decisions/x.md"
 
@@ -408,7 +410,7 @@ ALLOWED = {
     "lint/test_ci_job.py": (["AGENTS.md", "CLAUDE.md"], "written into temp roots"),
     "lint/test_ci_scope.py": ([
         "README.md", "reference/copies-and-accounts.md", "reference/repo-pages.md", "skills/ci-hygiene/SKILL.md",
-        "skills/waiting-page/SKILL.md", "skills/waiting-page/reference/copies-and-accounts.md",
+        "CLAUDE.md", "output-styles/shiv-stylisms.md", "skills/waiting-page/SKILL.md", "skills/waiting-page/reference/copies-and-accounts.md",
         "skills/waiting-page/reference/designs.md", "skills/waiting-page/reference/repo-pages.md",
         "skills/waiting-page/reference/republish.md", "skills/waiting-page/reference/routing-and-sessions.md",
         "tests/fixture/docs/map/core.md", "tests/fixture/docs/map/traces/home.md",
@@ -439,6 +441,7 @@ TRANSITIVE_MD_READERS = ["skills/impeccable/SKILL.md", "test_guard.py", "drive_t
 # A reader named in a file that does not read it at run time, with one reason. The ALLOWED rule, for these names.
 TRANSITIVE_ALLOWED = {
     "lint/test_ci_scope.py": (["test_guard.py"], "a changed path the scope detector is given; no file is run"),
+    "lint/rule_audit.py": (["test_guard.py"], "section_dir and _with_sections only parse hooks/test_guard.py and tests/guard/*.py as Python; nothing runs them or opens skills/impeccable"),
     "lint/test_rule_audit.py": (["test_guard.py", "tests/guard"], "builds its own hooks/test_guard.py and tests/guard fixture in a temp tree"),
     "hooks/mutate_guard.py": (["test_guard.py"], "strace, round 1 review: no open of skills/impeccable at run time"),
     "hooks/test_mutate_ci.py": (["test_guard.py"], "strace, round 1 review: no open of skills/impeccable at run time"),
@@ -667,7 +670,8 @@ class UnscopedAndPrOnlySteps(ChecksStepBase):
         for name in PR_ONLY:
             with self.subTest(step=name):
                 got = if_of(self.named(steps, name))
-                self.assertEqual(got, PR_ONLY_IF, "step %r: if is %r, want its pull-request if" % (name, got))
+                self.assertTrue(got == PR_ONLY_IF or PR_ONLY_LINT_IF.match(got or ""),
+                                "step %r: if is %r, want its pull-request if, with at most one lint_* flag" % (name, got))
 
 
 class StepNames(ChecksStepBase):
