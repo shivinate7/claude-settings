@@ -504,4 +504,36 @@ chained_ask("cap var: a cap write to a settings path held in a shell variable, t
    "F=" + PROJ_SETTINGS + "; python3 -c \"import os; os.system('echo " + CAP_KEY + "=opus >> $F')\"",
    cwd=NOGIT, carries=("agent-model-cap",))
 
+# THE CAP ASK NAMES ITS LIFT FIELD (debt cap-until-field-taught-late). The deadline key `_agentCapUntil` is how
+# a cap is lifted past its expiry, so the ask names it, and an approver reads the field before the write is
+# approved. The green control is the existing cap asks that carry the model name (cap: a redirect onto a project
+# settings file asks, and its Write sibling). It checks that those asks stay asks once the field is named.
+add("cap-until: a Write that sets the cap asks and names the _agentCapUntil field", "ask", "agent-model-cap",
+    tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL, content=cap_settings(), carries="_agentCapUntil")
+sh("cap-until: a shell redirect that sets the cap asks and names the _agentCapUntil field",
+   "printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL, "ask", "agent-model-cap",
+   cwd=NOGIT, carries="_agentCapUntil")
+
+
+# A CAP WRITE MADE BY AN INTERPRETER'S OWN FILE CALL (debt cap-write-by-python-unseen). `python -c`, a python
+# heredoc and `node -e` write the settings file with their own open or write call, which the shell-write reader
+# does not read. The interpreter reader already returns the path for each, so each form asks as a redirect does.
+# The green control is a `python -c` that prints the same cap JSON and writes no file, which keeps its allow.
+PY_CAP_C = ("python3 -c \"import json; open('settings.local.json', 'w').write(json.dumps({'env': {'"
+            + CAP_KEY + "': '" + OPUS + "'}}))\"")
+PY_CAP_HEREDOC = ("python3 - <<'PY'\nimport json\nopen('settings.local.json', 'w').write(json.dumps({'env': {'"
+                  + CAP_KEY + "': '" + OPUS + "'}}))\nPY")
+NODE_CAP_E = ("node -e \"require('fs').writeFileSync('settings.local.json', JSON.stringify({env: {'"
+              + CAP_KEY + "': '" + OPUS + "'}}))\"")
+sh("cap python -c: a python -c that writes the cap key to a settings file asks", PY_CAP_C, "ask",
+   "agent-model-cap", cwd=PROJ, carries=CAP_KEY)
+sh("cap python heredoc: a python heredoc that writes the cap key to a settings file asks", PY_CAP_HEREDOC,
+   "ask", "agent-model-cap", cwd=PROJ, carries=CAP_KEY)
+sh("cap node -e: a node -e that writes the cap key to a settings file asks", NODE_CAP_E, "ask",
+   "agent-model-cap", cwd=PROJ, carries=CAP_KEY)
+sh("cap python -c control: a python -c that prints the cap JSON and writes no file allows",
+   "python3 -c \"import json; print(json.dumps({'env': {'" + CAP_KEY + "': '" + OPUS + "'}}))\"",
+   "allow", cwd=PROJ)
+
+
 # =========================================================================== 6c. ask alone

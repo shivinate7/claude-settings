@@ -879,12 +879,14 @@ sh("per-file deny: -C lane with --work-tree naming the shared checkout, from a w
 # The setter rows sit in the git-env family, below the shared-tree section.
 GIT_ENV_RULE = "git-env-set"
 # 3. A segment with no -C must not borrow another segment's -C. From the shared checkout, the bare
-# restore runs in the shared checkout whichever side the lane's -C status stands on. main asks the
-# command; chained with the status, it denies as a chained ask command (ask-alone).
-chained_ask("per-file ask: -C lane status, then a bare restore f.txt, from the shared checkout, denies as a chained ask command",
-            VCS + " -C " + slash(GITWT) + " status && " + VCS + " restore f.txt", cwd=GITMAIN)
-chained_ask("per-file ask: a bare restore f.txt, then -C lane status, from the shared checkout, denies as a chained ask command",
-            VCS + " restore f.txt && " + VCS + " -C " + slash(GITWT) + " status", cwd=GITMAIN)
+# restore runs in the shared checkout whichever side the lane's -C status stands on, so it denies as
+# shared-tree, as it does alone. lacks pins that the chain is not the reason.
+sh("per-file deny: -C lane status, then a bare restore f.txt, from the shared checkout, denies as shared-tree",
+   VCS + " -C " + slash(GITWT) + " status && " + VCS + " restore f.txt", "deny", "shared-tree",
+   cwd=GITMAIN, lacks=(CHAIN_ASK,))
+sh("per-file deny: a bare restore f.txt, then -C lane status, from the shared checkout, denies as shared-tree",
+   VCS + " restore f.txt && " + VCS + " -C " + slash(GITWT) + " status", "deny", "shared-tree",
+   cwd=GITMAIN, lacks=(CHAIN_ASK,))
 # 4. A PowerShell Set-Location into the shared checkout, from a cwd in no checkout. The cd act does not
 # judge it there, so the shared-tree rule reads the folder it moved to and denies the restore.
 # From a worktree, Set-Location and its aliases (sl, chdir, Push-Location) move into another checkout,
@@ -1224,6 +1226,18 @@ for _name, _command in (
 # ALLOW control: a hash at a word start is a real comment, so the `$( )` after it is text.
 sh("substitution: shared tree, a hash at a word start allowed", "echo hi #$(" + VCS + " reset --hard)",
    "allow", cwd=NOGIT)
+
+
+# A DISCARD INSIDE A SHELL WRAPPER (debt guard-shell-wrap-discard-unread). The script that sh -c, bash -lc or eval
+# runs is a command, so a discard in it is judged as the bare form is. The green control is a read inside the same
+# wrapper, which stays allowed.
+for _name, _command in (
+    ("sh -c, a hard reset", "sh -c '" + VCS + " reset --hard'"),
+    ("bash -lc, a checkout of the whole tree", "bash -lc '" + VCS + " checkout .'"),
+    ("eval, a hard reset", "eval '" + VCS + " reset --hard'"),
+):
+    sh("shell wrap: %s denies, as the bare form does" % _name, _command, "deny", "shared-tree", cwd=NOGIT)
+sh("shell wrap: a status read inside bash -c stays allowed", "bash -c '" + VCS + " status'", "allow", cwd=NOGIT)
 
 
 # ============================================================ 1. branch delete / worktree remove/prune

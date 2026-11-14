@@ -549,7 +549,7 @@ while True:
         from guard_core import (
             AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
-            _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
+            _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, bare_segment_dirs, wrapped_segment_dirs, basename, own_c_segment_dirs, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
             inner_commands, nested_script, norm,
             _segment_cd_target, _strip_heredoc_bodies_unconditionally, _RUNNER,
@@ -575,7 +575,7 @@ while True:
         )
         _loading = "guard_pointer"
         from guard_pointer import (
-            POINTER_EDIT_REASON, POINTER_HEAD_REASON, head_root, pointer_checkout, pointer_edit_hit, pointer_head_hit,
+            POINTER_EDIT_REASON, POINTER_HEAD_REASON, head_in, head_root, pointer_checkout, pointer_edit_hit, pointer_head_hit,
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
@@ -893,7 +893,7 @@ def fetch_moves_branch(args) -> bool:
     return False
 
 
-def silent_write_hit(segment: str, tail: str = ""):
+def silent_write_hit(segment: str, tail: str = "", outer_silenced: bool = False):
     """Return (matched text, mechanism, kind) for a write whose own trace is silenced, else
     ("", "", "").
 
@@ -906,8 +906,10 @@ def silent_write_hit(segment: str, tail: str = ""):
     2>&1` allowed. `merge --abort` is carved out inside the loop: it lands nothing, so it has no
     landing to prove. A call whose argv names a read (`read_verb`) is carved out the same way.
     `tail` is the last segment of the pipe this segment feeds, if any (see `tail_discards`).
+    A command a wrapper hands on (`bash -c`, `sh -c`, `eval`) is read as the bare form is, and a discard
+    on the wrapper itself silences what it runs (`outer_silenced`).
     """
-    silenced = discards_output(segment) or (bool(tail) and tail_discards(tail))
+    silenced = discards_output(segment) or (bool(tail) and tail_discards(tail)) or outer_silenced
     for subcommand, args in git_calls(segment):
         if subcommand == "fetch":
             # Only a fetch that moves a local branch (`src:dst`) is a write; a bare one is a read.
@@ -932,6 +934,12 @@ def silent_write_hit(segment: str, tail: str = ""):
             if (word == "make" and "merge" in rest) or (
                     word in ("gh", "gh.exe") and rest[:2] == ["pr", "merge"]):
                 return word + " " + " ".join(rest), "redirect", ("make merge" if word == "make" else "gh pr merge")
+    tokens = segment_tokens(segment)
+    for text in inner_commands(tokens) if tokens else []:
+        for part in split_segments(text):
+            hit = silent_write_hit(part, "", silenced)
+            if hit[0]:
+                return hit
     return "", "", ""
 
 
@@ -1437,6 +1445,7 @@ CAP_ASK_REASON = (
     "hold. A project settings file overrides user settings, so the write lifts the cap for every "
     "agent started there. Requested: {change}. File: {where}. "
     "Approve it only when a model above Sonnet is wanted for this project. "
+    "A lift past its expiry needs a current ISO-8601 _agentCapUntil field in the same file. "
     "(decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
 )
 
@@ -1859,9 +1868,10 @@ def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
     """Return the first record path a commit message or PR body cites, else ''. A message file
     that cannot be read returns UNREAD_MARK + its name.
 
-    Acts: `git commit` and `gh pr create|edit`.
+    Acts: `git commit`, `gh pr create|edit` and `gh pr merge`, whose squash subject and body become a
+    commit on main.
     """
-    read = message_texts(segment, raw, where, before)
+    read = message_texts(segment, raw, where, before, titles=True)
     if read is None:
         return ""
     is_commit, texts, unread = read
@@ -1906,7 +1916,7 @@ def lane_number_named(segment: str, raw: str, where: str, before: int) -> str:
     """Return the first session-number lane name (`N20`) in a commit message, PR body or title, or
     `gh pr merge` subject or body, else ''. Fenced blocks and backtick spans are quoted text and
     skipped. Same text extraction as cite-by-id. An unread message file returns UNREAD_MARK + its
-    name: cite-by-id refuses an unread create or edit file first, so this covers merge.
+    name, so a message that cannot be read is never passed as clean.
     """
     read = message_texts(segment, raw, where, before, titles=True)
     if read is None:
@@ -4430,6 +4440,21 @@ def refuse_ready_page(tool: str, tool_input: dict, command: str, where: str) -> 
         refuse(tool, "deny", "records-page-ready", hit[0], hit[1])
 
 
+def wrapped_script_segments(segment: str, depth: int = 0):
+    """Each segment of every script a wrapper in SEGMENT hands on, nested wrappers included. Depth is
+    bounded so a self-nesting text cannot loop."""
+    tokens = segment_tokens(segment)
+    if not tokens or depth > 4:
+        return []
+    found = []
+    for text in inner_commands(tokens):
+        for part in split_segments(text):
+            if part.strip():
+                found.append(part)
+                found.extend(wrapped_script_segments(part, depth + 1))
+    return found
+
+
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", agent: bool = False,
                 background: bool = False, description: str = "", payload=None,
@@ -4457,14 +4482,53 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # Not a recursive judge_shell: that clears PENDING_ASK and would lose a deny.
     texts = [stripped, *substitution_commands(raw, stripped)]
     whole_root = []   # command_root reads the whole command: once per command, never per segment
-    for segment in (part for text in texts for part in split_segments(text)):
+    # a git segment with no folder of its own runs where the shell stands when it runs, so each reads
+    # its own folder; a substitution's segments and any line the walk does not know take the whole call's
+    bare_dirs = {}
+    for text_segment, folder in bare_segment_dirs(stripped, cwd):
+        bare_dirs.setdefault(text_segment, []).append(folder)
+    own_dirs = {}   # a segment's own `git -C`, read against the folder the shell stands in when it runs
+    for text_segment, folder in own_c_segment_dirs(stripped, cwd):
+        own_dirs.setdefault(text_segment, []).append(folder)
+    wrap_dirs = {}   # a shell wrapper's own folder from the same walk, which the script it hands on starts in
+    for text_segment, folder in wrapped_segment_dirs(stripped, cwd):
+        wrap_dirs.setdefault(text_segment, []).append(folder)
+    pointer_dirs = {text_segment: list(folders) for dirs in (bare_dirs, own_dirs) for text_segment, folders in dirs.items()}
+    # A script a shell wrapper runs (`sh -c`, `bash -lc`, `eval`) is judged as the bare command is. Each inner
+    # segment keeps the text number of the text it came from and the folder of the outer segment it was unwrapped
+    # from (read now, before the loop pops them); with no folder known it takes the whole call's, as any unknown
+    # segment does.
+    own_segments = [(number, part) for number, text in enumerate(texts) for part in split_segments(text)]
+    segment_runs = [(number, part, False, None) for number, part in own_segments]
+    for number, part in own_segments:
+        # the same text twice (`cd A; sh -c X; cd B; sh -c X`) runs in two folders: each takes its own, in order
+        known = wrap_dirs.get(part) or bare_dirs.get(part) or own_dirs.get(part) or [None]
+        outer = known.pop(0) if number == 0 and len(known) > 1 and known is wrap_dirs.get(part) else known[0]
+        segment_runs += [(number, inner, True, outer) for inner in wrapped_script_segments(part)]
+    for text_number, segment, wrapped, outer_dir in segment_runs:
         if not segment.strip():
             continue
         words = segment_tokens(segment)
         own_c = _segment_git_c_target(words) if words else None
         if own_c is not None:
             # a `--work-tree` beside the `-C` moves the files the call discards to that tree
-            root = command_root(segment, cwd) if GIT_WORK_TREE_RE.search(segment) else _absolute(own_c, cwd)
+            if wrapped:
+                root = _absolute(own_c, outer_dir or cwd)
+            else:
+                root = own_dirs[segment].pop(0) if text_number == 0 and own_dirs.get(segment) else _absolute(own_c, cwd)
+            work_tree = GIT_WORK_TREE_RE.search(segment)
+            if work_tree:
+                root = _absolute(work_tree.group(2), root)
+        elif wrapped and outer_dir:
+            root = outer_dir
+            work_tree = GIT_WORK_TREE_RE.search(segment)
+            if work_tree:
+                root = _absolute(work_tree.group(2), root)
+        elif not wrapped and text_number == 0 and bare_dirs.get(segment):
+            root = bare_dirs[segment].pop(0)
+            work_tree = GIT_WORK_TREE_RE.search(segment)
+            if work_tree:
+                root = _absolute(work_tree.group(2), root)
         else:
             whole_root = whole_root or [command_root(stripped, cwd)]
             root = whole_root[0]
@@ -4529,11 +4593,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 1b. The pointer checkout's HEAD. Placed AFTER rule 1 on purpose: a `git checkout` that
     # names a path is a path operation, rule 1 already judges it, and this rule never sees it, so
     # the shared-tree clause keeps governing those calls unchanged.
+    # A git segment moves the HEAD of the folder it runs in (its own `-C`, else where the shell stands when it
+    # runs); a line the walk does not know takes the whole call's folder.
     head_where = head_root(stripped, cwd)
     for segment in split_segments(stripped):
         if not segment.strip():
             continue
-        matched = pointer_head_hit(segment, head_where)
+        folders = pointer_dirs.get(segment)
+        matched = pointer_head_hit(segment, head_in(stripped, folders.pop(0)) if folders else head_where)
         if matched:
             refuse(tool, "deny", "pointer-head", POINTER_HEAD_REASON, matched)
 
@@ -4614,7 +4681,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if matched:
             refuse(tool, "deny", "cite-by-id", CITE_REASON, matched)
         matched = lane_number_named(segment, raw, cite_where, before)
-        if matched.startswith(UNREAD_MARK):   # a gh pr merge file: cite-by-id never reads merge
+        if matched.startswith(UNREAD_MARK):   # backstop: cite-by-id above reads the same files, merge too
             refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
         if matched:
             refuse(tool, "deny", "lane-by-slug", LANE_REASON, matched)
@@ -4705,15 +4772,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 3b. A trap ported from banchi's `scripts/guard-shell.py`: `ln -s` onto a directory that is
     # already there. It reads the segment's own command word, never a substring, and reads the
-    # filesystem rather than the text.
+    # filesystem rather than the text. Each ln is read in the folder it runs in on the cd walk, since
+    # `_run_dir` answers for the call's git segments, not for an ln in another folder. When the walk
+    # cannot tell that folder, the whole-call answer stands in.
     run_in = _run_dir(stripped, cwd)
     ends = []
     nm_segments = split_segments(stripped, ends)
     for number, segment in enumerate(nm_segments):
-        matched = ln_descends_hit(segment, run_in)
+        folder = dir_before_segment(nm_segments, number, cwd, ends)
+        matched = ln_descends_hit(segment, folder or run_in)
         if matched:
             refuse(tool, "deny", "ln-over-directory", LN_DESCENDS_REASON, matched)
-        folder = dir_before_segment(nm_segments, number, cwd, ends)
         matched = folder and linked_nm_hit(segment, folder)
         if matched:
             refuse(tool, "deny", "linked-node-modules", LINKED_NM_REASON, matched)
@@ -4884,7 +4953,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # and rule 1 strips it. A command that writes a settings file and names the cap variable
     # somewhere else on the line is asked too: an over-trigger of one prompt, inside a scope this
     # narrow, beats a bypass by a second segment.
-    matched = shell_write_hit(raw, cwd, is_settings_file)
+    # A python or node script's own file call writes the file without a shell spot, so the interpreter reader adds it.
+    matched = shell_write_hit(raw, cwd, is_settings_file) or interpreter_write_hit(raw, cwd, is_settings_file)
     if matched:
         change = cap_change(raw)
         if change:

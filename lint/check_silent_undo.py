@@ -160,7 +160,8 @@ def allowed(cwd, rng, pr_body=""):
     for line in out.splitlines() + body:
         m = re.match(r"\s*(\S.*?)\s+--\s+(\S.*?)\s*$", line)
         if m:
-            res[m.group(1)] = m.group(2)
+            # git names a path without its leading ./, so `./a` must key as `a` to match.
+            res[re.sub(r"^(?:\./)+", "", m.group(1))] = m.group(2)
     return res
 
 

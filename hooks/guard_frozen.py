@@ -240,6 +240,11 @@ def _mutates_as_command(command: str, words) -> bool:
     return bool(re.fullmatch(MUTATING_COMMAND, command))
 
 
+# The in-place flag of perl and ruby: `-i`, a cluster ending in i (`-pi`, `-ni`, `-0pi`, where `-0` takes
+# digits), and either with a backup suffix (`-i.bak`). A cluster that merely holds an i (`-rtime`) is a library, not an edit in place, and so
+# is one that holds a capital I: `-Iui` is the include directory `ui`, as `-I` takes the rest of the word.
+_INPLACE_FLAG = r"-[0-9A-HJ-Za-z]*i(?:\.\S*)?"
+
 # A character that lets a script run text the segment split cannot see: a substitution, a group, a brace,
 # or a backslash (an escaped quote or separator the split would read wrongly).
 _SCRIPT_RUNS_HIDDEN = re.compile(r"[$`(){}\\]")
@@ -252,14 +257,51 @@ def _script_mutates(script: str) -> bool:
         return True
     for segment in split_segments(script):
         command, rest = _segment_command([_unquoted(word) for word in _quoted_words(segment, True)])
-        # `sed -i` is no mutating word: `writes_to` reads it by its own pattern, so it must get that far.
+        # `sed -i` and `perl`/`ruby -i` are no mutating word: `writes_to` reads them by their own patterns,
+        # so they must get that far.
         if _mutates_as_command(command, rest) or (
-                command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)):
+                command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)) or (
+                command in ("perl", "ruby") and any(re.fullmatch(_INPLACE_FLAG, word) for word in rest)):
             return True
     return False
 
 
-def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
+# Commands whose arguments are text, never a program: a `perl -i` after one is a pattern or a printed word.
+_TEXT_ARGUMENT_COMMANDS = {"grep", "egrep", "fgrep", "rg", "ag", "echo", "printf"}
+
+
+def _inplace_in_words(target: str, words) -> bool:
+    """True when one segment's quote-keeping `words` run perl or ruby with its in-place flag and then name
+    `target`. A quoted word, or a word after a `#`, is text, and a command that only prints or searches its
+    arguments (`grep -n perl -i f`) runs no perl."""
+    command, rest = _segment_command([_unquoted(word) for word in words])
+    if command in _TEXT_ARGUMENT_COMMANDS:
+        return False
+    if command in guard_core.INLINE_SCRIPT_SHELLS:   # `sh -c 'perl -pi ...'`: the quoted script is a command line
+        script = guard_core.inline_script([command, *rest])
+        return bool(script) and any(
+            _inplace_in_words(target, _quoted_words(segment)) for segment in split_segments(script))
+    for index, word in enumerate(words):
+        if _has_quote(word) or _name(word) not in ("perl", "ruby"):
+            continue
+        rest = words[index + 1:]
+        rest = rest[:next((at for at, other in enumerate(rest) if other.startswith("#")), len(rest))]
+        for at, flag in enumerate(rest):
+            if re.fullmatch(_INPLACE_FLAG, flag) and re.search(target, " ".join(rest[at + 1:])):
+                return True
+    return False
+
+
+def _perl_ruby_inplace(target: str, cmd: str, raw=()) -> bool:
+    """True when the segment runs perl or ruby with its in-place flag and then names `target` (a regex).
+    `raw` is the segment's words with their quotes: `cmd` has a quoted script cut into pieces, so only
+    the words can tell a `-i` flag from a `-i` inside a string. Without them `cmd` is read by its segments."""
+    if raw:
+        return _inplace_in_words(target, list(raw))
+    return any(_inplace_in_words(target, _quoted_words(segment)) for segment in split_segments(cmd))
+
+
+def writes_to(path: str, cmd: str, command=None, words=(), raw=()) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
     Two ways to write a named file from a shell: redirect onto it, or hand it to a command that
@@ -276,12 +318,13 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
-        return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
+        return (command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))) or (
+            command in ("perl", "ruby") and _perl_ruby_inplace(target, cmd, raw))
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
     if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
         return True
-    return False
+    return _perl_ruby_inplace(target, cmd, raw)
 
 
 # VARIABLE INDIRECTION. In `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` the parse
@@ -1133,7 +1176,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ())):
+            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else (None, ())), raw=raw):
                 return word
     for text in inner:
         hit = _shell_write_hit(text, cwd, predicate, holds, follow_cd, command_position)

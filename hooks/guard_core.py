@@ -363,7 +363,8 @@ POWERSHELL_ASSIGNMENT = re.compile(r"^\$[A-Za-z_][A-Za-z0-9_]*$")
 # command word, not the wrapper. `xargs pkill foo` runs pkill, so `xargs` unwraps the same as
 # the rest: the token after it, once its own flags are skipped, is what actually runs.
 COMMAND_WRAPPERS = {"sudo", "env", "command", "nohup", "nice", "time", "doas", "xargs",
-                    "timeout", "verdict", "python", "python3", "exec", "builtin", "!", "&"}
+                    "timeout", "gtimeout", "watch", "verdict", "python", "python3", "exec", "builtin",
+                    "!", "&"}
 # The flags of a wrapper that take the NEXT word as their value: `nice -n 5 git` runs git, not `5`.
 # Long flags are listed too: `sudo --user root git ...` runs git. A `--flag=value` is one token and
 # needs no entry.
@@ -397,6 +398,7 @@ DURATION = re.compile(r"^\d+(\.\d+)?[smhd]?$")
 TIMEOUT_FLAGS_WITH_VALUE = {"-k", "-s", "--kill-after", "--signal"}
 TIMEOUT_FLAGS_BARE = {"--preserve-status", "--foreground"}
 WRAPPER_VALUE_FLAGS["timeout"] = TIMEOUT_FLAGS_WITH_VALUE
+WRAPPER_VALUE_FLAGS["gtimeout"] = TIMEOUT_FLAGS_WITH_VALUE   # the macOS name of timeout, same shape
 
 # A leading shell keyword that opens or joins a control-flow block, never a command itself.
 # `split_segments` cuts on `;`, so the segment after a loop's own semicolon starts with `do`, and
@@ -669,9 +671,11 @@ def _walk_wrappers(tokens):
         word, start = basename(tokens[index]), index
         index, flags = _wrapper_flags(word, tokens, index + 1)
         chain.append((word, tuple(flags)))
-        if word == "timeout" and not (index < end and DURATION.match(tokens[index])):
+        if word in ("timeout", "gtimeout") and not (index < end and DURATION.match(tokens[index])):
             return start, tuple(chain)
-        if word == "timeout":
+        if word == "watch" and index < end and re.search(r"\s", tokens[index]):
+            return start, tuple(chain)   # one quoted line: `wrapped_commands` reads what watch hands to sh -c
+        if word in ("timeout", "gtimeout"):
             index += 1
         if word in ("python", "python3"):
             if not (index < end and basename(tokens[index]) == "verdict"):
@@ -848,14 +852,16 @@ def INTERPRETER_HEREDOC(text: str) -> bool:
 _HEAD_MARKS = re.compile(r"""['"(#<]""")
 
 
-def heredoc_heads(text: str, quote: str = "", closes_after: bool = False, legacy: bool = False):
+def heredoc_heads(text: str, quote: str = "", closes_after: bool = False, legacy: bool = False,
+                  dashes: "list | None" = None):
     """Return ([(quote char, delimiter)], quote) for the heredoc headers in `text` that sit outside
     quotes and comments, in order, and what is still open at its end. `quote` is a stack of open
     quotes and parentheses. `echo "<<EOF"` and `<<<word` hold no header, but `-m "$(cat <<EOF` does:
     a `$(` inside double quotes is shell again. Quotes are read as bash reads them, with no escape:
     only a contraction bash never closes (is_contraction; `closes_after` says a `'` follows `text`)
     opens none. A mark read as text could show a header bash quotes, and drop a body bash runs.
-    `legacy` reads each header with _MAIN_HEADER, as main did (the bandaid there)."""
+    `legacy` reads each header with _MAIN_HEADER, as main did (the bandaid there). A caller that passes
+    `dashes` gets one flag appended per header: True for `<<-`, whose body closer may lead with tabs."""
     if not quote and not _HEAD_MARKS.search(text):
         return [], ""   # no quote, paren, comment or `<` to read: nothing opens, nothing is open
     heads = []
@@ -890,6 +896,8 @@ def heredoc_heads(text: str, quote: str = "", closes_after: bool = False, legacy
             header = (_MAIN_HEADER if legacy else HEREDOC_HEADER).match(text, index)
             if header:
                 heads.append(header.groups() if legacy else heredoc_delimiter(header.group(1)))
+                if dashes is not None:
+                    dashes.append(header.group(0).startswith("<<-"))
                 index = header.end()
                 continue
         index += 1
@@ -950,13 +958,15 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
         if kept_at is not None:
             kept_at.append(index)
         header_line = lines[index]
-        heads, stack = heredoc_heads(header_line, stack, index < last, legacy)   # a later line holds a `'`
+        dashes = []
+        heads, stack = heredoc_heads(header_line, stack, index < last, legacy, dashes)   # a later line holds a `'`
         index += 1
         if own_heads is not None and heads:
             own_heads.extend(_own_headers(header_line, len(heads)))
-        for quote, delimiter in heads:
+        for (quote, delimiter), dash in zip(heads, dashes):
             start = index
-            while index < len(lines) and lines[index].strip() != delimiter:
+            # Bash closes on a line that is exactly the delimiter; `<<-` also strips leading tabs, never spaces.
+            while index < len(lines) and (lines[index].lstrip("\t") if dash else lines[index]) != delimiter:
                 index += 1
             bodies.append((quote, "\n".join(lines[start:index]), header_line))
             if spans is not None:
@@ -1488,6 +1498,17 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
     a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
     fails closed on an untrusted `cd` keeps doing so."""
+    value = None
+    for at, value in enumerate(_walk_dirs(segments, shell_cwd, ends, failed_cd_stays)):
+        if at >= number:
+            break
+    return value
+
+
+def _walk_dirs(segments, shell_cwd: str, ends=(), failed_cd_stays=False):
+    """Yield, once per segment and once more after the last, the folder `dir_before_segment` reads for it
+    (None when it cannot be told). One pass gives every segment's folder, so a caller that needs many does
+    not walk the command again for each."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
     known = {}         # the variables the shell holds: plain assignments that ran here (`_track_variables`)
@@ -1495,14 +1516,13 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     unsure = False     # the last segment may have failed or not run: an assignment after its `&&` may not run
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     last_end = ""      # the operator that ended the last non-empty segment
-    for at, segment in enumerate(segments[:number + 1]):
+    for at, segment in enumerate(segments):
         marks = [(index, char) for index, char, quote in walk_quotes(segment) if not quote and char in "()"]
         groups = _subshell_opens(segment, marks)
         stack.extend((where, prev, dict(known), index in groups) for index, char in marks if char == "(")
         closes = sum(1 for _, char in marks if char == ")")
         end = ends[at] if at < len(ends) else ""
-        if at == number:
-            return None if skipping else where
+        yield None if skipping else where
         if not segment.strip():
             continue   # an operator at end of line then the newline leaves an empty part: it changes nothing
         if skipping:
@@ -1554,7 +1574,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         for _ in range(closes):
             if stack:
                 where, prev, known = _close_paren(stack, known)
-    return where
+    yield where
 
 
 # The value flags of a wrapper that move the program it runs into another folder first, so `env
@@ -1587,8 +1607,8 @@ def _segment_git_c_parts(tokens):
     or None when the segment's command word is not `git` or a `-C` has no value. The env folder is the one
     an `env -C <dir>` or `env --chdir <dir>` in front of the `git` moves it into (`_wrapper_chdir`). The
     git -C folder is every `-C` after the `git`, chained. The two stay apart because `_run_dir` reads them
-    differently: an env folder moves only the segment's own program, and a git -C folder reads first-wins.
-    `_segment_git_c_target` joins them for every other caller.
+    differently: an env folder moves only the segment's own program, and a git -C folder is the segment's
+    own folder. `_segment_git_c_target` joins them for every other caller.
 
     ONLY THE SPACED FORM, `-C <path>`, IS READ. MEASURED against the real binary: `git
     -C/some/path status` and `git -C=/some/path status` both fail with `unknown option:
@@ -1665,9 +1685,69 @@ def _strip_heredoc_bodies_unconditionally(cmd: str) -> str:
     return _drop_heredoc_bodies(cmd)
 
 
+def _read_git_segments(cmd: str, shell_cwd: str):
+    """Read the cd walk of a command once, for `_run_dir`, `bare_segment_dirs` and `own_c_segment_dirs`.
+
+    Returns `(last_c, env_moved, bare, owned, moved, final, wrapped)`. `last_c` is the folder of the last git
+    segment when that segment carries a `git -C`, else None. `env_moved` is the env folder of the last git
+    segment that carries one. `bare` lists, per git segment with no env folder and no `-C`,
+    `(segment text, folder)`: the folder the shell stands in when THAT segment runs, with the last `cd`
+    before it standing in when the walk cannot tell (a `cd` to a folder that is not there, an unread
+    variable). `owned` lists, per git segment with a `-C`, `(segment text, folder)`: that `-C` (after its
+    env folder) read against the folder the shell stands in when that segment runs. `moved` is the folder
+    the last `cd` left and `final` the folder the shell ends in. Heredoc bodies are dropped first,
+    unconditionally, so the segment texts are the shell's own lines. `wrapped` lists, per segment whose
+    command word is a shell wrapper (`sh -c`, `bash -lc`, `eval`), `(segment text, folder)`: the folder the
+    walk gives that segment, for the script it hands on. It is empty when the command has no `cd`, since the
+    walk is skipped then and the caller's whole-call folder answers.
+
+    A command with no `cd` keeps the shell where it started, so the walk is skipped: `_run_dir` runs once
+    per segment for some callers, and a walk each time would grow as the square of the segments."""
+    cmd = _strip_heredoc_bodies_unconditionally(cmd)
+    ends = []
+    segments = split_segments(cmd, ends)
+    read = [segment_tokens(segment) for segment in segments]
+    start = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
+    walk = None
+    if any(tokens is not None and _segment_cd_move(tokens) is not None for tokens in read):
+        walk = _walk_dirs(segments, shell_cwd, ends)
+    last_c = None
+    moved = None
+    env_moved = None
+    bare = []
+    owned = []
+    wrapped = []
+    for segment, tokens in zip(segments, read):
+        folder = next(walk) if walk else start
+        if tokens is None:
+            continue
+        if walk and folder and inner_commands(tokens):
+            wrapped.append((segment, _absolute(folder, shell_cwd)))
+        parts = _segment_git_c_parts(tokens)
+        if parts is not None:
+            env_dir, git_c = parts
+            if git_c is not None:
+                base = folder or moved
+                last_c = _absolute(_chain_chdir(env_dir, git_c), _absolute(base, shell_cwd) if base else shell_cwd)
+                owned.append((segment, last_c))
+            else:
+                last_c = None
+                if env_dir and moved:
+                    env_dir = shell_abs(env_dir, moved) or env_dir
+                if env_dir:
+                    env_moved = env_dir
+                else:
+                    bare.append((segment, folder or moved))
+        cd = _segment_cd_target(tokens)
+        if cd is not None:
+            moved = cd
+    return last_c, env_moved, bare, owned, moved, (next(walk) if walk else start), wrapped
+
+
 def _run_dir(cmd: str, shell_cwd: str) -> str:
-    """Return the directory the command RUNS in: a `git -C`, else the env folder when every git segment
-    has one, else the last `cd`, else the cwd.
+    """Return the directory the command RUNS in, as one answer for the whole call: the last git
+    segment's `git -C`, else the env folder when every git segment has one, else where the last bare git segment runs, else the last
+    `cd`, else the cwd. A caller that judges each git segment on its own asks `bare_segment_dirs`.
 
     This is the part both roots share. Neither `--work-tree` nor `--git-dir` is read here,
     because each answers a different question and each belongs to one caller.
@@ -1676,53 +1756,59 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     inside a quoted argument or a `#` comment is text, not a command, and only a segment that
     tokenizes to `cd`/`git` as its OWN command word (via `resolve_command`, which already steps
     over wrappers and loop keywords) counts. A segment that fails to tokenize (an unmatched
-    quote) is skipped, the same fail-open stance `segment_tokens` documents elsewhere. The FIRST
-    segment with a `git -C` wins over every `cd` and over an env folder (only an env folder in its
-    own segment is kept, as its base), and its relative folder reads against the shell cwd, not
-    against the folder an earlier `cd` left. Without a `git -C`, an env folder is used only when
-    every git segment carries one (below); otherwise the last `cd`, else the cwd. That first-wins
-    reading of `git -C` is kept as the owner ruled.
+    quote) is skipped, the same fail-open stance `segment_tokens` documents elsewhere. Each git
+    segment runs in the folder it names, so the owner ruled `git -C` per segment (item 621, 14:13 CST
+    Nov 12): a `-C` binds its own segment only, and a relative one reads against the folder the shell
+    stands in when that segment runs. The one answer for the whole call is the last git segment's: its
+    `git -C` when it has one. Otherwise an env folder is used only when every git segment carries one
+    (below), else where the last bare git segment runs.
 
     AN `env -C` FOLDER MOVES ONLY ITS OWN PROGRAM, NOT THE SHELL: a later bare `git` in the command
     still runs in the shell's folder. So the env folder is read only when EVERY git segment carries
     one; the last of them wins, and a relative one joins onto the folder the last `cd` before it left.
-    Any bare git segment makes the shell's folder (the last `cd`, else the cwd) the answer, and so
-    does a command with no git segment. With a `git -C` in the same segment, the `git -C` joins onto
+    Any bare git segment makes the folder where the last of them runs the answer (a `cd` after it
+    moves the shell for the segments after it only), and a command with no git segment makes the
+    folder the shell ends in the answer. With a `git -C` in the same segment, the `git -C` joins onto
     that env folder.
 
     HEREDOC BODIES ARE STRIPPED FIRST, unconditionally, even an interpreter body that
     `strip_heredoc_bodies` keeps for other callers: a `cd` line inside one never moves the
     OUTER shell, which is the tree this function answers about.
     """
-    cmd = _strip_heredoc_bodies_unconditionally(cmd)
-    where = None
-    moved = None   # the folder the last `cd` left
-    env_moved = None   # the env folder of the last git segment that carries one
-    bare_git = False   # a git segment without an env folder runs in the shell's folder
-    for segment in split_segments(cmd):
-        tokens = segment_tokens(segment)
-        if tokens is None:
-            continue
-        parts = _segment_git_c_parts(tokens)
-        if parts is not None:
-            env_dir, git_c = parts
-            if env_dir and moved:
-                env_dir = shell_abs(env_dir, moved) or env_dir
-            if git_c is not None:
-                if where is None:
-                    where = _chain_chdir(env_dir, git_c)
-            elif env_dir:
-                env_moved = env_dir
-            else:
-                bare_git = True
-        cd = _segment_cd_target(tokens)
-        if cd is not None:
-            moved = cd
+    last_c, env_moved, bare, _, moved, final, _ = _read_git_segments(cmd, shell_cwd)
+    where = last_c
     if where is None:
-        where = env_moved if env_moved and not bare_git else moved
+        if env_moved and not bare:
+            where = env_moved
+        elif bare:
+            where = bare[-1][1]
+        else:
+            where = final or moved
     if where:
         where = _absolute(where, shell_cwd)
     return where or shell_cwd or ""
+
+
+def bare_segment_dirs(cmd: str, shell_cwd: str):
+    """Return `(segment text, folder)` for each git segment that carries no `env -C` and no `git -C`
+    of its own, in command order: the folder THAT segment runs in, so a discard is judged where it runs
+    and not where another segment stands or names."""
+    _, _, bare, _, _, _, _ = _read_git_segments(cmd, shell_cwd)
+    return [(segment, _absolute(folder or shell_cwd or "", shell_cwd)) for segment, folder in bare]
+
+
+def own_c_segment_dirs(cmd: str, shell_cwd: str):
+    """Return `(segment text, folder)` for each git segment that carries a `git -C`, in command order:
+    that `-C` (after its env folder) read against the folder the shell stands in when THAT segment runs.
+    A `-C` names its own segment's folder and no other's."""
+    return _read_git_segments(cmd, shell_cwd)[3]
+
+
+def wrapped_segment_dirs(cmd: str, shell_cwd: str):
+    """Return `(segment text, folder)` for each segment that hands a script to a shell wrapper (`sh -c`,
+    `bash -lc`, `eval`), in command order: the folder the cd walk gives THAT segment, which the script it
+    runs starts in. Empty for a command with no `cd`."""
+    return _read_git_segments(cmd, shell_cwd)[6]
 
 
 def command_root(cmd: str, shell_cwd: str) -> str:

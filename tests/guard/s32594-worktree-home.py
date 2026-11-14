@@ -735,22 +735,22 @@ LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads a bare git ahead of an 
                          _run_dir_row("git status && env -C %s git log" % slash(RUN_DIR_CLEAN), RUN_DIR_LANE,
                                       "a bare git ahead of an env -C reads the env folder, as if the env -C moved the shell for it")))
 # The guards below pin what each red row must keep. A git -C under an env -C joins onto that env folder, and a
-# relative one chains onto it. A non-git env -C moves nothing. A relative git -C after a cd reads the shell's
-# folder, and a git -C ahead of a cd keeps its folder over the cd. With an env -C on every git segment, the last
-# env -C folder is read.
+# relative one chains onto it. A non-git env -C moves nothing. A relative git -C after a cd joins onto the cd's
+# folder, and a bare git after a cd runs in the cd's folder, whatever a git -C ahead of it named. With an env -C
+# on every git segment, the last env -C folder is read.
 LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir joins a git -C onto the env -C folder of its own segment",
                          _run_dir_row("env -C a git -C b status", os.path.join(RUN_DIR_LANE, "a", "b"),
                                       "a git -C under an env -C was not joined onto that env folder")))
 LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads a git after an env -C of a non-git program as the shell's folder",
                          _run_dir_row("env -C %s true && git status" % slash(RUN_DIR_PRIM), RUN_DIR_LANE,
                                       "an env -C of a non-git program moved the shell's folder")))
-LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads a relative git -C after a cd in the shell's folder",
-                         _run_dir_row("cd %s && git -C . status" % slash(RUN_DIR_PRIM), RUN_DIR_LANE,
-                                      "a relative git -C after a cd joined onto the cd folder, not the shell's folder")))
-LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads a git -C ahead of a cd in its own folder, not the cd's",
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads a relative git -C after a cd in the cd's folder",
+                         _run_dir_row("cd %s && git -C . status" % slash(RUN_DIR_PRIM), RUN_DIR_PRIM,
+                                      "a relative git -C after a cd read the shell's folder, not the cd's folder")))
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads a bare git after a cd in the cd's folder, not an earlier git -C's",
                          _run_dir_row("git -C %s status && cd %s && git status" % (slash(RUN_DIR_LANE), slash(RUN_DIR_PRIM)),
-                                      RUN_DIR_LANE,
-                                      "a cd after a git -C decided the folder over the git -C")))
+                                      RUN_DIR_PRIM,
+                                      "a bare git after a cd read the folder of an earlier git -C, not the cd's")))
 LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads the last env -C folder when every git segment carries one",
                          _run_dir_row("env -C %s git status && env -C %s git log" % (slash(RUN_DIR_PRIM), slash(RUN_DIR_CLEAN)),
                                       RUN_DIR_CLEAN,

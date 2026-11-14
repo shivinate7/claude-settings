@@ -521,4 +521,32 @@ sh("silent-write: a PowerShell here-string opener mid-word, then a silenced comm
 TEMP_DIR = None   # back to the system temp for the sections below
 
 
+# A GIT WRITE INSIDE A SHELL WRAPPER (debt guard-bash-c-silent-write). A shell that runs a git write as its own script
+# is judged as the bare form is: the silent-write rule reads each command a wrapper hands on, so a discarded output or
+# git's quiet flag inside the quotes denies. The green control is an ordinary commit in the same wrapper, which allows.
+for _name, _command, _carries in (
+    ("bash -c, a commit with both streams discarded", "bash -c '" + VCS + " commit -m x >/dev/null 2>&1'",
+     "a redirect silences"),
+    ("sh -c, a commit with stdout discarded", "sh -c '" + VCS + " commit -m x >/dev/null'",
+     "a redirect silences"),
+    ("bash -c, a push with git's quiet flag", "bash -c '" + VCS + " push -q'", "moved nothing"),
+):
+    sh("silent-write wrapper: %s denies, as the bare form does" % _name, _command, "deny",
+       "silent-write", carries=_carries, cwd=NOGIT)
+sh("silent-write wrapper: an ordinary commit inside bash -c stays allowed",
+   "bash -c '" + VCS + " commit -m x'", "allow", cwd=NOGIT)
+
+# The wrapper's inner text is scanned as source text (building-scanner-respects-strings). A merge named inside a
+# quoted echo is text, so it allows. A comment opener or a lone apostrophe inside those quotes must not hide the
+# real merge that follows, so the discarded merge still denies.
+sh("silent-write wrapper scanner: a merge named inside a quoted echo is text, allowed",
+   'bash -c "echo \'a && gh pr merge 3\'" >/dev/null', "allow", cwd=NOGIT)
+sh("silent-write wrapper scanner: a comment opener inside a quoted echo does not hide a discarded merge",
+   'bash -c "echo \'x # y\'; gh pr merge 3 --squash" >/dev/null', "deny", "silent-write",
+   carries=("a redirect silences", "gh pr merge"), cwd=NOGIT)
+sh("silent-write wrapper scanner: a lone apostrophe in an escaped echo does not hide a discarded merge",
+   'bash -c "echo don\\\'t; gh pr merge 3 --squash" >/dev/null', "deny", "silent-write",
+   carries=("a redirect silences", "gh pr merge"), cwd=NOGIT)
+
+
 # =========================================================================== 3. push and delete

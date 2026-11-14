@@ -414,4 +414,18 @@ sh("guard-command-position: lane in the third of three plain heredoc bodies deni
    "cat <<'A'\nfirst body\nA\ncat <<'B'\nsecond body\nB\n" + VCS + " commit -F - <<'C'\nLane N20 lands\nC",
    "deny", "lane-by-slug", cwd=NOGIT, config=MERGECFG)
 
+# A RECORD PATH IN A MERGE SUBJECT OR BODY (debt cite-by-id-skips-merge-subject). A squash subject or body becomes a
+# commit on main, so cite-by-id reads it as it reads a commit message, as lane-by-slug already does. The green
+# control is a merge subject that names a code path and cites no record.
+for _name, _command in (
+    ("a merge subject", 'gh pr merge 5 --squash --subject "cites ' + CITE + '"'),
+    ("a merge body", 'gh pr merge 5 --squash --body "cites ' + CITE + '"'),
+):
+    sh("cite-by-id: %s citing a record path denies" % _name, _command, "deny", "cite-by-id",
+       cwd=NOGIT, env_path=GREEN_ON, config=MERGECFG)
+sh("cite-by-id: a merge subject naming a code path is allowed",
+   'gh pr merge 5 --squash --subject "guard: fix hooks/guard.py"', "allow", cwd=NOGIT,
+   env_path=GREEN_ON, config=MERGECFG)
+
+
 # =========================================================================== 5c-1. a message file in a scratchpad

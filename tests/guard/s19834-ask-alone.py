@@ -276,4 +276,16 @@ chained_prune("ask-alone: a cd - to the previous folder before the prune is no n
               "cd - && " + ASK_PRUNE)
 
 
+# A COMMENT OPENER OR A LONE APOSTROPHE INSIDE A HARMLESS TAIL (debt ask-alone-tail-test-gap). The tail is read with the
+# shell's own quoting: a quoted #, a quoted /* and a lone apostrophe in a double-quoted echo or Write-Host text hide no
+# command and open no comment, so each call still asks once. Test only: the guard already reads these tails this way,
+# so these cases pin the current verdict, and no guard change is needed for them.
+for _label, _text in (("a quoted hash", "a # b"), ("a quoted block opener", "x /* y"),
+                      ("a lone apostrophe", "don't stop")):
+    asks_alone("ask-alone: %s in an && echo tail still asks once" % _label,
+               ASK_PRUNE + ' && echo "' + _text + '"', "shared-tree", cwd=WTPRUNE)
+    asks_alone("ask-alone: %s in a ; Write-Host tail still asks once" % _label,
+               ASK_PRUNE + '; Write-Host "' + _text + '"', "shared-tree", tool="PowerShell", cwd=WTPRUNE)
+
+
 # =========================================================================== 6d. an interpreter heredoc is one command
