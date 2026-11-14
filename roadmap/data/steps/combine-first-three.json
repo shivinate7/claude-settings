@@ -1,0 +1,14 @@
+{
+ "id": "combine-first-three",
+ "title": "Combine PRs #3259, #3269 and #3210 into one combined PR: one push run instead of three",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJKyubnYbVk1PhBXyFYX",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Three reviewed PRs merging separately start three push runs; one combined PR starts one, and it proves the combined-PR recipe on real lanes.",
+ "source": "Coordinator 18:16 CST Nov 13: lane combine-first-three started (session_013NEJKyubnYbVk1PhBXyFYX, Sonnet medium), tagged to step combined-pr-recipe.",
+ "note": "Filed 18:16 CST Nov 13. The lane builds one combined PR of #3259 (role hand-off wording), #3269 and #3210, each already reviewed under its own rules; ruling own-767-a-combined-pr allows a PR to merge alone and to combine reviewed lanes when that saves CI. Done check: one PR with each lane's own commit kept, lane lint read, and a green PR run that ran its suites (not an all-skipped run; step force-advice-needs-real-run). The first member #3259 had a lane lint UNKNOWN on a queued macOS job (page item 775); the lane reads that first. Relations: combined-pr-recipe, express-combined-pr, lane-lint-unknown-on-ready-pr. Past rulings checked: own-767-a-combined-pr. Merge needs the owner's word or a repo grant; the batch runner marks ready.",
+ "updatedAt": "2026-11-13T18:16:38-06:00"
+}
