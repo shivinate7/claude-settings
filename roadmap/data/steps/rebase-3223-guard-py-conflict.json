@@ -1,14 +1,14 @@
 {
  "id": "rebase-3223-guard-py-conflict",
  "title": "PR #3223 is brought up to date on hooks/guard.py, so it can join the next combined PR",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1k5MRDCFf5YCvW9ox",
  "owner": "coordinator",
  "blockedBy": [],
- "why": "Left out of combined PR #3418 by name (g1 via the coordinator 15:09 CST Nov 14; triage read nothing): #3223 conflicts main alone in hooks/guard.py. The step test-sections-no-branch-numbers names #3223. First act of a lane: merge main into the PR, resolve hooks/guard.py by reading both sides, run the PR's own checks, hand it in; do not drop it. Never drop an item without saying so.",
+ "why": "Left out of combined PR #3418 by name (g1 via the coordinator 15:09 CST Nov 14; triage read nothing): #3223 conflicts main alone in hooks/guard.py. The step test-sections-no-branch-numbers names #3223. First act of a lane: merge main into the PR, resolve hooks/guard.py by reading both sides, run the PR's own checks, hand it in; do not drop it. Never drop an item without saying so. LANE STARTED 15:14 CST Nov 14 (coordinator 15:13): lane session_013NEJL1k5MRDCFf5YCvW9ox (PR #3223, branch cmk-unread-git-read-rebuild). It first checks that no live session holds the branch (stops if the last push is under 2 h), merges main only, and hands in; no review chain until the coordinator says.",
  "source": "coordinator 15:09 CST Nov 14 (g1's list)",
  "note": "Filed 15:11 CST Nov 14 by triage. Tracker: the coordinator.",
- "updatedAt": "2026-11-14T15:11:00"
+ "updatedAt": "2026-11-14T15:14:30"
 }
