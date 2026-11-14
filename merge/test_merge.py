@@ -18782,30 +18782,30 @@ class LocalSessionRoleCheck(CloudSession):
         self.put_local_role("batch-runner", session=LOCAL_OTHER)
         self.assert_refused()
 
-    # CONTROL, green on 34345f092: unequal ids leave the session with no own file, so today's confirm applies and the host is read.
+    # Unequal ids leave the session with no own file, so today's confirm applies and the host is read.
     def test_unequal_ids_leave_the_session_with_no_own_file(self):
         self.put_local_role("batch-runner")
         self.assert_reaches_host("7", "--confirm", CLAUDE_CODE_SESSION_ID=LOCAL_OTHER)
 
-    # CONTROL, green on 34345f092: no id at all, so no own file; a batch-runner file elsewhere does not refuse the confirm.
+    # With no id there is no own file, so a batch-runner file elsewhere does not refuse the confirm.
     def test_an_absent_id_leaves_the_session_with_no_own_file(self):
         self.put_local_role("batch-runner")
         self.assert_reaches_host("7", "--confirm", CLAUDE_CODE_SESSION_ID=None)
 
-    # CONTROL, green on 34345f092: another session's lingering file, and this session has no file of its own.
+    # Another session's lingering file does not refuse a session that has no file of its own.
     def test_another_sessions_lingering_file_does_not_refuse_a_session_with_no_file(self):
         self.put_local_role("triage", session=LOCAL_OTHER, name=LOCAL_OTHER)
         self.assert_reaches_host("7", "--confirm")
 
-    # CONTROL, green on 34345f092, rule (c): CS_SESSION_ROLE is set and no own file exists, so the hook failed to bind the session.
+    # Rule (c): CS_SESSION_ROLE is set and no own file exists, so the hook failed to bind the session and the confirm refuses.
     def test_a_launcher_session_with_no_own_file_refuses_the_confirm(self):
         self.assert_refused(CS_SESSION_ROLE="batch-runner")
 
-    # CONTROL, green on 34345f092, rule (c): CS_SESSION_ROLE is set and the session has no id at all, so the hook could not bind it.
+    # Rule (c): CS_SESSION_ROLE is set and the session has no id at all, so the hook could not bind it and the confirm refuses.
     def test_a_launcher_session_with_no_id_at_all_refuses_the_confirm(self):
         self.assert_refused(CLAUDE_CODE_SESSION_ID=None, CS_SESSION_ROLE="batch-runner")
 
-    # CONTROL, green on 34345f092, rule (c): the own file says batch-runner and CS_SESSION_ROLE says coordinator. They differ, so refuse.
+    # Rule (c): the own file says batch-runner and CS_SESSION_ROLE says coordinator. They differ, so the confirm refuses.
     def test_a_launcher_session_whose_own_file_differs_refuses_the_confirm(self):
         self.put_local_role("batch-runner")
         reads = len(self.host.pr_calls)

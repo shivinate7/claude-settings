@@ -60,11 +60,11 @@ add("local-tier: a triage file for this session and repo lets a local push to ro
 add("local-tier: a triage file is not read when neither the hook id nor the env id is set", "deny", rule=RECORD_RULE,
     tool="Bash", command=LT_PUSH, cwd=PUSHSSH, config=LT_TRIAGE, env={"CLAUDE_CODE_SESSION_ID": None}, lacks=LT_LACKS,
     windows=True)
-# RED on 34345f092. Cause: the guard reads the role file only when the hook's session_id equals the env id, so this push is refused.
+# The guard reads the role file the hook's session_id names, not one the env id names, so a differing env id does not refuse this push.
 add("local-tier: a triage file for the hook's session id lets a roadmap push through when the env id differs", "allow",
     tool="Bash", command=LT_PUSH, cwd=PUSHSSH, session=LT_SID, env={"CLAUDE_CODE_SESSION_ID": LT_OTHER},
     config=LT_TRIAGE, silent=True, windows=True)
-# CONTROL, green on 34345f092: a file named for the env id alone is not this session's, so the push stays refused.
+# A role file named for the env id alone is not this session's, so the push stays refused.
 add("local-tier: a triage file for the env id alone does not prove a roadmap push for the hook's session", "deny", rule=RECORD_RULE,
     tool="Bash", command=LT_PUSH, cwd=PUSHSSH, session=LT_SID, env={"CLAUDE_CODE_SESSION_ID": LT_OTHER},
     config=LT_OTHERENV, lacks=LT_LACKS, windows=True)
@@ -159,10 +159,10 @@ add("local-tier: unequal ids leave the session with no own file, so its confirm 
     tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env={"CLAUDE_CODE_SESSION_ID": LT_OTHER},
     config=LT_OTHERENV, silent=True)
 
-# CONTROL, green on 34345f092: the hook's session_id names the own file, so an env id that differs does not lift the refusal.
+# The hook's session_id names the own file, so an env id that differs does not lift the refusal.
 add("local-tier: a triage file for the hook's session id refuses a confirm when the env id differs", "deny", rule="merge-confirm-repo",
     tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env={"CLAUDE_CODE_SESSION_ID": LT_OTHER}, config=LT_TRIAGE)
-# CONTROL, green on 34345f092, rule (c): CS_SESSION_ROLE is set and the session has no id at all, so the hook could not bind it: refuse.
+# Rule (c): CS_SESSION_ROLE is set and the session has no id at all, so the hook could not bind it, and the confirm refuses.
 add("local-tier: a launcher session with CS_SESSION_ROLE and no id at all refuses the confirm", "deny", rule="merge-confirm-repo",
     tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=None,
     env={"CLAUDE_CODE_SESSION_ID": None, "CS_SESSION_ROLE": "batch-runner"}, config=LT_EMPTY)
@@ -179,8 +179,8 @@ add("local-tier: a launcher session whose own batch-runner file agrees with CS_S
     tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID,
     env={"CLAUDE_CODE_SESSION_ID": LT_SID, "CS_SESSION_ROLE": "batch-runner"}, config=LT_BATCH, silent=True)
 
-# A session may not claim a role for itself: the owner starts the launcher from his own terminal, never through Claude's tools.
-# RED on 47171b260: the guard allows each of these forms, so each stops at the deny the owner's ruling asks for.
+# A session may not give a role to a child session. The launcher runs from a terminal outside Claude's tools.
+# Each form below sets a role for a child session or runs the launcher, so each must stop at a deny.
 for _cmd in (
     "CS_SESSION_ROLE=batch-runner claude -p x",
     "env CS_SESSION_ROLE=triage claude",
@@ -193,7 +193,7 @@ for _cmd in (
         tool="Bash", command=_cmd, cwd=PUSHSSH, session=LT_SID)
 add("local-role: a PowerShell call that sets CS_SESSION_ROLE and starts claude is denied", "deny",
     tool="PowerShell", command="$env:CS_SESSION_ROLE='x'; claude", cwd=PUSHSSH, session=LT_SID, windows=True)
-# CONTROLS, green on 47171b260: reading the variable, grepping for the launcher's name and reading its file stay allowed.
+# Reading the variable, grepping for the launcher's name and reading its file are allowed, since none of them gives a role.
 add("local-role: echo of CS_SESSION_ROLE is allowed", "allow", tool="Bash", command="echo $CS_SESSION_ROLE",
     cwd=PUSHSSH, session=LT_SID, silent=True)
 add("local-role: a grep for the launcher's name is allowed", "allow", tool="Bash",
@@ -201,8 +201,8 @@ add("local-role: a grep for the launcher's name is allowed", "allow", tool="Bash
 add("local-role: reading bin/claude-role with cat is allowed", "allow", tool="Bash",
     command="cat bin/claude-role", cwd=PUSHSSH, session=LT_SID, silent=True)
 
-# More forms that claim a role for a child session: a subshell, a command substitution, a brace group, and a PowerShell
-# SetEnvironmentVariable. RED on fbb931781, where the guard allows each one.
+# Forms that give a role to a child session: a subshell, a command substitution, a brace group, and a PowerShell
+# SetEnvironmentVariable. Each must be denied.
 for _cmd in (
     "(CS_SESSION_ROLE=batch-runner claude -p hi)",
     "echo $(CS_SESSION_ROLE=batch-runner claude -p hi)",
@@ -213,7 +213,7 @@ for _cmd in (
 add("local-role: a PowerShell call that sets CS_SESSION_ROLE with SetEnvironmentVariable and starts claude is denied", "deny",
     tool="PowerShell", command="[Environment]::SetEnvironmentVariable('CS_SESSION_ROLE', 'batch-runner', 'Process'); claude -p hi",
     cwd=PUSHSSH, session=LT_SID, windows=True)
-# CONTROLS, green on fbb931781: text that names the variable or the launcher is not a claim, and neither is a shell that reads or unsets it.
+# Text that names the variable or the launcher is not a claim, and a shell that reads or unsets the variable is not one either.
 add("local-role: a commit message that quotes CS_SESSION_ROLE and claude-role is allowed", "allow", tool="Bash",
     command="git commit -m \"CS_SESSION_ROLE comes from bin/claude-role\"", cwd=PUSHSSH, session=LT_SID, silent=True)
 add("local-role: a heredoc that names CS_SESSION_ROLE is allowed", "allow", tool="Bash",
@@ -230,7 +230,7 @@ add("local-role: python3 -m pytest -k CS_SESSION_ROLE is allowed", "allow", tool
     command="python3 -m pytest -k CS_SESSION_ROLE", cwd=PUSHSSH, session=LT_SID, silent=True)
 add("local-role: python3 lint/test_claude_role.py is allowed", "allow", tool="Bash",
     command="python3 lint/test_claude_role.py", cwd=PUSHSSH, session=LT_SID, silent=True)
-# PowerShell reads of the variable are not judged (guard.py: a read is not judged). RED on fbb931781 for the two that deny today.
+# PowerShell reads of the variable are not judged, so each of these is allowed.
 for _cmd in (
     "Test-Path Env:CS_SESSION_ROLE",
     "Get-Item Env:CS_SESSION_ROLE",
