@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The push skip decision: it decides whether a push to main can skip the checks its tree already passed (decision push-skip-on-proven-tree).
 
-This is the shared action's script (actions/push-skip/action.yml). Child repos pin the action, and this repo's checks.yml calls it.
+This is the shared action's script (actions/push-skip/action.yml). Child repos follow the action at @stable (restart-plan R44), and this repo's checks.yml calls it.
 Writes one line to $GITHUB_OUTPUT (stdout when unset): skip=true or skip=false. It exits 0 on every path, so the push-skip job
 is a visible success and scope reads its output.
 
@@ -17,7 +17,7 @@ of any type, writes skip=false and says "unknown": an unknown state runs everyth
 
 The suite jobs are the jobs all-jobs-passed needs in the CALLING repo's workflow ($GITHUB_WORKSPACE/$WORKFLOW), minus the bookkeeping
 jobs. lint/all_jobs_passed_rules.py reads them (split_jobs, the one reader), loaded from this action's own checkout, so a child repo
-that pins this action by SHA gets the reader its pin carries. Nothing is copied here.
+that follows this action at @stable gets the reader that @stable carries. Nothing is copied here.
 
 A skipped push run clears no red nightly: a push run with push-skip success and scope skipped is evidence for the push group only,
 and a skipped job is never a pass (actions/ci-alarm/clear_rule.py, merge/test_merge.py).
@@ -41,7 +41,7 @@ ROLLUP = "all-jobs-passed"
 DEFAULT_WORKFLOW = ".github/workflows/checks.yml"
 PAGE = 100
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(os.path.dirname(HERE))  # the checkout this action came from: a pinned child repo gets claude-settings' copy
+ROOT = os.path.dirname(os.path.dirname(HERE))  # the checkout this action came from: a child repo on @stable gets claude-settings' copy
 LINT = os.path.join(ROOT, "lint")
 NIGHTLY_SKIP = os.path.join(ROOT, ".github", "scripts", "nightly-skip.py")
 
