@@ -1,0 +1,14 @@
+{
+ "id": "hold-names-its-end",
+ "title": "Any hold a session sets names the event that ends it",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The coordinator's \"merge nothing without a go\" outlived main going green at 20:12 CST by about 50 minutes; the owner asked at 21:04 CST whether that was a bug in the batch runner or correct.",
+ "source": "Consultant 21:06 CST Nov 13, from the owner's 21:04 chat question.",
+ "note": "Triage 21:06 CST Nov 13: rule outcomes-judge-by-outcome. Fix: a hold a session sets (in a handoff, a message or a record) states its end event in the same line; a check refuses a hold line with no end. Red case first. Times are the consultant's, unchecked by triage. Existing hold steps to compare: lane-hold-end-trigger (closed page item) and drain-first-hold.",
+ "updatedAt": "2026-11-13T21:06:41-06:00"
+}
