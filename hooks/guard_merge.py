@@ -1817,20 +1817,36 @@ def brief_hit(tool: str, tool_input, transcript: str):
 # ---- A lane brief names only roster ids (rule brief-ids-in-roster)
 ROSTER_HEADING = "## Standing sessions"  # the roster's heading in the roadmap branch's top-level notes file
 ROSTER_FILE = "CLAUDE.md"
-# A session id as a brief types it. SESSION_ID_RE (guard_shared_tree) is a full match, so this scans: the id starts with a
-# digit after `session_`, so a parameter name such as `session_id` in prose is no id. A trailing period ends a sentence.
-_BRIEF_ID = re.compile(r"(?<![A-Za-z0-9_])session_[0-9][A-Za-z0-9._-]*")
-_QUOTED_SPAN = re.compile(r"`[^`\n]*`|\"[^\"\n]*\"")  # a closed span on one line is data; a lone quote or backtick opens none
+# A session id as a brief types it, in any case. SESSION_ID_RE (guard_shared_tree) is a full match, so this scans: the id is
+# `session_`, a digit, then letters and digits, so a parameter name such as `session_id` is no id, and a `.md`, a dot or a
+# dash after the id is not part of it.
+_BRIEF_ID = re.compile(r"(?<![A-Za-z0-9_])session_[0-9][A-Za-z0-9]*", re.IGNORECASE)
+_DATA_QUOTES = "`\""  # an id with one of these right before it and right after it is data (an incident quote)
+# A line that opens a brief: an optional markdown lead, then Grant: or Lane brief:. The lead is _MARKDOWN_LEAD plus the
+# list dash, which the other readers of the lead do not take.
+_ROSTER_LEAD = r"[-#*_>\s]*"
+_ROSTER_OPENER = re.compile(_ROSTER_LEAD + r"(?:" + re.escape(LANE_GRANT_MARKER) + r"|(?i:" + re.escape(LANE_BRIEF_MARKER) + r"))")
 ROSTER_REASON = (
     "this brief names a session id that is not in the roster on the roadmap branch. A hand-typed id can wake "
     "the wrong session or none. Run `git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap`, then copy the "
-    "id from the roster. An id quoted as data goes in backticks or double quotes. "
+    "id from the roster. "
     "(decision brief-ids-in-roster, a lane brief names only roster ids)"
 )
 
 
 def _ids_in(text: str) -> list[str]:
-    return [found.rstrip(".") for found in _BRIEF_ID.findall(text)]
+    return [found.group(0).lower() for found in _BRIEF_ID.finditer(text)]
+
+
+def _bare_ids_in(text: str) -> list[str]:
+    """The ids not wrapped in a quote on both sides. A quote elsewhere on the line hides nothing."""
+    bare = []
+    for found in _BRIEF_ID.finditer(text):
+        before = text[found.start() - 1] if found.start() else ""
+        after = text[found.end()] if found.end() < len(text) else ""
+        if not (before and before in _DATA_QUOTES and after and after in _DATA_QUOTES):
+            bare.append(found.group(0).lower())
+    return bare
 
 
 def roster_ids(cwd: str):
@@ -1843,9 +1859,9 @@ def roster_ids(cwd: str):
         return set()
     section, inside = [], False
     for line in shown.stdout.splitlines():
-        if line.startswith("#") and inside:
+        if inside and line.startswith("## "):
             break
-        if line.strip() == ROSTER_HEADING:
+        if line.startswith(ROSTER_HEADING):
             inside = True
         elif inside:
             section.append(line)
@@ -1862,17 +1878,16 @@ def brief_roster_hit(tool: str, tool_input, cwd: str):
         return None
     if tool == BRIEF_TOOL:
         text = tool_input.get("message")
-        first = next((ln.strip() for ln in text.splitlines() if ln.strip()), "") if isinstance(text, str) else ""
-        if not (first.startswith(LANE_GRANT_MARKER) or _BRIEF_MARKER_LINE.match(first)):
+        if not isinstance(text, str) or not any(_ROSTER_OPENER.match(ln) for ln in text.splitlines()):
             return None
     elif is_lane_create_session(tool, tool_input):
         text = tool_input.get("prompt")
     else:
         return None
-    if not isinstance(text, str) or "session_" not in text:
+    if not isinstance(text, str) or "session_" not in text.lower():
         return None
     try:
-        bare = _ids_in(_QUOTED_SPAN.sub(" ", text))
+        bare = _bare_ids_in(text)
         if not bare:
             return None
         roster = roster_ids(cwd)
