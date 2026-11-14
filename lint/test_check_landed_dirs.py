@@ -182,23 +182,25 @@ class CheckLandedDirsTests(unittest.TestCase):
         self.assertIn("probe.txt", result.stderr)
 
     def test_a_test_helper_in_a_subfolder_names_the_flat_home(self):
-        # Why: a builder that hits this refusal needs the one way out, a flat test_<name>.py file beside its tests.
-        # The refused path itself holds `test_`, so the way out is pinned as the literal `test_<name>.py`.
+        # Why: a builder that hits this refusal needs the one way out: a flat _test_<name>.py file beside its tests,
+        # which a builder writes. The helper home is the underscore name (lint/_test_git.py), not test_<name>.py.
         result = run_in_copy(add_file("hooks/test_support/x.py", "case\n"))
         self.assertEqual(result.returncode, 1,
                          "a helper in hooks/test_support/, a subfolder of landed hooks/, passed the check: %s" % result.stdout)
         self.assertIn("hooks/test_support/x.py", result.stderr,
                       "the refusal does not name the refused helper: %s" % result.stderr)
-        self.assertIn("test_<name>.py", result.stderr,
-                      "the refusal does not name the way out, a test_<name>.py file: %s" % result.stderr)
+        self.assertIn("_test_<name>.py", result.stderr,
+                      "the refusal does not name the way out, a flat _test_<name>.py file: %s" % result.stderr)
         self.assertIn("flat", result.stderr,
                       "the refusal does not say the way out is flat: %s" % result.stderr)
         self.assertIn("beside", result.stderr,
                       "the refusal does not say the way out sits beside its tests: %s" % result.stderr)
+        self.assertIn("builder writes", result.stderr,
+                      "the refusal does not say a builder writes the flat file: %s" % result.stderr)
 
     def test_a_flat_test_file_beside_its_tests_passes_the_check(self):
-        # Why: the way out the refusal names must pass. A flat test_<name>.py at the top of a landed folder is landed.
-        result = run_in_copy(add_file("hooks/test_cost_probe.py", "case\n"))
+        # Why: the way out the refusal names must pass. A flat _test_<name>.py at the top of a landed folder is landed.
+        result = run_in_copy(add_file("hooks/_test_cost_probe.py", "case\n"))
         self.assertIn("check_landed_dirs: ok", result.stdout,
                       "the check did not reach its ok line: %s" % result.stderr)
         self.assertEqual(result.returncode, 0, "a flat hooks/test_cost_probe.py was refused: %s" % result.stderr)
@@ -234,9 +236,11 @@ class HelperHomeRecordTests(unittest.TestCase):
         with open(RECORD_PATH, encoding="utf-8") as f:
             section = record_section(f.read(), HELPER_HOME_HEADING)
         self.assertIsNotNone(section, "the decision record has no '%s' section" % HELPER_HOME_HEADING)
-        self.assertIn("test_<name>.py", section,
-                      "the '%s' section does not name the flat test_<name>.py home" % HELPER_HOME_HEADING)
+        self.assertIn("_test_<name>.py", section,
+                      "the '%s' section does not name the flat _test_<name>.py home" % HELPER_HOME_HEADING)
         self.assertIn("flat", section, "the '%s' section does not say the home is flat" % HELPER_HOME_HEADING)
+        self.assertIn("builder writes", section,
+                      "the '%s' section does not say a builder writes the flat file" % HELPER_HOME_HEADING)
 
 
 if __name__ == "__main__":
