@@ -5,7 +5,7 @@
 Each repo that keeps records has one generated index page, `docs/records.md`. It lists each decision and
 debt with a one-line gist. Only the merge tool rebuilds the page. A branch never edits the page by hand.
 
-The tool rebuilds the page on the integration branch before the branch goes ready. `merge <pr> --confirm`
+Until the cutover (decision `all-repos-switch-together`), the tool rebuilds the page on the integration branch before the branch goes ready. After it, the tool rebuilds the page on each lane branch before that PR merges. `merge <pr> --confirm`
 on a draft PR is that step, and it never merges. It refuses a head that does not hold the base tip, as
 `--confirm` does, and a head that carries a claim. It commits the page alone, pushes it, and stops: mark
 the PR ready, then run `--confirm` again. The tool sends no GraphQL, so the batch runner marks the PR ready
