@@ -614,7 +614,7 @@ class Scope(unittest.TestCase):
         self.assertEqual(got["checks_guard"], "false", f"checks_guard: {got}")
 
 
-# A records-only push after a fully green head (owner ruling own-830-c-ci-scope-green-before-head). GREEN_HEAD names the
+# A records-only push after a fully green head. GREEN_HEAD names the
 # pull request's newest earlier head whose `checks` run was fully green. When the delta from it to HEAD is docs/records.md
 # alone, the 13 job and suite flags below are false, and the four lint flags and mutation_report keep their whole-PR
 # values. Every other case runs as before: the flags follow the whole PR diff against BASE_SHA.
