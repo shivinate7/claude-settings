@@ -482,13 +482,17 @@ def case_early_exit_before_transcript_read():
 # own invocations. The key holds the file's bytes, so an edited file is judged again, even
 # when the edit falls past the 4000 characters of diff the model is shown.
 
-def _fake_claude(name, verdict='{"verdict": "ALLOW"}'):
-    """Put a fake `claude` first on PATH. Return (count_file, restore)."""
+def _fake_claude(name, verdict='{"verdict": "ALLOW"}', record_cwd=False):
+    """Put a fake `claude` first on PATH. Return (count_file, restore). With record_cwd, each run also writes
+    its working directory to a `cwd` file beside the count file."""
     bindir = os.path.join(ROOT, name + "_bin")
     os.makedirs(bindir, exist_ok=True)
     count = os.path.join(bindir, "count")
     py = os.path.join(bindir, "fake_claude.py")
-    write(py, "import json, sys\nopen(%r, 'a').write('x')\nprint(json.dumps({'result': %r}))\n" % (count, verdict))
+    body = "import json, sys\nopen(%r, 'a').write('x')\n" % count
+    if record_cwd:
+        body += "import os\nopen(%r, 'w').write(os.getcwd())\n" % os.path.join(bindir, "cwd")
+    write(py, body + "print(json.dumps({'result': %r}))\n" % verdict)
     launcher = os.path.join(bindir, "claude")
     write(launcher, '#!/bin/sh\nexec "%s" "%s" "$@"\n' % (sys.executable, py))
     os.chmod(launcher, 0o755)
@@ -1982,6 +1986,7 @@ def case_unread_zone_less_line_reads_as_local_under_cst():
 
 # The cost of one invoke_model call: one `claude` child and no other, and one isolation temp root
 # made and removed inside the call. Once per call, on success, timeout and start failure alike.
+# A stub of _nowindow.run would count no child start, so each case starts the fake claude for real.
 
 class CostTests(unittest.TestCase):
     @classmethod
@@ -2005,42 +2010,59 @@ class CostTests(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
 
-    def call(self, stub):
-        with mock.patch.object(dw._nowindow, "run", stub):
-            return dw.invoke_model("P")
+    def call(self):
+        # One model call, with each child start counted at Popen. The claude child is the fake on PATH, so its start is real.
+        with cost_probe.children() as log:
+            result = dw.invoke_model("P")
+        return result, log
 
-    def assert_one_claude_and_clean(self, stub):
-        argvs = stub.argvs()
-        self.assertEqual(cost_probe.names(argvs), ["claude"],
-                         "one model call starts exactly one child, the claude binary; got %r" % (argvs,))
-        cwd = stub.calls[0][1].get("cwd") or ""
-        self.assertEqual(os.path.realpath(os.path.dirname(cwd)), os.path.realpath(self.sub),
-                         "the isolation root is made under this case's folder; cwd is %r" % cwd)
+    def assert_one_claude_and_clean(self, log):
+        self.assertEqual(cost_probe.names(log.argvs), ["claude"],
+                         "one model call starts exactly one child, the claude binary; got %r" % (log.argvs,))
         self.assertEqual(cost_probe.leftovers(self.sub), [],
                          "the isolation root is removed when the call ends; this is left behind")
 
     def test_a_reply_starts_one_claude_child_and_leaves_no_temp_folder(self):
-        stub = cost_probe.StubRun(result=_FakeCompletedProcess(0, json.dumps({"result": json.dumps(ALLOW)}), ""))
-        verdict, error = self.call(stub)
+        if sys.platform == "win32":
+            self.skipTest("the fake claude is a POSIX launcher")
+        count, restore = _fake_claude("cost_reply", record_cwd=True)
+        self.addCleanup(restore)
+        (verdict, error), log = self.call()
         self.assertIsNone(error, "a valid reply is no error")
         self.assertEqual(verdict, ALLOW)
-        self.assert_one_claude_and_clean(stub)
+        self.assert_one_claude_and_clean(log)
+        with open(os.path.join(os.path.dirname(count), "cwd"), encoding="utf-8") as f:
+            cwd = f.read()
+        self.assertEqual(os.path.realpath(os.path.dirname(cwd)), os.path.realpath(self.sub),
+                         "the isolation root is made under this case's folder; cwd is %r" % cwd)
 
     def test_a_timeout_starts_one_claude_child_and_leaves_no_temp_folder(self):
-        stub = cost_probe.StubRun(error=subprocess.TimeoutExpired(["claude"], dw.MODEL_TIMEOUT),
-                                  fails=lambda argv: "-p" in argv)
-        verdict, error = self.call(stub)
+        if sys.platform == "win32":
+            self.skipTest("the fake claude is a POSIX launcher")
+        _count, restore = _fake_claude("cost_timeout")
+        self.addCleanup(restore)
+        # The claude child starts for real. Its wait ends as a timeout at once, so no clock runs here.
+        real_communicate = subprocess.Popen.communicate
+
+        def late_for_claude(proc, *args, **kwargs):
+            if cost_probe.names([proc.args])[0] == "claude":
+                raise subprocess.TimeoutExpired(["claude"], dw.MODEL_TIMEOUT)
+            return real_communicate(proc, *args, **kwargs)
+
+        with mock.patch.object(subprocess.Popen, "communicate", late_for_claude):
+            (verdict, error), log = self.call()
         self.assertIsNone(verdict)
         self.assertTrue(error, "a timeout is an error, not a verdict")
-        self.assert_one_claude_and_clean(stub)
+        self.assert_one_claude_and_clean(log)
 
     def test_a_start_failure_starts_one_claude_attempt_and_leaves_no_temp_folder(self):
-        stub = cost_probe.StubRun(error=FileNotFoundError(2, "No such file or directory", "claude"),
-                                  fails=lambda argv: "-p" in argv)
-        verdict, error = self.call(stub)
+        nobin = os.path.join(self.cfg, "nobin")  # an empty folder: no claude on PATH, so the start fails
+        os.makedirs(nobin)
+        with mock.patch.dict(os.environ, {"PATH": nobin}):
+            (verdict, error), log = self.call()
         self.assertIsNone(verdict)
         self.assertTrue(error, "a start failure is an error, not a verdict")
-        self.assert_one_claude_and_clean(stub)
+        self.assert_one_claude_and_clean(log)
 
 
 def main():
