@@ -66,5 +66,65 @@ class ClaudeRoleLauncher(unittest.TestCase):
                     self.assertEqual(handle.read(), role, "claude started without CS_SESSION_ROLE=%s" % role)
 
 
+CMD = os.path.join(REPO, "bin", "claude-role.cmd")
+
+
+def cmd_code_lines(text):
+    """The code lines of a .cmd file's text, stripped, in order. A comment line (`rem` or `::`, after any `@`) is no code, so a comment
+    that names WindowsApps is no skip. Any line ending splits the text, so CRLF and LF read alike."""
+    lines = []
+    for line in text.splitlines():
+        body = line.strip().lstrip("@").strip()
+        lowered = body.lower()
+        if not body or lowered.startswith("::") or lowered == "rem" or lowered.startswith("rem "):
+            continue
+        lines.append(body)
+    return lines
+
+
+def first_line_with(lines, needle):
+    """The index of the first code line that names `needle`, ignoring case, else None."""
+    for at, line in enumerate(lines):
+        if needle.lower() in line.lower():
+            return at
+    return None
+
+
+class ClaudeRoleCmdText(unittest.TestCase):
+    """The Windows launcher's text, bin/claude-role.cmd. Static: it reads the file and never runs it. Each assert names one cause."""
+
+    def setUp(self):
+        with open(CMD, encoding="utf-8") as handle:
+            self.lines = cmd_code_lines(handle.read())
+
+    def test_the_cmd_skips_the_windowsapps_python_alias_before_it_launches_claude_role(self):
+        launch = first_line_with(self.lines, "%~dp0claude-role")
+        self.assertIsNotNone(launch, "bin/claude-role.cmd has no code line that launches claude-role")
+        skip = first_line_with(self.lines, "windowsapps")
+        self.assertIsNotNone(skip, "bin/claude-role.cmd names no WindowsApps path on a code line, so `where python` can return the "
+                                   "WindowsApps alias, which exits 9009 and never starts claude")
+        self.assertLess(skip, launch, "bin/claude-role.cmd filters WindowsApps only after its first launch, so the alias runs first")
+
+    def test_the_py_3_fallback_comes_after_the_windowsapps_filter(self):
+        py = first_line_with(self.lines, "py -3")
+        self.assertIsNotNone(py, "bin/claude-role.cmd has no `py -3` fallback line for a machine with no other python")
+        skip = first_line_with(self.lines, "windowsapps")
+        self.assertIsNotNone(skip, "bin/claude-role.cmd names no WindowsApps path on a code line, so no fallback follows a filter")
+        self.assertLess(skip, py, "bin/claude-role.cmd reaches its `py -3` fallback before the WindowsApps filter")
+
+    def test_the_scanner_reads_code_lines_and_skips_comment_lines(self):
+        # Scanner controls, green on the old code. A comment that names WindowsApps is no skip. A code line that names it is found,
+        # including one with a comment-looking word inside quotes and one with a lone quote, so a miss below is the file's, not the reader's.
+        for text in ("rem skip WindowsApps paths\r\n", ":: skip WindowsApps paths\r\n", "@rem WindowsApps\r\n"):
+            with self.subTest(comment=text):
+                self.assertIsNone(first_line_with(cmd_code_lines(text), "windowsapps"),
+                                  "a comment line that names WindowsApps is read as a code line, so it counts as the skip")
+        for text in ("for /f %%P in ('where python') do @echo %%P | findstr /v WindowsApps\r\n",
+                     'echo "rem WindowsApps"\r\n', "echo it's WindowsApps\r\n"):
+            with self.subTest(code=text):
+                self.assertEqual(first_line_with(cmd_code_lines(text), "windowsapps"), 0,
+                                 "a code line that names WindowsApps is not read as code")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
