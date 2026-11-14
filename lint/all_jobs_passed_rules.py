@@ -16,8 +16,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, all_jobs, eval_if, push_guard_only,  # noqa: E402  the one home of the scope condition and scalar parsers
-                                schedule_only, shard_base, yaml_scalar)
+from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs, draft_guard_only, eval_if, push_guard_only,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
+                                shard_base, yaml_scalar)  # NIGHTLY_SKIP_JOB and PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
 
 ALL_JOBS_PASSED_USES = "$/actions/all-jobs-passed"
@@ -166,18 +166,19 @@ def steps_problems(text):
 
 
 def off_problems(text):
-    """Only a shard job, and the schedule-only nightly skip job, may stay off all-jobs-passed. A needed job has no job-level if,
-    except scope (its draft rule) and a macOS job (the push guard)."""
+    """Only a shard job may stay off all-jobs-passed. A needed job has no job-level if, except scope (its draft rule),
+    a macOS job (the push guard) and a Windows full shard (the draft guard)."""
     jobs = all_jobs(text)
     needed, off, problems = split_jobs(text)
     for name in off:
-        if name == NIGHTLY_SKIP_JOB and schedule_only(jobs[name]["if"]):  # R61 part 3: the skip job runs on a schedule only
-            continue
         if not shard_base(name):
             problems.append(f"{name} is off all-jobs-passed but is not a shard: its job-level if skips it on a PR")
     for name in needed:
         if shard_base(name):
-            problems.append(f"shard {name} is in all-jobs-passed's needs: a shard runs only off pull_request")
+            # R62: a Windows full shard runs on a ready pull request, so it is needed. Its job-level if is the draft guard only.
+            if not draft_guard_only(jobs[name]["if"] or ""):
+                problems.append(f"shard {name} is in all-jobs-passed's needs but its job-level if is not the draft guard: "
+                                f"{jobs[name]['if']}")
         elif name in MACOS_JOBS and push_guard_only(jobs[name]["if"] or ""):
             continue  # R61 part 1: the push guard is true on a PR, so the macOS job stays needed and runs there
         elif name != "scope" and jobs[name]["if"] is not None:
