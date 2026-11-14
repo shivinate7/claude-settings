@@ -17758,10 +17758,11 @@ class JudgeStub:
     """Stands in for decision_watch.invoke_model. `answer(prompt)` gives (verdict, error), or raises. Each call's prompt is
     kept, so a case reads what the judge sent as well as what it got back."""
     def __init__(self, answer):
-        self.answer, self.prompts = answer, []
+        self.answer, self.prompts, self.shapes = answer, [], []
 
     def __call__(self, prompt, *args, **kwargs):
         self.prompts.append(prompt)
+        self.shapes.append(kwargs.get("shape"))
         return self.answer(prompt)
 
 
@@ -17895,9 +17896,9 @@ class ProseJudge(Env):
         with unittest.mock.patch.object(merge, CAP_NAME, cap):  # no create=True: a renamed constant fails here, not passes
             return self.run_merge("7", "--confirm")
 
-    def judge(self, answer, cap=PROSE_CAP):
-        """The merge with `answer` in place of invoke_model, at `cap` model calls (None: the default). -> (stub, rc, out)."""
-        stub = JudgeStub(answer)
+    def judge(self, answer, cap=PROSE_CAP, stub_class=JudgeStub):
+        """The merge with `answer` in place of invoke_model, at `cap` model calls (None: the default), through `stub_class`. -> (stub, rc, out)."""
+        stub = stub_class(answer)
         with unittest.mock.patch.object(decision_watch, "invoke_model", stub):
             rc, out = self.run_capped(cap)
         return stub, rc, out
@@ -18496,6 +18497,379 @@ class ProseJudge(Env):
             self.assertLessEqual(len(got), 40, "the call carries %d lines of %s, want at most 40" % (len(got), path))
         size = len(prompt.encode("utf-8"))
         self.assertLess(size, 12 * 1024, "the prompt is %d bytes for three named paths, want under 12 KB" % size)
+
+    # The where-else judge (merge.py prose_judge_plan, prose_judge_run, prose_judge_prompt). A merge that lands a ruling asks the model
+    # where else the same mistake class applies. The fixture ruling is the claim-at-merge rule; its other number-minting place is a guard
+    # section file (hooks/test_guard.py load_sections). The stub answers the where-else prompt, the one that names SECTION_PATH, and holds
+    # every prose line, so the prose judge's own call never reads as the where-else call.
+    def changed_paths(self):
+        """The paths the PR changes against main: the range's own diff, read after setup_range has taken main's base."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        return set(sh(self.other, "git", "diff", "--name-only", "origin/main...origin/feat").split())
+
+    def setup_landing(self, main_files, feat_files, later=None, renames=None):
+        """setup_range for a PR that lands something, then the records page the generator writes for the head, committed on the head when the
+        page changed. The merge's records check rebuilds the page on the merged tree and stops the merge when the head's page would change.
+        `later` is setup_range's one more feat commit, after main's base is taken: a change to a file main already has."""
+        self.setup_range(main_files, feat_files, later=later, renames=renames)
+        o = self.other
+        sh(o, sys.executable, merge.RECORDS, "--root", o, "--records-only")
+        sh(o, "git", "add", "-A")
+        if sh(o, "git", "status", "--porcelain"):
+            sh(o, "git", "commit", "-qm", "feat: the records page the generator writes for this head")
+        sh(o, "git", "push", "-q", "origin", "feat")
+
+    def setup_ruling(self, main_files):
+        self.setup_landing(main_files, {RULING_PATH: RULING_DOC})
+
+    def setup_record_edit(self, appended):
+        """The PR edits the existing decision record: `appended` lines go on its end, and nothing else in it changes."""
+        added = "".join("A line the edit adds, %d.\n" % i for i in range(appended))
+        self.setup_landing(SECTIONS, {"docs/decisions/first.md": record("D-001", "first") + added})
+
+    def judge_where_else(self, answer):
+        """The merge with a where-else stub: a where-else call that does not ask in the PLACES shape gets no answer. -> (stub, rc, out)."""
+        return self.judge(answer, stub_class=WhereElseStub)
+
+    def where_else_limit(self, name):
+        """A named limit of the where-else judge, read from merge.py by name. A name it does not define fails the case as an assert."""
+        value = getattr(merge, name, None)
+        self.assertIsNotNone(value, "merge.%s is not defined: the where-else judge has no %s" % (name, name))
+        return value
+
+    def assert_where_else_unknown(self, answer, cause):
+        """One where-else UNKNOWN line naming `cause`, no candidate line, and the merge landed with exit status 0: the judge is report-only."""
+        self.setup_ruling(SECTIONS)
+        before = self.head("main")
+        stub, rc, out = self.judge_where_else(route(answer))
+        lines = where_else_unknown_lines(out)
+        self.assertEqual(len(lines), 1, "where-else UNKNOWN lines: %d, want 1: one count line for the one call\n%s" % (len(lines), out))
+        self.assertIn(cause, lines[0], "the where-else UNKNOWN line does not name the cause %r: %r" % (cause, lines[0]))
+        self.assertEqual(where_else_candidates(out), [], "a failed call printed a candidate line\n" + out)
+        self.assertEqual(rc, 0, "the where-else failure changed the exit status to %s: the judge is report-only\n%s" % (rc, out))
+        self.assertNotEqual(self.head("main"), before, "origin main did not move: the merge did not land\n" + out)
+
+    def test_a_ruling_pr_sends_the_ruling_and_the_section_files_in_one_where_else_call(self):
+        self.setup_ruling(SECTIONS)
+        self.assertEqual(self.changed_paths(), {RULING_PATH, merge.RECORDS_PAGE},
+                         "scope: the PR must land the ruling and its records page, and nothing else")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = [p for p in stub.prompts if SECTION_PATH in p]
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: one ruling PR makes one call\n%s" % (len(where), out))
+        self.assertIn("Claim the number at merge.", where[0], "the where-else prompt does not carry the ruling text")
+        self.assertIn("# section 442", where[0], "the where-else prompt does not carry the section file's first line, so the model cannot name its number")
+        self.assertRegex(where[0], r"(?i)other repo|another repo|cross-repo|other repositories",
+                         "the where-else prompt does not say that other repos are unread")
+
+    def test_a_where_else_reply_naming_a_section_prints_one_candidate_line(self):
+        self.setup_ruling(SECTIONS)
+        stub, rc, out = self.judge_where_else(route(lambda prompt: (WHERE_ELSE_REPLY, None)))
+        candidates = where_else_candidates(out)
+        self.assertEqual(len(candidates), 1, "candidate lines: %d, want 1: one reply that names one place\n%s" % (len(candidates), out))
+        self.assertIn("section 442", candidates[0], "the candidate line does not name section 442: %r" % candidates[0])
+        self.assertIn("vary", candidates[0], "the candidate line does not say that model verdicts vary run to run: %r" % candidates[0])
+        self.assertEqual(rc, 0, "the candidate line changed the exit status to %s: the judge is report-only\n%s" % (rc, out))
+
+    def test_a_pr_that_lands_no_ruling_makes_no_model_call(self):
+        self.setup_range(SECTIONS, {BACKING: BACKING_TEXT})
+        self.assertEqual(self.changed_paths(), {BACKING}, "scope: the PR must land no ruling, rule or guard")
+        stub, rc, out = self.judge_where_else(route(lambda prompt: (WHERE_ELSE_REPLY, None)))
+        self.assertEqual(stub.prompts, [], "model calls: %d, want 0: no ruling landed\n%s" % (len(stub.prompts), out))
+        self.assertEqual(where_else_candidates(out), [], "a PR with no ruling printed a candidate line\n" + out)
+
+    def test_a_where_else_model_error_prints_one_unknown_line_and_the_merge_lands(self):
+        self.assert_where_else_unknown(raises(RuntimeError("model exited 1")), CAUSE_MODEL_ERROR)
+
+    def test_a_where_else_timeout_prints_one_unknown_line_and_the_merge_lands(self):
+        self.assert_where_else_unknown(lambda prompt: (None, decision_watch.MODEL_TIMEOUT_ERROR), CAUSE_TIMED_OUT)
+
+    def test_a_where_else_reply_with_no_verdict_text_prints_one_unknown_line_and_the_merge_lands(self):
+        self.assert_where_else_unknown(
+            lambda prompt: (None, decision_watch.REPLY_RESULT_ERROR + " carried no JSON verdict: a stray reply"), CAUSE_NO_VERDICT)
+
+    def test_a_where_else_reply_of_the_wrong_shape_prints_one_unknown_line_and_the_merge_lands(self):
+        self.assert_where_else_unknown(lambda prompt: ({"places": "several"}, None), CAUSE_NO_VERDICT)
+
+    def test_a_tree_with_sixty_section_files_names_every_one_in_the_where_else_prompt(self):
+        sections = {**SECTIONS, **{"tests/guard/s%05d-case-%d.py" % (n, n): "# section %d\n" % n for n in range(1, 60)}}
+        self.setup_ruling(sections)
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = [p for p in stub.prompts if SECTION_PATH in p]
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1 for sixty section files\n%s" % (len(where), out))
+        missing = [path for path in sections if path not in where[0]]
+        self.assertEqual(missing, [], "the where-else prompt leaves out %d of %d section files" % (len(missing), len(sections)))
+
+    def assert_where_else_seam_unknown(self, fault, reached, text):
+        """The merge with merge.git replaced by `fault` at one read: one where-else UNKNOWN line that says `text`, no model call, the merge lands."""
+        before = self.head("main")
+        stub = WhereElseStub(route(no_places))
+        with unittest.mock.patch.object(merge, "git", fault), unittest.mock.patch.object(decision_watch, "invoke_model", stub):
+            rc, out = self.run_capped()
+        self.assertEqual(len(reached), 1, "the seam was reached %d times, want 1: the case did not hit its seam" % len(reached))
+        self.assertEqual(where_else_calls(stub), [], "a where-else call was made without what it needs\n" + out)
+        lines = where_else_unknown_lines(out)
+        self.assertEqual(len(lines), 1, "where-else UNKNOWN lines: %d, want 1\n%s" % (len(lines), out))
+        self.assertIn(text, lines[0], "the where-else UNKNOWN line does not say %r: %r" % (text, lines[0]))
+        self.assertEqual(rc, 0, "the unreadable read changed the exit status to %s\n%s" % (rc, out))
+        self.assertNotEqual(self.head("main"), before, "origin main did not move: the merge did not land\n" + out)
+
+    def test_the_where_else_call_asks_in_the_places_shape(self):
+        self.setup_ruling(SECTIONS)
+        stub, rc, out = self.judge_where_else(route(no_places))
+        self.assertEqual(len(where_else_calls(stub)), 1, "where-else calls: %d, want 1\n%s" % (len(where_else_calls(stub)), out))
+        self.assertEqual(where_else_shapes(stub), [decision_watch.PLACES],
+                         "the where-else call asked in another shape, and a reply in that shape is no answer\n" + out)
+
+    def test_a_reply_past_the_places_cap_prints_the_cap_and_a_count_line(self):
+        cap = self.where_else_limit("WHERE_ELSE_MAX_PLACES")
+        self.assertEqual(cap, 10, "the places cap is ten, the value the decision record gives")  # pinned: a read by name alone would follow a changed cap
+        places = [{"path": "hooks/place-%02d.py" % i, "section": None, "why": "the same mistake"} for i in range(12)]
+        self.setup_ruling(SECTIONS)
+        stub, rc, out = self.judge_where_else(route(lambda prompt: ({"places": places}, None)))
+        candidates = where_else_candidates(out)
+        self.assertEqual(len(candidates), cap, "candidate lines: %d, want %d: one line per place up to the cap\n%s" % (len(candidates), cap, out))
+        counts = [line for line in out.splitlines() if re.search(r"\b2 more places not shown\b", line)]
+        self.assertEqual(len(counts), 1, "the count line for the places past the cap: %d, want 1\n%s" % (len(counts), out))
+        self.assertEqual(rc, 0, "the cap changed the exit status to %s\n%s" % (rc, out))
+
+    def test_a_new_decision_record_lands_and_makes_one_where_else_call(self):
+        self.setup_landing(SECTIONS, {"docs/decisions/landed-place.md": record("pending", "landed-place")})
+        self.assertIn("docs/decisions/landed-place.md", self.changed_paths(), "scope: the PR must add the decision record")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = where_else_calls(stub)
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: a new decision record lands\n%s" % (len(where), out))
+        self.assertIn("landed-place", where[0], "the where-else prompt does not carry the new record")
+
+    def test_a_new_guard_rule_name_lands_and_makes_one_where_else_call(self):
+        self.setup_landing({**SECTIONS, GUARD_PATH: GUARD_MAIN}, {}, later={GUARD_PATH: GUARD_FEAT})
+        self.assertIn(GUARD_PATH, self.changed_paths(), "scope: the PR must change the guard file")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = where_else_calls(stub)
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: a new guard rule name lands\n%s" % (len(where), out))
+        self.assertIn("widget-slug-rule", where[0], "the where-else prompt does not carry the new guard rule name")
+
+    def test_an_unchanged_anchor_sentence_makes_no_where_else_call(self):
+        self.setup_landing({**SECTIONS, RULING_PATH: RULING_DOC}, {},
+                           later={RULING_PATH: RULING_DOC + "\nA note under the rule that names no anchor.\n"})
+        changed = self.changed_paths()
+        self.assertIn(RULING_PATH, changed, "scope: the PR must edit the rule file")
+        self.assertLessEqual(changed, {RULING_PATH, merge.RECORDS_PAGE}, "scope: the PR must change the rule file and its records page, nothing else")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        self.assertEqual(where_else_calls(stub), [], "where-else calls: %d, want 0: no anchor sentence changed\n%s" % (len(where_else_calls(stub)), out))
+        self.assertEqual(where_else_unknown_lines(out), [], "an unchanged anchor printed an UNKNOWN line\n" + out)
+        self.assertEqual(where_else_candidates(out), [], "an unchanged anchor printed a candidate line\n" + out)
+
+    def test_a_where_else_base_unknown_prints_one_unknown_line_and_the_merge_lands(self):
+        self.setup_ruling(SECTIONS)
+        real_git, reached = merge.git, []
+
+        def base_unreadable(cwd, *a, **kw):
+            if sys._getframe(1).f_code.co_name == "confirm" and a == ("rev-parse", "--verify", "-q", "origin/main^{commit}"):
+                reached.append(a)
+                return 1, ""
+            return real_git(cwd, *a, **kw)
+        self.assert_where_else_seam_unknown(base_unreadable, reached, "the base could not be read")
+
+    def test_a_where_else_files_unknown_prints_one_unknown_line_and_the_merge_lands(self):
+        self.setup_ruling(SECTIONS)
+        real_git, reached = merge.git, []
+
+        def names_unreadable(cwd, *a, **kw):
+            if sys._getframe(1).f_code.co_name == "confirm" and a[:2] == ("diff", "--name-only"):
+                reached.append(a)
+                return 1, ""
+            return real_git(cwd, *a, **kw)
+        self.assert_where_else_seam_unknown(names_unreadable, reached, "the changed files could not be read")
+
+    def test_seventy_five_records_are_capped_and_the_rest_are_named_as_not_judged(self):
+        cap_records = self.where_else_limit("WHERE_ELSE_MAX_RECORDS")
+        cap_chars = self.where_else_limit("WHERE_ELSE_MAX_CHARS")
+        self.setup_landing(SECTIONS, {"docs/decisions/place-%02d.md" % i: big_record(i) for i in range(MANY_RECORDS)})
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = where_else_calls(stub)
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: one call for the merge\n%s" % (len(where), out))
+        self.assertLessEqual(len(where[0]), cap_chars,
+                             "the where-else prompt is %d characters, want at most %d (WHERE_ELSE_MAX_CHARS)" % (len(where[0]), cap_chars))
+        slugs = ["place-%02d" % i for i in range(MANY_RECORDS)]  # a claim may rename a record's file, but not its slug
+        judged = [s for s in slugs if s in where[0]]
+        self.assertEqual(judged, slugs[:cap_records],
+                         "the where-else prompt judges %d records, want the first %d (WHERE_ELSE_MAX_RECORDS)" % (len(judged), cap_records))
+        lines = [line for line in out.splitlines() if "too many records" in line]
+        self.assertEqual(len(lines), 1, "lines that name too many records: %d, want 1: the cap never goes silent\n%s" % (len(lines), out))
+        self.assertIn("too many records, judged first %d" % cap_records, lines[0],
+                      "the too-many-records line does not say how many it judged: %r" % lines[0])
+        not_judged = MANY_RECORDS - cap_records
+        self.assertTrue(re.search(r"\b%d\b" % not_judged, lines[0]) and "not judged" in lines[0],
+                        "the too-many-records line does not count the %d records not judged: %r" % (not_judged, lines[0]))
+
+    def test_a_string_section_number_prints_on_the_candidate_line(self):
+        reply = {"places": [{"path": "hooks/elsewhere.py", "section": "442", "why": "the same mistake"}]}
+        self.setup_ruling(SECTIONS)
+        stub, rc, out = self.judge_where_else(route(lambda prompt: (reply, None)))
+        candidates = where_else_candidates(out)
+        self.assertEqual(len(candidates), 1, "candidate lines: %d, want 1\n%s" % (len(candidates), out))
+        self.assertIn("442", candidates[0], "the candidate line drops the section number the model gave as a string: %r" % candidates[0])
+
+    def test_a_four_line_edit_of_an_existing_record_makes_no_where_else_call(self):
+        self.setup_record_edit(4)
+        self.assertIn("docs/decisions/first.md", self.changed_paths(), "scope: the PR must edit the existing record")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        self.assertEqual(where_else_calls(stub), [], "where-else calls: %d, want 0: a four-line edit is under the threshold\n%s" % (len(where_else_calls(stub)), out))
+        self.assertEqual(where_else_candidates(out), [], "a four-line edit printed a candidate line\n" + out)
+
+    def test_a_record_edit_at_the_threshold_makes_one_where_else_call(self):
+        threshold = self.where_else_limit("WHERE_ELSE_MIN_EDIT_LINES")
+        self.assertEqual(threshold, 5, "the edit threshold is five lines, the value the spec gives")  # pinned: a read by name alone would follow a changed threshold
+        self.setup_record_edit(threshold)
+        self.assertIn("docs/decisions/first.md", self.changed_paths(), "scope: the PR must edit the existing record")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        self.assertEqual(len(where_else_calls(stub)), 1,
+                         "where-else calls: %d, want 1: an edit of %d lines is at the threshold\n%s" % (len(where_else_calls(stub)), threshold, out))
+
+    def setup_record_delete(self):
+        """The PR deletes the existing decision record, and the records page follows it."""
+        self.setup_landing(SECTIONS, {})
+        o = self.other
+        sh(o, "git", "rm", "-q", "docs/decisions/first.md")
+        sh(o, sys.executable, merge.RECORDS, "--root", o, "--records-only")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-qm", "feat: drop the first record")
+        sh(o, "git", "push", "-q", "origin", "feat")
+
+    def test_a_failing_added_paths_read_prints_one_unknown_line_and_the_merge_lands(self):
+        self.setup_landing(SECTIONS, {"docs/decisions/landed-place.md": record("pending", "landed-place")})
+        real_git, reached = merge.git, []
+
+        def added_read_fails(cwd, *a, **kw):
+            if "--diff-filter=A" in a:
+                reached.append(a)
+                return 1, "the added-paths read failed"
+            return real_git(cwd, *a, **kw)
+        self.assert_where_else_seam_unknown(added_read_fails, reached, "git diff failed")
+
+    def test_a_failing_numstat_read_prints_one_unknown_line_and_the_merge_lands(self):
+        self.setup_landing(SECTIONS, {"docs/decisions/landed-place.md": record("pending", "landed-place")})
+        real_git, reached = merge.git, []
+
+        def counts_read_fails(cwd, *a, **kw):
+            if "--numstat" in a:
+                reached.append(a)
+                return 1, "the changed-line read failed"
+            return real_git(cwd, *a, **kw)
+        self.assert_where_else_seam_unknown(counts_read_fails, reached, "git diff failed")
+
+    def test_an_edit_of_three_added_and_two_removed_lines_lands(self):
+        self.setup_landing(SECTIONS, {"docs/decisions/first.md": FIVE_LINE_EDIT})
+        self.assertIn("docs/decisions/first.md", self.changed_paths(), "scope: the PR must edit the existing record")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = where_else_calls(stub)
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: five changed lines (three added, two removed) is the threshold\n%s" % (len(where), out))
+        self.assertIn("title: Renamed", where[0], "the where-else prompt does not carry the edited record")
+
+    def test_a_changed_anchor_sentence_lands(self):
+        self.setup_landing({**SECTIONS, RULING_PATH: RULING_DOC}, {}, later={RULING_PATH: CHANGED_RULE_DOC})
+        self.assertIn(RULING_PATH, self.changed_paths(), "scope: the PR must change the rule file")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = where_else_calls(stub)
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: a changed sentence before a known anchor lands\n%s" % (len(where), out))
+        self.assertIn("or in a commit", where[0], "the where-else prompt does not carry the changed sentence")
+
+    def test_a_changed_source_line_of_a_known_guard_rule_lands(self):
+        self.setup_landing({**SECTIONS, GUARD_PATH: GUARD_FEAT}, {}, later={GUARD_PATH: GUARD_CHANGED})
+        self.assertIn(GUARD_PATH, self.changed_paths(), "scope: the PR must change the guard file")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = where_else_calls(stub)
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: a known rule name with a source line the base lacks lands\n%s" % (len(where), out))
+        self.assertIn("twice", where[0], "the where-else prompt does not carry the changed guard line")
+
+    def test_a_deleted_record_makes_no_where_else_call(self):
+        self.setup_record_delete()
+        self.assertFalse(os.path.exists(os.path.join(self.other, "docs", "decisions", "first.md")), "scope: the PR must delete the record")
+        self.assertIn("docs/decisions/first.md", self.changed_paths(), "scope: the deletion must be in the PR's changed paths")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        self.assertEqual(where_else_calls(stub), [], "where-else calls: %d, want 0: a deleted record lands nothing\n%s" % (len(where_else_calls(stub)), out))
+        self.assertEqual(where_else_unknown_lines(out), [], "a deleted record printed a where-else UNKNOWN line\n" + out)
+        self.assertEqual(rc, 0, "the deletion changed the exit status to %s\n%s" % (rc, out))
+
+    def test_a_pure_rename_of_a_record_triggers_one_where_else_call(self):
+        self.setup_landing(SECTIONS, {}, renames={"docs/decisions/first.md": "docs/decisions/renamed-first.md"})
+        self.assertIn("docs/decisions/renamed-first.md", self.changed_paths(), "scope: the PR must move the record")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = where_else_calls(stub)
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: the code counts the moved record's lines as changed\n%s" % (len(where), out))
+        self.assertIn("renamed-first.md", where[0], "the where-else prompt does not carry the moved record")
+
+
+# The where-else judge's fixtures. RULING_DOC is the claim-at-merge rule as CLAUDE.md states it, with its anchor line. SECTIONS is one
+# guard section file on main, the other number-minting place. WHERE_ELSE_REPLY is the reply shape the where-else judge reads: a `places` list.
+RULING_PATH = "CLAUDE.md"
+RULING_DOC = ("# Rules\n\nNever allocate a numbered record on a branch. Write a slug of 32 characters or fewer. "
+              "Claim the number at merge.<!-- rule:git-slug-then-claim-number --> Ids, not paths.\n")
+SECTION_PATH = "tests/guard/s00442-lane-title.py"
+SECTIONS = {SECTION_PATH: "# section 442\nFAMILY = \"lane-title\"\n"}
+WHERE_ELSE_REPLY = {"places": [{"path": SECTION_PATH, "section": 442,
+                                "why": "the guard suite numbers its sections the way the rule numbers records"}]}
+CAUSE_TIMED_OUT, CAUSE_MODEL_ERROR, CAUSE_NO_VERDICT = UNKNOWN_CAUSES[0], UNKNOWN_CAUSES[1], UNKNOWN_CAUSES[2]  # the buckets of UNKNOWN_CAUSES, by name
+
+
+def no_places(prompt):
+    return {"places": []}, None
+
+
+def route(where_else):
+    """A JudgeStub answer: the where-else prompt, the one that names SECTION_PATH, goes to `where_else`; every prose line is held."""
+    def answer(prompt):
+        if SECTION_PATH in prompt:
+            return where_else(prompt)
+        numbers = [int(n) for n in re.findall(r"^Line (\d+): ", prompt, re.M)]
+        return {"verdicts": [{"line": n, "verdict": "holds", "why": "w"} for n in numbers]}, None
+    return answer
+
+
+GUARD_PATH = "hooks/guard.py"
+GUARD_MAIN = "def check(ctx):\n    return None\n"
+GUARD_FEAT = GUARD_MAIN + 'def widget(ctx):\n    return refuse(ctx, "a widget was made", "widget-slug-rule")\n'
+MANY_RECORDS = 75  # decision records one PR lands, for the cap case
+GUARD_CHANGED = GUARD_MAIN + 'def widget(ctx):\n    return refuse(ctx, "a widget was made twice", "widget-slug-rule")\n'  # the same rule name, its source line changed
+CHANGED_RULE_DOC = ("# Rules\n\nNever allocate a numbered record on a branch, or in a commit. Write a slug of 32 characters or fewer. "
+                    "Claim the number at merge.<!-- rule:git-slug-then-claim-number --> Ids, not paths.\n")  # the same anchor, its sentence changed
+FIVE_LINE_EDIT = "---\nid: D-001\nslug: first\ntitle: Renamed\n---\nbody, reworded\nan added line\n"  # record("D-001", "first") with two lines changed and one added: the slug stays, a numbered record keeps its key
+
+
+def big_record(i):
+    """A decision record of about 4 KB, so that 75 of them could not fit any sensible prompt."""
+    body = "".join("Sentence %d of place %d keeps this record long enough to matter.\n" % (k, i) for k in range(60))
+    return "---\nid: pending\nslug: place-%02d\ntitle: Place %02d\n---\n%s" % (i, i, body)
+
+
+class WhereElseStub(JudgeStub):
+    """A JudgeStub that answers a where-else call only when it asks in the PLACES shape. Any other shape reads as a call with no answer, so
+    a case that drops the shape fails on its own count, not on a quiet pass. Each call's shape is kept in `shapes`."""
+    def __call__(self, prompt, *args, **kwargs):
+        if SECTION_PATH in prompt and kwargs.get("shape") is not decision_watch.PLACES:
+            self.prompts.append(prompt)
+            self.shapes.append(kwargs.get("shape"))
+            return None, "stub: the where-else call did not ask in the PLACES shape"
+        return super().__call__(prompt, *args, **kwargs)
+
+
+def where_else_calls(stub):
+    """The where-else prompts a stub took: the ones that name SECTION_PATH, the evidence every where-else prompt carries."""
+    return [p for p in stub.prompts if SECTION_PATH in p]
+
+
+def where_else_shapes(stub):
+    return [s for p, s in zip(stub.prompts, stub.shapes) if SECTION_PATH in p]
+
+
+def where_else_unknown_lines(out):
+    """The merge's where-else UNKNOWN lines. The prose judge's own UNKNOWN lines do not name the where-else judge."""
+    return [line for line in out.splitlines() if "UNKNOWN" in line and re.search(r"where[ -]else", line, re.I)]
+
+
+def where_else_candidates(out):
+    """The merge's candidate lines from the where-else judge: each names a candidate and no UNKNOWN."""
+    return [line for line in out.splitlines() if "candidate" in line.lower() and "UNKNOWN" not in line]
 
 
 NAMED = "hooks/x.py"  # a tracked code path that a prose line names in backticks
