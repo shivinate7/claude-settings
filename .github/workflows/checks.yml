@@ -762,6 +762,9 @@ jobs:
       - name: Roadmap builder fixture suite
         run: python3 skills/roadmap/test_build.py
 
+      - name: Roadmap derived status fixture suite
+        run: python3 skills/roadmap/test_derived_status.py
+
       - name: project-ops skill scaffold suite
         run: python3 skills/project-ops/tests/test_scaffold.py
 
