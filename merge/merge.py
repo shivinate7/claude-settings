@@ -4419,10 +4419,11 @@ def rollup_green(h, n, head):
     return bool(rows) and all(bucket == "pass" for (bucket, _), i in zip(rows, ids) if decides(bucket, i))
 
 def lint_carried(root, cfgrel, base, n, passed, live, h=None, source_passed=()):
-    """True when a lane-lint PASS holds for the live head `live` of pull request `n`: one on a head of `passed` with every commit after it a claim or a records-page commit
-    (claim_only, against `base`), or one on a head of `source_passed` (the passes of the source a replacement names, replaces_source) whose tree
-    equals the tree of `live` (same_tree, through `h`; step review-carries-by-tree). The checkout `root` fetches the pull request's head first when
-    it lacks `live`. A read that fails is False. The one home of that carry, for the join (lint_check), `--reviewed` and `--release-check`."""
+    """True when a lane-lint PASS on one of the heads `passed` holds for the live head `live` of pull request `n`: every commit after it is a
+    claim or a records-page commit (claim_only, against `base`). The checkout `root` fetches the pull request's head first when it lacks `live`. A read that fails is False.
+    A PASS on a head of `source_passed` (the passes of the source a replacement names, replaces_source) holds too when its tree equals the tree of `live`
+    (same_tree, through `h`; step review-carries-by-tree).
+    The one home of that carry, for the join (lint_check), `--reviewed` and `--release-check`."""
     if passed:
         if git(root, "cat-file", "-e", f"{live}^{{commit}}")[0]:
             git(root, "fetch", "-q", "origin", f"+refs/pull/{n}/head:refs/remotes/origin/pull/{n}")
