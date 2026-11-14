@@ -1,7 +1,7 @@
 {
  "id": "allow-merge-base-red-ok",
  "title": "Merge main into PR #3097 (allow merge --base-red-ok), re-lint, and join a combine group",
- "status": "doing",
+ "status": "blocked",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKzyVUbeFsmoQeuaUP2",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "The PR was dropped after a red CI run at 06:52 CST and the red-main revert flow needs it.",
  "source": "Coordinator 18:33 CST Nov 13: lane started (session_013NEJKzyVUbeFsmoQeuaUP2), owner via the consultant at 18:37; consultant said #3097 was dropped after a red run at 06:52 CST. Unchecked by triage.",
- "note": "Filed 18:35 CST Nov 13. Lane session_013NEJKzyVUbeFsmoQeuaUP2 merges main into #3097, re-lints, and the coordinator puts it in a combine group. Done check: lane lint read and a green PR run that ran its suites. Past rulings not checked. Lane 18:38 CST Nov 13 (merge-base-red-ok-refresh, session_013NEJKzyVUbeFsmoQeuaUP2, 18:37): PR #3097 adds a settings.json allow rule for --base-red-ok; test_the_repo_settings_json_has_no_merge_allow_rule forbids it (run 43375520417, job checks-merge-install). Decision auto-mode-owner-acts lines 66 and 76 say entries never cover that flag. Owner question: page item 786 (a no rule, b cloud_allow.json only, c settings.json with the test re-pointed). The lane waits: no push, no ready flip. Answered 19:23 CST Nov 13: owner 786 c, ruling own-786-c-base-red-ok-settings. settings.json rule plus re-pointed test, and the two decision sentences rewritten in the same PR; guard review. Lane resumes.",
- "updatedAt": "2026-11-13T19:23:01-06:00"
+ "note": "Filed 18:35 CST Nov 13. Lane session_013NEJKzyVUbeFsmoQeuaUP2 merges main into #3097, re-lints, and the coordinator puts it in a combine group. Done check: lane lint read and a green PR run that ran its suites. Past rulings not checked. Lane 18:38 CST Nov 13 (merge-base-red-ok-refresh, session_013NEJKzyVUbeFsmoQeuaUP2, 18:37): PR #3097 adds a settings.json allow rule for --base-red-ok; test_the_repo_settings_json_has_no_merge_allow_rule forbids it (run 43375520417, job checks-merge-install). Decision auto-mode-owner-acts lines 66 and 76 say entries never cover that flag. Owner question: page item 786 (a no rule, b cloud_allow.json only, c settings.json with the test re-pointed). The lane waits: no push, no ready flip. Answered 19:23 CST Nov 13: owner 786 c, ruling own-786-c-base-red-ok-settings. settings.json rule plus re-pointed test, and the two decision sentences rewritten in the same PR; guard review. Lane resumes. Lane 19:31 CST Nov 13 (merge-base-red-ok-refresh, 19:31; its report): #3097 failed round 1 at head 5e921534c (reviewer haiku, findings 1 and 3). The rule matches any merge typed with --base-red-ok and any reason (merge/merge.py:2972-2974 lifts the check on any non-blank reason), so it is not revert-only; the cloud already allows merge * --confirm * in merge/cloud_allow.json. A permission rule cannot say \"revert only\". Scope asked on page item 791 (2 narrow first, recommended; 1 keep as written, widening; 3 drop). Trim of --base-red-ok from the two Never-covers sentences: ruled inside own-786-c-base-red-ok-settings (the decision sentences are rewritten in the same PR); the lane's cited 2026-11-12 23:42/23:44 CST ruling sits in no record, so cite own-786-c. Lane waits.",
+ "updatedAt": "2026-11-13T19:31:48-06:00"
 }
