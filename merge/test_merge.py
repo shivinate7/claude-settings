@@ -5904,7 +5904,8 @@ class CloseReplaced(Env):
     """The draft step (`merge <pr> --ready`) closes each open pull request that the lane's body names as replaced or carried, `Replaces #N` or
     `Carries #N`, with a pointer comment to the kept pull request (step close-replaced-at-open; decision session-tiers, the replaced drafts).
     A name counts only as the body's own text: not inside a code span or fence, not on a quote line, not the pull request itself, not in another
-    repo, and not as `see #N` or `related #N`. Each case reads the fake gh's calls: at most one read of each named pull request, one
+    repo, and not as `see #N` or `related #N`. A number list counts only when the line or sentence ends right after it, so `Replaces #1 in the docs`
+    names nothing. Each case reads the fake gh's calls: at most one read of each named pull request, one
     `PATCH pulls/<N> state=closed` and one pointer comment for each open one, and no call at all to a pull request the body does not close.
     The close does not wait on the ready mark: the real Host's ready returns False, and the step still closes. Not a GhHalf subclass: the GhHalf tests must not run twice."""
     set, calls, gh_host, go, gh_state = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go, GhHalf.gh_state
@@ -6066,6 +6067,49 @@ class CloseReplaced(Env):
         for n in (3301, 3302):
             self.assert_closed_with_pointer(n, 7, out)
         self.assert_untouched(3303, out)
+
+    def test_a_name_with_words_after_its_number_closes_nothing(self):  # step 4: a number list counts only at the end of its line or sentence
+        rc, out = self.ready(3210, "Replaces #1636 in the docs", named=[(1636, "open")])
+        self.assert_untouched(1636, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_possessive_after_a_replaces_number_closes_nothing(self):
+        rc, out = self.ready(3210, "Replaces #1637's polling with webhooks", named=[(1637, "open")])
+        self.assert_untouched(1637, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_carries_line_with_a_word_after_its_number_closes_nothing(self):
+        rc, out = self.ready(3210, "Carries #1638 forward", named=[(1638, "open")])
+        self.assert_untouched(1638, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_replaces_list_followed_by_a_clause_names_none_of_its_numbers(self):
+        rc, out = self.ready(3210, "Replaces #1639, #1640, and see #1641", named=[(1639, "open"), (1640, "open"), (1641, "open")])
+        for n in (1639, 1640, 1641):
+            with self.subTest(n=n):
+                self.assert_untouched(n, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_replaces_list_ending_in_a_period_still_closes_every_number(self):  # control: green on the old code
+        rc, out = self.ready(3210, "Replaces #1642, #1643, and #1644.", named=[(1642, "open"), (1643, "open"), (1644, "open")])
+        for n in (1642, 1643, 1644):
+            with self.subTest(n=n):
+                self.assert_closed_with_pointer(n, 3210, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_replaces_line_ending_in_a_period_still_closes_its_number(self):  # control: green on the old code
+        rc, out = self.ready(3210, "Replaces #1645.", named=[(1645, "open")])
+        self.assert_closed_with_pointer(1645, 3210, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_carries_line_naming_a_dropped_lane_of_an_integration_pr_closes_nothing_at_ready(self):
+        lanes = {3301: "a" * 40, 3302: "b" * 40}
+        self.push_branch(merge.integration_branch("x"))
+        body = "\n".join(["Carries #3302", *merge.freeze_lines("x", lanes, dropped=[3302])])
+        rc, out = self.ready(7, body, named=[(3301, "open"), (3302, "open")], head_ref=merge.integration_branch("x"))
+        self.assert_closed_with_pointer(3301, 7, out)  # control: the kept lane still closes
+        self.assert_untouched(3302, out)
+        self.assertEqual(rc, 0, out)
 
 
 class ReadyUsage(unittest.TestCase):
