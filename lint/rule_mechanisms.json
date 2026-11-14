@@ -226,7 +226,8 @@
       "mechanism": {
         "kind": "check",
         "ref": "hooks/stall_watch.py",
-        "setting": {"file": "settings.json", "path": "hooks.Stop[*].hooks[*].command", "contains": "stall_watch.py"}
+        "setting": {"file": "settings.json", "path": "hooks.Stop[*].hooks[*].command", "contains": "stall_watch.py"},
+        "reason": "The stall watch (hooks/stall_watch.py --stop) sees that a ready PR has a check-in. It does not read how long the wait is. The cap is a second mechanism, the guard rule ci-wait-cap (hooks/guard.py ci_wait_hit, decision ci-wait-cap-guard, test hooks/test_guard.py::ci-wait-cap: a CI check-in of 90 minutes is refused). It sees only the limit, not that each check-in is spaced wider than the last."
       }
     },
     "git-ci-done-comment-wakes": {
