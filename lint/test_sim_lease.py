@@ -9,6 +9,7 @@ Temp files follow decisions/test-temp-standard.md: one run folder from lint/_tes
 """
 import importlib.machinery
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -17,11 +18,14 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SIM_LEASE = os.environ.get("SIM_LEASE") or os.path.join(HERE, "..", "bin", "sim-lease")
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+import agent_procs  # noqa: E402  the one home of the per-agent process record (hooks/agent_procs.py)
+SIM_LEASE =os.environ.get("SIM_LEASE") or os.path.join(HERE, "..", "bin", "sim-lease")
 REAL_PS = shutil.which("ps") or "/bin/ps"
 RUN_FOLDER = None
 SLOT_UDID = None  # read from the tool under test in setUpModule: the one home of the device IDs
@@ -136,8 +140,8 @@ class LeaseCase(unittest.TestCase):
         extra = ["--udid"] if udid else []
         return self.run_tool("take", "--device", device, "--pid", str(pid), "--wait", str(wait), *extra, env=env)
 
-    def give(self, pid):
-        return self.run_tool("give", "--pid", str(pid))
+    def give(self, pid, env=None):
+        return self.run_tool("give", "--pid", str(pid), env=env)
 
     def status(self):
         return self.run_tool("status")
@@ -462,6 +466,57 @@ class Concurrency(LeaseCase):
                              "two concurrent duo takes are not granted slots 1 and 2 (round %d)" % n)
             self.give(a.pid)
             self.give(b.pid)
+
+
+class LeaseRecord(LeaseCase):
+    """A simulator lease joins the agent's process record (step agent-owned-processes, ruling own-agent-owned-processes).
+    A take by an agent writes its holder into `<CLAUDE_AGENT_PROCS_DIR>/<agent>.json` as kind "sim-lease". The lease
+    itself stays in leases.json, the one lease store. The record's shape is pinned by janitor/test_sweep.py."""
+
+    AGENT = "5c0a1e7d93b2f4860"  # 17 hex characters, the id the marker carries
+
+    def take_for_agent(self, holder):
+        """A duo take of HOLDER by AGENT, with the record folder set in the environment."""
+        procs = os.path.join(self.cfg, "agent-procs")
+        r = self.take("duo", holder.pid, env={"CLAUDE_AGENT_ID": self.AGENT, "CLAUDE_AGENT_PROCS_DIR": procs})
+        self.assertEqual(grant(r)[0], 0, "scope: the take was not granted: %s" % r.stderr.strip())
+        return procs
+
+    def test_the_agents_record_lists_the_lease_holder(self):
+        holder = self.spawn()
+        procs = self.take_for_agent(holder)
+        record_path = os.path.join(procs, self.AGENT + ".json")
+        self.assertTrue(os.path.isfile(record_path), "no record file for the agent under the procs dir after the take")
+        with open(record_path, encoding="utf-8") as handle:
+            entries = json.load(handle).get("procs", [])
+        listed = [e for e in entries if isinstance(e, dict) and e.get("pid") == holder.pid]
+        self.assertTrue(listed, "the agent's record does not list the lease holder, pid %d" % holder.pid)
+        self.assertEqual(listed[0].get("kind"), "sim-lease",
+                         "the lease holder's kind is %r, not sim-lease" % listed[0].get("kind"))
+
+    def test_the_lease_stays_in_the_one_lease_store(self):
+        """Control: the take still writes its lease to leases.json, so the record holds a reference, not a second store."""
+        holder = self.spawn()
+        self.take_for_agent(holder)
+        with open(os.path.join(self.cfg, "state", "sim-lease", "leases.json"), encoding="utf-8") as handle:
+            leases = json.load(handle)["leases"]
+        self.assertTrue(any(e.get("pid") == holder.pid for e in leases),
+                        "the lease for pid %d is not in leases.json" % holder.pid)
+
+    def test_a_give_by_the_agent_ends_its_record_entry_so_the_released_lease_names_no_owner(self):
+        """A released lease names no owner. Before the give, AGENT's record names the holder to AGENT. The give, run as
+        AGENT, must end that entry, so a later read of the record names no owner for the pid. The read is the one the
+        guard uses (agent_procs.recorded_owners)."""
+        holder = self.spawn()
+        procs = self.take_for_agent(holder)
+        with mock.patch.dict(os.environ, {"CLAUDE_AGENT_PROCS_DIR": procs}):
+            self.assertEqual(agent_procs.recorded_owners(holder.pid), [self.AGENT],
+                             "scope: the agent's record does not name the lease holder, pid %d, to the agent" % holder.pid)
+        r = self.give(holder.pid, env={"CLAUDE_AGENT_ID": self.AGENT, "CLAUDE_AGENT_PROCS_DIR": procs})
+        self.assertEqual(r.returncode, 0, "scope: give exited %d: %s" % (r.returncode, r.stderr.strip()))
+        with mock.patch.dict(os.environ, {"CLAUDE_AGENT_PROCS_DIR": procs}):
+            self.assertEqual(agent_procs.recorded_owners(holder.pid), [],
+                             "the released lease of pid %d still names its owner %s" % (holder.pid, self.AGENT))
 
 
 if __name__ == "__main__":
