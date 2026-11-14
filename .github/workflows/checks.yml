@@ -111,6 +111,9 @@ jobs:
       - push-skip
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     outputs:
       checks_windows: ${{ steps.scope.outputs.checks_windows }}
       checks_windows_merge: ${{ steps.scope.outputs.checks_windows_merge }}
@@ -137,6 +140,19 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # The pull request's newest earlier fully green head, or an empty line (.github/scripts/green-head.sh). It lets ci-scope.sh skip the
+      # jobs for a push that changes docs/records.md alone. A failed read prints an empty line: unknown never skips. Two reads per pull_request run (unmeasured).
+      - name: Find the newest earlier green head
+        id: green
+        if: ${{ github.event_name == 'pull_request' }}
+        shell: bash
+        env:
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: echo "sha=$(bash .github/scripts/green-head.sh)" >> "$GITHUB_OUTPUT"
+
       - name: Detect which jobs and suites this change needs
         id: scope
         shell: bash
@@ -144,6 +160,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_REF: ${{ github.head_ref }}
+          GREEN_HEAD: ${{ steps.green.outputs.sha }}
         run: bash .github/scripts/ci-scope.sh
 
   checks:
@@ -296,6 +313,9 @@ jobs:
 
       - name: Scope detector fixture suite
         run: python3 lint/test_ci_scope.py
+
+      - name: Green head reader fixture suite
+        run: python3 lint/test_green_head.py
 
       - name: Touched-test selector fixture suite
         run: python3 lint/test_touched_tests.py
