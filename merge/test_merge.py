@@ -562,6 +562,11 @@ class Env(unittest.TestCase):
     def head(self, ref="feat"):
         return sh(self.co, "git", "ls-remote", "origin", f"refs/heads/{ref}").split("\t")[0]
 
+    def push_branch(self, name):
+        """origin gets `name` at the feat head, so a head ref of that name exists there (an integration PR's batch branch)."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", f"{self.head('feat')}:refs/heads/{name}")
+
     def show(self, ref, path):
         sh(self.co, "git", "fetch", "-q", "origin")
         return sh(self.co, "git", "show", f"origin/{ref}:{path}")
@@ -3289,6 +3294,8 @@ try:
             link = '%s; rel="next", %s; rel="last"' % (url(n + 1), url(last))
         finish(text, 0, include, link)
     num = S.get("pr_number", 7)
+    def refused(knob, n):  # a failure knob: a string refuses every call; a {"<PR number>": text} dict refuses the calls on those pull requests only
+        return knob.get(str(n)) if isinstance(knob, dict) else knob
     rows = S.get("open_prs", [])
     numbered = {(r[3] if len(r) > 3 else 101 + i): r for i, r in enumerate(rows)}
     def named_pr(n):  # a named pull request's state, merged flag and body: pr_extra, open and empty unless a case sets them
@@ -3362,10 +3369,10 @@ try:
         n = int(m_pr.group(1))
         if n == num or n not in numbered:
             raise Refused(api_error(404, "Not Found"))
-        if S.get("close_fail"):  # the text gh prints when GitHub refuses the close
-            raise Refused(S["close_fail"])
-        ex = S.setdefault("pr_extra", {}).setdefault(str(n), {}); ex["state"] = "closed"; save()
-        finish(one(pull(n, numbered[n][1], numbered[n][0], numbered[n][2], state="closed", body=ex.get("body", "")), jq), 0, include)
+        if refused(S.get("close_fail"), n):  # the text gh prints when GitHub refuses the close
+            raise Refused(refused(S["close_fail"], n))
+        ex = S.setdefault("pr_extra", {}).setdefault(str(n), {}); ex["state"] = params.get("state", "closed"); save()  # a reopen sends state=open
+        finish(one(pull(n, numbered[n][1], numbered[n][0], numbered[n][2], state=ex["state"], body=ex.get("body", "")), jq), 0, include)
 
     elif method == "PUT" and m_put and int(m_put.group(1)) == num:
         S["put_done"] = True; S.setdefault("merge_fields", []).append(dict(params)); save()  # each merge call's fields, as sent: a case reads what the merge carried
@@ -3429,8 +3436,8 @@ try:
             answer_list(cur["check_runs"], "check_runs", {"total_count": len(cur["check_runs"])})
         answer_list(cur["statuses"], "statuses", {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])})
 
-    elif method == "POST" and re.fullmatch(r"issues/\d+/comments", rel) and S.get("post_fail"):  # a case's failed post: the text gh prints, and no comment kept
-        raise Refused(S["post_fail"])
+    elif method == "POST" and re.fullmatch(r"issues/\d+/comments", rel) and refused(S.get("post_fail"), rel.split("/")[1]):  # a case's failed post: the text gh prints, and no comment kept
+        raise Refused(refused(S["post_fail"], rel.split("/")[1]))
     elif method == "POST" and re.fullmatch(r"issues/\d+/comments", rel):  # a comment a lane posts (Host.post_comment): kept in the state, as GitHub files it
         S.setdefault("posted", []).append({"n": int(rel.split("/")[1]), "body": params.get("body")}); save()
         finish(one({"id": 555, "body": params.get("body")}, jq), 0, include)
@@ -6017,6 +6024,79 @@ class CloseReplaced(Env):
         rc, out = self.run_merge("3210", host=self.gh_host())
         self.assertEqual(rc, 0, out)
         self.assert_untouched(1636, out)
+
+    def test_a_replaces_list_joined_by_and_closes_every_number_in_it(self):
+        rc, out = self.ready(3210, "Replaces #12, #13, and #14", named=[(12, "open"), (13, "open"), (14, "open")])
+        for n in (12, 13, 14):
+            with self.subTest(n=n):
+                self.assert_closed_with_pointer(n, 3210, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_replaces_line_with_pr_before_the_number_closes_it(self):
+        rc, out = self.ready(3210, "Replaces PR #1636", named=[(1636, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_replaces_line_with_a_colon_closes_the_number(self):
+        rc, out = self.ready(3210, "Replaces: #1636", named=[(1636, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_bold_replaces_word_closes_the_number(self):
+        rc, out = self.ready(3210, "**Replaces** #1636", named=[(1636, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_bullet_replaces_line_closes_the_number(self):  # control: green on the old code
+        rc, out = self.ready(3210, "- Replaces #1636", named=[(1636, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_prose_this_replaces_closes_nothing(self):  # control: green on the old code
+        rc, out = self.ready(3210, "This replaces #1636 in the old lane.", named=[(1636, "open")])
+        self.assertEqual(rc, 0, out)
+        self.assert_untouched(1636, out)
+
+    def test_an_integration_pr_at_ready_closes_its_open_lanes_and_not_a_dropped_one(self):  # control: green on the old code
+        lanes = {3301: "a" * 40, 3302: "b" * 40, 3303: "c" * 40}
+        self.push_branch(merge.integration_branch("x"))
+        body = "\n".join(merge.freeze_lines("x", lanes, dropped=[3303]))
+        rc, out = self.ready(7, body, named=[(3301, "open"), (3302, "open"), (3303, "open")], head_ref=merge.integration_branch("x"))
+        self.assertEqual(rc, 0, out)
+        for n in (3301, 3302):
+            self.assert_closed_with_pointer(n, 7, out)
+        self.assert_untouched(3303, out)
+
+
+class ReadyUsage(unittest.TestCase):
+    """The usage text of `merge <pr> --ready` says the draft step also closes the pull requests the body names as replaced (step close-replaced-at-open).
+    Two sources hold that text: the --ready help string the parser prints, and the module docstring's entry for the act. Each case finds its entry first
+    (the scope), then asserts that the entry names the close (the subject). Whitespace is joined, so a wrapped line reads as one line."""
+
+    def assert_names_the_close(self, entry, source):
+        text = " ".join(entry.split())
+        self.assertRegex(text, r"\bclos\w*\b[^.]*\breplaced\b", f"the --ready entry in {source} does not say it closes the replaced pull requests:\n{text}")
+
+    def test_the_ready_help_string_says_it_closes_the_replaced_pull_requests(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
+            merge.main(["--help"])
+        lines = out.getvalue().splitlines()
+        start = next((i for i, line in enumerate(lines) if line.lstrip().startswith("--ready")), None)
+        self.assertIsNotNone(start, "merge --help has no --ready entry:\n" + out.getvalue())
+        entry = [lines[start]]
+        for line in lines[start + 1:]:
+            if not line.startswith(" " * 10):  # argparse indents a help line's wrapped part to the help column; the next option starts at two
+                break
+            entry.append(line)
+        self.assert_names_the_close("\n".join(entry), "merge --help")
+
+    def test_the_module_docstring_entry_for_ready_says_it_closes_the_replaced_pull_requests(self):
+        lines = merge.__doc__.splitlines()
+        start = next((i for i, line in enumerate(lines) if line.lstrip().startswith("merge <pr> --ready")), None)
+        self.assertIsNotNone(start, "the module docstring has no `merge <pr> --ready` entry")
+        end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("  merge ")), len(lines))
+        self.assert_names_the_close("\n".join(lines[start:end]), "the module docstring")
 
 
 def put_base_config(env, text):
