@@ -8,8 +8,9 @@ import os
 import re
 import sys
 
-# The Linux jobs that hold the suites of the one old `checks` job, split for wall time. merge/merge.py reads suites from each.
-CHECKS_SUITE_JOBS = ("checks", "checks-merge-install")
+# The Linux jobs that hold the suites of the one old `checks` job, split for wall time: the lint family (`checks`), the hooks/
+# suites (checks-hooks), the other suites (checks-rest) and the merge and install suites. merge/merge.py reads suites from each.
+CHECKS_SUITE_JOBS = ("checks", "checks-hooks", "checks-rest", "checks-merge-install")
 
 
 def job_re(name):
