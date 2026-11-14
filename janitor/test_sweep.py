@@ -1294,6 +1294,31 @@ class StaleAgentLockTests(unittest.TestCase):
         self.assertTrue(guard.worktree_locked(self.root, self.wt["dead"]))
 
 
+class LiveFormLockOffLinuxTests(unittest.TestCase):
+    """Off Linux the live-form lock's start ticks cannot be read (`_ticks_lock_stale`), so a dead
+    host is unproven and its tree is kept, finish proof or not. This runs on every platform: it sets
+    the platform name, so Windows and macOS test the keep path they take."""
+
+    LOCK = "claude agent agent-offlinux (pid %d start 12345)"
+
+    @classmethod
+    def setUpClass(cls):
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        cls.dead_pid = gone.pid
+
+    def test_a_dead_host_live_lock_is_unproven_and_never_frees_its_tree(self):
+        lock = self.LOCK % self.dead_pid
+        for platform in ("win32", "darwin"):
+            with mock.patch.object(sys, "platform", platform):
+                with self.subTest(platform=platform, call="stale_agent_lock_verdict"):
+                    self.assertIsNone(sweep.stale_agent_lock_verdict(lock))
+                for finished in (False, True):
+                    with self.subTest(platform=platform, call="finish_gated_lock_verdict", finished=finished):
+                        self.assertIsNot(sweep.finish_gated_lock_verdict(lock, finished), True,
+                                         "a dead-host live lock freed its tree off Linux")
+
+
 class ListenerDecisionTests(unittest.TestCase):
     """`sweep.find_swept_listeners` / `sweep.decide_listener`. Every listener here is a REAL
     process this suite starts itself (`spawn_plain_listener` / `spawn_orphaned_listener`),
