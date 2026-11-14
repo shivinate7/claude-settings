@@ -7,9 +7,9 @@
  "lane": "session_013NEJL1FmGQvNLgjrnoxD7B",
  "owner": "triage",
  "blockedBy": [],
- "why": "Retrospective CI audit 15:53 CST Nov 12: lint/check_unknown_reads_contract.py runs on Linux, macOS and Windows (checks.yml:551, :1183, :1896), against decision test-strategy-reset line 20 (\"pure lints run on ubuntu only\").",
+ "why": "Retrospective CI audit 15:53 CST Nov 12: lint/check_unknown_reads_contract.py runs on Linux, macOS and Windows (checks.yml:551, :1183, :1896), against decision test-strategy-reset line 20 (\"pure lints run on ubuntu only\"). Lane question 03:23 CST Nov 14 (lane of #3005, head 06ccf55df, sent direct; unchecked by triage): the coordinator's 03:20 note said this step cuts macOS work; #3005 removes only the Windows run of the unknown-reads lint, and the macOS run (checks-macos, checks.yml l.1344 on main 4db2a9cf3) stays for step ci-mac-once-per-batch. This step's own text says the same. Answer by triage: keep #3005 Windows-only (the lane's own option a, no widening, no departure from main), so no owner question. The lane waits on runner 10 for the lane lint.",
  "source": "retrospective 15:53 CST Nov 12",
  "note": "Drop the Windows run of the lint (the macOS run goes in step ci-mac-once-per-batch). Express under R55 (CI fixes).",
- "updatedAt": "2026-11-12T16:05:45-06:00",
+ "updatedAt": "2026-11-14T03:23:00-06:00",
  "order": -294
 }
