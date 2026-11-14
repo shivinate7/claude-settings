@@ -8,7 +8,7 @@ Owner, 2026-10-30 15:03 CDT, waiting item 87: every owner repo runs the same kin
 - The number of checks scales with the repo's size. A bigger repo may run more checks, as long as each one looks at a shared outcome.
 - Branch protection in every repo requires one check: the `all-jobs-passed` rollup, from the shared action `actions/all-jobs-passed`. The repo's own checks run inside that rollup.
 - Degen and ios-adblock already call the shared action in their CI.
-- A repo with no CI gets a starter CI, not an exemption (owner, 2026-11-10 16:25 and 16:36 CST; restart plan R17). Skill project-ops writes it from `skills/project-ops/templates/starter-ci/checks.yml` (decision `opt-in-ci-templates-composite`). A lane lint of a head with no workflow file refuses, names the starter step, and no flag lifts it. In a protected repo, a merge of such a head waits on the required check until its deadline, since no run reports it. The merge names no starter step (merge/merge.py `wait_checks`).
+- A repo with no CI gets a starter CI, not an exemption (owner, 2026-11-10 16:25 and 16:36 CST; restart plan R17). Skill project-ops writes it from `skills/project-ops/templates/starter-ci/checks.yml` (decision `opt-in-ci-templates-composite`). A lane lint of a head with no workflow file refuses, and no flag lifts its no-CI stop, which names the starter step. For a PR number, a draft-run stop that a `--lint-unknown-ok` reason lifts comes first (the notes entry `no-ci-lift-before-starter-step`). In a protected repo, a merge of such a head refuses: its required check reads pending, since no run reports it. The merge names no starter step (merge/merge.py `confirm`, `head_not_green`).
 
 Cites:
 
