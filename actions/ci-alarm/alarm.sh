@@ -10,7 +10,7 @@
 # all passed, cancelled or skipped only) is never cleared this way. A cancelled run never alarms. Cost, only for a failed group that has
 # such an N: one jobs read for R, and for each N one jobs read and, unless N leaves a red job of R unpassed (a certain red), one contents read of N's workflow file at N's head (headSha), each once;
 # a failed read is unknown. An empty green run of the push group (no suite ran: clear_rule.py) is passed over, never read as green or red; the group's
-# newest run that is not empty is the verdict, so an older red run stays red. A group whose every run is empty keeps its newest run and never alarms
+# newest run that is not empty is the verdict, so an older failed run stays failed. A group whose every run is empty keeps its newest run and never alarms
 # (the alarm raises red only; merge.py's Host.base_state reads such a group as unknown). Cost: one jobs read per green run of the push group, newest first,
 # down to the first that is not empty. Otherwise the same rules as Host.base_state. Needs python3 (stdlib only) and
 # clear_rule.py beside this file; no checkout. Env: BRANCH, SELF

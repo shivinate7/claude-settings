@@ -23,7 +23,7 @@ A job name maps to a job when exactly one job has it as `name:` or key. Two matc
 The empty-run rule (decision no-merge-onto-red-main; owner ruling own-812-a-judge-suite-runs). Only a run that ran its suites is judged. A completed
 `success` run of the push group (the events of events.json that share a group with `push`: push and workflow_dispatch) is EMPTY when no job of it
 concluded `success` except the bookkeeping jobs `scope`, `push-skip` and `nightly-skip`. A run with no jobs is empty. Why: a push can run no suite
-(push-skip skips the whole run, or a docs-only push turns every scope flag off), yet the run concludes `success` and must not hide an older red run
+(push-skip skips the whole run, so scope and every suite job skip), yet the run concludes `success` and must not hide an older failed run
 of its group; nor may it vouch for a green one. An empty run is passed over, never read as green or red: a caller walks past it to the group's
 newest run that is not empty. `empty_without_evidence` is that test. A schedule run is left as it is.
 

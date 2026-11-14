@@ -216,6 +216,7 @@ DEBT_CITE = "(decision debt-close-runs-retire, a debt closes only when its Retir
 RED_CITE = "(decision no-merge-onto-red-main, no batch merges onto a red base)"
 CANCELLED_NO_RED = "was cancelled with no red job"  # base_state words an unknown cancelled run with it; red_base reads it back to give the cancelled run its own headline
 RERUN_REMEDY = "gh run rerun"  # base_state names it for a cancelled run on the base's head; red_base reads it back to name the remedy in its way out
+NO_SUITE_RUN = "in the push group on the page ran its suites, so main has no verdict"  # base_state words a push group whose every run on the page ran no suite with it, after "no run of <workflow>"; red_base reads it back to give that cause its own headline
 RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-run with it; red_base reads it back to give the re-run its own headline
 BREAKING_MERGE = "breaking merge:"  # base_state words the first red run with a green parent, once its re-run is red again, with it; red_base reads it back to name the revert route
 FIRST_RED_RERUN = re.compile(rf"`{RERUN_REMEDY} (\d+) --failed`")  # base_state names a first red run's re-run with it; red_base reads the run id back to name the re-run before the reason flag
@@ -1454,8 +1455,8 @@ class Host:
         A cancelled run with no red job that nothing clears keeps its line, in the unknown detail and beside a red verdict. It is named with `gh run rerun <id>` only when its
         `head_sha` is the head_sha of the newest run on the page read (any status, any event in BASE_EVENTS, from the unfiltered list): runs on the base start at its head, and a re-run tests the run's own commit. Never named for a run with a red job or a re-run in flight.
         An empty run is no verdict (clear_rule.empty_without_evidence, the one home; owner ruling own-812-a-judge-suite-runs): a completed success run of the push group
-        (push and dispatch) that ran no suite job, whatever its push-skip job says. The newest run of the group that is not empty is the group's verdict, so an older red
-        run stays red. A group with no such run on the page is unknown, never green or red. A page with no run of the group at all is not judged. A schedule run is judged as it is.
+        (push and dispatch) that ran no suite job, whatever its push-skip job says. The newest run of the group that is not empty is the group's verdict, so an older failed
+        run stays failed. A group with no such run on the page is unknown, never green or red. A page with no run of the group at all is not judged. A schedule run is judged as it is.
         A red verdict's detail also holds breaking_line's segment for each red run judged (one per file and group), the head group's first: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).
         One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A newest-first walk of the push group's
         green runs costs one jobs read each, down to the first that is not empty (the newest, when it ran a suite). A failed read is unknown."""
@@ -1494,7 +1495,7 @@ class Host:
             age = {r["id"]: i for i, r in enumerate(judged)}  # `judged` is newest first
             for r in passed_over.values():  # a group whose every run on the page ran no suite has no verdict
                 if (r["path"], self.BASE_EVENTS[r["event"]]) not in settled:
-                    unknown.append(f"no run of {r['name']} in the push group on the page ran its suites, so main has no verdict (newest, run {r['id']} at {str(r.get('head_sha'))[:9]}, ran none: {r.get('html_url')})")
+                    unknown.append(f"no run of {r['name']} {NO_SUITE_RUN} (newest, run {r['id']} at {str(r.get('head_sha'))[:9]}, ran none: {r.get('html_url')})")
 
             texts = {}
 
@@ -2990,8 +2991,10 @@ def red_base(root, host, base, red_ok=""):
         return
     rerun = verdict == "unknown" and RERUN_IN_FLIGHT in detail
     cancelled = verdict == "unknown" and not rerun and CANCELLED_NO_RED in detail
+    no_suite = verdict == "unknown" and not rerun and not cancelled and NO_SUITE_RUN in detail
     what = (f"{base}'s latest completed run is red: {detail}" if verdict == "red" else f"{base}'s runs are UNKNOWN, a re-run is still running: {detail}" if rerun
             else f"{base}'s runs are UNKNOWN: {detail}" if cancelled
+            else f"{base}'s runs are UNKNOWN, no run ran its suites: {detail}" if no_suite
             else f"{base}'s runs are UNKNOWN, the read failed: {detail}")
     if red_ok.strip():
         say(f"merge: {what}. {RED_FLAG}, reason: {red_ok.strip()}")
