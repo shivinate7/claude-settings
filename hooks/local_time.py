@@ -10,7 +10,7 @@ Modes:
   says yes: then 15 is minutes. `override off` means that only as the whole prompt. A grant prints one receipt line
   (override_line).
   A plain typed ask that holds the word `override` may grant one too, after a model call
-  (decision owner-override; hooks/override.py). It prints one more line.
+  (decision owner-override; hooks/override.py). A grant by that ask prints its receipt line the same way.
 - --agent: At SubagentStart, gives the agent the time in US Central as context.
 - --page-note: After an ArtifactData read of one waiting-page answer, saves the owner's note on it to the session's inbox, like a chat message (decision owner-feedback-inbox). It prints no time line.
 
