@@ -1313,7 +1313,7 @@ class ConfirmIdleLanes(Env):
 
     def test_no_roadmap_branch_on_origin_prints_no_pass_line(self):
         # No live file exists to read, so no pass is owed and none is printed. Scope first: origin has no roadmap branch.
-        # GREEN ON MAIN BY DESIGN: main prints no pass line at all, so this guards the new pass against printing one.
+        # Control: a merge with no roadmap branch has no pass, so the pass must not print a line.
         self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/heads/roadmap"), "", "scope: origin has a roadmap branch")
         rc, out, err = self.confirm(live_at=None, base=False)
         self.assert_landed(rc, out, err)
@@ -1322,7 +1322,7 @@ class ConfirmIdleLanes(Env):
     def test_a_refused_merge_prints_no_report_and_no_owed_line(self):
         # The refusal lands nothing, so no live file is read after it. The file is on origin already, so a pass that ran
         # before the refusal would find one and print. The exit code of a refused merge is 1, as before.
-        # GREEN ON MAIN BY DESIGN: main prints no pass line, so this guards the new pass against running before a landed merge.
+        # Control: a refused merge has not landed, so the pass must not run.
         self.push_roadmap(dict(ROADMAP_BASE, **{"roadmap/live/live.json": live_json("2026-11-13T00:00:00-06:00", IDLE_LANE)}))
         self.host.refuse = "refused by the test"
         rc, out, err = self.confirm(base=False)
@@ -1355,7 +1355,7 @@ class ConfirmIdleLanes(Env):
     def test_a_merge_onto_a_base_that_is_not_the_default_prints_no_pass_line(self):
         # The pull request targets integ, not main, so the merge lands on integ. A fresh live file would print the report after a
         # merge onto main; a merge onto integ owes no pass, so no line prints.
-        # GREEN ON MAIN BY DESIGN: main prints no pass line, so this guards the new pass against running for a non-default base.
+        # Control: a merge onto a non-default base must not run the pass.
         sh(self.other, "git", "fetch", "-q", "origin")
         sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/integ")
         self.host.base = "integ"
