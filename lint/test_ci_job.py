@@ -49,6 +49,7 @@ ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_
                            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
 ENV.pop("VERDICT_LOG", None)
 ENV.pop("CI_JOB_LINT_WORKERS", None)
+ENV.pop("CI_JOB_HEAD_SHA", None)  # the lane lint's pushed head: a case sets it, and the unset case needs it absent
 
 
 def workflow(*steps, job="lane", other=None):
@@ -539,6 +540,47 @@ class PinNoteEnv(Job):
         verdicts, seen, out = self.seen_after(step("seen", self.SEEN), env={PIN_NOTE_ENV: "1"})
         self.assertEqual(verdicts, ["PASS"], out)
         self.assertEqual(seen, "<unset>", "a step that is not ste-lint saw the pin note variable: " + out)
+
+
+class HeadShaCarrier(Job):
+    """ci-job gives a step's ${{ github.event.pull_request.head.sha }} the pushed head in CI_JOB_HEAD_SHA when that is set
+    and not blank (the lane lint's HEAD is a merge commit, so it passes the head in), else HEAD. No step's env carries
+    CI_JOB_HEAD_SHA. ci-job relays no step output, so each step writes the value it sees to seen.txt."""
+
+    SEEN = "printf '%s' \"$HEAD_SHA\" > seen.txt"
+    SEEN_ENV = "printf '%s' \"${CI_JOB_HEAD_SHA-<unset>}\" > seen.txt"
+    HEAD_EXPR = {"HEAD_SHA": "${{ github.event.pull_request.head.sha }}"}
+    PUSHED = "f" * 40  # a pushed head that is not HEAD of the throwaway repo
+
+    def setUp(self):
+        super().setUp()
+        subprocess.run(["git", "-C", self.root, "commit", "-q", "--allow-empty", "-m", "c"], check=True, env=ENV)
+        self.head_sha = subprocess.run(["git", "-C", self.root, "rev-parse", "HEAD"], capture_output=True, text=True,
+                                       check=True, env=ENV).stdout.strip()
+
+    def test_a_step_reading_the_head_sha_sees_the_pushed_head_when_the_env_sets_it(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN, env=self.HEAD_EXPR),
+                                              env={"CI_JOB_HEAD_SHA": self.PUSHED})
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertEqual(seen, self.PUSHED, "a step's head.sha is not CI_JOB_HEAD_SHA: " + out)
+
+    def test_a_blank_or_whitespace_pushed_head_falls_back_to_head(self):
+        for blank in ("", "   ", " \t "):
+            with self.subTest(blank=blank):
+                verdicts, seen, out = self.seen_after(step("seen", self.SEEN, env=self.HEAD_EXPR),
+                                                      env={"CI_JOB_HEAD_SHA": blank})
+                self.assertEqual(verdicts, ["PASS"], out)
+                self.assertEqual(seen, self.head_sha, "a blank CI_JOB_HEAD_SHA did not fall back to HEAD: " + out)
+
+    def test_an_unset_pushed_head_falls_back_to_head(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN, env=self.HEAD_EXPR))
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertEqual(seen, self.head_sha, "an unset CI_JOB_HEAD_SHA did not fall back to HEAD: " + out)
+
+    def test_a_step_env_never_carries_the_pushed_head_sha(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN_ENV), env={"CI_JOB_HEAD_SHA": self.PUSHED})
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertEqual(seen, "<unset>", "a step saw CI_JOB_HEAD_SHA in its env: " + out)
 
 
 def mapped(parent, body):
