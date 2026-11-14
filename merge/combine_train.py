@@ -6,7 +6,9 @@
 Standalone. merge.py never imports it, so it changes no merge verdict. It never runs `git push`, `gh pr ready`, `gh pr merge` or creates a pull request.
 Its writes are git objects (`git merge-tree`, `git commit-tree`) in the checkout DIR and one temporary worktree per batch, removed at the end.
 
-The queue file is {"prs": [{"number": N, "head": SHA}, ...] in priority order,
+The queue file's schema is this tool's own: skills/project-ops/scripts/check_runner_state.py, which the runner-queue step names as its home, is not in
+the repo, so there is no reader to reuse. The shape is
+                   {"prs": [{"number": N, "head": SHA}, ...] in priority order,
                    "batches": [{"name": B, "state": "in-ci" | "next-in-line" | "queued", "members": [N, ...]}, ...]}.
 Every batch name and every rule below is a reading of the decision text in docs/decisions/session-tiers.md ("Rolling combine train"), which
 is not built as a rule. The header line names the readings:
@@ -18,10 +20,13 @@ is not built as a rule. The header line names the readings:
       earlier ones, so the last round checks the whole batch. Their home is merge.readyChecks in .github/stamp.json on origin/main, run through
       `bin/ci-job checks --step NAME ... --base origin/main` (merge.ci_job_run). The tool re-implements none of them.
   (e) with --lint, one `bin/ci-job checks --lint` run on each folded batch's final tree.
+  (f) before any pairing, each queued member is merge-tested against origin/main in DIR. A member that clashes with main leaves by name with its
+      paths and `(clash with main)`. A merge with main is no pair tried, and a main clash is not in the clash rate's numerator.
 
+The clash rate is the members a pair clash left out, over the pairs tried (a group merge and each retry of its members are each a pair).
 A number the tool did not measure prints `unknown` or `n/a (reason)`, never 0 and never a guess.
-Exit: 0 ok, 1 a member left out or a check failed, 2 something unknown or a run that could not start.
-Cost: per fold, one `git merge-tree` start per pair tried and one `git commit-tree` start per merge; per round, one ci-job run when the checks have a home;
+Exit: 0 ok, 1 a member left out or a check failed, 2 something unknown or a run that could not start (a git that is not on PATH included).
+Cost: per fold, one `git merge-tree` start per member (against main) and per pair tried and one `git commit-tree` start per merge; per round, one ci-job run when the checks have a home;
 with --lint, one more ci-job run per batch. One temporary worktree per batch. Nothing is logged or left running.
 """
 import argparse
@@ -43,7 +48,8 @@ FROZEN = ("in-ci", "next-in-line")
 NO_HOME = "unknown (fast-checks-before-ready not landed)"
 HEADER = ("combine-train: dry run, no push, no gh pr ready or merge. Readings used: (a) in-ci and next-in-line batches are frozen and the queued "
           "batches behind them fold into one; (b) a clashing member leaves by name; (c) dry rounds ignore a move of main; "
-          "(d) the fast checks run once per round on its leading tip; (e) --lint runs once on a folded batch's final tree.")
+          "(d) the fast checks run once per round on its leading tip; (e) --lint runs once on a folded batch's final tree; "
+          "(f) each member is merge-tested against origin/main first, and a clash with main leaves by name. Queue schema: the tool's own.")
 
 
 class QueueError(Exception):
@@ -53,7 +59,7 @@ class QueueError(Exception):
 def git(root, *args):
     """-> (exit code, stdout, stderr) of one git call in `root`. The identity and signing are pinned so `commit-tree` needs no user config."""
     cmd = ["git", "-C", root, "-c", "user.name=combine-train", "-c", "user.email=combine-train@invalid", "-c", "commit.gpgsign=false", *args]
-    r = _nowindow.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    r = _nowindow.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")  # an OSError (no git on PATH) goes to main
     return r.returncode, r.stdout.strip(), r.stderr.strip()
 
 
@@ -119,7 +125,8 @@ class Fold:
         self.root, self.heads, self.clock = root, heads, clock
         self.tips = [Tip(heads[m], [m]) for m in members]
         self.left = []        # (member, "clash" | "unknown", detail)
-        self.tried = self.clashed = 0
+        self.tried = 0        # pairs tried: every merge of two tips, never a merge with main
+        self.clashed = 0      # members a pair clash left out
         self.rounds = 0
         self.seconds = 0.0
         self.lines = []       # round and check lines, in order
@@ -133,17 +140,18 @@ class Fold:
             return None, state, files
         self.tried += 1
         if state == "conflict":
-            self.clashed += 1
             return None, state, files
         code, out, err = git(self.root, "commit-tree", tree, "-p", a.commit, "-p", b_commit, "-m", f"dry fold of {tag(a.members + b_members)}")
         if code:
             return None, "unknown", [f"git commit-tree failed: {err or out}"]
         return Tip(out, a.members + b_members), state, []
 
-    def leave(self, members, state, files, against):
+    def leave(self, members, state, files, against, pair=True):
+        """Record `members` as left out. `against` is the text after "clash with"; `pair` is false for a clash with main, which the clash rate leaves out."""
         for m in members:
             if state == "conflict":
-                self.left.append((m, "clash", f"{', '.join(files) or '(no file name read)'} (clash with {tag(against)})"))
+                self.clashed += pair
+                self.left.append((m, "clash", f"{', '.join(files) or '(no file name read)'} (clash with {against})"))
             else:
                 self.left.append((m, "unknown", f"{' '.join(files)}"))
                 self.unknown = True
@@ -159,10 +167,21 @@ class Fold:
                 if tip:
                     a = tip
                 else:
-                    self.leave([m], st, fl, a.members)
+                    self.leave([m], st, fl, tag(a.members))
             return a
-        self.leave(b.members, state, files, a.members)
+        self.leave(b.members, state, files, tag(a.members))
         return a
+
+    def test_main(self):
+        """Reading (f): merge-test each member's head against BASE, and drop the member that clashes (or cannot be tested) before any pairing."""
+        kept = []
+        for tip in self.tips:
+            state, _tree, files = merge.merge_tree(self.root, BASE, tip.commit)
+            if state == "clean":
+                kept.append(tip)
+            else:
+                self.leave(tip.members, state, files, "main", pair=False)
+        self.tips = kept
 
     def round(self, check):
         """One round: pair adjacent tips, carry an odd one over, then run `check(tip, label)` on the leading tip."""
@@ -265,7 +284,7 @@ class Checks:
             f.unknown = True
             f.lines.append("lint unknown")
         f.lines.extend("  " + l for l in lines + log)
-        return f"{minutes(took)} (lint {'FAIL' if state == 'fail' else 'unknown'})"
+        return f"{minutes(took)} (lint FAIL)" if state == "fail" else "unknown"
 
 
 def fold_batch(name, members, heads, steps, why, lint, clock, root):
@@ -274,6 +293,7 @@ def fold_batch(name, members, heads, steps, why, lint, clock, root):
     checks = Checks(root, steps, why, fold)
     lint_value = "n/a (not run)"
     try:
+        fold.test_main()
         if len(fold.tips) == 1:
             checks.run(fold.tips[0], "no round")
         while len(fold.tips) > 1:
@@ -323,6 +343,15 @@ def main(argv, clock=None):
     except QueueError as e:
         print(f"unknown: {e}")
         return 2
+    try:
+        return run(args, heads, batches, clock)
+    except OSError as e:  # a program that cannot start, in practice git missing from PATH
+        print(f"unknown: a program cannot start ({e.filename or 'git'}: {e.strerror or e}); the dry fold needs git on PATH")
+        return 2
+
+
+def run(args, heads, batches, clock):
+    """The queue is read: print the header, then one block per batch. -> the exit code."""
     print(HEADER)
     queued = [(n, m) for n, st, m in batches if st == "queued"]
     folded = [m for _n, ms in queued for m in ms]
