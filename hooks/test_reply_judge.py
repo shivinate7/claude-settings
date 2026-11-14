@@ -1413,10 +1413,10 @@ def still_widens(cl, where):
         ("widening still named: %s names a second accepted form as widening" % where,
          has_pin(cl, ("widen",), ("second accepted form", "second form")), "no clause calls a second form widening"),
         ("widening still named: %s names an allow entry in settings.local.json as widening" % where,
-         has_pin(cl, ("settings.local.json",), ("widen",)) and not has_pin(cl, ("settings.local.json",), NEG_WORDS),
+         has_pin(cl, ("settings.local.json",), ("widen",)) and not has_pin(cl, ("settings.local.json",), ("widen",), NEG_WORDS),
          "no clause names an allow entry in settings.local.json as widening, or one says it is not"),
         ("widening still named: %s names a widening in another repo as widening" % where,
-         has_pin(cl, other, ("widen",)) and not has_pin(cl, other, NEG_WORDS),
+         has_pin(cl, other, ("widen",)) and not has_pin(cl, other, ("widen",), NEG_WORDS),
          "no clause names a widening in another repo as widening, or one says it is not"),
     ]
 
