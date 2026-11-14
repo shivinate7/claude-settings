@@ -1381,7 +1381,7 @@ class Host:
         or `touched` was skipped, as a never-drafted or ready lane's is: no touched test ran, so there is no proof.
         "pass": `touched` succeeded and every test job that ran succeeded or was skipped. Of rows that share a name (a re-run), the newest id counts: a re-run that passed clears the old failure.
         With no macOS row that succeeded, the touched log decides: a `run <test> on ... macos` line is "unknown" (the leg was selected and its row is missing, skipped or unread: this Linux lint never
-        sees a macOS red), an unreadable log is "unknown", a `skip <test> on macos: not a macOS subject` line is "pass" with one note line (the batch's macOS run covers it), and neither is "pass"."""
+        sees a macOS red), an unreadable or empty log is "unknown", a `skip <test> on macos: not a macOS subject` line is "pass" with one note line (the batch's macOS run covers it), and neither is "pass"."""
         newest = {}
         for r in self.pages(f"commits/{sha}/check-runs", "check_runs"):
             name = r.get("name") or ""
@@ -1405,10 +1405,12 @@ class Host:
         if c:
             return "unknown", [f"{self.MACOS_UNKNOWN}; the touched job's log could not be read, so no macOS leg can be ruled out: {out}"]
         lines = [LOG_PREFIX.sub("", t, count=1).rstrip() for t in out.splitlines()]
-        ran = next((t for t in lines if re.match(r"run \S+ on .*\bmacos\b", t)), None)
+        if not any(t.strip() for t in lines):
+            return "unknown", [f"{self.MACOS_UNKNOWN}; the touched job's log was empty, so no macOS leg can be ruled out"]
+        ran = next((t for t in lines if re.match(r"run .+ on .*\bmacos\b", t)), None)
         if ran:
             return "unknown", [f"{self.MACOS_UNKNOWN} (touched log: {ran})"]
-        if any(re.match(r"skip \S+ on macos: not a macOS subject", t) for t in lines):
+        if any(re.match(r"skip .+ on macos: not a macOS subject", t) for t in lines):
             return "pass", ["macOS left to batch CI: the touched log skips a test that is not a macOS subject on the macOS leg, so this head has no macOS run of its own"]
         return "pass", []
 
