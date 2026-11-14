@@ -8,7 +8,7 @@ Read-only table. No rule changes in this pull request. The owner signs the table
 ## Summary
 
 - Real rule count in `output-styles/shiv-stylisms.md` on main: **29** (counted with `grep -o 'rule:[a-z0-9-]*'`; each mark appears once). The older text says 23, so it is stale.
-- Verdicts: **21 keep, 7 change, 1 drop** (29 total).
+- Verdicts: **23 keep, 6 change, 0 drop** (29 total). Owner ruling `own-800-stylisms-two-keeps` (22:24 CST Nov 13) turned two rows to keep: `style-offer-screen-takeover` and `style-press-has-link`. Triage reads the other six changes as signed; the owner has not said so.
 - Prior audit: restart-plan R41 (owner 13:36 CST Nov 11, "r41 yes on all") judged the file's folder and its place only. R44 part 3 left the content to this review. This table is the first rule-by-rule read.
 - The file is 92 lines and 1144 words. Four rules hold 40% of the words: `style-question-form` 210, `output-never-hand-off-doable-step` 116, `style-hand-off-runs-as-is` 67, `style-hand-off-irreversible` 61 (454 of 1144; the sum of those four counts).
 - Cloud limits: no `guard.log` here, so no rule's fire rate is measured. Every "unmeasured" below means that. Mechanism and size are read from `lint/rule_mechanisms.json` and the file.
@@ -43,8 +43,8 @@ Mechanism column values come from `lint/rule_mechanisms.json` (guard, check, jud
 | `style-hand-off-runs-as-is` | Handed block runs as is, in its own fence | keep | Judge flags a command with no runnable block (rule map). 67 words. | Keep; takes the one-shell line. |
 | `style-hand-off-gh-login` | gh block starts with `gh auth switch` | keep | Guard: `gh-login-switch` for the waiting page; judge for chat. Decision `act-in-place`. | Keep. |
 | `style-hand-off-one-shell` | One shell per pasted block | change | No check. The judge files it under `output-never-hand-off-doable-step`, because `JUDGED_RULES` names no id for it (rule map). 24 words. | Merge into `style-hand-off-runs-as-is`. |
-| `style-offer-screen-takeover` | Offer to take over the screen where a tool can | drop | Unmechanized (no hook sees which screen tools exist). Zero mentions outside the file and the rule map (grep over docs, hooks, lint, root `CLAUDE.md`, `.claude`). Whether sessions ever act on it: unmeasured. | Drop unless the owner has seen it work. Root `verification-announce-own-screen` covers screens the session opens. |
-| `style-press-has-link` | A press step carries a link | change | Guard: `press-link` (reads words; misses verbs outside its list). Applies only on the waiting page; `skills/waiting-page/SKILL.md` already names press and links (8 matching lines by grep). | Move the text to the waiting-page skill; keep the guard. It loads in every repo today. |
+| `style-offer-screen-takeover` | Offer to take over the screen where a tool can | keep | Unmechanized (no hook sees which screen tools exist). Zero mentions outside the file and the rule map (grep over docs, hooks, lint, root `CLAUDE.md`, `.claude`). Whether sessions ever act on it: unmeasured. | Keep (owner ruling own-800-stylisms-two-keeps, 22:24 CST Nov 13). |
+| `style-press-has-link` | A press step carries a link | keep | Guard: `press-link` (reads words; misses verbs outside its list). Applies only on the waiting page; `skills/waiting-page/SKILL.md` already names press and links (8 matching lines by grep). | Keep in the style file with its guard (owner ruling own-800-stylisms-two-keeps, 22:24 CST Nov 13). |
 | `style-command-in-item` | Command sits in the item's `command` field | change | Guard: `command-in-item`. `skills/waiting-page/SKILL.md` line 127 already defines the `command` field `{powershell, mac}`. Same home problem. | Move to the waiting-page skill; keep the guard. |
 | `style-table-gold-column` | Comparison table has a gold-standard column | keep | Code in `hooks/reply_judge.py` finds a table and sends it to the judge. Judge rule. | Keep. |
 | `style-time-central-24h` | Times in US Central, 24-hour, with zone | keep | Hook `hooks/local_time.py` is on main and wired in `settings.json` (lines 359 and 370). The rule map entry says the hook is "not yet on main"; that is stale. The hook gives the clock; no check reads the reply's zone. | Keep. Rule map entry needs its own fix (not in this pull request). |
@@ -55,11 +55,11 @@ Mechanism column values come from `lint/rule_mechanisms.json` (guard, check, jud
 
 ## Counts
 
-- keep: 21
-- change: 7 (`style-plain-words`, `style-question-form`, `style-question-inside-box`, `style-hand-off-cleanup`, `style-hand-off-one-shell`, `style-press-has-link`, `style-command-in-item`)
-- drop: 1 (`style-offer-screen-takeover`)
+- keep: 23
+- change: 6 (`style-plain-words`, `style-question-form`, `style-question-inside-box`, `style-hand-off-cleanup`, `style-hand-off-one-shell`, `style-command-in-item`)
+- drop: 0
 
-If all verdicts stand: 29 marks become 23 (three merges, two moves out, one drop). Word effect is unmeasured.
+If the six changes stand: 29 marks become 25 (three merges into other rules, one move to the waiting-page skill). Word effect is unmeasured.
 
 ## What the owner signs
 
