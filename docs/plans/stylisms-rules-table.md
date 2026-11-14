@@ -3,13 +3,13 @@
 Read-only table. No rule changes in this pull request. The owner signs the table before any rule changes.
 
 - Roadmap step: `stylisms-rules-table`. Ruling `own-795-a-stylisms-table` (owner, 21:39 CST Nov 13, waiting-page item 795, pick a).
-- Base: origin/main 309fa5ed5. Written: 21:42 CST Nov 13.
+- Base: origin/main 309fa5ed5. Written: 21:42 CST Nov 13. Revised: 23:25 CST Nov 13.
 
 ## Summary
 
 - Real rule count in `output-styles/shiv-stylisms.md` on main: **29** (counted with `grep -o 'rule:[a-z0-9-]*'`; each mark appears once). The older text says 23, so it is stale.
 - Verdicts: **23 keep, 6 change, 0 drop** (29 total). Owner ruling `own-800-stylisms-two-keeps` (22:24 CST Nov 13) turned two rows to keep: `style-offer-screen-takeover` and `style-press-has-link`. Triage reads the other six changes as signed; the owner has not said so.
-- Prior audit: restart-plan R41 (owner 13:36 CST Nov 11, "r41 yes on all") judged the file's folder and its place only. R44 part 3 left the content to this review. This table is the first rule-by-rule read.
+- Prior audit: restart-plan R41 (owner 13:36 CST Nov 11, "r41 yes on all") found the output style "in the right folders" and earning "their place": a placement check. R44 part 3 sends the content (are its rules still right) to R35's review, which the owner signs. This table is that review's rule-by-rule read.
 - The file is 92 lines and 1144 words. Four rules hold 40% of the words: `style-question-form` 210, `output-never-hand-off-doable-step` 116, `style-hand-off-runs-as-is` 67, `style-hand-off-irreversible` 61 (454 of 1144; the sum of those four counts).
 - Cloud limits: no `guard.log` here, so no rule's fire rate is measured. Every "unmeasured" below means that. Mechanism and size are read from `lint/rule_mechanisms.json` and the file.
 
@@ -19,7 +19,7 @@ A rule earns its place when it meets three tests. (a) A hook, a check or a named
 
 ## Table
 
-Mechanism column values come from `lint/rule_mechanisms.json` (guard, check, judgment, unmechanized). "Judge" means `hooks/reply_judge.py` flags it; it never refuses (decision `reply-judge-samples-never-refuses`).
+Mechanism words in the Evidence column come from `lint/rule_mechanisms.json` (guard, check, judgment, unmechanized). "Judge" means `hooks/reply_judge.py` flags it; it never refuses (decision `reply-judge-samples-never-refuses`).
 
 | Rule mark | The rule in a few words | Verdict | Evidence | Recommendation |
 |---|---|---|---|---|
@@ -37,12 +37,12 @@ Mechanism column values come from `lint/rule_mechanisms.json` (guard, check, jud
 | `style-plain-words` | Plain words everywhere | change | Unmechanized (no jargon list). 47 words; its last sentence points to root `speak-one-name-per-thing`, and root `output-write-in-ste` also covers plain writing. Unmeasured. | Cut to one sentence; keep the pointer to root. |
 | `style-question-form` | Question form: goal, problem, based-on, departs-from, gain/lose | change | Guard: `question-form` (`hooks/question_form.py`). 13 lines, 210 words (18% of the file). R41 item 5 already says the decision should state what the code does. The guard enforces the form, so the prose repeats the check. | Shrink to a pointer to decision `question-form` plus the one line of intent; keep the guard. |
 | `style-question-inside-box` | Put all a question needs inside the box | change | Unmechanized (a hook cannot see the box). Root `questions-go-to-owner` already holds the box rules and "no box while work runs". Its one unique clause is "text before the box may not show". | Fold that clause into `style-question-form`; drop the rest. |
-| `output-never-hand-off-doable-step` | Do an act yourself before handing it over | keep | Judge rule; the judge reads every report with Input Needed (decision `reply-judge-samples-never-refuses`). Most-referenced mark outside the file (8 files, by grep). | Keep. Candidate to trim later; 116 words. |
-| `style-hand-off-cleanup` | A thing you made, you clean up | change | Unmechanized; rule map says no hook sees branches, test ids or data. 19 words. Same topic as `style-hand-off-irreversible` (acts and their cleanup). | Merge into `style-hand-off-irreversible`. |
+| `output-never-hand-off-doable-step` | Do an act yourself before handing it over | keep | Judge rule; the judge reads every report with Input Needed (decision `reply-judge-samples-never-refuses`). Referenced in 8 files by grep, level with `style-question-form`. | Keep. Candidate to trim later; 116 words. |
+| `style-hand-off-cleanup` | A thing you made, you clean up | change | Unmechanized; rule map says no hook sees branches, test ids or data. 19 words. Same topic as `style-hand-off-irreversible` (acts and their cleanup). | Merge into `style-hand-off-irreversible`. R41 item 4 (restart-plan) ruled the hand-off bullet split into seven rules, and this merge partly reverses it; the owner signed it at item 807. |
 | `style-hand-off-irreversible` | Irreversible act: one yes or no, cleanup named | keep | Judgment. Unmeasured. | Keep; takes the cleanup line. |
 | `style-hand-off-runs-as-is` | Handed block runs as is, in its own fence | keep | Judge flags a command with no runnable block (rule map). 67 words. | Keep; takes the one-shell line. |
 | `style-hand-off-gh-login` | gh block starts with `gh auth switch` | keep | Guard: `gh-login-switch` for the waiting page; judge for chat. Decision `act-in-place`. | Keep. |
-| `style-hand-off-one-shell` | One shell per pasted block | change | No check. The judge files it under `output-never-hand-off-doable-step`, because `JUDGED_RULES` names no id for it (rule map). 24 words. | Merge into `style-hand-off-runs-as-is`. |
+| `style-hand-off-one-shell` | One shell per pasted block | change | No check. The judge files it under `output-never-hand-off-doable-step`, because `JUDGED_RULES` names no id for it (rule map). 24 words. | Merge into `style-hand-off-runs-as-is`. Partly reverses the R41 item 4 split, as above. |
 | `style-offer-screen-takeover` | Offer to take over the screen where a tool can | keep | Unmechanized (no hook sees which screen tools exist). Zero mentions outside the file and the rule map (grep over docs, hooks, lint, root `CLAUDE.md`, `.claude`). Whether sessions ever act on it: unmeasured. | Keep (owner ruling own-800-stylisms-two-keeps, 22:24 CST Nov 13). |
 | `style-press-has-link` | A press step carries a link | keep | Guard: `press-link` (reads words; misses verbs outside its list). Applies only on the waiting page; `skills/waiting-page/SKILL.md` already names press and links (8 matching lines by grep). | Keep in the style file with its guard (owner ruling own-800-stylisms-two-keeps, 22:24 CST Nov 13). |
 | `style-command-in-item` | Command sits in the item's `command` field | change | Guard: `command-in-item`. `skills/waiting-page/SKILL.md` line 127 already defines the `command` field `{powershell, mac}`. Same home problem. | Move to the waiting-page skill; keep the guard. |
