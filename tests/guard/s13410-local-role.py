@@ -239,4 +239,74 @@ for _cmd in (
     add("local-role: a PowerShell read of the launcher's variable is allowed: " + _cmd, "allow",
         tool="PowerShell", command=_cmd, cwd=PUSHSSH, session=LT_SID, silent=True, windows=True)
 
+# A launcher session starts a child `claude` (self-role-claim, decision session-tiers). The guard's own environment holds
+# CS_SESSION_ROLE, the launcher's role, and the child inherits it, so its SessionStart hook would give the child that role.
+# While the variable is set, a call that starts claude is denied in every form below. The text of these calls names neither
+# the variable nor the launcher, so the old guard, which reads only the text, allows each one: RED on 93df5839b. Each form takes
+# one role, cycled over all three, so a fix that keys on two of them is caught.
+SELF_START_BASH = (
+    'claude -p "x"',
+    "claude",
+    "env X=1 claude -p x",
+    "nohup claude -p x",
+    'bash -c "claude -p x"',
+    "sh -c 'claude'",
+    "(claude -p x)",
+    "echo $(claude -p x)",
+    "cd d && claude -p x",
+    "timeout 5 claude -p x",
+    "claude.exe -p x",
+)
+SELF_START_PS = ("& claude -p x", "Start-Process claude")
+SELF_ROLES = ("triage", "batch-runner", "coordinator")
+for _i, _cmd in enumerate(SELF_START_BASH):
+    _role = SELF_ROLES[_i % len(SELF_ROLES)]
+    add("local-role: a launcher session (CS_SESSION_ROLE=%s) that starts claude is denied: %s" % (_role, _cmd), "deny",
+        rule="self-role-claim", tool="Bash", command=_cmd, cwd=PUSHSSH, session=LT_SID, env={"CS_SESSION_ROLE": _role})
+for _j, _cmd in enumerate(SELF_START_PS):
+    _role = SELF_ROLES[(len(SELF_START_BASH) + _j) % len(SELF_ROLES)]
+    add("local-role: a launcher session (CS_SESSION_ROLE=%s) that starts claude in PowerShell is denied: %s" % (_role, _cmd), "deny",
+        rule="self-role-claim", tool="PowerShell", command=_cmd, cwd=PUSHSSH, session=LT_SID,
+        env={"CS_SESSION_ROLE": _role}, windows=True)
+
+# CONTROLS, with the variable set: text that names claude, and a call that reads or checks it, starts no session, so each stays
+# allowed. `claude --version` is not a session start (the owner's ruling). The last three are the scanner controls: a comment,
+# a `#` inside a quoted string, and a lone quote in text.
+for _cmd in (
+    "echo claude",
+    "grep -r claude README.md",
+    "git -C ~/.claude status",
+    "cat ~/.claude/settings.json",
+    "ls .claude",
+    "which claude",
+    "claude --version",
+    'git commit -m "Document how claude starts"',
+    "echo ok # claude -p x",
+    'echo "# claude -p x"',
+    "echo \"it's claude -p x\"",
+):
+    add("local-role: a launcher session (CS_SESSION_ROLE=triage) that only names or reads claude is allowed: " + _cmd, "allow",
+        tool="Bash", command=_cmd, cwd=PUSHSSH, session=LT_SID, env={"CS_SESSION_ROLE": "triage"}, silent=True)
+add("local-role: a launcher session (CS_SESSION_ROLE=triage) with claude in a heredoc body is allowed", "allow", tool="Bash",
+    command="cat <<'EOF'\nclaude -p x\nEOF", cwd=PUSHSSH, session=LT_SID, env={"CS_SESSION_ROLE": "triage"}, silent=True)
+add("local-role: a launcher session (CS_SESSION_ROLE=triage) that reads claude in PowerShell is allowed", "allow",
+    tool="PowerShell", command="Get-Command claude", cwd=PUSHSSH, session=LT_SID, env={"CS_SESSION_ROLE": "triage"},
+    silent=True, windows=True)
+
+# CONTROL: an empty CS_SESSION_ROLE is no role. The session-start hook writes no role file for an empty value, so the child
+# gets no role and the start is allowed (session_role.py write, and local_judgement's `or ""`).
+add("local-role: a launcher session with CS_SESSION_ROLE empty may start claude, since an empty value is no role", "allow",
+    tool="Bash", command="claude -p x", cwd=PUSHSSH, session=LT_SID, env={"CS_SESSION_ROLE": ""}, silent=True)
+
+# CONTROLS, with the variable UNSET: a lane that starts a child claude is normal, so every form above stays allowed.
+for _cmd in SELF_START_BASH:
+    add("local-role: a session with CS_SESSION_ROLE unset may start claude: " + _cmd, "allow", tool="Bash", command=_cmd,
+        cwd=PUSHSSH, session=LT_SID, silent=True)
+add("local-role: a session with CS_SESSION_ROLE unset may start claude in PowerShell: & claude -p x", "allow", tool="PowerShell",
+    command="& claude -p x", cwd=PUSHSSH, session=LT_SID, silent=True, windows=True)
+# The old guard denies a detached start by detached-launch, with or without the variable, so the unset form of
+# `Start-Process claude` is pinned as that deny, not as an allow. The variable changes nothing for it while unset.
+add("local-role: a session with CS_SESSION_ROLE unset is denied a detached Start-Process claude by detached-launch", "deny",
+    rule="detached-launch", tool="PowerShell", command="Start-Process claude", cwd=PUSHSSH, session=LT_SID, windows=True)
+
 FAMILY = _LT_PREV_FAMILY
