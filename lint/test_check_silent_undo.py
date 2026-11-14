@@ -845,6 +845,14 @@ class Flips(unittest.TestCase):
         self.assertTrue(any("cfg.txt" in p for p in self.in_place("x = run(cfg)", "x = true  // run(cfg) is not needed")),
                         "an in-place paste of the words into a // comment, without a semicolon, was not flagged")
 
+    def test_a_line_with_no_words_keeps_the_old_rule(self):
+        """`}` becomes `} not reachable`. The line has no words to keep in order, so a negation added to it is still a flip."""
+        self.red("", "}", "} not reachable")
+
+    def test_a_line_with_no_words_keeps_the_old_rule_in_place(self):
+        self.assertTrue(any("cfg.txt" in p for p in self.in_place("}", "} not reachable")),
+                        "an in-place change of a line with no words to a negated line was not flagged")
+
 
 class MainLineDrop:
     """The one home of the fixture for a case that merges main into a feat branch and drops lines main added to
