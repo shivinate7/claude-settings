@@ -101,7 +101,7 @@
                           heads merge clean with the base. A clash that comes through the base is a report line after the PASS line, and it
                           names the PR that conflicts with the base. A counted clash FAILs, naming each PR and file, with its remedy
                           (--lint-unknown-ok never lifts it); on a batch integration PR (a freeze block in its body, and its branch is that
-                          batch's `batch-NAME`) it is a report line instead, because the lanes rebase after the merge. A base conflict still FAILs. PRs in one stack (one head holds the other) are skipped. Added cost: one `git merge-tree` of the
+                          batch's `batch-NAME`), or on a PR whose body holds the single line `<!-- combined-pr -->` outside a code fence, it is a report line instead, because the lanes rebase after the merge. A base conflict still FAILs. PRs in one stack (one head holds the other) are skipped. Added cost: one `git merge-tree` of the
                           head against main (its base), two merge-trees per other PR compared (that PR against the base, and against the head),
                           and exactly one PR-list read; no merge-tree for a stack-skipped PR, and none beyond the head's when there is no other
                           PR. (A PR-list read is one `gh api` call per 100 PRs, and the PR-list read still runs when there is no other PR. When any PR is
@@ -2616,7 +2616,7 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     -> (fails, reports, stop). fails: one text block for the clashes that count. reports: one line per clash that does not count. stop: "" or the text
     of an unknown (a read git cannot answer, a head origin does not hold); the caller raises it, with the fails above it, never as a pass.
     A clash counts only when both heads merge clean with the base: otherwise it comes through the base, and its line names the head that conflicts with it.
-    `integration` is true for a batch integration PR (is_integration_pr): a clash that would count is a report line instead, for the lane rebases after the merge.
+    `integration` is true for a batch integration PR (is_integration_pr) or a PR whose body holds the combined-PR marker (has_combined_marker): a clash that would count is a report line instead, for the lane rebases after the merge.
     A PR that --with names and that is not open is a Stop here: never a pass. --lint-unknown-ok lifts none of it. A PR posted under another
     session id is found only through --with.
     `scope` is "lane" (the lint's: the lane's PRs and --with), "all" (every other open PR on the same base) or "ready" (the same PRs, but a clash counts only with
@@ -2704,7 +2704,7 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         elif why is not None:
             reports.append(f"{named}. Not counted: #{m}'s own head conflicts with {base}, so the clash comes through {base}. Its own lint names it.")
         elif integration:
-            reports.append(f"{named}. Not counted: this PR is a batch integration PR, so #{m} rebases after the merge.")
+            reports.append(f"{named}. Not counted: this PR is a batch integration PR or carries the combined-PR marker, so #{m} rebases after the merge.")
         else:
             conflicts.append(named)
     fails = []
@@ -2885,7 +2885,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         if why is not None:
             fails.append(f"its head conflicts with {base}: {why}. Merge {base} into the lane with an ordinary merge commit, push, and run `merge --lane-lint` again.")
         if target.isdigit():
-            cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None, is_integration_pr(info))
+            cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None, is_integration_pr(info) or has_combined_marker(info["body"]))
             fails += cross_fails
             # one check-runs read: the draft's Windows and macOS runs, which this Linux lint never runs. A batch integration PR has no draft run of its own
             # (a lane's run is the proof), so it reads none.
@@ -4722,6 +4722,7 @@ def fix_verifier_arg(text):
 # can tell such a PR from a lane PR (is_integration_pr). Nothing here builds or drops a batch.
 
 BATCH_BEGIN, BATCH_END = "<!-- batch-freeze:begin -->", "<!-- batch-freeze:end -->"
+COMBINED_MARKER = "<!-- combined-pr -->"  # a lane PR body line that makes the cross rule read the PR like an integration PR, for a clash only
 BATCH_PREFIX = "batch-"  # CI reads a batch by the head ref `batch-*` (ci-scope.sh mutation_report), so the integration branch must start with it
 
 def integration_branch(name):
@@ -4737,10 +4738,10 @@ def is_integration_pr(info):
         return False
     return bool(block) and info["branch"] == integration_branch(block["name"])
 
-def freeze_markers(lines):
-    """-> (begin indexes, end indexes): the marker lines outside a fenced code block, which is an example and not a block.
-    A body edited on the web has CRLF line ends: the comparison ignores the CR."""
-    begins, ends, fence = [], [], None
+def unfenced_lines(lines):
+    """Yield (index, line) for each line outside a fenced code block, which is an example and not a block.
+    A body edited on the web has CRLF line ends: the line comes without its CR."""
+    fence = None
     for i, line in enumerate(lines):
         line = line.rstrip("\r")
         m = re.match(r" {0,3}(`{3,}|~{3,})", line)
@@ -4749,11 +4750,23 @@ def freeze_markers(lines):
                 fence = None
         elif m:
             fence = m.group(1)
-        elif line == BATCH_BEGIN:
+        else:
+            yield i, line
+
+def freeze_markers(lines):
+    """-> (begin indexes, end indexes): the freeze marker lines outside a fenced code block."""
+    begins, ends = [], []
+    for i, line in unfenced_lines(lines):
+        if line == BATCH_BEGIN:
             begins.append(i)
         elif line == BATCH_END:
             ends.append(i)
     return begins, ends
+
+def has_combined_marker(body):
+    """True when `body` holds exactly one COMBINED_MARKER line outside a fenced code block, alone on its line. Two or more is no marker: an
+    ambiguous body never lifts a refusal."""
+    return sum(line == COMBINED_MARKER for _, line in unfenced_lines((body or "").split("\n"))) == 1
 
 def parse_freeze(body):
     """-> None when the body holds no block, else {name, on: (branch, sha) or None, base: sha or None, lanes: {PR: head}, dropped: [PR],
