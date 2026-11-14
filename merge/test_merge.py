@@ -4390,8 +4390,19 @@ class GhHalf(Env):
     def test_a_merge_reply_secondary_rate_limit_403_is_retried_then_stops_without_a_revert(self):
         self.merge_reply_is_retried_then_stops(RATE_API_SECONDARY_403, rate=True)
 
+    def spare_is_the_take(self):
+        """The lock's spare is its take expiry, LOCK_TTL_SECONDS, as the rate-wait cases are sized. confirm's two check extensions (UNDO_CHECK_LOCK_SECONDS
+        and debt_check_lock_seconds()) would lift the expiry to about 3900 s from the take, past the end of the 900 s rung, so no rung would need an
+        extension. They are 0 here; their real values are pinned by the event-order cases (confirm_extends_the_lock_for_*_before_each_*_check)."""
+        for name, value in (("UNDO_CHECK_LOCK_SECONDS", 0), ("debt_check_lock_seconds", lambda: 0)):
+            patch = unittest.mock.patch.object(merge, name, value)
+            patch.start()
+            self.addCleanup(patch.stop)
+
     def test_a_rate_wait_past_the_lock_spare_extends_the_lock_and_the_merge_goes_on(self):
-        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deadlineMinutes=1))))  # the lock lasts (3 * 1 + 10) * 60 = 780 s: the 60 s and 300 s waits fit its spare, the 900 s wait does not
+        # the take holds the lock LOCK_TTL_SECONDS (1200 s) at any deadline: the 60 s and 300 s waits fit its spare, and the 900 s wait, which starts
+        # about 360 s in, must extend it
+        self.spare_is_the_take()
         self.set(merge_replies=[[RATE_API_SECONDARY_403, False]] * 3 + [["", True]])  # three rate-limited merge tries, then the merge lands
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
@@ -4543,6 +4554,7 @@ class GhHalf(Env):
 
     def test_a_lock_that_moves_during_the_first_rate_wait_stops_both_lock_lines(self):
         # The rival takes the lock ref during the first rate wait, so the run's extension for the next wait fails.
+        self.spare_is_the_take()
         def rival():
             if self.paused and self.paused[-1] in RATE_LADDER and not getattr(self, "rival_done", False):
                 self.rival_done = True
@@ -6366,6 +6378,27 @@ def names_kind(test, out, slug, kind):
     test.assertIn(kind, line, "the line for debt %s does not name its kind %s: %s" % (slug, kind, line))
 
 
+def unextended_checks(events, kind, bound):
+    """-> the positions in `events` of each check call of `kind` that no lock extension of at least `bound` seconds came before, since the check
+    call before it. `events` holds ("extend", wait) for each extend_for call and ("check", kind) for each check call, in the order the run made them."""
+    longest, found = 0, []
+    for pos, (what, arg) in enumerate(events):
+        if what == "extend":
+            longest = max(longest, arg)
+            continue
+        if arg == kind and longest < bound:
+            found.append(pos)
+        longest = 0  # each check call needs its own extension before it
+    return found
+
+
+class NoExtendLock(merge.GitLock):
+    """A GitLock with no extend_for attribute: getattr(lock, "extend_for", None) reads None, and a direct call raises."""
+    @property
+    def extend_for(self):
+        raise AttributeError("this lock has no extend_for")
+
+
 class DebtRetire(Env):
     """A PR that closes a debt (deletes the debt file) runs that debt's Retire check on the PR head before preview or confirm
     lets it through. The fixture debt names tests/test_retire_target.py, which exits with the code each case gives it."""
@@ -6486,6 +6519,122 @@ class DebtRetire(Env):
         self.assertIn("reverted on feat", out)
         self.assertIn("closes a debt without proof", out)
         self.assertEqual(self.show("feat", "docs/decisions/second.md"), record("pending", "second").strip())
+        self.assertFalse(self.lock_ref(), "the merge lock was left on origin")
+
+    # The lock outlasts the long checks (debt_check runs each Retire test up to 1800 s; undo_check has no bound). Each check call is preceded by
+    # its own extend_for, so the lock is never left to the take's fixed expiry under a check.
+
+    LOCK_REFUSAL = "the fake lock refuses the extension"
+
+    def recording_lock(self, events, stop_when=None):
+        """A GitLock whose extend_for appends ("extend", wait) to `events`, then runs the real method. With `stop_when`, a call made while
+        stop_when() is true raises NetStop instead: the lock cannot be extended. confirm reads the method with getattr, so the
+        instance attribute is what it finds."""
+        lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)
+        real = lock.extend_for
+        def extend_for(wait):
+            events.append(("extend", wait))
+            if stop_when and stop_when():
+                raise merge.NetStop(self.LOCK_REFUSAL)
+            return real(wait)
+        lock.extend_for = extend_for
+        return lock
+
+    def spy_checks(self, events):
+        """merge.undo_check and merge.debt_check append ("check", kind) to `events` at each call, then run the real check."""
+        real_undo, real_debt = merge.undo_check, merge.debt_check
+        def undo_spy(*a, **k):
+            events.append(("check", "undo"))
+            return real_undo(*a, **k)
+        def debt_spy(*a, **k):
+            events.append(("check", "debt"))
+            return real_debt(*a, **k)
+        for name, fn in (("undo_check", undo_spy), ("debt_check", debt_spy)):
+            patch = unittest.mock.patch.object(merge, name, fn)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def spy_pushes(self, events):
+        """merge.push_branch appends ("push", branch) to `events` at each push, then pushes. confirm's claim is the first push."""
+        real = merge.push_branch
+        def push(wt, branch, *a, **k):
+            events.append(("push", branch))
+            return real(wt, branch, *a, **k)
+        patch = unittest.mock.patch.object(merge, "push_branch", push)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def confirm_closed_debt_under_spies(self, events):
+        """A confirm of a PR that closes a debt, with each extension and check call logged in `events`. -> (rc, out)."""
+        self.pr_on_debt(0)
+        self.spy_checks(events)
+        return self.run_merge("7", "--confirm", lock=self.recording_lock(events))
+
+    def assert_claimed_and_checked_twice(self, events, out):
+        """Scope before subject (P7): the claim was pushed and merged, and each check ran twice, before the claim and inside prove."""
+        self.assertEqual(self.claims(), 1, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertGreaterEqual(events.count(("check", "debt")), 2, "the debt check ran fewer than twice, so the case misses the call inside prove")
+        self.assertGreaterEqual(events.count(("check", "undo")), 2, "the undo check ran fewer than twice, so the case misses the call inside prove")
+
+    def test_confirm_extends_the_lock_for_1800_s_before_each_debt_check(self):
+        events = []
+        rc, out = self.confirm_closed_debt_under_spies(events)
+        self.assertEqual(rc, 0, out)
+        self.assert_claimed_and_checked_twice(events, out)
+        lacking = unextended_checks(events, "debt", 1800)
+        self.assertEqual(lacking, [], f"a debt check at event {lacking} ran with no lock extension of 1800 s or more before it, since the check before it "
+                                      f"(run order: {events}). debt_check runs a Retire test for up to 1800 s, and the lock can expire under it")
+
+    def test_confirm_extends_the_lock_for_3600_s_before_each_undo_check(self):
+        events = []
+        rc, out = self.confirm_closed_debt_under_spies(events)
+        self.assertEqual(rc, 0, out)
+        self.assert_claimed_and_checked_twice(events, out)
+        lacking = unextended_checks(events, "undo", 3600)
+        self.assertEqual(lacking, [], f"an undo check at event {lacking} ran with no lock extension of 3600 s or more before it, since the check before it "
+                                      f"(run order: {events}). undo_check has no time bound, and the lock can expire under it")
+
+    def test_confirm_runs_under_a_lock_with_no_extend_for(self):  # control: green on the code before the change
+        self.pr_on_debt(0)
+        lock = NoExtendLock(self.co, now=lambda: self.now, pause=lambda s: None)
+        rc, out = self.run_merge("7", "--confirm", lock=lock)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("AttributeError", out, "a lock with no extend_for crashed confirm")
+        self.assertTrue(getattr(self.host, "merged", False), out)
+
+    def test_confirm_stops_before_the_undo_and_debt_checks_when_the_lock_cannot_be_extended(self):
+        """confirm extends the lock before the undo check, its first call under the lock. The extension is refused: no check runs, no claim is pushed, nothing merges."""
+        self.pr_on_debt(0)
+        events = []
+        self.spy_checks(events)
+        rc, out = self.run_merge("7", "--confirm", lock=self.recording_lock(events, stop_when=lambda: True))
+        checks = [e for e in events if e[0] == "check"]
+        self.assertEqual(checks, [], f"a check ran after the lock extension was refused (run order: {events}). The extension stops the run before the check it covers")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(self.LOCK_REFUSAL, out, "the refusal does not name the lock's stop")
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.claims("feat"), 0, "a claim was pushed although the run stopped before the claim")
+        self.assertFalse(self.lock_ref(), "the merge lock was left on origin")
+
+    def test_prove_stops_before_the_checks_when_the_lock_cannot_be_extended_after_the_claim_push(self):
+        """prove extends the lock after confirm pushes the claim. The extension is refused there: no check runs after the push, the claim stays
+        on the branch, and nothing is reverted or merged."""
+        self.pr_on_debt(0)
+        events = []
+        self.spy_checks(events)
+        self.spy_pushes(events)
+        pushed = lambda: any(e[0] == "push" for e in events)
+        rc, out = self.run_merge("7", "--confirm", lock=self.recording_lock(events, stop_when=pushed))
+        pushes = [i for i, e in enumerate(events) if e[0] == "push"]
+        self.assertTrue(pushes, f"the claim was not pushed, so the run never reached prove (run order: {events})")
+        late = [e for e in events[pushes[0] + 1:] if e[0] == "check"]
+        self.assertEqual(late, [], f"a check ran after the claim push, past the lock extension that was refused (run order: {events})")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(self.LOCK_REFUSAL, out, "the refusal does not name the lock's stop")
+        self.assertNotIn("reverted on", out, "the claim was reverted although the run stopped on a refused lock extension")
+        self.assertEqual(self.claims("feat"), 1, "the claim is not kept on the branch")
+        self.assertFalse(getattr(self.host, "merged", False), out)
         self.assertFalse(self.lock_ref(), "the merge lock was left on origin")
 
 class DraftPreview(Env):
@@ -10329,6 +10478,7 @@ class LockExtendsForRateWaits(unittest.TestCase):
 class LockProseStatesTheCode(unittest.TestCase):
     """The lock numbers and lines that the prose states are the code's values. Each is a plain text read of its file."""
     GRANT = os.path.join(os.path.dirname(HERE), "docs", "decisions", "standing-merge-grant.md")
+    LOCK = os.path.join(os.path.dirname(HERE), "docs", "decisions", "merge-lock.md")
     README = os.path.join(os.path.dirname(HERE), "README.md")
     MERGE = os.path.join(HERE, "merge.py")
 
@@ -10360,18 +10510,29 @@ class LockProseStatesTheCode(unittest.TestCase):
         self.assertIsNotNone(hold, f"the bullet does not state LOCK_MAX_HOLD as a number of hours: {bullet}")
         self.assertEqual(int(hold.group(1)), merge.LOCK_MAX_HOLD // 3600, bullet)
 
-    def test_the_grant_bullet_names_the_take_expiry_terms_and_not_the_old_cap(self):
+    def test_the_grant_bullet_names_the_take_expiry_as_the_fixed_lock_ttl(self):
         bullet = self.lock_bullet()
-        for term in ("`WAITS`", "`merge.deadlineMinutes`"):
-            self.assertIn(term, bullet, f"the bullet does not name {term} as a term of the take expiry: {bullet}")
+        self.assertIn("`LOCK_TTL_SECONDS`", bullet, f"the bullet does not name LOCK_TTL_SECONDS as the take expiry: {bullet}")
+        self.assertNotIn("`WAITS`", bullet, f"the bullet still sizes the take expiry from WAITS: {bullet}")
         self.assertNotIn("600 s lock cap", bullet)
 
-    def test_the_grant_bullet_and_the_take_call_state_the_same_ten_minute_spare(self):
+    def test_the_grant_bullet_states_the_twenty_minute_take_expiry(self):
         bullet = self.lock_bullet()
-        self.assertIn("+ 10 minutes", bullet, f"the bullet does not state the take's ten-minute spare: {bullet}")
+        self.assertIn("20 minutes", bullet, f"the bullet does not state the twenty-minute take expiry: {bullet}")
+
+    def test_the_take_call_passes_the_lock_ttl_constant(self):
         take = self.read(self.MERGE)
-        self.assertIsNotNone(re.search(r'(?m)^\s*token = lock\.acquire\(base, \(WAITS \* m\["deadlineMinutes"\] \+ 10\) \* 60\)', take),
-                             "merge.py's take call does not hold the ten-minute spare that the bullet states")
+        self.assertIsNotNone(re.search(r'(?m)^\s*token = lock\.acquire\(base, LOCK_TTL_SECONDS\)', take),
+                             "merge.py's take call does not pass LOCK_TTL_SECONDS as its TTL")
+
+    def test_the_grant_and_merge_lock_records_state_the_twenty_minute_take_expiry(self):
+        for doc in (self.GRANT, self.LOCK):
+            name = os.path.basename(doc)
+            text = self.read(doc)
+            with self.subTest(doc=name):
+                self.assertIn("20 minutes", text, f"{name} does not state the twenty-minute take expiry")
+                self.assertIn("LOCK_TTL_SECONDS", text, f"{name} does not name LOCK_TTL_SECONDS as the take expiry")
+                self.assertNotRegex(text, r"\bWAITS\b", f"{name} still sizes the take expiry from WAITS")
 
     def assert_unlock_line_never_checks_the_holder(self, line):
         self.assertNotIn("Reads no lock state", line)
@@ -10868,20 +11029,30 @@ def merge_stamp_text(deadline):
     return json.dumps({**CONFIG, "merge": merge_block}) + "\n"
 
 
-def confirmed_wait(env):
-    """Merge the fixture PR with --confirm. -> (rc, output, the deadline each lock take is given). The per-lane run waits on no check, so the
-    floored deadline reaches the lock alone: confirm takes it for (WAITS * deadline + 10) * 60 seconds, and this reads the deadline back from that."""
+def confirmed_takes(env):
+    """Merge the fixture PR with --confirm. -> (rc, output, the deadline confirm reads for each run, the TTL each lock take is given). The
+    deadline is read where confirm receives the config, after the floor, so a floored deadline shows there: the lock no longer carries it, since
+    the take holds the fixed LOCK_TTL_SECONDS (decision merge-lock)."""
     takes = []
     take = env.lock.acquire
     def record(base, ttl):
-        takes.append((ttl // 60 - 10) // merge.WAITS)
+        takes.append(ttl)
         return take(base, ttl)
     env.lock.acquire = record
     try:
-        rc, out = env.run_merge("7", "--confirm", host=FakeHost(env.co, env.other))
+        with unittest.mock.patch.object(merge, "confirm", wraps=merge.confirm) as spy:
+            rc, out = env.run_merge("7", "--confirm", host=FakeHost(env.co, env.other))
     finally:
         del env.lock.acquire
-    return rc, out, takes
+    deadlines = [call.args[1]["merge"]["deadlineMinutes"] for call in spy.call_args_list]  # confirm(root, cfg, ...): the config is the second argument
+    env.assertTrue(deadlines, "confirm was never called, so no deadline was read")
+    return rc, out, deadlines, takes
+
+
+def confirmed_wait(env):
+    """Merge the fixture PR with --confirm. -> (rc, output, the floored deadline each confirm run reads). See confirmed_takes."""
+    rc, out, deadlines, _takes = confirmed_takes(env)
+    return rc, out, deadlines
 
 
 def fix_line(floor):
@@ -14609,12 +14780,14 @@ class ReviewEnv(Env):
         sh(self.co, "git", "push", "-q", "-f", "origin", f"{sha}:refs/heads/main")
         sh(self.co, "git", "fetch", "-q", "origin")
 
-    def claim_over(self, parent, changes):
-        """-> the sha of a claim commit over `parent`: one parent, and the tree git_commit builds for `changes`, under the message a claim commit
-        carries (a Record-claim trailer, claim_only reads it). The tree is git_commit's, so the fixture stays one home; only the message differs."""
+    def claim_over(self, parent, changes, message="Claim record numbers\n\nRecord-claim: D-002", more_parents=()):
+        """-> the sha of a commit over `parent`: its tree is the one git_commit builds for `changes`, and its message is a claim commit's (a Record-claim
+        trailer, which claim_only reads) unless `message` names another. `more_parents` follow `parent`. The tree is git_commit's, so the fixture
+        stays one home; only the message and the parents differ."""
         plain = self.git_commit(parent, changes)
         tree = sh(self.co, "git", "rev-parse", f"{plain}^{{tree}}")
-        return sh(self.co, "git", "commit-tree", tree, "-p", parent, "-m", "Claim record numbers\n\nRecord-claim: D-002")
+        parents = [arg for p in (parent, *more_parents) for arg in ("-p", p)]
+        return sh(self.co, "git", "commit-tree", tree, *parents, "-m", message)
 
 class ReviewArgs(ReviewEnv):
     """The flags, as argparse reads them. --reviewed and --role each stand alone. --review-record needs a PR number and a --head, and takes no
@@ -15310,9 +15483,9 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         self.assertNotIn("Traceback", err)
 
 class ReviewRoundModel(ReviewEnv):
-    """The --round values against the reviewer row (agent-model-cap): a review after the first names sonnet, the last review names opus only by
-    the owner's override, the first review names haiku or sonnet, and a design reviewer names opus. Each refusal sits beside its sonnet twin, which must print a
-    record first, so a missing flag cannot pass for the refusal."""
+    """The --round values against the reviewer row (agent-model-cap): a review after the first round, the last round included, names sonnet, the first
+    review names haiku or sonnet, and a design reviewer names opus. Each refusal sits beside its sonnet twin, which must print a record first, so a
+    missing flag cannot pass for the refusal."""
 
     def round_flags(self, *rounds):
         """The review flags for a record with the given --round values, in order, with --head set to the live head of the feature branch."""
@@ -15323,6 +15496,8 @@ class ReviewRoundModel(ReviewEnv):
             (("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS"), ("1:reviewer:sonnet:FAIL", "2:reviewer:haiku:PASS"), "round 2 on haiku"),
             (("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:sonnet:PASS"),
              ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:haiku:PASS"), "round 3 on haiku"),
+            (("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:sonnet:PASS"),
+             ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS"), "round 3 on opus"),
             (("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS"), ("1:reviewer:sonnet:FAIL", "2:reviewer:opus:PASS"), "round 2 on opus"),
         )
         for good, bad, label in pairs:
@@ -15335,13 +15510,13 @@ class ReviewRoundModel(ReviewEnv):
                 self.assertNotIn("Traceback", err)
 
     def test_the_rounds_the_row_allows_still_print(self):
-        # controls: the first review on haiku or sonnet, a design reviewer on opus in every review, and the last review on opus by the owner's override
+        # controls: the first review on haiku or sonnet, a design reviewer on opus in every review, and a later review on sonnet
         cases = (
             ("1:reviewer:haiku:PASS",),
             ("1:reviewer:sonnet:PASS",),
             ("1:reviewer:sonnet:FAIL", "1:design-reviewer:opus:PASS", "2:reviewer:sonnet:FAIL", "2:design-reviewer:opus:PASS",
              "3:reviewer:sonnet:PASS", "3:design-reviewer:opus:PASS"),
-            ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS"),
+            ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:sonnet:PASS"),
         )
         for rounds in cases:
             with self.subTest(rounds=rounds):
@@ -15384,6 +15559,19 @@ class ReviewRoundModel(ReviewEnv):
         self.assertEqual(rc, 0, "round 2 on opus was refused under a record whose round 2 row names opus:\n" + out + err)
         self.assertNotIn("Traceback", err)
 
+    def test_a_round_three_on_opus_is_refused_by_a_message_that_names_round_three_and_sonnet(self):
+        # Control: the sonnet record of the same rounds prints a record. The opus record is refused by the --round check, whose message names the
+        # round and the one model the row allows, so a refusal for another cause cannot pass (decision agent-model-cap, the round rows).
+        earlier = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL")
+        rc, out, err = self.run_args("7", "--review-record", *self.round_flags(*earlier, "3:reviewer:sonnet:PASS"))
+        self.assertEqual(rc, 0, "the sonnet control for round 3 was refused:\n" + out + err)
+        rc, out, err = self.run_args("7", "--review-record", *self.round_flags(*earlier, "3:reviewer:opus:PASS"))
+        self.assertEqual(rc, 2, "round 3 on opus was accepted, but the reviewer row runs round 3 on sonnet only:\n" + out + err)
+        self.assertIn("--round 3", err, "the refusal of round 3 on opus does not name round 3")
+        self.assertIn("sonnet", err, "the refusal of round 3 on opus does not name sonnet")
+        self.assertNotIn(REVIEW_MARKER, out, "a refused round 3 on opus still printed a record")
+        self.assertNotIn("Traceback", err)
+
 class ReviewNoRestart(ReviewEnv):
     """`merge <pr> --review-record` refuses a record whose rounds restart on a pull request that already holds rounds (decision pr-review-record;
     rule roles-review-cap-three). The earlier records are the pull request's review comments, oldest first, as review_comments reads them. A
@@ -15393,7 +15581,7 @@ class ReviewNoRestart(ReviewEnv):
 
     EARLIER_FIX_FROM = "1e" * 20  # the head a fix check's fix diff started from: a fix check line never names its own record's Head
     GRANT = REVIEW_GRANT_TEXT  # the owner's grant of a fourth review pass, bound to this pull request
-    THREE_FAILED_ARGV = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:FAIL")  # the --round values of rounds 1-3, all FAIL
+    THREE_FAILED_ARGV = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:sonnet:FAIL")  # the --round values of rounds 1-3, all FAIL
 
     def host_with(self, *bodies):
         """A host whose pull request 7 is at the live head, with the review comments `bodies`, oldest first."""
@@ -15449,7 +15637,7 @@ class ReviewNoRestart(ReviewEnv):
 
     def test_a_round_three_record_that_lists_the_earlier_rounds_is_accepted(self):
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
-        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS"),
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:sonnet:PASS"),
                                      host=self.host_with(earlier))
         self.assert_accepted(rc, out, err)
 
@@ -15472,7 +15660,7 @@ class ReviewNoRestart(ReviewEnv):
 
     def test_a_granted_round_four_after_an_earlier_round_three_is_accepted(self):
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_FAILED_THREE)
-        rc, out, err = self.run_args(*self.review_argv(*self.THREE_FAILED_ARGV, "4:reviewer:opus:PASS", grant=self.GRANT), host=self.host_with(earlier))
+        rc, out, err = self.run_args(*self.review_argv(*self.THREE_FAILED_ARGV, "4:reviewer:sonnet:PASS", grant=self.GRANT), host=self.host_with(earlier))
         self.assert_accepted(rc, out, err)
 
     def test_an_equal_top_below_round_three_with_no_fix_verifier_is_refused(self):
@@ -15601,7 +15789,8 @@ class ReviewedList(ReviewEnv):
     def test_one_ready_pr_with_a_record_costs_six_gh_calls(self):
         # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses, main's ruleset (one read of
         # rules/branches/main when no ruleset applies) and the branch protection, which is read second (ruling c, 19:49 CST Nov 11)
-        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
+        # The lint comment is what keeps the join from reading the head's rollup: without it the count is eight (the case below)
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS)), lint_of(7, REVIEW_HEAD)]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "success")]},
                                           count_gh=True)
         self.assertEqual(rc, 0, out + err)
@@ -15609,6 +15798,18 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(host.gh_calls[:4], ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status"])
         self.assertEqual(host.gh_calls[4], "rules/branches/main", "the ruleset read comes before the classic protection")
         self.assertEqual(host.gh_calls[5:], ["branches/main/protection/required_status_checks"])
+
+    def test_a_ready_pr_with_a_record_and_no_lint_comment_reads_the_rollup_first(self):
+        # The same fixture without the lint comment: the join reads the head's rollup (rollup_green: its check runs, then its statuses), head_state
+        # reads the same two again, then the ruleset and the protection. Eight calls
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "success")]},
+                                          count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(host.gh_calls, ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status",
+                                         f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status", "rules/branches/main",
+                                         "branches/main/protection/required_status_checks"],
+                         "a ready pull request with a record and no lint comment must read the head's rollup before its CI state")
 
     def test_a_draft_with_a_record_reads_no_head_checks(self):
         host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS))],
@@ -15628,6 +15829,53 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, older), review_comment(2, 7, newest), lint_of(7, REVIEW_HEAD)])
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+    # A done record with no lane-lint comment: the lint is skipped only when the all-jobs-passed rollup is green on the live head (rollup_green, the
+    # one home of that read, as lint_check uses it). The head's check runs are the one thing these cases vary.
+
+    def rollup_line(self, rows):
+        """-> (host, pull request 7's line) for a done record with no lane-lint comment, the check runs of each head given as `rows`."""
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, rows)
+        self.assertEqual(rc, 0, out + err)
+        return host, list_line(self, out, 7)
+
+    def test_a_done_record_with_a_green_rollup_on_the_live_head_reads_lint_skipped_not_no_lint(self):
+        # Red on the code before the change: the line reads `no lint` and names `merge --lane-lint 7`, though lint_check skips the lint on this rollup.
+        _, line = self.rollup_line({REVIEW_HEAD: [batch_run("all-jobs-passed", "completed", "success")]})
+        self.assertRegex(line, rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "a green rollup on the live head must leave the record done: " + line)
+        self.assertIn("lint skipped", line, "a green all-jobs-passed on the live head does not read as lint skipped: " + line)
+        self.assertNotIn("no lint", line, "a green all-jobs-passed on the live head still reads no lint: " + line)
+
+    def test_the_green_rollup_skip_is_read_through_rollup_green(self):
+        # Red on the code before the change: reviewed_read never asks rollup_green, so it cannot share the join's one reader of the rollup.
+        calls = []
+        def rollup_says_green(h, n, head):
+            calls.append((n, head))
+            return True
+        with unittest.mock.patch.object(merge, "rollup_green", rollup_says_green):
+            _, line = self.rollup_line({})
+        self.assertIn((7, REVIEW_HEAD), calls, "reviewed_read did not ask rollup_green about pull request 7 at its live head")
+        self.assertIn("lint skipped", line, "rollup_green said the rollup was green, and the line still does not read lint skipped: " + line)
+
+    def test_a_done_record_with_no_rollup_on_the_live_head_still_reads_no_lint(self):  # control: green on the code before the change
+        _, line = self.rollup_line({})
+        self.assertIn("no lint", line, "a done record with no rollup must still read no lint: " + line)
+        self.assertNotIn("lint skipped", line, line)
+
+    def test_a_done_record_with_a_red_rollup_on_the_live_head_still_reads_no_lint(self):  # control: green on the code before the change
+        _, line = self.rollup_line({REVIEW_HEAD: [batch_run("all-jobs-passed", "completed", "failure")]})
+        self.assertIn("no lint", line, "a red rollup on the live head must still read no lint: " + line)
+        self.assertNotIn("lint skipped", line, line)
+
+    def test_a_done_record_with_a_pending_rollup_on_the_live_head_still_reads_no_lint(self):  # control: green on the code before the change
+        _, line = self.rollup_line({REVIEW_HEAD: [batch_run("all-jobs-passed", "in_progress")]})
+        self.assertIn("no lint", line, "a pending rollup on the live head must still read no lint: " + line)
+        self.assertNotIn("lint skipped", line, line)
+
+    def test_a_done_record_with_a_green_rollup_on_another_head_still_reads_no_lint(self):  # control: green on the code before the change
+        _, line = self.rollup_line({REVIEW_OLD_HEAD: [batch_run("all-jobs-passed", "completed", "success")]})
+        self.assertIn("no lint", line, "a green rollup on another head must not clear the live head: " + line)
+        self.assertNotIn("lint skipped", line, line)
 
 class ReleaseHost(PullsHost):
     """A PullsHost for `merge --release-check`. A number in `closed` answers `pulls/<n>` as a closed pull request (the open list leaves it out),
@@ -16294,7 +16542,8 @@ MODEL_RECORD = "/".join((layout.path(os.path.dirname(HERE), "decisions"), hook_g
 class ClaimOnlyReviewed(ReviewEnv):
     """`merge --reviewed` reads a one-parent claim commit as the head it stacks on: the record done at the reviewed head survives the claim, and the
     lane-lint PASS on the reviewed head carries to the claim head (claim_only, the rule lint_check already uses). A claim-shaped commit that
-    writes a code file carries neither, so the control reads not done."""
+    writes a code file carries neither, so the control reads not done. A records-page commit (page_only: one parent, the subject PAGE_SUBJECT,
+    the records page alone) carries both the same way; a commit that breaks one of those rules carries neither."""
 
     def claim_host(self, fx, claim, record_head, lint_head):
         """The host of `merge --reviewed` for pull request 7 at `claim`: its one record for `record_head`, and a lane-lint PASS on `lint_head`."""
@@ -16328,6 +16577,94 @@ class ClaimOnlyReviewed(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertNotIn(" done: ", list_line(self, out, 7), "a code-file commit carried the lint of its parent:\n" + out)
         self.assertIn("merge --lane-lint 7", out, out)
+
+    def page_over(self, parent, changes=None, message=merge.PAGE_SUBJECT):
+        """-> the sha of a records-page commit over `parent`: one parent, and the records page alone changed unless `changes` names more. Its
+        subject is PAGE_SUBJECT, the subject page_only reads; `message` replaces it for a case that needs another."""
+        return self.claim_over(parent, changes or {merge.RECORDS_PAGE: "records page, rebuilt\n"}, message=message)
+
+    def assert_page_not_carried(self, fx, page, cause):
+        """`page` carries neither the record nor the lint. The record done at the reviewed head reads stale on `page`, and a lint PASS on the reviewed
+        head does not carry to `page` (the record done on `page` then reads done, and the lane lint is still owed)."""
+        with self.subTest(cause=cause, carry="record"):
+            rc, out, err = self.run_args("--reviewed", host=self.claim_host(fx, page, record_head=fx.fixed, lint_head=page))
+            self.assertEqual(rc, 0, out + err)
+            self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {page[:9]} stale: ", f"{cause}: a record done at the reviewed head carried to the page head:\n{out}")
+        with self.subTest(cause=cause, carry="lint"):
+            rc, out, err = self.run_args("--reviewed", host=self.claim_host(fx, page, record_head=page, lint_head=fx.fixed))
+            self.assertEqual(rc, 0, out + err)
+            self.assertNotIn(" done: ", list_line(self, out, 7), f"{cause}: a lint PASS on the reviewed head carried to the page head:\n{out}")
+            self.assertIn("merge --lane-lint 7", out, out)
+
+    def test_m_a_record_done_at_the_reviewed_head_reads_done_on_a_records_page_head(self):
+        # Catches: the clean-merge walk refusing a records-page commit, so the record done at the reviewed head reads stale on the page head.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        page = self.page_over(fx.fixed)
+        self.facts(fx, [page])
+        self.reviewed_line(self.claim_host(fx, page, record_head=fx.fixed, lint_head=page), page, "done",
+                           "a records-page head reads stale for a record done at the reviewed head")
+
+    def test_n_a_lint_pass_on_the_reviewed_head_carries_to_the_records_page_head(self):
+        # Catches: lint_check's carry (claim_only) refusing a records-page commit, so the PASS on the reviewed head reads as no lint at the page head.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        page = self.page_over(fx.fixed)
+        self.facts(fx, [page])
+        self.reviewed_line(self.claim_host(fx, page, record_head=page, lint_head=fx.fixed), page, "done",
+                           "a lint PASS on the reviewed head does not carry to a records-page head")
+
+    def test_o_two_records_page_commits_stacked_carry_the_record_and_the_lint_of_the_reviewed_head(self):
+        # Catches: the walk and the carry stopping at the first records-page commit, so the second one breaks a chain the first one kept.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        first = self.page_over(fx.fixed)
+        second = self.page_over(first, {merge.RECORDS_PAGE: "records page, rebuilt again\n"})
+        self.facts(fx, [first, second])
+        self.reviewed_line(self.claim_host(fx, second, record_head=fx.fixed, lint_head=fx.fixed), second, "done",
+                           "two records-page commits on the reviewed head break the record or the lint carry")
+
+    def test_p_a_claim_then_a_records_page_commit_carry_the_record_and_the_lint_of_the_reviewed_head(self):
+        # Catches: a records-page commit after a claim commit breaking the chain the claim alone keeps (test_j, test_k), or the page's walk stopping there.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
+        page = self.page_over(claim)
+        self.facts(fx, [claim, page])
+        self.reviewed_line(self.claim_host(fx, page, record_head=fx.fixed, lint_head=fx.fixed), page, "done",
+                           "a records-page commit after a claim commit breaks the record or the lint carry")
+
+    def test_q_a_records_page_subject_on_a_commit_that_also_touches_a_file_is_not_carried(self):  # control: green on the old code
+        # page_only needs the records page alone. A page-subject commit that also writes notes.txt is no page commit, so nothing carries over it.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        page = self.page_over(fx.fixed, {merge.RECORDS_PAGE: "records page, rebuilt\n", "notes.txt": "notes\n"})
+        self.facts(fx, [page])
+        self.assert_page_not_carried(fx, page, "a records-page subject on a commit that also touches notes.txt")
+
+    def test_r_a_records_page_only_commit_with_another_subject_and_no_trailer_is_not_carried(self):  # control: green on the old code
+        # The records page alone is not enough: the subject must be PAGE_SUBJECT, and a commit with no Record-claim trailer is no claim either.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        page = self.page_over(fx.fixed, message="Fix the records page")
+        self.facts(fx, [page])
+        self.assert_page_not_carried(fx, page, "a records-page-only commit with another subject and no Record-claim trailer")
+
+    def test_s_a_two_parent_commit_with_the_records_page_subject_is_not_carried(self):  # control: green on the old code
+        # The second parent is feat, which main does not hold. A two-parent commit is a merge, and only a clean merge of main carries.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        merged = self.claim_over(fx.fixed, {merge.RECORDS_PAGE: "records page, rebuilt\n"}, message=merge.PAGE_SUBJECT, more_parents=(fx.feat,))
+        self.facts(fx, [merged])
+        self.assert_page_not_carried(fx, merged, "a two-parent commit with the records-page subject, the second parent off main")
+
+    def test_t_a_records_page_commit_whose_parent_is_off_the_reviewed_head_is_not_carried(self):  # control: green on the old code
+        # The page commit stacks on feat, which is not the reviewed head's chain: the head it reads is not the record's head plus clean steps.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        page = self.page_over(fx.feat)
+        self.facts(fx, [page])
+        self.assert_page_not_carried(fx, page, "a records-page commit on a parent that is not the reviewed head's chain")
 
 class ReviewGuardPaths(unittest.TestCase):
     """merge.GUARD_PATHS: the rule dirs of lint/stale_cites.py, then merge/ and githooks/, folder prefixes only. merge.GUARD_FILES: settings.json,
@@ -19056,6 +19393,93 @@ class TouchesRead(Env):
         entry = "\n".join(lines[start:end])
         for kind in ("pull list", "pulls/N/files", "jobs read", "log read"):
             self.assertIn(kind, entry, f"the `merge --touches` entry of merge.py's docstring does not name the {kind} read")
+
+# ------------------------------------------------------------------ the take's lock TTL is one fixed bound (decision merge-lock; debt lock-ttl-sized-for-gone-waits)
+FIXED_TAKE_TTL = 1200  # seconds, twenty minutes at every deadline: the value LOCK_TTL_SECONDS must hold and confirm must pass
+
+
+class LockTtlFixed(Env):
+    """confirm takes the merge lock for LOCK_TTL_SECONDS at every deadline. The code the debt describes takes 780 s at a deadline of 1 and 65400 s
+    at 360 (the sizing from WAITS), so these cases are red there, and red on any TTL that scales with merge.deadlineMinutes."""
+
+    def test_lock_ttl_seconds_is_twenty_minutes(self):
+        self.assertEqual(getattr(merge, "LOCK_TTL_SECONDS", None), FIXED_TAKE_TTL,
+                         "merge.py names no LOCK_TTL_SECONDS of 1200 s: the take's TTL is still sized from the deadline")
+
+    def test_the_take_at_deadline_one_is_the_fixed_ttl(self):
+        push_base(self, {".github/stamp.json": merge_stamp_text(1)})
+        rc, out, _deadlines, ttls = confirmed_takes(self)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(ttls, "no lock take was recorded")
+        self.assertEqual(set(ttls), {FIXED_TAKE_TTL}, f"the take at deadline 1 was given {sorted(set(ttls))} s, not the fixed {FIXED_TAKE_TTL} s")
+
+    def test_the_take_at_deadline_360_is_the_fixed_ttl(self):
+        push_base(self, {".github/stamp.json": merge_stamp_text(360)})
+        rc, out, _deadlines, ttls = confirmed_takes(self)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(ttls, "no lock take was recorded")
+        self.assertEqual(set(ttls), {FIXED_TAKE_TTL}, f"the take at deadline 360 was given {sorted(set(ttls))} s, not the fixed {FIXED_TAKE_TTL} s")
+
+    def test_the_take_ttl_is_at_most_thirty_minutes_at_the_largest_deadline(self):
+        push_base(self, {".github/stamp.json": merge_stamp_text(360)})
+        rc, out, _deadlines, ttls = confirmed_takes(self)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(ttls, "no lock take was recorded")
+        self.assertLessEqual(max(ttls), 1800, f"the take at deadline 360 holds the lock for {max(ttls)} s, over thirty minutes")
+
+    def test_merge_py_names_no_WAITS(self):
+        tree = ast.parse(pathlib.Path(merge.__file__).read_text(encoding="utf-8"))  # the parser reads names, so a comment or string cannot pass
+        named = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+        self.assertNotIn("WAITS", named, "merge.py still names WAITS, which sizes the take's TTL from waits that are gone")
+
+
+class StaleBatchCites(unittest.TestCase):
+    """The merge tool's three refusal cites name live homes and no retired batch-CI rule (debt merge-stale-texts-and-cites). Red while RED_CITE,
+    DROP_CITE or BATCH_CITE holds a retired phrase, names no decision or rule that exists, or names a line number."""
+    CITES = ("RED_CITE", "DROP_CITE", "BATCH_CITE")
+    RETIRED = ("no batch merges onto a red base", "a batch that drops a lane", "nothing merges while another ready pull request's CI runs")
+
+    def test_no_cite_holds_a_retired_batch_phrase(self):
+        for name in self.CITES:
+            text = getattr(merge, name, None)
+            self.assertIsInstance(text, str, f"merge.py names no {name} string")
+            for phrase in self.RETIRED:
+                with self.subTest(constant=name, phrase=phrase):
+                    self.assertNotIn(phrase, text, f"{name} still names the retired batch rule {phrase!r}")
+
+    def test_each_cite_names_a_decision_or_rule_that_exists(self):
+        decisions, anchors = audit.cite_homes(root=str(REPO))  # the one home of the cite pattern and the homes it reads (lint/test_rule_audit.py)
+        for name in self.CITES:
+            text = getattr(merge, name, "")
+            found = audit.CITE_RE.findall(text)
+            with self.subTest(constant=name):
+                self.assertTrue(found, f"{name} names no decision or rule: {text!r}")
+                for kind, slug in found:
+                    homes = decisions if kind == "decision" else anchors
+                    self.assertIn(slug, homes, f"{name} names {kind} {slug}, which no file or rule anchor holds")
+
+    def test_the_red_base_cite_names_the_per_lane_rule(self):
+        text = getattr(merge, "RED_CITE", "")
+        self.assertIn(("rule", "git-red-main-reverts"), audit.CITE_RE.findall(text),
+                      f"RED_CITE does not name rule git-red-main-reverts: {text!r}")
+
+    def test_the_frozen_block_cite_names_the_batch_freeze_decision(self):
+        # FREEZE_CITE governs the frozen-block refusals and the duplicate-head stop (decision batch-freeze-lane-set). Red on the code before the change:
+        # it names no-merge-during-batch-ci, the decision the batch brake's text came from.
+        text = getattr(merge, "FREEZE_CITE", "")
+        self.assertIn(("decision", "batch-freeze-lane-set"), audit.CITE_RE.findall(text),
+                      f"FREEZE_CITE does not name decision batch-freeze-lane-set: {text!r}")
+
+    def test_the_frozen_block_cite_is_not_the_batch_brake_cite(self):  # control: green on the code before the change
+        self.assertNotEqual(getattr(merge, "FREEZE_CITE", None), getattr(merge, "BATCH_CITE", None),
+                            "FREEZE_CITE is the batch brake's cite, BATCH_CITE, which does not govern the frozen block")
+
+    def test_no_cite_names_a_line_number(self):
+        for name in self.CITES:
+            text = getattr(merge, name, "")
+            with self.subTest(constant=name):
+                self.assertIsNone(re.search(r"\bline \d+\b", text), f"{name} cites a line number, which moves: {text!r}")
+
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
