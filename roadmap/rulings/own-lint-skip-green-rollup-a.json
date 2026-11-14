@@ -1,0 +1,10 @@
+{
+  "id": "own-lint-skip-green-rollup-a",
+  "at": "2026-11-13T21:01:00-06:00",
+  "title": "The merge skips lane lint when the head's all-jobs-passed rollup is green",
+  "ruling": "Owner 21:01 CST Nov 13, relayed by the consultant (chat; triage did not see it), answer a to the consultant's 20:59 question: skip the lane lint at the merge when the head's all-jobs-passed rollup is green. Gain per the consultant: about 9 min per lane merge and no re-lint after each main merge-in. Lose: the lint's checks run only in CI, not a second time at merge. Rewrites line 11 of decision lanes-run-no-full-ci-job in place (lane merge-tool-audit-fixes). Page item 799 closed.",
+  "quote": "a to: Skip the lane lint at merge when the PR's CI is already green? a (recommended): skip the lint when the head's all-jobs-passed rollup is green.",
+  "source": "Consultant 21:01 CST Nov 13 (quoting the owner); filed by triage.",
+  "status": "open",
+  "step": "merge-lint-skip-green-rollup"
+}

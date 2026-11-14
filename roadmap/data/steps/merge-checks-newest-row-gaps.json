@@ -1,0 +1,14 @@
+{
+ "id": "merge-checks-newest-row-gaps",
+ "title": "merge reads the newest check run correctly: a newer dispatch cannot clear an older red `checks` row, and a pending non-required row cannot drop an older red without holding the wait",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane merge-reads-newest-check-run (session_013NEJL11tb2uYHYT8zSzoo1) left two gaps and two stale lines on #3317 (head 0f553f214293, lint PASS, round 2 PASS).",
+ "source": "Coordinator 21:00 CST Nov 13, from the lane (head frozen); triage has read none of the code.",
+ "note": "Triage 21:02 CST Nov 13: (a) a newer workflow_dispatch with full_ste_audit=true could clear an older red `checks` row; (b) a pending newest row of a non-required name drops an older red without holding the wait. Stale wording: merge/merge.py:1593 (classify docstring) and skills/ci-hygiene/SKILL.md:41 (\"A timeout stays red\"). Fix after #3317 merges, red cases first.",
+ "updatedAt": "2026-11-13T21:02:16-06:00"
+}

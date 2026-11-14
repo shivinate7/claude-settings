@@ -1,0 +1,14 @@
+{
+ "id": "waiting-page-skill-route-close-line",
+ "title": "skills/waiting-page/SKILL.md line 476 (Route and close, step 2) says \"until the owner marks it read\"; it is rewritten once answered lines age out",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane answered-lines-age-out (PR #3327) makes an answered line age out; the skill line still says it stays until the owner marks it read.",
+ "source": "Coordinator 21:01 CST Nov 13, from the lane (head 76780e19e1c3); triage has not read the line.",
+ "note": "Triage 21:02 CST Nov 13: fix with or after #3327. Rule fresh-prose.",
+ "updatedAt": "2026-11-13T21:02:16-06:00"
+}
