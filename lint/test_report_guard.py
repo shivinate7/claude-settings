@@ -5757,10 +5757,11 @@ class MistakeNamesGuardTests(unittest.TestCase):
     def test_mg_green_guard_line_backticked_passes(self):
         self.assert_allowed(mg_report("The brief quoted `Guard: run it later` from the lane."))
 
-    # A guard label counts only at the start of a sentence: a line start after a bullet,
-    # blockquote mark or bold section label, or after . ; ! ?. A label is guard or guards then : — – - or --. A
-    # guard line's ref is read from its label to the line end, backticks kept: #N and PR N need 2+ digits, and a bare
-    # sha needs 7-40 hex with a digit and a letter a-f. The refusal names the section and never quotes the line.
+    # A guard label is guard or guards, then : — – - or --, and it opens a sentence: a line start after a bullet,
+    # blockquote mark or bold section label, or after . ; ! ?. The colon form also counts after a dash, a comma, "and"
+    # or "(", and "Missing guard:" is a label. The dash form (guard — or guard -) opens a sentence only. A guard
+    # line's ref is read from its label to the line end, backticks kept: #N and PR N need 2+ digits, and a bare sha
+    # needs 7-40 hex with a digit and a letter a-f. The refusal names the section and never quotes the line.
     # Green: a guard word that is not a label, and a label with a ref, pass.
     def test_mg_green_guard_label_done_pr_then_mid_sentence_guard_passes(self):
         self.assert_allowed(mg_report("none", done="> **Done** BUILT #2046 — the push guard - refuses a dirty push"))
@@ -5768,8 +5769,9 @@ class MistakeNamesGuardTests(unittest.TestCase):
     def test_mg_green_guard_label_next_mid_sentence_guard_passes(self):
         self.assert_allowed(mg_report("none", nxt="> **Next** the report guard — it refuses the reply"))
 
-    def test_mg_green_guard_label_done_guard_after_dash_passes(self):
-        self.assert_allowed(mg_report("none", done="> **Done** BUILT #1183 — guard: hooks/x.py refuses Y"))
+    # Owner ruling 2026-11-13 18:24 CST (own-700-a-labels-then-count): a label after a dash counts in colon form.
+    def test_mg_red_guard_label_done_guard_after_dash_blocks(self):
+        self.assert_blocked(mg_report("none", done="> **Done** BUILT #1183 — guard: hooks/x.py refuses Y"))
 
     def test_mg_green_guard_label_backticked_pr_ref_passes(self):
         self.assert_allowed(mg_report("Guard: built as `#2077`."))
@@ -5839,6 +5841,60 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
     def test_mg_green_guard_r3_pull_url_ref_passes(self):
         self.assert_allowed(mg_report(MG_INBOX + " Guard: built in https://github.com/o/r/pull/7."))
+
+    # A guard label also follows a dash, a comma, "and" or "(" in the colon form, and "Missing guard:" is a label.
+    # Each red has no ref after its label, and each green has one. Inputs have no apostrophe or first-person admission.
+    def test_mg_red_guard_label_after_dash_blocks(self):
+        self.assert_blocked(mg_report(
+            "The builders broke the lint check — Guard: future briefs run the check first."))
+
+    def test_mg_red_guard_label_after_comma_blocks(self):
+        self.assert_blocked(mg_report("The builders broke the lint check, Guard: future briefs run the check first."))
+
+    def test_mg_red_guard_label_after_and_blocks(self):
+        self.assert_blocked(mg_report(
+            "The builders broke the lint check and Guard: future briefs run the check first."))
+
+    def test_mg_red_missing_guard_label_blocks(self):
+        self.assert_blocked(mg_report("Missing guard: future briefs run the check first."))
+
+    def test_mg_red_bracketed_guard_label_blocks(self):
+        self.assert_blocked(mg_report("The builders skipped the check (Guard: future briefs run it first)."))
+
+    def test_mg_green_guard_label_after_dash_with_pr_passes(self):
+        self.assert_allowed(mg_report("The builders broke the lint check — Guard: PR #2881 runs it first."))
+
+    def test_mg_green_guard_label_after_comma_with_step_passes(self):
+        self.assert_allowed(mg_report("The builders broke the lint check, Guard: step:lint-precheck."))
+
+    def test_mg_green_guard_label_after_and_with_debt_passes(self):
+        self.assert_allowed(mg_report("The builders broke the lint check and Guard: a debt records it."))
+
+    def test_mg_green_missing_guard_label_with_pr_passes(self):
+        self.assert_allowed(mg_report("Missing guard: built in PR #2881."))
+
+    def test_mg_green_bracketed_guard_label_with_step_passes(self):
+        self.assert_allowed(mg_report("The builders skipped the check (Guard: step:lint-precheck)."))
+
+    # False-alarm pins: a guard word that is no label. Each line has no ref after its guard word, so a label read
+    # there would refuse it. The dash form opens a sentence only, so it stays unlabelled after a comma.
+    def test_mg_green_push_guard_hyphen_prose_passes(self):
+        self.assert_allowed(mg_report("The push guard - refuses it when the tree is dirty."))
+
+    def test_mg_green_push_guard_em_dash_prose_passes(self):
+        self.assert_allowed(mg_report("The push guard — refused my push when the tree was dirty."))
+
+    def test_mg_green_guard_merge_file_after_dash_passes(self):
+        self.assert_allowed(mg_report("The builders broke the lint check — guard_merge.py refuses the push."))
+
+    def test_mg_green_guard_merge_file_after_comma_passes(self):
+        self.assert_allowed(mg_report("The builders broke the lint check, guard_merge.py refuses the push."))
+
+    def test_mg_green_dash_form_guard_after_comma_passes(self):
+        self.assert_allowed(mg_report("Fixed the hook, guard — it refuses the push."))
+
+    def test_mg_green_backticked_guard_label_after_dash_passes(self):
+        self.assert_allowed(mg_report("The builders broke the lint check — `Guard: future briefs run it`."))
 
 
 if __name__ == "__main__":
