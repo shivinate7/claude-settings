@@ -16496,6 +16496,178 @@ class ClaimOnlyReviewed(ReviewEnv):
         self.assertNotIn(" done: ", list_line(self, out, 7), "a code-file commit carried the lint of its parent:\n" + out)
         self.assertIn("merge --lane-lint 7", out, out)
 
+class PageOnlyRecordCarry(ReviewEnv, RecordsEnv):
+    """A records-page commit the merge tool wrote carries a review record the way a claim commit does. The tool's page commit has one parent, the
+    subject PAGE_SUBJECT, and the records page alone changed, and its page is what the generator writes for its tree. The generator is FAKE_RECORDS
+    through merge.RECORDS, so a proof that runs the generator reads the same page here. A commit the tool did not write, or a page it did not write,
+    reads stale or unknown, never done."""
+
+    def setUp(self):
+        super().setUp()
+        self.use_fake_records()
+
+    def tool_page(self, parent, changes=None, hand=""):
+        """-> the sha of the commit the merge tool writes for a records-page rebuild on `parent`. The tool's own rebuild and commit run in a worktree
+        of this run's folder. `changes` are written before the rebuild, so they join the commit. `hand` is text added to the page after the rebuild."""
+        wt = os.path.join(self.t, "page-wt")
+        sh(self.co, "git", "worktree", "add", "-q", "--detach", wt, parent)
+        try:
+            for path, text in (changes or {}).items():
+                put_lf(os.path.join(wt, *path.split("/")), text)
+            merge.rebuild_records(wt)
+            if hand:
+                with open(os.path.join(wt, *merge.RECORDS_PAGE.split("/")), "a", newline="\n") as f:
+                    f.write(hand)
+            return merge.commit_claim(wt, None)
+        finally:
+            sh(self.co, "git", "worktree", "remove", "--force", wt)
+
+    def debts(self, n):
+        """-> {path: text} for n debt files. The fake generator lists each one by its name, so the page lists n lines in order."""
+        return {f"debts/gap-{i:02d}.md": DEBT_TEXT for i in range(1, n + 1)}
+
+    def record_at(self, fx, live, record_head):
+        """The host of `merge --reviewed` for pull request 7 at `live`: its one record for `record_head`, and a lane-lint PASS on `live`, so the
+        read is of the record's carry alone."""
+        return self.reviewed_host(fx, live, comments=[review_comment(1, 7, record_text(head=record_head, rounds=REVIEW_PASS)), lint_of(7, live)])
+
+    def state_of(self, line):
+        """The state word of a `merge --reviewed` line."""
+        m = re.match(r"#7 \S+ \S+ (\w+): ", line)
+        self.assertIsNotNone(m, "not a state line: " + line)
+        return m.group(1)
+
+    def assert_page_scope(self, sha, parent, files=None):
+        """Scope before subject (P7): the walk from `parent` to `sha` is `sha` alone, `sha` has one parent, its subject is PAGE_SUBJECT, and the
+        files it changes are `files` (the records page by default)."""
+        self.assertEqual(sh(self.co, "git", "rev-list", f"{parent}..{sha}").split(), [sha], "fixture: the walk from the parent to the page commit is not that commit alone")
+        self.assertEqual(sh(self.co, "git", "rev-list", "--parents", "-n", "1", sha).split()[1:], [parent], "fixture: the page commit does not have one parent")
+        self.assertEqual(sh(self.co, "git", "log", "-1", "--format=%s", sha), merge.PAGE_SUBJECT, "fixture: the page commit's subject is not PAGE_SUBJECT")
+        changed = sh(self.co, "git", "diff-tree", "--no-commit-id", "--name-only", "-r", sha).split()
+        self.assertEqual(sorted(changed), sorted(files or [merge.RECORDS_PAGE]), "fixture: the page commit changes other files than it should")
+
+    def test_a_generated_page_on_the_reviewed_head_carries_the_record(self):
+        fx = self.real_commits()
+        self.reviewed_line(self.record_at(fx, fx.fixed, fx.fixed), fx.fixed, "done", "control: the record does not read done at its own head")
+        page = self.tool_page(fx.fixed)
+        self.facts(fx, [page])
+        self.assert_page_scope(page, fx.fixed)
+        self.reviewed_line(self.record_at(fx, page, fx.fixed), page, "done",
+                           "a records page the tool wrote on the reviewed head must carry the record, but the page commit reads stale")
+
+    def test_b_a_claim_then_a_generated_page_carries_the_record(self):
+        fx = self.real_commits()
+        claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
+        page = self.tool_page(claim)
+        self.facts(fx, [claim, page])
+        self.assert_page_scope(page, claim)
+        self.reviewed_line(self.record_at(fx, page, fx.fixed), page, "done",
+                           "a records page the tool wrote on a claim commit must carry the record the claim carries, but the page commit reads stale")
+
+    def test_c_a_generated_page_then_a_claim_carries_the_record(self):
+        fx = self.real_commits()
+        page = self.tool_page(fx.fixed)
+        claim = self.claim_over(page, {"docs/decisions/second.md": record("D-002", "second")})
+        self.facts(fx, [page, claim])
+        self.assert_page_scope(page, fx.fixed)
+        self.reviewed_line(self.record_at(fx, claim, fx.fixed), claim, "done",
+                           "a claim commit over the records page the tool wrote must carry the record, but the walk stops at the page commit")
+
+    def test_d_a_generated_page_listing_a_full_records_folder_carries_the_record(self):
+        fx = self.real_commits()
+        debted = self.git_commit(fx.fixed, self.debts(60))
+        self.facts(fx, [debted])
+        self.reviewed_line(self.record_at(fx, debted, debted), debted, "done", "control: the record does not read done at its own head")
+        page = self.tool_page(debted)
+        self.facts(fx, [page])
+        self.assert_page_scope(page, debted)
+        self.assertEqual(len(sh(self.co, "git", "show", f"{page}:{merge.RECORDS_PAGE}").splitlines()), 61, "fixture: the page does not list all 60 debts")
+        self.reviewed_line(self.record_at(fx, page, debted), page, "done",
+                           "the tool's page for 60 debts must carry the record of the head it rebuilds, but the page commit reads stale")
+
+    def test_e_a_page_commit_that_changes_another_file_does_not_carry_the_record(self):  # control: green on the old code
+        fx = self.real_commits()
+        for name, changes in (("a code file", {"x.txt": "x\n"}), ("a decision file", {"docs/decisions/second.md": record("D-002", "second")})):
+            with self.subTest(name):
+                page = self.tool_page(fx.fixed, changes)
+                self.facts(fx, [page])
+                self.assert_page_scope(page, fx.fixed, files=[merge.RECORDS_PAGE, *changes])
+                out = self.reviewed_line(self.record_at(fx, page, fx.fixed), page, "stale",
+                                         "a page commit that also changes %s must not carry the record" % name)
+                self.assertNotIn("unknown", list_line(self, out, 7), "the stale line says unknown: the walk stopped on a read, not on the other file")
+
+    def test_f_a_hand_edited_page_under_the_page_subject_does_not_carry_the_record(self):  # control: green on the old code
+        fx = self.real_commits()
+        pc = self.tool_page(fx.fixed, hand="hand line\n")
+        self.facts(fx, [pc])
+        self.assert_page_scope(pc, fx.fixed)
+        self.assertNotEqual(sh(self.co, "git", "show", f"{pc}:{merge.RECORDS_PAGE}"), page().strip(),
+                            "fixture: the page is the generator's output, so the hand edit is not in it")
+        self.reviewed_line(self.record_at(fx, pc, fx.fixed), pc, "stale",
+                           "a page under the page subject that the generator did not write must not carry the record")
+
+    def test_g_a_page_commit_the_checkout_cannot_read_never_reads_done(self):  # control: green on the old code
+        fx = self.real_commits()
+        page = self.tool_page(fx.fixed)
+        self.facts(fx, [page])
+        clone = self.main_only_clone()
+        self.assertFalse(self.has_commit(clone, page), "fixture: the main-only clone holds the page commit, so its reads are not unreadable")
+        host = self.record_at(fx, page, fx.fixed)
+        host.cwd = clone
+        rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotEqual(self.state_of(list_line(self, out, 7)), "done", "a page commit the checkout cannot read reads done")
+
+    def test_h_a_page_commit_the_checkout_cannot_read_says_unknown(self):
+        fx = self.real_commits()
+        page = self.tool_page(fx.fixed)
+        self.facts(fx, [page])
+        clone = self.main_only_clone()
+        self.assertFalse(self.has_commit(clone, page), "fixture: the main-only clone holds the page commit, so its reads are not unreadable")
+        host = self.record_at(fx, page, fx.fixed)
+        host.cwd = clone
+        rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertEqual(self.state_of(line), "stale", "fixture: the record reads %r, not stale, so the unknown line below tests nothing" % self.state_of(line))
+        self.assertIn("unknown", line, "the stale line does not say unknown: the page commit's diff cannot be read, so the verdict is unknown, not a plain stale")
+
+    def test_i_a_page_commit_the_host_cannot_read_says_unknown(self):  # control: green on the old code
+        fx = self.real_commits()
+        page = self.tool_page(fx.fixed)
+        self.assert_page_scope(page, fx.fixed)
+        self.assertNotIn(page, fx.parents, "fixture: the host answers the page commit's read, so the read below is not of a missing commit")
+        rc, out, err = self.run_args("--reviewed", host=self.record_at(fx, page, fx.fixed))
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertEqual(self.state_of(line), "stale", "a page commit whose host read fails reads %r, not stale" % self.state_of(line))
+        self.assertIn("unknown", line, "a failed commit read does not say unknown")
+
+    def test_j_a_merge_commit_between_that_is_not_a_clean_merge_stops_the_walk(self):  # control: green on the old code
+        fx = self.real_commits()
+        page = self.tool_page(fx.fixed)
+        msg = sh(self.co, "git", "log", "-1", "--format=%B", page)
+        two = sh(self.co, "git", "commit-tree", sh(self.co, "git", "rev-parse", f"{page}^{{tree}}"), "-p", fx.fixed, "-p", fx.main2, "-m", msg)
+        self.facts(fx, [two])
+        self.assertEqual(sh(self.co, "git", "diff", "--name-only", fx.fixed, two).split(), [merge.RECORDS_PAGE],
+                         "fixture: the two-parent commit does not change the records page alone against its first parent")
+        self.reviewed_line(self.record_at(fx, two, fx.fixed), two, "stale",
+                           "a two-parent commit that is no clean merge of main must not count as a tool commit")
+        under = self.tool_page(fx.edited)
+        self.facts(fx, [under])
+        self.assert_page_scope(under, fx.edited)
+        self.reviewed_line(self.record_at(fx, under, fx.fixed), under, "stale",
+                           "a page commit over a merge that is no clean merge of main must not carry the record")
+
+    def test_l_a_generated_page_over_a_clean_merge_of_main_carries_the_record(self):
+        fx = self.real_commits()
+        self.reviewed_line(self.record_at(fx, fx.clean, fx.fixed), fx.clean, "done", "control: the record does not read done at a clean merge of main")
+        page = self.tool_page(fx.clean)
+        self.facts(fx, [page])
+        self.assert_page_scope(page, fx.clean)
+        self.reviewed_line(self.record_at(fx, page, fx.fixed), page, "done",
+                           "a records page the tool wrote over a clean merge of main must carry the record, but the page commit reads stale")
+
 class ReplacementCarry(ReviewEnv):
     """`merge --reviewed` reads a replacement pull request (its body names `Replaces #6`) with the newest record on #6 and #6's lane-lint PASS,
     when the tree of #6's record head equals the tree of the replacement's live head (step review-carries-by-tree; decision pr-review-record).
