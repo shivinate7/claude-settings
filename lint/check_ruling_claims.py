@@ -5,32 +5,42 @@
     python3 lint/check_ruling_claims.py [--root DIR] [--rulings-dir DIR] --brief FILE [FILE ...]
 
 A session's own call has passed as an owner ruling. The mistake reached tests and code comments until a reviewer
-found no record. This check reads the text, prose, comment or string alike, with no parser, so a claim cannot hide
-in a string or after a lone quote. Two forms are claims:
+found no record. This check reads text, prose, comment or string alike, with no parser. A claim cannot hide
+in a string or after a lone quote.
 
-    owner ruling <H:MM> [zone]     an optional 's after owner; the zone is read and ignored
-    ruling <id>                    <id> is a kebab-case slug of two or more words
+Time claims. The lead is `owner ruling`, `owner's ruling` or `ruled at`. A connector (`,` `(` `at` `of`) may follow.
+Then comes a time, `H:MM` or `H.MM`, with an optional zone. A date makes it a dated claim: `YYYY-MM-DD` or `Mon D`
+(a comma is optional) before the time. A bare time is refused, whatever the records hold, since no record can
+tell which day it means. A dated claim has a record when one line of a record holds both its date and its time. A
+zone and a leading zero are ignored. A record is a decision record, CLAUDE.md, or a rulings entry's `at`.
 
-A time claim has a record when any of these holds that time (H:MM, a leading zero ignored, a zone ignored): a
-decision record under the layout's decisions folder, CLAUDE.md, or a rulings entry (its `at` time or any text in
-it). An id claim has a record when a decision file stem, a rulings entry `id` or a CLAUDE.md rule marker
-(`<!-- rule:<id> -->`) equals it. A line that holds `no record: <reason>` passes, and the reason must be given.
+Id claims. An id is a kebab slug of two or more words. It is read in backticks after `ruling`, after `ruling:`,
+after `owner ruling` or `decision`, or after a capital `Ruling` or `RULING` that starts a line. A lowercase `ruling`
+followed by a word is prose. An id has a record when a decision file stem, a rulings entry `id` or a CLAUDE.md
+rule marker (`<!-- rule:<id> -->`) equals it.
 
-Modes. Files named: every line of each. --brief: the same, for the files of a brief; a brief is read whole, never as
-a diff. With neither, the lines the change adds against --base (default origin/main), in every file of the diff.
+A claim split across two lines is read joined and reported on its first line. A line that holds `no record: <reason>`
+passes. The reason must be given.
 
---rulings-dir reads the rulings entries from a folder of JSON files. Without it, entries come from
-lint/ruled_store.py (`ruled_entries`, the folder roadmap/rulings on origin/roadmap of --root).
+Modes. Files named: every line of each. --brief: the same, for the files of a brief, read whole and never as a
+diff. With neither, the lines the change adds against --base (default origin/main), in every file of the diff.
+--rulings-dir reads the rulings from a folder of JSON files. Without it, entries come from lint/ruled_store.py,
+the folder roadmap/rulings on origin/roadmap of --root. A store that cannot be read exits 2 when a claim is found.
 
 Exit: 0 clear, 1 an unbacked claim, 2 an input that cannot be read (named).
 
-NAMED LIMIT. A record that a change adds in the same diff backs its own claim, so a decision record that files a ruling
-needs no second record. The check cannot tell whether the owner said it; it checks that a record exists to read.
+NAMED LIMITS.
+- A record that a change adds in the same diff backs its own claim. A decision that files a ruling needs no
+  second record. The check cannot tell whether the owner said it. It checks that a record exists.
+- An id shaped `fb-<digits>-<digits>` (a feedback item) passes. It has no record file.
+- A claim that wraps from an unchanged line into an added line is read only from the added lines.
+- Only this check reads a brief, run by hand or in CI. No guard reads a brief when a session spawns an agent.
 
-Cost: starts no process in file mode. Base mode starts two git processes (merge-base, diff). It reads the records
-only when a claim is found, and writes nothing.
+Cost: starts no process in file mode. Base mode starts two git processes (merge-base, diff). It reads the
+records only when a claim is found, and writes nothing.
 """
 import argparse
+import bisect
 import glob
 import json
 import os
@@ -43,15 +53,33 @@ sys.path.insert(0, HERE)
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
 import ruled_store  # noqa: E402  the one reader of the rulings store
 
-TIME_CLAIM = re.compile(r"\bowner(?:'s|’s)?\s+ruling\s+(\d{1,2}):(\d{2})(?!\d)(?:\s+([A-Za-z]{2,4})\b)?",
-                        re.IGNORECASE)
-ID_CLAIM = re.compile(r"\bruling\s+([a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b")
+NAME = "check_ruling_claims"
+# One break between two words of a claim: spaces, or a line end with an optional comment or quote prefix.
+SEP = r"(?:[ \t]+|[ \t]*\r?\n[ \t]*(?:(?:#|//|\*|>|;|--)[ \t]*)?)"
+SEP0 = r"(?:" + SEP + r")?"
+TIME = r"(?<![\d:.])((?:[01]?\d|2[0-3])[:.][0-5]\d)(?!\d)"
+MONTHS = "jan feb mar apr may jun jul aug sep oct nov dec".split()
+ISO_DATE = r"(\d{4})-(\d{2})-(\d{2})"
+MON_DATE = r"(?i:(" + "|".join(MONTHS) + r")[a-z]*\.?)" + SEP + r"(\d{1,2})(?:st|nd|rd|th)?,?"
+LEAD = r"(?i:\bowner(?:'s|\u2019s)?" + SEP + r"ruling|\bruled" + SEP + r"at)"
+CONNECTOR = r"(?:" + SEP0 + r"(?:,|\(|(?i:at|of)\b))?"
+TIME_CLAIM = re.compile(LEAD + CONNECTOR + SEP0 + r"(?:(?:" + ISO_DATE + r"|" + MON_DATE + r")" + SEP + r")?" +
+                        TIME + r"(?:[ \t]+[A-Z]{2,4}\b)?")
+SLUG = r"`?([a-z][a-z0-9]*(?:-[a-z0-9]+)+)(?![\w-])`?"
+ID_CLAIMS = (
+    re.compile(r"\bruling:?" + SEP0 + r"`([a-z][a-z0-9]*(?:-[a-z0-9]+)+)`"),
+    re.compile(r"\bruling:" + SEP + SLUG),
+    re.compile(r"(?i:\bowner(?:'s|\u2019s)?" + SEP + r"ruling):?" + SEP + SLUG),
+    re.compile(r"(?i:\bdecision):?" + SEP + SLUG),
+    re.compile(r"(?m:^)[ \t>*#-]*(?:Ruling|RULING)" + SEP + SLUG),
+)
+FEEDBACK_ID = re.compile(r"^fb-\d+-\d+$")
 NO_RECORD = re.compile(r"\bno record:\s*\S")
-CLOCK = re.compile(r"(?<![\d:])(\d{1,2}):(\d{2})(?![\d:]|\d)")
-AT_TIME = re.compile(r"T(\d{2}):(\d{2})")
+RECORD_TIME = re.compile(r"(?<![\d:.+-])(\d{1,2}):(\d{2})(?!\d)")
+RECORD_ISO = re.compile(ISO_DATE)
+RECORD_MON = re.compile(MON_DATE)
 MARKER = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
 HUNK = re.compile(r"^@@ -\S+ \+(\d+)")
-NAME = "check_ruling_claims"
 
 
 class Unreadable(Exception):
@@ -66,25 +94,75 @@ def read_text(path):
         raise Unreadable("%s: cannot read: %s" % (path, err.strerror or err))
 
 
-def claims_in(line):
-    """[(kind, key, text)] for each claim on a line. kind is "time" (key (hour, minute)) or "id" (key the slug)."""
+def month_number(word):
+    return MONTHS.index(word.lower()[:3]) + 1
+
+
+def clock(text):
+    """(hour, minute) of an `H:MM` or `H.MM` time."""
+    hour, minute = re.split(r"[:.]", text)
+    return int(hour), int(minute)
+
+
+def claim_date(m):
+    """(year or None, month, day) of a time claim match, or None when the claim has no date."""
+    if m.group(1):
+        return int(m.group(1)), int(m.group(2)), int(m.group(3))
+    if m.group(4):
+        return None, month_number(m.group(4)), int(m.group(5))
+    return None
+
+
+def claims_in(text):
+    """[(offset, end, kind, key, shown)] for each claim in text. Kind is "time" (key (date, (hour, minute))),
+    "bare" (key None: a time with no date) or "id" (key the slug)."""
     found = []
-    for m in TIME_CLAIM.finditer(line):
-        found.append(("time", (int(m.group(1)), int(m.group(2))), m.group(0)))
-    for m in ID_CLAIM.finditer(line):
-        found.append(("id", m.group(1), m.group(0)))
-    return found
+    for m in TIME_CLAIM.finditer(text):
+        date = claim_date(m)
+        kind, key = ("time", (date, clock(m.group(6)))) if date else ("bare", None)
+        found.append((m.start(), m.end(), kind, key, " ".join(m.group().split())))
+    seen = set()
+    for pattern in ID_CLAIMS:
+        for m in pattern.finditer(text):
+            slug = m.group(1)
+            if FEEDBACK_ID.match(slug) or (m.start(1), slug) in seen:
+                continue
+            seen.add((m.start(1), slug))
+            found.append((m.start(), m.end(), "id", slug, " ".join(m.group().split())))
+    return sorted(found)
 
 
-def sparse_refused(lines):
-    """[(line number, claim kind, key, claim text)] for each claim in a {line number: text} map, on a line with no
-    `no record: <reason>`. A diff gives only its added lines, so each keeps its own number."""
+def refused(lines):
+    """[(first line, kind, key, claim text)] for each claim in a {line number: text} map. Runs of consecutive line
+    numbers are read joined. A claim whose lines hold `no record: <reason>` is skipped."""
     out = []
-    for n in sorted(lines):
-        if NO_RECORD.search(lines[n]):
-            continue
-        out.extend((n, kind, key, shown) for kind, key, shown in claims_in(lines[n]))
+    numbers = sorted(lines)
+    runs = []
+    for n in numbers:
+        if runs and runs[-1][-1] == n - 1:
+            runs[-1].append(n)
+        else:
+            runs.append([n])
+    for run in runs:
+        text = "\n".join(lines[n] for n in run)
+        starts, pos = [], 0
+        for n in run:
+            starts.append(pos)
+            pos += len(lines[n]) + 1
+        for offset, end, kind, key, shown in claims_in(text):
+            first = bisect.bisect_right(starts, offset) - 1
+            last = bisect.bisect_right(starts, max(end - 1, offset)) - 1
+            if any(NO_RECORD.search(lines[run[i]]) for i in range(first, last + 1)):
+                continue
+            out.append((run[first], kind, key, shown))
     return out
+
+
+def line_dates_and_times(line):
+    """({(year or None, month, day)}, {(hour, minute)}) of one record line."""
+    dates = {(int(y), int(mo), int(d)) for y, mo, d in RECORD_ISO.findall(line)}
+    dates |= {(None, month_number(mo), int(d)) for mo, d in RECORD_MON.findall(line)}
+    return dates, {(int(h), int(mi)) for h, mi in RECORD_TIME.findall(line)}
 
 
 class Records:
@@ -92,7 +170,7 @@ class Records:
 
     def __init__(self, root, rulings_dir):
         self.root, self.rulings_dir = root, rulings_dir
-        self._times = self._ids = None
+        self._stamps = self._ids = None
 
     def _decision_folders(self):
         """Each decisions folder the layout names for this root that exists (a repo not yet rolled out holds its
@@ -112,7 +190,11 @@ class Records:
 
     def _entries(self):
         if self.rulings_dir is None:
-            return ruled_store.ruled_entries(self.root)
+            entries, state = ruled_store.read_store(self.root)
+            if state != "ok":
+                raise Unreadable("the rulings store of %s is %s: cannot tell whether a record exists" %
+                                 (self.root, state))
+            return entries
         entries = []
         for path in sorted(glob.glob(os.path.join(self.rulings_dir, "*.json"))):
             try:
@@ -123,36 +205,42 @@ class Records:
                 entries.append(body)
         return entries
 
-    @staticmethod
-    def _clocks(text):
-        return {(int(h), int(m)) for h, m in CLOCK.findall(text)}
-
     def _load(self):
-        times, ids = set(), set()
+        stamps, ids, lines = set(), set(), []
         for folder in self._decision_folders():
             for path in glob.glob(os.path.join(folder, "*.md")):
                 ids.add(os.path.splitext(os.path.basename(path))[0])
-                times |= self._clocks(read_text(path))
+                lines += read_text(path).split("\n")
         claude = self._claude_md()
         if os.path.isfile(claude):
             text = read_text(claude)
-            times |= self._clocks(text)
+            lines += text.split("\n")
             ids.update(MARKER.findall(text))
         for entry in self._entries():
             if isinstance(entry.get("id"), str):
                 ids.add(entry["id"])
-            at = entry.get("at")
-            if isinstance(at, str):
-                times |= {(int(h), int(m)) for h, m in AT_TIME.findall(at)}
-            for field, value in entry.items():
-                if field != "at" and isinstance(value, str):
-                    times |= self._clocks(value)
-        self._times, self._ids = times, ids
+            if isinstance(entry.get("at"), str):
+                lines.append(entry["at"])
+        for line in lines:
+            dates, times = line_dates_and_times(line)
+            stamps |= {(date, time) for date in dates for time in times}
+        self._stamps, self._ids = stamps, ids
 
     def backs(self, kind, key):
-        if self._times is None:
+        if kind == "bare":
+            return False
+        if self._stamps is None:
             self._load()
-        return key in (self._times if kind == "time" else self._ids)
+        if kind == "id":
+            return key in self._ids
+        (year, month, day), time = key
+        return any(date[1:] == (month, day) and t == time and (year is None or date[0] in (None, year))
+                   for date, t in self._stamps)
+
+    def load(self):
+        """Read every source now, so an unreadable one stops the run before any verdict."""
+        if self._stamps is None:
+            self._load()
 
 
 def git(root, *args):
@@ -197,19 +285,18 @@ def main(argv):
             raise Unreadable("%s: --rulings-dir is not a folder" % args.rulings_dir)
         records = Records(root, args.rulings_dir)
         named = args.brief + args.files
-        # Each unit is (name shown, {line: text}). A named file is read whole; a diff gives only its added lines.
         if named:
-            units = []
-            for name in named:
-                text = read_text(name)
-                units.append((name, dict(enumerate(text.split("\n"), 1))))
+            units = [(name, dict(enumerate(read_text(name).split("\n"), 1))) for name in named]
             scope = "the files named"
         else:
             units = sorted(added_text(root, args.base).items())
             scope = "the lines added against " + args.base
+        found = [(name, refused(lines)) for name, lines in units]
+        if any(claims for _name, claims in found):
+            records.load()
         bad = 0
-        for name, lines in units:
-            for n, kind, key, shown in sparse_refused(lines):
+        for name, claims in found:
+            for n, kind, key, shown in claims:
                 if not records.backs(kind, key):
                     bad = 1
                     print("%s: FAIL: %s:%d: '%s' names an owner ruling with no record. Cite the record, or add "
