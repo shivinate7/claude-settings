@@ -271,6 +271,9 @@ jobs:
       - name: Proc env read suite
         run: python3 hooks/test_proc_env.py
 
+      - name: Agent-owned process suite
+        run: python3 hooks/test_agent_procs.py
+
       - name: Simulator boot-record fixture suite
         run: python3 hooks/test_sim_boot_record.py
 
