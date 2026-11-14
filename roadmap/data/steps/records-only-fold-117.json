@@ -1,0 +1,17 @@
+{
+ "id": "records-only-fold-117",
+ "title": "A records-only fold for the 117 sessions blocked by guard lane-closes-after-records",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "runner 10 lists the records PRs",
+  "PR #3368 and the git-home pair"
+ ],
+ "why": "About 117 sessions are blocked from archiving by the guard lane-closes-after-records because their records PRs are still open.",
+ "source": "Coordinator 23:58 CST Nov 13 (relayed; consultant 23:57, runner 10 23:56; counts are the agents' reads, not re-run by the coordinator or triage).",
+ "note": "Triage 23:57 CST Nov 13: runner 10 lists the records PRs next. Wave plan track: a records-only fold after #3368 and the git-home pair. Not started; the count is an agent read.",
+ "updatedAt": "2026-11-13T23:57:30-06:00"
+}

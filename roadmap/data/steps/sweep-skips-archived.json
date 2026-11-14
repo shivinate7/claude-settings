@@ -1,0 +1,14 @@
+{
+ "id": "sweep-skips-archived",
+ "title": "The archive sweep's first sort drops already-archived sessions before it counts work left",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The sweep's phase 1 sort counted already-archived sessions as work left: 927 sorted ARCHIVE, and 807 were already archived when re-read (runner 10 workflow wf_9afc56cb-b7f).",
+ "source": "Coordinator 23:58 CST Nov 13 (relayed; consultant 23:57, runner 10 23:56; counts are the agents' reads, not re-run by the coordinator or triage).",
+ "note": "Triage 23:57 CST Nov 13: filter on session status first, then sort and count. Test: a list holding archived and live sessions counts only the live ones. Touches step archive-sweep-runs-per-merge's sweep; the lane there says whether to fold it in. Not started.",
+ "updatedAt": "2026-11-13T23:57:30-06:00"
+}
