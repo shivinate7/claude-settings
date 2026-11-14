@@ -13,16 +13,20 @@ The note is "read as of HH:MM TZ" (US Central, 24 h, with the zone) when the tim
 roadmap fetch (FETCH_HEAD's mtime), else the commit time of the local ref's tip. It is "read as of an unknown time"
 when neither is known: the fetch timed out and no roadmap fetch is on record (the tip read is skipped, so a hung git
 costs one wait, not two), the ref cannot be read, or git finds no repository in repo_dir (then no fetch starts).
+There is no note when there is nothing to be stale about: the local ref does not resolve, no roadmap fetch is on
+record, and the fetch says there is no roadmap to fetch (the repo has no remote `origin`, or origin has no `roadmap`
+branch: fetch_roadmap returns NO_ROADMAP). An origin that cannot be reached could hold one, so it keeps the note.
 
 Callers: lint/ruled_store.py (read_store), hooks/feedback_guard.py (roadmap_candidates), hooks/sendmessage_state.py
 (read_rulings), hooks/override.py (the step grant) and hooks/question_form.py (_read_steps). Step
 roadmap-ref-fresh-before-verdict. `fetch(repo_dir, timeout)` is the injected fetch of a test: it returns True when
-the ref was fetched, and False or raises when not. No other file runs a fetch of the roadmap
+the ref was fetched, NO_ROADMAP when origin holds no roadmap to fetch, and False or raises when not. No other file runs a fetch of the roadmap
 (lint/test_roadmap_ref.py scans for one).
 
 The fetch runs in its own process group, and a timeout kills the whole group, so a transport helper that git started
 does not outlive the wait. It reads no stdin, and it never prompts: GIT_TERMINAL_PROMPT=0, GIT_ASKPASS=true and, unless
-the caller set GIT_SSH_COMMAND, ssh in BatchMode.
+the caller set GIT_SSH_COMMAND, ssh in BatchMode. Git runs with LC_ALL=C, so the fetch's error text matches
+NOTHING_TO_FETCH in any locale.
 
 Cost: a fresh ref costs one stat and one small read of FETCH_HEAD, and no process. A repo whose `.git` is neither a
 folder nor a `gitdir:` file adds one `git rev-parse` to find FETCH_HEAD. A stale ref adds one `git fetch`, up to
@@ -50,6 +54,9 @@ FETCH_TIMEOUT = 2.0  # seconds one fetch may run
 REF = "refs/remotes/origin/roadmap"
 ROADMAP_LINE = "branch 'roadmap' of"  # what git writes in FETCH_HEAD for a fetched roadmap branch
 UNKNOWN = "read as of an unknown time"
+NO_ROADMAP = "no roadmap on origin"  # fetch_roadmap's answer when there is nothing to fetch
+# What git (LC_ALL=C) prints when a fetch has nothing to fetch: no remote named origin, or no roadmap branch on it.
+NOTHING_TO_FETCH = ("'origin' does not appear to be a git repository", "couldn't find remote ref")
 # A git start must read repo_dir, never an outer repo that a hook or CI step points at through these.
 STRIPPED = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_NAMESPACE")
 
@@ -59,6 +66,7 @@ def _env():
     env["GIT_TERMINAL_PROMPT"] = "0"  # an offline or private origin fails the fetch; it never waits for a password
     env["GIT_ASKPASS"] = "true"  # the no-op program: a credential helper that would ask gets an empty answer
     env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")  # ssh fails at once instead of asking for a passphrase
+    env["LC_ALL"] = "C"  # git's error text in English, so NOTHING_TO_FETCH matches in any locale
     return env
 
 
@@ -82,21 +90,22 @@ def _kill_group(proc):
 
 
 def _run_group(argv, timeout):
-    """The exit code of argv run in its own process group, stdin /dev/null. A timeout kills the group and raises
-    subprocess.TimeoutExpired."""
+    """(exit code, stderr text) of argv run in its own process group, stdin /dev/null. A timeout kills the group and
+    raises subprocess.TimeoutExpired."""
     group = {"start_new_session": True} if os.name == "posix" else {}
     proc = _nowindow.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=_env(),
                            **group)
     try:
-        proc.communicate(timeout=timeout)
-        return proc.returncode
+        _out, err = proc.communicate(timeout=timeout)
+        return proc.returncode, (err or b"").decode("utf-8", "replace")
     finally:
         if proc.poll() is None:
             _kill_group(proc)
 
 
 def fetch_roadmap(repo_dir, timeout):
-    """The one fetch of the roadmap branch. True when git fetched it; False when git failed. A timeout raises.
+    """The one fetch of the roadmap branch. True when git fetched it; NO_ROADMAP when git says there is nothing to
+    fetch (NOTHING_TO_FETCH); False when git failed otherwise. A timeout raises.
     Git truncates FETCH_HEAD before it connects, so a failed fetch would leave an empty one, fresh by mtime. A failed
     or timed-out fetch puts FETCH_HEAD back as it was, so it keeps the time and the branches of the last good fetch."""
     path = _fetch_head(repo_dir)
@@ -104,9 +113,11 @@ def fetch_roadmap(repo_dir, timeout):
     fetched = False
     try:
         # "+" makes the refspec the default remote-tracking one: a rewritten roadmap branch still updates the ref.
-        code = _run_group(["git", "-C", repo_dir, "fetch", "--quiet", "origin", "+roadmap:refs/remotes/origin/roadmap"],
-                          timeout)
+        code, err = _run_group(["git", "-C", repo_dir, "fetch", "--quiet", "origin",
+                                "+roadmap:refs/remotes/origin/roadmap"], timeout)
         fetched = code == 0
+        if not fetched and any(text in err for text in NOTHING_TO_FETCH):
+            return NO_ROADMAP
         return fetched
     finally:
         if not fetched and path:
@@ -191,9 +202,11 @@ def fresh_ref(repo_dir, now=None, fetch=None):
         last = _roadmap_fetched_at(head)
         if last is not None and now - last <= MAX_AGE:
             return ""
-        timed_out = False
+        timed_out = nothing = False
         try:
-            if (fetch or fetch_roadmap)(repo_dir, FETCH_TIMEOUT):
+            fetched = (fetch or fetch_roadmap)(repo_dir, FETCH_TIMEOUT)
+            nothing = fetched == NO_ROADMAP
+            if fetched and not nothing:
                 return ""
         except subprocess.TimeoutExpired:
             timed_out = True
@@ -201,6 +214,8 @@ def fresh_ref(repo_dir, now=None, fetch=None):
             pass
         if last is None and not timed_out:
             last = _tip_time(repo_dir)
+            if last is None and nothing:
+                return ""  # no ref, no roadmap fetch on record, and origin holds none: nothing to be stale about
         return _note(last)
     except Exception:
         return UNKNOWN

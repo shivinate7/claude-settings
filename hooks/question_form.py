@@ -2034,7 +2034,8 @@ def _ruled_candidates(roots, unknown, words, note=None):
     with " (unchecked, not law)". The store is read from the first root that has one: the repo, else the
     claude-settings checkout. No store anywhere adds "ruled store (absent)"; a store git failed to read adds
     "ruled store (unreadable: git)". `note` is the freshness note of the first root, when the caller ran the
-    check for it already."""
+    check for it already. A failed fetch of the checkout's store adds "claude-settings ruled store (read as of
+    <time>)", which is no unreadable source."""
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
@@ -2045,7 +2046,10 @@ def _ruled_candidates(roots, unknown, words, note=None):
         return []
     state = "absent"
     for root in roots:
-        entries, state = ruled_store.read_store(root, note=note if root == roots[0] else None)
+        notes = []
+        entries, state = ruled_store.read_store(root, note=note if root == roots[0] else None, notes=notes)
+        if notes and root != roots[0]:  # the first root's note reaches the verdict through its step read
+            unknown.append("claude-settings ruled store (%s)" % notes[0])
         if state == "ok":
             opened = ruled_store.open_entries(entries, root)
             lines = []

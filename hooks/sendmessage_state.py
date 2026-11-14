@@ -10,7 +10,8 @@ something that changes its work). Spec: docs/decisions/agent-model-cap.md, the t
   read of the `"ref":` lines under roadmap/rulings, in the repo of the payload's cwd: one `ref` listing, then
   one `grep` of the local ref `roadmap` and `origin/roadmap`, both when both exist. `origin/roadmap` is first
   fetched when its last roadmap fetch is older than roadmap_ref.MAX_AGE, bounded at roadmap_ref.FETCH_TIMEOUT
-  (lint/roadmap_ref.py); a read that could not be fetched fresh says "read as of <time>" on stderr. It refuses,
+  (lint/roadmap_ref.py); a read that could not be fetched fresh says "read as of <time>" on stderr, and a repo
+  with no roadmap ref and no roadmap branch on origin has nothing to be stale about and says nothing. It refuses,
   rule `past-ruling`, when a ruling's supersedes ref names a cited decision. A ref that quotes a sentence
   refuses only when the message shares two of its key words; a bare-slug or docs-path ref with no sentence
   refuses always, and prose that names a decision with no sentence after it refuses never. Why: a

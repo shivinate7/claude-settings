@@ -24,8 +24,8 @@ every entry text only. A guard rule id is the first token of the ref, with a tra
 
 Freshness (step roadmap-ref-fresh-before-verdict): a read of STORE_REF (read_store, ruled_entries, session_lines)
 first calls lint/roadmap_ref.py, which fetches origin/roadmap when its last fetch is older than MAX_AGE, bounded at
-FETCH_TIMEOUT, and else reads it as of that fetch. session_lines adds "read as of <time>" to its header when the fetch
-failed. check_store and a read of any other ref fetch nothing.
+FETCH_TIMEOUT, and else reads it as of that fetch. When the fetch failed, session_lines adds "read as of <time>" to its
+header, `list` prints it on one stderr line, and read_store appends it to the caller's `notes`. check_store and a read of any other ref fetch nothing.
 
 Cost: this module keeps no timer and writes no file of its own. A fresh ref adds no process (roadmap_ref reads one
 stat); a stale one adds one `git fetch` of at most FETCH_TIMEOUT seconds, and git writes FETCH_HEAD and the ref.
@@ -176,14 +176,17 @@ def _read(repo_dir, ref, note=None):
     return _load(repo_dir, ref) + (note,)
 
 
-def read_store(repo_dir, ref=STORE_REF, note=None):
+def read_store(repo_dir, ref=STORE_REF, note=None, notes=None):
     """(entries, state) of the store at `ref` in repo_dir, oldest first by instant. state is "ok" (also an empty
     folder that exists), "absent" (no such ref, folder or repo) or "unreadable" (git cannot start, or fails after the
     listing worked). A file that is not a JSON object is skipped. When `ref` is STORE_REF the read first fetches
     origin/roadmap if it is older than roadmap_ref.MAX_AGE, bounded at roadmap_ref.FETCH_TIMEOUT; a fetch that fails
-    reads the ref as it is, and session_lines says "read as of <time>". A caller that already ran the check for
-    repo_dir passes `note` (its result, "" for none) to skip a second one. Never raises."""
-    return _read(repo_dir, ref, note)[:2]
+    reads the ref as it is, and its note "read as of <time>" is appended to `notes` when given. A caller that already
+    ran the check for repo_dir passes `note` (its result, "" for none) to skip a second one. Never raises."""
+    entries, state, _bad, said = _read(repo_dir, ref, note)
+    if said and notes is not None:
+        notes.append(said)
+    return entries, state
 
 
 def ruled_entries(repo_dir, ref=STORE_REF):
@@ -342,7 +345,13 @@ def session_lines(repo_dir):
 
 
 def _list(repo_dir):
-    for entry in sorted(open_entries(ruled_entries(repo_dir), repo_dir), key=entry_instant, reverse=True):
+    """Prints every open entry in full. A failed fetch of the store ref adds one stderr line: a read is never silent
+    about how fresh it is."""
+    notes = []
+    entries, _state = read_store(repo_dir, notes=notes)
+    if notes:
+        print("ruled store: %s %s" % (STORE_REF, notes[0]), file=sys.stderr)
+    for entry in sorted(open_entries(entries, repo_dir), key=entry_instant, reverse=True):
         print("%s  %s" % (entry.get("id", "?"), entry.get("at", "?")))
         print("  ruling: %s" % _norm(str(entry.get("ruling", ""))))
         print("  supersedes: %s" % supersedes_text(entry))
