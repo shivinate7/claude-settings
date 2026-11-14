@@ -1413,10 +1413,12 @@ def case_widens_finding_logs_its_rule():
 
 # ------------------------------------------ the not-widening and still-widening sentences (uniform-over-variants)
 #
-# The style-question-form rule names one change for every repo, and a tighter rule with no per-repo entry, as not
-# widening, once. An option for every repo that also adds an entry, a second form or an exception still widens.
-# A pin is a sentence that holds a word from each group, so the wording can be tuned. The same phrases are in
-# test_call_judge.py, which runs the call judge's prompt.
+# The style-question-form rule names a change that only tightens, or makes one same rule apply to every repo without
+# adding one, as not widening, once, and so does a tighter rule with no per-repo entry. A change to the shared tool that
+# adds an accepted form, an entry or an exception widens it, whatever it says about repos. A change that tightens and
+# also adds one still widens, and so does an option for every repo that also adds one. A pin is a sentence that holds
+# a word from each group, so the wording can be tuned. The same phrases are in test_call_judge.py, which runs the call
+# judge's prompt.
 NOT_WIDENING_ONE_CHANGE = (("every repo", "all repos"), ("not widen", "not a widen", "n't widen"))
 NOT_WIDENING_TIGHTER = (("tighter", "stricter", "narrower"), ("per-repo", "per repo"),
                         ("not widen", "not a widen", "n't widen"))
@@ -1485,6 +1487,69 @@ def case_prompt_keeps_the_control_words_in_the_widening_rule():
     check("prompt: the style-question-form rule keeps second accepted form, allow-list entry and per-repo exception",
           bool(rule) and not missing, "style-question-form rule %s; missing control words: %s"
           % ("present" if rule else "missing", missing))
+
+
+# The carve-out wording, one wording in both judges. The old count-based carve-out must be gone from the rule. Each
+# still-widens sentence names the same three items as the call judge's, so each file pins them.
+OLD_CARVE_OUT = "one change that applies to every repo is not widening"
+WHATEVER_REPOS = (("whatever it says about repos",), ("every repo", "all repos"), ("widen",))
+TIGHTEN_AND_ADDS = (("tighten", "tighter", "stricter", "narrower"), ("also add",), ("still widen",))
+STILL_WIDENING_ITEMS = ("shared allow-list entry", "second accepted form", "exception")
+
+
+def case_prompt_says_whatever_it_says_about_repos_widens():
+    # Case 14: the style-question-form rule says a shared-tool change that adds a form, an entry or an exception widens
+    # it, whatever it says about repos, one that applies to every repo included. One sentence holds all three groups.
+    rule = style_rule_text(widens_prompt_head())
+    hits = sentences_with(rule, *WHATEVER_REPOS)
+    check("prompt: the style-question-form rule says a shared-tool change that adds a form, entry or exception widens it, whatever it says about repos",
+          bool(rule) and len(hits) >= 1,
+          "style-question-form rule %s; sentences naming such a change: %d (want at least 1)"
+          % ("present" if rule else "missing", len(hits)))
+
+
+def case_prompt_drops_the_count_based_carve_out():
+    # Case 15: the count-based carve-out is gone from the prompt. The rule's text is checked first, so an empty prompt fails.
+    head = widens_prompt_head()
+    rule = style_rule_text(head)
+    check("prompt: the count-based carve-out is absent from the prompt",
+          bool(rule) and OLD_CARVE_OUT not in head.lower(),
+          "style-question-form rule missing" if not rule else "the count-based carve-out is still in the prompt")
+
+
+def case_prompt_says_every_repo_not_widening_names_its_limit():
+    # Case 16: each sentence that calls a change for every repo not widening also names its limit, without adding an
+    # accepted form, an entry or an exception.
+    rule = style_rule_text(widens_prompt_head())
+    hits = sentences_with(rule, *NOT_WIDENING_ONE_CHANGE)
+    lacking = [s for s in hits if "without" not in s]
+    check("prompt: an every-repo change named not widening also names its limit, without adding one",
+          bool(hits) and not lacking,
+          "style-question-form rule %s; every-repo not-widening sentences: %d (want at least 1); lacking 'without': %d"
+          % ("present" if rule else "missing", len(hits), len(lacking)))
+
+
+def case_prompt_says_a_change_that_tightens_and_adds_still_widens():
+    # Case 17: a change that tightens the tool and also adds an accepted form, an entry or an exception still widens.
+    rule = style_rule_text(widens_prompt_head())
+    hits = sentences_with(rule, *TIGHTEN_AND_ADDS)
+    check("prompt: the style-question-form rule says a change that tightens and also adds a form, entry or exception still widens",
+          bool(rule) and len(hits) >= 1,
+          "style-question-form rule %s; sentences naming a tightening change that also adds one: %d (want at least 1)"
+          % ("present" if rule else "missing", len(hits)))
+
+
+def case_prompt_still_widens_names_the_same_items():
+    # Case 18: each still-widens sentence for an option for every repo names a shared allow-list entry, a second accepted
+    # form and an exception, one check per item. The call judge's file pins the same three items.
+    rule = style_rule_text(widens_prompt_head())
+    hits = sentences_with(rule, *STILL_WIDENING_CLAUSE)
+    for item in STILL_WIDENING_ITEMS:
+        lacking = [s for s in hits if item not in s]
+        check("prompt: each still-widens sentence in the style-question-form rule names '%s'" % item,
+              bool(rule) and bool(hits) and not lacking,
+              "style-question-form rule %s; still-widens sentences: %d (want at least 1); lacking '%s': %d"
+              % ("present" if rule else "missing", len(hits), item, len(lacking)))
 
 
 # --------------------------------------------------------------------------- d9
@@ -2265,6 +2330,11 @@ CASES = (
     case_prompt_says_a_tighter_rule_with_no_per_repo_entry_is_not_widening,
     case_prompt_says_an_option_for_every_repo_that_adds_an_entry_still_widens,
     case_prompt_keeps_the_control_words_in_the_widening_rule,
+    case_prompt_says_whatever_it_says_about_repos_widens,
+    case_prompt_drops_the_count_based_carve_out,
+    case_prompt_says_every_repo_not_widening_names_its_limit,
+    case_prompt_says_a_change_that_tightens_and_adds_still_widens,
+    case_prompt_still_widens_names_the_same_items,
     case_prompt_flags_a_pick_one_question_whose_options_could_combine,
     case_route_cite_carries_cited_same_act_and_alternate_rows,
     case_route_cite_skips_other_acts_in_a_full_rows_file,

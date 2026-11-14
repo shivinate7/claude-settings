@@ -1392,9 +1392,11 @@ def case_widening_rule_names_the_mark():
 
 # ------------------------------------------------- the not-widening and still-widening sentences (uniform-over-variants)
 #
-# One change that applies to every repo, or a tighter rule with no per-repo entry, is not widening. An option for
-# every repo that also adds a per-repo entry, a second form or an exception still widens. Each sentence sits once in
-# the widening slot. A pin is a sentence that holds a word from each group, so the wording can be tuned.
+# A change that only tightens the tool, or makes one same rule apply to every repo without adding an accepted form, an
+# allow-list entry or an exception, is not widening, and neither is a tighter rule with no per-repo entry. A change to
+# the shared tool that adds one of those widens it, whatever it says about repos, every repo included. A change that
+# tightens and also adds one still widens, and so does an option for every repo that also adds one. Each sentence sits
+# once in the widening slot. A pin is a sentence that holds a word from each group, so the wording can be tuned.
 NOT_WIDENING_ONE_CHANGE = (("every repo", "all repos"), ("not widen", "not a widen", "n't widen"))
 NOT_WIDENING_TIGHTER = (("tighter", "stricter", "narrower"), ("per-repo", "per repo"),
                         ("not widen", "not a widen", "n't widen"))
@@ -1474,6 +1476,69 @@ def case_widening_not_widening_only_in_the_slot():
         check("widening slot only: %s is judged once, and carries no not-widening sentence" % label,
               len(r.calls) == 1 and r.code == 0 and not hits,
               "%s; not-widening sentences in its prompt: %s" % (detail(r), hits))
+
+
+# The carve-out wording. The old count-based carve-out must be gone. A change to the shared tool that adds a form, an
+# entry or an exception widens it, whatever it says about repos. Each still-widens sentence names the same three items
+# in both judges, so each file pins them.
+OLD_CARVE_OUT = "one change that applies to every repo is not widening"
+WHATEVER_REPOS = (("whatever it says about repos",), ("every repo", "all repos"), ("widen",))
+TIGHTEN_AND_ADDS = (("tighten", "tighter", "stricter", "narrower"), ("also add",), ("still widen",))
+STILL_WIDENING_ITEMS = ("shared allow-list entry", "second accepted form", "exception")
+
+
+def case_widening_old_count_carve_out_is_gone():
+    # Case 12: the count-based carve-out is not in the widening slot, so a change for every repo is judged by what it adds.
+    region = set_prompt_region()
+    check("widening carve-out: the count-based sentence is absent from the widening slot",
+          bool(region) and OLD_CARVE_OUT not in region.lower(),
+          "widening slot missing" if not region else "the count-based sentence is still in the widening slot")
+
+
+def case_widening_carve_out_reads_whatever_it_says_about_repos():
+    # Case 13: a change to the shared tool that adds a form, an entry or an exception widens it, whatever it says about
+    # repos, one that applies to every repo included. One sentence holds all three groups.
+    region = set_prompt_region()
+    hits = sentences_with(region, *WHATEVER_REPOS)
+    check("widening carve-out: a shared-tool change that adds a form, entry or exception widens it, whatever it says about repos",
+          bool(region) and len(hits) >= 1,
+          "widening slot %s; sentences naming such a change: %d (want at least 1)"
+          % ("present" if region else "missing", len(hits)))
+
+
+def case_widening_every_repo_not_widening_names_its_limit():
+    # Case 14: each sentence that calls a change for every repo not widening also names its limit, without adding an
+    # accepted form, an entry or an exception. A change that adds one falls outside the carve-out.
+    region = set_prompt_region()
+    hits = sentences_with(region, *NOT_WIDENING_ONE_CHANGE)
+    lacking = [s for s in hits if "without" not in s]
+    check("widening carve-out: an every-repo change named not widening also names its limit, without adding one",
+          bool(hits) and not lacking,
+          "widening slot %s; every-repo not-widening sentences: %d (want at least 1); lacking 'without': %d"
+          % ("present" if region else "missing", len(hits), len(lacking)))
+
+
+def case_widening_tighten_and_add_still_widens():
+    # Case 15: a change that tightens the tool and also adds an accepted form, an entry or an exception still widens.
+    region = set_prompt_region()
+    hits = sentences_with(region, *TIGHTEN_AND_ADDS)
+    check("widening still-widens: a change that tightens and also adds a form, an entry or an exception still widens",
+          bool(region) and len(hits) >= 1,
+          "widening slot %s; sentences naming a tightening change that also adds one: %d (want at least 1)"
+          % ("present" if region else "missing", len(hits)))
+
+
+def case_widening_still_widens_names_the_same_items():
+    # Case 16: each still-widens sentence for an option for every repo names a shared allow-list entry, a second accepted
+    # form and an exception, one check per item. The reply judge's file pins the same three items.
+    region = set_prompt_region()
+    hits = sentences_with(region, *STILL_WIDENING_CLAUSE)
+    for item in STILL_WIDENING_ITEMS:
+        lacking = [s for s in hits if item not in s]
+        check("widening still-widens: each still-widens sentence names '%s'" % item,
+              bool(hits) and not lacking,
+              "widening slot %s; still-widens sentences: %d (want at least 1); lacking '%s': %d"
+              % ("present" if region else "missing", len(hits), item, len(lacking)))
 
 
 def case_fail_open():
@@ -1910,6 +1975,9 @@ def main():
                  case_widening_one_change_is_not_widening, case_widening_tighter_rule_is_not_widening,
                  case_widening_still_widens_clause, case_widening_control_words_remain,
                  case_widening_not_widening_only_in_the_slot,
+                 case_widening_old_count_carve_out_is_gone, case_widening_carve_out_reads_whatever_it_says_about_repos,
+                 case_widening_every_repo_not_widening_names_its_limit, case_widening_tighten_and_add_still_widens,
+                 case_widening_still_widens_names_the_same_items,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
