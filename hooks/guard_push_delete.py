@@ -1536,7 +1536,9 @@ def cmd_exe_delete_hit(segment: str) -> str:
 
 PUSH_REASON = (
     "Rule (Git): a forced push can overwrite newer remote work with a stale copy. "
-    "Remedy: retry with --force-with-lease --force-if-includes."
+    "The sha is the tip your own last push left, so record it when you push; never one read after a "
+    "fetch, which accepts whatever the fetch brought in. "
+    "Remedy: retry with --force-with-lease=<branch>:<sha>."
 )
 PUSH_MAIN_REASON = (
     "Rule (Git): this push writes the default branch, main or master. Main moves only by pull request "
