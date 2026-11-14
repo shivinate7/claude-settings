@@ -1,0 +1,14 @@
+{
+ "id": "task-item-with-options",
+ "title": "The question-form check refuses a waiting-page task item that carries choice options",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Three owner items (771, 774, 775) were posted as tasks with options; the page shows no choices for a task, so the owner could not answer.",
+ "source": "Owner chat 18:25 CST Nov 13: \"others have no answer choices\"; triage's own fault; the page-render cause is a hypothesis, not read in the page source.",
+ "note": "Filed 18:28 CST Nov 13. Guard wanted: hooks/question_form.py (decision question-form) refuses an item with kind task that has options without how and links, or a lint on kind. First read the page template to confirm tasks hide choices. Harm stopped: an owner question the owner cannot answer. Rule building-mistake-names-its-guard. A guard change: test-author red case first. Not started.",
+ "updatedAt": "2026-11-13T18:28:04-06:00"
+}
