@@ -1,14 +1,14 @@
 {
  "id": "ci-skip-untouched-steps",
  "title": "CI skips whole jobs, and the checks job's unflagged pull_request lint steps, when a change touches nothing they read",
- "status": "done",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL3hpjg5FJKuEAqUdvm",
  "owner": "triage",
  "blockedBy": [],
- "why": "Owner 11:20 CST Nov 13, relayed by runner 10 and the coordinator: a prose-only batch still starts about 19 jobs and runs the lint steps. Ruled by decisions test-strategy-reset (\"Each CI job runs only when a file that its suites read changes\") and ci-cut-in-steps (item 31), never built. DONE 13:08 CST Nov 14 (coordinator 13:08, REST read 13:07; relayed; triage read no diff): #3158 merged 13:05:44 CST as dbac2a33b1ee766ed66261aa38b3e643c52524d6, alone on its green ready run 43625566950 (green 18:57:31Z). Marked done on the coordinator's word that the merged PR builds this step.",
+ "why": "Owner 11:20 CST Nov 13, relayed by runner 10 and the coordinator: a prose-only batch still starts about 19 jobs and runs the lint steps. Ruled by decisions test-strategy-reset (\"Each CI job runs only when a file that its suites read changes\") and ci-cut-in-steps (item 31), never built. DONE 13:08 CST Nov 14 (coordinator 13:08, REST read 13:07; relayed; triage read no diff): #3158 merged 13:05:44 CST as dbac2a33b1ee766ed66261aa38b3e643c52524d6, alone on its green ready run 43625566950 (green 18:57:31Z). Marked done on the coordinator's word that the merged PR builds this step. SLICE 2 13:47 CST Nov 14 (coordinator 13:50, REST read of branch names; relayed; the step's own slice list unread by coordinator and triage): #3408 (branch ci-skip-untouched-steps-2-repl, replaces #3180 on ci-skip-untouched-steps-2) builds slice 2 of this step; #3158 was slice 1 (merged 13:05). Status moved from done to doing, because I marked it done at #3158 on the coordinator's word and slice 2 is still open. Slice 2 notes: step step-scope-scanner-gaps.",
  "source": "owner 11:20 CST Nov 13 via runner 10; coordinator 11:21 CST; retrospective 11:19 CST",
  "note": "Scope: whole jobs, and the unflagged pull_request lint steps in the checks job (.github/workflows/checks.yml about lines 445 to 564), skipped when the change touches no file they read. Caveat from steps guard-pr-runs-windows-shards and rollup-needs-all-shards: a job-level skip needs the all-jobs-passed rollup to accept a skipped job; the coordinator's 14:25 CST Nov 12 pick gates by step instead. Overlaps lane ci-mac-once-per-batch (same file, checks.yml). First measure: runner 10's job minutes for batch 133. Express (ruling drain-first-hold part 4: a CI fix). Lane started by the coordinator 11:21 CST Nov 13. Measure (retrospective 11:22 CST Nov 13, batch 133): the 19 short jobs cost 3.0 job-minutes and about 0 wall time, so job-level skips save little. The checks job runs about 93 unflagged suite steps (29.4 step-minutes so far, still running) on a docs-only diff. First fix: step-level code flags on checks suites that read no .md. It avoids the rollup blocker. Lane order (coordinator 11:22 CST): steps first, then jobs. Widened (coordinator 11:35 CST Nov 13): now covers the full F1 path map, all 149 unflagged steps; doc reads move to fixtures.",
- "updatedAt": "2026-11-14T13:08:00"
+ "updatedAt": "2026-11-14T13:47:30"
 }
