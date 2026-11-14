@@ -828,7 +828,9 @@ def page_problem(item_id, rest, text, k, stamp, pages, homes=None):
         return ("%s [page] page:%s: the waiting copy at origin/%s, as of the last fetch, holds no item with n %s,"
                 " and the transcript shows no read-back of it; ask the page writer to export the waiting copy"
                 " into folder `%s` on that branch and push it, then run `git fetch origin %s` (the filing check"
-                " fetches nothing; the repeats read fetches the record branch only when its ref is older than 60 seconds); or read item %s back from the page (an ArtifactData get, list or query of collection"
+                " fetches nothing; the repeats read fetches the record branch only when the FETCH_HEAD roadmap line is older"
+                " than 60 seconds, absent, or names a commit other than the tip of the roadmap ref); or read item %s back"
+                " from the page (an ArtifactData get, list or query of collection"
                 " `items` with no out_dir); then end the turn again"
                 % (item_id, n, branch, n, folder, branch, n))
     return ("%s [page] page:%s: the transcript shows no send of the owner's ruling to the page writer after"

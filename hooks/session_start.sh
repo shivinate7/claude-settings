@@ -52,8 +52,11 @@ bounded_git() {
 
 # bounded_fetch <dir>: one quiet, bounded `git fetch` in <dir> that names refs and never prunes or fetches all of
 # origin, so its cost does not grow with the remote's branch count (a prune fetch of a 429-branch remote did not finish
-# in 20 s; one ref takes well under a second). Returns 0 when the refresh ran, else not. The one home for every
-# freshness check below. The first call per checkout runs it; a later call for the same checkout (resolved with pwd -P)
+# in 20 s; one ref takes well under a second). Returns 0 when the refresh ran, else not. The one home of the
+# session start's checkout refreshes below: the grants read, the pointer checkout's behind check and the repo's
+# behind check, each of main, stable or the remote HEAD's target. It never fetches the roadmap branch: that fetch
+# is lint/roadmap_ref.py (fresh_ref), for the readers of origin/roadmap. The first call per checkout runs it; a
+# later call for the same checkout (resolved with pwd -P)
 # returns that status again, so a session start refreshes each checkout once, however many checks ask. The caller must
 # not run it in $( ), or the memo and fetch_target are lost with the subshell.
 # The refs come from the remote, not from local refs: one `git ls-remote --symref origin HEAD refs/heads/main refs/heads/stable`

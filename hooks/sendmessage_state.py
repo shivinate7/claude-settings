@@ -59,12 +59,15 @@ READER_PARTS = ("mods", "session-board", "hooks", "receiver-state.mjs")
 OK_SHAPE = {"ok": (True, False)}
 # THE TIME BUDGET. The board read (READER_TIMEOUT, plus up to 5 s for kill_tree) then the busy call
 # (MODEL_TIMEOUT) run beside the wording call (WORDING_TIMEOUT, joined 5 s later at most), so the
-# longest path is 12 + 5 + 25 = 42 s, plus RULINGS_TIMEOUT = 5 s for the past-ruling read before them (one
-# shared deadline) and up to roadmap_ref.FETCH_TIMEOUT = 2 s for its fetch of a stale ref = 49 s plus start-up. The settings.json PreToolUse entry for this hook
-# carries "timeout": 50.
+# longest path is 12 + 5 + 25 = 42 s. The past-ruling read runs before them: roadmap_ref.fresh_ref takes at most
+# 4 s (its fetch, FETCH_TIMEOUT = 2 s, then one bounded `git log`, 2 s, after a fetch that failed fast), then
+# RULINGS_TIMEOUT = 3 s for the two git starts (one shared deadline). Worst case 42 + 4 + 3 = 49 s plus start-up,
+# under the 50 s of the settings.json PreToolUse entry for this hook ("timeout": 50). A repo whose `.git` is
+# neither a folder nor a `gitdir:` file, or whose refs are not files, adds up to two more bounded `git rev-parse`
+# starts of 2 s each inside fresh_ref: that case can pass 50 s, and the hook is then cut by its timeout.
 READER_TIMEOUT = 12
 MODEL_TIMEOUT = 25
-RULINGS_TIMEOUT = 5  # one deadline for the whole past-ruling read (ref list, then one grep of about 150 small files)
+RULINGS_TIMEOUT = 3  # one deadline for the whole past-ruling read (ref list, then one grep of about 150 small files)
 WORDING_TIMEOUT = 30  # a prompt hook's default timeout
 WORDING_MODEL = "claude-sonnet-5-5"  # at the model's default effort (docs/decisions/agent-model-cap.md)
 RULE = "parallelism-no-mid-task-talk"

@@ -141,7 +141,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   100 inbox blocks. Within a source the share keeps the front: roadmap steps not marked done come
   first, todo and notes lines go newest (last) line first, and inbox blocks newest first. They are: steps at `refs/remotes/origin/roadmap`, read by one `git grep`. The ref is fetched
   first when the roadmap's own fetch record (a `branch 'roadmap' of` line in FETCH_HEAD) is older
-  than 60 seconds, or names a commit other than the ref's tip. That fetch is bounded at 2 seconds. Otherwise, the ref is read as of its last
+  than 60 seconds, absent, or names a commit other than the tip of `origin/roadmap`. That fetch is bounded at 2 seconds. Otherwise, the ref is read as of its last
   fetch. A repeat flag on a step then ends "(roadmap read as of HH:MM TZ)". When no reason or flag
   carries that note, one systemMessage line reads: "Feedback guard: roadmap read as of HH:MM TZ (its
   fetch failed)." The code is lint/roadmap_ref.py, step roadmap-ref-fresh-before-verdict. The other two
