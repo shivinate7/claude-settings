@@ -233,7 +233,7 @@ class Scaffold(TempDest):
                 self.assertTrue("--priority-rows" in s or leaves_flag_off_without_rows(s),
                                 "a merge --confirm names neither --priority-rows nor the leave-off line for no priority rows: " + s)
 
-    def test_handoff_priorities_names_the_gate_form(self):
+    def test_handoff_priorities_names_the_check_form(self):
         section = section_of(tree(SKILL)["templates/role-handoff.md"], "Priorities")
         self.assertIsNotNone(section, "no Priorities section")
         spans = re.findall(r"`([^`]*)`", " ".join(section.split()))

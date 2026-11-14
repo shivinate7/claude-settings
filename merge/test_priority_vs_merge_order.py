@@ -154,7 +154,7 @@ class PriorityBeforeMerge(tm.Env):
         self.assertIn("not clear", out + err, "a row the reader cannot parse must say it is not clear: " + out + err)
 
     def lower_goes_with(self, info, runs, status, why):
-        """Priority PR 3302 reads as `info`, with `runs` on its head. The lower PR goes, and the row's line says `status` and `why`."""
+        """A priority row whose PR reads as `info`, with `runs` on its head, does not block a lower pull request. The lower one merges, and the row's line says `status` and `why`."""
         self.host.prio[3302] = info
         self.host.prio_runs[HEAD_3302] = runs
         rc, out, err = self.confirm(LOWER, ROW_3302)
