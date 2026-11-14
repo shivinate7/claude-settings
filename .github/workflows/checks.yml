@@ -284,6 +284,12 @@ jobs:
       - name: Session start notice suite
         run: python3 hooks/test_session_start.py
 
+      - name: Session role file suite
+        run: python3 hooks/test_session_role.py
+
+      - name: Claude role launcher suite
+        run: python3 lint/test_claude_role.py
+
       - name: Directory before a segment suite
         run: python3 hooks/test_dir_before_segment.py
 
