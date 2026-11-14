@@ -1,0 +1,14 @@
+{
+ "id": "lane-touched-tests-cap-cancels",
+ "title": "The lane-touched-tests Windows job keeps cancelling at its cap on a large merge-in diff",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "#3261 had 5 Windows cancels at the 10 min cap; the selector runs many tests on a 145-file merge-in diff.",
+ "source": "Coordinator 20:04 and 20:04 CST Nov 13, from lane brief-from-step; the lane read the last 60 lines of job 132285068637 (run 43542199013). Triage read nothing.",
+ "note": "Filed 20:05 CST Nov 13. Facts (coordinator): the Windows run job of lane-touched-tests.yml has timeout-minutes 10 (decision ci-job-caps, provisional, 4 runs, slowest 4.7 min). #3261 had 5 Windows cancels at that cap (runs 43532208819 twice, 43538055612 twice, 43542199013), one with both steps passing at 9:27 and cancelled at 10:02. Windows ran four install*.test.ps1 files, merge/test_launch.py, janitor/test_session_end_sweep.py and many hooks/test_*.py suites; the head of the list is unread. #3262 Windows took 0:53 (few files). Unmeasured: how many files the selector picked on #3261, and whether main merge-ins widened it. Related, not a duplicate: step lane-touched-tests-windows-cap (cap 10 to 30 min, carrier PR #3257); triage has not read whether #3257 merged, so the lane checks first whether main already holds the 30 min cap. Decision ci-job-caps (owner: generously raise time limits) rules a cancellation at a cap gets a raise; a selector change moves a check verdict, so a lane builds it. Needs a lane.",
+ "updatedAt": "2026-11-13T20:05:36-06:00"
+}
