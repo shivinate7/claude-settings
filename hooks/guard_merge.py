@@ -1149,12 +1149,29 @@ SELF_ROLE_REASON = (
 )
 
 
+def _set_environment_variable_names(lowered) -> bool:
+    """True when a `SetEnvironmentVariable(` call in the lowered tokens takes the role variable as its first argument. The tokenizer drops
+    the quotes and leaves the paren glued, so the name is the rest of the call's token, or the next token when that rest is empty."""
+    variable = SELF_ROLE_VARIABLE.lower()
+    for at, token in enumerate(lowered):
+        call = token.find("setenvironmentvariable")
+        if call < 0:
+            continue
+        first = token[call + len("setenvironmentvariable"):].lstrip("( ")
+        if not first and at + 1 < len(lowered):
+            first = lowered[at + 1]
+        if first.strip("'\"(), ") == variable:
+            return True
+    return False
+
+
 def _claims_a_role(tokens) -> bool:
-    """True when one tokenized command sets the role variable (a `VAR=x` prefix, `env VAR=x`, `export VAR=x`, PowerShell `$env:VAR=x`,
-    `Set-Item Env:VAR`, `SetEnvironmentVariable('VAR', ...)`) or runs the launcher, as its command word or as the script of a python call."""
+    """True when one tokenized command sets the role variable (a `VAR=x` prefix, also glued to a subshell's `(`, `env VAR=x`, `export VAR=x`,
+    PowerShell `$env:VAR=x`, `Set-Item` or `New-Item` on `Env:VAR`, `SetEnvironmentVariable('VAR', ...)`) or runs the launcher, as its command
+    word or as the script of a python call. A PowerShell read of `Env:VAR` (Test-Path, Get-Item, Remove-Item) is no claim."""
     index = resolve_command(tokens)
     before = tokens if index is None else tokens[:index]
-    if any(t.startswith(SELF_ROLE_VARIABLE + "=") for t in before):
+    if any(t.lstrip("(").startswith(SELF_ROLE_VARIABLE + "=") for t in before):
         return True
     lowered = [t.lower() for t in tokens]
     variable = SELF_ROLE_VARIABLE.lower()
@@ -1162,14 +1179,14 @@ def _claims_a_role(tokens) -> bool:
         return True
     if any(t == "$env:" + variable for t in lowered) and any(t.startswith("=") for t in lowered):
         return True
-    if any(t in ("env:" + variable, "env:\\" + variable) for t in lowered):
-        return True
-    if any("setenvironmentvariable" in t for t in lowered) and variable in lowered:
+    if _set_environment_variable_names(lowered):
         return True
     if index is None:
         return False
     word = basename(tokens[index])
     rest = tokens[index + 1:]
+    if word.lower() in ("set-item", "new-item") and any(t in ("env:" + variable, "env:\\" + variable) for t in lowered):
+        return True
     if word in ("export", "declare", "typeset", "setenv") and any(t.startswith(SELF_ROLE_VARIABLE + "=") for t in rest):
         return True
     if word in SELF_ROLE_LAUNCHERS:
@@ -1181,24 +1198,28 @@ def _claims_a_role(tokens) -> bool:
 
 
 def _self_role_hit(text: str, depth: int) -> bool:
-    segments = split_segments(text)
-    for segment in segments:
-        if not segment.strip():
-            continue
-        tokens = segment_tokens(segment)
-        if tokens is None:
-            return True   # a quote left open: the segment names the variable or the launcher and cannot be read, so it is refused
-        if _claims_a_role(tokens):
-            return True
-        for script in inner_commands(tokens):
-            if depth >= MERGE_NEST_DEPTH or _self_role_hit(script, depth + 1):
+    from guard_env import substitution_commands   # imported late: a family reads only the families before it
+    stripped = strip_heredoc_bodies(text)
+    # Each `$( )` or backtick text runs as a command of its own, as judge_shell reads it. A nest too deep to read gives no inner text,
+    # so a claim buried that deep passes: only a forger writes one (rule guard-guards-mistakes-only).
+    for each in substitution_commands(text, stripped, outer=True):
+        for segment in split_segments(each):
+            if not segment.strip():
+                continue
+            tokens = segment_tokens(segment)
+            if tokens is None:
+                return True   # a quote left open: the segment names the variable or the launcher and cannot be read, so it is refused
+            if _claims_a_role(tokens):
                 return True
+            for script in inner_commands(tokens):
+                if depth >= MERGE_NEST_DEPTH or _self_role_hit(script, depth + 1):
+                    return True
     return False
 
 
 def self_role_hit(stripped: str) -> str:
-    """Return a short label when a Bash or PowerShell call sets the role variable or runs the launcher, else ''. Reads each segment and each
-    script a `bash -c`, `sh -c` or `eval` hands on, so quoted text, `echo $VAR`, `grep claude-role` and `cat bin/claude-role` are no claim.
+    """Return a short label when a Bash or PowerShell call sets the role variable or runs the launcher, else ''. Reads each segment, each `$( )` or
+    backtick text, and each script a `bash -c`, `sh -c` or `eval` hands on, so quoted text, `echo $VAR`, `grep claude-role` and `cat bin/claude-role` are no claim.
     Fails closed inside the clause: a call that names the variable or the launcher and cannot be read is refused, because the guard-wide crash
     path fails open. Cost: one substring test per call; a parse only for a call that names the variable or the launcher."""
     lowered = stripped.lower()

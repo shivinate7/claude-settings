@@ -3,8 +3,8 @@
 
 bin/claude-role starts `claude` with CS_SESSION_ROLE set. The session-start hook runs `session_role.py write`, which records
 that role in <config dir>/state/session-roles/<session id>.json as {"session", "role", "repo"}. The guard and the merge tool read
-it with `own_record` / `own_role` where a cloud session reads its get_session tags. Claude cannot write the folder: the
-configuration rule and settings.json's Edit deny refuse a write under the config directory.
+it with `own_record` / `own_role` where a cloud session reads its get_session tags. Claude's own writes into the folder are refused,
+as far as the guards reach: the configuration rule and settings.json's Edit deny refuse a write under the config directory.
 
 Every read fails closed: a failure is None, never a role. pathlib only, so the same code runs on Windows; an os.replace that
 raises (a reader holds the file open there) leaves the old file or none, which no reader trusts.
