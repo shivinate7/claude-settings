@@ -4515,6 +4515,17 @@ test("answered-lines-age-out: the read items list is newest first by max(read, c
   assert.deepEqual(order, [`line-${NEWER.n}`, `line-${DISMISSED.n}`, `line-${OLDER.n}`], `the read items list is ${JSON.stringify(order)}, not newest by max(read, closed)`);
 });
 
+test("answered-lines-age-out: a reply earlier than the close does not pin an old line: it ages out to read", async (t) => {
+  // Replied 31 days before the load, so a day before the close: the reply is earlier than the close and does not keep the line.
+  const EARLY = agedLine("age-early-reply", 88, { replied: agoIso(31 * DAY_MS) });
+  const page = await open(t, { items: [AP_OPEN, EARLY], clock: AP_NOW }); if (!page) return;
+  await mustHave(page, "#tier-answered", "Answered section, which holds the aged line behind its fold");
+  assert.equal(await page.locator(`#tier-answered #line-${EARLY.n}`).count(), 0, `the line of No. ${EARLY.n}, replied before it closed, still draws in Answered`);
+  await mustHave(page, "#readItems", "Show read items fold, which holds the line of No. " + EARLY.n);
+  await page.click("#readItems");
+  await mustHave(page, `#readItemList #line-${EARLY.n}`, `line of No. ${EARLY.n} in the read items list`);
+});
+
 // ---------------------------------------------------------------- the ask stack: Add to list, one Send, one Undo for the batch
 
 // The reach line of the ask row that holds the text, or "" when no row holds it. Reads the page, never waits.
