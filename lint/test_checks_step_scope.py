@@ -38,6 +38,7 @@ from test_windows_split import NO_MD_SCOPE_CONDITION, eval_if  # noqa: E402  the
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 WORKFLOW = ".github/workflows/checks.yml"
 JOB = "checks"
+SPLIT_JOBS = ("checks", "checks-hooks", "checks-rest")  # the old checks job split into these three; the rest of CHECKS_SUITE_JOBS were never part of it
 SCOPE_CONDITION = "${{ %s }}" % NO_MD_SCOPE_CONDITION
 PR_ONLY_IF = "${{ github.event_name == 'pull_request' }}"
 STE_LINT = "STE lint"
@@ -403,6 +404,7 @@ ALLOWED = {
     "lint/test_check_claude_md_size.py": ([".claude/CLAUDE.md", "CLAUDE.md"], "written into a temp tree"),
     "lint/test_check_hook_stubs.py": (["README.md"], "committed into temp git repos"),
     "lint/test_check_record_slugs.py": (["debts/README.md", "debts/notes.md"], "folder files the check skips, named as constants"),
+    "lint/test_all_jobs_passed.py": (["README.md"], "a changed path handed to the scope detector as a fixture; the file is never read"),
     "lint/test_ci_job.py": (["AGENTS.md", "CLAUDE.md"], "written into temp roots"),
     "lint/test_ci_scope.py": ([
         "README.md", "reference/copies-and-accounts.md", "reference/repo-pages.md", "skills/ci-hygiene/SKILL.md",
@@ -466,9 +468,12 @@ def if_of(st):
 
 
 def checks_steps():
-    """The checks job's steps, or None when the workflow has no checks job."""
-    block = ws.job_block(read_repo(WORKFLOW), JOB)
-    return None if block is None else ws.step_blocks(block)
+    """The steps of the checks job and the two jobs it split into, or None when the workflow has no checks job."""
+    text = read_repo(WORKFLOW)
+    blocks = [ws.job_block(text, j) for j in SPLIT_JOBS]
+    if blocks[0] is None:
+        return None
+    return [st for b in blocks if b is not None for st in ws.step_blocks(b)]
 
 
 def runs_on_pull_request_with(st, code):
