@@ -70,7 +70,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    A lane run of `merge --lane-lint` goes through `verdict` in the background with a Bash `timeout` above the merge tool's bound
    (`LINT_SECONDS` plus `PUSHED_HEAD_WAIT_MINUTES` times 60, in ms); a shorter limit ends it with no verdict (guard rule `check-timeout`).
    A lane's `merge --lane-lint <pr> --touched-tests` runs each test file the diff touches, once, in the lint worktree, after the lint passes. That catches a test that fails only on that head before the CI run. A ref target posts no comment, so it cannot
-   satisfy the join. A FAIL keeps it a draft. The lint counts a clash between two heads only when both
+   satisfy the join. The integration PR's lint runs the mutation test when the batch touches a mutation test file. A FAIL keeps it a draft. The lint counts a clash between two heads only when both
    merge clean with their base (decision `lanes-run-no-full-ci-job`). A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
@@ -276,11 +276,12 @@ The seven opt-in templates of that decision:
   is the last job. It sets `needs:` on every other job,
   `if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}`,
   `permissions: {pull-requests: write}`, and `with: needs: ${{ toJSON(needs) }}`.
-- `ci-alarm`: opens or comments on one issue when the latest completed run per workflow and per
-  event group on a branch (default `main`) is red. Groups: `actions/ci-alarm/events.json`. Runs of
+- `ci-alarm`: opens or comments on one issue when the newest run per workflow and per
+  event group on a branch (default `main`) is red. It also wakes the merged pull request of any run in the
+  last 100 that holds a job cancelled at its time cap, and opens no issue for it. Groups: `actions/ci-alarm/events.json`. Runs of
   other events, such as a Pages build, a `workflow_run` or a `repository_dispatch`, and runs of a
   deleted workflow, are not judged. A failed `gh` read prints `unknown` with a warning, never a red
-  job. The caller is a scheduled workflow with `permissions: {actions: read, issues: write}`. It
+  job. The caller is a scheduled workflow with `permissions: {actions: read, contents: read, issues: write, pull-requests: write}`. It
   needs no checkout. Not enabled in this repo.
 - `readme-links`: checks the external https links in a markdown file (default `README.md`). Run it
   from a weekly schedule, never per PR. `open-issue: true` opens or updates one issue.

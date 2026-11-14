@@ -1,0 +1,18 @@
+name: Quick checks
+description: >
+  The starter CI's three checks for a repo that has no CI of its own: each relative link in a markdown file resolves, each
+  Python and shell script parses, each JSON file parses. Stdlib python3 and bash; fetches no URL. A failing file is named in
+  the step output, and the step fails after it has run all three. The caller needs actions/checkout.
+runs:
+  using: composite
+  steps:
+    - name: Check links, scripts and JSON
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        rc=0
+        for mode in links scripts json; do
+          python3 "$ACTION_PATH/quick_checks.py" "$mode" || rc=1
+        done
+        exit "$rc"

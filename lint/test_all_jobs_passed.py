@@ -264,6 +264,7 @@ NEEDED_JOB = "      - test-mac # the mac job\n"
 CHILD_GOOD = """name: checks
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
 jobs:
   lint:
@@ -312,6 +313,11 @@ CHILD_MUTATIONS = [
     ("the if also runs on push", CHILD_IF, "    if: ${{ !github.event.pull_request.draft && always() }}\n"),
     ("the needs input is not toJSON(needs)", "needs: ${{ toJSON(needs) }}", "needs: ${{ toJSON(github.event) }}"),
     ("no all-jobs-passed job", "  all-jobs-passed:\n", "  all-jobs-gone:\n"),
+    # A red draft marked ready reruns nothing unless ready_for_review is a type: GitHub's default types omit it.
+    ("the pull_request types lack ready_for_review", "    types: [opened, synchronize, reopened, ready_for_review]\n",
+     "    types: [opened, synchronize, reopened]\n"),
+    ("pull_request has no types, so GitHub's default omits ready_for_review",
+     "    types: [opened, synchronize, reopened, ready_for_review]\n", ""),
 ]
 RULES_CLI = os.path.join(HERE, "all_jobs_passed_rules.py")  # the child CLI: `--workflow PATH`
 RUN_FOLDER = None  # set by setUpModule, so a `--workflow` run makes no folder of its own
@@ -413,6 +419,13 @@ class ChildWorkflow(unittest.TestCase):
             self.assertIn(problem, out, "the problem is not printed: " + problem)
         self.assertIn("test-mac", out, "the printed problem does not name test-mac: " + out)
 
+    def test_a_child_without_ready_for_review_exits_1_and_names_it(self):
+        text = CHILD_GOOD.replace("    types: [opened, synchronize, reopened, ready_for_review]\n", "    types: [opened, synchronize, reopened]\n", 1)
+        self.assertNotEqual(text, CHILD_GOOD, "the fixture's pull_request types line is not there to change")
+        code, out = child_check(text)
+        self.assertEqual(code, 1, "a child without ready_for_review: exit %d, want 1: %s" % (code, out))
+        self.assertIn("ready_for_review", out, "the output does not name ready_for_review: " + out)
+
 
 # The action step must carry neither continue-on-error nor its own if: either lets the required check pass while the
 # action is skipped or fails. Each false alarm is a valid child with one layout changed, and the rules must pass it.
@@ -430,6 +443,8 @@ CHILD_FALSE_ALARMS = [
      "    needs:\n    - lint\n    # - retired-job\n    - test-mac # the mac job\n"),
     ("a comment after steps:", "    steps:\n      - uses: shivinate7", "    steps: # note\n      - uses: shivinate7"),
     ("CRLF line endings", "\n", "\r\n"),
+    ("pull_request types as a block list", "    types: [opened, synchronize, reopened, ready_for_review]\n",
+     "    types:\n      - opened\n      - synchronize\n      - reopened\n      - ready_for_review\n"),
 ]
 
 
