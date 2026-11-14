@@ -975,6 +975,33 @@ class DoneNamesModelsTests(unittest.TestCase):
                 "> **Done** BUILT the guard, PR #5 " + done + "\n> **Next** Unstarted: none",
                 [self.BUILDER, self.REVIEWER_R2]), done)
 
+    def test_dm_false_alarm_design_reviewer_hyphen_name_passes(self):
+        # design-reviewer is another role: its name and model claim nothing about the reviewer spawn.
+        spawns = [self.BUILDER, self.REVIEWER_R2]
+        scope = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer sonnet)\n"
+                             "> **Next** Unstarted: none", spawns)
+        self.assertIsNone(scope, scope and scope["reason"])  # scope: the plain names match the spawns
+        done = "(builder sonnet, reviewer sonnet, design-reviewer opus)"
+        out = self.verdict("> **Done** BUILT the guard, PR #5 " + done + "\n> **Next** Unstarted: none", spawns)
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_false_alarm_design_reviewer_spaced_name_passes(self):
+        # Same as the hyphenated name: "design reviewer" is one role, not a reviewer.
+        spawns = [self.BUILDER, self.REVIEWER_R2]
+        scope = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer sonnet)\n"
+                             "> **Next** Unstarted: none", spawns)
+        self.assertIsNone(scope, scope and scope["reason"])  # scope: the plain names match the spawns
+        done = "(builder sonnet, reviewer sonnet, design reviewer opus)"
+        out = self.verdict("> **Done** BUILT the guard, PR #5 " + done + "\n> **Next** Unstarted: none", spawns)
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_red_plain_reviewer_opus_still_blocks(self):
+        # Guard for the two cases above: a plain "reviewer opus" still claims the reviewer spawn, which ran sonnet.
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer opus)\n"
+                           "> **Next** Unstarted: none", [self.BUILDER, self.REVIEWER_R2])
+        self.assertIsNotNone(out, "a plain reviewer opus claim on a sonnet reviewer passed")
+        self.assertIn("'reviewer opus' matches no reviewer spawn, which ran sonnet", out["reason"])
+
     def test_dm_false_alarm_no_agent_passes(self):
         self.assertIsNone(self.verdict("> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none", []))
 
