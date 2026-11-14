@@ -55,7 +55,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   record the answer goes to; a step is its bare step id, so the roadmap upkeep row can match it), `context` (plain text, line breaks kept).
   - The page derives the tier from these fields. Never write a tier.
     - `holds` (one plain sentence: what is stopped until the answer) puts the item in Blocking.
-    - `holdsLane` (boolean `true`) says a lane waits on the item. It does not move the tier. A merge or PR wait sets `holds` only. See `lane`. The field is in the page's `itemFields` list. Drop it with `lane` when no lane waits on the item any more (the withdrawn path and unpark).
+    - `holdsLane` (boolean `true`) says a lane waits on the item. It does not move the tier. A merge or PR wait sets `holds` only. See `lane`. The page lists it in `itemFields` so a write passes, and never draws it. Drop it with `lane` when no lane waits on the item any more (the withdrawn path and unpark).
     - `by` (an ISO deadline) puts an item with no `holds` in Upcoming.
     - An item with neither is in Whenever.
     - `stands: true` puts the item in the last section, Pick stands (see "Add an item").
@@ -167,9 +167,9 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   - `checked_with` is the session id of the triage, coordinator or owner's-computer session of that repo that said the owner has not ruled on it. It is required when `repo` is not this page's repo. It is never the session in the item's `owner` or, in a cloud session, the session that writes the item. To change `repo` or `checked_with`, send an `update` that carries both; a `str_replace` on either, or an `update` with `checked_with` and no `repo`, is refused. The writer refuses an item without it (guard rule `question-checked-with-repo`).
   - Before writing `reply`, `replied`, `lastAnswer`, `lane`, `waits` or `recommended`, the writer checks that the page is current with `stale_pages.py`, the same
     check as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the six. A page published before the `recommended` change reads only `pick`, so it shows no star for `recommended`: after the change merges, the writer republishes the page.
-  - The page draws only the top-level fields that its `itemFields` block lists (`page.html`). A write that names another
+  - The page draws the top-level fields that its `itemFields` block lists (`page.html`), except `holdsLane`, a machine flag that is listed and never drawn. A write that names another
     top-level field is refused (guard rule `item-field-rendered`), and a stored item that carries one shows a warning on its card.
-    To add a field, draw it on the page and add its name to that block. A key inside `options` or `steps` is not judged. `shown` is in the block; an option's `id` and `note` sit inside `options`, so they are not listed.
+    To add a field, draw it on the page and add its name to that block (`holdsLane` is the one named exception). A key inside `options` or `steps` is not judged. `shown` is in the block; an option's `id` and `note` sit inside `options`, so they are not listed.
     When the page is current, it saves `optionId` in an answer, and it draws an option's `note`. It lists `shown` in its item fields and draws nothing from it. An older page does none of these. Run `stale_pages.py` before you write `shown`, an option `note` or `optionId`.
     An update removes a stored field with `{"__delete__": true}`.
 - `groups/<slug>`: `title` and `why`. `why` is one sentence on how the items of the group connect.

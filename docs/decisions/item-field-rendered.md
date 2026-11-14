@@ -2,7 +2,7 @@
 
 ## The ruling
 
-A field on a waiting item is for the owner to read. A field the page does not draw is lost to him. The page lists the top-level item fields it draws in one block, `<script type="application/json" id="itemFields">[...]</script>` in `skills/waiting-page/page.html`. That block is the one home of the list. The page reads it, and so does the guard. Nothing else holds a copy.
+A field on a waiting item is for the owner to read. A field the page does not draw is lost to him. The page lists the top-level item fields it draws, plus one named machine flag, `holdsLane`, which the page does not draw, in one block, `<script type="application/json" id="itemFields">[...]</script>` in `skills/waiting-page/page.html`. That block is the one home of the list. The page reads it, and so does the guard. Nothing else holds a copy.
 
 - The page shows a visible warning on the card of an item that carries a top-level field outside the list. It names each field. It never blocks Send.
 - Guard rule `item-field-rendered` (`hooks/question_form.py`, `item_field_hit`, called by `item_hit`) refuses an `ArtifactData` write to `items` that names a top-level field outside the list.
@@ -15,9 +15,10 @@ A field on a waiting item is for the owner to read. A field the page does not dr
   - The reason names `itemFields`. It tells the session to draw the field and add it to the block, or leave it out.
   - It is built against a named incident, below. It landed 2026-10-30.
   - Cost: no new process. It runs inside the guard process that every `ArtifactData` call already starts. For a call to the waiting page it reads `page.html` once per write (about 2,200 lines; unmeasured: no test counts the reads). It writes no file unless it denies.
-  - Known limit: the guard sees that a field is listed, not that the page draws it well. A name added to the block with no drawing passes. Review catches it.
+  - Known limit: the guard sees that a field is listed, not that the page draws it well. A name added to the block with no drawing passes, except `holdsLane`, which is named here. Review catches any other.
   - Known limit: the guard reads the template `page.html`, not the live page. A page published before this change lacks the block, so the stale-page check (`stale_pages.py`) is the backstop.
   - Known limit: it cannot see a stored field. An item written before the rule keeps its fields, and the page warns on them.
+- `holdsLane` is a machine flag: a lane waits on the item. The page never draws it. It is listed so a write of it passes. Owner ruling `own-773-a-machine-flag-field` (owner, 19:21 CST Nov 13), option a: one list, no separate machine-flags list.
 - The fields `reply`, `lastAnswer` and `lane` are listed, and the page draws each on an open item (`docs/design/last-answer-notes.md`).
 
 Incident:
