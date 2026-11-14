@@ -287,6 +287,15 @@ def rr_below_remedy_case():
     return True, "the refusal prints a git command that names the commit below the tip, and each one is allowed"
 
 
+# 11. known-limit: a commit whose message comes from a place the guard cannot read (-F, -C, -c, -t, --fixup or
+# --squash) makes the whole push no-hit, so an untrailered test commit below it is allowed. This pins the current
+# behaviour, not a desired one. A fix that reads these forms turns these cases red, and then they are re-pointed.
+LIMIT_COMMIT_THEN_PUSH = VCS + " commit %s && " + VCS + " push"
+for limit_form in ("-F msg.txt", "-C HEAD", "-c HEAD", "-t msg.txt", "--fixup=HEAD", "--squash=HEAD"):
+    rr_allow("known-limit: a commit with %s, then a push, sends an untrailered test commit below it and is allowed"
+             % limit_form, LIMIT_COMMIT_THEN_PUSH % limit_form, RR_LIMIT)
+
+
 def rr_remedy_case():
     """The refusal of a test commit with no Red-run line prints only commit and push, and the amend it prints, run
     with a Red-run line and then a push, is allowed. Scope first: the push is refused under the rule. Why: a remedy
