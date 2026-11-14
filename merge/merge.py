@@ -23,10 +23,12 @@
                           then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
   merge <pr> --confirm --express   go on to the merge only for a prose-only diff (main's ci-scope.sh turns on nothing) whose body has a `Ruling: <id>`
                           line naming an entry in origin/roadmap's rulings; any other case refuses before a push.
-  merge <pr> --confirm --base-red-ok "<reason>"   lift the red-main refusal (decision no-merge-onto-red-main) and log the reason in the merge commit message. In the run that merges it also prints
-                          `merge: own run of #N ran K suites on HEAD9`: K counts the PR head's newest workflow run's jobs that are not `scope` and not skipped (suites_ran). K of 0 adds
+  merge <pr> --confirm --base-red-ok "<reason>"   lift the red-main refusal (decision no-merge-onto-red-main) and log the reason in the merge commit message.
+                          Whenever the base is not green, the preview and the run that merges (the claim step prints nothing) also print
+                          `merge: own run of #N ran K suites on HEAD9`: K counts the jobs of the newest run, on the head the merge call sends, of the workflow that holds `scope`,
+                          less `scope`, nightly-skip, all-jobs-passed, ci-done and the skipped jobs (suites_ran). The preview prints it before the line that names --base-red-ok. K of 0 adds
                           `: the run proves nothing, do not advise forcing this PR`; an unreadable run prints `merge: own run of #N unknown: WHY`. Print only: it never refuses.
-                          Cost: one workflow-runs read and one jobs read per lift; none without the lift.
+                          Cost: two reads (one workflow-runs read, one jobs read) per non-green preview and per confirm lift; none on a green base.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--grant "#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT"]
@@ -446,11 +448,12 @@ def refuse_closing_reason(*reasons):
 
 
 SUITE_GATE_JOB = "scope"  # the job that decides which suites run; it is never a suite (decision no-merge-onto-red-main)
+NOT_SUITE_JOBS = (SUITE_GATE_JOB, "nightly-skip", ROLLUP_JOB, "ci-done")  # checks.yml's jobs that run whatever the suites do: the gate, the nightly skip note, the rollup and the done signal
 
 def suites_ran(jobs):
-    """-> how many of a run's `jobs` (dicts with name and conclusion) are suites that ran: every job except the scope gate and the skipped ones. A failed job ran.
-    The one home of that count: the red-base lift line reads it, and the gate for a push run that skipped every suite calls it too."""
-    return sum(1 for j in jobs if j.get("conclusion") != "skipped" and j.get("name") != SUITE_GATE_JOB)
+    """-> how many of a run's `jobs` (dicts with name and conclusion) are suites that ran: every job except NOT_SUITE_JOBS and the skipped ones. A failed job ran.
+    The one home of that count: the own-run line reads it."""
+    return sum(1 for j in jobs if j.get("conclusion") != "skipped" and j.get("name") not in NOT_SUITE_JOBS)
 
 def record_lift(lifts, flag, reason):
     """Keep a reason flag that lifted a check in `lifts` ({flag: reason}), so the merge can carry it. `reason` is what the check returned: None when it passed with no lift.
@@ -2997,15 +3000,26 @@ def red_base(root, host, base, red_ok=""):
                "Wait for the re-run to finish, then run again. Or, " if rerun else "Re-run the cancelled run named above, then run again. Or, " if cancelled and RERUN_REMEDY in detail else "") + carries
     raise Liftable(f"{what}\nNo batch merges onto a red {base}. {way[0].upper() + way[1:]} {RED_CITE}")
 
-def own_run_line(host, n, head):
-    """-> the one line `--base-red-ok` prints about the PR's own run: how many suites the newest workflow run of the PR head ran. Information only: it never
+def own_run_line(root, host, base, n, head):
+    """-> the one line printed about the PR's own run when the base is not green: how many suites the newest run of the workflow that holds the scope job
+    (SUITE_GATE_JOB, on origin/<base>) ran on the PR head. Another workflow's newer run (it skips both its jobs) is not the suites' run. Information only: it never
     refuses and never raises, so an unreadable run reads `unknown: <why>` and the merge goes on. A run that ran no suite proves nothing, so the line says so.
-    Cost: one workflow-runs read of the head and one jobs read of its newest run, only when the lift was used."""
+    Cost: one workflow-runs read of the head and one jobs read of that run, only when the base is not green (the workflow files are read with git, no gh call)."""
     head9 = head[:9]
     try:
-        runs = [r for r in host.runs(head) if r.get("databaseId")]
+        names = []
+        for f in base_workflows(root, f"origin/{base}"):
+            c, text = git(root, "show", f"origin/{base}:{f}")
+            if c:
+                raise Stop(f"cannot read {f} on origin/{base}: {text}")
+            run_name, jobs = workflow_name(f.rsplit("/", 1)[-1], text)
+            if SUITE_GATE_JOB in jobs:
+                names.append(run_name)
+        if not names:
+            return f"merge: own run of #{n} unknown: no workflow on origin/{base} holds the {SUITE_GATE_JOB} job"
+        runs = [r for r in host.runs(head) if r.get("databaseId") and r.get("name") in names]
         if not runs:
-            return f"merge: own run of #{n} unknown: no workflow run on {head9}"
+            return f"merge: own run of #{n} unknown: no run of the {SUITE_GATE_JOB} workflow ({', '.join(names)}) on {head9}"
         newest = max(runs, key=lambda r: r["databaseId"])
         ran = suites_ran(host.pages(f"actions/runs/{newest['databaseId']}/jobs", "jobs"))
     except Exception as e:  # print only: whatever goes wrong here must not stop a merge that is past its claim push
@@ -3121,6 +3135,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     say(f"merge: PREVIEW for #{n} ({info['branch']} at {info['head'][:9]}). Nothing was pressed.",
         "  lock:   " + (holder_text(base, held, lock.now()) if held and held[1] > lock.now() else "free"),
         f"  head checks: {host.head_state(n)}",
+        *([] if verdict == "green" else [own_run_line(root, host, base, n, info["head"])]),  # before the line that advises --base-red-ok: the lane reads whether its own run proves anything first
         f"  {base} run: {verdict}" + (f": {detail}. --confirm refuses it unless --base-red-ok \"<reason>\" is given." if verdict != "green" else ""),
         "  base:   " + (current or f"holds {base}'s tip"),
         "  claim:  " + (f"already claimed ({resumed}); " + ((f"run `merge {n} --confirm` on the draft first: it runs the ready checks (" + ", ".join(m["readyChecks"]) + "), then refuses this head, so mark it ready by hand after they pass (route pr-ready-mcp-cloud in cloud)"
@@ -3447,8 +3462,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             if pushed:  # the first step of two: the pushed commit's own checks start now, and the merge call waits for the next confirm
                 say(f"merge: the claim is pushed to {branch} at {claim_sha[:9]}. Nothing was merged. Run --confirm again when the new head is green. {CLAIM_STEP_CITE}")
                 return 0
-            if RED_FLAG in lifts:  # once per merge: the claim step above returns before this, so only the run that merges prints. The head under the claims is the PR's own run
-                say(own_run_line(host, n, lane_head))
+            if RED_FLAG in lifts:  # once per merge: the claim step above returns before this, so only the run that merges prints. `sha` is the head the merge call sends
+                say(own_run_line(root, host, base, n, sha))
             try:  # the PR's own paths. --no-renames: a moved file names both paths. -z: git does not quote a non-ASCII name. Any failure of this read leaves the list unknown and never holds the merge
                 c, names = git(wt, "diff", "--name-only", "--no-renames", "-z", f"{base_ref}...{sha}")
             except (subprocess.TimeoutExpired, OSError):
