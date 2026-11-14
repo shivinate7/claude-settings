@@ -5,7 +5,8 @@ while a priority row's own pull request is ready, and the line says why when a l
 Run: python3 merge/test_priority_vs_merge_order.py
 
 WHAT IT PROVES. With FILE, the confirm reads each priority row with priority_row and priority_verdict. It refuses to merge PR N when N is
-not a row's own PR and some row's PR is ok (ready, clean, newest runs green), and it names that row's slug and PR. Otherwise it merges
+not a row's own PR and some row's PR is ok (ready, clean, newest runs green), and it names that row's slug and PR. An open pull request
+whose base is not main is never ok: its row reads flag and names the base, and it does not block a pull request that lands on main. Otherwise it merges
 and prints one line that says why: a row is flag, waiting or unknown. With no FILE it prints that nothing was checked. An empty or
 missing FILE is not clear, and its line says so. A row the reader cannot parse refuses too, and the refusal says it cannot be read. A
 refusal lands nothing: no merge, no claim on main, no lock held, no ref moved. A priority pull request costs at most two reads per run,
@@ -235,6 +236,9 @@ class PriorityBeforeMerge(tm.Env):
     def test_a_merged_priority_pr_does_not_block(self):
         self.lower_goes_with(pr_fields(HEAD_3302, state="MERGED"), [], "done", "merged")
 
+    def test_an_open_row_based_on_another_branch_is_flagged_and_does_not_block_a_main_pr(self):
+        self.lower_goes_with(pr_fields(HEAD_3302, base="feat-3337"), green(HEAD_3302), "flag", "feat-3337")
+
     def test_two_ok_rows_refuse_a_third_pr_and_name_both(self):
         self.host.prio[3302] = pr_fields(HEAD_3302)
         self.host.prio_runs[HEAD_3302] = green(HEAD_3302)
@@ -361,6 +365,13 @@ class PriorityBeforeMerge(tm.Env):
         self.refusal_names(out, err, MALFORMED_SLUG, "#3302")
         self.assert_cannot_be_read(out, err)
 
+    def test_a_malformed_pr_row_refusal_starts_its_sentence_with_the_row(self):
+        rc, out, err = self.confirm(LOWER, MALFORMED_ROW)
+        self.assert_reached_check(out, err)
+        self.assertIn("the priority row %s cannot be read: pr #3302 is not owner/repo#N." % MALFORMED_SLUG, out + err,
+                      "the refusal must start its sentence with the row, then say it cannot be read: " + out + err)
+        self.assert_cannot_be_read(out, err)
+
     # Controls: these pass on the old code too, and show that the fixture means what each case says.
 
     def test_control_the_standing_reader_reads_the_3302_row_ok(self):
@@ -388,6 +399,17 @@ class PriorityBeforeMerge(tm.Env):
         self.assertNotIn("ok", words(line), "unknown must never read as ok: " + line)
         self.assertIsNone(NOT_CLEAR.search(line), "the row's line reads as clear: " + line)
         self.assert_merged(rc, out, err)
+
+    def test_control_an_open_row_based_on_main_still_refuses_a_lower_pr(self):
+        """Green on the old code too: an open row whose base is main reads ok and refuses a lower pull request."""
+        self.host.prio[3302] = pr_fields(HEAD_3302, base="main")
+        self.host.prio_runs[HEAD_3302] = green(HEAD_3302)
+        refs0, claims0 = self.refs(), self.claims()
+        rc, out, err = self.confirm(LOWER, ROW_3302)
+        self.assert_reached_check(out, err)
+        self.assertIn("ok", words(self.line_with(out, err, SLUG, "#3302")), "want ok on the row's line: " + out + err)
+        self.refusal_names(out, err, SLUG, "#3302")
+        self.assert_refused_lands_nothing(rc, refs0, claims0)
 
     def script_ready_branch_row(self):
         """Branch feat-3302 is one open pull request, #3302, ready and green: the branch row names it."""

@@ -7,7 +7,7 @@ WHAT IT PROVES. The command prints one line per row, then a summary, and exits 0
 A row names its pull request by `pr: owner/repo#N` or by `branch: name`. A row that names neither is flagged with no read.
 A closed pull request that did not merge is flagged, never done. A draft, a dirty head and a red newest run are flagged. A
 pending run is waiting. A read that fails, a row on another repo and a merge state GitHub has not computed are unknown, never
-ok. Cost: a pr: row makes at most two reads (its pull request, and the runs on its head only when the verdict needs them). A
+ok. An open pull request whose base is not main is flagged, and the flag names the base. Cost: a pr: row makes at most two reads (its pull request, and the runs on its head only when the verdict needs them). A
 branch: row adds one shared read of the open pull requests per wake, read to its last page. A row with neither makes none.
 Malformed and non-priority lines are unknown; comment and blank lines are skipped. The mode writes nothing and takes no lock.
 
@@ -500,6 +500,13 @@ class PriorityRowsCli(unittest.TestCase):
         line = self.row_line(out, err, SLUG)
         self.assert_unknown(line)
         self.assertEqual(code, 1, "an unknown row exits 1: " + err)
+
+    def test_a_stacked_open_pr_reads_flag_naming_its_base_and_exits_one(self):
+        self.put_pr(3302, SHA_A, runs=green(SHA_A), base="feat-3337", mergeable=True, mergeable_state="clean")
+        code, out, err = self.wake(ROW_3302)
+        line = self.row_line(out, err, SLUG)
+        self.assert_flag(line, "feat-3337")
+        self.assertEqual(code, 1, "a flagged row exits 1: " + err)
 
     def test_a_behind_pr_is_flagged_behind_its_base(self):
         self.put_pr(3302, SHA_A, runs=green(SHA_A), mergeable=True, mergeable_state="behind")
