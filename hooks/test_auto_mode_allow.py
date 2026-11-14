@@ -207,13 +207,14 @@ def installer_forms():
     ps = open(os.path.join(REPO_ROOT, "install.ps1"), encoding="utf-8").read()
     repo = re.search(r'^REPO="([^"]+)"', sh, re.M).group(1)
     ref = re.search(r'^REF="\$\{CLAUDE_SETTINGS_REF:-([^}]+)\}"', sh, re.M).group(1)
-    hook = re.search(r"HOOK_CMD='i=\$\(cat\); (curl -\w+) '\"\$\{RAW\}\"'/install\.sh \| "
+    fetch = re.search(r'^REFRESH_FETCH="(curl -\w+)"', sh, re.M)
+    hook = re.search(r"HOOK_CMD='i=\$\(cat\); '\"\$\{REFRESH_FETCH\} \$\{RAW\}\"'/install\.sh \| "
                      r"(CS_HOOK_INPUT)=\"\$i\" (bash -s -- --cloud)'", sh)
     win = re.search(r"Run once from the clone:\s+(powershell -ExecutionPolicy Bypass -File \.\\install\.ps1)", ps)
     mac = re.search(r"Local \(from a clone\):\s+(bash install\.sh)\b", sh)
-    assert repo and ref and hook and win and mac, "installer forms moved: update the readers"
+    assert repo and ref and fetch and hook and win and mac, "installer forms moved: update the readers"
     url = "https://raw.githubusercontent.com/%s/%s/install.sh" % (repo, ref)
-    return {"repo": repo, "url": url, "curl": "`%s %s | %s=\"{}\" %s`" % (hook.group(1), url, hook.group(2), hook.group(3)),
+    return {"repo": repo, "url": url, "curl": "`%s %s | %s=\"{}\" %s`" % (fetch.group(1), url, hook.group(1), hook.group(2)),
             "cloud": "`%s --cloud`" % mac.group(1), "mac": "`%s`" % mac.group(1),
             "win": "`%s`" % win.group(1)}
 
