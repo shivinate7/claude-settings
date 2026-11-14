@@ -3024,7 +3024,8 @@ def own_run_line(root, host, base, n, head):
         ran = suites_ran(host.pages(f"actions/runs/{newest['databaseId']}/jobs", "jobs"))
     except Exception as e:  # print only: whatever goes wrong here must not stop a merge that is past its claim push
         return f"merge: own run of #{n} unknown: {type(e).__name__ + ': ' if not isinstance(e, Stop) else ''}{' '.join(str(e).split())} {RED_CITE}"
-    return f"merge: own run of #{n} ran {ran} suites on {head9}" + (": the run proves nothing, do not advise forcing this PR" if not ran else "") + f" {RED_CITE}"
+    warn = "" if ran else ": the run proves nothing, do not advise forcing this PR"
+    return f"merge: own run of #{n} ran {ran} suites on {head9}{warn} {RED_CITE}"
 
 def head_not_green(state):
     """-> why `state`, the one read of a head's own checks (Host.head_state), is not green; None when it is green. The read never waits:
