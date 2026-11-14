@@ -160,6 +160,96 @@ class Compaction(unittest.TestCase):
             need().recover(handoff(version=4), lambda ref: bad)
 
 
+class AgainstCommitted(unittest.TestCase):
+    """Triage holds the committed file. A message is judged against it, so a reset cannot overwrite live state."""
+
+    def newer(self, **over):
+        s = good_state()
+        s["version"] = 5
+        s["afterMerge"] = {"pr": 3323, "commit": "aaaaaaaaaaaa"}
+        s["queue"] = [s["queue"][1]]
+        s.update(over)
+        return s
+
+    def judge(self, new, old=None):
+        return need().message_problems(message_for(new), committed=json.dumps(old or good_state()))
+
+    def test_next_version_passes(self):
+        self.assertEqual(self.judge(self.newer()), [])
+
+    def test_reset_from_seed_refused(self):
+        seed = good_state()
+        seed.update(version=1, queue=[], holds=[], folds=[], gos=[])
+        self.assertTrue(self.judge(seed))
+
+    def test_skipped_version_refused(self):
+        self.assertTrue(self.judge(self.newer(version=7)))
+
+    def test_same_version_refused(self):
+        self.assertTrue(self.judge(self.newer(version=4)))
+
+    def test_merged_pr_must_leave_queue(self):
+        s = self.newer()
+        s["afterMerge"] = {"pr": 3314, "commit": "aaaaaaaaaaaa"}
+        self.assertTrue(self.judge(s))
+
+    def test_unreadable_committed_is_unknown(self):
+        with self.assertRaises(need().Unknown):
+            need().message_problems(message_for(good_state()), committed="not json")
+
+
+class Tightened(unittest.TestCase):
+    def test_placeholder_end_event_refused(self):
+        for word in ("TBD", "none", "n/a", "unknown", "?"):
+            s = good_state()
+            s["holds"][0]["endsOn"] = word
+            self.assertTrue(need().state_problems(s), word)
+
+    def test_after_merge_types(self):
+        s = good_state()
+        s["afterMerge"] = {"pr": "x", "commit": 5}
+        self.assertTrue(need().state_problems(s))
+
+    def test_archive_pending_items_are_strings(self):
+        s = good_state()
+        s["archivePass"]["pending"] = [1, None]
+        self.assertTrue(need().state_problems(s))
+
+    def test_copy_forms_refused(self):
+        for line in ("Queue: 3323, 3314", "**Queue:** #3323", "- Holds: #2881", "Queue (3): #3323",
+                     "Folds: g1 = 3314 3315"):
+            self.assertTrue(need().handoff_problems(handoff(extra=line + "\n")), line)
+
+    def test_pointer_must_name_the_record_branch(self):
+        text = handoff().replace("origin/roadmap:", "origin/main:")
+        self.assertTrue(need().handoff_problems(text))
+
+    def test_stale_names_the_way_back(self):
+        state = good_state()
+        committed = lambda ref: json.dumps(state)  # noqa: E731
+        with self.assertRaises(need().Stale) as cm:
+            need().recover(handoff(version=5), committed)
+        self.assertIn(state["afterMerge"]["commit"], str(cm.exception))
+
+
+class DutiesNamed(unittest.TestCase):
+    def read(self, *parts):
+        with open(os.path.join(SKILL, "..", "..", *parts), encoding="utf-8") as f:
+            return f.read()
+
+    def test_triage_bullet_names_the_message(self):
+        text = self.read("skills", "project-ops", "templates", "operating-model.md")
+        triage = text[text.index("- **Triage.**"):text.index("- **Batch runner.**")]
+        self.assertIn("RUNNER-STATE", triage)
+        self.assertIn("check_runner_state.py", triage)
+
+    def test_runner_duty_names_channel_fetch_and_answer(self):
+        text = self.read("skills", "project-ops", "templates", "operating-model.md")
+        runner = text[text.index("- **Batch runner.**"):text.index("- **Lane.**")]
+        for word in ("send_message", "git fetch origin roadmap", "answer", "check_runner_state.py handoff"):
+            self.assertIn(word, runner)
+
+
 class WiredIn(unittest.TestCase):
     def read(self, *parts):
         with open(os.path.join(SKILL, "..", "..", *parts), encoding="utf-8") as f:

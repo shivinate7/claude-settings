@@ -30,6 +30,9 @@ A spawner is a session that starts its own agents. Each session role is a set of
   the batch runner's hand-in or hold list names the pull) and `reviewLog` (true when the pull has a posted review log),
   JSON bools, omitted when false or unknown. Each item row carries
   `lane` when the page item has one, so it can list an item whose lane is gone.
+  Triage is also the reader of the runner's `RUNNER-STATE` message: it saves the body to a file, runs
+  `python3 skills/project-ops/scripts/check_runner_state.py message <file> <file of git show origin/roadmap:plans/runner-state.json>`,
+  commits the body whole as `plans/runner-state.json` and pushes it, and answers the runner with the commit. On a problem it commits nothing and sends the runner the printed lines (decision `runner-state-on-record`).
   The file also carries `landedPulls`: each pull request closed in the last 14 days whose base is the default
   branch, with `number`, `branch`, `head` and `merged`. The build marks a step landed from it when no `Step:` trailer is on main.
   At each publish, triage also disposes each `stalled step:` line the build prints (the build exits 1 on one): a
@@ -76,10 +79,11 @@ A spawner is a session that starts its own agents. Each session role is a set of
   `merge-confirm-repo`). It runs the confirm in the foreground (Bash timeout up to 600000), never with
   `run_in_background`: a background call misses the allow rule and the auto-mode classifier refuses it. It dispatches no deferred step. Each CI or merge alarm wakes it, and it fixes the alarm or brings it to the coordinator (ruling R53). A red job wakes it at once (ruling R50). It runs Sonnet 5.5 at medium effort (ruling R52).
   Its working state (merge queue order, folds and their members, gos, holds with their end events, archive pass) lives in one file on the record branch,
-  `plans/runner-state.json` (decision `runner-state-on-record`). The runner cannot push to that branch: triage is its one writer. After each merge the runner sends triage one message,
-  `RUNNER-STATE <owner/repo> v<N> after merge #<PR>` and then the whole file as JSON, with `version` one higher than the last. Triage runs
-  `check_runner_state.py message` on it, commits it whole, and answers with the commit. At start and after each compaction the runner reads `git show origin/roadmap:plans/runner-state.json` before any other act;
-  a committed version below its last sent one means it resends. Its handoff holds one pointer line and never the list.
+  `plans/runner-state.json` (decision `runner-state-on-record`). The runner cannot push to that branch: triage is its one writer. After each merge the runner sends triage one message with
+  `mcp__claude-code-remote__send_message`: `RUNNER-STATE <owner/repo> v<N> after merge #<PR>`, then the whole file as JSON, with `version` one higher than the last. It reads triage's answer (the commit)
+  before it starts the next merge; with no answer it sends again and tells the coordinator. At start and after each compaction it runs `git fetch origin roadmap`, then reads
+  `git show origin/roadmap:plans/runner-state.json` before any other act. A committed version below its last sent one means a merge is missing: it rebuilds that merge from main's log since the file's `afterMerge.commit`
+  and sends the next version. Its handoff holds one pointer line and never the list, and before it ends a handoff it runs `python3 skills/project-ops/scripts/check_runner_state.py handoff <file>`.
 - **Lane.** Runs one line of work, with its own builder and reviewer agents.
   It opens its draft PR early, runs `merge --lane-lint <pr>` (with `--touched-tests` when it touches tests),
   posts the review record, then hands in to the batch runner (decision `session-tiers`). It ends with the

@@ -2,7 +2,8 @@
 """Checks the batch runner's state file, the message that carries it, and the handoff that points to it.
 
     python3 check_runner_state.py state <file>      # plans/runner-state.json, or a seed
-    python3 check_runner_state.py message <file>    # the text a runner sends triage after a merge
+    python3 check_runner_state.py message <file> [<committed file>]   # the text a runner sends triage; triage
+                                                    # passes `git show origin/roadmap:plans/runner-state.json`
     python3 check_runner_state.py handoff <file>    # a runner handoff: points to the file, copies no list
     python3 check_runner_state.py recover <handoff file> <state file>   # the state file is `git show <ref>` saved to a file
 
@@ -20,9 +21,12 @@ HOME = "origin/roadmap:plans/runner-state.json"
 FIELDS = ("schema", "repo", "version", "writtenAt", "runner", "afterMerge", "queue", "folds", "gos", "holds",
           "archivePass")
 HEADER = re.compile(r"^RUNNER-STATE (\S+/\S+) v(\d+) after merge #(\d+)[ \t]*$")
-POINTER = re.compile(r"^Runner state: (\S+?:plans/runner-state\.json), last sent version (\d+)\.?[ \t]*$", re.M)
-# A list label that carries PR numbers is a copy of the state.
-COPY = re.compile(r"^(?:Queue|Folds?|Gos?|Holds?|Archive pass)[ \t]*:.*#\d+", re.I | re.M)
+POINTER = re.compile(r"^Runner state: ((?:origin/)?roadmap:plans/runner-state\.json), last sent version (\d+)\.?[ \t]*$",
+                     re.M)
+# A line that opens with a list label (after a bullet, bold or quote mark) and then carries a PR number is a
+# copy of the state, with or without `#`, with a count in the label or not.
+COPY = re.compile(r"^[ \t>*_`-]*(?:Queue|Folds?|Gos?|Holds?|Archive pass)\b[^\n]*?\d{3,}", re.I | re.M)
+PLACEHOLDER = {"tbd", "none", "n/a", "na", "unknown", "?", "todo", "-"}
 
 
 class Unknown(Exception):
@@ -64,8 +68,9 @@ def state_problems(s):
     if not (isinstance(s["runner"], str) and s["runner"]):
         out.append("`runner` must name the runner session.")
     am = s["afterMerge"]
-    if not (isinstance(am, dict) and ("pr" in am) and ("commit" in am)):
-        out.append("`afterMerge` needs `pr` and `commit` (null before the first merge).")
+    if not (isinstance(am, dict) and (am.get("pr") is None or _int(am.get("pr")))
+            and (am.get("commit") is None or isinstance(am.get("commit"), str)) and "pr" in am and "commit" in am):
+        out.append("`afterMerge` needs `pr` (integer) and `commit` (string), both null before the first merge.")
     folds = s["folds"] if isinstance(s["folds"], list) else None
     queue = s["queue"] if isinstance(s["queue"], list) else None
     gos = s["gos"] if isinstance(s["gos"], list) else None
@@ -98,11 +103,12 @@ def state_problems(s):
             out.append(f"A go needs `pr`, `by` and a zoned `at`: {g!r}.")
     for h in holds or []:
         if not (isinstance(h, dict) and _int(h.get("pr")) and isinstance(h.get("reason"), str) and h["reason"]
-                and isinstance(h.get("endsOn"), str) and h["endsOn"].strip()):
+                and isinstance(h.get("endsOn"), str) and h["endsOn"].strip()
+                and h["endsOn"].strip().lower() not in PLACEHOLDER):
             out.append(f"A hold needs `pr`, `reason` and a named end event `endsOn`: {h!r}.")
     ap = s["archivePass"]
     if not (isinstance(ap, dict) and (ap.get("lastRunAt") is None or _zoned(ap.get("lastRunAt")))
-            and isinstance(ap.get("pending"), list)):
+            and isinstance(ap.get("pending"), list) and all(isinstance(x, str) for x in ap["pending"])):
         out.append("`archivePass` needs `lastRunAt` (zoned time or null) and a `pending` list.")
     return out
 
@@ -112,8 +118,13 @@ def _split(text):
     return head, body
 
 
-def message_problems(text):
-    """-> the problems of a runner-to-triage message: a header line, then the whole file as JSON."""
+def message_problems(text, committed=None):
+    """-> the problems of a runner-to-triage message: a header line, then the whole file as JSON.
+
+    committed is the text of the file now on the record branch, which triage reads with `git show`. With it, the
+    message must be the next version and its merged PR must have left the queue, so a runner that lost its state
+    and starts from the seed cannot overwrite the live file. Raises Unknown when committed is not a valid state.
+    """
     head, body = _split(text)
     m = HEADER.match(head)
     if not m:
@@ -131,6 +142,18 @@ def message_problems(text):
         out.append(f"Header version v{m.group(2)} differs from the file's {s['version']}.")
     if s["afterMerge"]["pr"] != int(m.group(3)):
         out.append(f"Header PR #{m.group(3)} differs from the file's afterMerge PR {s['afterMerge']['pr']}.")
+    if any(q["pr"] == s["afterMerge"]["pr"] for q in s["queue"]):
+        out.append(f"PR {s['afterMerge']['pr']} merged but is still in the queue.")
+    if committed is not None:
+        try:
+            old = json.loads(committed)
+        except ValueError as e:
+            raise Unknown(f"the committed file is not JSON: {e}")
+        if state_problems(old):
+            raise Unknown(f"the committed file is not a valid state: {state_problems(old)[0]}")
+        if s["version"] != old["version"] + 1:
+            out.append(f"Version v{s['version']} is not the next after the committed v{old['version']}: "
+                       "the runner read an old file, or skipped one. Do not commit; tell the runner to re-read.")
     return out
 
 
@@ -166,7 +189,9 @@ def recover(handoff_text, read_ref):
     if bad:
         raise Unknown(f"{ref} is not a valid state: {bad[0]}")
     if s["version"] < sent:
-        raise Stale(f"committed v{s['version']} is older than the last sent v{sent}: resend the state to triage")
+        raise Stale(f"committed v{s['version']} is older than the last sent v{sent}: the merge after commit "
+                    f"{s['afterMerge']['commit']} is not in the file. Read main's merges since that commit, apply them "
+                    f"to the file, send v{s['version'] + 1}, and read triage's answer before the next merge")
     return s
 
 
@@ -201,8 +226,22 @@ def main(argv):
             problems = state_problems(json.loads(text))
         except ValueError as e:
             problems = [f"Not JSON: {e}."]
+    elif argv[1] == "message":
+        committed = None
+        if len(argv) > 3:
+            try:
+                with open(argv[3], encoding="utf-8") as f:
+                    committed = f.read()
+            except OSError as e:
+                print(f"unknown: cannot read {argv[3]}: {e}")
+                return 2
+        try:
+            problems = message_problems(text, committed)
+        except Unknown as e:
+            print(f"unknown: {e}")
+            return 2
     else:
-        problems = (message_problems if argv[1] == "message" else handoff_problems)(text)
+        problems = handoff_problems(text)
     for p in problems:
         print(p)
     return 1 if problems else 0
