@@ -75,7 +75,7 @@ The entry now quotes the `--head <sha>` form: `~/.claude/bin/merge <pr> --confir
 
 ### Merge Review Record
 
-Owner, 2026-11-14 14:59 CST, page item 839, pick a: allow a lane session to print the review record. Incident: auto mode refused the call as "Undermining Oversight" at least 7 times in lane sessions (PRs 3226, 3411 and 3407). The grant text said main has no entry for it. That was wrong for the bare form: main's "Merge Tool Read Checks" already allows `merge <pr> --review-record`. The new entry is for lane sessions only, tagged `cs-build:lane`, and names the record flags the printed text takes. The cause of the denial is unmeasured. Only a live classifier proves the entry works. The next lane record post after this merges tells.
+Owner, 2026-11-14 14:59 CST, page item 839, pick a: allow a lane session to print the review record. Incident: auto mode refused the call as "Undermining Oversight" at least 7 times in lane sessions (PRs 3226, 3411 and 3407). The lane then posts the printed text itself as a pull request comment (decision `pr-review-record`). The grant text said main has no entry for it. That was wrong for the bare form: main's "Merge Tool Read Checks" already allows `merge <pr> --review-record`. The new entry is for lane sessions only, tagged `cs-build:lane`, and names the record flags the printed text takes. The cause of the denial is unmeasured. Only a live classifier proves the entry works. The next lane record post after this merges tells.
 
 ### Relayed Merge Yes
 
