@@ -6,8 +6,10 @@ extra kind may not replace a layout kind. The mark that the repo has rolled out 
 its own key in that file, "rolled-out": true (ROLLED_OUT; decision one-layout-every-repo). An
 extras file with no mark does not roll a repo out. Its keys that are not about folder placement
 ("waiting-page", "waiting-page-colour", "waiting-page-icon", "page-writer", "kind", "caution", "visibility",
-"devices", "shared-resources", "roadmap", "record-branch", "artifacts") read whenever the file exists (`has_extras()`). The
+"devices", "shared-resources", "roadmap", "record-branch", "artifacts", "typecheck") read whenever the file exists (`has_extras()`). The
 "artifacts" key is the registry of the claude.ai artifacts the repo holds (`artifacts()`, decision waiting-data-in-repo).
+The "typecheck" key lists the checks that the PostToolUse watch runs after an edit (`typecheck()`, `match_globs()`,
+hooks/repo_typecheck.py).
 The "waiting-page" key holds the URL of the repo's waiting page (`waiting_page()`, skill waiting-page), the fallback after
 the registry entry whose role is "waiting-page";
 "waiting-page-colour" (#rrggbb) and "waiting-page-icon" (an .svg or .png path in the repo) are its
@@ -682,6 +684,131 @@ def mockup_home_problem(root, file, home=None):
 def folders(root, flag):
     """The paths in `root` of each kind whose `flag` (record, listed) is true, in layout order."""
     return tuple(path(root, name) for name, kind in kinds(root).items() if kind.get(flag))
+
+
+TYPECHECK = "typecheck"  # the extras key: a list of {globs, command, timeout}, the checks to run after an edit
+
+
+def typecheck(root, problems=None):
+    """The "typecheck" entries of the repo at `root`: [{globs, command, timeout}] in file order, [] when the repo
+    has no extras file or no key. `globs` are repo-relative patterns for `match_globs`; `command` is an argv run
+    from the repo root with no shell; `timeout` is a positive number of seconds. LayoutError on any other shape.
+    Given a `problems` list, a bad entry is skipped and its reason appended there instead: one bad entry costs
+    only itself, and the hook still runs the good ones."""
+    found = _repo_keys(root).get(TYPECHECK)
+    if found is None:
+        return []
+    where = "%s in %s" % (TYPECHECK, os.path.relpath(_extras(root), root).replace("\\", "/"))
+    if not isinstance(found, list):
+        problem = "%s is not a list" % where
+        if problems is None:
+            raise LayoutError(problem)
+        problems.append(problem)
+        return []
+    entries = []
+    for number, item in enumerate(found, 1):
+        try:
+            entries.append(_typecheck_entry(item, "%s, entry %d" % (where, number)))
+        except LayoutError as err:
+            if problems is None:
+                raise
+            problems.append(str(err))
+    return entries
+
+
+def _typecheck_entry(item, where):
+    """One "typecheck" entry as {globs, command, timeout}, or LayoutError naming `where`."""
+    if not isinstance(item, dict):
+        raise LayoutError("%s: the entry is not an object" % where)
+    globs, command, timeout = item.get("globs"), item.get("command"), item.get("timeout")
+    if not isinstance(globs, list) or not globs or not all(isinstance(g, str) and g for g in globs):
+        raise LayoutError("%s: \"globs\" is not a non-empty list of strings" % where)
+    for glob in globs:
+        for one in _expand_braces(glob):
+            _safe(one, where)  # each form a brace set stands for, so "{..,x}/a" is refused too
+        try:
+            _glob_regex(glob)  # a class such as [z-a] would otherwise fail later, inside the matching loop
+        except re.error:
+            raise LayoutError("%s: glob %r is not a readable pattern" % (where, glob))
+    if not isinstance(command, list) or not command or not all(isinstance(c, str) and c for c in command):
+        raise LayoutError("%s: \"command\" is not a non-empty list of strings" % where)
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
+        raise LayoutError("%s: \"timeout\" is not a positive number" % where)
+    return {"globs": list(globs), "command": list(command), "timeout": timeout}
+
+
+def _expand_braces(glob):
+    """Each glob that `glob`'s brace sets stand for: "a.{ts,tsx}" is "a.ts" and "a.tsx". A brace with no close is
+    a plain character. Sets do not nest."""
+    opening = glob.find("{")
+    closing = glob.find("}", opening + 1) if opening >= 0 else -1
+    if closing < 0:
+        return [glob]
+    head, rests = glob[:opening], _expand_braces(glob[closing + 1:])
+    return [head + choice + rest for choice in glob[opening + 1:closing].split(",") for rest in rests]
+
+
+def _class_regex(part, start):
+    """The regex of the `[...]` class that opens at `part[start]` and the index after it, or (None, start) when it
+    never closes. A first `!` or `^` negates it; a `]` right after that is a plain character."""
+    body = start + 1
+    negate = body < len(part) and part[body] in "!^"
+    if negate:
+        body += 1
+    close = part.find("]", body + 1)
+    if close < 0:
+        return None, start
+    chars = "".join(c if c == "-" else re.escape(c) for c in part[body:close])
+    return "[%s%s]" % ("^/" if negate else "", chars), close + 1  # a negated class still never crosses a folder
+
+
+def _part_regex(part):
+    """The regex for one folder name of a glob: `*` and `?` stay inside it, and `[...]` is a class."""
+    out, i = [], 0
+    while i < len(part):
+        if part[i] == "[":
+            found, after = _class_regex(part, i)
+            if found is not None:
+                out.append(found)
+                i = after
+                continue
+        out.append("[^/]*" if part[i] == "*" else "[^/]" if part[i] == "?" else re.escape(part[i]))
+        i += 1
+    return "".join(out)
+
+
+def _strip_dot_slash(path):
+    """`path` without its leading `./` folders, which name the same path."""
+    while path.startswith("./"):
+        path = path[2:]
+    return path
+
+
+def _glob_regex(glob):
+    """The regex for one glob: each brace form is an alternative, a leading `./` names the same path, `*`, `?` and
+    `[...]` stay inside a folder name, and a `**` folder holds zero or more folders."""
+    forms = []
+    for one in _expand_braces(glob.replace("\\", "/")):
+        parts = _strip_dot_slash(one).split("/")
+        last = len(parts) - 1
+        out = []
+        for i, part in enumerate(parts):
+            if part == "**":
+                out.append(".*" if i == last else "(?:[^/]+/)*")
+                continue
+            out.append(_part_regex(part))
+            if i != last:
+                out.append("/")
+        forms.append("".join(out))
+    return re.compile("(?:%s)\\Z" % "|".join(forms))
+
+
+def match_globs(rel_path, globs):
+    """True when the repo-relative `rel_path` matches any of `globs`. `**` matches zero or more folders, which
+    neither fnmatch nor PurePath.match does. Brace sets and `[...]` classes are read, a leading `./` names the
+    same path, and backslashes read as slashes."""
+    path = _strip_dot_slash(rel_path.replace("\\", "/"))
+    return any(_glob_regex(glob).match(path) for glob in globs)
 
 
 if __name__ == "__main__":
