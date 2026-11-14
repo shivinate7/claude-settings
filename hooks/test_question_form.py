@@ -67,6 +67,7 @@ import re
 import inspect
 import shutil
 import sys
+import time
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -2021,8 +2022,12 @@ def case_failed_fetch_note_once_and_no_searched_source_unknown():
     check("failed fetch steps ok: no unknown source carries the note, since the steps were searched",
           FETCH_NOTE not in unknown, unknown[:300])
     # Control: a fetch record that names the ref's tip and is fresh says nothing, so the note above is the failed fetch's.
-    fixture.set_fetch_head(repo)
-    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+    # The record and the clock are both pinned, so the control reads no real clock.
+    import roadmap_ref  # lint/roadmap_ref.py, imported by lint/test_ruled_store.py
+    pinned = 1800000000.0
+    fixture.set_fetch_head(repo, when=pinned)
+    clock = mock.Mock(wraps=time, time=mock.Mock(return_value=pinned + 1))
+    with mock.patch(POINTER_CHECKOUT, return_value=repo), mock.patch.object(roadmap_ref, "time", clock):
         fresh = fn(tcj.APPS_GOAL, repo)
     check("failed fetch steps ok: control, a fresh roadmap fetch adds no note", FETCH_NOTE not in str(fresh),
           str(fresh)[:300])
