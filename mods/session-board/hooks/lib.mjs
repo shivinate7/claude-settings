@@ -395,13 +395,14 @@ export const answered = r => !!r && typeof r === 'object' && 'result' in r && !r
 // The count a start record (store key started:<id>, { n, at }) holds, 0 when it holds none.
 export const startedCount = raw => (raw && typeof raw === 'object' ? num(raw.n, 0, 999) ?? 0 : 0)
 
-// The refusal text, or null when nothing runs and no session was started. A started session may
-// wait on this one for as long as this one lives.
+// The refusal text, or null when nothing runs and no session was started. A started session may be a
+// coordinator with no parent, so the text claims no @parent route: it points to the waiting page's writer. A lane
+// (a session with a parent) is refused by hooks/call_judge.py, which routes to @parent.
 export function questionRefusal(agents, tasks, started = 0) {
   if (!agents && !tasks && !started) return null
   const why = []
   if (agents || tasks) why.push([agents ? plural(agents, 'agent') : '', tasks ? plural(tasks, 'background task') : ''].filter(Boolean).join(' and ') + ' of this session still run')
-  if (started) why.push(`this session started ${plural(started, 'session')}, which may wait on it`)
+  if (started) why.push(`this session started ${plural(started, 'session')}`)
   return `Question box refused: ${why.join(', and ')}. A box stops the session until the owner answers. Ask in your reply instead, and send the question to the waiting page's writer in the same turn. Then keep working on what does not depend on the answer (rule questions-go-to-owner).`
 }
 
