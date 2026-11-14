@@ -695,6 +695,7 @@ def reap_worktrees(target: str, deadline: float, payload=None):
     return rows
 
 
+DISPLAY_ENV_NAMES = ("DISPLAY", "WAYLAND_DISPLAY")  # a process with one may own a visible window (Linux)
 AGENT_END_SETTLE_SECONDS = 3  # how long the stop waits for a signalled process to leave
 
 
@@ -708,11 +709,18 @@ def marked_processes(agent: str):
     return [pid for pid in pids if pid > 1 and pid not in own and sweep.agent_mark(pid) == agent]
 
 
+def has_display(pid: int) -> bool:
+    """True when `pid`'s exec-time environment names a display (DISPLAY or WAYLAND_DISPLAY), so it may hold a window.
+    Read from the same environment as the marker. Linux has no window list to read here: a pid whose environment
+    cannot be read is the same pid the marker read fails on, and it is not a candidate."""
+    return any(sweep.proc_env.entry_value(pid, name) for name in DISPLAY_ENV_NAMES) if sweep.proc_env else False
+
+
 def end_agent_processes(payload: dict):
     """The ending agent's process record (step agent-owned-processes). Writes the processes that hold the agent's
     marker to its `agent_procs` record, and ends only those `agent_procs.plan_ends` clears: the marker is the agent's,
     the account running the hook owns the pid, its start ticks match the record (or no record held it), and no other
-    agent's record lists it. A pid whose start differs, or whose start cannot be read (macOS, Windows), is recorded
+    agent's record lists it, and no display is in its environment (a headed process is reported, never ended). A pid whose start differs, or whose start cannot be read (macOS, Windows), is recorded
     as kind "unclear" and kept. Windows adds the Office diff. Returns {"ended", "reported"} pid lists for the
     payload log, or None when the payload names no agent."""
     agent = payload.get("agent_id")
@@ -732,7 +740,7 @@ def end_agent_processes(payload: dict):
         owner = agent if sweep.is_current_user_process(pid) is True else None
         entries[pid] = {"pid": pid, "start": current if start_ok or prior is None else prior.get("start"),
                         "owner": agent, "kind": kind}
-        candidates.append({"pid": pid, "owner": owner, "kind": kind, "visible": False, "start_ok": start_ok,
+        candidates.append({"pid": pid, "owner": owner, "kind": kind, "visible": has_display(pid), "start_ok": start_ok,
                            "shared": bool(agent_procs.held_by_others(pid, agent))})
     for candidate in agent_procs.office_candidates(agent):
         entries[candidate["pid"]] = {"pid": candidate["pid"], "start": None, "owner": agent, "kind": "office"}

@@ -20,8 +20,10 @@ two agents both hold are reported in the record, never ended (`plan_ends`).
 Office. COM-started Office has the DcomLaunch service as parent, so no parent check finds it. The adapter lists the
 three Office images at SubagentStart (`mark_office_start`) and again at SubagentStop, and the new pids are the agent's
 (`office_started`). It exits at once off Windows, and when no Office process runs, and it records nothing when the
-start list could not be read, so an unread list never makes the user's own Excel the agent's. Another agent still
-open (its record holds `office_before`) at the stop makes every new Office pid shared, so none ends. The Windows
+start list could not be read, so an unread list never makes the user's own Excel the agent's. A new Office pid that
+another agent also saw start is shared, so none ends it, in either stop order (`office_also_seen`): the other agent is
+open and its start list lacks the pid, or it stopped and its record holds the pid as kind "office". A pid only this agent
+saw ends at its stop, even when a later agent's start list holds it. The Windows
 window read (`visible_office_pids`) is unmeasured: a failed read counts every pid as visible.
 
 Cost (rule outcomes-mechanize-rules): zero process starts and zero files written per tool call. This module is not
@@ -148,17 +150,27 @@ def all_records():
     return found
 
 
+def lists_pid(entry, pid, current) -> bool:
+    """True when the record ENTRY puts `pid` in its owner's hands. It does not when the owner ended the process, or
+    when both starts are ticks and differ (a reused pid). A start that cannot be compared (None, a lease's start text,
+    or a current start that cannot be read) cannot prove a reuse, so the entry still names its owner."""
+    if entry.get("pid") != pid or entry.get("ended") is True:
+        return False
+    start = entry.get("start")
+    if isinstance(start, int) and not isinstance(start, bool) and current is not None and start != current:
+        return False
+    return True
+
+
 def recorded_owners(pid):
-    """The agents whose record lists `pid` with the start it has now. Empty when its start cannot be read."""
+    """The agents whose record lists `pid` (`lists_pid`), by the start it has now."""
     current = start_ticks(pid)
-    if current is None:
-        return []
     return [agent for agent, record in all_records().items()
-            if any(e.get("pid") == pid and e.get("start") == current for e in record["procs"])]
+            if any(lists_pid(e, pid, current) for e in record["procs"])]
 
 
 def held_by_others(pid, agent):
-    """The agents other than AGENT whose record lists `pid` with the start it has now."""
+    """The agents other than AGENT whose record lists `pid` (`lists_pid`)."""
     return [other for other in recorded_owners(pid) if other != agent]
 
 
@@ -255,10 +267,24 @@ def visible_office_pids():
         return None
 
 
+def office_also_seen(pid, agent, others) -> bool:
+    """True when an agent other than AGENT also saw Office pid `pid` start in its own run: an open agent whose start
+    list lacks it (the pid was new to it too), or an agent that stopped and recorded it as a kind "office" entry. An
+    open agent whose start list holds the pid started after it, so it never saw the pid as new."""
+    for other in others.values():
+        before = other.get("office_before")
+        if isinstance(before, dict) and str(pid) not in before:
+            return True
+        if any(e.get("pid") == pid and e.get("kind") == "office" for e in other["procs"]):
+            return True
+    return False
+
+
 def office_candidates(agent, platform=None, lister=None, visible=None):
     """SubagentStop: the Office pids this agent's diff names, as candidates for `plan_ends`. [] when the adapter does
-    not apply. The caller drops `office_before` from the record afterwards, so a later agent's stop no longer waits
-    on this one."""
+    not apply. A pid is shared (never ended) when another agent also saw it start (`office_also_seen`), whichever
+    agent stops first: the stopping agent's record keeps its kind "office" entries, so a later stop still finds them.
+    The caller drops `office_before` from the record afterwards, which marks this agent as stopped."""
     platform = sys.platform if platform is None else platform
     if not str(platform).startswith("win"):
         return []
@@ -271,8 +297,8 @@ def office_candidates(agent, platform=None, lister=None, visible=None):
     except Exception:
         return []
     started = office_started({int(pid): image for pid, image in before.items() if str(pid).isdigit()}, after)
-    others_open = any(isinstance(other.get("office_before"), dict)
-                      for name, other in all_records().items() if name != agent)
+    others = {name: other for name, other in all_records().items() if name != agent}
     seen = (visible or visible_office_pids)()
-    return [{"pid": pid, "owner": agent, "kind": "office", "start_ok": True, "shared": others_open,
+    return [{"pid": pid, "owner": agent, "kind": "office", "start_ok": True,
+             "shared": office_also_seen(pid, agent, others),
              "visible": seen is None or pid in seen} for pid in started]

@@ -329,10 +329,38 @@ def in_own_agent_worktree(pid: int, transcript: str) -> bool:
     return bool(found) and os.path.isfile(own_session.agent_transcript_path(transcript, found.group(1)))
 
 
-def _kill_pids(tokens):
+WINDOWS_PID_FLAGS = {"taskkill": ("/pid", "-pid"), "stop-process": ("-id",)}
+
+
+def _windows_kill_pids(tool, rest):
+    """The numeric pids `taskkill /PID <n>` or `Stop-Process -Id <n>[,<n>]` names, as text. `Stop-Process`
+    also takes the pid as its first positional argument."""
+    flags = WINDOWS_PID_FLAGS[tool]
+    take_next = False
+    for position, arg in enumerate(rest):
+        value = None
+        if take_next:
+            value, take_next = arg, False
+        elif arg.lower() in flags:
+            take_next = True
+        elif ":" in arg and arg.lower().split(":", 1)[0] in flags:
+            value = arg.split(":", 1)[1]
+        elif tool == "stop-process" and position == 0 and not arg.startswith("-"):
+            value = arg
+        for part in (value or "").split(","):
+            if KILL_PID_RE.match(part):
+                yield part
+
+
+def _kill_pids(tokens, windows=False):
     """The numeric pid arguments of a `kill` segment, as text, in order. Nothing for any other
-    command, or for `kill -l`. Signal flags and their values are skipped."""
+    command, or for `kill -l`. Signal flags and their values are skipped. With WINDOWS, a `taskkill /PID` or
+    `Stop-Process -Id` segment names its pids too: the agent check (`agent_pid_kill`) judges them as it judges a
+    `kill`, while the session-ownership check (`foreign_pid_kill`) still reads `kill` alone (unmeasured there: no `ps`)."""
     index = resolve_command(tokens)
+    if windows and index is not None and basename(tokens[index]) in WINDOWS_PID_FLAGS:
+        yield from _windows_kill_pids(basename(tokens[index]), tokens[index + 1:])
+        return
     if index is not None and basename(tokens[index]) == "pkill":
         for value in parent_filter_pids(tokens[index + 1:]) or ():
             if KILL_PID_RE.match(value):
@@ -404,15 +432,17 @@ def foreign_pid_kill(tokens, transcript: str = "", session_id: str = "") -> str:
 
 
 def agent_pid_kill(tokens, agent_id: str) -> str:
-    """Return the first numeric pid a `kill` segment names that another agent started, for a call by AGENT_ID.
+    """Return the first numeric pid a `kill`, `taskkill /PID` or `Stop-Process -Id` segment names that another agent
+    started, for a call by AGENT_ID.
 
     Step agent-owned-processes. Another agent's pid is one whose live exec environment holds a different
-    `CLAUDE_AGENT_ID` (proc_env), or that a record in `agent_procs` lists to another agent with the start it has
-    now (a pid reused since is not listed). A main-session call (AGENT_ID "") judges nothing here. Cost: one
-    environment read and the record folder's files per named pid; no process start."""
+    `CLAUDE_AGENT_ID` (proc_env), or that a record in `agent_procs` lists to another agent (`held_by_others`: a record
+    whose start cannot be compared still names its owner; a pid reused since is not listed). A main-session call
+    (AGENT_ID "") judges nothing here. Cost: one environment read and the record folder's files per named pid; no
+    process start."""
     if not agent_id:
         return ""
-    for arg in _kill_pids(tokens):
+    for arg in _kill_pids(tokens, windows=True):
         pid = abs(int(arg))
         if pid <= 1:
             continue
