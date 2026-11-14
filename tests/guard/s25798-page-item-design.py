@@ -343,18 +343,34 @@ pd_partial("an update that carries both options and designs is judged",
 
 def pd_budget_case():
     """Pictured items in one batch share one deadline. When the budget is spent, the rest are allowed with a noted
-    line, and the checker is not called for them. The checker is a stand-in that sleeps, so the case stays fast."""
-    import time
+    line, and the checker is not called for them. The stand-in advances a fake clock by 0.6 s per call, and
+    page_check reads that clock, so the case takes no real time."""
+    from unittest import mock
+
+    class Clock:
+        now = 0.0
+
+    class FakeTime:
+        def monotonic(self):
+            return clk.now
+
+        def __getattr__(self, name):
+            return getattr(real_time, name)
+
+    clk = Clock()
 
     def slow(page_file, item):
-        time.sleep(0.6)
+        clk.now += 0.6
         return 0, ""
+    pc = _load_guard_module()._page_check_module()
+    real_time = pc.time
     repo = pd_repo("budget", PD_PAGE)
     writes = [{"op": "set", "collection": "items", "doc_id": "budget-%d" % i, "data": pd_item(id="budget-%d" % i)}
               for i in range(3)]
     payload = {"tool_name": "ArtifactData", "cwd": repo,
                "tool_input": {"url": PQ_URL, "action": "batch", "writes": writes}}
-    calls, out, rows = pd_judged(payload, "budget", seam=slow, patches={"PAGE_ITEM_DESIGN_BATCH_SECONDS": 1.0})
+    with mock.patch.object(pc, "time", FakeTime()):
+        calls, out, rows = pd_judged(payload, "budget", seam=slow, patches={"PAGE_ITEM_DESIGN_BATCH_SECONDS": 1.0})
     noted = pd_noted(rows)
     problems = []
     if calls != 2:
