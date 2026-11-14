@@ -1,14 +1,14 @@
 {
  "id": "silent-undo-appended-negation",
  "title": "The silent-undo check keeps the rewrite excuse when a merge only appends a negation word and every original token survives in order",
- "status": "ready",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
  "owner": "triage",
  "blockedBy": [],
- "why": "Coordinator 00:38 CST Nov 14 (relayed, from lane ci-wait-cap-55, PR #2839 now fb96825fb59e, lane lint PASS, with runner 10; unchecked by triage): lint/check_silent_undo.py counts an added \"never\" inside a merge as a reversal (NEGATION; `rewritten` and `extends` in that file: an added negation word voids the rewrite excuse), so a merge that only appends \"never past 55 minutes\" to main's rule line fails. Each lane that hits it pays a second commit, a force push and a re-check.",
+ "why": "Coordinator 00:38 CST Nov 14 (relayed, from lane ci-wait-cap-55, PR #2839 now fb96825fb59e, lane lint PASS, with runner 10; unchecked by triage): lint/check_silent_undo.py counts an added \"never\" inside a merge as a reversal (NEGATION; `rewritten` and `extends` in that file: an added negation word voids the rewrite excuse), so a merge that only appends \"never past 55 minutes\" to main's rule line fails. Each lane that hits it pays a second commit, a force push and a re-check. DONE 09:59 CST Nov 14 (coordinator 09:56, relayed): #3401 merged 09:54:56 CST, main c03312687c13825b46e2cf9f5f2db95c54e84796 (coordinator REST read: merged true 15:54:56Z; ls-remote matches). DIFF READ 09:59 CST Nov 14 (triage, REST file list of #3401; tests not run by triage): extends() in lint/check_silent_undo.py counts negations only up to the last original word in a prose file (.md, .txt, .rst); code, a wordless line and a line with a new comment opener keep the plain rule. The merge-drop test for the appended clause is green by the lane, with code and comment-paste controls.",
  "source": "Coordinator message 00:38 CST Nov 14 (relayed). Related, done: silent-undo-restored-line, silent-undo-own-cap, silent-undo-renames; ready: silent-undo-merged-main (a different gap).",
  "note": "Triage 00:39 CST Nov 14: the coordinator's pick, option a, undoable; a false alarm of a spent guard, so a check change. Fix: the excuse holds when every original token survives in order, even if a negation word is appended; red first: a merge that only appends \"never past 55 minutes\" to a rule line passes; control: a merge that adds \"never\" in the middle and drops no word still reads as a change of meaning only if the lane judges it so (the lane decides the control). Own lane; review rounds apply. Not started.",
- "updatedAt": "2026-11-14T00:39:00-06:00"
+ "updatedAt": "2026-11-14T09:59:00"
 }
