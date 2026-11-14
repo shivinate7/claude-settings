@@ -29,7 +29,7 @@ POINTER = re.compile(r"^Runner state: ((?:origin/)?roadmap:plans/runner-state\.j
                      re.M)
 # A copy of the state is a list label that ends in a colon (after a bullet, bold or quote mark, with an
 # optional count), whose line or bullet block carries a PR ref; or a line that runs PR refs as a sequence.
-# Prose with no label and colon passes, so "Holds were reviewed at 23:10" or "Go merge PR 3359 first." is no copy.
+# Prose with no label and colon passes, so "Holds were reviewed at 23:10" or "Go merge the next PR first." is no copy.
 LABEL = re.compile(r"^[ \t>*_`-]*(?:Merge queue|Queue|Folds?|Gos?|Holds?|Held|Archive pass)"
                    r"[ \t]*(?:\(\d+\))?[*_`]*:(?P<rest>[^\n]*)$", re.I)
 # A PR ref: `#N`, `PR N`, or a bare number of 2+ digits that is not part of a time, date, path or word.

@@ -33,8 +33,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   Triage is also the reader of the runner's `RUNNER-STATE` message: it saves the message to a file, runs
   `python3 skills/project-ops/scripts/check_runner_state.py message <file> <file of git show origin/roadmap:plans/runner-state.json>`,
   commits the JSON body whole, without a code fence, as `plans/runner-state.json` and pushes it, and answers the runner with the commit. On a problem it commits nothing and sends the runner the printed lines (decision `runner-state-on-record`).
-  It runs `check_runner_state.py message <file> --first` in place of the committed file only when that `git show` fails because the file is absent
-  from the record branch; on any other read error the state is unknown, and triage commits nothing and tells the runner. A `--first` send passes only as version 1.
+  It runs `check_runner_state.py message <file> --first` only when that `git show` fails because the file is absent. On any other read error the state is unknown, and triage commits nothing and tells the runner. A `--first` send passes only as version 1.
   The file also carries `landedPulls`: each pull request closed in the last 14 days whose base is the default
   branch, with `number`, `branch`, `head` and `merged`. The build marks a step landed from it when no `Step:` trailer is on main.
   At each publish, triage also disposes each `stalled step:` line the build prints (the build exits 1 on one): a
@@ -88,7 +87,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   `python3 skills/project-ops/scripts/check_runner_state.py recover <handoff> <file of git show origin/roadmap:plans/runner-state.json>`.
   When that `git show` fails because the file is absent, there is no state yet: the runner builds v1 from `skills/project-ops/templates/runner-state.json`
   (it fills `repo`, `runner`, `writtenAt`, `afterMerge` and the lists) and sends it as `v1`; triage checks it with `--first`. Any other read error is unknown, never empty: the runner merges nothing and tells the coordinator.
-  A committed version below its last sent one means a merge is missing: it rebuilds that merge from main's log since the file's `afterMerge.commit`
+  A committed version below its last sent one means that a merge is missing: it rebuilds that merge from main's log since the file's `afterMerge.commit`
   and sends the next version. Its handoff holds one pointer line and never the list, and before it ends a handoff it runs `python3 skills/project-ops/scripts/check_runner_state.py handoff <file>`.
 - **Lane.** Runs one line of work, with its own builder and reviewer agents.
   It opens its draft PR early, runs `merge --lane-lint <pr>` (with `--touched-tests` when it touches tests),
