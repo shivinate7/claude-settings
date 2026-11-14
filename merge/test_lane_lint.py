@@ -59,6 +59,11 @@ with open(LOG, "a", encoding="utf-8") as f:
     print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached, "files": files,
                       "status": git("status", "--porcelain"), "first_parent": git("rev-parse", "--verify", "-q", "HEAD^1"),
                       "head_sha_env": os.environ.get("CI_JOB_HEAD_SHA")}), file=f)
+JOB = sys.argv[1] if len(sys.argv) > 1 else ""  # a run names its job first, as ci-job does
+if isinstance(STEPS, dict):  # a dict names each job's steps: a run of job J prints STEPS[J], and a job the dict does not name prints none
+    STEPS = STEPS.get(JOB, [])
+if isinstance(RC, dict):  # and each job's exit code, 0 for a job the dict does not name
+    RC = RC.get(JOB, 0)
 if "--plan" in sys.argv:
     for state, name in STEPS:
         print("would run " + name)
@@ -173,12 +178,14 @@ class CiJobStub:
         """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set.
         `details` maps a step name to the text its line prints after the verdict word (default `stub step`). `file_fails` maps a step
         name to a path: that step FAILs (and the run exits 1) when the path exists in the stub's cwd, the tree the run reads. `watch` names paths,
-        relative to the lint tree the stub runs in; each call's log line carries their text under "files", null for a path the tree lacks."""
+        relative to the lint tree the stub runs in; each call's log line carries their text under "files", null for a path the tree lacks.
+        `steps` and `rc` may each be a dict keyed by job id (the run's first argument): a run of job J prints steps[J] and exits rc[J],
+        and a job the dict does not name prints no step and exits 0."""
         tm.put(self.stub, self.stub_text(steps, rc, sleep, details, file_fails, watch))
         return self.stub
 
     def use_ci_job(self, steps, rc, details=None, file_fails=None, watch=()):
-        """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`. `watch`: see write_stub."""
+        """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`. Either may be a dict keyed by job (see write_stub). `watch`: see write_stub."""
         self.write_stub(steps, rc, details=details, file_fails=file_fails, watch=watch)
         patch = unittest.mock.patch.object(merge, "CI_JOB", self.stub)
         patch.start()
@@ -2581,6 +2588,8 @@ class LintTreeFileMain(LaneFixture):
 
 
 DECLARED_READY = ["STE lint", "Windows split guard", "Cost line pins"]  # the checks-job steps the pre-ready run runs by name
+SCAFFOLD_READY = "checks-rest:project-ops skill scaffold suite"  # the scaffold suite as a qualified ready check: its job checks-rest, its step below
+SCAFFOLD_STEP = "project-ops skill scaffold suite"  # the same step's bare name, as checks.yml names it
 
 
 def steps_for(failing=()):
@@ -2594,17 +2603,31 @@ def verdict_line(out, verdict, name):
     return re.search(r"^%s %s\b" % (re.escape(verdict), re.escape(name)), out, re.M) is not None
 
 
-SCAFFOLD_LINE_TEXT = "unknown scaffold: not run (lives in checks-rest, ci-job --step reads one job)"  # the pre-ready run's coverage note: not a check, so no exit code moves with it
+SCAFFOLD_NOTE_START = "unknown scaffold"  # the words of the line that would say the scaffold suite was not run: no run prints one, since the suite is a ready check
 
 
 def verdict_lines(out):
-    """Every verdict line of a pre-ready run (a line that opens with `pass`, `fail` or `unknown`), except the coverage note. The one-line-per-check count reads these."""
-    return [line for line in out.splitlines() if re.match(r"(?:pass|fail|unknown) ", line) and line != SCAFFOLD_LINE_TEXT]
+    """Every verdict line of a pre-ready run: a line that opens with `pass`, `fail` or `unknown`. The one-line-per-check count reads these."""
+    return [line for line in out.splitlines() if re.match(r"(?:pass|fail|unknown) ", line)]
 
 
 def scaffold_lines(out):
-    """The coverage note lines of a pre-ready run's output: each one exactly SCAFFOLD_LINE_TEXT."""
-    return [line for line in out.splitlines() if line == SCAFFOLD_LINE_TEXT]
+    """The lines of a run's output that say the scaffold suite was not run. A run that reads the suite prints none."""
+    return [line for line in out.splitlines() if line.startswith(SCAFFOLD_NOTE_START)]
+
+
+def step_names(argv):
+    """The name after each --step of one ci-job argv, in order."""
+    return [argv[i + 1] for i, arg in enumerate(argv) if arg == "--step"]
+
+
+QUALIFIED_READY = re.compile(r"([a-z][a-z0-9_-]*):(.+)")  # the test's own split of a `<job>:<step>` entry; merge.py's parse is the product's
+
+
+def job_and_step(entry):
+    """-> (job, bare step) of one merge.readyChecks entry: a qualified entry names its job, a bare one is a step of job checks."""
+    m = QUALIFIED_READY.fullmatch(entry)
+    return (m.group(1), m.group(2)) if m else ("checks", entry)
 
 
 class StepVerdictRows(unittest.TestCase):
@@ -2635,7 +2658,10 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
     The pre-ready run (`merge <pr> --ready` on a draft) also runs the open-PR clash check (CrossMeasure's pair read, against every
     open PR) and the debt retire check (DebtRetire's closed debt), both on the merge of the head with its base. The cases of that run
     use the names below. Each red case asserts `--ready` through its refusal (no ready mark, no push, a named verdict line) and
-    the controls assert the same run on a clean draft, which the old code also passes."""
+    the controls assert the same run on a clean draft, which the old code also passes.
+
+    A ready check may name its job, `<job>:<step>`. A bare name is a step of job checks. The run makes one ci-job run per job, in the
+    order the jobs first appear in the list, and each job's steps are read only from that run's own lines."""
 
     clash = CrossMeasure.clash  # the pair read, run in the second clone: one home, CrossMeasure's
     commit_on = CrossMeasure.commit_on
@@ -2931,6 +2957,96 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertEqual(self.host.readies, [], "an unreadable pair read marked the draft ready: " + out)
         self.assertEqual(self.refs(), refs_before, "the pre-ready run pushed beside an unreadable pair read: " + out)
 
+    def test_a_qualified_ready_check_runs_ci_job_on_its_job_and_its_pass_line_reads_pass(self):
+        self.pre_ready_lane([SCAFFOLD_READY])
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.use_ci_job({"checks-rest": [("PASS", SCAFFOLD_STEP)]}, 0)
+        rc, out = self.pre_ready()
+        runs = self.lint_calls()
+        self.assertEqual([run["argv"][0] for run in runs], ["checks-rest"], "the qualified ready check did not run ci-job on job checks-rest: " + out)
+        self.assertEqual(step_names(runs[0]["argv"]), [SCAFFOLD_STEP], "ci-job did not get the bare step name of the qualified ready check: " + out)
+        self.assertTrue(verdict_line(out, "pass", SCAFFOLD_READY), "the qualified ready check printed no `pass checks-rest:...` line for its PASS step: " + out)
+        self.assertTrue(any(line.startswith("merge: the ready checks (") and SCAFFOLD_READY in line for line in out.splitlines()),
+                        "the final line does not list the declared qualified name: " + out)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.host.readies, [7], out)
+
+    def test_two_jobs_run_ci_job_once_each_in_first_appearance_order_with_only_their_own_steps(self):
+        self.pre_ready_lane([SCAFFOLD_READY, "STE lint"])  # the qualified job is listed first: the order is the list's, not a fixed one
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.use_ci_job({"checks": [("PASS", "STE lint")], "checks-rest": [("PASS", SCAFFOLD_STEP)]}, 0)
+        rc, out = self.pre_ready()
+        runs = self.lint_calls()
+        self.assertEqual([run["argv"][0] for run in runs], ["checks-rest", "checks"], "the ready checks did not run ci-job once per job in first-appearance order: " + out)
+        self.assertEqual([step_names(run["argv"]) for run in runs], [[SCAFFOLD_STEP], ["STE lint"]], "a job's run did not get only its own --step names: " + out)
+        for run in runs:
+            self.assertIn("--pinned", run["argv"], "a job's run did not pass --pinned: " + out)
+            self.assertEqual(run["argv"][run["argv"].index("--base") + 1], "origin/main", "a job's run did not read the base: " + out)
+        self.assertTrue(verdict_line(out, "pass", "STE lint"), "the checks job's PASS line did not read pass: " + out)
+        self.assertTrue(verdict_line(out, "pass", SCAFFOLD_READY), "the checks-rest job's PASS line did not read pass: " + out)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.host.readies, [7], out)
+
+    def test_a_fail_in_the_second_job_refuses_and_a_pass_in_the_first_job_stays_pass(self):
+        self.pre_ready_lane(["check invariants", SCAFFOLD_READY])
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.use_ci_job({"checks": [("PASS", "check invariants")], "checks-rest": [("FAIL", SCAFFOLD_STEP)]}, {"checks": 0, "checks-rest": 1})
+        refs_before = self.refs()
+        rc, out = self.pre_ready()
+        self.assertEqual(len(self.lint_calls()), 2, "the pre-ready run did not run ci-job once per job: " + out)
+        self.assertTrue(verdict_line(out, "pass", "check invariants"), "the first job's PASS line did not read pass beside the second job's FAIL: " + out)
+        self.assertTrue(verdict_line(out, "fail", SCAFFOLD_READY), "the second job's FAIL line did not read fail: " + out)
+        self.assertEqual(rc, 1, "a FAIL in the second job did not refuse the pre-ready run: " + out)
+        self.assertEqual(self.host.readies, [], "a FAIL in the second job marked the draft ready: " + out)
+        self.assertEqual(self.refs(), refs_before, "the pre-ready run pushed beside a FAIL in the second job: " + out)
+
+    def test_a_step_name_held_by_two_jobs_reads_each_job_only_from_its_own_lines(self):
+        self.pre_ready_lane(["STE lint", "checks-rest:STE lint"])  # the same bare step in two jobs, with opposite verdicts
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.use_ci_job({"checks": [("PASS", "STE lint")], "checks-rest": [("FAIL", "STE lint")]}, {"checks": 0, "checks-rest": 1})
+        refs_before = self.refs()
+        rc, out = self.pre_ready()
+        self.assertEqual(len(self.lint_calls()), 2, "the pre-ready run did not run ci-job once per job: " + out)
+        self.assertTrue(verdict_line(out, "pass", "STE lint"), "the checks job's own PASS line for STE lint did not read pass: " + out)
+        self.assertTrue(verdict_line(out, "fail", "checks-rest:STE lint"),
+                        "the checks-rest group did not read its own FAIL line, or read the checks job's PASS line for the same step name: " + out)
+        self.assertEqual(rc, 1, "a FAIL in checks-rest did not refuse the pre-ready run: " + out)
+        self.assertEqual(self.host.readies, [], out)
+        self.assertEqual(self.refs(), refs_before, out)
+
+    def test_pre_ready_an_unqualified_list_runs_one_ci_job_run_on_checks(self):  # the control: today's list, one run on checks
+        self.pre_ready_lane(DECLARED_READY)
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.use_ci_job(steps_for(), 0)
+        rc, out = self.pre_ready()
+        runs = self.lint_calls()
+        self.assertEqual([run["argv"][0] for run in runs], ["checks"], "an unqualified list did not run ci-job once on checks: " + out)
+        self.assertEqual(step_names(runs[0]["argv"]), DECLARED_READY, "the checks run did not get the declared step names: " + out)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.host.readies, [7], out)
+
+    def assert_two_jobs_unknown_and_fail_read_fail(self, names):
+        """The list `names` runs two jobs: checks is unknown (exit 2, an unknown line) and checks-rest FAILs (exit 1). The combined state is fail, whichever
+        job the list names first: the refusal says FAIL, never `are unknown, not a pass`."""
+        self.pre_ready_lane(names)
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.use_ci_job({"checks": [("unknown", "check invariants")], "checks-rest": [("FAIL", SCAFFOLD_STEP)]}, {"checks": 2, "checks-rest": 1})
+        refs_before = self.refs()
+        rc, out = self.pre_ready()
+        self.assertEqual(len(self.lint_calls()), 2, "the pre-ready run did not run ci-job once per job: " + out)
+        self.assertTrue(verdict_line(out, "unknown", "check invariants"), "the checks job's unknown line did not read unknown: " + out)
+        self.assertTrue(verdict_line(out, "fail", SCAFFOLD_READY), "the checks-rest job's FAIL line did not read fail: " + out)
+        self.assertIn("against main FAIL", out, "an unknown job beside a FAIL job did not combine to FAIL: " + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.host.readies, [], out)
+        self.assertEqual(self.refs(), refs_before, out)
+
+    def test_a_fail_job_beats_an_unknown_job_listed_before_it_in_the_combined_state(self):
+        self.assert_two_jobs_unknown_and_fail_read_fail(["check invariants", SCAFFOLD_READY])  # checks (unknown) first
+
+    def test_a_fail_job_beats_an_unknown_job_listed_after_it_in_the_combined_state(self):
+        self.assert_two_jobs_unknown_and_fail_read_fail([SCAFFOLD_READY, "check invariants"])  # checks-rest (FAIL) first
+
 
     def unpushed_pr(self, n, files, body):
         """PR n as a draft whose head commit is never pushed: the second clone holds it, origin does not, so the lane's clone cannot read
@@ -3027,7 +3143,7 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertNotEqual(rc, 0, "a declared step with no ci-job line passed --fast-checks: " + out)
         self.assert_fast_checks_changed_nothing(out, refs_before)
 
-    def test_fast_checks_on_a_clean_pr_prints_the_scaffold_coverage_note_once_and_still_exits_zero(self):  # F9, with the green control: the exit stays 0
+    def test_fast_checks_on_a_clean_pr_prints_no_scaffold_line_and_still_exits_zero(self):  # F9, with the green control: the exit stays 0
         self.pre_ready_lane()
         self.own_writes({"own.txt": "lane 7\n"})
         self.pr_writes(8, {"elsewhere.txt": "lane 8\n"}, lane_body(OTHER))
@@ -3035,30 +3151,39 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.lock = NoLock("merge --fast-checks")
         refs_before = self.refs()
         rc, out = self.fast_checks_run()
-        self.assertEqual(len(scaffold_lines(out)), 1, "--fast-checks on a clean PR did not print the scaffold coverage note once: " + out)
-        self.assertEqual(rc, 0, "the scaffold coverage note moved the exit of a clean PR: " + out)
+        self.assertEqual(scaffold_lines(out), [], "--fast-checks on a clean PR printed a scaffold line: " + out)
+        self.assertEqual(rc, 0, "a clean PR refused --fast-checks: " + out)
         self.assert_fast_checks_changed_nothing(out, refs_before)
 
-    def test_fast_checks_on_a_failing_check_still_prints_the_scaffold_coverage_note(self):  # F9, the failing run: the note is printed every time
+    def test_fast_checks_on_a_failing_check_prints_no_scaffold_line(self):  # F9, the failing run: no scaffold line in either outcome
         self.pre_ready_lane()
         self.own_writes({"own.txt": "lane 7\n"})
         self.use_ci_job(steps_for(["STE lint"]), 1)
         self.lock = NoLock("merge --fast-checks")
         refs_before = self.refs()
         rc, out = self.fast_checks_run()
-        self.assertEqual(len(scaffold_lines(out)), 1, "--fast-checks on a failing check did not print the scaffold coverage note once: " + out)
+        self.assertEqual(scaffold_lines(out), [], "--fast-checks on a failing check printed a scaffold line: " + out)
         self.assertNotEqual(rc, 0, "a failing STE lint step exited 0 under --fast-checks: " + out)
         self.assert_fast_checks_changed_nothing(out, refs_before)
 
-    def test_pre_ready_on_a_clean_draft_prints_the_scaffold_coverage_note_and_still_marks_it_ready(self):  # F9, the ready step
+    def test_pre_ready_on_a_clean_draft_prints_no_scaffold_line_and_still_marks_it_ready(self):  # F9, the ready step
         self.pre_ready_lane()
         self.own_writes({"own.txt": "lane 7\n"})
         self.pr_writes(8, {"elsewhere.txt": "lane 8\n"}, lane_body(OTHER))
         self.use_ci_job(steps_for(), 0)
         rc, out = self.pre_ready()
-        self.assertEqual(len(scaffold_lines(out)), 1, "the ready step on a clean draft did not print the scaffold coverage note once: " + out)
-        self.assertEqual(rc, 0, "the scaffold coverage note moved the exit of a clean draft's ready step: " + out)
+        self.assertEqual(scaffold_lines(out), [], "the ready step on a clean draft printed a scaffold line: " + out)
+        self.assertEqual(rc, 0, "a clean draft's ready step refused: " + out)
         self.assertEqual(self.host.readies, [7], "a clean draft's ready step did not mark it ready once: " + out)
+
+    def test_pre_ready_with_the_scaffold_suite_declared_prints_no_scaffold_line_and_marks_ready(self):  # the scaffold suite is read as a ready check
+        self.pre_ready_lane(DECLARED_READY + [SCAFFOLD_READY])
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.use_ci_job({"checks": steps_for(), "checks-rest": [("PASS", SCAFFOLD_STEP)]}, 0)
+        rc, out = self.pre_ready()
+        self.assertEqual(scaffold_lines(out), [], "the pre-ready run printed a scaffold line with the scaffold suite declared: " + out)
+        self.assertEqual(rc, 0, "the pre-ready run with the scaffold suite declared refused: " + out)
+        self.assertEqual(self.host.readies, [7], "the pre-ready run with the scaffold suite declared did not mark it ready once: " + out)
 
     def fast_checks_run(self):
         """`merge 7 --fast-checks` on the draft. -> (rc, stdout and stderr together). Nothing else is run."""
@@ -3133,21 +3258,33 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
 
 
 class PreReadyDeclared(unittest.TestCase):
-    """The repo's own pre-ready list: merge.readyChecks in .github/stamp.json names the checks-job steps the pre-ready run runs, and
-    bin/ci-job reads each one as a step of its checks job (`checks --plan --step NAME`). Reads the repo's files; runs no lint."""
+    """The repo's own pre-ready list: merge.readyChecks in .github/stamp.json names the steps the pre-ready run runs, each bare (a step of
+    job checks) or qualified `<job>:<step>`, and bin/ci-job reads each one as a step of its job (`<job> --plan --step NAME`). Reads the repo's files; runs no lint."""
+
+    root = os.path.dirname(HERE)
+
+    def declared(self):
+        with open(os.path.join(self.root, ".github", "stamp.json"), encoding="utf-8") as f:
+            return json.load(f).get("merge", {}).get("readyChecks") or []
+
+    def assert_ci_job_reads(self, entry):
+        job, step = job_and_step(entry)
+        plan = subprocess.run([sys.executable, os.path.join(self.root, "bin", "ci-job"), job, "--plan", "--base", "origin/main", "--step", step],
+                              cwd=self.root, capture_output=True, text=True)
+        self.assertRegex(plan.stdout, r"(?m)^would run\s+%s$" % re.escape(step),
+                         "ci-job does not read %r as a step of its job %r: %s" % (step, job, plan.stdout + plan.stderr))
 
     def test_pre_ready_the_declared_list_names_the_checks_steps_ci_job_reads(self):
-        root = os.path.dirname(HERE)
-        with open(os.path.join(root, ".github", "stamp.json"), encoding="utf-8") as f:
-            declared = json.load(f).get("merge", {}).get("readyChecks") or []
+        declared = self.declared()
         self.assertTrue(declared, "the repo's .github/stamp.json declares no merge.readyChecks, so the pre-ready run has no declared steps")
         for name in DECLARED_READY:
             self.assertIn(name, declared, "merge.readyChecks does not name the checks step %r" % name)
-        for name in declared:
-            plan = subprocess.run([sys.executable, os.path.join(root, "bin", "ci-job"), "checks", "--plan", "--base", "origin/main", "--step", name],
-                                  cwd=root, capture_output=True, text=True)
-            self.assertRegex(plan.stdout, r"(?m)^would run\s+%s$" % re.escape(name),
-                             "ci-job does not read %r as a step of its checks job: %s" % (name, plan.stdout + plan.stderr))
+        for entry in declared:
+            self.assert_ci_job_reads(entry)
+
+    def test_pre_ready_the_declared_list_names_the_scaffold_suite_under_checks_rest(self):
+        self.assertIn(SCAFFOLD_READY, self.declared(), "merge.readyChecks does not name the scaffold suite as %r, so the pre-ready run does not read it" % SCAFFOLD_READY)
+        self.assert_ci_job_reads(SCAFFOLD_READY)
 
 
 class RunFolderSweep(unittest.TestCase):
