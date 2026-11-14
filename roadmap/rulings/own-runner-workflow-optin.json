@@ -1,0 +1,10 @@
+{
+  "id": "own-runner-workflow-optin",
+  "at": "2026-11-13T20:43:00-06:00",
+  "title": "Batch runner 10 may use Sonnet workflows inside its session to batch faster",
+  "ruling": "Owner 20:43 CST Nov 13, relayed by the consultant (triage did not see it): batch runner 10 may use Sonnet workflows within its own session, the workflow as a subagent concept, if that batches much faster. Standing opt-in for the Workflow tool with Sonnet agents, until withdrawn. It covers the batch runner only, and Sonnet only. It lifts no merge rule: the merge lock stays serial. Points (b) and (c) from runner 10's 20:43 plan are still unruled.",
+  "quote": "tell runner 10 it can use sonnet workflows within its session ie the workflow as a subagent concept if it helps batch a ton more faster like its inexcusable its lethargic pase",
+  "source": "Consultant 20:43 CST Nov 13 (quoting the owner, verbatim); filed by triage.",
+  "status": "open",
+  "step": "batch-runner-scales"
+}
