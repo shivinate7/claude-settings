@@ -34,7 +34,9 @@ Counted only when all hold:
      answers/ID.json and items/ID.json exist. Relay text alone never counts.
   3. The answer's `item` is --item (the item is read by its key, which is its id), and the answer's `n` is the item's `n`.
   4. The item is open: `status` is `open`, or absent (the page hides only `closed`, page.html `state.items`). A closed
-     item takes no answer, except an arbiter ruling (`arbiter` true, written closed) answered `overturn`.
+     item takes no answer, except an arbiter ruling (`arbiter` true, written closed) answered `overturn`, and a routed
+     close: `status` is `closed`, `lane` and `home` are strings non-empty after strip, `arbiter` is not true, and
+     `lastAnswer.at` equals the answer's `at`. Routing closes the item at once and keeps `lastAnswer` and answers/ID.
   5. The answer's `at` is later than the item's `added`: an earlier answer belongs to an earlier ask. Both carry a
      time zone (`Z` or an offset); one without is not counted.
   6. A decision (`kind` absent or `decision`): `choice` is the key of one option, or `overturn` when the item's `arbiter`
@@ -265,6 +267,15 @@ def label_of(item, answer, choice):
     return labels.get(choice)
 
 
+def routed_close(item, answer):
+    """Rule 4's routed close: the item closed at routing, with `lane` and `home` set, and still holds this answer as `lastAnswer`."""
+    last = item.get("lastAnswer")
+    return (item.get("status") == "closed"
+            and all(isinstance(item.get(key), str) and item[key].strip() for key in ("lane", "home"))
+            and item.get("arbiter") is not True
+            and isinstance(last, dict) and last.get("at") == answer.get("at"))
+
+
 def judge(args):
     """The counted line, or a Verdict raised."""
     folder, made = use_stamp(args.fetched)
@@ -296,7 +307,8 @@ def judge(args):
     if isinstance(n, bool) or not isinstance(n, int) or n != item.get("n"):
         raise not_counted("answer n %s is not the item's n %s: the answer is for another ask" % (n, item.get("n")))
     status = item.get("status", "open")  # absent is open, as the page reads it: it hides only "closed"
-    if status != "open" and not (status == "closed" and item.get("arbiter") is True and answer.get("choice") == "overturn"):
+    if status != "open" and not (status == "closed" and item.get("arbiter") is True and answer.get("choice") == "overturn") \
+            and not routed_close(item, answer):
         raise not_counted("item status is %s: only an open item takes an answer, or a closed arbiter ruling an overturn"
                           % json.dumps(status))
     if moment(answer.get("at"), "answer at") <= moment(item.get("added"), "item added"):

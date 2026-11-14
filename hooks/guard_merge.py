@@ -18,12 +18,13 @@ from guard_core import (
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_refspecs, push_target,
+    ARCHIVE_COPY_SUFFIX, ARCHIVE_PREFIX, DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_refspecs,
+    push_target,
 )
 
 
@@ -700,8 +701,10 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 # Context never hides a marker: a fence, a string, a comment and a template literal are not read.
 # Limits: a `sh -c` script and `eval` are not read, and a script that writes new markers in a blind chain
 # is not caught (guard-guards-mistakes-only); at most _UNTRACKED_CAP untracked files are read per commit;
-# a failed read, no HEAD, no resolvable range, `--all`, `--mirror` and a deletion push are no hit; an
-# unmerged index judged alone (git refuses that commit itself) is no hit.
+# a read that ran and exited non-zero, no HEAD, no resolvable range, `--all`, `--mirror` and a deletion push
+# are no hit; an unmerged index judged alone (git refuses that commit itself) is no hit. A read that did not
+# run (git timed out or did not start) in an existing folder is unknown: kind `unread`, and the caller asks,
+# unless another read finds a triplet, which keeps its deny.
 # Cost: per commit, one `git diff --check` (plus one read per file with a finding, and one `git ls-files`
 # and up to _UNTRACKED_CAP `git diff --no-index` reads when an add reaches untracked files); per push,
 # one `git diff --check` over `<tracking>...<source>`, built from the arguments with no spawn first (and
@@ -721,6 +724,11 @@ CONFLICT_MARKERS_CHAIN_REASON = (
     "the guard cannot read, so it cannot be checked for conflict markers before this push sends it. "
     "Remedy: run the push in a call of its own, after the commit has landed."
 )
+CONFLICT_MARKERS_UNREAD_REASON = (
+    "Rule (Git, conflict-markers; decision commit-refuses-conflict-markers): git timed out or did not start, so the guard "
+    "cannot check this commit or push for conflict markers. Remedy: retry the command once git answers."
+)
+CONFLICT_MARKERS_UNREAD_KIND = "unread"   # the kind conflict_markers_hit answers; guard.py asks on it
 OCTOPUS_PUSH_REASON = (
     "Rule (Git, octopus-push; decision octopus-push-refused): this push would send {sha}, a merge commit of more than two parents. "
     "Remedy: redo that merge as a chain of two-parent merges, then retry the push."
@@ -733,6 +741,19 @@ _CONFLICT_FINDING = re.compile(r"^(.+):(\d+): leftover conflict marker\s*$")
 _MARKER_KINDS = {"<": "start", "=": "mid", ">": "end"}
 
 
+class _GitUnread(Exception):
+    """A git read that did not run (`_git` answered None): unknown, never clear."""
+
+
+def _held(read, held, *args):
+    """(read(*args), held). A read that did not run gives {} and is held, so the reads after it still
+    run and a triplet any of them finds is still refused."""
+    try:
+        return read(*args), held
+    except _GitUnread as caught:
+        return {}, held or caught
+
+
 def _diff_check(where, diff_args):
     """The finished `git diff --check` over `diff_args`, or None when git did not run."""
     return _git(where, "-c", "core.quotepath=off", "-c", "diff.relative=false", "diff", "--no-ext-diff", "--no-color", "--check", *diff_args)
@@ -741,23 +762,29 @@ def _diff_check(where, diff_args):
 def _marker_findings(where, top, diff_args, source):
     """Return {file: set of marker kinds} for the leftover conflict markers `git diff --check` reports."""
     done = _diff_check(where, diff_args)
-    return {} if done is None else _kinds_of(done, top, source)
+    if done is None:
+        raise _GitUnread(where)
+    return _kinds_of(done, top, source)
 
 
 def _kinds_of(done, top, source):
     """{file: set of marker kinds} for the leftover conflict markers in a finished `git diff --check`.
     A line's kind is read from the new side of the file: `source` None is the working-tree file, ''
-    the index blob, and a revision that revision's blob. Only a file with a finding costs a read."""
+    the index blob, and a revision that revision's blob. Only a file with a finding costs a read. A blob read that did not run
+    is raised only when no other file holds a triplet."""
     wanted = {}
     for row in done.stdout.splitlines():
         found = _CONFLICT_FINDING.match(row)
         if found:
             wanted.setdefault(found.group(1), []).append(int(found.group(2)))
-    kinds = {}
+    kinds, held = {}, None
     for name, numbers in wanted.items():
         if source is not None:
             read = _git(top, "cat-file", "-p", source + ":" + name)
-            text = read.stdout if read is not None and read.returncode == 0 else ""
+            if read is None:
+                held = held or _GitUnread(top)
+                continue
+            text = read.stdout if read.returncode == 0 else ""
         else:
             try:
                 with open(os.path.join(top, name), encoding="utf-8", errors="replace", newline="") as handle:
@@ -768,6 +795,8 @@ def _kinds_of(done, top, source):
         for number in numbers:
             if 0 < number <= len(lines) and lines[number - 1][:1] in _MARKER_KINDS:
                 kinds.setdefault(name, set()).add(_MARKER_KINDS[lines[number - 1][0]])
+    if held and not _triplet_file(kinds):
+        raise held
     return kinds
 
 
@@ -792,21 +821,25 @@ def _plain_source(source):
 
 
 def _ref_sha(top, ref):
-    """The commit a revision names, or '' when it names none."""
+    """The commit a revision names, or '' when it names none. Raises _GitUnread when git did not run."""
     if ref.startswith("-"):
         return ""
     done = _git(top, "rev-parse", "--verify", "-q", ref + "^{commit}")
+    if done is None:
+        raise _GitUnread(top)
     return done.stdout.strip() if done is not None and done.returncode == 0 else ""
 
 
 def _checked_range(where, source, tracking, memo):
-    """(finished `git diff --check <base>...<source>`, source) for the first base that git accepts, else
-    (None, source). The three dots make git find the merge base itself, so no ref is read first. The
+    """(finished `git diff --check <base>...<source>`, source, held) for the first base that git accepts, else
+    (None, source, held). The three dots make git find the merge base itself, so no ref is read first. The
     bases are the destination's remote-tracking ref, the source's upstream, then the default base (read
     once per push, in `memo`). Only a rejected base costs more. After the first rejection the source is
     read once: one that does not resolve is read as HEAD, and the same base is tried again.
-    `--check` exits 2 on a finding."""
+    `--check` exits 2 on a finding. A diff that did not run raises _GitUnread. The source's own read is
+    held instead: the source is read as HEAD, and the caller raises it when no triplet is found."""
     verified = source == "HEAD"
+    held = None
     step = 0
     while step < 3:
         if step == 2 and "default" not in memo:
@@ -815,16 +848,20 @@ def _checked_range(where, source, tracking, memo):
         if base:
             done = _diff_check(where, [base + "..." + source, "--"])
             if done is None:
-                return None, source
+                raise _GitUnread(where)
             if done.returncode in (0, 2):
-                return done, source
+                return done, source, held
             if not verified:
                 verified = True
-                if not _ref_sha(where, source):
+                try:
+                    sha = _ref_sha(where, source)
+                except _GitUnread as caught:
+                    sha, held = "", caught
+                if not sha:
                     source = "HEAD"
                     continue
         step += 1
-    return None, source
+    return None, source, held
 
 
 def _push_refs(segment, stripped, cwd, args, skip=()):
@@ -853,13 +890,18 @@ def _push_hit(segment, stripped, cwd, args):
     ref the push names, the range is the merge base with the destination's remote-tracking tip, else the
     source's upstream, else the default base, up to the local source ref: in the usual case one
     `git diff --check`, with no read of the top folder, the source or a base first."""
+    unread = None   # the first ref whose read did not run: a later ref's triplet is still refused
     for where, source, _dest, tracking, _remote, memo in _push_refs(segment, stripped, cwd, args):
-        done, source = _checked_range(where, source, tracking, memo)
-        if done is None:
-            continue
-        name = _triplet_file(_kinds_of(done, where, source))
+        try:
+            done, source, held = _checked_range(where, source, tracking, memo)
+            name = _triplet_file(_kinds_of(done, where, source)) if done is not None else ""
+        except _GitUnread as caught:
+            name, held = "", caught
         if name:
             return name
+        unread = unread or held
+    if unread:
+        raise unread
     return ""
 
 
@@ -914,14 +956,20 @@ def octopus_push_hit(stripped: str, cwd: str, read_verb) -> str:
 def _untracked_findings(where, top, specs):
     """Marker findings in the untracked files that `git add` would stage: all of them under `top` when
     `specs` is None, else those the pathspecs name. `git diff HEAD` skips an untracked file, so each is
-    read against /dev/null. At most _UNTRACKED_CAP files are read, the first in git's order."""
+    read against /dev/null. At most _UNTRACKED_CAP files are read, the first in git's order. A read that
+    did not run is raised only when no other file holds a triplet."""
     done = _git(where, "-c", "core.quotepath=off", "ls-files", "--others", "--exclude-standard", "-z",
                 "--full-name", *(["--", *specs] if specs else []))
-    if done is None or done.returncode != 0:
+    if done is None:
+        raise _GitUnread(where)
+    if done.returncode != 0:
         return {}
-    found = {}
+    found, held = {}, None
     for name in [n for n in done.stdout.split("\0") if n][:_UNTRACKED_CAP]:
-        found.update(_marker_findings(top, top, ["--no-index", "--", "/dev/null", name], None))
+        more, held = _held(_marker_findings, held, top, top, ["--no-index", "--", "/dev/null", name], None)
+        found.update(more)
+    if held and not _triplet_file(found):
+        raise held
     return found
 
 
@@ -963,20 +1011,33 @@ def _repo_of(repos, where):
     folder, then HEAD when it resolves, and exits 1 only for a missing HEAD."""
     if where not in repos:
         done = _git(where, "rev-parse", "--show-toplevel", "--verify", "-q", "HEAD") if where and os.path.isdir(where) else None
+        if done is None and where and os.path.isdir(where):
+            raise _GitUnread(where)   # an existing folder and a read that did not run: unknown, never clear
         lines = done.stdout.splitlines() if done is not None and done.returncode in (0, 1) else []
         repos[where] = (os.path.normpath(lines[0].strip()), done.returncode == 0) if lines and lines[0].strip() else None
     return repos[where]
 
 
 def conflict_markers_hit(stripped: str, cwd: str):
+    """`_conflict_markers_hit`, with a git read that did not run answered `(CONFLICT_MARKERS_UNREAD_KIND,
+    folder)` when no read found a triplet: the caller asks. A read that ran and exited non-zero is no hit."""
+    try:
+        return _conflict_markers_hit(stripped, cwd)
+    except _GitUnread as unread:
+        return CONFLICT_MARKERS_UNREAD_KIND, str(unread) or "git"
+
+
+def _conflict_markers_hit(stripped: str, cwd: str):
     """Return `(kind, file)` for the first commit or push that would carry all three conflict markers
     in one file, else `('', '')`. The kind is `commit`, `push`, or `chain` (a push after a commit the
     guard could not judge; the file is then `git push`). Each segment is judged from its own command
-    word."""
+    word. A read that did not run raises _GitUnread at the end, so every segment had its chance to
+    refuse first."""
     pending = []                        # earlier adds no commit has taken: (where, None) stages whole, (where, specs) names paths
     repos = {}                          # where -> (top, has_head), one `git rev-parse` each until the next commit
     readable = True                     # every segment so far is one that cannot change the tree
     blind_commit = blind_triplet = conflict_step = False   # a commit after a blind step / that covers a triplet / a conflict step ran
+    unread = None                       # the first read that did not run, raised at the end when nothing is refused
     ends = []
     segments = split_segments(stripped, ends)
     for number, segment in enumerate(segments):
@@ -986,7 +1047,10 @@ def conflict_markers_hit(stripped: str, cwd: str):
         if call is not None and call[0] == "push":
             if blind_commit and (blind_triplet or conflict_step):
                 return "chain", "git push"
-            name = _push_hit(segment, stripped, cwd, call[1])
+            try:
+                name = _push_hit(segment, stripped, cwd, call[1])
+            except _GitUnread as caught:
+                unread, name = unread or caught, ""
             if name:
                 return "push", name
             readable = False
@@ -1010,14 +1074,22 @@ def conflict_markers_hit(stripped: str, cwd: str):
             elif specs:
                 pending.append((where, specs))
             continue
-        repo = _repo_of(repos, where)
+        try:
+            repo = _repo_of(repos, where)
+        except _GitUnread as caught:
+            unread = unread or caught
+            continue
         if repo is None:
             continue
         top, has_head = repo
         taken, pending = pending, []   # this commit takes the adds so far; the next starts clean
         wholes, adds = set(), []   # tops an add stages whole / (where, top, specs) of adds that name paths
         for add_where, add_paths in taken:
-            add_repo = _repo_of(repos, add_where)
+            try:
+                add_repo = _repo_of(repos, add_where)
+            except _GitUnread as caught:
+                unread = unread or caught   # held: this commit's own folder is still judged
+                continue
             if add_repo is None:
                 continue
             if add_paths is None:
@@ -1028,30 +1100,38 @@ def conflict_markers_hit(stripped: str, cwd: str):
         all_flag, specs = _commit_shape(call[1]) if call[0] == "commit" else (False, [])
         if not has_head:   # no HEAD: `git diff` would read an empty tree
             continue
+        later = None   # a read of this commit that did not run: the reads after it still run
         if specs:
-            found = _marker_findings(where, top, ["HEAD", "--", *specs], None)
+            found, later = _held(_marker_findings, later, where, top, ["HEAD", "--", *specs], None)
         else:
             if all_flag or top in wholes:
-                found = _marker_findings(top, top, ["HEAD"], None)
+                found, later = _held(_marker_findings, later, top, top, ["HEAD"], None)
             else:
-                found = _marker_findings(top, top, ["--cached"], "")
+                found, later = _held(_marker_findings, later, top, top, ["--cached"], "")
             if top in wholes:
-                found.update(_untracked_findings(top, top, None))
+                more, later = _held(_untracked_findings, later, top, top, None)
+                found.update(more)
             for add_where, add_top, add_paths in adds:
                 if add_top != top:
                     continue
                 if not (all_flag or top in wholes):
                     for name in _covered_by(add_where, add_paths):
                         found.pop(name, None)
-                    found.update(_marker_findings(add_where, top, ["HEAD", "--", *add_paths], None))
-                found.update(_untracked_findings(add_where, top, add_paths))
+                    more, later = _held(_marker_findings, later, add_where, top, ["HEAD", "--", *add_paths], None)
+                    found.update(more)
+                more, later = _held(_untracked_findings, later, add_where, top, add_paths)
+                found.update(more)
         name = _triplet_file(found)
+        if later and not name:
+            unread = unread or later   # a triplet found by another read is still refused
         if readable:
             if name:
                 return "commit", name
         else:
             blind_commit = True
             blind_triplet = blind_triplet or bool(name)
+    if unread:
+        raise unread
     return "", ""
 
 
@@ -1262,7 +1342,10 @@ RECORD_REASON = (
     "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this session's own "
     "record does not prove it is triage. Send the step change to the triage session (list_sessions, tag "
     "cs-build:triage, same cs-repo). If this session is triage: run get_session (no argument) alone in its "
-    "own turn, then retry. (decision session-tiers, the triage session is the only writer of the record branch)"
+    "own turn, then retry. Before this session asks the owner to push a commit, run `git fetch origin <record "
+    "branch>`, then `git merge-base --is-ancestor <commit> origin/<record branch>`: exit 0 means the commit is "
+    "already there, so ask the owner only when it is not. "
+    "(decision session-tiers, the triage session is the only writer of the record branch)"  # glossary-ok: session-tiers is the decision's file name
 )
 
 
@@ -1472,6 +1555,13 @@ def _head_landed(module, repo: str, row) -> bool:
     return _compare_status(module, module.Host(repo=repo), base, sha) in _CONTAINED
 
 
+def open_pull_rows(module, repo: str):
+    """The open pull request rows of `repo`, every page, through the merge tool's page reader `module`. The one home of
+    this read: rules lane-closes-after-records and lane-step-dup call it. A failed read raises. The caller holds the
+    one shared deadline over the read (a nested shared_deadline would reset it)."""
+    return module.Host(repo=repo).pages("pulls", fields={"state": "open"})
+
+
 def _branch_repos(ccr, tag_repos):
     """The repos a lane's branches may live in: its cs-repo tags, the github repos of
     session_context.sources[].git_repository.url, and each current_branches key that names owner/repo, in first-seen
@@ -1533,7 +1623,7 @@ def _covered(module, host, branch: str, tip, rows, pool) -> bool:
         heads = [str(row["head"]["sha"]) for row in [*rows, *pool] if row["state"] == "open" or _is_merged(row)]
         if any(sha == tip or _compare_status(module, host, sha, tip) in _CONTAINED for sha in dict.fromkeys(heads)):
             return True
-    copy_name = re.compile(re.escape("archive/" + branch) + r"(-[0-9]+)?")
+    copy_name = re.compile(re.escape(ARCHIVE_PREFIX + branch) + ARCHIVE_COPY_SUFFIX)
     for ref in host.pages("git/matching-refs/heads/archive/" + branch):
         name = str(ref["ref"])[len("refs/heads/"):]
         if copy_name.fullmatch(name) and _compare_status(module, host, name, tip, missing_ok=True) in _CONTAINED:
@@ -1677,7 +1767,7 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
         open_rows = {}
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             for repo in repos:
-                rows = open_rows[repo] = module.Host(repo=repo).pages("pulls", fields={"state": "open"})
+                rows = open_rows[repo] = open_pull_rows(module, repo)
                 for row in rows:
                     ref = str(row["head"]["ref"])
                     slug = next((s for s in slugs if ref in lane_head_refs(s)), None)
@@ -1812,6 +1902,157 @@ def brief_hit(tool: str, tool_input, transcript: str):
     if tagged_after:  # a set_session_tags call on the target followed its record, so the topic or steps may have changed
         return "lane brief to a target whose record is stale", BRIEF_STALE_REASON
     return topic_hit(first, tags)
+
+
+# ---- one lane per step (rule lane-step-dup)
+STEP_DUP_TAIL = " (decision session-tiers, a step has one lane)"  # glossary-ok: session-tiers is the decision's file name
+STEP_DUP_REASON = (
+    "session %s is live and carries cs-step:%s in the same repo, so this would start a second lane on one step. "
+    "Send the work to that session with send_message instead." + STEP_DUP_TAIL
+)
+STEP_DUP_UNKNOWN_REASON = (
+    "this session's transcript does not prove that no other live session carries cs-step:%s in this repo: it holds "
+    "no whole list_sessions read (a read with no cursor, then reads that each pass the last session id of the page "
+    "before as after_id, the last with has_more false, none with tags or mine), the brief's target has no current "
+    "record, or the subject has no cs-repo tag. Run list_sessions in its own turn that way, run get_session on the "
+    "target alone, check that the target or the new lane carries a cs-repo tag, then retry." + STEP_DUP_TAIL
+)
+
+
+STEP_PR_REASON = (
+    "open pull request #%(pr)s of this repo has the head of step %(step)s, so a lane already holds the step. Send the work to "
+    "that lane, or say in the brief that it `continues #%(pr)s` or `replaces #%(pr)s`, then retry." + STEP_DUP_TAIL
+)
+STEP_PR_READ_REASON = (
+    "the open pull requests of this repo, or the subject's record, could not be read, so the guard cannot tell whether "
+    "a lane pull request holds cs-step:%s. Retry once gh answers and the target has a current record." + STEP_DUP_TAIL
+)
+_STEP_CONTINUES = re.compile(r"\b(?:continues|replaces)\s+#(\d+)", re.IGNORECASE)  # a brief that names the pull request it takes over
+
+
+def _tag_values(tags, prefix: str):
+    """The lower-cased, non-empty values of the tags that start with `prefix`, stripped."""
+    return [v.lower() for v in (str(t)[len(prefix):].strip() for t in tags if str(t).startswith(prefix)) if v]
+
+
+def _step_call(tool: str, tool_input):
+    """(steps, target) of a lane brief (a send_message whose first non-blank line after any Grant line is `Lane brief:
+    <step>. Topic: <topic>.`) or of a create_session tagged cs-step:<step>, else None. Steps are lower case; `target`
+    is the brief's session id, None for a create."""
+    if not isinstance(tool_input, dict):
+        return None
+    if tool == BRIEF_TOOL:
+        message = tool_input.get("message")
+        lines = [line.strip() for line in message.splitlines() if line.strip()] if isinstance(message, str) else []
+        if lines and lines[0].startswith(LANE_GRANT_MARKER):
+            lines = lines[1:]
+        found = _BRIEF_LINE.match(lines[0]) if lines and _BRIEF_MARKER_LINE.match(lines[0]) else None
+        return ([found.group("step").lower()], tool_input.get("session_id")) if found else None
+    if tool == CREATE_SESSION_TOOL:
+        tags = tool_input.get("tags")
+        steps = _tag_values(tags, ARCHIVE_STEP_PREFIX) if isinstance(tags, list) else []
+        return (steps, None) if steps else None
+    return None
+
+
+def _step_subject(tool_input, transcript: str, target):
+    """(tags, mine) of the subject of a step call: the create's own tags, or the target's newest record in the
+    transcript, and the steps that subject carries. Raises ValueError when a brief's target has no current record."""
+    if target is None:
+        return tool_input["tags"], []
+    tags, tagged_after = _own_session_read(transcript, target, created=True) \
+        if transcript and isinstance(target, str) and target else (None, False)
+    if tags is None or tagged_after:
+        raise ValueError("no current record of the target")
+    return tags, _tag_values(tags, ARCHIVE_STEP_PREFIX)
+
+
+def step_dup_hit(tool: str, tool_input, transcript: str):
+    """Return (matched, reason) when this call would put a second live session on a step, else None. The call is a lane
+    brief or a create_session tagged cs-step:<step> (_step_call). It is refused when another live session, not the
+    brief's target, carries that step and shares a cs-repo tag with the subject (_step_subject); the reason names that
+    session. A brief to a target that carries the step itself starts no new lane, so it passes before any list read.
+    Steps and tags match without case. A session is live unless its newest row in the transcript's list_sessions reads
+    is archived (own_session.list_sessions_read). A session an earlier create_session of this transcript started and no
+    archive_session names is live too, when no list row shows it (own_session.created_sessions). A carrier on any page, whole read or not, is refused. With no
+    carrier found, no whole list read, a brief whose target has no current record, or a subject with no cs-repo tag is
+    refused too: unknown is never an allow, and the guard-wide crash path fails open, so any error here is a refusal.
+    Known limit: only this transcript is read, so a session another transcript started after its newest list read is not seen.
+    Cost: one transcript read per brief or create with a step, plus one for the target's record; no file written, no
+    process, no extra tool call."""
+    call = _step_call(tool, tool_input)
+    if call is None:
+        return None
+    steps, target = call
+    try:
+        subject, mine = _step_subject(tool_input, transcript, target)
+        steps = [s for s in steps if s not in mine]
+        if not steps:
+            return None
+        repos = set(_tag_values(subject, ARCHIVE_REPO_PREFIX))
+        if not repos:
+            raise ValueError("no cs-repo tag")
+        rows, whole = own_session.list_sessions_read(transcript)
+        live = [(sid, tags) for sid, (tags, archived) in rows.items() if not archived]
+        # A session a create_session of this transcript started is no row unless a later read showed it; a row,
+        # archived or not, is newer than the create and decides.
+        live += [(sid, tags) for sid, tags in own_session.created_sessions(transcript).items() if sid not in rows]
+        for sid, tags in live:
+            if sid == target:
+                continue
+            for step in steps:
+                if step in _tag_values(tags, ARCHIVE_STEP_PREFIX) and repos & set(_tag_values(tags, ARCHIVE_REPO_PREFIX)):
+                    return "lane step " + step + " carried by " + sid, STEP_DUP_REASON % (sid, step)
+        if not whole:
+            raise ValueError("no whole list read")
+    except (Exception, SystemExit):
+        return "lane step with no proof", STEP_DUP_UNKNOWN_REASON % steps[0]
+    return None
+
+
+def step_pr_hit(tool: str, tool_input, transcript: str):
+    """Return (matched, reason) when this call would start a second lane on a step an open lane pull request holds, else
+    None (rule lane-step-dup, part two). The call is a step call (_step_call). An open pull request in a cs-repo of the
+    subject whose head is lane_head_refs(step) refuses it, and the reason names the pull request. The brief's own text
+    (the message of a brief, the prompt of a create) lifts it when it says `continues #N` or `replaces #N` and N is
+    such an open pull request, whichever the list reads first; any other N lifts nothing. A brief to a target that carries the step passes too. The
+    read is open_pull_rows, the one reader lane-closes-after-records uses. A failed read, a repo tag that is no
+    owner/name, or a brief target with no current record is a refusal: the guard-wide crash path fails open.
+    Cost: one paged gh read per cs-repo tag, for each step call."""
+    call = _step_call(tool, tool_input)
+    if call is None:
+        return None
+    steps, target = call
+    text = tool_input.get("message" if tool == BRIEF_TOOL else "prompt")
+    taken = set(_STEP_CONTINUES.findall(text)) if isinstance(text, str) else set()
+    try:
+        subject, mine = _step_subject(tool_input, transcript, target)
+        steps = [s for s in steps if s not in mine]
+        if not steps:
+            return None
+        module = merge_module()
+        if module is None:
+            raise RuntimeError("the merge tool could not be loaded")
+        first = None
+        for repo in dict.fromkeys(_tag_values(subject, ARCHIVE_REPO_PREFIX)):
+            if not _REPO_NAME.fullmatch(repo):
+                raise ValueError("not an owner/name repo tag")
+            with module.shared_deadline(MERGE_READ_TIMEOUT):
+                pulls = open_pull_rows(module, repo)
+            for row in pulls:
+                ref = str(row["head"]["ref"]).lower()
+                for step in steps:
+                    if ref in lane_head_refs(step):
+                        if str(row.get("number")) in taken:
+                            return None
+                        first = first or (row, step)
+        if first:
+            row, step = first
+            return ("lane step " + step + " has open pull request " + str(row.get("number", "?")),
+                    STEP_PR_REASON % {"pr": row.get("number", "?"), "step": step})
+    except (Exception, SystemExit):
+        return "lane step with an unreadable pull request list", STEP_PR_READ_REASON % steps[0]
+    return None
 
 
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)

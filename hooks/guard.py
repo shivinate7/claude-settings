@@ -109,6 +109,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (rm-on-a-variable-needs-a-guard)
   rm-after-cd          deny. A recursive delete of a relative target after a cd.
                        (rm-after-cd-names-absolute-path)
+  archive-push-gates-delete  deny. A remote branch delete after an archive push of the same branch, with
+                       anything but `&&` between them. (shared-trees-archive-then-delete)
   ln-over-directory    deny. See the comment at rule 3b in judge_shell.
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
                        the working folder (`$(pwd)` too) or a folder above it, in either shell.
@@ -191,6 +193,17 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        that holds a `<` or no letter or digit is a refusal. A lane `create_session` whose prompt has the marker
                        line is judged the same way against its own tags, with no transcript read. A message without the marker reads no transcript. An
                        override lifts it.
+  lane-step-dup       deny. A lane brief (the lane-one-topic marker) or a `create_session` tagged `cs-step:<step>` while
+                       another live session, not the brief's target, carries that step and shares a cs-repo tag with the
+                       subject (the target's record, or the create's own tags), read from this transcript's
+                       list_sessions reads. A session whose newest row is archived is not live. The reason names the
+                       carrier. A brief to a target that carries the step passes. With no carrier found, no whole
+                       list_sessions read (a chain from no cursor, each next read's after_id the page before's last
+                       row id, the last has_more false, none filtered), a target with no current record, and a
+                       subject with no cs-repo tag are refusals. Steps and tags match without case. The same call is also
+                       refused while an open pull request of the cs-repo has the step's head (shared_names.lane_head_refs),
+                       and the reason names it, unless the brief or prompt says `continues #N` or `replaces #N`, or the
+                       target carries the step. A pull request read that fails is a refusal. An override lifts it.
   message-time-matches-clock
                        deny. A send_message whose first non-blank line opens with a header stamp: a label of 1 to 4 words,
                        then `,` or `:` or a dash spaced on both sides, an optional date, then `H:MM` or `HH:MM`, an
@@ -581,16 +594,17 @@ while True:
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
             PUSH_AGENT_REASON, PUSH_ALL_AGENT_REASON, PUSH_ALL_REASON, PUSH_REASON, PUSH_STRAY_REASON,
+            ARCHIVE_GUARD_REASON, archive_guard_hits,
             cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_verdict,
             rm_delete_hit, SUBST_OPEN, _in_group,
         )
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
+            CONFLICT_MARKERS_UNREAD_KIND, CONFLICT_MARKERS_UNREAD_REASON, DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, step_dup_hit, step_pr_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
         _loading = "guard_frozen"
@@ -3820,10 +3834,23 @@ def role_round_drift(pointer_root):
             for _, _, _, word, text in role_round_rows(pointer_root) or () if word not in ROLE_MODEL_RANK]
 
 
+def frontmatter_scalar(raw):
+    """A frontmatter value without its quotes or a trailing ` # comment`, "" when nothing is left. A value that is only
+    a comment (`# sonnet`) or an unquoted YAML null (`~`, `null`) holds no value. The one reader of a scalar's text."""
+    raw = str(raw).strip()
+    if raw[:1] in ("'", '"'):
+        close = raw.find(raw[0], 1)
+        return raw[1:close] if close > 0 else raw[1:]
+    value = re.split(r"(?:^|\s)#", raw, maxsplit=1)[0].strip()
+    return "" if value.lower() in ("~", "null") else value
+
+
 def role_model_rank(model):
     """The index in ROLE_MODEL_RANK of the family a model name holds (`claude-opus-5-5`, `Haiku`), the highest family
-    when a name holds more than one, or None when it holds none. The one normaliser of a model name to its family."""
-    return next((rank for rank, word in reversed(list(enumerate(ROLE_MODEL_RANK))) if word in str(model).lower()), None)
+    when a name holds more than one, or None when it holds none. The value is read without a trailing comment
+    (frontmatter_scalar), so a family word in a comment never counts. The one normaliser of a model name to its family."""
+    value = frontmatter_scalar(model).lower()
+    return next((rank for rank, word in reversed(list(enumerate(ROLE_MODEL_RANK))) if word in value), None)
 
 
 def frontmatter_keys(lines):
@@ -3863,7 +3890,7 @@ def role_has_model_pin(pointer_root, role):
     frontmatter, False when none does, None when the folder cannot be read."""
     try:
         for keys in role_agent_keys(pointer_root):
-            if keys.get("name", "").lower() == role.lower() and keys.get("model"):
+            if keys.get("name", "").lower() == role.lower() and frontmatter_scalar(keys.get("model", "")):
                 return True
     except OSError:
         return None
@@ -4717,6 +4744,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         matched = folder and linked_nm_hit(segment, folder)
         if matched:
             refuse(tool, "deny", "linked-node-modules", LINKED_NM_REASON, matched)
+    # 3b2. Before the push asks below, so a pending ask never pre-empts this denial. POSIX only: `&&` is shell syntax.
+    if not POWERSHELL_CALL[0]:
+        hits = archive_guard_hits(nm_segments, ends)
+        if hits:
+            refuse(tool, "deny", "archive-push-gates-delete", ARCHIVE_GUARD_REASON, "; ".join(hits))  # glossary-ok: the pinned rule id, the step slug
 
     # 4. A wide delete refuses, and a force push asks.
     # Split before backslashes turn to slashes, so `it\'s` opens no quote that hides a delete.
@@ -4837,7 +4869,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # Cost: per judged commit, one `git rev-parse --show-toplevel --verify -q HEAD` (one more for an add in
     # another folder) and one `git diff --check`; none for an add alone, or a command with no commit or push.
     kind, matched = conflict_markers_hit(stripped, cwd)
-    if matched:
+    if matched and kind == CONFLICT_MARKERS_UNREAD_KIND:
+        # Queued, so it settles last and never masks another rule's deny.
+        ask_command("conflict-markers", CONFLICT_MARKERS_UNREAD_REASON, matched, "git commit or push")
+    elif matched:
         markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else
                           CONFLICT_MARKERS_PUSH_REASON if kind == "push" else CONFLICT_MARKERS_REASON)
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
@@ -6851,6 +6886,15 @@ def judge(payload) -> None:
     briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # A brief or a create naming a step another live session of the repo carries (rule lane-step-dup).
+    doubled = step_dup_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    if doubled:
+        refuse(tool, "deny", "lane-step-dup", doubled[1], doubled[0])
+    # The same call, for an open lane pull request that holds the step (rule lane-step-dup, part two).
+    held = step_pr_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    if held:
+        refuse(tool, "deny", "lane-step-dup", held[1], held[0])
 
     # 8b. agent-no-remote-tools. An agent never starts, messages, tags or archives sessions, nor sets scheduled tasks;
     # the session that spawned it does. Keyed on a truthy agent_id of any shape, so a drifted id stays refused. After the

@@ -125,10 +125,21 @@ add("lane-start-settings: a denied lane with no model names model in its reason"
 add("lane-start-settings: lane tag with a model and a source_url is allowed", "allow",
     tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", source_url=LANE_SOURCE_URL)
+# The open pull requests of the lane's cs-repo, for lane-step-dup-pr: a stand-in for claude-settings with none open.
+LANE_START_GH = os.path.join(ROOT, "lanestart-gh")
+
+
+def build_lane_start_gh():
+    """The stand-in pull request tool for claude-settings: it answers only that repo, and holds no open pull request."""
+    make_fake_gh(LANE_START_GH, "main", need=["shivinate7/claude-settings"])
+
+
+lazy_fixture([LANE_START_GH], build_lane_start_gh)
 add("lane-start-settings: lane tag among several tags with a model and a source_url is allowed", "allow",
     tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-repo:shivinate7/claude-settings", "cs-step:lane-start-settings", "cs-build:lane"],
-    model="sonnet", source_url=LANE_SOURCE_URL)
+    model="sonnet", source_url=LANE_SOURCE_URL,
+    transcript=role_path("lane-start-listed"), env_path=fake_gh_path(LANE_START_GH))
 add("lane-start-settings: coordinator call with no model and no source_url is allowed", "allow",
     tool=LANE_TOOL, tags=["cs-build:coordinator"], prompt="do the task")
 add("lane-start-settings: triage call with no model and no source_url is allowed", "allow",
@@ -366,11 +377,14 @@ def merge_tool_missing_case():
     if "merge-checks" not in result.stdout or "could not be loaded" not in result.stdout:
         return False, "expected a deny that names the unloadable tool, got %r" % result.stdout[:120]
     # The same copy cannot read the record folders either. The cite rule stands down, and the log says so.
+    # git is on PATH for this probe: a commit whose git cannot start asks, and that is not this case's subject.
+    git_env = dict(env)
+    git_env["PATH"] = GHMAIN + os.pathsep + PY_PATH + os.pathsep + GIT_PATH
     result = subprocess.run(
         [sys.executable, copy],
         input=json.dumps({"tool_name": "Bash", "cwd": NOGIT, "tool_input": {
             "command": VCS + ' commit -m "cites decisions/one-shared-record-stamp.md"'}}),
-        capture_output=True, text=True, env=env, timeout=60)
+        capture_output=True, text=True, env=git_env, timeout=60)
     if "permissionDecision" in result.stdout:
         return False, "an unread folder list must not deny, got %r" % result.stdout[:120]
     try:
