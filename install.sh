@@ -22,6 +22,10 @@ case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) echo "install.sh does not run on Win
 REPO="shivinate7/claude-settings"
 REF="${CLAUDE_SETTINGS_REF:-stable}"   # stable: the branch sessions install from. CLAUDE_SETTINGS_REF=main is the recovery.
 RAW="https://raw.githubusercontent.com/${REPO}/${REF}"
+# REFRESH_FETCH: the fetch the cloud refresh hook runs. HOOK_CMD builds the hook from it and from the RAW in force at write time.
+# REFRESH_HEAD: that fetch up to a ref. A refresh hook built at any ref holds REFRESH_HEAD, a ref, then /install.sh.
+REFRESH_FETCH="curl -fsSL"
+REFRESH_HEAD="${REFRESH_FETCH} ${RAW%"${REF}"}"
 TARBALL="https://github.com/${REPO}/archive/refs/heads/${REF}.tar.gz"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
@@ -1042,6 +1046,32 @@ TARGET_JSON="$CLAUDE_DIR/settings.json"
 FIRES_JQ='def fires($s): (.matcher // "") as $m
   | if $m == "" or $m == "*" then true else (try ($s | test("^(" + $m + ")$")) catch false) end;'
 
+# The session source that the refresh hook passed in CS_HOOK_INPUT: empty when absent or unreadable. The one home of the
+# read: the stale-snapshot warning below and the cloud startup entries both use it.
+HOOK_SRC=
+if [ "$CLOUD" = 1 ] && command -v jq >/dev/null 2>&1; then
+  HOOK_SRC=$(printf '%s' "${CS_HOOK_INPUT:-}" \
+    | jq -r 'if (.source | type) == "string" then .source else empty end' 2>/dev/null)
+fi
+
+# Stale snapshot: the old settings.json is the one the last cloud run wrote. A SessionStart entry in it that fires on
+# startup and is not the refresh hook (REFRESH_HEAD, in either form, built at any ref) means the snapshot holds hooks
+# that a fix has since replaced. Warn once, for a startup hook run: a source of startup, or no readable source with CLAUDE_PROJECT_DIR set (a
+# snapshot from before the refresh hook passed its input; the snapshot build has neither). Resume stays silent.
+# The warning reads only local state, so a failed fetch does not stop it.
+# Cost: one jq run on the old file per cloud startup, no network call, no other process. Fail open: a missing file, bad
+# JSON or no jq is silent and never fails the install.
+if [ "$CLOUD" = 1 ] && [ -f "$TARGET_JSON" ] \
+   && { [ "$HOOK_SRC" = startup ] || { [ -z "$HOOK_SRC" ] && [ -n "${CLAUDE_PROJECT_DIR:-}" ]; }; }; then
+  if [ "$(jq -r --arg head "$REFRESH_HEAD" "$FIRES_JQ"'def refresh: . as $c
+        | any($c | indices($head)[]; $c[(. + ($head | length)):] | test("^\\S+/install\\.sh(\\s|$)"));
+      [.hooks.SessionStart[]? | select(fires("startup"))
+        | select(all(.hooks[]?; (.command // "") | refresh) | not)] | length' \
+      "$TARGET_JSON" 2>/dev/null)" -gt 0 ] 2>/dev/null; then
+    log "WARNING: this environment's snapshot is stale: its settings.json still holds a SessionStart startup entry from before this run. Edit the environment and save its Setup script, so the snapshot rebuilds."
+  fi
+fi
+
 if [ "$CLOUD" = 1 ]; then
   # Cloud: generate a real file (not a symlink) whose startup SessionStart entry is a hook that
   # refreshes ~/.claude by re-running install.sh from GitHub. Claude Code runs the entries of one
@@ -1050,7 +1080,7 @@ if [ "$CLOUD" = 1 ]; then
   # install runs them itself once the hooks are copied (see "cloud startup entries" below).
   # The refresh hook hands its stdin to install.sh, which reads the session source from it.
   # Locals get no refresh hook: their settings.json is a symlink into the clone.
-  HOOK_CMD='i=$(cat); curl -fsSL '"${RAW}"'/install.sh | CS_HOOK_INPUT="$i" bash -s -- --cloud'
+  HOOK_CMD='i=$(cat); '"${REFRESH_FETCH} ${RAW}"'/install.sh | CS_HOOK_INPUT="$i" bash -s -- --cloud'
   SRC_SHA=$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null) || SRC_SHA="no git"
   if command -v jq >/dev/null 2>&1; then
     # merge/cloud_allow.json: the `merge --confirm` and `merge --role` allow rules only a cloud session gets (a local settings.json links to the repo's, which has none).
@@ -1169,8 +1199,7 @@ start_entry_watchdog() {
 # logged and never fails the install. Without jq, the settings block above copied the file whole and
 # dropped nothing, so there is nothing to run here.
 if [ "$CLOUD" = 1 ] && command -v jq >/dev/null 2>&1 && [ -f "$SRC/settings.json" ]; then
-  START_SRC=$(printf '%s' "${CS_HOOK_INPUT:-}" \
-    | jq -r 'if (.source | type) == "string" then .source else empty end' 2>/dev/null)
+  START_SRC=$HOOK_SRC
   [ -n "$START_SRC" ] || START_SRC=startup
   if START_CMDS=$(jq -c --arg src "$START_SRC" "$FIRES_JQ"'
       [(.hooks.SessionStart // [])[] | select(fires("startup") and fires($src))
