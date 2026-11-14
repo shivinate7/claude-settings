@@ -22,10 +22,12 @@ except ImportError:  # install-hooks-whole: the guard set lands whole, the helpe
 from shared_names import config_dir  # noqa: E402  the one home, shared with the config watch
 
 
-def _git(where: str, *args):
+def _git(where: str, *args, stdin=None):
+    """One git read on `where`. `stdin` is text fed to git (a `--stdin` read); None leaves stdin alone."""
+    extra = {} if stdin is None else {"input": stdin}
     try:
         return _nowindow.run(
-            ["git", "-C", where, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=10
+            ["git", "-C", where, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=10, **extra
         )
     except Exception:
         return None
