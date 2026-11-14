@@ -1,0 +1,14 @@
+{
+ "id": "lane-four-lessons-unfiled",
+ "title": "Four process lessons from lane priority-vs-merge-order get a home: record after each round, read merge state when opening, run three lints on markdown, never two lane lints at once",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane priority-vs-merge-order, 04:04 CST Nov 14 (relayed; its own reads, not read by triage): the four lessons were NOT filed anywhere (the lane first wrote \"filed\" in error). (1) Post the tool-printed review record right after each passing round. (2) Read a PR's merge state when opening it: a dirty PR gets no CI run. (3) Run the STE, cost-pin and glossary lints on every markdown edit before pushing. (4) Never start two lane lints at once in one checkout (git fetch ref locks). Possible overlap by name, unread: record-after-each-round and review-record-before-any-push (1), lane-lint-before-push (3). Each lesson still needs a check or a rule, not prose alone (outcomes-mechanize-rules).",
+ "source": "lane priority-vs-merge-order 04:04 CST Nov 14",
+ "note": "Filed 04:04 CST Nov 14 by triage. Unstarted. The coordinator sorts each lesson to an existing step or its own lane.",
+ "updatedAt": "2026-11-14T04:04:57-06:00"
+}

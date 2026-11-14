@@ -1,0 +1,14 @@
+{
+ "id": "windows-guard-shard-balance",
+ "title": "The three checks-windows-guard shards are measured over 5 runs, and a shard is added only if the longest stays above the merge-install time",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Consultant ask via the coordinator (04:01 CST Nov 14; the consultant's reads, not read by triage): no step owns the Windows guard shard count; #2956 (guard-pr-runs-windows-shards) closed as covered by #3302. First read: run 43579733622 on main 4db2a9cf, three shards about 1465 s each, n=1. Scope: measure the three checks-windows-guard shards over 5 runs; add a shard only if the longest stays above checks-merge-install's post-split time (1689 s before #2942's split, so the target depends on #2942's result). Priority: low, behind the macOS gate and #2942.",
+ "source": "coordinator 04:01 CST Nov 14 (consultant's ask)",
+ "note": "Filed 04:04 CST Nov 14 by triage. Tracker: the coordinator. Path ALONE. No lane yet: it starts after #2942 lands. Related steps: windows-guard-cap-stopgap, lane-lint-windows-guard-slice (names only; overlap unread).",
+ "updatedAt": "2026-11-14T04:04:57-06:00"
+}
