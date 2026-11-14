@@ -1348,17 +1348,31 @@ class Host:
     DRAFT_TEST_JOB = re.compile(r"run \((windows|macos)")  # its Windows and macOS jobs, which the Linux-only lane lint never runs
     DRAFT_OK = ("success", "skipped", "neutral")
 
+    @staticmethod
+    def draft_row_skipped(r):
+        return r.get("status") == "completed" and r.get("conclusion") == "skipped"
+
     def draft_run_state(self, sha):
         """-> (state, lines): the verdict of the draft's lane-touched-tests run on the head `sha`, from ONE read of its check runs (no statuses).
         "fail": the `touched` job or a Windows or macOS test job finished with a conclusion other than success, skipped or neutral; `lines` name each job and its link.
         "wait": one of those jobs has not finished. "unknown": no `touched` job is on `sha`, so no run was judged for this head (a run of an older head is never read),
         or `touched` was skipped, as a never-drafted or ready lane's is: no touched test ran, so there is no proof.
-        "pass": `touched` succeeded and every test job that ran succeeded or was skipped. Of rows that share a name (a re-run), the newest id counts: a re-run that passed clears the old failure."""
+        "pass": `touched` succeeded and every test job that ran succeeded or was skipped. Of rows that share a name (a re-run), the newest id counts: a re-run that passed clears the old failure.
+        A skipped row never replaces a row of its name that ran (finished or not), whatever the ids: a ready PR's run skips every job on the same head as the draft's run, so its newer
+        skipped row would hide the draft's pass (read as unknown) or its failure (read as unknown, or as a pass for a test job). Rows that are all skipped keep the newest."""
         newest = {}
         for r in self.pages(f"commits/{sha}/check-runs", "check_runs"):
             name = r.get("name") or ""
             if name == self.DRAFT_TOUCHED or self.DRAFT_TEST_JOB.match(name):
-                if name not in newest or (r.get("id") or 0) > (newest[name].get("id") or 0):
+                have = newest.get(name)
+                if have is None:
+                    newest[name] = r
+                    continue
+                skipped, had_skipped = self.draft_row_skipped(r), self.draft_row_skipped(have)
+                if skipped != had_skipped:
+                    if had_skipped:  # a row that ran replaces a skipped one, whatever the ids
+                        newest[name] = r
+                elif (r.get("id") or 0) > (have.get("id") or 0):
                     newest[name] = r
         failed = [f"{n}: {r.get('conclusion')} {r.get('html_url') or r.get('details_url') or '(no link)'}"
                   for n, r in sorted(newest.items()) if r.get("status") == "completed" and r.get("conclusion") not in self.DRAFT_OK]
