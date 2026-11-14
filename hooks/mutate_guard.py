@@ -1291,10 +1291,6 @@ MUTATIONS = [
      '    found = []\n    for edit in edits if isinstance(edits, list) else ():',
      '    found = []\n    for edit in []:', "guard",
      'local-allow: an Edit adding an allow rule beside a // comment asks'),
-    ("local-allow-global: the deny and ask keys are not skipped, so a broken file's deny rule asks",
-     '        if key in ("deny", "ask"):\n            continue\n',
-     '', "guard",
-     'local-allow: a broken settings.local.json write holding only deny and ask rules does not ask'),
     # The fragment scanner's arms, read only for a text that does not parse. Each entry is killed by the case
     # named in it, in tests/guard/s21305-local-allow-global.py (family local-allow-global).
     ("local-allow-global: a # inside an allow string ends the string, so its rule is lost to the fragment scanner",

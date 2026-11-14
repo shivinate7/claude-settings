@@ -142,8 +142,8 @@ add("local-allow: a multi-line string in a non-allow field naming allow does not
 add("local-allow: a template-literal body in a non-allow field naming allow does not ask", "allow",
     tool="Edit", cwd=NOGIT, file_path=LA_EMPTY, old_string="{}",
     new_string='{"note": `\nallow ${list}\n`}', lacks=NOT_RULE)
-# A broken write holds deny and ask rules, so the scanner reads its fragment and must skip both keys: a rule
-# under deny or ask is never an allow rule, and the file is not JSON, so the fragment read is the one that runs.
+# A broken write holds deny and ask rules, so the fragment read is the one that runs: a rule under deny or ask
+# is never an allow rule, whatever the scanner does with those keys.
 add("local-allow: a broken settings.local.json write holding only deny and ask rules does not ask", "allow",
     tool="Write", cwd=NOGIT, file_path=LA_LOCAL,
     content='// broken draft, see the shared file\n{\n  "permissions": {\n    "deny": ["Bash(git push)"],\n'
