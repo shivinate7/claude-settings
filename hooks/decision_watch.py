@@ -54,7 +54,7 @@ or unreadable, `git` unavailable or failing, or the model subprocess failing, ti
 answering something that is not the JSON verdict it was asked for: each of these ends the
 run with a `systemMessage` that names UNKNOWN and why, and exit 0. This hook only ever
 reports, so nothing here ever refuses the turn. The incident cap never touches this branch:
-an UNKNOWN read is never cached and always reported again.
+an UNKNOWN read is never cached and always reported again, except a lost transcript, said once per session (step decision-watch-finds-transcript).
 
 THE CONFIG REPORT. The same Stop run also prints the config report: the project config files,
 merges into main and unreadable subjects of this turn. It is a separate section with its own
@@ -145,6 +145,8 @@ FLAG_PREFIX = "Decision watch: FLAG. "
 # folder, not a failed check, so it is said plainly and once per session (NO_REPO_SEEN_KEY).
 NO_REPO_MESSAGE = "Decision watch is off here: this folder is not a git repo."
 NO_REPO_SEEN_KEY = "no-git-repo"
+NO_TRANSCRIPT_SEEN_KEY = "no-transcript"
+SESSION_ID_NAME = re.compile(r"[\w.-]+")
 
 # WHY_MAX_LEN bounds the model's own `why` text before it is printed into the parent
 # session's transcript. That text is the judge model's summary of a diff built from
@@ -480,6 +482,36 @@ def _load_seen(session_id):
     return set()
 
 
+def find_transcript(path, session_id):
+    """Return the transcript's path, or None. The given path wins. A path that fails is read
+    again after the usual spellings are undone (`~`, backslashes). Then
+    the session id finds `projects/*/<id>.jsonl` in the config dir and in ~/.claude, so a
+    Windows path, a second config dir or a folder name cut short still resolves. An id that
+    is not a plain name matches nothing."""
+    spellings = []
+    if isinstance(path, str) and path:
+        spellings.append(path)
+        expanded = os.path.expanduser(path)
+        spellings += [expanded, expanded.replace("\\", "/")]
+    for candidate in spellings:
+        if os.path.isfile(candidate):
+            return candidate
+    if not isinstance(session_id, str) or not SESSION_ID_NAME.fullmatch(session_id) or session_id.startswith("."):
+        return None
+    roots = [guard.config_dir(), os.path.join(os.path.expanduser("~"), ".claude")]
+    found = []
+    for root in dict.fromkeys(roots):
+        try:
+            folders = os.listdir(os.path.join(root, "projects"))
+        except OSError:
+            continue
+        for folder in folders:
+            candidate = os.path.join(root, "projects", folder, session_id + ".jsonl")
+            if os.path.isfile(candidate):
+                found.append(candidate)
+    return max(found, key=os.path.getmtime) if found else None
+
+
 def _mark_seen(session_id, incident_key):
     path = _seen_store_path(session_id)
     if not path:
@@ -768,9 +800,18 @@ def run(hook, model_call=invoke_model, expect_key=None):
     the evidence moved between the two phases, so the reply is not used and the answer is UNKNOWN
     (SAFETY HOLE 1 of decision decision-watch-mod-limits).
     """
-    path = hook.get("transcript_path")
-    if not path or not isinstance(path, str) or not os.path.exists(path):
-        return UNKNOWN_PREFIX + "transcript_path is missing or does not exist."
+    given = hook.get("transcript_path")
+    path = find_transcript(given, hook.get("session_id"))
+    if path is None:
+        # Said once per session: a lost transcript does not change within a session. With no
+        # session_id nothing can dedupe, so it is said every time rather than never.
+        session_id = hook.get("session_id") or ""
+        if session_id and NO_TRANSCRIPT_SEEN_KEY in _load_seen(session_id):
+            return ""
+        _mark_seen(session_id, NO_TRANSCRIPT_SEEN_KEY)
+        named = "transcript_path %r does not exist" % given if given and isinstance(given, str) \
+            else "transcript_path is missing"
+        return UNKNOWN_PREFIX + named + ", and no transcript matches the session id."
 
     cwd = hook.get("cwd") or ""
     if not isinstance(cwd, str) or not cwd or not os.path.isdir(cwd):

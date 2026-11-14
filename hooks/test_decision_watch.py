@@ -1976,6 +1976,98 @@ def case_unread_zone_less_line_reads_as_local_under_cst():
                           local_turn="2026-11-01T12:00:00-06:00")
 
 
+# --------------------------------------------------------------------------- transcript lookup
+# A wrong transcript_path must not blind the watch: it finds the file by session id (step
+# decision-watch-finds-transcript). Found means the run reads it; an ordinary turn then stays silent.
+
+def _lookup_env(name):
+    """A scratch HOME and config dir, so a case never touches the real ~/.claude."""
+    home = os.path.join(ROOT, name + "_home")
+    cfg = os.path.join(ROOT, name + "_cfg")
+    os.makedirs(home, exist_ok=True)
+    os.makedirs(cfg, exist_ok=True)
+    return home, cfg
+
+
+@contextlib.contextmanager
+def _env(**values):
+    prior = {k: os.environ.get(k) for k in values}
+    os.environ.update(values)
+    try:
+        yield
+    finally:
+        for k, v in prior.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def _lookup_case(label, given, sid, store_root, folder, home, cfg, repo):
+    """Put the transcript at <store_root>/projects/<folder>/<sid>.jsonl, hand in `given`."""
+    store = os.path.join(store_root, "projects", folder)
+    os.makedirs(store, exist_ok=True)
+    real = os.path.join(store, sid + ".jsonl")
+    with open(real, "w", encoding="utf-8") as f:
+        f.write(json.dumps(human_record("hi", T0)) + "\n")
+    hook = {"transcript_path": given(real), "cwd": repo, "session_id": sid}
+    with _env(HOME=home, USERPROFILE=home, CLAUDE_CONFIG_DIR=cfg):
+        message = dw.run(hook, model_call=never_called())
+    check("transcript_lookup %s: found by session id, silent" % label, message == "", message)
+
+
+def case_transcript_lookup_finds_by_session_id():
+    home, cfg = _lookup_env("lookup")
+    repo = make_repo("lookup_repo")
+    write(os.path.join(repo, "a.txt"), "x")
+    commit_all(repo)
+    _lookup_case("windows backslash", lambda r: r.replace("/", "\\"), "sid-back-1", cfg, "p", home, cfg, repo)
+    _lookup_case("drive letter", lambda r: "C:\\Users\\x\\.claude\\projects\\p\\sid-drive-1.jsonl",
+                 "sid-drive-1", cfg, "p", home, cfg, repo)
+    _lookup_case("tilde", lambda r: "~/.claude/projects/p/sid-tilde-1.jsonl", "sid-tilde-1",
+                 os.path.join(home, ".claude"), "p", home, cfg, repo)
+    _lookup_case("git bash /c/", lambda r: "/c/Users/x/.claude/projects/p/sid-bash-1.jsonl",
+                 "sid-bash-1", cfg, "p", home, cfg, repo)
+    _lookup_case("second config dir", lambda r: os.path.join(cfg, "projects", "gone", "sid-second-1.jsonl"),
+                 "sid-second-1", os.path.join(home, ".claude"), "p", home, cfg, repo)
+    long_folder = "C--" + "very-long-folder-name-" * 9
+    _lookup_case("long folder name", lambda r: os.path.join(cfg, "projects", long_folder[:100], "sid-long-1.jsonl"),
+                 "sid-long-1", cfg, long_folder, home, cfg, repo)
+
+
+def case_transcript_lookup_refuses_other_sessions():
+    home, cfg = _lookup_env("lookup_other")
+    repo = make_repo("lookup_other_repo")
+    write(os.path.join(repo, "a.txt"), "x")
+    commit_all(repo)
+    store = os.path.join(cfg, "projects", "p")
+    write(os.path.join(store, "someone-else.jsonl"), json.dumps(human_record("hi", T0)) + "\n")
+    with _env(HOME=home, USERPROFILE=home, CLAUDE_CONFIG_DIR=cfg):
+        for sid in ("no-such-session", "../p/someone-else", "*", ""):
+            hook = {"transcript_path": "/nowhere/x.jsonl", "cwd": repo, "session_id": sid}
+            message = dw.run(hook, model_call=never_called())
+            check("transcript_lookup: id %r matches no file" % sid, message.startswith(dw.UNKNOWN_PREFIX), message)
+
+
+def case_transcript_unknown_names_path_once_per_session():
+    home, cfg = _lookup_env("lookup_once")
+    repo = make_repo("lookup_once_repo")
+    write(os.path.join(repo, "a.txt"), "x")
+    commit_all(repo)
+    given = "/nowhere/lost-path.jsonl"
+    hook = {"transcript_path": given, "cwd": repo, "session_id": "once-sid-1"}
+    with _env(HOME=home, USERPROFILE=home, CLAUDE_CONFIG_DIR=cfg):
+        first = dw.run(hook, model_call=never_called())
+        check("transcript_unknown: first run names the path", first.startswith(dw.UNKNOWN_PREFIX) and given in first, first)
+        check("transcript_unknown: same session, silent", dw.run(hook, model_call=never_called()) == "")
+        other = dict(hook, session_id="once-sid-2")
+        check("transcript_unknown: a new session hears it", given in dw.run(other, model_call=never_called()))
+        blank = {"cwd": repo, "session_id": "once-sid-3"}
+        said = dw.run(blank, model_call=never_called())
+        check("transcript_unknown: no path at all is said, not silent", said.startswith(dw.UNKNOWN_PREFIX), said)
+        check("transcript_unknown: no path, said once", dw.run(blank, model_call=never_called()) == "")
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -1983,6 +2075,9 @@ def main():
     case_allow_approved()
     case_outbound_alone_no_disk_change()
     case_missing_transcript()
+    case_transcript_lookup_finds_by_session_id()
+    case_transcript_lookup_refuses_other_sessions()
+    case_transcript_unknown_names_path_once_per_session()
     case_ordinary_turn()
     case_last_human_reader_skips_a_peer_record()
     case_not_a_repo()
