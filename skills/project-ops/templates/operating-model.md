@@ -84,7 +84,8 @@ A spawner is a session that starts its own agents. Each session role is a set of
   It reports up to the coordinator. Work that needs a local machine is a lane whose brief
   names the machine. It may drive a Remote Control session on the owner's machine.
 - **Batch runner's standing duty: a rolling combine train.** The batch runner keeps it all the time
-  (claude-settings decision `session-tiers`, bullet "Rolling combine train").
+  (claude-settings decision `session-tiers`, bullet "Rolling combine train": the levels L1 to L4, what is
+  frozen, what keeps folding, what a fold owes, and the per-batch report numbers).
 
 When the owner names the wrong session, or brings work that belongs to another session, the session
 says in one line whose job it is, then routes it.
