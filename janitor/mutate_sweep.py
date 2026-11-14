@@ -38,6 +38,13 @@ are scanned for lines containing "FAIL", and a mutant's death only counts when t
 case name shows up in one of them: a mutant that crashes the suite, or that some UNRELATED case
 happens to catch, is WRONG CAUSE, not KILLED.
 
+A CLEAN LAYOUT MUST RUN ITS SUITE. A mutant's FAIL lines prove a kill only when the same unmutated
+layout passes its suite. So each suite that has a chosen, unskipped mutant gets one control: one filtered
+run of that suite on an unmutated scaffold in its own folder (`run_control`). The folder is removed before
+the next job starts, and the control runs inside the MUTATE_JOBS cap. A red, empty or raising control reads
+that suite's mutants UNKNOWN and exits 1. Cost: one filtered suite run and one temp scaffold per suite per
+run. It writes no log, starts no timer, and leaves no long-lived process beyond the run's own pool.
+
 A mutant no case kills is a survivor, and the run exits 1.
 
 Run:
@@ -45,6 +52,7 @@ Run:
 Only some mutants (label fragments, comma-separated; every anchor is still checked):
     MUTATE_ONLY="deadline,oldest first" python3 janitor/mutate_sweep.py
 """
+import functools
 import os
 import re
 import shutil
@@ -1591,6 +1599,50 @@ def run_mutant(sources, work: str, index: int, entry):
         shutil.rmtree(scaffold, ignore_errors=True)
 
 
+def control_key(entry):
+    """The suite whose clean-layout control judges `entry`'s mutant, or None when this platform skips the
+    entry. A skipped entry asks for no control (see `mutate_shared.run_mutants`)."""
+    _label, target, _old, _new, _required, only_on = mutation_parts(entry)
+    if mutate_shared.skip_reason(only_on):
+        return None
+    return SUITE_FOR_TARGET[target]
+
+
+def control_case(suite, entries):
+    """The required case a suite's control runs: the first one among the chosen, unskipped entries of that suite."""
+    for entry in entries:
+        if control_key(entry) == suite:
+            return mutation_parts(entry)[4]
+    raise ValueError("no chosen mutation of suite %s runs on this platform" % suite)
+
+
+def run_controls(sources, work: str, entries):
+    """Return {suite: function} with one control per suite that a chosen, unskipped entry reads. `entries`
+    are the chosen mutations, so a control runs a case of this run's own mutants, never MUTATIONS' first."""
+    suites = []
+    for entry in entries:
+        suite = control_key(entry)
+        if suite is not None and suite not in suites:
+            suites.append(suite)
+    return {suite: functools.partial(run_control, sources, work, suite, entries) for suite in suites}
+
+
+def run_control(sources, work: str, suite: str, entries):
+    """Run one filtered case of `suite` on an unmutated scaffold in its own folder under `work`, and return
+    run_suite's (code, red, ran, seen). The folder is removed in `finally`, so it is gone before the next job
+    starts even when the run raises. Naming `sweep` with its own text is an identity mutation: the scaffold
+    holds the repository's files unchanged, so a red control means the layout itself, not a mutant."""
+    only = control_case(suite, entries)
+    scaffold = os.path.join(work, "c_%s" % mutate_shared.safe_name(suite))
+    config_dir = os.path.join(scaffold, "cfg")
+    try:
+        os.makedirs(config_dir, exist_ok=True)
+        build_scaffold(scaffold, sources, "sweep", sources["sweep"])
+        return run_suite(os.path.join(scaffold, "janitor", suite), config_dir, only)
+    finally:
+        shutil.rmtree(scaffold, ignore_errors=True)
+
+
 def main() -> int:
     sources = {}
     for name, path in SOURCES.items():
@@ -1627,7 +1679,9 @@ def main() -> int:
     try:
         return mutate_shared.run_mutants(
             chosen,
-            lambda item: run_mutant(sources, work, item[0], item[1]))
+            lambda item: run_mutant(sources, work, item[0], item[1]),
+            controls=run_controls(sources, work, [entry for _i, entry in chosen]),
+            control_of=lambda item: control_key(item[1]))
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
