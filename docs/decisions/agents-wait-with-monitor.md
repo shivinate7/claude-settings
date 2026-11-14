@@ -11,7 +11,7 @@ Owner, 2026-10-11 and 2026-10-12: the `Monitor` tool, Claude Code's own wait-onc
 - `gh run watch` in the foreground or the background (`ci-wait-reads-run-status`, CI waits read the run status);
 - `timeout /t`, which the ruling did not name.
 
-It allows one `sleep` or `Start-Sleep` under 25 s anywhere in a command, and a background `gh pr checks --watch`. A word inside a quoted string or a heredoc body is not a call. The remedy names the CI-wake notice that follows `gh pr ready`, or Monitor.
+It allows one `sleep` or `Start-Sleep` under 25 s anywhere in a command, and a background `gh pr checks --watch`. A word inside a quoted string or a heredoc body is not a call. A python, node or perl heredoc body reads `\'` as an escape inside a single-quoted string, and that read lives in `_split_reading` (`hooks/guard_core.py`). The remedy names the CI-wake notice that follows `gh pr ready`, or Monitor.
 
 Why: the guard once refused Monitor and all short pauses, so an agent that followed the Bash tool's text lost a turn. Almost none of the refusals were real loops. That count is unmeasured: it has no source or re-run command.
 Whether Monitor still errors is unmeasured too (notes entry `waiter-monitor-failures-unmeasured`).
