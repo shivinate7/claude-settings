@@ -50,3 +50,5 @@ Under Done, the first line is BUILT, PARTIAL, or OTHER. Then list the worktree p
 the brief's branch you pushed to (or that nothing was pushed), the files touched with line ranges, and the checks run with their outcome. Drop a label
 that does not apply. Write plainly (rule output-write-in-ste). Start with the point. No preamble.
 Report in under 25 lines unless the brief names another cap.
+
+Keep your prose to what the reader needs, with no narration; reasoning and tool inputs are never cut.

@@ -90,3 +90,5 @@ Done, list each mockup with its path, its deep links, and the sizes and themes i
 brief's branch you pushed to, or say nothing was pushed. Then list the critique's findings and which you fixed. Under
 Input Needed, list each `Owner grant: yes` item. Write plainly (rule output-write-in-ste). Report in
 under 25 lines unless the brief names another cap.
+
+Keep your prose to what the reader needs, with no narration; reasoning and tool inputs are never cut.

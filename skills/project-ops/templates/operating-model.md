@@ -192,6 +192,10 @@ parent, or miss a message while busy.
   from `brief.md`. Its full text also goes in the step's `ask` field.
 - When a ruling changes a step, update the brief file and the `ask` copy in the same turn.
 
+## Agent output
+
+- Keep your prose to what the reader needs, with no narration; reasoning and tool inputs are never cut.
+
 ## Portability
 
 Every process built here gets an explicit call: port it to the other repos, yes or no, and why.
