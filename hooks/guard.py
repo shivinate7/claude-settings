@@ -66,7 +66,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   pointer-edit         deny. A Write, Edit, MultiEdit or NotebookEdit whose target is one of the
                        pointer checkout's own files. The pointer's `.git`, a linked worktree under
                        `.claude/worktrees/` or elsewhere, a target outside it, an unreadable or
-                       missing pointer and the read tools pass. A shell write is not judged. The
+                       missing pointer and the read tools pass. A Bash write (redirect, `tee`, `sed -i`, `cp`, a python or node
+                       script) is judged by the same predicate. The
                        reason names the EnterWorktree tool. An override lifts a direct pointer path. A
                        config-dir spelling of a pointer file is frozen (never_lifted calls is_frozen
                        per target), so no override lifts it, as with frozen-path. It spawns no git.
@@ -2483,6 +2484,22 @@ def builder_shell_test_hit(raw: str, stripped: str, cwd: str, tool) -> str:
     return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True, command_position=True)
             or interpreter_write_hit(raw, cwd, builder_test_path, script_files=True)
             or git_apply_hit(raw, cwd, builder_test_path))
+
+
+def pointer_file_path(path: str, cwd: str) -> bool:
+    """True when `path` is one of the pointer checkout's own files, by the shape pointer_edit_hit reads."""
+    return bool(pointer_edit_hit([path], cwd))
+
+
+def pointer_shell_hit(raw: str, stripped: str, cwd: str, tool) -> str:
+    """The pointer checkout file a shell command writes, else ''. The same two readings as
+    builder_shell_test_hit (the plain write forms on the heredoc-stripped command, a python or node
+    script on the raw one), judged by the Edit tools' own predicate, so the two paths never disagree."""
+    if not pointer_checkout():
+        return ""
+    POWERSHELL_CALL[0] = tool == "PowerShell"
+    return (_shell_write_hit(stripped, cwd, pointer_file_path, follow_cd=True, command_position=True)
+            or interpreter_write_hit(raw, cwd, pointer_file_path))
 
 
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
@@ -5254,6 +5271,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = shell_write_hit(raw, cwd, is_frozen, _holds_frozen)
     if matched:
         refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)
+
+    # 7a. A shell write into the pointer checkout's own files: the Edit tools' rule 0, for a Bash write
+    # (a redirect, `tee`, `sed -i`, `cp`, a python script). Same predicate, same reason.
+    matched = pointer_shell_hit(raw, stripped, cwd, tool)
+    if matched:
+        refuse(tool, "deny", "pointer-edit", POINTER_EDIT_REASON, "shell write target in the pointer checkout: " + matched)
 
     # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
     matched = project_config_shell_hit(stripped, cwd)
