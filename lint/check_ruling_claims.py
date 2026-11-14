@@ -57,13 +57,13 @@ import glob
 import json
 import os
 import re
-import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
-import ruled_store  # noqa: E402  the one reader of the rulings store
+import ruled_store  # noqa: E402  the one reader of the rulings store; it puts hooks/ on the path
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 NAME = "check_ruling_claims"
 # One break between two words of a claim: spaces, or a line end with an optional comment or quote prefix.
@@ -274,8 +274,8 @@ class Records:
 
 
 def git(root, *args):
-    done = subprocess.run(["git", "-C", root, *args], capture_output=True, text=True, encoding="utf-8",
-                          errors="replace")
+    done = _nowindow.run(["git", "-C", root, *args], capture_output=True, text=True, encoding="utf-8",
+                         errors="replace")
     if done.returncode:
         raise Unreadable("git %s failed in %s: %s" % (" ".join(args), root, done.stderr.strip()))
     return done.stdout
