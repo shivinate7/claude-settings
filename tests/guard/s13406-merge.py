@@ -1301,14 +1301,14 @@ TRUST_NAMED = ("confirm_repository_trust", "request_computer_folder")
 # refuses (round 1 finding 3). The cite for the lane offer line: ruling own-778-a-reword-offer-for-lane, owner,
 # 2026-11-13 18:24 CST, page item 778 pick a, relayed by the coordinator at 18:31 CST.
 for _coerced in ("true", 1):
-    add("trust-card-in-build: update_trigger with ask_owner %r in a lane session is refused" % (_coerced,), "deny",
+    add("trust-card-in-build: update_trigger with ask_owner %r in a lane is refused" % (_coerced,), "deny",
         rule=TRUST_RULE, tool="mcp__claude-code-remote__update_trigger", cwd=NOGIT, lacks=TRUST_NAMED,
         transcript=role_path("lane"), env=ROLE_ENV, trigger_id="trig_X", ask_owner=_coerced)
-add("trust-card-in-build: update_trigger with ask_owner false in a lane session allows", "allow",
+add("trust-card-in-build: update_trigger with ask_owner false in a lane allows", "allow",
     tool="mcp__claude-code-remote__update_trigger", cwd=NOGIT, silent=True, transcript=role_path("lane"),
     env=ROLE_ENV, trigger_id="trig_X", ask_owner=False)
 # The same tool without ask_owner opens no card: a lane may edit its own scheduled task.
-add("trust-card-in-build: update_trigger without ask_owner in a lane session allows", "allow",
+add("trust-card-in-build: update_trigger without ask_owner in a lane allows", "allow",
     tool="mcp__claude-code-remote__update_trigger", cwd=NOGIT, silent=True, transcript=role_path("lane"),
     env=ROLE_ENV, trigger_id="trig_X", enabled=False)
 
@@ -1337,6 +1337,10 @@ offer_case("a lane's refusal carries the lane offer line", role_path("lane"),
            ("offer the owner this line to type", "grants nothing"), ("To allow this act, type",))
 offer_case("a session with a parent and no cs-build tag carries the lane offer line", role_path("lane-untagged"),
            ("offer the owner this line to type",), ("To allow this act, type",))
+# A lane's own agent keeps the agent offer line: the one-act word does not reach an agent (override.offer, agent_id).
+add("trust-card-in-build offer: a lane's agent call keeps the agent offer line", "deny", rule=TRUST_RULE,
+    tool=_OFFER_TOOL, cwd=NOGIT, carries=("override 15m",), lacks=("offer the owner this line to type",) + TRUST_NAMED,
+    transcript=role_path("lane"), env=ROLE_ENV, agent_id="agent_offer_x", **TRUST_TOOLS[_OFFER_TOOL])
 for _offer_why, _offer_transcript, _offer_env in (
     ("no session id in the env", role_path("untagged"), None),
     ("no get_session record", role_path("no-record"), ROLE_ENV),
