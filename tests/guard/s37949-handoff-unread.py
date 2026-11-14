@@ -91,7 +91,8 @@ def hu_hook(mode, payload, config):
 
 def hu_cycle_check():
     """PostCompact sets the flag, the guard refuses a Bash call, a Read of the handoff clears the flag,
-    and the same Bash call is then allowed."""
+    the handoff audit's Audit: spawn clears the audit flag that PostCompact also set, and the same Bash
+    call is then allowed."""
     cfg = os.path.join(ROOT, "hu-cycle")
     handoff, flag = hu_paths(cfg, HU_SID)
     write(handoff, HU_TEXT)
@@ -99,6 +100,8 @@ def hu_cycle_check():
     if post.returncode != 0 or not os.path.isfile(flag):
         return False, "PostCompact did not set the flag (exit %d)" % post.returncode
     bash = {"command": "echo hi"}
+    audit = {"description": "audit", "subagent_type": "Explore", "model": "sonnet",
+             "prompt": "Audit: check the handoff against the repo."}
     ok, why = ov_story([("after compaction, before the read",
                          lambda: hu_call("Bash", bash, cfg, HU_SID), "deny", HU_RULE)])
     if not ok:
@@ -107,7 +110,11 @@ def hu_cycle_check():
                                   "tool_input": {"file_path": handoff}}, cfg)
     if read.returncode != 0 or os.path.isfile(flag):
         return False, "a Read of the handoff left the flag set (exit %d)" % read.returncode
-    ok, why = ov_story([("after the read", lambda: hu_call("Bash", bash, cfg, HU_SID), "allow", None)])
+    ok, why = ov_story([("after the read, the Audit: spawn",
+                         lambda: hu_call("Agent", audit, cfg, HU_SID), "allow", None)])
+    if not ok:
+        return False, why
+    ok, why = ov_story([("after the Audit: spawn", lambda: hu_call("Bash", bash, cfg, HU_SID), "allow", None)])
     if not ok:
         return False, why
     return True, "PostCompact sets the flag, Bash is refused, a Read of the handoff clears it, Bash is allowed"

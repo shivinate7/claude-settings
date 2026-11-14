@@ -70,6 +70,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  git's tracked files under a folder, suites left out (testing/tracked_tree.py)
 GUARD = os.path.join(HERE, "guard.py")
 SUITE = os.path.join(HERE, "test_guard.py")
+WAVE2_SUITE = os.path.join(HERE, "test_handoff_wave2.py")   # the compaction-audit cases (its part 4)
 WATCH = os.path.join(HERE, "config_watch.py")
 WATCH_SUITE = os.path.join(HERE, "test_config_watch.py")
 DECISION = os.path.join(HERE, "decision_watch.py")
@@ -92,6 +93,9 @@ TARGETS = {
     "calljudge": (CALL_JUDGE, CALL_JUDGE_SUITE, "CALL_JUDGE_UNDER_TEST", "call_judge"),
     # bin/sim-lease, which the guard loads by path (hooks/guard.py sim_lease_holds). The suite is the guard's.
     "simlease": (SIM_LEASE, SUITE, "GUARD_UNDER_TEST", "sim_lease"),
+    # The guard family's compaction-audit rule, judged by test_handoff_wave2.py part 4 (test_guard.py has no
+    # section for it). It lays out the guard family like "guard" and reads its guard from GUARD_UNDER_TEST.
+    "audit": (GUARD, WAVE2_SUITE, "GUARD_UNDER_TEST", "guard"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -3244,9 +3248,47 @@ MUTATIONS = [
      '    except Exception:\n        raise\n',
      "guard", "handoff-unread: a guard copy without reread_check.py fails open"),
     ("handoff-unread: an agent's call is judged like the main session's",
-     '        if ph is None or not isinstance(payload, dict) or payload.get("agent_id"):',
-     '        if ph is None or not isinstance(payload, dict):',
+     '        if ph is None or not isinstance(payload, dict) or payload.get("agent_id"):\n'
+     '            return ""\n'
+     '        sid = payload.get("session_id")\n'
+     '        if not sid or not isinstance(sid, str) or not os.path.isfile(ph.reread_flag_path(sid)):',
+     '        if ph is None or not isinstance(payload, dict):\n'
+     '            return ""\n'
+     '        sid = payload.get("session_id")\n'
+     '        if not sid or not isinstance(sid, str) or not os.path.isfile(ph.reread_flag_path(sid)):',
      "guard", "handoff-unread: a payload that carries agent_id is allowed"),
+    # ---- compaction-audit (decision precompact-handoff, item 16): one mutant per arm the rule needs. Each is
+    # judged by test_handoff_wave2.py part 4 (target "audit"), so its required name is one of that suite's checks.
+    ("compaction-audit: the refusal is never printed",
+     '            refuse(tool, "deny", "compaction-audit", COMPACTION_AUDIT_REASON % pending, pending)',
+     '            pass',
+     "audit", "after the read, a Bash call is refused by compaction-audit"),
+    ("compaction-audit: the Audit: spawn does not clear the audit flag",
+     "        judge(payload)\n        audit_flag_clear_after_allow(payload)",
+     "        judge(payload)\n        pass",
+     "audit", "the Audit: spawn clears the audit flag"),
+    ("compaction-audit: a quoted Audit: line clears the flag, so the first-line rule is dropped",
+     "        return AUDIT_ROW is not None and AUDIT_ROW.search(first) is not None",
+     "        return AUDIT_ROW is not None and AUDIT_ROW.search(prompt) is not None",
+     "audit", "an Agent whose Audit: line is quoted on a later line is refused by compaction-audit"),
+    ("compaction-audit: judge() clears the flag at the mark, so a later rule's refusal leaves it cleared",
+     "            AUDIT_SPAWN_PASSED.append(True)",
+     "            AUDIT_SPAWN_PASSED.append(True)\n            from reread_check import audit_clear\n            audit_clear(payload)",
+     "audit", "the refused Audit: spawn leaves the audit flag set"),
+    ("compaction-audit: audit_spawn hard-codes a case-blind marker, not the home row's case-sensitive one",
+     "        return AUDIT_ROW is not None and AUDIT_ROW.search(first) is not None",
+     '        return re.search(r"(?i)\\bAudit:", first) is not None',
+     "audit", "a lowercase `audit:` first line is not the marker"),
+    ("compaction-audit: an agent's call is judged like the main session's",
+     '        if ph is None or not isinstance(payload, dict) or payload.get("agent_id"):\n'
+     '            return ""\n'
+     '        sid = payload.get("session_id")\n'
+     '        if not sid or not isinstance(sid, str) or not os.path.isfile(ph.audit_flag_path(sid)):',
+     '        if ph is None or not isinstance(payload, dict):\n'
+     '            return ""\n'
+     '        sid = payload.get("session_id")\n'
+     '        if not sid or not isinstance(sid, str) or not os.path.isfile(ph.audit_flag_path(sid)):',
+     "audit", "a Bash call whose payload carries agent_id is allowed"),
     ("handoff-unread: the flag is not read, so a set handoff alone refuses",
      '        if not sid or not isinstance(sid, str) or not os.path.isfile(ph.reread_flag_path(sid)):',
      '        if not sid or not isinstance(sid, str):',
@@ -4597,7 +4639,7 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
     A mutant and its clean-layout control both go through here, so they differ only in the text:
     `old == new` is the control, the same layout with nothing mutated (see `run_controls`)."""
     stem = TARGETS[target][3]
-    if target in ("guard", "simlease"):
+    if target in ("guard", "simlease", "audit"):
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
         # module that holds it. The suite loads the copied guard.py, which finds its siblings.
         root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
@@ -4647,7 +4689,7 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
         copy_path = os.path.join(tree, "call_judge.py")
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
-    elif target not in ("guard", "simlease"):
+    elif target not in ("guard", "simlease", "audit"):
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
     return copy_path
@@ -4763,7 +4805,7 @@ def main() -> int:
         if target not in TARGETS:
             print("ERROR unknown mutation target %r: %s" % (target, label))
             return 1
-        if target == "guard":
+        if target in ("guard", "audit"):
             # Across every guard module: exactly one match, or the mutant breaks the wrong spot.
             try:
                 mutate_shared.find_anchor(HERE, old)

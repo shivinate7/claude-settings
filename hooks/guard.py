@@ -32,6 +32,16 @@ set_override_veto and session_home_keep):
                        unread. The reason names the handoff and says to Read it. A payload with
                        `agent_id` passes. An override lifts it. A failed import allows.
                        (precompact-handoff, item 9)
+  compaction-audit     deny. After compaction, once the handoff is read, a call from the main session
+                       until it spawns one agent (Agent or Task) whose brief's first non-blank line
+                       starts with `Audit:`. That spawn clears the audit flag only once it has passed every
+                       later rule (main() clears it after judge() returns); a refused, asked or
+                       override-lifted spawn clears nothing. The reason names the remedy. A payload with `agent_id` passes and
+                       clears nothing. An override lifts it and keeps the flag. A failed import allows.
+                       While the handoff is unread, handoff-unread speaks first. Cost: one flag-file
+                       existence check on a call with no flag; one small file written at compaction
+                       (reread_check --post-compact); no log line, hook, timer or process start on an
+                       allowed call. (precompact-handoff, item 16)
 
 Shell tools (Bash, PowerShell), in judge_shell order:
   builder-diff         deny. A builder commit or push whose diff holds a test path, judged
@@ -1215,6 +1225,14 @@ WORKTREE_HOME_REASON = (
 HANDOFF_UNREAD_REASON = (
     "Rule (handoff unread): context was compacted and this session has not read its handoff. "
     "Remedy: Read %s now. The Read clears this check. Then repeat the call."
+)
+
+COMPACTION_AUDIT_REASON = (
+    "Rule (compaction audit): context was compacted and the handoff audit is still owed. "
+    "Remedy: spawn one Explore agent on Sonnet whose brief's first line is `Audit:`, as step 3 of the "
+    "handoff prompt says. It reads the transcript from the last compaction marker and compares it "
+    "with %s. That spawn clears this check. Then repeat the call. "
+    "(decision precompact-handoff, item 16)"
 )
 
 HANDOFF_SECTIONS_REASON = (
@@ -6766,6 +6784,21 @@ def workflow_args_hit(tool: str, tool_input: dict) -> str:
     return next((v.strip() for v in values if workflow_args_placeholder(v)), "")
 
 
+# Set by rule compaction-audit when an Audit: spawn passes it. main() reads it after judge() returns.
+AUDIT_SPAWN_PASSED: list = []
+
+
+def audit_flag_clear_after_allow(payload) -> None:
+    """Drop the audit flag when the call was the Audit: spawn and judge() returned, so no later rule refused it
+    (a refusal, an ask or an override lift all end judge() in sys.exit). Never raises."""
+    try:
+        if AUDIT_SPAWN_PASSED:
+            from reread_check import audit_clear
+            audit_clear(payload)
+    except Exception:
+        pass
+
+
 def judge(payload) -> None:
     if payload.get("hook_event_name") == "SubagentStop":
         judge_stop(payload)
@@ -6793,6 +6826,20 @@ def judge(payload) -> None:
     unread = unread_handoff(payload) if unread_handoff else ""
     if unread:
         refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)
+    # 0, compaction-audit. Once the handoff is read, no call runs from the main session until it sends the audit
+    # step 3 of the handoff prompt asks for: a spawn whose brief opens with `Audit:`. The spawn passes this rule
+    # and is marked; main() clears the flag only once judge() returns, that is, after every later rule allowed it.
+    # A failed import allows.
+    try:
+        from reread_check import audit_pending, audit_spawn
+    except Exception:
+        audit_pending = None
+    pending = audit_pending(payload) if audit_pending else ""
+    if pending:
+        if audit_spawn(payload, SPAWN_TOOLS):
+            AUDIT_SPAWN_PASSED.append(True)
+        else:
+            refuse(tool, "deny", "compaction-audit", COMPACTION_AUDIT_REASON % pending, pending)
     # 0. Each agent stays inside its own worktree.
     home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
     if home_hit:
@@ -7159,6 +7206,7 @@ def main() -> None:
         pass  # a guard_core without the setter has no override: every refusal stands
     try:
         judge(payload)
+        audit_flag_clear_after_allow(payload)
     except SystemExit:
         raise
     except Exception as exc:
