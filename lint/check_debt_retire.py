@@ -147,7 +147,7 @@ def run_span(wt, span, timeout):
             except subprocess.TimeoutExpired:
                 if left <= HEARTBEAT:  # this wait used up the rest of the cap
                     proc.kill()
-                    proc.wait()  # not communicate(): a grandchild may still hold the pipes open
+                    proc.wait()  # not communicate(): on POSIX a grandchild holding the pipes would block it (case h5). Windows: unmeasured
                     return "unknown", "%s ran past %d s" % (span, timeout)
                 say("debt-retire: still running %s, %d s of %d s" % (span, time.monotonic() - start, timeout))
     if proc.returncode:
