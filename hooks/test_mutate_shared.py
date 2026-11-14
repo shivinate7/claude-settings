@@ -1052,5 +1052,31 @@ class FamilySuiteEngineTests(unittest.TestCase):
         self.assertEqual(names, [], "a family line whose file is missing is no suite: %s" % note)
 
 
+class LinuxOnlySweepMutationsTests(unittest.TestCase):
+    """A sweep mutation whose one proving case is skipped off Linux carries `only_on="linux"`, so
+    Windows and macOS count it skipped. Without it the mutation reads survived there and the job
+    goes red."""
+
+    PROVEN_ON_LINUX_ONLY = (
+        "finish gate: a dead host's live lock frees its tree with no finish proof (ungated verdict)",
+        "cut-short restore: a finished dead-host tree is not restored (the finish proof is read as absent)",
+    )
+
+    def test_a_mutation_proven_only_by_the_linux_only_suite_is_marked_linux(self):
+        by_label = {mutate_sweep.mutation_parts(e)[0]: mutate_sweep.mutation_parts(e)[5]
+                    for e in mutate_sweep.MUTATIONS}
+        for label in self.PROVEN_ON_LINUX_ONLY:
+            with self.subTest(label=label):
+                self.assertIn(label, by_label, "the mutation is gone from the list")
+                self.assertEqual(by_label[label], "linux")
+
+    def test_linux_runs_only_on_linux_and_posix_still_runs_on_macos(self):
+        for platform, linux, posix in (("linux", True, True), ("darwin", False, True), ("win32", False, False)):
+            with mock.patch.object(sys, "platform", platform):
+                with self.subTest(platform=platform):
+                    self.assertEqual(mutate_shared.skip_reason("linux") is None, linux)
+                    self.assertEqual(mutate_shared.skip_reason("posix") is None, posix)
+
+
 if __name__ == "__main__":
     unittest.main()
