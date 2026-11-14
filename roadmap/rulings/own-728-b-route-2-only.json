@@ -1,0 +1,10 @@
+{
+  "id": "own-728-b-route-2-only",
+  "at": "2026-11-13T18:24:00-06:00",
+  "title": "Wait, and build only route 2 of the first-red-job read, after #2980",
+  "ruling": "Owner 18:24 CST Nov 13, page item 728 b: wait and build only route 2 after PR #2980 merges (step lane-lint-once-fail-fast). No first-red-job read for now.",
+  "quote": "b",
+  "source": "Owner answer saved on the waiting page 18:24 CST Nov 13, thread 5d63b6e5; filed by triage.",
+  "status": "open",
+  "step": "lane-lint-once-fail-fast"
+}

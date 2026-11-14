@@ -1,0 +1,10 @@
+{
+  "id": "own-772-a-revert-merges-lines",
+  "at": "2026-11-13T18:24:00-06:00",
+  "title": "Edit CLAUDE.md line 54 and ci-hygiene SKILL.md line 61: merges resume when the revert merges",
+  "ruling": "Owner 18:24 CST Nov 13, page item 772 a: edit CLAUDE.md line 54 (rule git-red-main-reverts) and skills/ci-hygiene/SKILL.md line 61 to say merges resume when the revert merges, matching ruling own-745-b-resume-at-revert.",
+  "quote": "a",
+  "source": "Owner answer saved on the waiting page 18:24 CST Nov 13, thread 5d63b6e5; filed by triage.",
+  "status": "open",
+  "step": "red-main-owner-two-picks"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "own-742-a-cut-extra-sentence",
+  "at": "2026-11-13T18:24:00-06:00",
+  "title": "Drop the extra widening sentence from PR #3201",
+  "ruling": "Owner 18:24 CST Nov 13, page item 742 a: drop the extra sentence that flags an option unless it says it applies to every repo. The item-278 one-repo rule stays.",
+  "quote": "a",
+  "source": "Owner answer saved on the waiting page 18:24 CST Nov 13, thread 5d63b6e5; filed by triage.",
+  "status": "open",
+  "step": "widens-card-plain-words"
+}

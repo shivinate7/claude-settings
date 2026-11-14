@@ -1,0 +1,10 @@
+{
+  "id": "own-780-c-round-4-3288",
+  "at": "2026-11-13T18:24:00-06:00",
+  "title": "Grant round 4 on PR #3288 (gh-quota-budget)",
+  "ruling": "Owner 18:24 CST Nov 13, page item 780 c: grant a fourth review round on PR #3288. It was held at round 3 (decision hold-unsafe-after-round-3). The grant covers this PR and this defect only: the quota wait must not sit past the BLOCKED/BEHIND check.",
+  "quote": "c",
+  "source": "Owner answer saved on the waiting page 18:24 CST Nov 13, thread 5d63b6e5; filed by triage.",
+  "status": "open",
+  "step": "gh-quota-budget"
+}

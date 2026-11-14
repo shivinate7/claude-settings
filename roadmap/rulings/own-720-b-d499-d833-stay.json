@@ -1,0 +1,10 @@
+{
+  "id": "own-720-b-d499-d833-stay",
+  "at": "2026-11-13T18:24:00-06:00",
+  "title": "D-499 and D-833 stay until the stable branch exists",
+  "ruling": "Owner 18:24 CST Nov 13, page item 720 b: not yet. q_max decisions D-499 (child guard) and D-833 (pinned-lint lock) stay until the stable branch exists (R44). PR #1167 round 1 failure stands until then.",
+  "quote": "b",
+  "source": "Owner answer saved on the waiting page 18:24 CST Nov 13, thread 5d63b6e5; filed by triage.",
+  "status": "open",
+  "step": "child-repo-gap"
+}

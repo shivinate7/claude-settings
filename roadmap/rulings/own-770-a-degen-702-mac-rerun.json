@@ -1,0 +1,10 @@
+{
+  "id": "own-770-a-degen-702-mac-rerun",
+  "at": "2026-11-13T18:24:00-06:00",
+  "title": "Re-run the Mac suite leg of degen PR #702 once",
+  "ruling": "Owner 18:24 CST Nov 13, page item 770 a: re-run the Mac suite leg of degen #702 once so it can merge on a real Mac run. Earlier note (16:08 CST): his Mac is offline, so the leg should run on a GitHub-hosted runner; child-repo CI speed-ups are coming from claude-settings. Triage read: #702 run 43472967936 used the self-hosted Mac though degen defaults to the hosted runner; unconfirmed.",
+  "quote": "a",
+  "source": "Owner answer saved on the waiting page 18:24 CST Nov 13, thread 5d63b6e5; filed by triage.",
+  "status": "open",
+  "step": "child-repo-gap"
+}

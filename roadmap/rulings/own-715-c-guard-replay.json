@@ -1,0 +1,10 @@
+{
+  "id": "own-715-c-guard-replay",
+  "at": "2026-11-13T18:24:00-06:00",
+  "title": "Keep guard merge-roots-cover only if a replay shows no false refusals and the build is small",
+  "ruling": "Owner 18:24 CST Nov 13, page item 715 c: keep the guard from PR #2071 only if a replay of real runner commands shows no false refusals and the build is small. Otherwise drop it and keep only the command-splitting fix. Rule building-guard-needs-incident is a judge of lift here, not a hard rule.",
+  "quote": "c",
+  "source": "Owner answer saved on the waiting page 18:24 CST Nov 13, thread 5d63b6e5; filed by triage.",
+  "status": "open",
+  "step": "runner-repos-in-parallel"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "own-778-a-reword-offer-for-lane",
+  "at": "2026-11-13T18:24:00-06:00",
+  "title": "Reword the \"type override\" line for a lane",
+  "ruling": "Owner 18:24 CST Nov 13, page item 778 a: reword the hooks/override.py offer line so a lane gets no dead instruction (ruling r13 point 3).",
+  "quote": "a",
+  "source": "Owner answer saved on the waiting page 18:24 CST Nov 13, thread 5d63b6e5; filed by triage.",
+  "status": "open",
+  "step": "override-plain-ask"
+}

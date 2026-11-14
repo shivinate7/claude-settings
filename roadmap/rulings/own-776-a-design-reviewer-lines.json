@@ -1,0 +1,10 @@
+{
+  "id": "own-776-a-design-reviewer-lines",
+  "at": "2026-11-13T18:24:00-06:00",
+  "title": "Edit CLAUDE.md lines 22-23: design reviewer runs Sonnet high, with the model table",
+  "ruling": "Owner 18:24 CST Nov 13, page item 776 a: edit CLAUDE.md lines 22-23 to say the design reviewer runs Sonnet high, with the model table (decision agent-model-cap), matching ruling own-756-design-reviewer-sonnet. His question, \"shouldn't it just be when you spawn the agent it has the model details there?\", is filed as step round-one-model-prose-matches-table follow-up; unanswered by a ruling.",
+  "quote": "a",
+  "source": "Owner answer saved on the waiting page 18:24 CST Nov 13, thread 5d63b6e5; filed by triage.",
+  "status": "open",
+  "step": "model-layout-to-table"
+}
