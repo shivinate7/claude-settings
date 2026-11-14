@@ -55,7 +55,10 @@ guard rule, so the watcher does the waiting and the session is told once.
   phase of a batch build draws no STALL (batch 138, batch 139 build 4; `merge/test_merge_beat.py`). It does
   nothing when the variable is unset. Cost: at most one thread a run and at most one append every 120 s, no process, pinned by
   `test_cost_one_thread_and_one_append_per_beat`. Limit: the thread beats while the main thread waits, so a
-  hung merge run shows life; its subprocess timeouts bound that. The merge
+  merge run hung in a `gh` or `git` call shows life and draws no STALL. Those calls have no timeout in a real run
+  (`SH_TIMEOUT` is set only by the guard's preview reads), so nothing bounds it (note `merge-beat-masks-hung-call`;
+  how often it happens is unmeasured). The merge tool's own 60 s scan line goes to stdout, the beat to
+  the beat file, so a redirect of stdout hides only the first. The merge
   tool also prints `merge: waiting on ...` while it waits on checks, and while GitHub still shows the head before
   the push. `verdict` prints a `still running` line to stderr every 120 seconds, so a pipe on stdout does not hide it.
   It also appends the line to the beat file, which the hook names next to its log, exports to the job as
@@ -94,7 +97,7 @@ guard rule, so the watcher does the waiting and the session is told once.
   process table with CPU time, and the watcher compares each process to its last reading. Each check also
   reads `/proc/PID/stat` once for the job's shell and once for each process under it, so N processes
   cost N + 1 reads a second (pinned by case 25f in `hooks/test_stall_watch.py`; one `ps` pinned by 25e).
-  Where `/proc` is absent the reads give 0. On Linux ps gives whole seconds, so a live child under 1/SECS of a core
+  Where `/proc` is absent the reads give 0. A fork-polling hang (`while ! mkdir lock; do sleep 1; done`) may read as life from its ended children's reaped time; unmeasured, and no test covers it. On Linux ps gives whole seconds, so a live child under 1/SECS of a core
   (0.33% at 300 s) that has not ended may still stall. A job that `exec`s has no child to count.
   Red cases: batch 138 (a silent parent with a busy child, case 25c) and batch 139 build 4 (a serial chain, case 25d).
   Kept as a stall: a child that holds a lock and does nothing, no CPU (the `playwright install` hang, case 4).

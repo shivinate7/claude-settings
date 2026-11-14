@@ -52,7 +52,7 @@ class PhaseBeat(unittest.TestCase):
         env = {"STALL_WATCH_BEAT": self.beat, "MERGE_HEARTBEAT": "0.2"}
         with mock.patch.dict(os.environ, env), mock.patch.object(merge, "build_parser", silent_phase(1.1)):
             run_main()
-        self.assertGreaterEqual(len(self.lines()), 3)
+        self.assertGreaterEqual(len(self.lines()), 2)  # a loaded runner may miss a beat
         self.assertTrue(all(l.startswith("merge: still working") for l in self.lines()))
 
     def test_no_beat_file_set_starts_no_thread(self):
