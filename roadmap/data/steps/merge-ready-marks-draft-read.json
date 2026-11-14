@@ -1,0 +1,14 @@
+{
+ "id": "merge-ready-marks-draft-read",
+ "title": "Reproduce whether `merge <pr> --ready` fails to mark the draft ready, as Degen's batch runner says it only checks",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 01:44 CST Nov 14 (relayed; Degen coordinator and batch-runner feedback pasted by the owner and relayed by the consultant; the feedback text itself is unread by triage and by the coordinator; the coordinator's code reads are on main 8e9f2b15, unchecked by triage): Degen says `merge --ready` \"only checks, does not mark ready\". The coordinator read merge.py:130 and :4370: both say it marks the draft ready after the records step and the ready checks. Whether it fails in practice is unread.",
+ "source": "Lane first reads and reproduces; no fix until it fails. Neighbour: ready-records-push-keeps-record-head (doing), close-replaced-at-open.",
+ "note": "Triage 01:50 CST Nov 14: done check: either a recorded run where `merge <pr> --ready` leaves a PR draft after passing its checks (with the PR, the time and the output), then a fix red first; or a recorded run where it marks ready, and the step closes with the Degen runner told. The lane states which Degen repo and PR the claim came from, from the consultant. Not started; behind CI speed.",
+ "updatedAt": "2026-11-14T01:50:00-06:00"
+}

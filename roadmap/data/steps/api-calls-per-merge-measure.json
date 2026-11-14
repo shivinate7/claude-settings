@@ -1,0 +1,14 @@
+{
+ "id": "api-calls-per-merge-measure",
+ "title": "Count the GitHub API calls one merge spends, with a sample size",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 01:44 CST Nov 14 (relayed; Degen coordinator and batch-runner feedback pasted by the owner and relayed by the consultant; the feedback text itself is unread by triage and by the coordinator; the coordinator's code reads are on main 8e9f2b15, unchecked by triage): about 30 API calls per merge are claimed, and a 15-PR loop spent the quota. Unmeasured.",
+ "source": "The lane measures first and states a count with a sample size (rule style-no-unmeasured-estimate). Neighbour: gh-quota-budget (blocked: the merge tool and the CI wait read the rate-limit header and back off); github-rate-limit-readers (folded into it).",
+ "note": "Triage 01:50 CST Nov 14: done check: a count per merge step (calls by endpoint) from a counted run of `merge` on one real PR, repeated on at least five merges, with the sample size printed; then the lane says which calls can be dropped or cached. A read tool first, no guard change. Not started; behind CI speed.",
+ "updatedAt": "2026-11-14T01:50:00-06:00"
+}

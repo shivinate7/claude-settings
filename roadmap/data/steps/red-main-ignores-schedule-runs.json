@@ -1,0 +1,14 @@
+{
+ "id": "red-main-ignores-schedule-runs",
+ "title": "The red-main check reads push runs only, so a red scheduled run does not hold main (waits on item 823)",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": "item 823 (pick-revert-skipped-run-red-main)",
+ "why": "Coordinator 01:44 CST Nov 14 (relayed; Degen coordinator and batch-runner feedback pasted by the owner and relayed by the consultant; the feedback text itself is unread by triage and by the coordinator; the coordinator's code reads are on main 8e9f2b15, unchecked by triage): Degen says red main reads a red scheduled run. The coordinator read merge.py:1458, docstring \"A schedule run is judged as it is\". The fix would touch what item 823 asks (ruling 745 b against 812 a), so it waits for the owner's answer there.",
+ "source": "Neighbours: red-main-stale-schedule (done: a newer run of the same jobs clears an old scheduled red), merge-tool-stale-run-unknown (done), own-812-a-judge-suite-runs (judge only runs that ran the tests). Drop the nightly schedule is ruled: drop-nightly-schedule (owner 22:19 CST Nov 12, item 683 a), so a scheduled run may not exist in claude-settings at all; the lane checks that first.",
+ "note": "Triage 01:50 CST Nov 14: blocked on item 823. Then: the lane reproduces (a red scheduled run holds main in some repo, with the run id), red first. Not started.",
+ "updatedAt": "2026-11-14T01:50:00-06:00"
+}

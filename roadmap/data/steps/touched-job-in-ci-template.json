@@ -1,0 +1,14 @@
+{
+ "id": "touched-job-in-ci-template",
+ "title": "A `touched` CI job in the shared child-repo CI template (low priority)",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 01:44 CST Nov 14 (relayed; Degen coordinator and batch-runner feedback pasted by the owner and relayed by the consultant; the feedback text itself is unread by triage and by the coordinator; the coordinator's code reads are on main 8e9f2b15, unchecked by triage): Degen asks for a `touched` job in the shared CI template. The coordinator reads an overlap with ruling own-lint-skip-green-rollup-a (lane lint skipped on a green rollup, so UNKNOWN is already covered).",
+ "source": "Low priority; stays under the CI speed work. Neighbour: child-lane-lint-no-touched-job (ready), lane-touched-tests-cap-cancels.",
+ "note": "Triage 01:50 CST Nov 14: first the lane says what the job would add that the green-rollup ruling does not cover; if nothing, the step closes as covered. Not started.",
+ "updatedAt": "2026-11-14T01:50:00-06:00"
+}
