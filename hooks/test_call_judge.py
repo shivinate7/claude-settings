@@ -1624,10 +1624,13 @@ def case_past_ruling_cost():
     fixture.prime_roadmap(CI_REPO)
     p = run_hook(page_input("set", item, doc_id="c133", cwd=CI_REPO), answer=ALLOW)
     check("past ruling cost: a judged page write runs two git processes", len(p.calls) == 1 and p.git == 2, detail(p))
-    fixture.write_fetch_head(BARE_REPO)
+    fixture.without_fetch_head(BARE_REPO)  # never fetched: no roadmap ref, and no roadmap line in FETCH_HEAD
     q = run_hook(question_input(box=good_box(), cwd=BARE_REPO), answer=ALLOW)
-    check("past ruling cost: a judged question with no roadmap ref runs at most two git processes",
-          len(q.calls) == 1 and q.git <= 2, detail(q))
+    # A repo that never fetched its roadmap: the freshness check finds no line and no ref, so it runs one bounded fetch and
+    # one `git log` of the ref (the failed-fetch read). The count also holds the test's own real-origin guard, one
+    # `git config` per fetch attempt. The ruled store then reads `ls-tree` and `cat-file`: five git processes, at most one fetch.
+    check("past ruling cost: a judged question in a repo that never fetched its roadmap runs five git processes, "
+          "at most one fetch", len(q.calls) == 1 and q.git == 5 and q.fetches <= 1, detail(q))
     # A stale roadmap ref (no roadmap line in FETCH_HEAD): the judged question fetches it exactly once. A fresh ref
     # is the control: the same question then fetches nothing.
     fixture.without_fetch_head(CI_REPO)
