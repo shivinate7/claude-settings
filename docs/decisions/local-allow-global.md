@@ -16,11 +16,11 @@ Should a guard ask when a session adds an allow rule to a project's `settings.lo
 - Mistake: an allowance that belongs to every session lands only in one project's local file.
 - Harm: other sessions and repos keep hitting the same prompt.
 
-Cost: It reads the write's content and the settings file on disk, up to 8 MiB. A refusal appends to the guard log, as every refusal does. The rule itself starts no process. How often the ask fires is unmeasured.
+Cost: It reads the write's content and the settings file on disk, up to 8 MiB, and resolves each write target's path once. A refusal appends to the guard log, as every refusal does. The rule itself starts no process. How often the ask fires is unmeasured.
 
 ## Code
 
-Rule `local-allow-global` (the guard's name for this check) in hooks/guard.py, as write check 8a, in `is_local_settings_file` and `local_allow_added`. It covers the write tools only: Write, Edit, MultiEdit and NotebookEdit. A shell write is not read. Test: tests/guard/s21305-local-allow-global.py, the guard test for this rule. The ask prints no override line, since its remedy is a change to a shared file.
+Rule `local-allow-global` (the guard's name for this check) in hooks/guard.py, as write check 8a, in `is_local_settings_file` and `local_allow_added`. It covers the write tools only: Write, Edit and MultiEdit. A shell write is not read. Test: tests/guard/s21305-local-allow-global.py, the guard test for this rule. The ask prints no override line, since its remedy is a change to a shared file.
 
 Kind: process
 Home: hooks/guard.py
