@@ -25,6 +25,7 @@ import sys
 import json
 import signal
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -288,9 +289,35 @@ def alive(pid):
         return True
     stat = "/proc/%d/stat" % pid
     if os.path.exists(stat):
-        with open(stat, encoding="utf-8") as handle:
-            state = handle.read().rsplit(")", 1)[1].split()[0]
-        return state != "Z"
+        try:
+            return proc_state(pid) != "Z"
+        except OSError:  # reaped between the kill probe and the read
+            return False
+    return True
+
+
+def proc_state(pid):
+    """The state letter in /proc/<pid>/stat, or "no /proc entry" when there is none."""
+    try:
+        with open("/proc/%d/stat" % pid, encoding="utf-8") as handle:
+            return handle.read().rsplit(")", 1)[1].split()[0]
+    except OSError:
+        return "no /proc entry"
+
+
+# A group member that SIGKILL reaches leaves the running state within about a millisecond. The bound is for a loaded
+# runner: a process still running at the bound is the failure, and its state is named in the message.
+GONE_BOUND = 5.0  # seconds
+GONE_STEP = 0.02  # seconds between polls
+
+
+def wait_until_dead(pid, bound=GONE_BOUND):
+    """True once `pid` is no longer running (gone, or a zombie), polled every GONE_STEP seconds up to `bound` seconds."""
+    end = time.monotonic() + bound
+    while alive(pid):
+        if time.monotonic() >= end:
+            return False
+        time.sleep(GONE_STEP)
     return True
 
 
@@ -343,8 +370,8 @@ class FetchProcessTests(unittest.TestCase):
         with open(pid_file, encoding="utf-8") as handle:
             grandchild = int(handle.read())
         self.addCleanup(kill_quietly, grandchild)
-        self.assertFalse(alive(grandchild), "the fetch's grandchild outlived the timeout: its process group was not"
-                         " killed")
+        self.assertTrue(wait_until_dead(grandchild), "the fetch's grandchild still ran %ss after the timeout: its process"
+                        " group was not killed; /proc state %s" % (GONE_BOUND, proc_state(grandchild)))
 
     def fetch_env(self, name, preset=None):
         """The environment one roadmap fetch starts with, after one fresh_ref with no value preset for the git
