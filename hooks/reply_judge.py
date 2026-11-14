@@ -60,6 +60,9 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN  # noqa: E402  stdlib only; the one home of the gh logins
 
+# The widening scope sentences come from call_judge, their one home; the model judges share them.
+from call_judge import WIDENING_ACCEPTS_CLAUSE, WIDENING_SAME_CHANGE_SENTENCE  # noqa: E402
+
 # The widening words come from question_form.WIDENS_TEXT, the one home. If the import fails, the prompt
 # keeps its sentence without the quoted words, one stderr line says so, and the hook still runs.
 try:
@@ -147,10 +150,12 @@ INSTRUCTIONS = (
     "\"verdict: clear\" or \"harness passes\", is a result, not narration; never flag it. "
     "Flag only a limit or rule named as a note on the session's own conduct. "
     "style-question-form: flag a reply whose recommended option widens what a shared tool accepts, "
-    "such as a second accepted form, an allow-list entry or a per-repo exception. "
+    + "meaning the tool changes to fit one repo: " + WIDENING_ACCEPTS_CLAUSE + " "
+    + WIDENING_SAME_CHANGE_SENTENCE + " "
     + WIDENS_LABEL_SENTENCE +
-    "Never flag an option where the repo changes to match the shared format. "
-    "Judge only options the reply offers the owner to pick; never flag a reply that describes the rule itself. "
+    "Do not flag an option where the repo changes to match the shared format. "
+    "Do not flag an option that names a repo and changes nothing in the tool. "
+    "Judge only options the reply offers the owner to pick. Do not flag a reply that describes the rule itself. "
     "verification-counts-from-rest: flag a reply that names a search's total, such as total_count or a search result total, "
     "quoted as a count; "
     "also flag a search total quoted as a state, open, closed, merged or CI status; "
