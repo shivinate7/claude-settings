@@ -17824,7 +17824,7 @@ class ReviewFixSonnet(ReviewEnv):
     MIXED_CASE_MODEL = merge.REVIEW_FIX_GUARD_MODEL.capitalize()
 
     def test_a_mixed_case_sonnet_fix_pass_on_a_guard_change_reads_like_lowercase(self):
-        # Pins letter case only. The state is not asserted: owner item 402 a owes a third review on a guard or check change.
+        # Pins letter case only. The state is not asserted.
         rounds = ("Round 1: reviewer, sonnet, FAIL",)
         lower = self.guard_yes_verdict(rounds, merge.REVIEW_FIX_GUARD_MODEL)  # control: the lowercase model is not refused
         self.assertNotIn(self.MODEL_REFUSAL, lower[1], f"the lowercase control is refused on the model, so the case proves nothing: {lower[1]!r}")
