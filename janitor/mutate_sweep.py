@@ -84,6 +84,15 @@ SOURCES.update({
 # hooks/git_reads.py holds the reads sweep.py and session_end_sweep.py call, so it is a target too.
 GIT_READS = os.path.join(REPO_ROOT, "hooks", "git_reads.py")
 SOURCES["git_reads"] = GIT_READS
+# hooks/agent_procs.py, the per-agent process record. Its checks run in two targets, one per suite that proves them.
+# "agent_procs" is proven by janitor/test_sweep.py: the stop list's start and shared arms, and plan_ends' shared and
+# never-ended kinds at SubagentStop. "agent_procs_hooks" is proven by hooks/test_agent_procs.py, the only suite that
+# reaches plan_ends' visible-window rule (a visible candidate is an Office pid, which exists only on Windows).
+AGENT_PROCS = os.path.join(REPO_ROOT, "hooks", "agent_procs.py")
+HOOKS_AGENT_PROCS_SUITE = os.path.join(REPO_ROOT, "hooks", "test_agent_procs.py")
+SOURCES["agent_procs"] = AGENT_PROCS
+SOURCES["agent_procs_hooks"] = AGENT_PROCS
+PROCS_TARGETS = ("agent_procs", "agent_procs_hooks")
 
 
 def is_guard_key(name: str) -> bool:
@@ -100,7 +109,10 @@ SUITE_FOR_TARGET = {
     "guard": "test_sweep.py",
     "session_end_sweep": "test_session_end_sweep.py",
     "agent_end_reap": "test_sweep.py",
+    "agent_procs": "test_sweep.py",
+    "agent_procs_hooks": "test_agent_procs.py",  # its suite lives in hooks/, see HOOKS_SUITE_TARGETS
 }
+HOOKS_SUITE_TARGETS = ("agent_procs_hooks",)  # the targets whose suite is in the scaffold's hooks/, not janitor/
 
 # (label, target, anchor text found once in the source, its mutated replacement, the case name
 # (or a distinctive fragment of it) that MUST appear among the suite's own FAIL lines). One
@@ -1448,6 +1460,57 @@ MUTATIONS = [
      'min(JUDGE_BUDGET_SECONDS, n - DEADLINE_TAIL_SECONDS))',
      'n - DEADLINE_TAIL_SECONDS)',
      "test_a_25_second_deadline_gives_a_12_second_budget"),
+    # ---- agent-owned sweep (step agent-owned-processes): the stop list and SubagentStop end only the agent's own pids ----
+    ("agent-owned sweep: the stop list's record check is off at the call site, so a pid whose start differs is stopped",
+     "sweep",
+     '        if agent_procs is not None and not agent_procs.proven_own(pid, agent_id):\n',
+     '        if False:\n',
+     "test_the_stop_list_skips_a_pid_whose_start_differs_from_the_record"),
+    ("agent-owned sweep: SubagentStop reads a pid whose start differs as its own, so a reused pid is ended",
+     "agent_end_reap",
+     '        start_ok = current is not None and (prior is None or prior.get("start") == current)\n',
+     '        start_ok = current is not None\n',
+     "test_a_pid_whose_start_differs_from_the_record_is_reported_unclear_and_kept"),
+    ("agent-owned sweep: SubagentStop ignores another agent's record, so a pid two agents list is ended",
+     "agent_end_reap",
+     '"shared": bool(agent_procs.held_by_others(pid, agent))})',
+     '"shared": False})',
+     "test_a_pid_another_agent_also_lists_is_kept_at_subagent_stop"),
+    ("agent-owned sweep: SubagentStop ignores the record's kind, so a sim-lease or unclear pid is ended",
+     "agent_end_reap",
+     '        kind = prior.get("kind", "background") if prior and start_ok else "background" if start_ok else "unclear"\n',
+     '        kind = "background" if start_ok else "unclear"\n',
+     "test_a_sim_lease_or_unclear_record_kind_is_kept_at_subagent_stop"),
+    ("agent-owned sweep: the stop list's shared-pid arm is off, so a pid two agents list is stopped",
+     "agent_procs",
+     '    return not held_by_others(pid, agent)\n',
+     '    return True\n',
+     "test_the_stop_list_skips_a_pid_that_two_agents_both_list"),
+    ("agent-owned sweep: the stop list's start arm is off, so a reused pid is stopped",
+     "agent_procs",
+     '    if entry is not None and entry.get("start") != current:\n',
+     '    if False:\n',
+     "test_the_stop_list_skips_a_pid_whose_start_differs_from_the_record"),
+    ("agent-owned sweep: plan_ends ignores another agent's record, so a shared pid is ended at SubagentStop",
+     "agent_procs",
+     '            and not c.get("shared") and c.get("kind") not in NEVER_ENDED_KINDS]',
+     '            and c.get("kind") not in NEVER_ENDED_KINDS]',
+     "test_a_pid_another_agent_also_lists_is_kept_at_subagent_stop"),
+    ("agent-owned sweep: sim-lease is no longer a never-ended kind, so a lease holder is ended",
+     "agent_procs",
+     'NEVER_ENDED_KINDS = ("sim-lease", "unclear")',
+     'NEVER_ENDED_KINDS = ("unclear",)',
+     "test_a_sim_lease_or_unclear_record_kind_is_kept_at_subagent_stop"),
+    ("agent-owned sweep: unclear is no longer a never-ended kind, so a pid the record reads as unclear is ended",
+     "agent_procs",
+     'NEVER_ENDED_KINDS = ("sim-lease", "unclear")',
+     'NEVER_ENDED_KINDS = ("sim-lease",)',
+     "test_a_sim_lease_or_unclear_record_kind_is_kept_at_subagent_stop"),
+    ("agent-owned sweep: a visible window no longer keeps a pid, so a visible Office process is ended",
+     "agent_procs_hooks",
+     'c.get("start_ok") and not c.get("visible")',
+     'c.get("start_ok")',
+     "test_a_visible_window_or_a_start_that_differs_is_reported_and_never_ended"),
 ]
 
 
@@ -1524,6 +1587,13 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
         "w", encoding="utf-8", newline="\n",
     ) as h:
         h.write(sources["test_session_end_sweep"])
+    # The per-agent record's module: the mutated copy for a procs target, else the real one, over the copy guard_tree made.
+    # The hooks suite is copied in too: guard_tree copies no test_ module, and a hooks-suite target runs it from here.
+    procs_text = mutated_text if mutated_target in PROCS_TARGETS else sources["agent_procs"]
+    with open(os.path.join(hooks_dir, "agent_procs.py"), "w", encoding="utf-8", newline="\n") as h:
+        h.write(procs_text)
+    with open(os.path.join(hooks_dir, "test_agent_procs.py"), "w", encoding="utf-8", newline="\n") as h:
+        h.write(sources["test_agent_procs"])
     with open(os.path.join(scaffold, "settings.json"), "w", encoding="utf-8", newline="\n") as h:
         h.write(sources["settings_json"])
 
@@ -1578,7 +1648,8 @@ def run_mutant(sources, work: str, index: int, entry):
     os.makedirs(config_dir, exist_ok=True)
     try:
         build_scaffold(scaffold, sources, target, mutated_text)
-        suite_path = os.path.join(scaffold, "janitor", SUITE_FOR_TARGET[target])
+        folder = "hooks" if target in HOOKS_SUITE_TARGETS else "janitor"
+        suite_path = os.path.join(scaffold, folder, SUITE_FOR_TARGET[target])
         code, red, seen = mutate_shared.staged_suite_seen(
             lambda only: run_suite(suite_path, config_dir, only), required)
         return label, code, red, required, None, seen
@@ -1597,6 +1668,8 @@ def main() -> int:
         sources["test_session_end_sweep"] = handle.read()
     with open(SETTINGS_JSON, encoding="utf-8") as handle:
         sources["settings_json"] = handle.read()
+    with open(HOOKS_AGENT_PROCS_SUITE, encoding="utf-8") as handle:
+        sources["test_agent_procs"] = handle.read()
 
     # Every anchor is checked before any suite runs, so a stale mutation fails in the first
     # second, not after the mutants ahead of it in the list have spent their minutes.
