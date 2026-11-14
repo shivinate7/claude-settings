@@ -4498,9 +4498,8 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--grant: the PR in the grant must be the pull request number")
         if a.fix_check and a.fix_check[0] == a.head:
             p.error("--fix-check: the reviewed head must differ from --head, or the fix diff is empty")
-        # The reviewer row (decision agent-model-cap): every fix check runs Sonnet (owner item 444 a), and every later-round reviewer runs its round
-        # row's model, Sonnet from round 2 on, round 3 and a granted round 4 included (owner ruling own-r3-reviewer-sonnet-high).
-        # Checked here, never in parse_review, so a record posted before the rule still parses.
+        # The reviewer row (decision agent-model-cap): every fix check runs Sonnet, and every reviewer round after the first runs its row's model,
+        # Sonnet, a granted last round included. Checked here, never in parse_review, so a record posted before the rule still parses.
         if a.fix_check:
             fix_model = review_round_model(REVIEW_FIX_ROW)
             if a.fix_check[2].lower() != fix_model:
