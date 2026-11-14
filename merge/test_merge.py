@@ -15479,7 +15479,7 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         self.assertNotIn("Traceback", err)
 
 class ReviewRoundModel(ReviewEnv):
-    """The --round values against the reviewer row (agent-model-cap): a review from the second round on, round 3 included, names sonnet, the first
+    """The --round values against the reviewer row (agent-model-cap): a review after the first round, the last round included, names sonnet, the first
     review names haiku or sonnet, and a design reviewer names opus. Each refusal sits beside its sonnet twin, which must print a record first, so a
     missing flag cannot pass for the refusal."""
 
@@ -15506,7 +15506,7 @@ class ReviewRoundModel(ReviewEnv):
                 self.assertNotIn("Traceback", err)
 
     def test_the_rounds_the_row_allows_still_print(self):
-        # controls: the first review on haiku or sonnet, a design reviewer on opus in every review, and a round 3 review on sonnet
+        # controls: the first review on haiku or sonnet, a design reviewer on opus in every review, and a later review on sonnet
         cases = (
             ("1:reviewer:haiku:PASS",),
             ("1:reviewer:sonnet:PASS",),
