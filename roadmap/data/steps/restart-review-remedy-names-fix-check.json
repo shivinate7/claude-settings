@@ -1,0 +1,14 @@
+{
+ "id": "restart-review-remedy-names-fix-check",
+ "title": "The refusal \"this record restarts the review\" names the same-PR route (`--fix-check`) where the decision allows it, not only a new PR",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Finding (coordinator 11:41 CST Nov 14, relayed; triage read the refusal line, merge/merge.py line 4854 in the stable clone, and the decision line 130 of pr-review-record, and nothing else): the refusal ends \"A new branch with a new PR is the only way out.\" That is false for a head after a PASS fix verifier (decision pr-review-record, \"One fix verifier per record\": a further fix verifier over a new head is accepted, owner item 741) and for a merge of main: a clean merge takes no record; a conflicted merge or a further head after a PASS fix check takes one more fix verifier, posted as the newest record's rounds plus `--fix-check <that record's head>:...:sonnet:PASS`. Harm measured by the coordinator from messages: six lanes got the refusal tonight; five were routed to replacement PRs, about 30 min each, 4 extra PRs and 1 extra close. Candidate fix (coordinator's): a remedy line that names the `--fix-check` form, shown only where the decision allows the same-PR route; the refusal for a FAIL fix verifier still names a new PR. First act of a lane: read the refusal branch in merge.py and the decision section, then reproduce, red then green: a bare `--round 1` on a merge-of-main head after a PASS fix check prints the same-PR route, never \"only way out\". A check-text change; if a verdict changes, round 3 applies. A debt record for this gap is the coordinator's to write in the repo's debt store on main; triage has no write there. Kin: record-after-each-round, review-carries-by-tree (item 835).",
+ "source": "coordinator 11:41 CST Nov 14, six lane refusals",
+ "note": "Filed 11:44 CST Nov 14 by triage. Tracker: the coordinator. No lane yet. Rule: fix the cause, not the symptom (building-fix-cause-not-symptom).",
+ "updatedAt": "2026-11-14T11:44:00"
+}
