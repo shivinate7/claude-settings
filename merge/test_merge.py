@@ -18733,7 +18733,7 @@ LOCAL_SID = "local-tier-check-session"  # what a local Bash call carries in CLAU
 LOCAL_OTHER = "local-tier-other-session"
 
 
-class LocalSessionTierCheck(CloudSession):
+class LocalSessionRoleCheck(CloudSession):
     """A local session's `merge <pr> --confirm` reads the role the launcher wrote for it: <config dir>/state/session-roles/<session id>.json,
     {"session", "role", "repo"}. The id is the one a local Bash call carries in CLAUDE_CODE_SESSION_ID, and the cloud remote id is unset.
     The gate passes only a batch-runner file whose session and that id are both present and equal (lane local-tier-file). run_main is
@@ -18798,7 +18798,7 @@ class LocalSessionTierCheck(CloudSession):
         self.assert_refused()
 
     # CONTROL, green on the old code: a batch-runner file with both ids present and equal passes the gate and reads the host.
-    def test_a_batch_runner_file_with_equal_ids_passes_the_gate(self):
+    def test_a_batch_runner_file_with_equal_ids_passes_the_check(self):
         self.put_local_role("batch-runner")
         self.assert_reaches_host("7", "--confirm", "--head", self.head())
 
