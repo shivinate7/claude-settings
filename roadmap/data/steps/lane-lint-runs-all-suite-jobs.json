@@ -1,0 +1,14 @@
+{
+ "id": "lane-lint-runs-all-suite-jobs",
+ "title": "Lane lint runs the picked suites in every CHECKS_SUITE_JOBS job, not only the `checks` job",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane ci-split-checks-jobs 00:40 CST Nov 14 (relayed; numbers unchecked by triage): for a diff touching hooks/ (base bedbce7b5c), main's `checks` job runs 139 of 173 steps under `ci-job checks --lint`; after the split (PR #3376) `checks` runs 102 of 107 and 37 picked hook suites read \"not run, job checks-hooks runs them\". Main already does this for checks-guard, checks-macos and checks-merge-install.",
+ "source": "Lane message to triage 00:40 CST Nov 14 (relayed). Related: step lane-lint-hook-suites (which suites lane lint picks; this step is which jobs run them). The coordinator ruled option a at 00:39 CST: accept the gap for #3376.",
+ "note": "Triage 00:39 CST Nov 14: option b of the lane: lane lint also runs the picked suites in every job named in CHECKS_SUITE_JOBS, so a split of `checks` does not drop suites from lane lint. The coordinator accepted the gap for PR #3376 only (relayed). Cost of b is unmeasured: the lane states suites run, process starts and wall time per lane lint, as step lane-lint-hook-suites asks. A check change: own lane, review rounds apply, red first. Not started.",
+ "updatedAt": "2026-11-14T00:39:50-06:00"
+}
