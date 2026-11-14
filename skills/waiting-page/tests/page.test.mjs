@@ -4420,6 +4420,67 @@ test("ask-phase-out: the rail's Answered row follows the Answered section's orde
   assert.deepEqual(r.rail, secN, "the rail's Answered row " + JSON.stringify(r.rail) + " is not in the section's order " + JSON.stringify(secN));
 });
 
+// ---------------------------------------------------------------- answered-lines-age-out: a closed line ages out to read (step answered-lines-age-out)
+// Ruling: a closed item stays one line in Answered until its closed time is older than the age, a top-level `const LINE_AGE_H`
+// (a number of hours) in page.html. Past the age it reads as read at load, so it sits behind Show N read items, as a line read at
+// load does. A reply later than the close brings it back, however old the close. The page writes nothing for it: no set, no
+// update, no delete, and no session writes dismissed. Every time here is set from AP_NOW, the fixed clock above, so an age is exact.
+const agoIso = (ms) => new Date(Date.parse(AP_NOW) - ms).toISOString();
+const DAY_MS = 864e5, MIN_MS = 6e4;
+// 30 days before the load is past any age the owner picks.
+const agedLine = (id, n, over = {}) => mk(id, n, { status: "closed", closed: agoIso(30 * DAY_MS), home: "step:answered-lines-age-out", reply: "Filed as step answered-lines-age-out.", ...over });
+const AGE_AGED = agedLine("age-aged", 80);
+// Closed a minute before the load: well inside any age.
+const AGE_YOUNG = mk("age-young", 81, { status: "closed", closed: agoIso(MIN_MS), home: "step:answered-lines-age-out", reply: "Filed a minute before the load." });
+// Closed 30 days before the load and replied an hour after that: the reply is later than the close, so the line stays.
+const AGE_REPLIED = agedLine("age-replied", 82, { replied: agoIso(30 * DAY_MS - 36e5) });
+
+test("answered-lines-age-out: a closed line older than the age leaves Answered for Show read items; a younger line and a line with a later reply stay, and the page writes nothing", async (t) => {
+  const page = await open(t, { items: [AP_OPEN, AGE_AGED, AGE_YOUNG, AGE_REPLIED], clock: AP_NOW }); if (!page) return;
+  // Scope first: the two lines that must draw are in Answered, so the absence of the aged line below means something.
+  await mustHave(page, `#tier-answered #line-${AGE_YOUNG.n}`, `the younger line of No. ${AGE_YOUNG.n} in Answered`);
+  await mustHave(page, `#tier-answered #line-${AGE_REPLIED.n}`, `the line of No. ${AGE_REPLIED.n}, replied after it closed, in Answered`);
+  await frameWait(page, 3);
+  assert.deepEqual(await apBad(page, "items"), [], "the page set or deleted an item at load");
+  assert.deepEqual(await apWrites(page, "items"), [], "the page updated an item at load, with no press");
+  assert.equal(await page.locator(`#tier-answered #line-${AGE_AGED.n}`).count(), 0, `the line of No. ${AGE_AGED.n}, closed 30 days before the load, still draws in Answered`);
+  await mustHave(page, "#readItems", "the Show read items fold, which holds the aged line");
+  await page.click("#readItems");
+  await mustHave(page, `#readItemList #line-${AGE_AGED.n}`, `the aged line of No. ${AGE_AGED.n} in the read items list`);
+});
+
+test("answered-lines-age-out: twelve aged lines sit behind Show 12 read items, and none draws in Answered", async (t) => {
+  const FULL = Array.from({ length: 12 }, (_, i) => agedLine("age-full-" + i, 100 + i));
+  const page = await open(t, { items: [AP_OPEN, ...FULL], clock: AP_NOW }); if (!page) return;
+  // Scope first: the Answered section is drawn, with the fold that holds the twelve lines.
+  await mustHave(page, "#tier-answered", "the Answered section, which holds the aged lines behind its fold");
+  assert.equal(await page.locator('#tier-answered article[id^="line-"]').count(), 0, "twelve aged lines still draw as lines in Answered");
+  await mustHave(page, "#tier-answered p.allread", "the All read. line, since no line is left in Answered");
+  await mustHave(page, "#readItems", "the Show read items fold for the twelve aged lines");
+  const foldWords = ((await page.locator("#readItems").textContent()) || "").replace(/\s+/g, " ");
+  assert.ok(foldWords.includes("Show 12 read items"), `the fold reads ${JSON.stringify(foldWords)}, not Show 12 read items`);
+  await page.click("#readItems");
+  assert.equal(await page.locator('#readItemList article[id^="line-"]').count(), 12, "the read items list does not hold all twelve aged lines");
+});
+
+test("answered-lines-age-out: a line a minute under the age draws in Answered, and one a minute over it sits behind Show read items", async (t) => {
+  // The first page holds a line 30 days old. Code with no age-out fails here by that line, never by a missing constant; the edge is read only after it.
+  const first = await open(t, { items: [AP_OPEN, AGE_AGED], clock: AP_NOW }); if (!first) return;
+  await mustHave(first, "#tier-answered", "the Answered section of the first page");
+  assert.equal(await first.locator(`#tier-answered #line-${AGE_AGED.n}`).count(), 0, `the line of No. ${AGE_AGED.n}, closed 30 days before the load, still draws in Answered`);
+  const ageH = await first.evaluate(() => (typeof LINE_AGE_H === "number" ? LINE_AGE_H : null));
+  assert.equal(typeof ageH, "number", "page.html has no top-level number LINE_AGE_H, the one age constant");
+  const UNDER = mk("age-under", 83, { status: "closed", closed: agoIso(ageH * 36e5 - MIN_MS), home: "step:answered-lines-age-out", reply: "Closed a minute under the age." });
+  const OVER = mk("age-over", 84, { status: "closed", closed: agoIso(ageH * 36e5 + MIN_MS), home: "step:answered-lines-age-out", reply: "Closed a minute over the age." });
+  const page = await open(t, { items: [AP_OPEN, UNDER, OVER], clock: AP_NOW }); if (!page) return;
+  await mustHave(page, "#tier-answered", "the Answered section of the edge page");
+  await mustHave(page, `#tier-answered #line-${UNDER.n}`, `the line of No. ${UNDER.n}, a minute under the age, in Answered`);
+  assert.equal(await page.locator(`#tier-answered #line-${OVER.n}`).count(), 0, `the line of No. ${OVER.n}, a minute over the age, still draws in Answered`);
+  await mustHave(page, "#readItems", "the Show read items fold, which holds the line a minute over the age");
+  await page.click("#readItems");
+  await mustHave(page, `#readItemList #line-${OVER.n}`, `the line of No. ${OVER.n} in the read items list`);
+});
+
 // ---------------------------------------------------------------- the ask stack: Add to list, one Send, one Undo for the batch
 
 // The reach line of the ask row that holds the text, or "" when no row holds it. Reads the page, never waits.
