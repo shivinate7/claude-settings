@@ -23,7 +23,7 @@ Built on this branch, commit 5e74db191 (the refusal) and fb917dbc0 (test wording
 
 Open, not built here:
 
-- Point 2, the `dontAsk` mode. `create_session` refuses `permission_mode` `dontAsk` from an `auto` parent, and the installed allow list holds no Bash, Edit or Write. Waits on the owner's pick (keep `auto`, or a `dontAsk` coordinator with a wider allow list).
+- Point 2, the `dontAsk` mode. `create_session` refused `permission_mode` `dontAsk` from this lane, whose parent runs `auto` (measured 2026-11-13: tool result "permission_mode \"dontAsk\" exceeds parent session's \"auto\"; omit to inherit"). The installed allow list (17 entries, read 2026-11-13) holds no broad Bash, Edit or Write. Waits on the owner's pick (keep `auto`, or a `dontAsk` coordinator with a wider allow list).
 - Point 3, the typed-word acts as page items. The page save grants through `page_grant.py`; a guard refusal in a lane still lifts only by the owner's typed line.
 
 ## Fail-open reading (a decision for the owner, not an owner ruling)
