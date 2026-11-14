@@ -1,0 +1,10 @@
+{
+  "id": "own-821-a",
+  "at": "2026-11-14T02:36:00-06:00",
+  "title": "Each q_max lane PR rides its own one-PR batch branch so its CI runs",
+  "ruling": "Owner 02:36 CST Nov 14, answering item 821 (pick-qmax-batch-of-one) in chat; it did not land on the page (answers store held no doc for it), so triage read it from the consultant's relay (02:37): \"A is fine\". Reading: option a. Runner 12 opens a batch-<slug> branch on each q_max lane head and merges that one-lane batch on its green run, so q_max's only-a-batch-runs-ci rule is met. Covers q_max only, and the batch-of-one form only; it widens nothing else (a grant covers the act it names). Item 820 c (a lane's own PR on its own green run) stands for the other repos.",
+  "quote": "A is fine",
+  "source": "Owner, typed in chat 02:36 CST Nov 14, relayed by the consultant at 02:37 CST (triage did not read the chat; the page held no answer)",
+  "status": "open",
+  "step": "tci-11-qmax-shards"
+}
