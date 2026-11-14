@@ -2286,6 +2286,124 @@ class LiveStatusPhase(UpkeepFixture):
         self.assertEqual(compares, [], "an == comparison with doing or active is at these lines of build.py")
 
 
+class BlockedNoOpenBlocker(UpkeepFixture):
+    """The upkeep row `blocked with no open blocker`: each blocked step whose blockedBy names no open step. A blocker is
+    open when its status is neither done nor folded, since a folded step is absorbed into another lane; a blocker that
+    names no step does not hold the step, and is named in its entry.
+    A step with an open blocker is never listed, nor is a step that is not blocked. A missing or null blockedBy names no
+    blocker, so the step is listed plainly. Any other non-list blockedBy, or a list holding a non-string, lists the step
+    as unreadable, and never crashes the build."""
+
+    ROW = "blocked with no open blocker"
+
+    def listed(self, claim):
+        """(count, sorted entries) of the row, from a build of main with no --live file. A missing row fails by name:
+        `claim` says what the row should have shown."""
+        _, out = self.build_from_main()
+        if self.ROW not in self.summary_counts(out):
+            self.fail("%s: the upkeep output has no %r row, so nothing is listed:\n%s" % (claim, self.ROW, out))
+        count, detail = self.row(out, self.ROW)
+        return count, self.entries(detail)
+
+    def test_a_blocked_step_that_names_no_blocker_is_listed(self):
+        self.commit_step("c2", status="blocked", blockedBy=[], order=2)
+        self.assertEqual(self.listed("a blocked step with an empty blockedBy is not listed"), (1, ["c2"]))
+
+    def test_a_blocked_step_whose_blockers_are_all_done_is_listed(self):
+        self.commit_step("c2", status="done", order=2)
+        self.commit_step("c3", status="done", order=3)
+        self.commit_step("c4", status="blocked", blockedBy=["c2", "c3"], order=4)
+        self.assertEqual(self.listed("a blocked step whose blockers are all done is not listed"), (1, ["c4"]),
+                         "its block has lifted, so the step is listed")
+
+    def test_a_blocked_step_with_an_open_blocker_is_not_listed(self):
+        self.commit_step("c2", status="blocked", blockedBy=[], order=2)  # control: listed
+        self.commit_step("c3", status="todo", order=3)
+        self.commit_step("c4", status="blocked", blockedBy=["c3"], order=4)  # an open todo blocker
+        self.commit_step("c5", status="doing", order=5)
+        self.commit_step("c6", status="blocked", blockedBy=["c2", "c5"], order=6)  # a blocked blocker and a doing one
+        self.commit_step("c7", status="blocked", blockedBy=["c2"], order=7)  # a blocked blocker is still open
+        self.commit_step("c8", status="blocked", blockedBy=["c3", "c98"], order=8)  # open beside an unknown blocker
+        entries = self.listed("the row should list the control step that names no blocker, and no step with an open blocker")[1]
+        self.assertIn("c2", entries, "scope first: the control step with no blocker is listed")
+        self.assertEqual(entries, ["c2"], "a blocked step with an open blocker is not listed")
+
+    def test_a_step_that_is_not_blocked_is_never_listed(self):
+        self.commit_step("c2", status="blocked", blockedBy=[], order=2)  # control: listed
+        self.commit_step("c3", status="todo", blockedBy=[], order=3)
+        self.commit_step("c4", status="doing", blockedBy=[], order=4)
+        self.commit_step("c5", status="ready", blockedBy=[], order=5)
+        self.commit_step("c6", status="queued", blockedBy=[], order=6)
+        self.commit_step("c7", status="done", blockedBy=[], order=7)
+        self.assertEqual(self.listed("the row should list the blocked step that names no blocker, and no step in another status"),
+                         (1, ["c2"]), "only the blocked step is listed; a step in another status is not")
+
+    def test_a_blocker_that_names_no_step_is_listed_and_named(self):
+        self.commit_step("c2", status="done", order=2)
+        self.commit_step("c7", status="blocked", blockedBy=["c99"], order=7)
+        self.commit_step("c8", status="blocked", blockedBy=["c2", "c98"], order=8)
+        self.assertEqual(self.listed("a blocked step whose only blocker names no step is not listed"),
+                         (2, ["c7 (unknown blocker c99)", "c8 (unknown blocker c98)"]),
+                         "a blocker that names no step does not hold the step, and the entry names it")
+
+    def test_a_missing_or_null_blocked_by_lists_the_step_plainly(self):
+        for name, value in (("absent", _ABSENT), ("null", None)):
+            with self.subTest(name):
+                git(self.repo, "checkout", "-q", "roadmap")
+                self.commit_step("c6", status="blocked", blockedBy=value, order=6)
+                try:
+                    listed = self.listed("a blocked step whose blockedBy is %s is not listed" % name)
+                except AssertionError:
+                    raise
+                except Exception as err:  # the crash is the defect, so it fails by name, not as an error
+                    self.fail("upkeep crashed on a blockedBy that is %s: %s: %s" % (name, type(err).__name__, err))
+                self.assertEqual(listed, (1, ["c6"]), "a missing or null blockedBy names no blocker, so the step is listed plainly")
+
+    def test_an_unreadable_blocked_by_is_listed_and_never_crashes(self):
+        for name, value in (("string", "c9"), ("number", 3), ("object", {"id": "c9"}), ("list of a number", [3]),
+                            ("list of a list", [["c9"]]), ("list of null", [None])):
+            with self.subTest(name):
+                git(self.repo, "checkout", "-q", "roadmap")
+                self.commit_step("c6", status="blocked", blockedBy=value, order=6)
+                try:
+                    listed = self.listed("a blocked step whose blockedBy is %s is not listed" % name)
+                except AssertionError:
+                    raise
+                except Exception as err:  # the crash is the defect, so it fails by name, not as an error
+                    self.fail("upkeep crashed on a blockedBy that is %s: %s: %s" % (name, type(err).__name__, err))
+                self.assertEqual(listed, (1, ["c6 (blockedBy unreadable)"]),
+                                 "a blockedBy of another type, or a list with a non-string, lists the step as unreadable")
+
+    def test_the_row_prints_right_after_the_in_progress_row(self):
+        self.commit_step("c2", status="blocked", blockedBy=[], order=2)
+        _, out = self.build_from_main()
+        labels = list(self.summary_counts(out))
+        self.assertIn(self.ROW, labels, "the upkeep line has the row")
+        self.assertEqual(labels[labels.index(self.ROW) - 1], StaleInProgress.ROW,
+                         "the row sits after the in-progress row")
+        self.assertEqual(self.row(out, self.ROW), (1, "c2"), "the count is in the line, and the step id is its detail")
+
+    def test_the_build_source_spells_the_blocked_status_only_in_its_home(self):
+        path = HERE / "build.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        # BLOCKED_STATUS is the one home of the blocked word. STATES holds the thread states, a different set, so it is
+        # allowed by name. Any other string constant equal to blocked is a second spelling, in a tuple or a comparison.
+        home = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id in ("BLOCKED_STATUS", "STATES")
+                                                    for t in node.targets):
+                home.update(id(n) for n in ast.walk(node.value))
+        spelled = sorted(n.lineno for n in ast.walk(tree)
+                         if isinstance(n, ast.Constant) and n.value == "blocked" and id(n) not in home)
+        self.assertEqual(spelled, [], "the word blocked is spelled at these lines of build.py, outside BLOCKED_STATUS")
+
+    def test_a_folded_blocker_is_finished_so_its_step_is_listed(self):
+        self.commit_step("f", status="folded", order=2)
+        self.commit_step("c1", status="blocked", blockedBy=["f"], order=1)
+        self.assertEqual(self.listed("the row should list the blocked step whose only blocker is folded, since folded is finished"),
+                         (1, ["c1"]), "a folded blocker is absorbed into another lane, not open work, so c1 is listed")
+
+
 class PageRulings(UpkeepFixture):
     """The upkeep row for each closed waiting-page item whose home step is open and cites the item nowhere.
     The step's note, why or ask cites an item with `item <n>` (any case, an optional #). The row reads
@@ -3182,10 +3300,10 @@ class DoneWithoutCheck(UpkeepFixture):
     NOT_SHOWN = " (not shown green on main)"
     UNREADABLE = " (updatedAt unreadable)"
     HASH_40 = "0123456789abcdef0123456789abcdef01234567"
-    # The fifteen rows before this one, in print order. The control case reads them.
+    # The rows before this one, in print order. The control case reads them.
     OLD_ROWS = ["notes over %d words" % build.NOTE_WORDS, "untouched %d days in a live phase" % build.STALE_DAYS,
                 "no note in a live phase", "new in top %d with no placement line" % build.TOP,
-                "in progress with no live lane or open PR", "ready todo steps",
+                "in progress with no live lane or open PR", "blocked with no open blocker", "ready todo steps",
                 "draft PRs over %d h with no live lane" % build.STALE_DRAFT_HOURS,
                 "dated claims to re-check before a lane starts", "page rulings not on their step",
                 build.IDLE_LANES_LINE, "landed, waiting for a device trial", "landed, waiting for triage to close",
@@ -3237,7 +3355,7 @@ class DoneWithoutCheck(UpkeepFixture):
         _, out = self.build_from_main()
         self.assertEqual(list(self.summary_counts(out))[-1], self.ROW)
 
-    def test_the_fifteen_rows_before_it_keep_their_order(self):
+    def test_the_rows_before_it_keep_their_order(self):
         # Control, green on main: the rows before this one print as they did, with or without this row.
         self.commit_steps({"bad": self.done_step(note="Shipped.")})
         _, out = self.build_from_main()

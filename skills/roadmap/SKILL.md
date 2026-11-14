@@ -239,6 +239,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   - the repo's GitHub name cannot be read;
   - `readAt` is not an ISO time, has no time zone, is over 60 minutes old (an old list counts a dead
     lane as live), or is more than 5 minutes ahead;
+- blocked steps whose blockers are all done, folded or name no step (a missing or null `blockedBy` holds none), in the row `blocked with no open blocker`. Each entry is `<id>`, `<id> (unknown blocker <x>)` or `<id> (blockedBy unreadable)`;
 - `todo` steps whose note has the sentence `Ready.`, in the row `ready todo steps`. A live phase is not
   needed. Each entry is the step id;
 - draft pull requests over 12 hours old with no live lane, in the row `draft PRs over 12 h with no live
