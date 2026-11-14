@@ -1514,7 +1514,7 @@ class CannotClaimTests(unittest.TestCase):
 
     def test_cc_red_blocker_while_the_batch_run_is_no_claim(self):
         # Catches: a claim whose clause carries a blocker (while the batch run) read as a claim with no try.
-        line = "I cannot merge it while the batch run is in progress."
+        line = "I cannot merge it while the batch run is in progress (pull_request_read at 11:43 CST: open)."
         out = self.stop([trg.human("merge the PR"), trg.assistant_text(line)])
         self.assert_passes(out, "a claim whose clause carries a blocker (while the batch run)")
 
