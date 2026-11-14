@@ -467,8 +467,8 @@ def case_nudge():
         check("nudge: 210k stores bucket 0", stored_bucket(c) == 0, "got %r" % stored_bucket(c))
 
         p = nudge(c, 330000)
-        check("nudge: 330k after 210k is silent (below the top checkpoint)",
-              p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+        check("nudge: 330k after 210k is refused by the pending 200k checkpoint (refusal 2 of 3)",
+              block_reason(p) is not None, "rc=%r out=%r" % (p.returncode, p.stdout))
         check("nudge: 330k keeps bucket 0", stored_bucket(c) == 0, "got %r" % stored_bucket(c))
 
         p = nudge(c, 360000)
@@ -476,15 +476,19 @@ def case_nudge():
         check("nudge: 360k stores bucket 1", stored_bucket(c) == 1, "got %r" % stored_bucket(c))
 
         p = nudge(c, 455000)
-        check("nudge: 455k after the top is silent (no checkpoint above it)",
-              p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+        check("nudge: 455k after the top is refused by the pending top checkpoint (refusal 2 of 3)",
+              block_reason(p) is not None, "rc=%r out=%r" % (p.returncode, p.stdout))
         check("nudge: 455k keeps bucket 1", stored_bucket(c) == 1, "got %r" % stored_bucket(c))
 
         p = nudge(c, 120000)
-        check("nudge: 120k after 455k (compaction) is silent",
-              p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+        check("nudge: 120k after 455k (compaction) is refused by the pending top (refusal 3 of 3)",
+              block_reason(p) is not None, "rc=%r out=%r" % (p.returncode, p.stdout))
         check("nudge: compaction resets stored bucket to -1", stored_bucket(c) == -1,
               "got %r" % stored_bucket(c))
+        p = nudge(c, 120000)
+        check("nudge: a 4th Stop at the pending top passes (the cap is 3 refusals)",
+              p.returncode == 0 and block_reason(p) is None,
+              "rc=%r out=%r" % (p.returncode, p.stdout))
 
         p = nudge(c, 210000)
         check("nudge: 210k blocks again after reset", is_block(c, p), "out=%r" % p.stdout)
@@ -516,13 +520,17 @@ def case_nudge_uses_last_assistant_entry_and_sums_cache():
 
 
 def case_nudge_stop_hook_active():
+    """stop_hook_active does not skip the gate: a checkpoint is refused under it, up to the cap."""
     c = Case("nudgea")
     try:
         p = nudge(c, 410000, active=True)
-        check("nudge: stop_hook_active is silent", p.returncode == 0 and not p.stdout.strip(),
-              "out=%r" % p.stdout)
-        check("nudge: stop_hook_active changes nothing", not os.path.exists(c.nudge_path()),
-              "state file written")
+        check("nudge: stop_hook_active does not skip the checkpoint: it is refused (refusal 1 of 3)",
+              block_reason(p) is not None, "rc=%r out=%r" % (p.returncode, p.stdout))
+        check("nudge: the checkpoint's bucket is stored under stop_hook_active",
+              stored_bucket(c) == 1, "got %r" % stored_bucket(c))
+        p = nudge(c, 410000, active=True)
+        check("nudge: a second stop_hook_active Stop is refused too (refusal 2 of 3)",
+              block_reason(p) is not None, "rc=%r out=%r" % (p.returncode, p.stdout))
     finally:
         c.cleanup()
 
@@ -562,8 +570,8 @@ def case_nudge_limit_checkpoints():
               is_block(c, p), "out=%r" % p.stdout)
         check("limit: 340k stores bucket 1", stored_bucket(c) == 1, "got %r" % stored_bucket(c))
         p = nudge(c, 460000)
-        check("limit: 460k after the top is silent", p.returncode == 0 and not p.stdout.strip(),
-              "out=%r" % p.stdout)
+        check("limit: 460k after the top is refused by the pending top (refusal 2 of 3)",
+              block_reason(p) is not None, "rc=%r out=%r" % (p.returncode, p.stdout))
     finally:
         c.cleanup()
     c = Case("nlimexp")
@@ -591,8 +599,8 @@ def case_nudge_limit_checkpoints():
         set_limit(c, 800000)
         nudge(c, 410000)
         p = nudge(c, 455000)
-        check("limit 800k: 455k silent after 410k fired (next is the top, 574k)",
-              p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+        check("limit 800k: 455k is refused by the pending checkpoint 410k opened (refusal 2 of 3)",
+              block_reason(p) is not None, "rc=%r out=%r" % (p.returncode, p.stdout))
         p = nudge(c, 755000)
         check("limit 800k: 755k blocks", is_block(c, p), "out=%r" % p.stdout)
         check("limit 800k: 755k stores bucket 2", stored_bucket(c) == 2,
@@ -671,13 +679,16 @@ def case_nudge_close_checkpoint_dropped_and_bogus_first_entry():
     try:
         set_limit(c, 700000)
         first = usage_line(90000)
-        blocks = []
+        blocks, buckets = [], []
         for total in (290000, 430000, 440000, 494000):
             p = nudge(c, 0, overhead=None, lines=[first, usage_line(total)])
-            blocks.append((total, is_block(c, p)))
-        check("close checkpoint: one nudge between total 430k and 494k, none at 440k",
-              blocks == [(290000, True), (430000, False), (440000, False), (494000, True)],
+            blocks.append((total, block_reason(p) is not None))
+            buckets.append(stored_bucket(c))
+        check("close checkpoint: 430k and 440k are refused by the pending 200k checkpoint, 494k blocks",
+              blocks == [(290000, True), (430000, True), (440000, True), (494000, True)],
               "got %r" % blocks)
+        check("close checkpoint: the stored bucket stays 0 through 440k, then 494k opens bucket 1",
+              buckets == [0, 0, 0, 1], "got %r" % buckets)
     finally:
         c.cleanup()
     # a bogus first entry is not the overhead
@@ -713,13 +724,13 @@ def case_nudge_ignores_bogus_last_entries():
             p = nudge(c, 0, lines=[real])
             check("bogus: 250k blocks (%s)" % tag, is_block(c, p), "out=%r" % p.stdout)
             p = nudge(c, 0, lines=[real, bad])
-            check("bogus: last entry %s is silent" % tag,
-                  p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+            check("bogus: last entry %s is refused by the pending checkpoint (refusal 2 of 3)" % tag,
+                  block_reason(p) is not None, "out=%r" % p.stdout)
             check("bogus: last entry %s leaves bucket 0" % tag, stored_bucket(c) == 0,
                   "got %r" % stored_bucket(c))
             p = nudge(c, 0, lines=[real, bad, real])
-            check("bogus: 250k again after %s is silent" % tag,
-                  p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+            check("bogus: 250k again after %s is refused (refusal 3 of 3)" % tag,
+                  block_reason(p) is not None, "out=%r" % p.stdout)
         finally:
             c.cleanup()
 
@@ -2322,6 +2333,7 @@ BOUNDARY_TS = "2027-01-10T10:02:00Z"  # after the checkpoint, before MTIME_1
 LATE_BOUNDARY_TS = "2027-02-01T00:00:00Z"  # after MTIME_1
 OLD_MTIME = 1700000000  # 2023-11-14: older than every time in these cases
 GATE_TOOL_ID = "toolu_gate"
+REWRITE_BRIEF = "Rewrite the handoff from the transcript since its last write."
 
 
 def size_entry(size, ts=GATE_TS):
@@ -2331,13 +2343,14 @@ def size_entry(size, ts=GATE_TS):
     return json.dumps(obj)
 
 
-def spawn_entry(model="sonnet", name="Agent", ts=GATE_SPAWN_TS):
-    """A main-chain entry that calls the subagent tool `name`, with input model `model`."""
+def spawn_entry(model="sonnet", name="Agent", ts=GATE_SPAWN_TS, subagent_type="general-purpose",
+                prompt=REWRITE_BRIEF):
+    """A main-chain entry that calls the subagent tool `name`, with input model `model`, a brief
+    `prompt` and a `subagent_type`."""
     obj = {"type": "assistant", "timestamp": ts, "message": {"role": "assistant", "content": [
         {"type": "tool_use", "id": GATE_TOOL_ID, "name": name,
-         "input": {"description": "Rewrite the handoff",
-                   "prompt": "Rewrite the handoff from the transcript since its last write.",
-                   "model": model}}]}}
+         "input": {"description": "Rewrite the handoff", "prompt": prompt,
+                   "subagent_type": subagent_type, "model": model}}]}}
     return json.dumps(obj)
 
 
@@ -2478,6 +2491,29 @@ def case_gate_needs_a_sonnet_spawn():
                   names_sonnet_subagent(r), "reason: %r" % r)
         finally:
             c.cleanup()
+
+
+def case_gate_audit_spawn_never_counts():
+    """The item-16 Explore audit is a Sonnet spawn that reads and does not write. Its brief's first
+    non-blank line starts with `Audit:`, so it never satisfies the gate, even with its result returned
+    and the handoff newer. Scope first: the spawn follows the checkpoint, and its result is not an error."""
+    c = Case("gate_audit")
+    try:
+        install_prompt(c, prompt_source())
+        brief = "\n\nAudit: compare the transcript with the handoff and report MISSING, STALE and DONE."
+        ckpt = size_entry(GATE_SIZE)
+        spawn = spawn_entry("sonnet", subagent_type="Explore", prompt=brief)
+        lines = [ckpt, spawn, spawn_result(ok=True)]
+        check("gate audit: scope: the Audit: spawn follows the checkpoint",
+              lines.index(ckpt) < lines.index(spawn), "")
+        p = nudge_at(c, handoff_text(), MTIME_1, lines=lines)
+        r = block_reason(p)
+        check("gate audit: an Audit: spawn does not satisfy the gate, so the Stop blocks",
+              r is not None, "stdout: %r" % p.stdout[:200])
+        check("gate audit: the block names the Sonnet subagent it still needs",
+              names_sonnet_subagent(r), "reason: %r" % r)
+    finally:
+        c.cleanup()
 
 
 def case_gate_spawn_must_follow_the_checkpoint_and_the_last_compaction():
@@ -2743,6 +2779,7 @@ def main() -> int:
     case_gate_passes_once_a_sonnet_subagent_rewrote_the_handoff()
     case_gate_blocks_a_failed_or_stale_spawn()
     case_gate_needs_a_sonnet_spawn()
+    case_gate_audit_spawn_never_counts()
     case_gate_spawn_must_follow_the_checkpoint_and_the_last_compaction()
     case_gate_after_compaction_blocks_and_reorient_names_the_subagent()
     case_gate_fails_open_without_a_readable_transcript()
