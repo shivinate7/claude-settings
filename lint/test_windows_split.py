@@ -468,12 +468,25 @@ def unwrap(raw):
     return s[3:-2].strip() if s.startswith("${{") and s.endswith("}}") else s
 
 
-# The records-only skip (ci-scope.sh's records_only_skip output, read as needs.scope.outputs.records_only_skip) turns off the
-# test steps of these jobs. Each run step ends in the gate: `(E) && GATE`, or `success() && GATE` when it has no if:.
+# The records-only skip (ci-scope.sh's records_only_skip output, read as needs.scope.outputs.records_only_skip) turns off some
+# run steps. A step that takes the gate ends in it: `(E) && GATE`, or `success() && GATE` when it has no if:. Which steps take it:
+#   GATED_JOBS: every run step. A static trace found the Windows guard suite reads no records page.
+#   SPLIT_GATED_JOBS: only the run steps named by scope_named_steps(), each with the scope condition as its if:.
+#   UNGATED_JOBS: no run step.
 GATE = "needs.scope.outputs.records_only_skip != 'true'"
-GATED_JOBS = ("checks-hooks", "checks-rest", "checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3",
-              "checks-windows-merge", "checks-windows-merge-2", "checks-windows-merge-3", "checks-windows-merge-4",
-              "checks-windows-merge-5", "checks-windows-rest", "checks-windows-rest-2")
+GATED_JOBS = ("checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3", "checks-windows-merge",
+              "checks-windows-merge-2", "checks-windows-merge-3", "checks-windows-merge-4", "checks-windows-merge-5",
+              "checks-windows-rest", "checks-windows-rest-2")
+SPLIT_GATED_JOBS = ("checks-hooks", "checks-rest")
+UNGATED_JOBS = ("checks",)
+GATE_JOBS = GATED_JOBS + SPLIT_GATED_JOBS + UNGATED_JOBS
+
+
+def scope_named_steps():
+    """The step names that take the gate in SPLIT_GATED_JOBS: NO_MD and NAMES_ONLY of lint/test_checks_step_scope.py, the one
+    home of those lists. Imported here, not at the top, because that module imports this one."""
+    from test_checks_step_scope import NAMES_ONLY, NO_MD
+    return set(NO_MD) | set(NAMES_ONLY)
 
 
 def ungate(expr):
@@ -499,17 +512,33 @@ def gate_problem(name, st):
     return f"{name} / {st.get('name') or st.get('run')}: the if: is not `(E) && {GATE}` (or `success() && {GATE}` with no if:): {raw!r}"
 
 
-def gate_problems(text, jobs=GATED_JOBS):
-    """gate_problem for each run step of each job in `jobs`, and one problem for each named job the workflow lacks."""
+def gate_spec_problem(name, st):
+    """None when run step `st` of job `name` has the gate the spec gives it, else the problem, named. A step the spec does not
+    gate has no gate. A step it gates has gate_problem's form."""
+    label = st.get("name") or st.get("run")
+    if name in UNGATED_JOBS or (name in SPLIT_GATED_JOBS and label not in scope_named_steps()):
+        if GATE in (st.get("if") or ""):
+            return f"{name} / {label}: the if: carries the records-only gate, which the spec does not give this step: {unwrap(st.get('if'))!r}"
+        return None
+    return gate_problem(name, st)
+
+
+def gate_problems(text, jobs=GATE_JOBS):
+    """gate_spec_problem for each run step of each job in `jobs`. Also one problem for each named job the workflow lacks, for a
+    job with no run step, and for a split job with no run step named by scope_named_steps(), so a check never passes on nothing."""
     found = all_jobs(text)
     problems = []
     for name in jobs:
         if name not in found:
             problems.append(f"{name}: no such job in checks.yml")
             continue
-        for st in found[name]["steps"]:
-            if "run" in st and gate_problem(name, st):
-                problems.append(gate_problem(name, st))
+        runs = [st for st in found[name]["steps"] if "run" in st]
+        if not runs:
+            problems.append(f"{name}: no run step, so the gate has nothing to check")
+            continue
+        if name in SPLIT_GATED_JOBS and not any(st.get("name") in scope_named_steps() for st in runs):
+            problems.append(f"{name}: no run step is named by scope_named_steps(), so the gate has nothing to check")
+        problems += [p for p in (gate_spec_problem(name, st) for st in runs) if p]
     return problems
 
 
@@ -1142,7 +1171,7 @@ class WindowsSplit(unittest.TestCase):
 
     def test_scope_job_checks_every_other_job(self):
         self.assertEqual(scope_problems(self.text), [])
-        self.assertEqual(gate_problems(self.text), [], "a gated job's run step does not end in the records-only gate")
+        self.assertEqual(gate_problems(self.text), [], "a run step does not carry the records-only gate the spec gives it")
         # The guard and mutate jobs skip on the
         # guard flag. Named failure: a cut job runs or never runs on push, schedule and dispatch.
         jobs = all_jobs(self.text)
@@ -1210,7 +1239,7 @@ class WindowsSplit(unittest.TestCase):
 
     def test_suites_keep_their_conditions(self):
         self.assertEqual(hardening_problems(self.text), [])
-        self.assertEqual(gate_problems(self.text), [], "a gated job's run step does not end in the records-only gate")
+        self.assertEqual(gate_problems(self.text), [], "a run step does not carry the records-only gate the spec gives it")
 
     def test_a_comment_that_names_a_shard_value_is_no_home(self):
         # Rows: a full-line comment, a trailing comment on a shard key, and a comment after a lone apostrophe.
@@ -1464,8 +1493,8 @@ class SplitJobs(unittest.TestCase):
 
     def test_each_linux_suite_runs_once_in_its_split(self):
         self.assertEqual(linux_split_problems(self.text), [])
-        split_gated = [n for n in GATED_JOBS if n in LINUX_SPLIT]
-        self.assertEqual(gate_problems(self.text, split_gated), [], "a gated Linux job's run step does not end in the records-only gate")
+        linux_gated = [n for n in GATE_JOBS if n in LINUX_SPLIT]
+        self.assertEqual(gate_problems(self.text, linux_gated), [], "a Linux split job's run step does not carry the records-only gate the spec gives it")
 
     def test_every_lint_form_step_stays_in_the_checks_job(self):
         """`merge --lane-lint` runs the `checks` job by name (bin/ci-job checks --lint), so a lint step moved into another Linux
@@ -1504,7 +1533,7 @@ class SplitJobs(unittest.TestCase):
         # The shard values are counted as homes in hardening_problems, so a stray one (here at job level) is a named problem.
         leak = self.text.replace("    steps:\n", "    env:\n      GUARD_SHARD: 1/2\n    steps:\n", 1)
         self.assertEqual(hardening_problems(self.text), [])
-        self.assertEqual(gate_problems(self.text), [], "a gated job's run step does not end in the records-only gate")
+        self.assertEqual(gate_problems(self.text), [], "a run step does not carry the records-only gate the spec gives it")
         self.assertTrue([p for p in hardening_problems(leak) if "GUARD_SHARD appears" in p])
 
     def test_checker_sees_the_linux_split_defects(self):
