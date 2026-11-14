@@ -25,9 +25,9 @@ Interface the module must match (the lane's form contract):
   not a restatement of main (none, nothing, n/a, no change, unchanged, stays, keeps, as today, as on main,
   same as, already; word match) before the change side's first ";", or anywhere when it has none. The chat
   box judges it in `question`; a page decision in `context`.
-- A widening option: page `widens: true`, never in `pick`; chat `Goes against your ruling: a repo changes to
-  fit a shared tool, never the tool to fit a repo` in its label or description, and never `(Recommended)` in
-  its label (rule uniform-pick).
+- A widening option: page `widens: true`, never `recommended`; chat `Goes against your ruling: a repo should change
+  to fit the shared tool, rather than the tool change to fit a repo` in its label or description, and never
+  `(Recommended)` in its label (rule uniform-pick).
 - A press in a web app: page `links`; chat an https:// url in that option's description (rule press-link).
   The chat scan skips an option's Gain and Lose text, as the page scan reads only label and how.
 - A chat refusal reason names its remedy and no field of the waiting page (no `stands`). Each page reason
@@ -110,7 +110,13 @@ MISSING = ("MISSING", "hooks/question_form.py has no such function yet")
 # The widening words are one constant, question_form.WIDENS_TEXT. A build that lacks it gets this sentinel,
 # so each case that uses it goes red by its own name instead of raising. WIDENS_WORDS pins the owner's exact
 # words once; every other case takes WIDE from the module.
-WIDENS_WORDS = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
+WIDENS_WORDS = ("Goes against your ruling: a repo should change to fit the shared tool, rather than the tool change "
+                "to fit a repo")
+# Older sessions still write these words in chat. The mark keeps refusing them (question_form.LEGACY_WIDENS_TEXTS).
+LEGACY_WORDS = "Goes against your uniform ruling (t18)"
+# The wording before the owner's Nov 6 ruling, as a literal. question_form.LEGACY_WIDENS_TEXTS holds it, and WIDE
+# no longer carries it.
+PRIOR_WORDS = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
 WIDE = getattr(question_form, "WIDENS_TEXT", None) or "<WIDENS_TEXT missing from hooks/question_form.py>"
 # The reply judge's prompt is read from its module constant in case_widens_words_in_the_reply_judge_prompt.
 WIDENS_HOMES = ("skills/waiting-page/page.html", "skills/waiting-page/SKILL.md", "output-styles/shiv-stylisms.md",
@@ -1613,6 +1619,31 @@ def case_widens_words_in_the_reply_judge_prompt():
     check("widens prompt: reply_judge.INSTRUCTIONS carries no 't18'", "t18" not in text, "t18")
 
 
+def case_widens_chat_new_words_mark_a_recommended_option():
+    # Item 278: the owner's new words mark a Recommended chat option as uniform-pick. WIDENS_WORDS is pinned here,
+    # not read from WIDE, so a build whose mark matches only the old words goes red on this case.
+    options = tcj.good_options()
+    options[0] = {"label": "Allow the second form (Recommended)",
+                  "description": "Gain: it lands today. Lose: two forms stay. " + WIDENS_WORDS + "."}
+    chat("the new words in a Recommended option's description are refused as uniform-pick",
+         tcj.good_box(options=options), ("uniform-pick", None))
+    options[0] = {"label": "Allow the second form, " + WIDENS_WORDS + " (Recommended)",
+                  "description": "Gain: it lands today. Lose: two forms stay."}
+    chat("the new words in a Recommended option's label are refused as uniform-pick",
+         tcj.good_box(options=options), ("uniform-pick", None))
+
+
+def case_widens_chat_legacy_words_still_mark():
+    # Controls: the t18 words older sessions write, and the prior owner words, still mark a Recommended option. The
+    # mark refuses both, through question_form.LEGACY_WIDENS_TEXTS.
+    for words, label in ((LEGACY_WORDS, "t18"), (PRIOR_WORDS, "prior")):
+        options = tcj.good_options()
+        options[0] = {"label": "Allow the second form (Recommended)",
+                      "description": "Gain: it lands today. Lose: two forms stay. " + words + "."}
+        chat("legacy: the %s words in a Recommended option's description are still refused as uniform-pick" % label,
+             tcj.good_box(options=options), ("uniform-pick", None))
+
+
 # ------------------------------------------------------------------ past rulings and option keys (units)
 #
 # question_form.past_rulings(text, root) -> (candidates, unknown), and question_form.key_overlap(reply, earlier) (spec
@@ -2682,6 +2713,7 @@ def main():
                  case_port_main_side, case_port_departs_shapes, case_call_judge,
                  case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
                  case_widens_words_in_every_home, case_widens_words_in_the_reply_judge_prompt,
+                 case_widens_chat_new_words_mark_a_recommended_option, case_widens_chat_legacy_words_still_mark,
                  case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_past_rulings_skips_the_debt_notes_file,
