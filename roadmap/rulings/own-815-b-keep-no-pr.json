@@ -1,0 +1,10 @@
+{
+ "id": "own-815-b-keep-no-pr",
+ "at": "2026-11-13T23:41:00-06:00",
+ "title": "Keep the chats that name no PR and no branch",
+ "ruling": "Owner, saved on the waiting page 23:40 CST Nov 13, item 815, pick b: keep all about 373 sessions whose transcript names no PR or branch; the sweep archives none of them. Count is the consultant's, unchecked. With ruling own-816-skip-other-repo the sweep leaves these and the other-repo sessions alone.",
+ "quote": "B: Keep them all",
+ "source": "Owner page save 23:40 CST Nov 13 (05:40:15Z), read by triage in the answers store; filed by triage.",
+ "status": "open",
+ "step": "archive-sweep-runs-per-merge"
+}

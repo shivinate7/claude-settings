@@ -1,0 +1,10 @@
+{
+ "id": "own-806-d-handed-in-only",
+ "at": "2026-11-13T23:41:00-06:00",
+ "title": "The runner merges main only into handed-in PRs; no 2-hour clock",
+ "ruling": "Owner, saved on the waiting page 23:40 CST Nov 13, item 806, pick d: no extra rule; the batch runner touches only a PR a lane has handed in, and a lane that pushes again to a handed-in branch says so first. The \"no lane has pushed there in 2 hours\" clause in the grant text (draft PR #3233) goes; ruling runner-merge-main-grant is rewritten in place. Git refuses a push that would overwrite newer work, so a missed message loses nothing.",
+ "quote": "D: No extra rule: the runner touches only a PR a lane has handed in, and a lane that pushes again says so first (my reading of your note)",
+ "source": "Owner page save 23:40 CST Nov 13 (05:40:15Z), read by triage in the answers store; filed by triage.",
+ "status": "open",
+ "step": "runner-merge-main-grant"
+}
