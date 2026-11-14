@@ -50,7 +50,7 @@ session transcripts, not a repo.
 | Building | designs in `docs/` or `plans/` with no record | each design has a record, or is marked abandoned |
 | Speak plainly | `` grep -rnE -e "\bD-?[0-9]+\b" -e "\b[Dd]ecision [a-z0-9]+(-[a-z0-9]+)+" -e "\brecord [a-z0-9]+(-[a-z0-9]+)+" -e "\bD ?\`[a-z0-9]+(-[a-z0-9]+)*\`" --include=*.md . `` finds numbered ids (D12, D-570), keyword cites (Decision draft-until-reviewed) and a D before a backtick slug. `grep -rnwF -f <(basename -s .md decisions/*.md) --include=*.md .` finds bare slugs. `grep -rnE -e "#[0-9]+\b" -e "\b[Ll]ane [0-9]+\b" -e "\b[0-9a-f]{7,40}\b" --include=*.md .` finds PR, issue, lane and commit ids (skip hex words with no digit). Run all from the records parent | each cited id has a short plain name beside it |
 | Output | `ste_lint` totals on the child's `*.md` | 0 errors |
-| Output | none: known gap. CI's STE step reads Markdown only, so UI copy gets no sentence-length, bloat or double-negative check. The Design probe counts the UI files | report the gap with its count; do not build a UI linter |
+| Output | none: known gap. CI's STE step reads Markdown only, so UI copy gets no bloat or double-negative check (STE011, STE013). The Design probe counts the UI files | report the gap with its count; do not build a UI linter |
 | Style | none: `output-styles/shiv-stylisms.md` governs replies, a session act | `n/a (session)` |
 | Reports | none: `report_guard.py` covers it | `parent-covered` |
 
