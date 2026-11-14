@@ -139,6 +139,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (`main HEAD:agent-<hex>`, `main agent-<hex>`), from any checkout. It also holds
                        for `--all` or `--branches` from an agent checkout, to a network remote, because
                        that push sends the agent branch too. A delete, a mirror and a dry run pass.
+  push-needs-review-record  ask. A `git push` (not a dry run) while the session's own transcript shows a PR and a reviewer or
+                       design-reviewer report with no later posted review log holding that role, verdict and round (and Head,
+                       when the report names its reviewed head). It denies a push to the head branch of a PR whose posted
+                       review log already holds a `Fix check:` line.
   env-file             deny. Any read or write of an environment file.
   process-args         deny. A command that prints other processes' full arguments, which can hold a
                        secret: `ps` with an args column (`aux`, `-ef`, `-f`, `-o args|command|cmd`),
@@ -582,6 +586,7 @@ while True:
             cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_verdict,
             rm_delete_hit, SUBST_OPEN, _in_group,
         )
+        from guard_push_delete import REVIEW_LOG_FIX_REASON, push_destinations, push_sources, review_log_hit
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
@@ -4763,6 +4768,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
             elif not read_verb("push", args):
+                record_hit, record_reason = review_log_hit(transcript, lambda: push_destinations(args, where, overrides), where,
+                                                         lambda: push_sources(args, where, overrides))
+                if record_hit and record_reason == REVIEW_LOG_FIX_REASON:
+                    refuse(tool, "deny", "push-needs-review-record", record_reason, record_hit)  # glossary-ok: the rule id, a literal
+                elif record_hit:
+                    ask_command("push-needs-review-record", record_reason, record_hit, "push before its review log")  # glossary-ok: the rule id, a literal
                 # A non-forced push of every branch that may update main or master, or sends a local agent-named
                 # branch (rule push-all-main, refuses), one
                 # that writes main or master by name (rule push-main, asks), an agent-worktree

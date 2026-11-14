@@ -80,6 +80,7 @@ OVERRIDE = os.path.join(HERE, "override.py")
 CALL_JUDGE = os.path.join(HERE, "call_judge.py")
 CALL_JUDGE_SUITE = os.path.join(HERE, "test_call_judge.py")
 SIM_LEASE = os.path.join(HERE, "..", "bin", "sim-lease")
+MERGE_TOOL = os.path.join(HERE, "..", "merge", "merge.py")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
@@ -92,6 +93,8 @@ TARGETS = {
     "calljudge": (CALL_JUDGE, CALL_JUDGE_SUITE, "CALL_JUDGE_UNDER_TEST", "call_judge"),
     # bin/sim-lease, which the guard loads by path (hooks/guard.py sim_lease_holds). The suite is the guard's.
     "simlease": (SIM_LEASE, SUITE, "GUARD_UNDER_TEST", "sim_lease"),
+    # merge/merge.py, the clean-merge walk the fix-branch refusal reads (guard_merge loads it beside hooks/). The suite is the guard's.
+    "merge": (MERGE_TOOL, SUITE, "GUARD_UNDER_TEST", "merge"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -398,6 +401,77 @@ MUTATIONS = [
      '        return merge.removeprefix("refs/heads/") if merge else None\n    return None',
      '        return merge.removeprefix("refs/heads/") if merge else None\n    return current', "guard",
      'push.default matching'),
+    # The review-record rule: each mutant removes one link of the chain, and one named case must go red.
+    ("push-needs-review-record: the guard.py call is dropped",
+     'review_log_hit(transcript, lambda: push_destinations(args, where, overrides), where,\n'
+     '                                                         lambda: push_sources(args, where, overrides))',
+     '(False, "")', "guard", 'the incident: a reviewer FAIL in the foreground result'),
+    ("push-needs-review-record: a posted record never clears its report",
+     'pending = [report for report in pending if report not in held]',
+     'pending = list(pending)', "guard", 'a FAIL round 1, then a FAIL record posted'),
+    ("push-needs-review-record: a round report is cleared by any posted fix check line",
+     '            if head is None:\n                return False',
+     '            if head is None:\n                return bool(self.fix)', "guard",
+     'a FAIL round 1 unrecorded beside a Fix check record line'),
+    ("push-needs-review-record: a fix check PASS no longer denies its head branch",
+     'if heads[number] in destinations() and',
+     'if False and', "guard", 'a fix check PASS for PR 1464 posted, then a push to its head branch'),
+    # The clean-merge allow (`_only_clean_merges`, then the walk in merge/merge.py), one link per row.
+    ("push-needs-review-record: the clean-merge verdict is always true, so an evil merge is allowed",
+     '        return branch in sources and bool(bases) and merge.clean_merges_pushed(where, sources[branch], head, bases)',
+     '        return True', "guard", 'an evil merge of main with an edit beyond git'),
+    ("push-needs-review-record: a clean-merge read that raises is allowed, not refused",
+     '        return branch in sources and bool(bases) and merge.clean_merges_pushed(where, sources[branch], head, bases)\n'
+     '    except Exception:\n        return False',
+     '        return branch in sources and bool(bases) and merge.clean_merges_pushed(where, sources[branch], head, bases)\n'
+     '    except Exception:\n        return True', "guard", 'a refspec source with a NUL byte'),
+    # The default base is origin/HEAD's target when it is set (`_push_main_refs`): a base of origin/main alone refuses a trunk merge.
+    ("push-needs-review-record: the default base is origin/main even when origin/HEAD names trunk",
+     '    return ["refs/remotes/" + (head or remote + "/main")]',
+     '    return ["refs/remotes/" + remote + "/main"]', "guard", 'a clean merge of trunk is allowed'),
+    ("push-needs-review-record: a merge whose second parent is off main is read as clean",
+     'if len(parents) != 2 or not tree or not any(ancestor(root, parents[1], base) is True for base in bases):',
+     'if len(parents) != 2 or not tree:', "merge",
+     'a clean merge whose second parent is a side branch off the root'),
+    ("push-needs-review-record: a merge that differs from git's clean merge is read as clean",
+     'if state != "clean" or merged != tree:', 'if state != "clean":', "merge",
+     'an evil merge of main with an edit beyond git'),
+    ("push-needs-review-record: the walk does not stop at the record's Head",
+     '        if sha == head:\n            return True\n        c, text = git(root, "cat-file", "commit", sha)',
+     '        c, text = git(root, "cat-file", "commit", sha)', "merge",
+     'one clean merge of main onto the record'),
+    ("push-needs-review-record: a verdict on the Done label line is not read",
+     '                if loose and marker:\n                    return loose.group(), "round" if marker.group(1) else "fix", int(marker.group(1)) if marker.group(1) else None',
+     '                if loose and marker:\n                    return None', "guard",
+     'a reviewer FAIL round 1 on the Done label line, no record, then the push'),
+    ("push-needs-review-record: a held report is never counted",
+     '    return counted',
+     '    return []', "guard",
+     'a FAIL naming diff base A then head B'),
+    ("push-needs-review-record: a commit on main counts for a held report",
+     '    if on_main is not False:',
+     '    if False:', "guard",
+     'a FAIL naming only diff base A'),
+    ("push-needs-review-record: a report no PR counts is dropped, not kept for the next PR",
+     'early = [report for report in early if report[:-1] not in counted]   # held for a later PR',
+     'early = []', "guard",
+     'a FAIL naming head B, then a PR for another branch'),
+    ("push-needs-review-record: the Done label round marker ignores case",
+     '", re.I)\n_LABEL_WORD',
+     '")\n_LABEL_WORD', "guard",
+     'a Done label line reading Round 1 with a capital R'),
+    ("push-needs-review-record: the Done label verdict is the first all-caps word",
+     ' if word.group() in verdicts',
+     '', "guard",
+     'a Done label line whose first all-capitals word is HEAD'),
+    ("push-needs-review-record: a Base head line names the reviewed head",
+     'if not _BASE_BEFORE.search(', 'if True or not _BASE_BEFORE.search(', "guard",
+     'reads Base main head B, reviewed A, with its record at B only'),
+    # A transcript line that is valid JSON but not an object: the reader steps over it before any record read.
+    ("push-needs-review-record: a transcript line that is valid JSON but not an object is read as a record",
+     '            if not isinstance(record, dict):\n                continue\n            content = record["message"]',
+     '            if False:\n                continue\n            content = record["message"]', "guard",
+     'a transcript line that is a JSON list, then the push'),
     ("force-push: quoted text is read as a push",
      'return PUSH_QUOTED.sub(" ", segment)', 'return segment', "guard",
      'false alarm: --force quoted in a commit message'),
@@ -4648,15 +4722,18 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
     A mutant and its clean-layout control both go through here, so they differ only in the text:
     `old == new` is the control, the same layout with nothing mutated (see `run_controls`)."""
     stem = TARGETS[target][3]
-    if target in ("guard", "simlease"):
+    if target in ("guard", "simlease", "merge"):
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
         # module that holds it. The suite loads the copied guard.py, which finds its siblings.
         root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
         tree = os.path.join(root, "hooks")
         mutate_shared.guard_tree(tree)
-        lay_out_guard_reads(root)  # takes the original bin/sim-lease; a simlease mutant overwrites it below
+        lay_out_guard_reads(root)  # takes the original bin/sim-lease and merge/merge.py; a mutant of either overwrites it below
         if target == "simlease":
             with open(os.path.join(root, "bin", "sim-lease"), "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(sources[target].replace(old, new, 1))
+        elif target == "merge":
+            with open(os.path.join(root, "merge", "merge.py"), "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(sources[target].replace(old, new, 1))
         elif old != new:  # old == new is the clean-layout control: no anchor to find
             mutate_shared.apply_mutant(tree, old, new)
@@ -4698,7 +4775,7 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
         copy_path = os.path.join(tree, "call_judge.py")
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
-    elif target not in ("guard", "simlease"):
+    elif target not in ("guard", "simlease", "merge"):
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
     return copy_path

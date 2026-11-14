@@ -3741,6 +3741,40 @@ def clean_merges_after(h, head, live, base=None, claims=None):
         sha = parents[0]
     return sha == head  # the head after the last commit the walk may read: REVIEW_MERGE_WALK commits reach it, one more does not
 
+def clean_merges_pushed(root, source, head, bases):
+    """True when the commits a push of `source` adds above the record's `head` are only clean merges of main, read from the local checkout `root`
+    (the push hook's walk; clean_merges_after is the same walk on the host's API reads). `source` is the pushed revision, `bases` the full refs that
+    stand for main (such as refs/remotes/origin/main; a short name could be shadowed by a local branch). The walk follows first parents from `source` and must reach `head` within REVIEW_MERGE_WALK commits.
+    Each commit walked has exactly two parents, a second parent that is an ancestor of one of `bases`, and git's clean merge of its parents
+    (merge_tree) as its tree. A `source` that is `head` walks no commit and is True. A one-parent commit, a merge of three, a merge of a branch
+    main lacks, an edited or conflicted merge, a longer walk, a head never reached, and every read that cannot answer (a commit or ref the
+    checkout lacks, a shallow cut, a git that will not run) are False, never True: the caller refuses on False. Cost: one `git rev-parse`; per
+    commit walked one `git cat-file` read, one `git merge-base --is-ancestor` per base tried (the push hook passes one), one merge_tree. The
+    caller starts none of it unless the fix-branch refusal would fire."""
+    c, sha = git(root, "rev-parse", "--verify", "-q", f"{source}^{{commit}}")
+    if c or not head:
+        return False
+    for _ in range(REVIEW_MERGE_WALK):
+        if sha == head:
+            return True
+        c, text = git(root, "cat-file", "commit", sha)
+        if c:
+            return False
+        parents, tree = [], None
+        for line in text.split("\n\n", 1)[0].split("\n"):  # the header lines, before the message
+            key, _, value = line.partition(" ")
+            if key == "parent":
+                parents.append(value)
+            elif key == "tree":
+                tree = value
+        if len(parents) != 2 or not tree or not any(ancestor(root, parents[1], base) is True for base in bases):
+            return False
+        state, merged, _files = merge_tree(root, *parents)
+        if state != "clean" or merged != tree:
+            return False
+        sha = parents[0]
+    return sha == head  # as in clean_merges_after: REVIEW_MERGE_WALK commits reach the head, one more does not
+
 REVIEW_SURVIVAL_UNKNOWN = "whether only clean merges of main follow the reviewed head is unknown"  # the why of a stale record whose clean-merge read could not run
 
 def live_review_state(h, rec, live, main, claims=None):
