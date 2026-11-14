@@ -1,14 +1,14 @@
 {
  "id": "push-skip-needs-constant-job-names",
- "title": "The shared push-skip action only works on repos whose suite jobs have constant names; a repo that adopts it learns that where it is written",
+ "title": "The shared push-skip action only works on repos whose suite job names match exactly; a repo that adopts it learns the working form where it is written",
  "status": "ready",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
  "owner": "triage",
  "blockedBy": [],
- "why": "Lane child-ci-q-max measured (coordinator 22:23 CST, relayed; the coordinator calls it checked): the shared action's suite list is every job key whose job-level `if` is true minus scope, all-jobs-passed, ci-done, push-skip, nightly-skip and the rollup's needs, matched by exact name. A matrix or reusable-call repo never matches: q_max needs `checks` without the base sha, `name: test` on 12 shards, and tiers inlined; degen needs a fan-in `app` job.",
+ "why": "Lane child-ci-q-max measured (coordinator 22:23 and 22:41 CST, relayed; the coordinator calls it checked on real runs): the shared action's suite list is every job key whose job-level `if` is true minus scope, all-jobs-passed, ci-done, push-skip, nightly-skip and the rollup's needs, matched by exact check-run name. On GitHub Actions a matrix job with a constant `name:` keeps its suffix (run 43557726741: `test (1)` to `test (3)`), so it never matches. A `name:` that references `matrix` gets no suffix, and every leg is named exactly the name (run 43557746396, form `name: test${{ matrix.shard == 0 && 'x' || '' }}`). An expression in a step name is evaluated in the jobs API (run 43557764774). The coordinator's earlier premise that a constant name works was wrong.",
  "source": "Coordinator 22:23 CST Nov 13 (relayed), lane child-ci-q-max; ruling qmax-skips-push-suite; decision uniform-over-variants.",
- "note": "Triage 22:23 CST Nov 13: the coordinator left it to triage whether this is a note or a step. A step: every repo that adopts the skip hits it, and today only each lane's own PR finds out. Ask: the adoption text (decision ci-once-per-batch or the action's own README, whichever the lane names) says in one paragraph that suite jobs need constant names and lists the three q_max renames and degen's fan-in as the worked cases; optionally a lint that names a suite job whose name carries a matrix or a call prefix. Not started; do after the two child lanes report, so the text carries what they found. No change to the action itself (ruling: a repo changes to fit the tool).",
- "updatedAt": "2026-11-13T22:23:06-06:00"
+ "note": "Triage 22:40 CST Nov 13 (rewritten in place): a step, since every repo that adopts the skip hits it. Ask: one ci-hygiene snippet (docs) so repos copy one form, and a line in the push-skip decision, with the measured facts above and q_max and degen's fan-in as worked cases. Optionally a lint that names a suite job whose name carries a matrix suffix or a call prefix. Not started; do after the two child lanes report, so the text carries what they found. No change to the action itself (ruling: a repo changes to fit the tool). Needs a past-ruling and guard-record read before any build.",
+ "updatedAt": "2026-11-13T22:40:54-06:00"
 }
