@@ -1226,8 +1226,7 @@ def widening_rule():
 
 def widens_key():
     """question_form.WIDENS_KEY, the one home of the mark's key. "" when the constant is missing or blank."""
-    value = getattr(load_file_module(QF_PATH, "question_form_widen_probe"), "WIDENS_KEY", "")
-    return value if isinstance(value, str) and value.strip() else ""
+    return qf_text("WIDENS_KEY")
 
 
 def hook_template(name):
@@ -1383,6 +1382,170 @@ def case_widening_rule_names_the_mark():
     cause = ("WIDENING_RULE is not defined" if not rule else "WIDENS_KEY is not defined" if not key
              else "WIDENING_RULE does not contain WIDENS_KEY")
     check("widening key: WIDENING_RULE contains WIDENS_KEY", bool(rule) and bool(key) and key in rule, cause)
+
+
+# ------------------------------------------------------------------ the carve-out for claude-settings' shared file
+#
+# One global allow entry in claude-settings' own shared settings.json is the shared tool itself, not one repo's
+# second form, so it is not widening and may be recommended. Its words are question_form.WIDENING_CARVE_OUT, the one
+# home that this judge and reply_judge both read. The waiting-page skill says the same in prose. A per-repo exception,
+# a second form, an allow entry in settings.local.json and a widening in another repo stay widening.
+# The helpers below repeat test_reply_judge's pin helpers: each judge test is its own CI step, and neither imports the other.
+CARVE_PINS = (("claude-settings",), ("settings.json",), ("allow",), ("not widen", "never flag"), ("recommend",))
+NEG_WORDS = ("not widen", "never flag", "is not", "isn't")  # the plain "is not" form ends a clause that says no widening
+SKILL_PATH = os.path.join(REPO, "skills", "waiting-page", "SKILL.md")
+SKILL_WIDENS = "`widens: true` on an option marks one"
+
+
+def qf_text(name):
+    """A text constant of question_form.py, read at test time. "" when it is missing or blank."""
+    value = getattr(load_file_module(QF_PATH, "question_form_text_probe"), name, "")
+    return value if isinstance(value, str) and value.strip() else ""
+
+
+def norm(text):
+    """The text with each run of white space as one space, so a wrapped line reads as its words."""
+    return " ".join(text.split())
+
+
+def clauses(text):
+    """The lowercase clauses of a text. A clause ends at a period or a semicolon, each followed by a space, so
+    settings.local.json stays whole and a clause after a semicolon is judged alone."""
+    return [c for c in re.split(r"\.\s|;\s", norm(text).lower()) if c.strip()]
+
+
+def has_pin(cl, *groups):
+    """True when one clause holds at least one word from each group."""
+    return any(all(any(w in c for w in g) for g in groups) for c in cl)
+
+
+def still_widens(cl, where):
+    """(name, ok, cause) for each form the text must still name as widening: a per-repo exception and a second form
+    (green on the current text), an allow entry in settings.local.json and a widening in another repo."""
+    other = ("another repo", "other repo")
+    return [
+        ("widening still named: %s names a per-repo exception as widening" % where,
+         has_pin(cl, ("widen",), ("per-repo exception",)), "no clause calls a per-repo exception widening"),
+        ("widening still named: %s names a second accepted form as widening" % where,
+         has_pin(cl, ("widen",), ("second accepted form", "second form")), "no clause calls a second form widening"),
+        ("widening still named: %s names an allow entry in settings.local.json as widening" % where,
+         has_pin(cl, ("settings.local.json",), ("widen",)) and not has_pin(cl, ("settings.local.json",), ("widen",), NEG_WORDS),
+         "no clause names an allow entry in settings.local.json as widening, or one says it is not"),
+        ("widening still named: %s names a widening in another repo as widening" % where,
+         has_pin(cl, other, ("widen",)) and not has_pin(cl, other, ("widen",), NEG_WORDS),
+         "no clause names a widening in another repo as widening, or one says it is not"),
+    ]
+
+
+def case_widening_carve_out_has_one_home():
+    # question_form.WIDENING_CARVE_OUT holds the carve-out's words. The rule carries them verbatim, so this judge and
+    # reply_judge read one text, and the rule's own clause says the carve-out in plain words.
+    carve = qf_text("WIDENING_CARVE_OUT")
+    check("carve-out home: question_form.py defines WIDENING_CARVE_OUT as non-blank text", bool(carve),
+          "WIDENING_CARVE_OUT is not defined in question_form.py")
+    rule = widening_rule()
+    check("carve-out clause: WIDENING_RULE has a clause that says one allow entry in claude-settings' shared "
+          "settings.json is not widening and may be recommended",
+          has_pin(clauses(rule), *CARVE_PINS), "no clause of WIDENING_RULE carries the carve-out")
+    if carve:
+        check("carve-out home: WIDENING_RULE carries the text of question_form.WIDENING_CARVE_OUT",
+              norm(carve) in norm(rule), "WIDENING_RULE does not carry the constant's text")
+
+
+def case_widening_rule_still_names_the_widening_forms():
+    rule = widening_rule()
+    check("widening still named scope: call_judge.WIDENING_RULE is defined as non-blank text", bool(rule),
+          "WIDENING_RULE is not defined in call_judge.py")
+    if not rule:
+        return
+    for name, ok, cause in still_widens(clauses(rule), "WIDENING_RULE"):
+        check(name, ok, cause)
+
+
+def skill_widens_paragraph():
+    """The waiting-page skill's `widens` paragraph, from its mark to the next bullet. "" when the mark is missing."""
+    with open(SKILL_PATH, encoding="utf-8") as f:
+        text = f.read()
+    start = text.find(SKILL_WIDENS)
+    if start < 0:
+        return ""
+    end = text.find("\n  - ", start)
+    return text[start:end if end >= 0 else len(text)]
+
+
+def case_skill_widens_paragraph_names_the_carve_out():
+    para = skill_widens_paragraph()
+    check("skill widens paragraph scope: skills/waiting-page/SKILL.md has the widens paragraph", bool(para),
+          "no `widens: true` paragraph in SKILL.md")
+    if not para:
+        return
+    cl = clauses(para)
+    check("skill carve-out: the paragraph says one allow entry in claude-settings' shared settings.json is not "
+          "widening and may be recommended", has_pin(cl, *CARVE_PINS),
+          "no clause of the widens paragraph carries the carve-out")
+    check("skill names no repo: the paragraph says the carve-out entry names no repo",
+          "names no repo" in norm(para).lower(), "the widens paragraph does not say the carve-out entry names no repo")
+    for name, ok, cause in still_widens(cl, "the waiting-page skill"):
+        check(name, ok, cause)
+
+
+ALLOW_WORDS = ("allow-list entry", "allow entry")
+ALLOW_QUALIFIERS = ("settings.local.json", "per-repo allow")
+
+
+def bare_allow_widenings(cl):
+    """The clauses that call a plain allow-list or allow entry widening: no settings.local.json or per-repo allow
+    qualifier, and no negation. A clause that says the global entry is not widening never counts."""
+    return [c for c in cl if any(a in c for a in ALLOW_WORDS) and "widen" in c
+            and not any(q in c for q in ALLOW_QUALIFIERS) and not any(n in c for n in NEG_WORDS)]
+
+
+def case_widening_template_keeps_a_repo_exception_widening():
+    # The clause "an option that only names a repo ... is not widening" must not swallow a per-repo exception. The clause
+    # after it says an option that adds an exception for a repo is widening. A scratch mutant that deletes that clause
+    # must fail this check.
+    rule = widening_rule()
+    check("per-repo exception scope: call_judge.WIDENING_RULE is defined as non-blank text", bool(rule),
+          "WIDENING_RULE is not defined in call_judge.py")
+    if not rule:
+        return
+    cl = clauses(rule)
+    check("per-repo exception clause: WIDENING_RULE has a clause that makes an option adding an exception for a repo widening",
+          has_pin(cl, ("adds an exception for a repo",)) and not has_pin(cl, ("adds an exception for a repo",), NEG_WORDS),
+          "no clause of WIDENING_RULE makes an option that adds an exception for a repo widening")
+
+
+def case_widening_rule_names_no_bare_allow_entry():
+    # A plain allow-list or allow entry is not named as widening: the widening entry is one in settings.local.json or a
+    # per-repo allow entry, so the sentence does not contradict the global carve-out.
+    rule = widening_rule()
+    check("bare allow entry scope: call_judge.WIDENING_RULE is defined as non-blank text", bool(rule),
+          "WIDENING_RULE is not defined in call_judge.py")
+    if not rule:
+        return
+    bare = bare_allow_widenings(clauses(rule))
+    check("bare allow entry: no clause of WIDENING_RULE calls a plain allow-list or allow entry widening",
+          not bare, "a clause calls a plain allow entry widening: %r" % (bare[:1],))
+
+
+def case_carve_out_says_it_names_no_repo():
+    # An entry that names no repo is the global one. An entry that names one repo's path stays a per-repo exception.
+    carve = qf_text("WIDENING_CARVE_OUT")
+    ok = "names no repo" in norm(carve).lower()
+    check("names no repo: question_form.WIDENING_CARVE_OUT says the global entry names no repo", ok,
+          "WIDENING_CARVE_OUT does not say the global entry names no repo")
+    if ok:
+        check("names no repo: WIDENING_RULE carries the phrase", "names no repo" in norm(widening_rule()).lower(),
+              "WIDENING_RULE does not carry the phrase")
+
+
+def case_carve_out_names_path_or_slug():
+    # An entry names a repo by its path or its slug. The constant says so, and the judge's rule carries the words.
+    carve = qf_text("WIDENING_CARVE_OUT")
+    check("path or slug: question_form.WIDENING_CARVE_OUT says an entry names a repo by its path or slug",
+          "path or slug" in norm(carve).lower(), "WIDENING_CARVE_OUT does not say an entry names a repo by its path or slug")
+    check("path or slug: WIDENING_RULE carries the phrase", "path or slug" in norm(widening_rule()).lower(),
+          "WIDENING_RULE does not carry the phrase")
 
 
 def case_fail_open():
@@ -1732,6 +1895,10 @@ def main():
                  case_widening_set_holds_rule_once, case_widening_batch_holds_rule_once,
                  case_widening_absent_without_options, case_widening_refusal_names_the_option,
                  case_widening_fair_option_passes_code_path, case_widening_rule_names_the_mark,
+                 case_widening_carve_out_has_one_home, case_widening_rule_still_names_the_widening_forms,
+                 case_skill_widens_paragraph_names_the_carve_out,
+                 case_widening_template_keeps_a_repo_exception_widening, case_widening_rule_names_no_bare_allow_entry,
+                 case_carve_out_says_it_names_no_repo, case_carve_out_names_path_or_slug,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
