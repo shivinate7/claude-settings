@@ -25,8 +25,10 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   limits the already granted act to messages that ask.
 - One "Relayed Grant:" entry quotes page_grant.py's COMMAND and COUNTED_LINE, read from the
   checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
-  relayed-grant-read-from-page). Its Covers text names the one settings change: a label that names
-  `settings.json` and the entry by its exact title or key, one entry per grant. Its "Never covers wins"
+  relayed-grant-read-from-page) and the closed-item clause in RELAYED_CLOSED (ruling own-753-a: a
+  routed close counts, as page_grant rule 4 in ruling own-748-b-rule-4). Its Covers text names the
+  one settings change: a label that names `settings.json` and the entry by its exact title or key,
+  one entry per grant. Its "Never covers wins"
   sentence follows the Never covers sentence and settles any clash with Covers.
 - One "Own Branch Lease Push:" entry quotes the lease push with a named sha and the guard remedy's
   command form, read from PUSH_REASON. Its Covers text names the 9 lease-push refusals, requires
@@ -111,7 +113,6 @@ RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page 
                    ("answer for another item", "an answer for another item"), ("choice none", "choice none"),
                    ("task answer", "any task answer"), ("time with no zone", "time has no zone"),
                    ("older than added", "an answer older than the item's added"),
-                   ("closed item", "a closed item"), ("arbiter overturn only", r"except an arbiter overturn"),
                    ("permissions", "permissions"), ("overrides", "overrides"),
                    ("settings change without file and entry",
                     "a settings change whose label does not name the file and entry"),
@@ -120,6 +121,13 @@ RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page 
                    ("an autoMode.allow entry the label does not name",
                     r"an autoMode\.allow entry the label does not name"),
                    ("no counted line", "no `counted` line in this session"))
+# The closed-item clause of the Relayed Grant entry (ruling own-753-a). A closed item counts only as a routed
+# close, which page_grant.routed_close reads (rule 4, ruling own-748-b-rule-4): status closed, a non-blank
+# `lane` and `home`, no arbiter, and `lastAnswer.at` equal to the answer's `at`. An arbiter overturn counts too.
+# A closed item that is neither stays refused. These tokens are the clause the entry's Never covers must name.
+RELAYED_CLOSED = (("closed item", "a closed item"), ("routed close", "routed close"),
+                  ("lane", "`lane`"), ("home", "`home`"), ("lastAnswer.at", r"`lastAnswer\.at`"),
+                  ("arbiter overturn", "arbiter overturn"))
 # Each term the Relayed Grant entry's Covers text names for its one settings change.
 RELAYED_SETTINGS_COVERS = (("one settings change", "one settings change"),
                            ("label names the settings file and entry", r"label.*?settings file.*?entry"),
@@ -318,6 +326,13 @@ class RelayedGrantIsAllowed(unittest.TestCase):
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Grant entry")
         for name, pattern in RELAYED_REFUSED:
             with self.subTest(act=name):
+                self.assertRegex(clause, "(?i)" + pattern, "Never covers does not name %r" % name)
+
+    def test_never_covers_names_the_routed_close_clause(self):
+        clause = never_covers(allow_entry(RELAYED))
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Grant entry")
+        for name, pattern in RELAYED_CLOSED:
+            with self.subTest(term=name):
                 self.assertRegex(clause, "(?i)" + pattern, "Never covers does not name %r" % name)
 
     def test_never_covers_wins_over_covers(self):
