@@ -200,6 +200,32 @@ class StepNoteTests(unittest.TestCase):
                       % ((steps, state),))
 
 
+class SecondRootNoteTests(unittest.TestCase):
+    """past_rulings reads the ruled store of the second root when the first has none. That read's freshness note goes
+    into the verdict as the first root's does: a failed fetch on the second root is named, never dropped. The check is
+    the real roadmap_ref.fresh_ref, not a mock."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="roadmap_second_", dir=fixture.run_folder())
+        self.addCleanup(shutil.rmtree, self.root, True)
+
+    def test_a_failed_fetch_on_the_second_root_is_named_in_the_verdict(self):
+        gone = os.path.join(self.root, "gone-second-root.git")  # no repo there, so the fetch fails
+        first = fixture.init_repo(os.path.join(self.root, "second-root-no-ref"))
+        fixture.set_fetch_head(first)  # the first root reads fresh, so only the second root's fetch can say read as of
+        second = fixture.clone_with_origin(self.root, "second-root-gone", gone,
+                                           fixture.ruling_files({RULING: fixture.entry(RULING)}))
+        fixture.without_fetch_head(second)
+        with mock.patch("guard_pointer.pointer_checkout", return_value=second):
+            candidates, unknown = question_form.past_rulings("Should we keep the store to one place?", first)
+        verdict = "\n".join(candidates + unknown)
+        self.assertTrue(any(c.startswith("ruled:%s:" % RULING) for c in candidates),
+                        "control: the second root's ruling is not a candidate, so its store was not read: %r"
+                        % (candidates,))
+        self.assertIn("read as of", verdict, "a failed fetch of the second root's ruled store is not named in the "
+                                             "verdict: %r" % (verdict,))
+
+
 def tearDownModule():
     for folder in fixture._RUN:
         shutil.rmtree(folder, ignore_errors=True)  # test-temp-standard: teardown removes the run folder

@@ -8,7 +8,9 @@ The store is roadmap/rulings/<id>.json on origin/roadmap. Each case builds a rea
 the module's functions or runs its CLI. RULED_STORE_UNDER_TEST overrides the module path, as a mutant run needs.
 hooks/test_session_start.py and hooks/test_question_form.py import this file as `fixture` for the same helpers.
 """
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -940,6 +942,24 @@ class StaleRefNoteTests(RepoCase):
             lines = load_module().session_lines(repo)
         self.assertTrue(any("read as of unknown:" in line for line in lines),
                         "an unimportable freshness check left the session block silent: %r" % lines)
+
+
+class ListNoteTests(RepoCase):
+    """`lint/ruled_store.py list` prints the full entries, and a read is never silent about how fresh it is: after a
+    failed fetch the list says "read as of" too, as the session block does."""
+
+    def test_list_says_read_as_of_when_the_fetch_failed(self):
+        gone = os.path.join(self.root, "gone-list.git")  # no repo there, so the fetch fails
+        repo = fixture.clone_with_origin(self.root, "list-stale", gone, ruling_files({"r-list": entry("r-list")}))
+        fixture.without_fetch_head(repo)
+        printed, errors = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(errors):
+            code = ruled_store.main(["list", repo])
+        out = printed.getvalue() + errors.getvalue()
+        self.assertEqual(code, 0, "list exited %r" % (code,))
+        self.assertIn("r-list", out, "control: list printed no entry for the open ruling: %r" % out)
+        self.assertIn("read as of", out, "list did not say the store was read as of a time after a failed fetch: %r"
+                      % out)
 
 
 def tearDownModule():
