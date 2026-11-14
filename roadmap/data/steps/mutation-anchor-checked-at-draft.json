@@ -1,0 +1,14 @@
+{
+ "id": "mutation-anchor-checked-at-draft",
+ "title": "A PR that changes a guarded file runs the mutation check at the draft stage, not first at the ready run",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Candidate from the coordinator (09:10 CST Nov 14, relayed; the coordinator does not know whether lane-touched-tests already covers mutate_guard; triage read none of the logs). Cases: #3389 (ready run RED: stale mutation anchor in hooks/mutate_guard.py line 3060, because the PR changes hooks/guard.py; the lane re-points the entry) and, earlier tonight, #3272 (ready run red in checks-mutate-guard, test_guard_beat.py line 307; replaced by #3403 and #3404). Two reds in one night found first at the ready run, each costing a bounce to draft and a new head. Mistake it would stop: a lane marks ready without running the mutation check for the guarded file its change touches. Guard: the lane lint (or the draft-stage run) runs the mutation check for any guarded file the diff changes, before the ready mark. First act of a lane: read what lane-touched-tests and the lane lint run today, and whether mutate_guard anchors are in either; build only the gap. Kin: lane-lint-before-push (unstarted), red-run-pre-push, lane-touched-tests-cap-cancels, mutate-guard-split (done). Cost: the mutation check runs at draft: unmeasured; checks-mutate-guard runs as shards under 25 min (step mutate-guard-split). A check change: round 3 applies.",
+ "source": "coordinator 09:10 CST Nov 14",
+ "note": "Filed 09:21 CST Nov 14 by triage. Tracker: the coordinator. No lane yet.",
+ "updatedAt": "2026-11-14T09:21:00-06:00"
+}
