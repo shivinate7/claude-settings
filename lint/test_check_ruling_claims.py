@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Cases for lint/check_ruling_claims.py: a line that names an owner ruling needs a record behind it.
+"""Cases for lint/check_ruling_claims.py: a line that names a ruling by the owner needs a record behind it.
 Standard library only.
 
     python3 lint/test_check_ruling_claims.py
 
 Claims. A time claim carries a date (`YYYY-MM-DD H:MM`, or `Mon D H:MM` with an optional comma). It follows the lead,
-which is `owner ruling`, `owner's ruling` or `ruled at`, through an optional joiner: a comma, a parenthesis, `at`, `of`,
+which is `ruled at`, or `ruling` after `owner` or `owner's`, through an optional joiner: a comma, a parenthesis, `at`, `of`,
 `on`, a colon, or a `T`. A stamp may also come time first, with the date after the time. A bare time is refused whatever
 the records hold. An id claim (a kebab slug of two or more words) is read in backticks, after `ruling:`, after the lead,
 or after a capitalised `Ruling` or `RULING` that starts a line. A bare lowercase `ruling` followed by a word is prose. A
