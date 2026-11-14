@@ -1,0 +1,10 @@
+{
+  "id": "own-merge-tool-audit-opus",
+  "at": "2026-11-13T20:50:00-06:00",
+  "title": "One read-only Opus agent audits the merge tool and tables each gate keep, fix or cut",
+  "ruling": "Owner 20:50 CST Nov 13, relayed by the consultant (chat; triage did not see it), answering item 798 option a: one Opus agent audits merge/merge.py, read-only. This is the owner's grant for that one Opus spawn (rule roles-sonnet-is-the-ceiling). It covers the audit only and no gate change; any change waits for his pick from the table.",
+  "quote": "yes send a opus agent to audit the merge tool",
+  "source": "Consultant 20:51 CST Nov 13 (quoting the owner's chat 20:50 CST); filed by triage.",
+  "status": "open",
+  "step": "merge-tool-audit"
+}

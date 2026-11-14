@@ -1,16 +1,14 @@
 {
  "id": "merge-tool-audit",
  "title": "One read-only agent tables every gate in merge/merge.py with the ruling behind it and keep, fix or cut",
- "status": "blocked",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
  "owner": "triage",
- "blockedBy": [
-  "item 798"
- ],
+ "blockedBy": [],
  "why": "Owner asked 20:49 CST whether the merge tool is any good and said it may be stale. The consultant counted 337 commits touching merge.py in 8 days, 4,617 lines, and 27 debts naming it (unchecked by triage).",
  "source": "Consultant 20:50 CST Nov 13, owner chat 20:49 CST.",
- "note": "Triage 20:51 CST Nov 13: blocked on owner item 798 (pick a audit, recommended; b no audit). On a: one Sonnet audit agent, read-only, report is the table. No gate changes until the owner picks from it. Counts are the consultant's, unchecked.",
- "updatedAt": "2026-11-13T20:51:11-06:00"
+ "note": "Triage 20:51 CST Nov 13: blocked on owner item 798 (pick a audit, recommended; b no audit). On a: one Sonnet audit agent, read-only, report is the table. No gate changes until the owner picks from it. Counts are the consultant's, unchecked. Owner picked a at 20:50 CST via the consultant (item 798 closed; ruling own-merge-tool-audit-opus): an Opus agent, read-only. Consultant 20:52 CST Nov 13: its audit agent is running and reports a gate table (keep, fix, cut). Nothing changes until the owner picks from the table.",
+ "updatedAt": "2026-11-13T20:52:00-06:00"
 }
