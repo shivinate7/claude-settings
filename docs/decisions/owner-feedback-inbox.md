@@ -138,14 +138,18 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   source has its own share, so one cannot crowd out the rest: 200 roadmap steps, 100 backlog lines,
   100 inbox blocks. Within a source the share keeps the front: roadmap steps not marked done come
   first, todo and notes lines go newest (last) line first, and inbox blocks newest first. They are: steps at `refs/remotes/origin/roadmap` (one `git grep`,
-  never fetched); the layout's debt, todo and notes files in the working tree; this inbox's other
+  never fetched); the layout's debt, todo and notes files in the working tree; this inbox's
   blocks. They also include the blocks of the 50 newest other inboxes whose sidecar
   `<sid>.inbox.repo` holds a folder at or under the repo root. Capture writes that sidecar once per
   session, when its cwd is in a repo. It walks up for `.git` and starts no process. The model names
-  at most one candidate per item. A hit appends ` repeats <ref>` to the item line (one inbox rewrite
-  through a temp file) and the block reason names it, or systemMessage does when `stop_hook_active`.
-  A line that cannot be found is reported as not marked. The session merges the work or drops the
-  mark. A dropped mark is not judged again. A model error or odd answer marks nothing and adds one
+  at most one candidate per item. Each item has its own candidate list: the judge drops the step,
+  debt, todo or notes file the item's home names (every line of a todo or notes file) and the item's own
+  owner-message block, even when two blocks share a minute (ruling 2026-11-11 13:03 CST,
+  restart plan R38). Another message of the same Stop, and the same text in another session's
+  inbox, stay candidates. An item with no candidate left is not asked. A hit appends ` repeats <ref>`
+  to the item line (one inbox rewrite through a temp file) and prints one systemMessage line. A mark
+  never blocks the turn. A line that cannot be found is reported as not marked. The session merges
+  the work or drops the mark. A dropped mark is not judged again. A model error or odd answer marks nothing and adds one
   systemMessage line. The items count as judged, so there is no retry loop. Cost: a Stop with no new
   item or no candidate makes no call. Otherwise it makes one call, one `git grep` and one rev-parse (unmeasured).
   It lists the handoffs folder and reads one sidecar per inbox there. It writes the turn state, and
