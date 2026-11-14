@@ -16,7 +16,7 @@ the post-build mutant is what proves them. The kill check's in-process cases (it
 kill verbs `taskkill` and `Stop-Process`, and the taskkill spellings) are in classes KillCheckWithoutReads, KillVerbs and KillVerbControls below: a guard case runs the
 hook as a subprocess, so it cannot patch a read.
 
-The cost case is a control: it passes on the base, because the recording adds nothing to the tool-call path today.
+The cost case is a control: the recording adds nothing to the tool-call path.
 It pins the stated number, zero process starts, so a recording that starts a process there fails it.
 """
 import contextlib
