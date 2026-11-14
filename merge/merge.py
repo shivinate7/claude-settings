@@ -2998,10 +2998,10 @@ def where_else_records(wt, base_ref, sha, paths):
         return []
     c, added = git(wt, "diff", "--name-only", "--no-renames", "--diff-filter=A", "-z", f"{base_ref}...{sha}", "--", *paths)
     if c:
-        raise Stop(f"git diff failed, so no decision record was looked for: {added}")
+        raise Stop(f"git diff failed, so no decision record was looked for (decision where-else-judge-prints-places): {added}")
     c, counts = git(wt, "diff", "--numstat", "--no-renames", "-z", f"{base_ref}...{sha}", "--", *paths)
     if c:
-        raise Stop(f"git diff failed, so no decision record was looked for: {counts}")
+        raise Stop(f"git diff failed, so no decision record was looked for (decision where-else-judge-prints-places): {counts}")
     new, edited = set(added.split("\0")), {}
     for row in counts.split("\0"):
         parts = row.split("\t", 2)
