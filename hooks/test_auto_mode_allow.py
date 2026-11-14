@@ -384,8 +384,11 @@ def run_never_covers_cases(settings):
     saved = os.environ.get("AUTO_MODE_SETTINGS")
     os.environ["AUTO_MODE_SETTINGS"] = settings
     try:
+        # Each case runs through TestCase.run, not a TestSuite: a suite fires this module's setUpModule and
+        # tearDownModule again, and the teardown would delete RUN under the mutant copy.
         result = unittest.TestResult()
-        unittest.TestSuite(MergeReviewRecordIsAllowed(n) for n in names).run(result)
+        for name in names:
+            MergeReviewRecordIsAllowed(name).run(result)
     finally:
         if saved is None:
             os.environ.pop("AUTO_MODE_SETTINGS", None)
