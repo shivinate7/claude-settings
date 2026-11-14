@@ -1,0 +1,14 @@
+{
+ "id": "merge-brake-text-stale",
+ "title": "The two requiredChecks refusals print BATCH_CITE, \"nothing merges while another ready pull request's CI runs\", though the tool no longer enforces that brake",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 01:42 CST Nov 14 (read by the coordinator in code on main 8e9f2b15; unchecked by triage): merge/merge.py:223 BATCH_CITE still reads \"nothing merges while another ready pull request's CI runs\", and the two requiredChecks refusals at merge.py:1243 and :1249 print it. The tool no longer enforces that brake: merge.py:1658 and merge/test_merge.py:3920 say another ready PR's running CI holds no merge. Serialization comes from the merge lock, the macOS queue (item 775) and each PR's own CI time, per the coordinator. The consultant had claimed the tool serializes merges because of the brake; the coordinator's code read says it does not.",
+ "source": "Coordinator 01:42 CST Nov 14 (relayed; wording-only, no owner question). Neighbour: merge-stale-cites-to-ids (doing, lane merge-tool-audit-fixes): the stale line's pointers to BATCH_CITE 223, DROP_CITE 222 and RED_CITE 216 point at ids, not moved text. That step fixes where the cite points; this one fixes what the cite says. The lane that has merge.py open may take both.",
+ "note": "Triage 01:44 CST Nov 14: the harm: a reader of the refusal waits for, or reports, a brake that is not there (the consultant's serialization claim is one case). Fix: red first: a test pins the text of BATCH_CITE against what merge.py:1658 enforces (no merge held by another ready PR's running CI), so the refusal never names the dropped brake; the text names what the tool does check. The allow list or text points at the constant the code emits (rule building-allow-list-is-the-constant). Unread by triage: the lines named. A text-only change in a guard or check's message; the lane judges whether it moves a verdict. Not started.",
+ "updatedAt": "2026-11-14T01:44:00-06:00"
+}
