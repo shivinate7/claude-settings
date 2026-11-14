@@ -834,6 +834,34 @@ class Selector(unittest.TestCase):
         self.assertEqual(self.commands_of(outputs, "commands_macos"), {a: "python3"},
                          "commands_macos does not name the macOS job's interpreter")
 
+    # R58: checks.yml's macOS jobs take their runner from the scope job's mac_runner output, so their runs-on is an
+    # expression, not a label. The selector places such a job on macOS, and its test lands in files_macos.
+    # The runs-on is the fixture's own copy of the expression checks.yml writes, fork guard included.
+    def test_a_runs_on_that_reads_the_mac_pick_lists_its_test_in_files_macos(self):
+        a = "lint/test_a.py"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              scope:
+                runs-on: ubuntu-latest
+                outputs:
+                  mac_runner: ${{ steps.mac.outputs.mac_runner }}
+                steps:
+                  - run: echo scope
+              macos:
+                needs: scope
+                runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON('["macos-latest"]') || fromJSON(needs.scope.outputs.mac_runner) }}
+                steps:
+                  - run: python3 lint/test_a.py
+            """)
+        repo, sha, out = self.fixture(with_checks({a: "old\n"}, text), {a: "new\n"})
+        r, outputs = self.select(repo, sha, out)
+        self.assertEqual(r.returncode, 0,
+                         f"the selector cannot read a macOS runs-on that reads needs.scope.outputs.mac_runner: {r.stderr}")
+        _, macos = self.os_lists(outputs)
+        self.assertEqual(macos, [a], "files_macos does not list the test the mac_runner runs-on job runs")
+
     # F4: a mod source with no sibling test lists the mod's tests by the lint form, mods/<mod>/**/*.test.mjs.
     def test_a_mod_source_with_no_sibling_test_lists_the_mods_tests(self):
         base = {"mods/m/check.mjs": "old\n", "mods/m/tests/a.test.mjs": "old\n",

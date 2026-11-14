@@ -23,15 +23,19 @@ are named in the all-jobs-passed and ci-done needs.
 
 Run with:  python3 lint/test_windows_split.py -v
 """
+import contextlib
+import http.server
 import itertools
 import json
 import os
 import re
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -39,6 +43,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from workflow_steps import CHECKS_SUITE_JOBS, gating_text, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
 CHECKS = os.environ.get("CHECKS_YML") or os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
+LANE_YML = os.environ.get("LANE_TOUCHED_YML") or os.path.join(HERE, "..", ".github", "workflows", "lane-touched-tests.yml")
 MIN_JOBS = 3
 
 # The run commands of the old single `checks-windows` job. Edit here only on purpose.
@@ -3181,6 +3186,453 @@ class CiCoverageCollector(unittest.TestCase):
         self.assertIsNotNone(error, "the scan passed although the collector exits 3; a failed collector must fail it")
         self.assertNotIsInstance(error, AssertionError, "a failed collector reads as a gap report, not as an error")
         self.assertRegex(str(error), r"\b3\b", "the collector's error does not name its exit code 3: %s" % error)
+
+
+ROOT = os.path.join(HERE, "..")
+MAC_JOBS = ("shell-macos", "checks-macos", "checks-macos-b")
+LABELS = ["self-hosted", "macOS", "claude-settings-mac"]
+FALLBACK = ["macos-latest"]
+# The whole runs-on of each macOS job: the fork guard comes first, so a fork PR takes macos-latest whatever the pick says.
+RUNS_ON = ("${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)"
+           " && fromJSON('[\"macos-latest\"]') || fromJSON(needs.scope.outputs.mac_runner) }}")
+# The env values the pick step passes to mac-runner.py, whole, as checks.yml writes them.
+MAC_PICK_ENV = {
+    "EVENT": "${{ github.event_name }}",
+    "HEAD_REF": "${{ github.head_ref }}",
+    "HEAD_REPO": "${{ github.event.pull_request.head.repo.full_name }}",
+    "REPO": "${{ github.repository }}",
+    "RUNNER_TOKEN": "${{ secrets.MAC_RUNNER_READ_TOKEN }}",
+}
+# The env values the skip step passes to batch-macos-skip.py, whole, as lane-touched-tests.yml writes them.
+SKIP_ENV = {
+    "GH_TOKEN": "${{ github.token }}",
+    "REPO": "${{ github.repository }}",
+    "MATRIX": "${{ steps.select.outputs.matrix }}",
+    "ANY": "${{ steps.select.outputs.any }}",
+}
+
+
+def step_env_of(case, path, job, step_id):
+    """The env of the one step `step_id` in `job` of the workflow at `path`. The job and the step are asserted first, so a
+    missing one fails by name before any value is read."""
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    block = job_block(text, job)
+    case.assertIsNotNone(block, f"{path} has no {job} job")
+    steps = [s for s in step_blocks(block) if step_key(s, "id") == step_id]
+    case.assertEqual(len(steps), 1, f"job {job} in {path} has {len(steps)} steps with id {step_id}, not one")
+    return step_env(steps[0])
+
+
+def assert_env(case, env, want, where):
+    """Each key of `want` holds exactly its value in `env`. One subtest per key, so a failure names its key."""
+    for key, value in want.items():
+        with case.subTest(key=key):
+            case.assertEqual(env.get(key), value, f"{where}: {key} is {env.get(key)!r}, not {value!r}")
+
+
+def run_script_streams(name, env):
+    """Run one .github/scripts file with `env` and a scratch $GITHUB_OUTPUT in this run's folder.
+    -> (exit code, {name: value}, stdout, stderr), the two streams apart."""
+    folder = tempfile.mkdtemp(prefix="script-", dir=RUN_FOLDER)
+    out = os.path.join(folder, "out")
+    open(out, "w").close()
+    e = {"PATH": os.environ["PATH"], "GITHUB_OUTPUT": out}
+    e.update(env)
+    r = subprocess.run([sys.executable, os.path.join(ROOT, ".github", "scripts", name)], env=e,
+                       capture_output=True, text=True, timeout=60)
+    with open(out, encoding="utf-8") as f:
+        pairs = dict(l.rstrip("\n").split("=", 1) for l in f if "=" in l)
+    return r.returncode, pairs, r.stdout, r.stderr
+
+
+def run_script(name, env):
+    """Run one .github/scripts file. -> (exit code, {name: value}, stdout and stderr together)."""
+    code, pairs, stdout, stderr = run_script_streams(name, env)
+    return code, pairs, stdout + stderr
+
+
+@contextlib.contextmanager
+def runners_api(status, body=b""):
+    """A local API that answers each GET with `status` and `body`. Yields (base URL, seen); seen gets (path, Authorization)
+    for each request. The server is shut down and closed on exit."""
+    seen = []
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append((self.path, self.headers.get("Authorization")))
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        yield "http://127.0.0.1:%d" % srv.server_port, seen
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def unreachable_url():
+    """A local API URL with nothing listening on it: the probe socket closes before the URL is returned."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return "http://127.0.0.1:%d" % s.getsockname()[1]
+
+
+def warnings_of(text):
+    """The GitHub ::warning:: lines in `text`. A runner reads a workflow command only at the start of a line."""
+    return [line for line in text.splitlines() if line.startswith("::warning::")]
+
+
+def summary_file(text="", dir_exists=True):
+    """A $GITHUB_STEP_SUMMARY path in this run's folder, holding `text`. Returns the path. With dir_exists=False the
+    folder above the file is never made, so the path cannot be written."""
+    folder = tempfile.mkdtemp(prefix="summary-", dir=RUN_FOLDER)
+    if not dir_exists:
+        return os.path.join(folder, "missing", "summary.md")
+    path = os.path.join(folder, "summary.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return path
+
+
+class MacRunnerPick(unittest.TestCase):
+    """R58 points 1 and 2: the integration PR's CI run's macOS jobs run on the owner's Mac (label claude-settings-mac) and fall back to
+    macos-latest when no such runner is online. A fork PR never reaches it."""
+
+    ONLINE = json.dumps({"runners": [{"status": "online", "labels": [{"name": n} for n in LABELS]}]})
+    OFFLINE = json.dumps({"runners": [{"status": "offline", "labels": [{"name": n} for n in LABELS]}]})
+    EMPTY = json.dumps({"runners": []})
+    # A full page (per_page=100) with the owner's Mac online last.
+    FULL_PAGE = json.dumps({"runners": [{"status": "online", "labels": [{"name": "linux"}]} for _ in range(99)]
+                            + [{"status": "online", "labels": [{"name": n} for n in LABELS]}]})
+    BATCH = {"EVENT": "pull_request", "HEAD_REF": "batch-104", "HEAD_REPO": "o/r", "REPO": "o/r"}
+    TOKEN = "tok-Zq7Lw3pRx9"  # distinctive, so a leak shows in any output
+
+    def pick_streams(self, **kw):
+        """Run the pick with the batch env and `kw` on top. Returns (labels, stdout, stderr), the two streams apart."""
+        env = dict(self.BATCH, RUNNERS_JSON=self.ONLINE)
+        env.update(kw)
+        code, out, stdout, stderr = run_script_streams("mac-runner.py", env)
+        self.assertEqual(code, 0, stdout + stderr)
+        return json.loads(out["mac_runner"]), stdout, stderr
+
+    def run_pick(self, **kw):
+        """Run the pick with the batch env and `kw` on top. Returns (labels, text): the labels, and the run's output with
+        stdout and stderr together."""
+        labels, stdout, stderr = self.pick_streams(**kw)
+        return labels, stdout + stderr
+
+    def pick(self, **kw):
+        return self.run_pick(**kw)[0]
+
+    def test_a_batch_run_with_a_runner_online_picks_the_mac(self):
+        self.assertEqual(self.pick(), LABELS)
+
+    def test_an_online_runner_without_the_label_falls_back(self):
+        other = json.dumps({"runners": [{"status": "online", "labels": [{"name": "self-hosted"}, {"name": "macOS"}]}]})
+        self.assertEqual(self.pick(RUNNERS_JSON=other), FALLBACK)
+
+    def test_the_real_request_asks_the_repo_runners_endpoint_with_the_token(self):
+        with runners_api(200, self.ONLINE.encode()) as (api, seen):
+            got = self.pick(RUNNERS_JSON="", RUNNER_TOKEN="tok", API_URL=api)
+        self.assertEqual(got, LABELS)
+        self.assertEqual(seen, [("/repos/o/r/actions/runners?per_page=100", "Bearer tok")])
+
+    def test_a_non_200_read_falls_back_with_a_warning_naming_the_status(self):
+        for status in (403, 500):
+            with self.subTest(status=status), runners_api(status) as (api, seen):
+                labels, text = self.run_pick(RUNNERS_JSON="", RUNNER_TOKEN="tok", API_URL=api)
+                self.assertEqual(len(seen), 1, "the read made %d requests, not 1, after a %d answer" % (len(seen), status))
+                self.assertEqual(labels, FALLBACK, "a %d read did not fall back to macos-latest" % status)
+                warns = warnings_of(text)
+                self.assertTrue(warns, "no ::warning:: line on stdout after a %d read: %s" % (status, text))
+                self.assertIn(str(status), warns[0], "the ::warning:: line does not name status %d: %s" % (status, warns[0]))
+                self.assertIn("macos-latest", warns[0], "the ::warning:: line does not name macos-latest as the fallback: %s" % warns[0])
+
+    def test_a_403_read_appends_the_status_to_the_step_summary(self):
+        summary = summary_file("earlier step line\n")
+        with runners_api(403) as (api, seen):
+            labels, _ = self.run_pick(RUNNERS_JSON="", RUNNER_TOKEN="tok", API_URL=api, GITHUB_STEP_SUMMARY=summary)
+        self.assertEqual(len(seen), 1, "the read made %d requests, not 1, after a 403 answer" % len(seen))
+        self.assertEqual(labels, FALLBACK, "a 403 read did not fall back to macos-latest")
+        with open(summary, encoding="utf-8") as f:
+            got = f.read()
+        self.assertIn("earlier step line", got, "the step summary lost the line an earlier step wrote; the status must be appended")
+        self.assertIn("403", got, "the step summary does not name status 403: %r" % got)
+
+    def test_a_200_read_logs_one_status_line(self):
+        cases = {"online runner": (self.ONLINE, LABELS), "empty list": (self.EMPTY, FALLBACK), "full page": (self.FULL_PAGE, LABELS)}
+        for name, (body, want) in cases.items():
+            with self.subTest(case=name), runners_api(200, body.encode()) as (api, seen):
+                labels, text = self.run_pick(RUNNERS_JSON="", RUNNER_TOKEN="tok", API_URL=api)
+                self.assertEqual(len(seen), 1, "the %s read made %d requests, not 1" % (name, len(seen)))
+                self.assertEqual(labels, want, "the %s read picked %s, not %s" % (name, labels, want))
+                self.assertIn("mac-runner: runners read status 200", text.splitlines(),
+                              "the %s read answered 200 and logged no status line: %s" % (name, text))
+
+    def test_an_unreachable_api_falls_back_with_a_warning(self):
+        labels, text = self.run_pick(RUNNERS_JSON="", RUNNER_TOKEN="tok", API_URL=unreachable_url())
+        self.assertEqual(labels, FALLBACK, "an unreachable API did not fall back to macos-latest")
+        warns = warnings_of(text)
+        self.assertTrue(warns, "no ::warning:: line on stdout when the API refuses the connection: %s" % text)
+        self.assertIn("macos-latest", warns[0], "the ::warning:: line does not name macos-latest as the fallback: %s" % warns[0])
+
+    def test_the_early_returns_and_a_missing_token_make_no_read_and_no_warning(self):
+        # Controls, green on the old code. A read would reach the live API below, so `seen` shows any read.
+        cases = {
+            "not a pull request run": {"EVENT": "push"},
+            "a lane branch": {"HEAD_REF": "lane-x"},
+            "a fork": {"HEAD_REPO": "fork/r"},
+            "a missing token": {"RUNNER_TOKEN": ""},
+        }
+        for name, change in cases.items():
+            with self.subTest(case=name), runners_api(200, self.ONLINE.encode()) as (api, seen):
+                summary = summary_file()
+                env = {"RUNNERS_JSON": "", "RUNNER_TOKEN": "tok", "API_URL": api, "GITHUB_STEP_SUMMARY": summary}
+                env.update(change)
+                labels, text = self.run_pick(**env)
+                self.assertIn("mac-runner: ", text, "the %s case printed no decision line, so it never reached its decision: %s" % (name, text))
+                self.assertEqual(seen, [], "the %s case read the runners list; it must make no read" % name)
+                self.assertEqual(labels, FALLBACK, "the %s case did not fall back to macos-latest" % name)
+                self.assertEqual(warnings_of(text), [], "the %s case printed a ::warning:: line; it must stay quiet" % name)
+                with open(summary, encoding="utf-8") as f:
+                    self.assertEqual(f.read(), "", "the %s case wrote to the step summary; it must stay quiet" % name)
+
+    def test_no_runner_online_falls_back(self):
+        self.assertEqual(self.pick(RUNNERS_JSON=self.OFFLINE), FALLBACK)
+
+    def test_an_unreadable_runner_list_falls_back(self):
+        self.assertEqual(self.pick(RUNNERS_JSON="not json"), FALLBACK)
+
+    def test_a_missing_token_falls_back(self):
+        self.assertEqual(self.pick(RUNNERS_JSON="", RUNNER_TOKEN=""), FALLBACK)
+
+    def test_a_fork_pr_falls_back_even_with_a_runner_online(self):
+        self.assertEqual(self.pick(HEAD_REPO="fork/r"), FALLBACK)
+
+    def test_a_lane_branch_falls_back(self):
+        self.assertEqual(self.pick(HEAD_REF="lane-x"), FALLBACK)
+
+    def test_every_macos_job_reads_the_pick_and_guards_forks_itself(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            text = f.read()
+        for job in MAC_JOBS:
+            block = job_block(text, job)
+            runs_on = re.search(r"^    runs-on:(.*)$", block, re.M).group(1)
+            self.assertEqual(runs_on.strip(), RUNS_ON, job)
+
+    def test_the_scope_job_runs_the_pick_with_the_token_from_a_secret(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            scope = job_block(f.read(), "scope")
+        self.assertIn("mac_runner: ${{ steps.mac.outputs.mac_runner }}", scope)
+        self.assertIn("python3 .github/scripts/mac-runner.py", scope)
+        self.assertIn("RUNNER_TOKEN: ${{ secrets.MAC_RUNNER_READ_TOKEN }}", scope)
+
+    def test_the_mac_step_passes_each_value_the_pick_reads(self):
+        env = step_env_of(self, CHECKS, "scope", "mac")
+        assert_env(self, env, MAC_PICK_ENV, "checks.yml scope job, step mac")
+
+    def assert_missing_list_warns(self, labels, text):
+        """A 200 body with no runners list: the run reaches its decision, falls back, and says so on a ::warning:: line."""
+        self.assertIn("mac-runner: ", text, "the run printed no decision line, so it never reached its decision: %s" % text)
+        self.assertEqual(labels, FALLBACK, "a 200 body with no runners list did not fall back to macos-latest: %s" % labels)
+        warns = warnings_of(text)
+        self.assertTrue(warns, "a 200 body with no runners list printed no ::warning:: line, so its fallback is silent: %s" % text)
+        self.assertIn("macos-latest", warns[0], "the ::warning:: line does not name macos-latest as the fallback: %s" % warns[0])
+
+    def test_a_200_body_without_a_runners_list_falls_back_with_a_warning(self):
+        labels, text = self.run_pick(RUNNERS_JSON='{"total_count": 0}')
+        self.assert_missing_list_warns(labels, text)
+
+    def test_a_200_read_without_a_runners_list_falls_back_with_a_warning(self):
+        with runners_api(200, b'{"total_count": 0}') as (api, seen):
+            labels, text = self.run_pick(RUNNERS_JSON="", RUNNER_TOKEN="tok", API_URL=api)
+        self.assertEqual(len(seen), 1, "the read made %d requests, not 1, after a 200 answer" % len(seen))
+        self.assert_missing_list_warns(labels, text)
+
+    def test_an_empty_or_offline_runners_list_falls_back_with_no_warning(self):
+        # Control, green on the old code: an empty list and an offline runner are real answers, so they stay quiet.
+        for name, body in (("empty list", self.EMPTY), ("offline runner", self.OFFLINE)):
+            with self.subTest(case=name):
+                labels, text = self.run_pick(RUNNERS_JSON=body)
+                self.assertIn("mac-runner: ", text, "the %s case printed no decision line, so it never reached its decision: %s" % (name, text))
+                self.assertEqual(labels, FALLBACK, "the %s case did not fall back to macos-latest" % name)
+                self.assertEqual(warnings_of(text), [], "the %s case printed a ::warning:: line; a real answer must stay quiet: %s" % (name, text))
+
+    def test_an_unwritable_step_summary_still_exits_0_and_picks_macos_latest(self):
+        summary = summary_file(dir_exists=False)
+        with runners_api(403) as (api, seen):
+            code, out, stdout, stderr = run_script_streams("mac-runner.py", dict(self.BATCH, RUNNERS_JSON="", RUNNER_TOKEN="tok",
+                                                                                  API_URL=api, GITHUB_STEP_SUMMARY=summary))
+        self.assertEqual(len(seen), 1, "the read made %d requests, not 1, after a 403 answer" % len(seen))
+        self.assertEqual(code, 0, "an unwritable $GITHUB_STEP_SUMMARY made the pick exit %d, not 0: %s" % (code, stderr))
+        self.assertIn("mac_runner", out, "an unwritable $GITHUB_STEP_SUMMARY stopped the pick before $GITHUB_OUTPUT was written: %s" % stderr)
+        self.assertEqual(json.loads(out["mac_runner"]), FALLBACK, "the pick with an unwritable summary did not fall back to macos-latest")
+        self.assertTrue(warnings_of(stdout), "no ::warning:: line on stdout after a 403 with an unwritable summary: %s" % stdout)
+
+    def assert_status_warning_does_not_blame_the_token(self, status):
+        with runners_api(status) as (api, seen):
+            _, text = self.run_pick(RUNNERS_JSON="", RUNNER_TOKEN="tok", API_URL=api)
+        self.assertEqual(len(seen), 1, "the read made %d requests, not 1, after a %d answer" % (len(seen), status))
+        self.assertIn("mac-runner: ", text, "the %d case printed no decision line, so it never reached its decision: %s" % (status, text))
+        warns = warnings_of(text)
+        self.assertTrue(warns, "no ::warning:: line on stdout after a %d read: %s" % (status, text))
+        self.assertIn(str(status), warns[0], "the ::warning:: line does not name status %d: %s" % (status, warns[0]))
+        self.assertNotIn("Administration", warns[0],
+                         "a %d read blames the token (Administration: read); only a 403 gets that hint: %s" % (status, warns[0]))
+
+    def test_a_500_warning_names_the_status_and_not_the_token(self):
+        self.assert_status_warning_does_not_blame_the_token(500)
+
+    def test_a_429_warning_names_the_status_and_not_the_token(self):
+        self.assert_status_warning_does_not_blame_the_token(429)
+
+    def test_a_403_warning_keeps_the_administration_hint(self):
+        # Control, green on the old code: a 403 is the status the token hint is for.
+        with runners_api(403) as (api, seen):
+            _, text = self.run_pick(RUNNERS_JSON="", RUNNER_TOKEN="tok", API_URL=api)
+        self.assertEqual(len(seen), 1, "the read made %d requests, not 1, after a 403 answer" % len(seen))
+        warns = warnings_of(text)
+        self.assertTrue(warns, "no ::warning:: line on stdout after a 403 read: %s" % text)
+        self.assertIn("Administration: read", warns[0],
+                      "the 403 warning lost its hint that the token needs Administration: read: %s" % warns[0])
+
+    def test_the_warning_and_the_status_line_go_to_stdout(self):
+        # Control, green on the old code: both lines are printed to stdout today. A fix must keep them there.
+        with runners_api(403) as (api, seen):
+            _, stdout, stderr = self.pick_streams(RUNNERS_JSON="", RUNNER_TOKEN="tok", API_URL=api)
+        self.assertEqual(len(seen), 1, "the read made %d requests, not 1, after a 403 answer" % len(seen))
+        self.assertTrue(warnings_of(stdout), "the ::warning:: line after a 403 is not on stdout: %r" % stdout)
+        self.assertEqual(warnings_of(stderr), [], "the ::warning:: line after a 403 is on stderr: %r" % stderr)
+        with runners_api(200, self.ONLINE.encode()) as (api, seen):
+            _, stdout, stderr = self.pick_streams(RUNNERS_JSON="", RUNNER_TOKEN="tok", API_URL=api)
+        self.assertEqual(len(seen), 1, "the read made %d requests, not 1, after a 200 answer" % len(seen))
+        self.assertIn("mac-runner: runners read status 200", stdout.splitlines(), "the status 200 line is not on stdout: %r" % stdout)
+        self.assertNotIn("mac-runner: runners read status 200", stderr.splitlines(), "the status 200 line is on stderr: %r" % stderr)
+
+    def run_with_token(self, api):
+        """One pick with the token set and a step summary file. Returns (stdout, stderr, the step summary's text)."""
+        summary = summary_file()
+        _, stdout, stderr = self.pick_streams(RUNNERS_JSON="", RUNNER_TOKEN=self.TOKEN, API_URL=api, GITHUB_STEP_SUMMARY=summary)
+        with open(summary, encoding="utf-8") as f:
+            return stdout, stderr, f.read()
+
+    def assert_no_token(self, stdout, stderr, step_summary, where):
+        self.assertIn("mac-runner: ", stdout, "%s: the run printed no decision line, so it never reached its decision: %s" % (where, stdout))
+        for name, text in (("stdout", stdout), ("stderr", stderr), ("the step summary", step_summary)):
+            self.assertNotIn(self.TOKEN, text, "%s: the token printed to %s" % (where, name))
+
+    def test_the_token_reaches_no_output_and_no_step_summary(self):
+        # Guard, green on the old code. The token travels only in the Authorization header; each read proves it was sent.
+        for status in (403, 500, 200):
+            with self.subTest(status=status), runners_api(status, self.ONLINE.encode()) as (api, seen):
+                stdout, stderr, step_summary = self.run_with_token(api)
+                self.assertEqual(seen, [("/repos/o/r/actions/runners?per_page=100", "Bearer " + self.TOKEN)],
+                                 "the %d read did not send the token in its Authorization header: %s" % (status, seen))
+                self.assert_no_token(stdout, stderr, step_summary, "a %d read" % status)
+        with self.subTest(status="unreachable"):
+            stdout, stderr, step_summary = self.run_with_token(unreachable_url())
+            self.assertTrue(warnings_of(stdout), "the unreachable API printed no ::warning:: line: %s" % stdout)
+            self.assert_no_token(stdout, stderr, step_summary, "an unreachable API")
+
+    def test_the_status_200_line_follows_only_a_200_read(self):
+        # Controls, green on the old code. Each case shows its scope first: the read it made, or the decision line.
+        with runners_api(403) as (api, seen):
+            _, text = self.run_pick(RUNNERS_JSON="", RUNNER_TOKEN="tok", API_URL=api)
+        self.assertEqual(len(seen), 1, "the 403 case made %d requests, not 1" % len(seen))
+        self.assertTrue(warnings_of(text), "the 403 case printed no ::warning:: line, so it never reached its failure path: %s" % text)
+        self.assertNotIn("mac-runner: runners read status 200", text.splitlines(), "a 403 read printed a status 200 line: %s" % text)
+        for name, change in (("missing token", {"RUNNERS_JSON": "", "RUNNER_TOKEN": ""}),
+                             ("RUNNERS_JSON override", {"RUNNERS_JSON": self.ONLINE, "RUNNER_TOKEN": "tok"})):
+            with self.subTest(case=name), runners_api(200, self.ONLINE.encode()) as (api, seen):
+                _, text = self.run_pick(API_URL=api, **change)
+                self.assertIn("mac-runner: ", text, "the %s case printed no decision line, so it never reached its decision: %s" % (name, text))
+                self.assertEqual(seen, [], "the %s case made a read; it must make none" % name)
+                self.assertEqual([line for line in text.splitlines() if "runners read status" in line], [],
+                                 "the %s case printed a runners read status line, though no read was made" % name)
+
+
+class TouchedMacosSkip(unittest.TestCase):
+    """R58 point 3: lane-touched-tests' macOS job skips while a `checks` run on a batch-* branch is in progress."""
+
+    MATRIX = json.dumps({"include": [{"os": "windows-latest", "files": "[\"a\"]"}, {"os": "macos-latest", "files": "[\"b\"]"}]})
+
+    def hold(self, runs, matrix=None, **kw):
+        env = {"MATRIX": matrix or self.MATRIX, "ANY": "true", "RUNS_JSON": json.dumps({"workflow_runs": runs})}
+        env.update(kw)
+        code, out, text = run_script("batch-macos-skip.py", env)
+        self.assertEqual(code, 0, text)
+        return json.loads(out["matrix"]), out["any"], text
+
+    def oses(self, matrix):
+        return [e["os"] for e in matrix["include"]]
+
+    def test_a_batch_run_in_progress_drops_the_macos_entry(self):
+        m, any_, _ = self.hold([{"head_branch": "batch-104", "status": "in_progress"}])
+        self.assertEqual(self.oses(m), ["windows-latest"])
+        self.assertEqual(any_, "true")
+
+    def test_a_queued_batch_run_drops_it_too(self):
+        m, _, _ = self.hold([{"head_branch": "batch-104", "status": "queued"}])
+        self.assertEqual(self.oses(m), ["windows-latest"])
+
+    def test_a_lane_run_in_progress_keeps_it(self):
+        m, _, _ = self.hold([{"head_branch": "lane-x", "status": "in_progress"}])
+        self.assertEqual(self.oses(m), ["windows-latest", "macos-latest"])
+
+    def test_a_finished_batch_run_keeps_it(self):
+        m, _, _ = self.hold([{"head_branch": "batch-104", "status": "completed"}])
+        self.assertEqual(self.oses(m), ["windows-latest", "macos-latest"])
+
+    def test_only_macos_left_empties_the_matrix_and_any_turns_false(self):
+        only = json.dumps({"include": [{"os": "macos-latest", "files": "[\"b\"]"}]})
+        m, any_, _ = self.hold([{"head_branch": "batch-104", "status": "in_progress"}], matrix=only)
+        self.assertEqual(m, {"include": []})
+        self.assertEqual(any_, "false")
+
+    def test_an_unreadable_run_list_keeps_the_matrix_and_says_unknown(self):
+        code, out, text = run_script("batch-macos-skip.py", {"MATRIX": self.MATRIX, "ANY": "true", "RUNS_JSON": "nope"})
+        self.assertEqual(code, 0, text)
+        self.assertEqual(json.loads(out["matrix"]), json.loads(self.MATRIX))
+        self.assertIn("unknown", text)
+
+    def test_the_real_call_lists_the_checks_workflow_runs_for_each_busy_status(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = os.path.join(d, "calls")
+            gh = os.path.join(d, "gh")
+            with open(gh, "w") as f:
+                f.write("#!/bin/sh\necho \"$*\" >> \"$GH_LOG\"\n"
+                        "case \"$*\" in *status=in_progress*) echo '{\"workflow_runs\": [{\"head_branch\": \"batch-9\", \"status\": \"in_progress\"}]}';;"
+                        " *) echo '{\"workflow_runs\": []}';; esac\n")
+            os.chmod(gh, 0o755)
+            code, out, text = run_script("batch-macos-skip.py", {"MATRIX": self.MATRIX, "ANY": "true", "REPO": "o/r",
+                                                                 "GH_LOG": log, "PATH": d + os.pathsep + os.environ["PATH"]})
+            self.assertEqual(code, 0, text)
+            calls = open(log).read().splitlines()
+        for status in ("queued", "in_progress"):
+            self.assertTrue(any("repos/o/r/actions/workflows/checks.yml/runs" in c and "status=" + status in c for c in calls), calls)
+        self.assertEqual([e["os"] for e in json.loads(out["matrix"])["include"]], ["windows-latest"])
+
+    def test_the_workflow_runs_the_skip_after_the_selector_and_reads_actions(self):
+        with open(LANE_YML, encoding="utf-8") as f:
+            text = f.read()
+        touched = job_block(text, "touched")
+        self.assertIn("actions: read", touched)
+        self.assertLess(touched.index("touched-tests.py"), touched.index("batch-macos-skip.py"))
+        self.assertIn("matrix: ${{ steps.skip.outputs.matrix }}", touched)
+        self.assertIn("any: ${{ steps.skip.outputs.any }}", touched)
+
+    def test_the_skip_step_passes_the_token_repo_and_selector_outputs(self):
+        env = step_env_of(self, LANE_YML, "touched", "skip")
+        assert_env(self, env, SKIP_ENV, "lane-touched-tests.yml touched job, step skip")
+
 
 
 if __name__ == "__main__":
