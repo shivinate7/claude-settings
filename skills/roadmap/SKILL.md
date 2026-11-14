@@ -305,7 +305,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   report when its `readAt` is later than the merge commit's time. Otherwise it prints one line saying the pass is owed because the file is stale
   or unread, then one `check this lane (...)` line for each lane behind the merged steps (the step record's `lane`, else the session link at the
   foot of the pull request body). A check line is not a lane to archive: the lane's session state, open pull requests and keep list decide that.
-  A lane still working prints no check line, whatever its keep list. A live file or `keepSessions` that cannot be read prints one unknown line for each lane not still working: the owner may keep it. `keepSessions` is read from the file at any age. With no roadmap branch on origin it prints nothing,
+  A lane still working prints no check line, whatever its keep list. A merged step still recorded doing does not count as working. A live file or `keepSessions` that cannot be read prints one unknown line for each lane not still working: the owner may keep it. `keepSessions` is read from the file at any age. With no roadmap branch on origin it prints nothing,
   and a merge onto another base prints nothing. The merge's exit code is unchanged.
 
   An idle lane not to archive now reads `hold (<reason>; lane <session id>)`. The reason is one of three, or `kept:` (above).

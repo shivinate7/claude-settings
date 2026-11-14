@@ -1798,8 +1798,8 @@ def lanes_to_check(steps, slugs, body, raw, open_heads):
     (stale, missing or unreadable). The lane is the step record's `lane`, else the last session link in the pull request
     `body`. `raw` is the live file parsed, or None; `open_heads` is a function that returns the set of head refs with an
     open pull (it may raise: the read then counts as not read). It runs once, and only for a lane no earlier test skipped. Each line says to check the lane by hand, and none says to archive it: a stale file cannot prove
-    the lane is done. No line for a lane that is still working (its row is not completed or review ready, a step is doing
-    under it, or an open pull is on its head) or archived. A session in keepSessions (read at any age) prints one hold
+    the lane is done. No line for a lane that is still working (its row is not completed or review ready, a step outside `slugs` is doing
+    under it, or an open pull is on its head; a step in `slugs` just landed, so its doing record does not hold the lane) or archived. A session in keepSessions (read at any age) prints one hold
     line; a keepSessions that could not be read, or a live file that could not be read (`raw` None), prints an unknown line for a lane not already
     skipped as working. Reads only what the caller loaded."""
     keep, keep_why = keep_sessions(raw) if raw is not None else ({}, None)
@@ -1833,8 +1833,8 @@ def lanes_to_check(steps, slugs, body, raw, open_heads):
         row = rows.get(sid)
         if row and (row.get("session_status") == ARCHIVED_SESSION or row.get("status_bucket") not in IDLE_BUCKETS):
             continue
-        if any(running_under(d, sid) for d in steps.values()):
-            continue  # a lane still working needs no keep list
+        if any(running_under(d, sid) for k, d in steps.items() if k not in slugs):
+            continue  # a lane still working needs no keep list; a step in `slugs` just landed
         if raw is None or keep_why:  # an unreadable file has no keep list: the owner may keep this lane
             out.append("unknown (the keep list could not be read, so lane %s is not named)" % sid)
             continue
