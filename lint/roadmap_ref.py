@@ -5,9 +5,11 @@
 
 Returns "" when the local ref origin/roadmap is fresh or was just fetched, else a note that starts "read as of". The
 ref is fresh only when the repo's FETCH_HEAD holds a `branch 'roadmap' of` line (git writes one per fetched branch, so
-a fetch of main says nothing about the roadmap) and its mtime is within MAX_AGE seconds. Anything else is stale, and a
-stale ref gets one `git fetch` of the roadmap branch, bounded at FETCH_TIMEOUT seconds. A fetch that fails, times out
-or has no origin gives the note and never raises: the caller reads the ref as it is.
+a fetch of main says nothing about the roadmap), its mtime is within MAX_AGE seconds, and its sha is the tip of the
+local ref. A plain `git fetch origin roadmap` in a single-branch clone writes the line and leaves the ref where it was,
+so a line that names another commit is stale, and so is a line with no local ref to compare. Anything else is stale
+too, and a stale ref gets one `git fetch` of the roadmap branch, bounded at FETCH_TIMEOUT seconds. A fetch that fails,
+times out or has no origin gives the note and never raises: the caller reads the ref as it is.
 
 The note is "read as of HH:MM TZ" (US Central, 24 h, with the zone) when the time is known: the time of the last
 roadmap fetch (FETCH_HEAD's mtime), else the commit time of the local ref's tip. It is "read as of an unknown time"
@@ -20,18 +22,20 @@ branch: fetch_roadmap returns NO_ROADMAP). An origin that cannot be reached coul
 Callers: lint/ruled_store.py (read_store), hooks/feedback_guard.py (roadmap_candidates), hooks/sendmessage_state.py
 (read_rulings), hooks/override.py (the step grant) and hooks/question_form.py (_read_steps). Step
 roadmap-ref-fresh-before-verdict. `fetch(repo_dir, timeout)` is the injected fetch of a test: it returns True when
-the ref was fetched, NO_ROADMAP when origin holds no roadmap to fetch, and False or raises when not. No other file runs a fetch of the roadmap
-(lint/test_roadmap_ref.py scans for one).
+the ref was fetched, NO_ROADMAP when origin holds no roadmap to fetch, and False or raises when not. No other file in lint/
+or hooks/ runs a fetch of the roadmap (lint/test_roadmap_ref.py scans those two folders for one). merge/merge.py also
+fetches the roadmap (fetch_branch), outside this helper and outside that scan.
 
 The fetch runs in its own process group, and a timeout kills the whole group, so a transport helper that git started
 does not outlive the wait. It reads no stdin, and it never prompts: GIT_TERMINAL_PROMPT=0, GIT_ASKPASS=true and, unless
 the caller set GIT_SSH_COMMAND, ssh in BatchMode. Git runs with LC_ALL=C, so the fetch's error text matches
 NOTHING_TO_FETCH in any locale.
 
-Cost: a fresh ref costs one stat and one small read of FETCH_HEAD, and no process. A repo whose `.git` is neither a
-folder nor a `gitdir:` file adds one `git rev-parse` to find FETCH_HEAD. A stale ref adds one `git fetch`, up to
-FETCH_TIMEOUT seconds, and, after a failure that was not a timeout and with no roadmap fetch on record, one `git log`
-of the ref's tip. No file is written but the ones git writes (FETCH_HEAD and the ref), no timer, no log.
+Cost: a ref with no fresh roadmap line costs one stat and one small read of FETCH_HEAD, and no other process. A fresh
+roadmap line adds one `git rev-parse` of the ref's tip, so a fresh ref costs one git start. A repo whose `.git` is
+neither a folder nor a `gitdir:` file adds one `git rev-parse` to find FETCH_HEAD. A stale ref adds one `git fetch`,
+up to FETCH_TIMEOUT seconds, and, after a failure that was not a timeout and with no fresh roadmap line on record, one
+`git log` of the ref's tip. No file is written but the ones git writes (FETCH_HEAD and the ref), no timer, no log.
 """
 import os
 import signal
@@ -164,15 +168,25 @@ def _fetch_head(repo_dir):
     return os.path.join(repo_dir, done.stdout.strip())
 
 
-def _roadmap_fetched_at(path):
-    """FETCH_HEAD's mtime when it holds a roadmap line, else None: a missing file and a fetch of other branches alone
-    say nothing about the roadmap ref."""
+def _roadmap_fetch(path):
+    """(mtime, sha) of FETCH_HEAD's roadmap line, or None: a missing file and a fetch of other branches alone say
+    nothing about the roadmap ref."""
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
-            if ROADMAP_LINE not in f.read():
-                return None
-        return os.stat(path).st_mtime
+            for line in f:
+                if ROADMAP_LINE in line:
+                    return os.stat(path).st_mtime, line.split("\t", 1)[0].strip()
     except (OSError, TypeError):
+        pass
+    return None
+
+
+def _ref_tip(repo_dir):
+    """The sha the local roadmap ref names, or None when it does not resolve or git cannot be read."""
+    try:
+        done = _run_git(repo_dir, ["rev-parse", "--verify", "--quiet", REF], FETCH_TIMEOUT)
+        return done.stdout.strip() or None if done.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError):
         return None
 
 
@@ -199,9 +213,12 @@ def fresh_ref(repo_dir, now=None, fetch=None):
         head = _fetch_head(repo_dir)
         if head is None:
             return UNKNOWN  # git finds no repository here, so there is no ref to fetch into
-        last = _roadmap_fetched_at(head)
-        if last is not None and now - last <= MAX_AGE:
-            return ""
+        line = _roadmap_fetch(head)
+        last = line[0] if line else None
+        if line and now - last <= MAX_AGE:
+            if line[1] == _ref_tip(repo_dir):
+                return ""
+            last = None  # the line is recent, but the ref is not at it: only the ref's own commit time says how old it is
         timed_out = nothing = False
         try:
             fetched = (fetch or fetch_roadmap)(repo_dir, FETCH_TIMEOUT)

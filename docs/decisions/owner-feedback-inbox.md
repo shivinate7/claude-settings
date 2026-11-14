@@ -141,7 +141,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   100 inbox blocks. Within a source the share keeps the front: roadmap steps not marked done come
   first, todo and notes lines go newest (last) line first, and inbox blocks newest first. They are: steps at `refs/remotes/origin/roadmap`, read by one `git grep`. The ref is fetched
   first when the roadmap's own fetch record (a `branch 'roadmap' of` line in FETCH_HEAD) is older
-  than 60 seconds. That fetch is bounded at 2 seconds. Otherwise, the ref is read as of its last
+  than 60 seconds, or names a commit other than the ref's tip. That fetch is bounded at 2 seconds. Otherwise, the ref is read as of its last
   fetch. A repeat flag on a step then ends "(roadmap read as of HH:MM TZ)". When no reason or flag
   carries that note, one systemMessage line reads: "Feedback guard: roadmap read as of HH:MM TZ (its
   fetch failed)." The code is lint/roadmap_ref.py, step roadmap-ref-fresh-before-verdict. The other two
@@ -153,7 +153,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   A line that cannot be found is reported as not marked. The session merges the work or drops the
   mark. A dropped mark is not judged again. A model error or odd answer marks nothing and adds one
   systemMessage line. The items count as judged, so there is no retry loop. Cost: a Stop with no new
-  item or no candidate makes no call. Otherwise it makes one call, one `git grep` and one rev-parse (unmeasured). A stale roadmap ref adds one `git fetch` of at most 2 seconds, once per Stop (a failed fetch may add one `git log`). A fresh one adds none.
+  item or no candidate makes no call. Otherwise it makes one call, one `git grep` and one rev-parse (unmeasured). A roadmap ref with a recent fetch record adds one `git rev-parse` of the ref's tip. A stale ref adds one `git fetch` of at most 2 seconds, once per Stop (a failed fetch may add one `git log`). A fresh one adds no fetch.
   It lists the handoffs folder and reads one sidecar per inbox there. It writes the turn state, and
   on a hit the inbox. Capture adds one small file per session and no process (unmeasured). Risk kind: named
   incident. On 2026-11-01 17:44 CST the owner said "carousel" in a repo whose code said "wheel", and
