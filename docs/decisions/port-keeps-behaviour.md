@@ -30,7 +30,7 @@ Owner, 2026-10-27 15:32 CDT: when a session ports or redesigns an existing app, 
   - It is built against a named incident, the third one below. It landed 2026-10-31.
   - Cost: no extra process. The same guard, call-judge and Stop-hook runs read the one predicate, a regex over the text already in hand. It writes no file unless it denies.
   - Known limit: text cannot tell whether a claimed change really differs from main. `call_judge`'s model is the chat backstop.
-- Reply judge (`hooks/reply_judge.py`, a model, never blocks): it judges every Stop whose reply says "blocked on". It flags work blocked on, or an Input Needed item marked blocking, a question about a port, and a port question with no "Departs from:" line. It never flags a question that says how the work departs and is not marked blocking. Cost: one Haiku call per Stop that says "blocked on".
+- Reply judge (`hooks/reply_judge.py`, a model, never blocks): it judges every Stop whose reply says "blocked on". It flags work blocked on, or an Input Needed item marked blocking, a question about a port, and a port question with no "Departs from:" line. It never flags a question that says how the work departs and is not marked blocking. Cost: one Haiku call per Stop that says "blocked on" (unmeasured).
 
 Incidents:
 
