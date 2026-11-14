@@ -823,6 +823,28 @@ class Flips(unittest.TestCase):
         self.red("", self.S0, inside)
         self.assertTrue(any("cfg.txt" in p for p in self.in_place(self.S0, inside)), "an in-place negation inside the words was not flagged")
 
+    def test_a_hash_comment_paste_is_flagged(self):
+        """`x = run(cfg)` becomes `x = True`, and the original words sit after a # with a negation: a comment, not an edit."""
+        self.red("", "x = run(cfg)", "x = True  # run(cfg) is not needed")
+
+    def test_a_hash_comment_paste_is_flagged_in_place(self):
+        self.assertTrue(any("cfg.txt" in p for p in self.in_place("x = run(cfg)", "x = True  # run(cfg) is not needed")),
+                        "an in-place paste of the words into a # comment was not flagged")
+
+    def test_a_slash_comment_paste_with_its_semicolon_is_flagged(self):  # control: flagged on the old code too, a guard for the fix
+        self.red("", "x = run(cfg);", "x = true;  // run(cfg) is not needed")
+
+    def test_a_slash_comment_paste_with_its_semicolon_is_flagged_in_place(self):  # control
+        self.assertTrue(any("cfg.txt" in p for p in self.in_place("x = run(cfg);", "x = true;  // run(cfg) is not needed")),
+                        "an in-place paste of the words into a // comment, with the semicolon, was not flagged")
+
+    def test_a_slash_comment_paste_without_a_semicolon_is_flagged(self):
+        self.red("", "x = run(cfg)", "x = true  // run(cfg) is not needed")
+
+    def test_a_slash_comment_paste_without_a_semicolon_is_flagged_in_place(self):
+        self.assertTrue(any("cfg.txt" in p for p in self.in_place("x = run(cfg)", "x = true  // run(cfg) is not needed")),
+                        "an in-place paste of the words into a // comment, without a semicolon, was not flagged")
+
 
 class MainLineDrop:
     """The one home of the fixture for a case that merges main into a feat branch and drops lines main added to
