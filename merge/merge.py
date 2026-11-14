@@ -302,13 +302,16 @@ def shared_deadline(seconds):
     finally:
         _READ_DEADLINE = prior
 
-def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
+def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False, raw=False):
     args = [resolve_program(args[0], env), *args[1:]]
     limits = [t for t in (SH_TIMEOUT, timeout) if t is not None]
     timeout = max(0.05, _READ_DEADLINE - time.monotonic()) if _READ_DEADLINE is not None else min(limits) if limits else None
     if live_stderr:  # the child's stderr goes straight to ours; only its stdout is read
         r = _nowindow.run(args, cwd=cwd, input=input, env=env, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", timeout=timeout)
         return r.returncode, r.stdout.strip()
+    if raw:  # the child's stdout as bytes, untouched: for a compare that must be byte for byte
+        r = _nowindow.run(args, cwd=cwd, input=input, env=env, capture_output=True, timeout=timeout)
+        return r.returncode, r.stdout
     r =_nowindow.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     return r.returncode, (r.stdout + r.stderr).strip()
 
@@ -1871,16 +1874,40 @@ def page_only(wt, sha, strict=False):
         return fail("the files", files)
     return parents.strip() if files.split() == [RECORDS_PAGE] else None
 
+PAGE_CLEANUP_SECONDS = 20  # the budget of the temporary tree's removal, its own: the read's deadline may be spent when the removal runs
+
 def page_is_generated(root, sha):
-    """True when the records page of `sha` is what the generator writes for its tree: rebuild_records on a temporary worktree at `sha` changes
-    nothing. The tool's own page commit passes (it was written by that rebuild); a hand edit, or a page the generator would write differently, does not.
-    Any failure to make the tree, read it or run the generator raises Stop (unknown), never True. The tree is removed on every path.
-    Cost: one worktree add and remove, and one generator run."""
+    """True when the records page committed at `sha` is what the generator writes for its tree, byte for byte; False when it differs or `sha`
+    deletes it. The proof is the one lint/check_silent_undo.py generated_page makes: on a temporary worktree at `sha` the page is removed first, the
+    generator must write it back, and its bytes are compared with `git show <sha>:<page>`. A generator run that changes nothing proves nothing, so
+    a generator that is missing, exits nonzero, or writes no page, a commit read that fails, and a tree that cannot be made raise Stop (unknown),
+    never True. The tree is removed on every path; a removal that itself times out is dropped, so the verdict (or the Stop) stands.
+    A commit that deletes the page is False once the generator has written one, Stop when it writes none.
+    Cost: one worktree add and remove, one `git show` (plus one `git ls-tree` when the page is not in `sha`), and one generator run."""
     tmp, wt = add_worktree(root, sha)
     try:
-        return not rebuild_records(wt)
+        c, committed = sh(["git", "-C", root, "show", f"{sha}:{RECORDS_PAGE}"], raw=True)
+        if c:
+            c, listed = git(root, "ls-tree", "--name-only", sha, "--", RECORDS_PAGE)
+            if c:
+                raise Stop(f"cannot read the records page of {sha[:9]}: {' '.join(listed.split())[:200]} " + REVIEW_CITE)
+            if listed.strip():
+                raise Stop(f"cannot read the records page of {sha[:9]} " + REVIEW_CITE)
+            committed = None  # the commit deletes the page: the generator still runs, and a page it writes is not the commit's
+        page = os.path.join(wt, *RECORDS_PAGE.split("/"))
+        if os.path.exists(page):
+            os.remove(page)  # a stale copy must not stand in for the generator's own write
+        run_records(wt)
+        if not os.path.isfile(page):
+            raise Stop(f"the records generator wrote no page for {sha[:9]}, so the page commit is not proved " + REVIEW_CITE)
+        with open(page, "rb") as f:
+            return f.read() == committed
     finally:
-        drop_worktree(root, tmp, wt)
+        try:
+            with shared_deadline(PAGE_CLEANUP_SECONDS):
+                drop_worktree(root, tmp, wt)
+        except (subprocess.TimeoutExpired, OSError):
+            shutil.rmtree(tmp, ignore_errors=True)
 
 def head_under_claims(wt, cfgrel, base, sha):
     """The commit under the claim and page-only commits at the top of `sha`, or `sha` itself when none is there. A claim commit is claim_only's: one
@@ -1953,11 +1980,16 @@ def rebuild_records(wt):
         git(wt, "add", "-A")
         return git(wt, "write-tree")[1]
     before = tree()
+    run_records(wt)
+    return tree() != before
+
+def run_records(wt):
+    """Run the records generator on the worktree, nothing else. A generator that cannot start or exits nonzero raises Stop. The one home of the run:
+    rebuild_records (the tool's own rebuild) and page_is_generated (the proof of a page) both call it."""
     c, out = sh([sys.executable, RECORDS, "--root", wt, "--records-only"])
     if c:
         why = "; ".join(l.strip() for l in out.splitlines() if l.strip()) or "no output"
         raise Stop(f"the records page cannot be rebuilt, so nothing was pushed {RECORDS_CITE}: {why}")
-    return tree() != before
 
 def conflicted(wt):
     """The paths a failed merge left in conflict. [] when git names none: the merge could not run, so nothing was read."""
@@ -3783,8 +3815,9 @@ def clean_merges_after(h, head, live, base=None, claims=None):
     longer walk and a head that is never reached are all False. A failed read, a commit read that names no tree, and a merge git cannot read
     (merge_state "unknown") raise Stop: so do a page commit whose reads fail and a generator run that fails: unknown, never False and never True.
     Cost: one commit read per commit walked (each sha read once); one holds_head compare and one merge_state per merge commit; per one-parent
-    commit that is no claim, page_only's two git reads, and for a page commit one temporary worktree and one generator run (at most one per
-    commit, never repeated for a sha); and at most one fetch_branch_heads a run."""
+    commit that is no claim, page_only's git reads (one per commit, two only for a commit with the subject PAGE_SUBJECT), and for a page commit
+    one temporary worktree, one `git show` and one generator run (at most one per commit, never repeated for a sha); and at most one
+    fetch_branch_heads a run."""
     sha, read = live, {}
 
     def commit(s):
