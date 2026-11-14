@@ -586,11 +586,13 @@ t green job-cancelled-at-359-minutes-with-no-cap-is-quiet "" "" ""
 # Every cancelled run in the window is judged, not only the newest cancelled run of its group. A cap end under a newer green run of the
 # same group still opens the cap-only alarm. Each judged cancelled run reads its jobs once and its workflow file once.
 runs_are "$(gh_run ci success 2026-01-02 https://runs/newer-green-5201 push 5201)" "$(gh_run ci cancelled 2026-01-01 https://runs/older-cap-5200 push 5200)"
+jobs_of 5201 checks:success
 jobs_of 5200 scope-guard:cancelled:40
 workflow_at 5200 scope-guard:37
 t alarm older-cancelled-cap-end-under-a-newer-green-run-opens-the-cap-alarm "" "" "$(capmsg 5200 scope-guard 40 37)"
 cost older-cancelled-cap-end-under-a-newer-green-run-reads-its-jobs-and-workflow-once 1 1 0 1
 runs_are "$(gh_run ci success 2026-01-02 https://runs/newer-green-5211 push 5211)" "$(gh_run ci cancelled 2026-01-01 https://runs/older-under-cap-5210 push 5210)"
+jobs_of 5211 checks:success
 jobs_of 5210 scope-guard:cancelled:2
 workflow_at 5210 scope-guard:37
 t green older-cancelled-under-its-cap-under-a-newer-green-run-stays-quiet "" "" ""
@@ -606,6 +608,7 @@ cost two-cancelled-runs-each-read-their-jobs-and-workflow-once 2 2 0 1
 # A full run window of 100 runs: the oldest is a cancelled cap end and the 99 newer ones succeeded. The cap end still opens the alarm.
 window=(); for i in $(seq 1 99); do window+=("$(gh_run ci success 2026-01-02 "https://runs/window-green-$i" push $((5300 + i)))"); done
 runs_are "$(gh_run ci cancelled 2026-01-01 https://runs/window-oldest-cap-5300 push 5300)" "${window[@]}"
+jobs_of 5399 checks:success
 jobs_of 5300 scope-guard:cancelled:40
 workflow_at 5300 scope-guard:37
 t alarm full-run-window-oldest-cancelled-cap-end-opens-the-cap-alarm "" "" "$(capmsg 5300 scope-guard 40 37)"
@@ -674,12 +677,14 @@ named green green-run-with-no-cap-end-in-any-attempt-stays-silent
 # An older succeeded re-run is judged under a newer green run of its group: the re-run list is every succeeded re-run in the window,
 # not only each group's newest run. Only the older run's earlier attempt holds the cap end, so a read of the newest run alone misses it.
 runs_are "$(gh_run ci success 2026-01-01 https://runs/older-retry-cap-6010 push 6010 completed 2)" "$(gh_run ci success 2026-01-02 https://runs/newer-green-6011 push 6011)"
+jobs_of 6011 checks:success
 attempt_jobs_of 6010 1 scope-guard:cancelled:40
 workflow_at 6010 scope-guard:37
 t alarm older-rerun-under-a-newer-green-run-opens-the-cap-alarm "" "" "$(capmsg 6010 scope-guard 40 37 ', attempt 1')"
 count_is older-rerun-under-a-newer-green-run-reads-attempt-1-jobs-once "actions/runs/6010/attempts/1/jobs" 1
 # Control: the same older re-run with attempt 1 cancelled under its cap, under the same newer green run, stays silent.
 runs_are "$(gh_run ci success 2026-01-01 https://runs/older-retry-under-6012 push 6012 completed 2)" "$(gh_run ci success 2026-01-02 https://runs/newer-green-6013 push 6013)"
+jobs_of 6013 checks:success
 attempt_jobs_of 6012 1 scope-guard:cancelled:2
 workflow_at 6012 scope-guard:37
 t green older-rerun-under-its-cap-under-a-newer-green-run-stays-silent "" ""
@@ -699,6 +704,7 @@ count_is red-run-with-a-cap-end-in-attempt-1-reads-its-workflow-file-once "/cont
 # A failure run that a newer run of its group supersedes is judged for its cap end. A job cancelled at its cap wakes the PR for that
 # run, and the alarm opens no issue. Its jobs and its workflow file are each read once. The controls read its jobs once and wake nothing.
 runs_are "$(gh_run ci failure 2026-01-01 https://runs/stale-cap-7010 push 7010)" "$(gh_run ci success 2026-01-02 https://runs/stale-cap-green-7011 push 7011)"
+jobs_of 7011 checks:success
 jobs_of 7010 scope-guard:cancelled:40
 workflow_at 7010 scope-guard:37
 t alarm failure-run-not-newest-with-a-cap-end-wakes-the-pr "" "" "$(capmsg 7010 scope-guard 40 37)" "actions/runs/7010/jobs"
@@ -706,6 +712,7 @@ woke failure-run-not-newest-cap-end-wakes-for-that-run 7010
 cost failure-run-not-newest-cap-end-reads-its-jobs-and-workflow-once 1 1 0 1
 stale_window=(); for i in $(seq 1 99); do stale_window+=("$(gh_run ci success 2026-01-02 "https://runs/stale-window-green-$i" push $((7100 + i)))"); done
 runs_are "$(gh_run ci failure 2026-01-01 https://runs/stale-window-oldest-7100 push 7100)" "${stale_window[@]}"
+jobs_of 7199 checks:success
 jobs_of 7100 scope-guard:cancelled:40
 workflow_at 7100 scope-guard:37
 t alarm failure-run-not-newest-in-a-full-window-wakes-the-pr "" "" "$(capmsg 7100 scope-guard 40 37)" "actions/runs/7100/jobs"
@@ -713,22 +720,26 @@ woke failure-run-not-newest-in-a-full-window-wakes-for-that-run 7100
 # A cap end in an earlier attempt of a failure run that a newer run of its group supersedes wakes the PR for that run. The newest
 # attempt holds no cap end; the attempts endpoint does. The control has the same shape with that attempt under its cap, and stays quiet.
 runs_are "$(gh_run ci success 2026-01-02 https://runs/stale-retry-green-7201 push 7201)" "$(gh_run ci failure 2026-01-01 https://runs/stale-retry-red-7200 push 7200 completed 2)"
+jobs_of 7201 checks:success
 attempt_jobs_of 7200 1 scope-guard:cancelled:40
 jobs_of 7200 checks:failure scope-guard:success
 workflow_at 7200 checks scope-guard:37
 t alarm failure-run-not-newest-cap-end-in-attempt-1-wakes-the-pr "" "" "$(capmsg 7200 scope-guard 40 37 ', attempt 1')" "actions/runs/7200/jobs"
 count_is failure-run-not-newest-cap-end-in-attempt-1-reads-attempt-1-jobs-once "actions/runs/7200/attempts/1/jobs" 1
 runs_are "$(gh_run ci success 2026-01-02 https://runs/stale-retry-under-green-7221 push 7221)" "$(gh_run ci failure 2026-01-01 https://runs/stale-retry-under-red-7220 push 7220 completed 2)"
+jobs_of 7221 checks:success
 attempt_jobs_of 7220 1 scope-guard:cancelled:2
 jobs_of 7220 checks:failure scope-guard:success
 workflow_at 7220 checks scope-guard:37
 t green failure-run-not-newest-cap-end-in-attempt-1-under-its-cap-stays-quiet "" "" ""
 runs_are "$(gh_run ci failure 2026-01-01 https://runs/stale-red-7020 push 7020)" "$(gh_run ci success 2026-01-02 https://runs/stale-red-green-7021 push 7021)"
+jobs_of 7021 checks:success
 jobs_of 7020 checks:failure
 t green failure-run-not-newest-with-no-cap-end-stays-quiet
 quiet_wake failure-run-not-newest-with-no-cap-end-makes-no-wake
 count_is failure-run-not-newest-with-no-cap-end-reads-its-jobs-once "actions/runs/7020/jobs" 1
 runs_are "$(gh_run ci failure 2026-01-01 https://runs/stale-under-7030 push 7030)" "$(gh_run ci success 2026-01-02 https://runs/stale-under-green-7031 push 7031)"
+jobs_of 7031 checks:success
 jobs_of 7030 scope-guard:cancelled:2
 workflow_at 7030 scope-guard:37
 t green failure-run-not-newest-with-a-cap-job-under-its-cap-stays-quiet
@@ -737,6 +748,7 @@ count_is failure-run-not-newest-with-a-cap-job-under-its-cap-reads-its-jobs-once
 # A failure run that a newer run of its group supersedes is never red. When its jobs read fails, the alarm is unknown, not green: the
 # unread jobs may hold a cap end.
 runs_are "$(gh_run ci success 2026-01-02 https://runs/stale-unread-green-7211 push 7211)" "$(gh_run ci failure 2026-01-01 https://runs/stale-unread-red-7210 push 7210)"
+jobs_of 7211 checks:success
 t unknown failure-run-not-newest-with-an-unreadable-jobs-read-is-unknown-not-green "api *actions/runs/7210/jobs*" "" "" "actions/runs/7210/jobs"
 # A re-run in flight is the group's newest run: its status is in_progress or queued and its attempt is above 1. The group is
 # UNKNOWN (main's judged rule, merge/merge.py base_state), so the alarm reads unknown with a warning and writes no issue. It never
