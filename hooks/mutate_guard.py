@@ -80,8 +80,8 @@ OVERRIDE = os.path.join(HERE, "override.py")
 CALL_JUDGE = os.path.join(HERE, "call_judge.py")
 CALL_JUDGE_SUITE = os.path.join(HERE, "test_call_judge.py")
 SIM_LEASE = os.path.join(HERE, "..", "bin", "sim-lease")
-# The merge tool's review-record rules (owner ruling own-r3-reviewer-sonnet-high). Its suite is unittest, which prints
-# each failure as `FAIL: <case>` on stderr; run_suite reads those lines too.
+# The merge tool's review-record rules. Its suite is unittest, which prints each failure as `FAIL: <case>` on stderr;
+# run_suite reads those lines too.
 MERGE_TOOL = os.path.join(HERE, "..", "merge", "merge.py")
 MERGE_SUITE = os.path.join(HERE, "..", "merge", "test_merge_grant.py")
 
@@ -1392,7 +1392,7 @@ MUTATIONS = [
      'if "..." in unseen and "agentType" not in keys:',
      'if False:', "guard",
      'role-model: Workflow designer and Plan on opus, a shorthand agentType in a loop, are allowed'),
-    # The round-row refusal of a reviewer's last round (owner ruling own-r3-reviewer-sonnet-high): no row above it, no override.
+    # The round-row refusal of a reviewer's last round: no row above it, and no override lifts it.
     ("round row: a reviewer's last round past its row skips the no-opus check and reaches the Opus ceiling",
      '    for kind, n in brief_markers(prompt):\n        if kind.lower() == "round" and n in ROLE_ROUND_NO_OPUS:',
      '    for kind, n in brief_markers(prompt):\n        if False and kind.lower() == "round" and n in ROLE_ROUND_NO_OPUS:', "guard",
@@ -1404,15 +1404,15 @@ MUTATIONS = [
      "    if bare and vetoed:\n        reason = bare_reason",
      "    if False:\n        reason = bare_reason", "guard",
      "role-model: reviewer on opus with Round 3 of 3 is denied under agent-role-model, with no override line"),
-    ("lane kind: a guard-or-check lane is read as a product lane, so it takes the product effort",
+    ("lane marker: a guard-or-check lane is read as a product lane, so it takes the product effort",
      '    if any(marker_line(line, REVIEW_GUARD_MARKER) for line in block):\n        return "guard"',
      '    if False:\n        return "guard"', "guard",
      "lane-effort-pin: a guard-or-check lane at effort high is allowed under the kind table"),
-    ("lane kind: a docs-only lane is read as a product lane, so it takes the product effort",
+    ("lane marker: a docs-only lane is read as a product lane, so it takes the product effort",
      '    return "docs" if any(marker_line(line, DOCS_LANE_MARKER) for line in block) else LANE_KIND_DEFAULT',
      '    return LANE_KIND_DEFAULT', "guard",
      "lane-effort-pin: a docs lane at effort low is allowed under the kind table"),
-    ("lane kind: the block read stops at its first line, so a marker past the Lane brief line is not read",
+    ("lane marker: the block read stops at its first line, so a marker past the Lane brief line is not read",
      '    for line in lines[1:]:\n        if not line.strip():',
      '    for line in lines[1:2]:\n        if not line.strip():', "guard",
      "lane-effort-pin: a guard-or-check lane with a Lane brief line before its marker is allowed at effort high"),

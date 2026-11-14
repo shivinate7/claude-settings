@@ -384,8 +384,8 @@ for _is_timed in (False, True):
 # lifts it only for spawns of that role. Every other refusal and ask stands.
 OP_SECONDS = 2 * 3600  # the length of the override these stories type: `opus 2h`
 OP_BUILDER = {"prompt": "Round 1 of 3. Start the fix.", "model": "opus", "subagent_type": "builder"}
-# A reviewer on Opus with no round line: an Opus spawn that an override or a step grant may lift. A round 3 brief is
-# never lifted (owner ruling own-r3-reviewer-sonnet-high, 2026-11-13 14:05 CST), so it is not used for a lift.
+# A reviewer on Opus with no round line: an Opus spawn that an override or a step grant may lift. A third-review brief is
+# never lifted, so it is not used for a lift.
 OP_REVIEWER = {"prompt": "Check the diff for typos.", "model": "claude-opus-5-5", "subagent_type": "reviewer"}
 
 
@@ -1184,15 +1184,14 @@ def ov_chain_acts(config, session):
 
 def ov_role_pointer(config):
     """Point this config's global rules at this checkout, so the role rule reads the real record. Without the pointer
-    the role rule stands down, and a reviewer's round 3 on Opus would meet only the liftable Opus ceiling
-    (owner ruling own-r3-reviewer-sonnet-high, 2026-11-13 14:05 CST)."""
+    the role rule stands down, and a reviewer's third review on Opus would meet only the liftable Opus ceiling."""
     write(os.path.join(config, "CLAUDE.md"), "@%s/CLAUDE.md\n" % slash(REPO))
 
 
 def ov_role_acts(config, session):
     """The model and role guards stay outside every override, as frozen paths do: an override that lifted them
-    would let an agent pick its own model or edit the tests it is judged by. A reviewer's round 3 on Opus is one
-    of them: no row lifts it, and its refusal names no override (owner ruling own-r3-reviewer-sonnet-high)."""
+    would let an agent pick its own model or edit the tests it is judged by. A reviewer's third review on Opus is one
+    of them: no row lifts it, and its refusal names no override."""
     ov_role_pointer(config)
     return (
         OvAct("a settings write that lifts the agent model cap", "Write",
