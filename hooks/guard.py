@@ -1975,7 +1975,7 @@ def disables_tests(new_lines, old_lines) -> bool:
 BUILDER_TEST_REASON = (
     "A builder does not change tests or test config. Report the needed test change in your "
     "report. The orchestrator assigns it to a test-author."
-    " A merge conflict in a test file takes the same route."
+    " A merge conflict in a test file takes the same route, unless you keep every test case of both parents unchanged."
     " (decision builders-cannot-edit-tests, a builder never changes a test or test config)"
 )
 READONLY_SHELL_WRITE_REASON = (
@@ -2479,6 +2479,17 @@ def builder_shell_test_hit(raw: str, stripped: str, cwd: str, tool) -> str:
             or interpreter_write_hit(raw, cwd, builder_test_path, script_files=True))
 
 
+def builder_merge_write_ok(target: str, cwd: str, rel: str) -> bool:
+    """True when a builder's write tool may write the test path `target`: the open merge left it conflicted,
+    and it is no mutation test. The content is judged at commit, push and stop (`builder_merge_test_why`).
+    Git runs only for a test path already refused, and reads none of the target's text."""
+    if is_mutation_test_rel(rel):
+        return False
+    where = norm(os.path.normpath(_expanded(target, cwd)))
+    where = where[:len(where) - len(rel)] if rel and where.endswith(rel) else ""
+    return bool(where) and norm(rel).lstrip("/") in {norm(c).lstrip("/") for c in merge_conflicts(where) or ()}
+
+
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
     """The early warning for a write tool call: the target path a role may not change, else ''.
 
@@ -2514,7 +2525,7 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
-    if builder_test_path(target, cwd):
+    if builder_test_path(target, cwd) and not builder_merge_write_ok(target, cwd, rel):
         return target
     if is_test_config_rel(rel) and any(
             disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
@@ -2600,6 +2611,14 @@ def merge_tree(root: str, ours: str, theirs: str):
         if not entry:
             break
         conflicts.add(entry.partition("\t")[2])
+    if conflicts:
+        # From a subfolder git names each path from that folder (`../tests/x.py`): put it back to the checkout's top.
+        prefix = guard_core._git(root, "rev-parse", "--show-prefix")
+        if prefix is None or prefix.returncode != 0:
+            return None
+        if prefix.stdout.strip():
+            conflicts = {os.path.normpath(os.path.join(prefix.stdout.strip(), path)).replace(os.sep, "/")
+                         for path in conflicts}
     return tree.strip(), sorted(conflicts)
 
 
@@ -2772,20 +2791,275 @@ def pyproject_author_ok(old: str, new: str) -> bool:
                for key in set(before) | set(after) if not key.startswith("tool.pytest"))
 
 
-def text_at(root: str, rev, rel: str, top: str = "") -> str:
-    """The file's text at `rev` (a commit or tree), in the working tree when `rev` is None, and ''
+def text_at(root: str, rev, rel: str, top: str = "", missing="") -> str:
+    """The file's text at `rev` (a commit or tree), in the working tree when `rev` is None, and `missing`
     when it does not exist there or `rev` is '' (no commit). `rel` is relative to the top of the checkout,
-    so the working tree is read from `top`; `top` defaults to `root`."""
+    so the working tree is read from `top`; `top` defaults to `root`. A caller that must tell a missing file
+    from an empty one passes `missing=None`."""
     if rev is None:
         try:
             with open(os.path.join(top or root, rel), encoding="utf-8", errors="replace") as handle:
                 return handle.read()
         except Exception:
-            return ""
+            return missing
     if not rev:
-        return ""
+        return missing
     answer = guard_core._git(root, "show", rev + ":" + norm(rel))
-    return answer.stdout if answer is not None and answer.returncode == 0 else ""
+    return answer.stdout if answer is not None and answer.returncode == 0 else missing
+
+
+# ---- a builder's resolution of a merge conflict in a test file (decision builders-cannot-edit-tests).
+# The one home of the reading: `builder_merge_test_why` names the class of loss, or '' when the resolution
+# keeps every test case of both parents as the parents have it.
+MERGE_TEST_REASONS = {
+    "lost": "A test case of a parent is missing from your merge result.",
+    "renamed": "Your merge result renames a test case of a parent.",
+    "moved": "Your merge result has a test case of a parent moved to another file.",
+    "skip": "Your merge result adds a skip or expected-fail mark to a test.",
+    "body": "A test case body or test file part in your merge result differs from both parents' versions.",
+    "new": "Your merge result holds a new test case that no parent had.",
+    "config": "Your merge result changes test config beyond one parent's version.",
+    "mutation": "A merge that conflicts in a mutation test goes to a test-author, whatever you keep.",
+    "unread": "The guard could not read a test file of this merge, so it cannot tell that every case survived.",
+}
+# The classes in the order the reason names them, when a file holds more than one.
+MERGE_TEST_ORDER = ("unread", "lost", "renamed", "moved", "skip", "body", "new")
+MERGE_SKIP_NAMES = {"skip", "skipif", "skiptest", "skipunless", "xfail", "expectedfailure", "importorskip"}
+# The files a builder may add a dependency to: a conflict there keeps its own content check, not this reading.
+MERGE_MANIFESTS = {"package.json", "pyproject.toml", "setup.cfg", "tox.ini"}
+
+
+class MergeOffence(str):
+    """A path a builder's merge resolution is refused for, with the class of loss in `why`."""
+    why = ""
+
+
+def _skip_marks(node) -> int:
+    import ast
+    return sum(1 for n in ast.walk(node)
+               if (isinstance(n, ast.Attribute) and n.attr.lower() in MERGE_SKIP_NAMES)
+               or (isinstance(n, ast.Name) and n.id.lower() in MERGE_SKIP_NAMES))
+
+
+def _node_key(node, prefix):
+    """What names a module or class statement across the parents and the result: a def or class by its name, an
+    assignment by its targets. Any other statement is its own key, so a missing one reads as lost."""
+    import ast
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return (prefix, type(node).__name__, node.name)
+    if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        return (prefix, "assign", "|".join(ast.dump(t) for t in targets))
+    return None
+
+
+def test_file_parts(text: str):
+    """A python test file read with `ast`, or None when it does not parse. `cases` maps each test function by
+    its class path and name to `(dump, node)`. `others` holds each other statement, and each class header with
+    its members taken out as their own entries, as `(dump, node)`; `keys` holds `(key, dump)` for each of them
+    but an import (a union of imports is free) and a bare string, and `calls` each module-level call statement. Comments are no
+    node, so they are free, and a test written inside a string is no case."""
+    import ast
+    import copy
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return None
+    cases, others, keys, calls = {}, [], [], []
+
+    def walk(body, prefix, top_level):
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test"):
+                key, count = prefix + node.name, 1
+                while key in cases:
+                    count += 1
+                    key = "%s%s#%d" % (prefix, node.name, count)
+                cases[key] = (ast.dump(node), node)
+            elif isinstance(node, ast.ClassDef):
+                shell = copy.copy(node)
+                shell.body = []
+                others.append((ast.dump(shell), shell))
+                keys.append((_node_key(node, prefix), ast.dump(shell)))
+                walk(node.body, prefix + node.name + ".", False)
+            elif top_level and isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+                calls.append((ast.dump(node), node))
+            else:
+                others.append((ast.dump(node), node))
+                # An import, or a bare string (a docstring or a ghost test in a string), runs nothing: free.
+                if not isinstance(node, (ast.Import, ast.ImportFrom)) and not (
+                        isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)):
+                    keys.append((_node_key(node, prefix) or (prefix, ast.dump(node)), ast.dump(node)))
+
+    walk(tree.body, "", True)
+    return {"cases": cases, "others": others, "keys": keys, "calls": calls}
+
+
+def _case_shape(node) -> str:
+    import ast
+    import copy
+    bare = copy.copy(node)
+    bare.name = ""
+    return ast.dump(bare)
+
+
+def _key_versions(parts):
+    """Each statement key of `parts` with the dumps it holds, in file order, so a key held twice (an assign and
+    an augmented assign of one name) compares as one version."""
+    versions = {}
+    for key, dump in parts["keys"]:
+        versions[key] = versions.get(key, ()) + (dump,)
+    return versions
+
+
+def _key_counts(parts):
+    return {key: len(dumps) for key, dumps in _key_versions(parts).items()}
+
+
+def _edit_dropped(first, second, base, result) -> bool:
+    """True when a key both parents hold at different versions loses a parent's edit. Each argument maps a key to
+    its version. Both parents changed it from the base: the result keeps one version at most. One changed it: the
+    result must keep that version, since the base version drops that parent's edit."""
+    for key in set(first) & set(second):
+        mine, theirs, origin = first[key], second[key], base.get(key)
+        if mine != theirs and (origin not in (mine, theirs) or result.get(key) == origin):
+            return True
+    return False
+
+
+def merge_test_issue(result, first, second, elsewhere, base=None):
+    """The class of loss in a merge result of a test file, else ''. `result`, `first`, `second` and `base` (the
+    merge base's file; None skips the same-name check) come from `test_file_parts`; `elsewhere(key)` is True when
+    another test file of the merge holds that case as new."""
+    issues = set()
+    parents = (first, second)
+    parent_keys = set(first["cases"]) | set(second["cases"])
+    fresh = {k: v for k, v in result["cases"].items() if k not in parent_keys}
+    fresh_shapes = {}
+    for key, (_, node) in fresh.items():
+        fresh_shapes.setdefault(_case_shape(node), key)
+    renamed = set()
+    for key in parent_keys - set(result["cases"]):
+        node = (first["cases"].get(key) or second["cases"][key])[1]
+        if elsewhere(key):
+            issues.add("moved")
+        elif _case_shape(node) in fresh_shapes:
+            issues.add("renamed")
+            renamed.add(fresh_shapes[_case_shape(node)])
+        else:
+            issues.add("lost")
+    if set(fresh) - renamed:
+        issues.add("new")
+    for key, (dump, node) in result["cases"].items():
+        held = [p["cases"][key] for p in parents if key in p["cases"]]
+        if held and all(dump != h[0] for h in held):
+            issues.add("skip" if _skip_marks(node) > max(_skip_marks(h[1]) for h in held) else "body")
+    if base is not None:
+        # The same reading for a case body and for any other statement a parent edited (a table, a helper, a class
+        # header): a result that keeps the other parent's version drops the edit, though every key survives.
+        read = (first, second, base, result)
+        if _edit_dropped(*({key: dump for key, (dump, _) in p["cases"].items()} for p in read)) or _edit_dropped(
+                *(_key_versions(p) for p in read)):
+            issues.add("lost")
+    # A statement a parent holds (not an import, not a comment) that the result no longer holds.
+    have = _key_counts(result)
+    for part in parents:
+        for key, count in _key_counts(part).items():
+            if have.get(key, 0) < count:
+                issues.add("lost")
+    kept = {d for p in parents for d, _ in p["others"]}
+    for dump, node in result["others"]:
+        if dump not in kept:
+            issues.add("skip" if _skip_marks(node) else "body")
+    held_calls = {d for p in parents for d, _ in p["calls"]}
+    for dump, node in result["calls"]:
+        if dump not in held_calls:
+            issues.add("skip" if _skip_marks(node) else "new")
+    for dump in held_calls:
+        needed = max(sum(1 for d, _ in p["calls"] if d == dump) for p in parents)
+        if sum(1 for d, _ in result["calls"] if d == dump) < needed:
+            issues.add("lost")
+    return next((name for name in MERGE_TEST_ORDER if name in issues), "")
+
+
+def merge_parent_revs(root: str, new):
+    """The two parents of the merge commit `new`, or of the merge in progress (HEAD and MERGE_HEAD) when `new`
+    is None; None when git could not say."""
+    if new is None:
+        answer = guard_core._git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+        return ("HEAD", answer.stdout.strip()) if answer is not None and answer.returncode == 0 else None
+    answer = guard_core._git(root, "show", "-s", "--format=%P", new)
+    found = answer.stdout.split() if answer is not None and answer.returncode == 0 else []
+    return tuple(found) if len(found) == 2 else None
+
+
+def merge_base_parts(root: str, parents, rel: str, top: str):
+    """`test_file_parts` of `rel` at the merge base of the two parents, with `held` True when the base holds the
+    file; an empty reading with `held` False when they share no ancestor or the base lacks the file; None when
+    git or the parse could not say."""
+    answer = guard_core._git(root, "merge-base", parents[0], parents[1])
+    if answer is None or answer.returncode not in (0, 1):
+        return None
+    found = answer.stdout.split()
+    text = text_at(root, found[0], rel, top, missing=None) if found else None
+    parts = test_file_parts(text or "")
+    if parts is not None:
+        parts["held"] = text is not None
+    return parts
+
+
+def builder_merge_test_path(rel: str, names, conflicts) -> bool:
+    """True when `rel`, a path a builder changed in a merge, is one the merge left conflicted that this check
+    reads: a test path, a mutation test, or test config other than a manifest."""
+    held = {norm(c).lstrip("/") for c in conflicts}
+    if not all(norm(n).lstrip("/") in held for n in names):
+        return False
+    return is_builder_test_rel(rel) or (is_test_config_rel(rel) and basename(rel) not in MERGE_MANIFESTS)
+
+
+def builder_merge_test_why(root: str, top: str, rel: str, paths, new=None) -> str:
+    """Why a builder's resolution of the conflicted test path `rel` is refused: a key of `MERGE_TEST_REASONS`;
+    '' when it keeps every test case of both parents as the parents have it. `paths` holds the files the
+    resolution changed, for a case moved to another test file. A mutation test is always refused. Test config
+    must equal one parent's version. Any test file the check cannot parse as python is unread."""
+    if is_mutation_test_rel(rel):
+        return "mutation"
+    parents = merge_parent_revs(root, new)
+    if parents is None:
+        return "unread"
+
+    def same_text(left, right):
+        return left.replace("\r\n", "\n") == right.replace("\r\n", "\n")
+
+    result = text_at(root, new, rel, top)
+    if is_test_config_rel(rel) and not is_test_rel(rel):
+        return "" if any(same_text(result, text_at(root, p, rel, top)) for p in parents) else "config"
+    if not rel.lower().endswith(".py"):
+        return "unread"
+    texts = [text_at(root, p, rel, top, missing=None) for p in parents]
+    read = [test_file_parts(text or "") for text in [result] + texts]
+    if None in read:
+        return "unread"
+    base = merge_base_parts(root, parents, rel, top)
+    if base is None:
+        return "unread"
+    if None in texts and not base["held"]:
+        # A rename that conflicts: the path is new since the base, and the parent that lacks it holds the file at
+        # another path, so its cases cannot be matched here. A delete against a modify keeps the base's file.
+        return "unread"
+
+    def elsewhere(key):
+        for other in paths:
+            if other == rel or not other.lower().endswith(".py") or not is_test_rel(other):
+                continue
+            there = test_file_parts(text_at(root, new, other, top))
+            if there is None or key not in there["cases"]:
+                continue
+            before = [test_file_parts(text_at(root, p, other, top)) for p in parents]
+            if not any(b and key in b["cases"] for b in before):
+                return True
+        return False
+
+    return merge_test_issue(read[0], read[1], read[2], elsewhere, base)
 
 
 def role_offences(root: str, top: str, role: str, paths, old: str, new=None, conflicts=()):
@@ -2817,8 +3091,16 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None, con
             bad = any(is_builder_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
                 text_at(root, new, rel, top).splitlines(), text_at(root, old, rel, top).splitlines())) or (
                 is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel, top), text_at(root, new, rel, top)))
+        why = ""
+        if role == BUILDER_ROLE and builder_merge_test_path(rel, names, conflicts):
+            # The merge route: a builder resolves a conflict in a test file when no test case of either parent
+            # is lost, and the reading says which loss when one is. Git runs only for a conflicted path.
+            why = builder_merge_test_why(root, top, rel, paths, new)
+            bad = bool(why) or (bad and not is_builder_test_rel(rel))
         if bad:
-            found.append(rel)
+            offence = MergeOffence(rel)
+            offence.why = why
+            found.append(offence)
     return found
 
 
@@ -2853,8 +3135,18 @@ def diff_rule(role: str) -> str:
             DESIGNER_ROLE: "designer-diff"}.get(role, "builder-diff")
 
 
-def builder_diff_reason() -> str:
-    """The refusal text for a builder's test change. It names no path: it gives the undo route."""
+def builder_diff_reason(offence="") -> str:
+    """The refusal text for a builder's test change. It names no path: it gives the undo route. A merge
+    resolution that loses a test case (`MergeOffence`) gets the class of loss and the merge route."""
+    why = getattr(offence, "why", "")
+    if why:
+        return (
+            MERGE_TEST_REASONS[why] + " A builder may resolve a merge conflict in a test file only by keeping every "
+            "test case of both parents exactly as the parents have it. The guard judges it at commit, push and stop. "
+            "Undo your resolution, or run `git merge --abort` and report it, so the orchestrator hands the whole "
+            "merge to a test-author. This refusal is final: never write the files another way. "
+            "(decision builders-cannot-edit-tests, a builder never changes a test or test config)"
+        )
     return (
         BUILDER_TEST_REASON + " The guard refuses a test change you made, at commit, push and stop. "
         "Undo it: restore each test file you changed to its text at HEAD, and delete each test file "
@@ -2875,7 +3167,7 @@ def diff_refusal(tool: str, role: str, root: str) -> None:
     elif found and role == BUILDER_ROLE:
         # A role guard stays outside every override (decision owner-override): a refusal is final.
         guard_core.set_override_veto(lambda: True)
-        refuse(tool, "deny", "builder-diff", builder_diff_reason(), found)
+        refuse(tool, "deny", "builder-diff", builder_diff_reason(found), found)
     elif found or noted:
         record(tool, "noted", diff_rule(role), found or noted[0])
 
@@ -2903,7 +3195,7 @@ def judge_stop(payload) -> None:
         record("SubagentStop", "noted", "role-diff-unread", where)
     elif found and role == BUILDER_ROLE:
         record("SubagentStop", "deny", diff_rule(role), found)
-        print(json.dumps({"decision": "block", "reason": diff_rule(role) + ": " + builder_diff_reason()}))
+        print(json.dumps({"decision": "block", "reason": diff_rule(role) + ": " + builder_diff_reason(found)}))
         sys.exit(0)
     elif found or noted:
         record("SubagentStop", "noted", diff_rule(role), found or noted[0])
