@@ -1,0 +1,14 @@
+{
+ "id": "new-guard-sweeps-open-prs",
+ "title": "When a change to main adds a guard that older open PRs can fail, a one-time sweep lists those PRs and tells their lanes",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 23:44 CST Nov 13 (relayed; evidence from runner 10 23:42 and g1 23:30, not re-run by the coordinator or triage): the Windows split guard on main (lint/test_windows_split.py, changed by b9f5217c, the CI-speed rebuild #3302) now fails three open PRs that add a checks.yml step: #3256, #3227 (found by g1 bisect) and #3325 (found by runner 10 lint). Each passed its own lane lint before main moved.",
+ "source": "Coordinator message 23:44 CST Nov 13 (relayed). Same class as step test-sections-no-branch-numbers (a collision no check catches until a merge). Related: release-pairwise-clash (todo).",
+ "note": "Triage 23:44 CST Nov 13: two parts. (1) When a main change adds or tightens a guard that older open PRs can fail, a one-time sweep lists those PRs (merge-tree plus the new test, per open PR with a checks.yml edit) and tells their lanes. (2) The guard's failure text says which step breaks and not how to write one that passes; add the remedy (rule: a refusal names its way out). Also a check at PR open on a PR's checks.yml edits against current main. A lane checks first whether release-pairwise-clash or lane lint already does any of it. Not started.",
+ "updatedAt": "2026-11-13T23:44:00-06:00"
+}
