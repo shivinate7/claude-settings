@@ -75,6 +75,11 @@ A spawner is a session that starts its own agents. Each session role is a set of
   never `cd X && merge`, and only when its own record names that checkout's repo (claude-settings record
   `merge-confirm-repo`). It runs the confirm in the foreground (Bash timeout up to 600000), never with
   `run_in_background`: a background call misses the allow rule and the auto-mode classifier refuses it. It dispatches no deferred step. Each CI or merge alarm wakes it, and it fixes the alarm or brings it to the coordinator (ruling R53). A red job wakes it at once (ruling R50). It runs Sonnet 5.5 at medium effort (ruling R52).
+  Its working state (merge queue order, folds and their members, gos, holds with their end events, archive pass) lives in one file on the record branch,
+  `plans/runner-state.json` (decision `runner-state-on-record`). The runner cannot push to that branch: triage is its one writer. After each merge the runner sends triage one message,
+  `RUNNER-STATE <owner/repo> v<N> after merge #<PR>` and then the whole file as JSON, with `version` one higher than the last. Triage runs
+  `check_runner_state.py message` on it, commits it whole, and answers with the commit. At start and after each compaction the runner reads `git show origin/roadmap:plans/runner-state.json` before any other act;
+  a committed version below its last sent one means it resends. Its handoff holds one pointer line and never the list.
 - **Lane.** Runs one line of work, with its own builder and reviewer agents.
   It opens its draft PR early, runs `merge --lane-lint <pr>` (with `--touched-tests` when it touches tests),
   posts the review record, then hands in to the batch runner (decision `session-tiers`). It ends with the

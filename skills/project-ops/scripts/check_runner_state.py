@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""Checks the batch runner's state file, the message that carries it, and the handoff that points to it.
+
+    python3 check_runner_state.py state <file>      # plans/runner-state.json, or a seed
+    python3 check_runner_state.py message <file>    # the text a runner sends triage after a merge
+    python3 check_runner_state.py handoff <file>    # a runner handoff: points to the file, copies no list
+    python3 check_runner_state.py recover <handoff file> <state file>   # the state file is `git show <ref>` saved to a file
+
+The runner's merge queue, folds, gos, holds and archive pass live in one file on the record branch, so a
+compaction cannot drop them (decision runner-state-on-record). Triage is the one writer of that branch
+(rule roadmap-one-writer), so the runner sends the whole file in one message per merge and triage commits it.
+Exit 0 ok, 1 a problem (each printed), 2 a bad argument or an unreadable file.
+"""
+import datetime
+import json
+import re
+import sys
+
+HOME = "origin/roadmap:plans/runner-state.json"
+FIELDS = ("schema", "repo", "version", "writtenAt", "runner", "afterMerge", "queue", "folds", "gos", "holds",
+          "archivePass")
+HEADER = re.compile(r"^RUNNER-STATE (\S+/\S+) v(\d+) after merge #(\d+)[ \t]*$")
+POINTER = re.compile(r"^Runner state: (\S+?:plans/runner-state\.json), last sent version (\d+)\.?[ \t]*$", re.M)
+# A list label that carries PR numbers is a copy of the state.
+COPY = re.compile(r"^(?:Queue|Folds?|Gos?|Holds?|Archive pass)[ \t]*:.*#\d+", re.I | re.M)
+
+
+class Unknown(Exception):
+    """The state could not be read or is not valid: the caller must treat it as unknown, never empty."""
+
+
+class Stale(Exception):
+    """The committed file is older than the last version the runner sent."""
+
+
+def _zoned(value):
+    if not isinstance(value, str):
+        return False
+    try:
+        return datetime.datetime.fromisoformat(value).tzinfo is not None
+    except ValueError:
+        return False
+
+
+def _int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def state_problems(s):
+    """-> the problems of a state object, one string each. An empty list is ok."""
+    if not isinstance(s, dict):
+        return ["The state is not a JSON object."]
+    out = [f"Missing field `{k}`." for k in FIELDS if k not in s]
+    if out:
+        return out
+    if s["schema"] != 1:
+        out.append("`schema` must be 1.")
+    if not (isinstance(s["repo"], str) and "/" in s["repo"]):
+        out.append("`repo` must be `owner/name`.")
+    if not _int(s["version"]) or s["version"] < 0:
+        out.append("`version` must be an integer, 0 or more.")
+    if not _zoned(s["writtenAt"]):
+        out.append("`writtenAt` must be an ISO time with a zone.")
+    if not (isinstance(s["runner"], str) and s["runner"]):
+        out.append("`runner` must name the runner session.")
+    am = s["afterMerge"]
+    if not (isinstance(am, dict) and ("pr" in am) and ("commit" in am)):
+        out.append("`afterMerge` needs `pr` and `commit` (null before the first merge).")
+    folds = s["folds"] if isinstance(s["folds"], list) else None
+    queue = s["queue"] if isinstance(s["queue"], list) else None
+    gos = s["gos"] if isinstance(s["gos"], list) else None
+    holds = s["holds"] if isinstance(s["holds"], list) else None
+    for name, val in (("folds", folds), ("queue", queue), ("gos", gos), ("holds", holds)):
+        if val is None:
+            out.append(f"`{name}` must be a list.")
+    fold_ids = set()
+    for f in folds or []:
+        if not (isinstance(f, dict) and isinstance(f.get("id"), str) and f["id"] and _int(f.get("pr"))
+                and isinstance(f.get("base"), str) and isinstance(f.get("members"), list)
+                and all(_int(m) for m in f["members"])):
+            out.append(f"A fold needs `id`, `pr`, `base` and an integer `members` list: {f!r}.")
+        else:
+            fold_ids.add(f["id"])
+    seen = set()
+    for q in queue or []:
+        if not (isinstance(q, dict) and _int(q.get("pr")) and isinstance(q.get("head"), str) and q["head"]
+                and isinstance(q.get("path"), str)):
+            out.append(f"A queue row needs `pr`, `head` and `path`: {q!r}.")
+            continue
+        if q["pr"] in seen:
+            out.append(f"PR {q['pr']} is twice in the queue.")
+        seen.add(q["pr"])
+        if q["path"] != "alone" and not (q["path"].startswith("fold:") and q["path"][5:] in fold_ids):
+            out.append(f"Queue row for PR {q['pr']} has path `{q['path']}`: use `alone` or `fold:<id of a fold>`.")
+    for g in gos or []:
+        if not (isinstance(g, dict) and _int(g.get("pr")) and isinstance(g.get("by"), str) and g["by"]
+                and _zoned(g.get("at"))):
+            out.append(f"A go needs `pr`, `by` and a zoned `at`: {g!r}.")
+    for h in holds or []:
+        if not (isinstance(h, dict) and _int(h.get("pr")) and isinstance(h.get("reason"), str) and h["reason"]
+                and isinstance(h.get("endsOn"), str) and h["endsOn"].strip()):
+            out.append(f"A hold needs `pr`, `reason` and a named end event `endsOn`: {h!r}.")
+    ap = s["archivePass"]
+    if not (isinstance(ap, dict) and (ap.get("lastRunAt") is None or _zoned(ap.get("lastRunAt")))
+            and isinstance(ap.get("pending"), list)):
+        out.append("`archivePass` needs `lastRunAt` (zoned time or null) and a `pending` list.")
+    return out
+
+
+def _split(text):
+    head, _, body = text.replace("\r\n", "\n").partition("\n")
+    return head, body
+
+
+def message_problems(text):
+    """-> the problems of a runner-to-triage message: a header line, then the whole file as JSON."""
+    head, body = _split(text)
+    m = HEADER.match(head)
+    if not m:
+        return ["The first line must be `RUNNER-STATE <owner/repo> v<N> after merge #<PR>`."]
+    try:
+        s = json.loads(body)
+    except ValueError as e:
+        return [f"The body is not JSON: {e}."]
+    out = state_problems(s)
+    if out:
+        return out
+    if s["repo"] != m.group(1):
+        out.append(f"Header repo {m.group(1)} differs from the file's {s['repo']}.")
+    if s["version"] != int(m.group(2)):
+        out.append(f"Header version v{m.group(2)} differs from the file's {s['version']}.")
+    if s["afterMerge"]["pr"] != int(m.group(3)):
+        out.append(f"Header PR #{m.group(3)} differs from the file's afterMerge PR {s['afterMerge']['pr']}.")
+    return out
+
+
+def handoff_problems(text):
+    """-> the problems of a runner handoff: one pointer line to the file, and no copy of its lists."""
+    out = []
+    if not POINTER.search(text):
+        out.append(f"No pointer line. Add `Runner state: {HOME}, last sent version <N>.`")
+    for m in COPY.finditer(text):
+        out.append(f"The handoff copies a list of the state: \"{m.group(0).strip()}\". Name the file, never copy it.")
+    return out
+
+
+def recover(handoff_text, read_ref):
+    """What a successor does after a compaction: find the pointer, read the file, check it. -> the state.
+
+    read_ref(ref) -> the file's text, or None when it could not be read.
+    Raises Unknown when the pointer, the read or the file is bad, and Stale when the committed version is older
+    than the last one the runner sent (the runner then resends its state to triage).
+    """
+    m = POINTER.search(handoff_text)
+    if not m:
+        raise Unknown("the handoff holds no `Runner state:` pointer line")
+    ref, sent = m.group(1), int(m.group(2))
+    text = read_ref(ref)
+    if text is None:
+        raise Unknown(f"could not read {ref}")
+    try:
+        s = json.loads(text)
+    except ValueError as e:
+        raise Unknown(f"{ref} is not JSON: {e}")
+    bad = state_problems(s)
+    if bad:
+        raise Unknown(f"{ref} is not a valid state: {bad[0]}")
+    if s["version"] < sent:
+        raise Stale(f"committed v{s['version']} is older than the last sent v{sent}: resend the state to triage")
+    return s
+
+
+def main(argv):
+    if len(argv) < 3 or argv[1] not in ("state", "message", "handoff", "recover"):
+        print(__doc__)
+        return 2
+    try:
+        with open(argv[2], encoding="utf-8") as f:
+            text = f.read()
+    except OSError as e:
+        print(f"unknown: cannot read {argv[2]}: {e}")
+        return 2
+    if argv[1] == "recover":
+        if len(argv) < 4:
+            print(__doc__)
+            return 2
+        try:
+            with open(argv[3], encoding="utf-8") as f:
+                state_text = f.read()
+        except OSError:
+            state_text = None
+        try:
+            s = recover(text, lambda ref: state_text)
+        except (Unknown, Stale) as e:
+            print(f"{type(e).__name__.lower()}: {e}")
+            return 1
+        print(f"ok: v{s['version']}, {len(s['queue'])} queued, {len(s['holds'])} held")
+        return 0
+    if argv[1] == "state":
+        try:
+            problems = state_problems(json.loads(text))
+        except ValueError as e:
+            problems = [f"Not JSON: {e}."]
+    else:
+        problems = (message_problems if argv[1] == "message" else handoff_problems)(text)
+    for p in problems:
+        print(p)
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
