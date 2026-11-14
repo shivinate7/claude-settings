@@ -2593,7 +2593,8 @@ SCAFFOLD_STEP = "project-ops skill scaffold suite"  # the same step's bare name,
 # The workflow on main names every step the ready checks below declare, in the job each runs in: a declared step the workflow lacks reads
 # unknown before ci-job runs (merge.pre_ready_rows). "no such step" is left out on purpose: that case declares a step no job has.
 READY_STEPS_WORKFLOW = tm.workflow_text("checks", "checks", "checks-rest",
-                                        steps={"checks": ["check invariants", *DECLARED_READY], "checks-rest": [SCAFFOLD_STEP]})
+                                        steps={"checks": ["check invariants", "records page", *DECLARED_READY],
+                                               "checks-rest": [SCAFFOLD_STEP, "STE lint"]})
 
 
 def steps_for(failing=()):
@@ -2803,7 +2804,9 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.use_ci_job([("unknown", "no such step")], 2)
         refs_before = self.refs()
         rc, out = self.draft_confirm()
-        self.assertEqual(len(self.lint_calls()), 1, "the declared name did not reach ci-job: " + out)
+        self.assertEqual(self.lint_calls(), [], "a declared name no step of its job has still reached ci-job: " + out)
+        self.assertIn("unknown no such step: not run: no step of job 'checks' has this name", out,
+                      "the refusal does not name the declared step as one the job lacks: " + out)
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.refs(), refs_before, "a page was pushed on an unknown ready check")
         self.assertEqual(self.host.readies, [], "the pull request went ready on an unknown ready check")
