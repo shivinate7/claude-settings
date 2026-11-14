@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Red run: the check must fail on failure, cancelled, skipped and empty needs; pass on all success.
 set -u
+unset SCOPE_SKIPS  # the cases below set it themselves; a caller's value never reaches the existing cases
 here="$(cd "$(dirname "$0")" && pwd)"
 bad=0
 expect() { # want label json
@@ -85,6 +86,119 @@ nopy_case() { # nopy_case <label>: wiring.sh with python3 off PATH must exit non
   if [ "$got" -ne 0 ]; then echo "ok   $1 (exit $got)"; else echo "FAIL $1 (exit 0 with python3 off PATH)"; bad=1; fi
 }
 nopy_case "wiring: python3 off PATH exits non-zero, never 0"
+
+# Scope-skips (decision: roadmap step macos-jobs-gated-by-scope). A skipped job that the scope-skips input names passes only when the
+# scope job succeeded and every flag the input lists is exactly "false". The map is testing/scope_skips.py's, the one home of the gate.
+map_json="$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import scope_skips; sys.stdout.write(scope_skips.SCOPE_SKIPS_JSON)' "$root/testing")" || map_json=""
+[ -n "$map_json" ] || { echo "FAIL - scope-skips fixture: testing/scope_skips.py did not load"; exit 1; }
+skips_case() { # skips_case <pass|fail> <label> <SCOPE_SKIPS value> <NEEDS json>: check.sh with the input set to that value
+  SCOPE_SKIPS="$3" NEEDS="$4" bash "$here/check.sh" >/dev/null 2>&1; got=$?
+  if { [ "$1" = pass ] && [ $got -eq 0 ]; } || { [ "$1" = fail ] && [ $got -ne 0 ]; }; then echo "ok   $2"
+  else echo "FAIL $2 (exit $got, wanted $1)"; bad=1; fi
+}
+unset_case() { # unset_case <pass|fail> <label> <NEEDS json>: check.sh with SCOPE_SKIPS unset
+  env -u SCOPE_SKIPS NEEDS="$3" bash "$here/check.sh" >/dev/null 2>&1; got=$?
+  if { [ "$1" = pass ] && [ $got -eq 0 ]; } || { [ "$1" = fail ] && [ $got -ne 0 ]; }; then echo "ok   $2"
+  else echo "FAIL $2 (exit $got, wanted $1)"; bad=1; fi
+}
+# The NEEDS of one run (toJSON(needs)): the scope job with its result and flags, the three macOS jobs, and one other job.
+MAC_SKIPPED='"shell-macos":{"result":"skipped"},"checks-macos":{"result":"skipped"},"checks-macos-b":{"result":"skipped"}'
+LINT_OK='"lint":{"result":"success"}'
+SCOPE_OFF='"scope":{"result":"success","outputs":{"shell_macos":"false","checks_macos":"false","sweep":"false"}}'
+GATE_OFF="{$SCOPE_OFF,$MAC_SKIPPED,$LINT_OK}"
+# (c) a scope job that did not succeed keeps the macOS skips red. With the scope job green and every flag off, they pass.
+skips_case pass "scope success with every flag false: the skipped macOS jobs pass" "$map_json" "$GATE_OFF"
+SCOPE_FAILED='"scope":{"result":"failure","outputs":{"shell_macos":"false","checks_macos":"false","sweep":"false"}}'
+SCOPE_CANCELLED='"scope":{"result":"cancelled","outputs":{"shell_macos":"false","checks_macos":"false","sweep":"false"}}'
+SCOPE_SKIPPED='"scope":{"result":"skipped"}'
+skips_case fail "scope failure: the skipped macOS jobs stay red" "$map_json" "{$SCOPE_FAILED,$MAC_SKIPPED,$LINT_OK}"
+skips_case fail "scope cancelled: the skipped macOS jobs stay red" "$map_json" "{$SCOPE_CANCELLED,$MAC_SKIPPED,$LINT_OK}"
+skips_case fail "scope skipped: the skipped macOS jobs stay red" "$map_json" "{$SCOPE_SKIPPED,$MAC_SKIPPED,$LINT_OK}"
+# (d) a listed flag that is not exactly "false" keeps its job red: "true", empty, absent, and sweep for checks-macos.
+SHELL_TRUE='"scope":{"result":"success","outputs":{"shell_macos":"true","checks_macos":"false","sweep":"false"}}'
+SHELL_EMPTY='"scope":{"result":"success","outputs":{"shell_macos":"","checks_macos":"false","sweep":"false"}}'
+SHELL_ABSENT='"scope":{"result":"success","outputs":{"checks_macos":"false","sweep":"false"}}'
+SWEEP_TRUE='"scope":{"result":"success","outputs":{"shell_macos":"false","checks_macos":"false","sweep":"true"}}'
+skips_case fail "shell_macos true: a skipped shell-macos stays red" "$map_json" "{$SHELL_TRUE,$MAC_SKIPPED,$LINT_OK}"
+skips_case fail "shell_macos empty: a skipped shell-macos stays red" "$map_json" "{$SHELL_EMPTY,$MAC_SKIPPED,$LINT_OK}"
+skips_case fail "shell_macos absent: a skipped shell-macos stays red" "$map_json" "{$SHELL_ABSENT,$MAC_SKIPPED,$LINT_OK}"
+skips_case fail "sweep true: a skipped checks-macos stays red" "$map_json" "{$SWEEP_TRUE,$MAC_SKIPPED,$LINT_OK}"
+# (e) a skipped job the map does not name stays red; so does a listed job that failed, and an empty map names no job.
+skips_case fail "a skipped job the map does not name stays red" "$map_json" "{$SCOPE_OFF,$MAC_SKIPPED,$LINT_OK,\"checks-rest\":{\"result\":\"skipped\"}}"
+MAC_ONE_FAILED='"shell-macos":{"result":"failure"},"checks-macos":{"result":"skipped"},"checks-macos-b":{"result":"skipped"}'
+skips_case fail "a listed job that failed stays red" "$map_json" "{$SCOPE_OFF,$MAC_ONE_FAILED,$LINT_OK}"
+skips_case fail "an empty map names no job: the skipped macOS jobs stay red" "{}" "$GATE_OFF"
+# (f) with the input unset, a skipped job is red as it was before. A malformed input fails closed.
+unset_case fail "SCOPE_SKIPS unset: a skipped macOS job stays red, as before" "$GATE_OFF"
+skips_case fail "a malformed SCOPE_SKIPS fails closed: the skipped macOS job stays red" "{not json" "$GATE_OFF"
+# (i) action.yml declares scope-skips as an optional input with default '', and its one step passes it to check.sh as SCOPE_SKIPS.
+inputs_static() { # inputs_static <action.yml>: one line per problem, none when clean
+  python3 -I - "$1" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+text = "\n".join(line for line in text.split("\n") if not line.lstrip().startswith("#"))
+inputs = re.search(r"^inputs:\n((?:[ \t]+[^\n]*\n|\n)*)", text, re.M)
+entry = re.search(r"^  scope-skips:[ \t]*(?:#[^\n]*)?\n((?:    [^\n]*\n|\n)*)", inputs.group(1) if inputs else "", re.M)
+if not entry:
+    print("inputs do not declare scope-skips")
+    sys.exit(0)
+body = entry.group(1)
+if not re.search(r"^    required:[ \t]*false[ \t]*(?:#[^\n]*)?$", body, re.M):
+    print("scope-skips is not an optional input: want required: false")
+if not re.search(r"^    default:[ \t]*(?:''|\"\")[ \t]*(?:#[^\n]*)?$", body, re.M):
+    print("scope-skips has no default of empty string")
+if not re.search(r"^        SCOPE_SKIPS:[ \t]*\$\{\{[ \t]*inputs\.scope-skips[ \t]*\}\}[ \t]*(?:#[^\n]*)?$", text, re.M):
+    print("the one step does not pass inputs.scope-skips to check.sh as SCOPE_SKIPS")
+PY
+}
+inputs_expect() { # inputs_expect <ok, or a substring the reader must print> <label> <action.yml>
+  problems="$(inputs_static "$3" 2>&1)"; rc=$?
+  if [ "$rc" -ne 0 ]; then echo "FAIL $2: the static reader crashed (exit $rc)"; bad=1; return; fi
+  if [ "$1" = ok ]; then
+    if [ -z "$problems" ]; then echo "ok   $2"; return; fi
+    while IFS= read -r line; do echo "FAIL $2: $line"; done <<< "$problems"; bad=1; return
+  fi
+  case "$problems" in *"$1"*) echo "ok   $2";; *) echo "FAIL $2: the reader did not print: $1"; bad=1;; esac
+}
+input_yml() { # input_yml <scope-skips body lines> <env line, or empty>: a one-step action.yml with that input and that env
+  cat <<YML
+name: All jobs passed
+inputs:
+  needs:
+    description: "Pass toJSON(needs) from the calling job."
+    required: true
+  workflow:
+    description: "The calling workflow's path."
+    required: false
+    default: ''
+  scope-skips:
+    description: "The macOS gate's map."
+$1
+runs:
+  using: composite
+  steps:
+    - name: Every needed job passed, and the wiring holds
+      shell: bash
+      env:
+        NEEDS: \${{ inputs.needs }}
+        WORKFLOW: \${{ inputs.workflow }}
+$2
+      run: bash "\${{ github.action_path }}/run.sh"
+YML
+}
+SKIPS_ENV='        SCOPE_SKIPS: ${{ inputs.scope-skips }}'
+input_yml "    required: false
+    default: ''" "$SKIPS_ENV" > "$work/input-ok.yml"
+input_yml "    required: true
+    default: ''" "$SKIPS_ENV" > "$work/input-required.yml"
+input_yml "    required: false" "$SKIPS_ENV" > "$work/input-nodefault.yml"
+input_yml "    required: false
+    default: ''" "" > "$work/input-noenv.yml"
+inputs_expect ok "static: scope-skips is an optional input with default '', and the one step passes it as SCOPE_SKIPS" "$here/action.yml"
+inputs_expect ok "static control: a synthetic action with the input and the env is clean" "$work/input-ok.yml"
+inputs_expect "not an optional input" "static control: a required scope-skips input is reported" "$work/input-required.yml"
+inputs_expect "default of empty string" "static control: a scope-skips input with no default is reported" "$work/input-nodefault.yml"
+inputs_expect "does not pass inputs.scope-skips" "static control: a step without SCOPE_SKIPS is reported" "$work/input-noenv.yml"
 
 # Static: action.yml has exactly one step under runs.steps. That step runs run.sh, sets no if: and no continue-on-error:,
 # and sets WORKFLOW from inputs.workflow. The reader drops full-line comments and matches each key and the run line exactly.
