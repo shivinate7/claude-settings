@@ -1200,7 +1200,7 @@ LOCAL_REPO_REASON = (
 
 
 def local_session_id(session_id: str) -> str:
-    """The session id a local role file may be read for, else ''. The hook payload's id and the environment's CLAUDE_CODE_SESSION_ID must both
+    """The session id a local role file may prove the record writer for, else ''. The hook payload's id and the environment's CLAUDE_CODE_SESSION_ID must both
     be present and equal; the reader then tests the id's shape. A guess about who is asking reads no file."""
     env_id = os.environ.get("CLAUDE_CODE_SESSION_ID")
     return session_id if isinstance(session_id, str) and session_id and session_id == env_id else ""
@@ -1223,8 +1223,8 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str, session_id: str = "
     --lane-lint merges nothing and is not judged. Cost: none for a call that is no merge confirm;
     else one parse, one read of the origin and one transcript read.
 
-    A local session is judged on `--confirm` only, and only once the launcher's role files are in use (session_role.roles_in_use): its role
-    file must name batch-runner and the repo the merge acts in (_local_role_proves). With no role file nothing is judged, as before.
+    A local session is judged on `--confirm` only, by its OWN record (session_role.local_judgement, rules a, b, c): an own file must name
+    batch-runner and the repo the merge acts in, and CS_SESSION_ROLE set with no matching own file refuses. A session with neither is not judged.
 
     A redirection (`2>&1`, `> run.log`) belongs to the shell, not to the merge tool, so the parser reads the segment without them
     (strip_redirections, the quote-aware reader of their shape; a quoted `<` or `>` is text and stays). When the segment no longer
@@ -1234,7 +1234,7 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str, session_id: str = "
             return ""
         try:
             import session_role
-            if not session_role.roles_in_use():
+            if not session_role.local_judgement(session_id)[0]:   # rule (b): no own file and no launcher role, so today's behaviour
                 return ""
         except Exception:
             pass   # a reader that cannot run judges the call, so the clause fails closed
@@ -1250,7 +1250,7 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int, local_se
     """True when a `merge --confirm` or `merge --ready` (PROVED_FLAGS) in `text` acts in a checkout the own record does not prove. `text` is the command, or a script a
     segment hands on (`bash -c`, `sh -c`, `eval`: inner_commands, the one reader of those wrappers), which runs in the directory its own
     segment is in. A `)` or `&` glued to the last word ends the merge's arguments (_command_words), so a merge closing a subshell is read.
-    `local_session` is None for a cloud session. For a local session it is the hook payload's session id: only `--confirm` is judged, by its role file."""
+    `local_session` is None for a cloud session. For a local session it is the hook payload's session id (own id; "" is no id): only `--confirm` is judged."""
     ends = []
     segments = split_segments(text, ends)
     for number, segment in enumerate(segments):
@@ -1281,7 +1281,11 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int, local_se
                 continue
             repo = _merge_target_repo(segments, number, cwd, ends, flags.repo_dir)
             if local_session is not None:
-                if not flags.confirm or _local_role_proves(local_session, ROLE_TIERS, repo):  # glossary-ok: ROLE_TIERS is the existing name
+                if not flags.confirm:
+                    continue
+                import session_role
+                judged, record = session_role.local_judgement(local_session)
+                if not judged or (record and record["role"] in ROLE_TIERS and repo and record.get("repo") == repo):  # glossary-ok: ROLE_TIERS is the existing name
                     continue
                 return True
             from override import remote_session_id
