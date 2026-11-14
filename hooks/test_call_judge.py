@@ -1392,7 +1392,7 @@ def case_widening_rule_names_the_mark():
 # a second form, an allow entry in settings.local.json and a widening in another repo stay widening.
 # The helpers below repeat test_reply_judge's pin helpers: each judge test is its own CI step, and neither imports the other.
 CARVE_PINS = (("claude-settings",), ("settings.json",), ("allow",), ("not widen", "never flag"), ("recommend",))
-NEG_WORDS = ("not widen", "never flag")
+NEG_WORDS = ("not widen", "never flag", "is not", "isn't")  # the plain "is not" form ends a clause that says no widening
 SKILL_PATH = os.path.join(REPO, "skills", "waiting-page", "SKILL.md")
 SKILL_WIDENS = "`widens: true` on an option marks one"
 
@@ -1483,6 +1483,8 @@ def case_skill_widens_paragraph_names_the_carve_out():
     check("skill carve-out: the paragraph says one allow entry in claude-settings' shared settings.json is not "
           "widening and may be recommended", has_pin(cl, *CARVE_PINS),
           "no clause of the widens paragraph carries the carve-out")
+    check("skill names no repo: the paragraph says the carve-out entry names no repo",
+          "names no repo" in norm(para).lower(), "the widens paragraph does not say the carve-out entry names no repo")
     for name, ok, cause in still_widens(cl, "the waiting-page skill"):
         check(name, ok, cause)
 
@@ -1535,6 +1537,15 @@ def case_carve_out_says_it_names_no_repo():
     if ok:
         check("names no repo: WIDENING_RULE carries the phrase", "names no repo" in norm(widening_rule()).lower(),
               "WIDENING_RULE does not carry the phrase")
+
+
+def case_carve_out_names_path_or_slug():
+    # An entry names a repo by its path or its slug. The constant says so, and the judge's rule carries the words.
+    carve = qf_text("WIDENING_CARVE_OUT")
+    check("path or slug: question_form.WIDENING_CARVE_OUT says an entry names a repo by its path or slug",
+          "path or slug" in norm(carve).lower(), "WIDENING_CARVE_OUT does not say an entry names a repo by its path or slug")
+    check("path or slug: WIDENING_RULE carries the phrase", "path or slug" in norm(widening_rule()).lower(),
+          "WIDENING_RULE does not carry the phrase")
 
 
 def case_fail_open():
@@ -1887,7 +1898,7 @@ def main():
                  case_widening_carve_out_has_one_home, case_widening_rule_still_names_the_widening_forms,
                  case_skill_widens_paragraph_names_the_carve_out,
                  case_widening_template_keeps_a_repo_exception_widening, case_widening_rule_names_no_bare_allow_entry,
-                 case_carve_out_says_it_names_no_repo,
+                 case_carve_out_says_it_names_no_repo, case_carve_out_names_path_or_slug,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,

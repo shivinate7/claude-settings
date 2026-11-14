@@ -1375,8 +1375,9 @@ def case_prompt_flags_a_recommended_option_that_widens():
 # ------------------------------------------------------------------ the carve-out for claude-settings' shared file
 #
 # The same carve-out as hooks/test_call_judge.py: its words are question_form.WIDENING_CARVE_OUT, the one home, and this
-# prompt carries them. The output style's style-question-form rule says them too. The helpers repeat test_call_judge's
-# pin helpers: each judge test is its own CI step, and neither imports the other.
+# prompt carries them verbatim. The output style's style-question-form rule and the waiting-page skill hold a paraphrase
+# of it, not the same words, so their checks pin the phrases each must say, not the constant.
+# The helpers repeat test_call_judge's pin helpers: each judge test is its own CI step, and neither imports the other.
 CARVE_PINS = (("claude-settings",), ("settings.json",), ("allow",), ("never flag", "not widen"), ("recommend",))
 NEG_WORDS = ("never flag", "not widen")
 QF_PATH = os.path.join(HERE, "question_form.py")
@@ -1467,6 +1468,8 @@ def case_shiv_style_rule_names_the_carve_out():
     check("shiv carve-out: the rule says one allow entry in claude-settings' shared settings.json is not widening "
           "and may be recommended", has_pin(cl, *CARVE_PINS),
           "no clause of the style-question-form rule carries the carve-out")
+    check("shiv names no repo: the rule says the carve-out entry names no repo",
+          "names no repo" in norm(block).lower(), "the style-question-form rule does not say the carve-out entry names no repo")
     for name, ok, cause in still_widens(cl, "the style-question-form rule"):
         check(name, ok, cause)
 
@@ -1506,6 +1509,16 @@ def case_carve_out_says_it_names_no_repo_in_prompt():
         run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
         check("names no repo: the prompt carries the phrase", "names no repo" in norm(run.prompt()).lower(),
               "the prompt does not carry the phrase")
+
+
+def case_carve_out_names_path_or_slug_in_prompt():
+    # An entry names a repo by its path or its slug. The constant says so, and the prompt carries the words verbatim.
+    carve = qf_text("WIDENING_CARVE_OUT")
+    check("path or slug: question_form.WIDENING_CARVE_OUT says an entry names a repo by its path or slug",
+          "path or slug" in norm(carve).lower(), "WIDENING_CARVE_OUT does not say an entry names a repo by its path or slug")
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    check("path or slug: the prompt carries the phrase", "path or slug" in norm(run.prompt()).lower(),
+          "the prompt does not carry the phrase")
 
 
 # Roadmap c135, item 31's shape: options that can all be done together, asked as pick-one. The prompt
@@ -2321,6 +2334,7 @@ CASES = (
     case_shiv_style_rule_names_the_carve_out,
     case_prompt_names_no_bare_allow_entry,
     case_carve_out_says_it_names_no_repo_in_prompt,
+    case_carve_out_names_path_or_slug_in_prompt,
     case_widens_finding_logs_its_rule,
     case_prompt_flags_a_pick_one_question_whose_options_could_combine,
     case_route_cite_carries_cited_same_act_and_alternate_rows,
