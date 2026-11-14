@@ -213,6 +213,39 @@ sh("coordinator-scope: a cloud coordinator's install -t into a repository folder
 sh("coordinator-scope: a cloud coordinator's cat <> onto a repository file that is no record home is refused",
    "cat <> hooks/x", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
 
+# --- a here-string is the input a shell or perl runs as its script: a write in that script is judged, not skipped ---
+# Each deny writes a repository path that is no record home from inside the script. The allow is a here-string into a
+# file outside every repository, so a refusal of every here-string would fail it.
+sh("coordinator-scope: a cloud coordinator's bash here-string script that redirects onto a repository path is refused",
+   "bash <<< 'echo a > hooks/x'", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's sh here-string script that tees into a repository path is refused",
+   'sh <<< "tee hooks/x"', "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's sh -s here-string script that removes a repository path is refused",
+   "sh -s <<< 'rm hooks/x'", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's bash here-string script that chmods a repository path is refused",
+   'bash <<< "chmod 755 hooks/x"', "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's perl here-string script that opens a repository path for write is refused",
+   "perl <<< 'open(F,\">hooks/x\")'", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's cat here-string into a file outside every repository is allowed",
+   "cat <<< 'hello' > /tmp/x-scratch", "allow", cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+
+# --- xargs takes its operands from stdin: a here-string, a list file or a pipe the guard cannot read ---
+# Each deny names a write whose operands come from that input, or whose last word is a record home while the sources
+# stay unread. The guard refuses each on the operands it cannot read, so no record home makes it safe.
+sh("coordinator-scope: a cloud coordinator's xargs rm of a here-string operand is refused",
+   "xargs rm <<< hooks/x", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's xargs rm with its files read from a list file is refused",
+   "xargs rm < list.txt", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's xargs tee with its files read from a list file is refused",
+   "xargs tee < list.txt", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's xargs mv into a record home, files read from a list file, is refused",
+   "xargs mv -t docs/decisions < list.txt", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's xargs install into a record home, files read from a list, is refused",
+   "xargs install -m 644 -t docs/decisions < list.txt", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's git file list piped to xargs install into a record home is refused",
+   "git ls-files hooks | xargs install -m 644 docs/decisions/x", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV,
+   config=COORD_CFG)
+
 # --- no role file: the role is the cs-build tag the session's own get_session record holds, after its own tag calls ---
 add("coordinator-scope: with no role file, a coordinator record's role refuses an Edit of a repository path", "deny",
     COORD_RULE, tool="Edit", cwd=REPO, env=COORD_ENV, config=COORD_NOROLE,
