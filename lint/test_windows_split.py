@@ -197,6 +197,7 @@ LINUX_SUITES = {
     "python3 merge/test_repaired_merges.py": (LINUX_CODE, None),
     "python3 merge/test_lane_lint.py": (LINUX_CODE, None),
     "python3 merge/test_idle_lanes.py": (LINUX_CODE, None),
+    "python3 merge/test_priority_rows.py": (LINUX_CODE, None),
     "sh merge/test_install_from_main.sh": (LINUX_CODE, None),
     "sh hooks/test_install_src.sh": (LINUX_CODE, None),
     "sh hooks/test_cloud_setup.sh": (LINUX_CODE, None),
