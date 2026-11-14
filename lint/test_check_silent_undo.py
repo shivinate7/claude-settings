@@ -781,6 +781,32 @@ class Flips(unittest.TestCase):
     def test_a_third_value_still_passes(self):
         self.assertEqual(self.resolve("RULE_FLOOR = 80", "RULE_FLOOR = 91", "RULE_FLOOR = 94"), [])
 
+    def test_an_appended_negation_clause_keeps_the_rewrite_excuse(self):
+        """A merge that only appends a clause with a negation word to main's rule line is no reversal: every original
+        token survives in order. The line's final `.` moves after the clause, so the clause sits after the last word."""
+        for result in ("Keep CI waits short, never past 55 minutes.", "Keep CI waits short; don't retry twice.",
+                       "Keep CI waits short, without a second push."):
+            with self.subTest(result=result):
+                self.assertNotIn("Keep CI waits short.", result)  # the line is lost, never a substring of the merge
+                self.assertEqual(self.resolve("", "Keep CI waits short.", result), [])
+
+    def test_an_appended_clause_without_a_negation_passes(self):
+        """The control for the appended cases: the same clause with no negation word passes on old code too, so the
+        flag on the negated clause comes from the negation word, not the number or the comma."""
+        result = "Keep CI waits short, under 55 minutes."
+        self.assertNotIn("Keep CI waits short.", result)  # the line is lost, never a substring of the merge
+        self.assertEqual(self.resolve("", "Keep CI waits short.", result), [])
+
+    def test_a_negation_inserted_among_the_tokens_stays_a_reversal(self):
+        """A negation word before the last word of a line is a reversal, never an appended clause. The first case is
+        the true reversal the appended rule must not let through. Each case keeps its first token and every original
+        token in order, so `extends` is the gate that flags it."""
+        for a_line, result in (("Keep CI waits short.", "Keep CI waits not short."),
+                               ("Claude can merge", "Claude can't merge"),
+                               ("must pass", "must not pass")):
+            with self.subTest(result=result):
+                self.red("", a_line, result)
+
 
 class MainLineDrop:
     """The one home of the fixture for a case that merges main into a feat branch and drops lines main added to
