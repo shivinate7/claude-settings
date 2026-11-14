@@ -143,8 +143,9 @@ def main(argv):
     if argv[1:] != ["write"]:
         return 0
     try:
-        payload = json.loads(sys.stdin.read())
-    except ValueError:
+        raw = getattr(sys.stdin, "buffer", sys.stdin).read()  # bytes when the stream has them, so a Windows locale codec never decides the read
+        payload = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+    except ValueError:  # UnicodeDecodeError is one
         return 0
     if not isinstance(payload, dict):
         return 0
