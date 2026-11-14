@@ -515,5 +515,28 @@ def rr_rewritten_remedy_case():
     return True, "the refusal for a rewritten branch says the owner must reword, and prints no git command"
 
 
+RR_SHELL_NEUTRAL_LABEL = ("red-run: each git command a refusal prints starts with `git` and ends in no caret, so cmd.exe, "
+                          "PowerShell and bash all run it")
+LOG_FAMILY[RR_SHELL_NEUTRAL_LABEL] = FAMILY
+
+
+def rr_shell_neutral_remedy_case():
+    """Every printed git command, for a flagged commit below the tip and below a merge. Why: `NAME=value git ...` is bash
+    only (cmd.exe says the name is not recognized, PowerShell reads it as a command), and a caret ends a cmd.exe line."""
+    for where, rev in ((RR_BELOW, "HEAD~1"), (RR_MERGEBELOW, "HEAD~1^1")):
+        materialize(where)
+        flagged = run_vcs(where, "rev-parse", rev).stdout.strip()[:7]
+        got, reason = decide(_rr_case(VCS + " push", where))
+        if got != "deny" or RR_RULE not in reason:
+            return False, "a push of a flagged commit is %s, want deny under %s: %s" % (got, RR_RULE, reason[:100])
+        for span in _rr_remedy_commands(reason.split("Remedy:", 1)[-1], flagged):
+            if not span.startswith("git "):
+                return False, "the printed command `%s` does not start with `git`, so only bash runs it" % span
+            if span.endswith("^"):
+                return False, "the printed command `%s` ends in a caret, which cmd.exe reads as a line join" % span
+    return True, "each printed git command starts with git and ends in no caret"
+
+
 LOG_CHECKS = LOG_CHECKS + ((RR_BELOW_CONTROL_LABEL, rr_below_control_case), (RR_MERGE_TIP_LABEL, rr_merge_tip_remedy_case),
-                           (RR_MERGE_BELOW_LABEL, rr_merge_below_remedy_case), (RR_REWRITTEN_LABEL, rr_rewritten_remedy_case))
+                           (RR_MERGE_BELOW_LABEL, rr_merge_below_remedy_case), (RR_REWRITTEN_LABEL, rr_rewritten_remedy_case),
+                           (RR_SHELL_NEUTRAL_LABEL, rr_shell_neutral_remedy_case))

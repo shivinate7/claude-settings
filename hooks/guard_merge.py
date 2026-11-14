@@ -744,11 +744,12 @@ RED_RUN_PUSH_REASON = (
 # the autosquash rebase folds it into that commit. No editor opens (`fixup -C`, and `merge -C` for a merge), so a
 # session can drive it. `--rebase-merges` keeps a merge in the range: without it the rebase flattens the merge
 # and replays main's commits under new shas, which the check then judges as the lane's. The sha is the one the
-# refusal lists for the flagged commit.
+# refusal lists for the flagged commit. The editors are set by `-c`, and the parent is `<sha>~1`, so the same
+# text runs in bash, PowerShell and cmd.exe: `NAME=value git` is bash only, and a trailing caret joins lines in cmd.exe.
 RED_RUN_BELOW_FIX = (
     "Reword each flagged commit by its sha, listed above: `git commit --allow-empty -m \"amend! <sha>\" "
-    "-m \"<subject>\" -m \"Red-run: ...\"`, then `GIT_SEQUENCE_EDITOR=true GIT_EDITOR=false git rebase -i "
-    "--autosquash --rebase-merges <sha>^`, then `git push`."
+    "-m \"<subject>\" -m \"Red-run: ...\"`, then `git -c sequence.editor=true -c core.editor=false rebase -i "
+    "--autosquash --rebase-merges <sha>~1`, then `git push`."
 )
 # A branch rewritten since it was pushed: the remote holds an earlier form of the flagged commits, so a reword
 # changes pushed history, which no session does.
