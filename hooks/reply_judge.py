@@ -150,7 +150,7 @@ INSTRUCTIONS = (
     "\"verdict: clear\" or \"harness passes\", is a result, not narration; never flag it. "
     "Flag only a limit or rule named as a note on the session's own conduct. "
     "style-question-form: flag a reply whose recommended option widens what a shared tool accepts, "
-    "meaning the tool changes to fit one repo: " + WIDENING_ACCEPTS_CLAUSE + " "
+    + "meaning the tool changes to fit one repo: " + WIDENING_ACCEPTS_CLAUSE + " "
     + WIDENING_SAME_CHANGE_SENTENCE + " "
     + WIDENS_LABEL_SENTENCE +
     "Do not flag an option where the repo changes to match the shared format. "
