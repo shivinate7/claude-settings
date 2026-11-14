@@ -12,7 +12,7 @@ claude-settings only. Push roadmap edits to the branch only; only Triage the roa
 
 ## Task
 
-Read plans/o5b-memory-hooks-audit.md on the roadmap branch (the feedback_gate and
+Read plans/o5b-memory-hooks-audit.md (deleted when its work shipped, last held at 0c389bd17) on the roadmap branch (the feedback_gate and
 precompact_handoff rows) first.
 1. hooks/feedback_gate.py (and feedback_judge.py, local_time.py's fb capture as needed): a `task`
    item's home must be a tracked file (the repo's todo or debt store); a `ruling` item's home must be

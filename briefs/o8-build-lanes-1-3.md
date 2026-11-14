@@ -6,7 +6,7 @@ them. Push roadmap edits to the branch only; only Triage the roadmap (3) republi
 
 ## Contract
 
-plans/o8-living-roadmap-plan.md on the roadmap branch (6651d48 or later), section 6, lanes 1 to 3.
+plans/o8-living-roadmap-plan.md (deleted when its work shipped, last held at 4ac7cdb08) on the roadmap branch (6651d48 or later), section 6, lanes 1 to 3.
 Read sections 1 to 6 only. Section 7 is parked for shiv: build nothing for live worker state.
 
 ## Task: one PR, one commit per lane, in order

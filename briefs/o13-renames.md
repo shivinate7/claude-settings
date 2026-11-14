@@ -7,7 +7,7 @@ branch only; only Triage the roadmap (3) republishes.
 
 ## Rulings
 
-- shiv, Oct 26: yes to all nine groups of plans/o13-one-word-per-meaning.md (roadmap 12b43eb or
+- shiv, Oct 26: yes to all nine groups of plans/o13-one-word-per-meaning.md (deleted when its work shipped, last held at 12b43eb6b) (roadmap 12b43eb or
   later). Read that plan first; it is the contract. Read only your groups' sections.
 - shiv, Oct 26: the code is renamed too, so his words and the code's words match with no
   conversion table: file names, identifiers, messages, rule anchors, record slugs, rule kinds.

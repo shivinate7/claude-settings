@@ -37,7 +37,7 @@ Relayed by the retrospective.
 ## Stale drafts
 
 - 09:49 CST, in the coordinator's session, option a: "close the 436 PRs listed in plans/stale-drafts-2026-11-12.md,
-  minus #1755 and #1725"; no close comments, no branch deletes. Record: plans/stale-drafts-2026-11-12.md.
+  minus #1755 and #1725"; no close comments, no branch deletes. Record: plans/stale-drafts-2026-11-12.md (deleted when its work shipped, last held at eb2e570fc).
 
 ## q_max Past Rates at 1440 px (page item 550)
 

@@ -232,7 +232,7 @@ First check: does a hook "ask" show a prompt to the owner in bypass mode? The gu
 
 ## Paste-in brief C: premises batch (c7, c24, c25)
 
-Premises batch, claude-settings. Roadmap: c7 (fix the reply-style conflict: one question reviewer), c24 (planners check their brief's premises), c25 (handoffs list premises with sources, evidence lives in its record). Attach plans/premise-handoffs-plan.md with this brief; it is the design, with file and line references checked at 73ed71a7. Re-check each reference against current main before editing, since other batches have merged since.
+Premises batch, claude-settings. Roadmap: c7 (fix the reply-style conflict: one question reviewer), c24 (planners check their brief's premises), c25 (handoffs list premises with sources, evidence lives in its record). Attach plans/premise-handoffs-plan.md (deleted when its work shipped, last held at f80ec483b) with this brief; it is the design, with file and line references checked at 73ed71a7. Re-check each reference against current main before editing, since other batches have merged since.
 
 Order: after the guard-rule batch (c10, let the guard grow then cull what never fired; l1, rules that never fired show up) lands. Fixes and tests only; no measuring step.
 

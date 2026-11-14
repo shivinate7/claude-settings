@@ -1,6 +1,6 @@
 # Brief: o8 lane 6, project-ops points at skills/roadmap
 
-Repo: shivinate7/claude-settings, from main 43d9af20 (batch #698). One lane: builder (sonnet), then reviewer (sonnet). Plan: plans/o8-living-roadmap-plan.md on the roadmap branch.
+Repo: shivinate7/claude-settings, from main 43d9af20 (batch #698). One lane: builder (sonnet), then reviewer (sonnet). Plan: plans/o8-living-roadmap-plan.md (deleted when its work shipped, last held at 4ac7cdb08) on the roadmap branch.
 
 ## Task
 skills/project-ops/SKILL.md, section "The roadmap page", still says the page builder's one home is `roadmap/build.py` on the claude-settings roadmap branch and that a repo's own record "has no page". Since batch #637, skills/roadmap builds the page for any checkout, and since #652 the publisher passes live work with --live.

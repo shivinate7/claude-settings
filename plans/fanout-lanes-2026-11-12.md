@@ -1,6 +1,6 @@
 # Fan-out lanes, 2026-11-12 07:23 CST (triage)
 
-Source: plans/fanout-2026-11-12.md, minus the steps laned at 07:20 CST and the two waiting on owner sign-off (spawn-rules-skill, mechanize-cost-to-hooks-rule). 307 steps in 57 lanes.
+Source: plans/fanout-2026-11-12.md (deleted when its work shipped, last held at 387fd4782), minus the steps laned at 07:20 CST and the two waiting on owner sign-off (spawn-rules-skill, mechanize-cost-to-hooks-rule). 307 steps in 57 lanes.
 
 How lanes were cut: steps of one repo and one kind (code or prose) that name the same file, or the same home when they name no file, are one group, so no two lanes edit one file. A group over 8 steps splits into parts that run in order ("after" names the part before). Files and homes are read from step text, not from code: each lane confirms its files first. Steps marked "unmapped" named no file or home; their lanes share nothing known and may still clash. Each lane checks every step's ruling source first and reports a step with none instead of building it (coordinator 07:21 CST, owner ruling 13:51 CST Nov 11).
 

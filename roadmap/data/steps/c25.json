@@ -1,10 +1,10 @@
 {
-  "ask": "Lanes 2, 3 and 7 of the premises brief; its full text is in the Ask of c7 (fix the reply-style conflict). Plan: plans/premise-handoffs-plan.md in the project files. Your ruling, Oct 21: evidence lives inside its record; add that clause to cull-rules.",
-  "note": "Done. Landed in #566 (Oct 23, checked at f463787): handoffs carry Goal and Working premises sections, each premise with a source kind (hooks/precompact_handoff_prompt.md, decision precompact-handoff); raw evidence lives in an Evidence section of its record (#562). Your rulings, Oct 21: nudges as fractions of the compaction window, handoff updates on events, owner messages kept verbatim in the PreCompact digest. Compaction stays at 500k; advisor pick (not measured): about 250k for an orchestrator.",
-  "order": 113,
-  "phase": "cleanup",
-  "status": "done",
-  "title": "Handoffs list premises with sources, and raw evidence gets one home",
-  "updatedAt": "2026-10-26T05:30:00Z",
-  "why": "Feedback you brought, Oct 21: lanes reasoned from summaries ('6 to 8 pythons, from notes') instead of the data, and a long-running session carries its own wrong beliefs forward."
+ "ask": "Lanes 2, 3 and 7 of the premises brief; its full text is in the Ask of c7 (fix the reply-style conflict). Plan: plans/premise-handoffs-plan.md (deleted when its work shipped, last held at f80ec483b) in the project files. Your ruling, Oct 21: evidence lives inside its record; add that clause to cull-rules.",
+ "note": "Done. Landed in #566 (Oct 23, checked at f463787): handoffs carry Goal and Working premises sections, each premise with a source kind (hooks/precompact_handoff_prompt.md, decision precompact-handoff); raw evidence lives in an Evidence section of its record (#562). Your rulings, Oct 21: nudges as fractions of the compaction window, handoff updates on events, owner messages kept verbatim in the PreCompact digest. Compaction stays at 500k; advisor pick (not measured): about 250k for an orchestrator.",
+ "order": 113,
+ "phase": "cleanup",
+ "status": "done",
+ "title": "Handoffs list premises with sources, and raw evidence gets one home",
+ "updatedAt": "2026-10-26T05:30:00Z",
+ "why": "Feedback you brought, Oct 21: lanes reasoned from summaries ('6 to 8 pythons, from notes') instead of the data, and a long-running session carries its own wrong beliefs forward."
 }

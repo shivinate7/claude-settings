@@ -20,7 +20,7 @@ only Triage the roadmap (3) republishes). Read other repos, never push to them.
 
 ## Task
 
-Write plans/o8-living-roadmap-plan.md (cap 2 pages): what the /roadmap skill reads in a repo
+Write plans/o8-living-roadmap-plan.md (deleted when its work shipped, last held at 4ac7cdb08) (cap 2 pages): what the /roadmap skill reads in a repo
 (each item from its one home, via layout.json; unknown when unreadable), the page layout per the
 logbook pick, how a merge updates a step's status, how it ports to each repo (yes or no per repo,
 with a reason), and the build lanes in order with a check that proves each. Measure, do not guess:
