@@ -1,0 +1,14 @@
+{
+ "id": "process-args-heredoc-probe",
+ "title": "The process-args guard refuses a plain heredoc that writes a probe file and lists no process",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Possible false alarm (coordinator 09:06 CST Nov 14, relayed from the round-2 reviewer of lane silent-undo-trailer-rewrite; the guard record unread by the coordinator and triage; unproven): the process-args guard refused a plain heredoc that writes a probe file, with no process listing in the command. Rule: before routing around a refusal, read the guard's record; if it seems to allow the act, the report flags a possible false alarm. First act of a lane: read the guard record, reproduce on the heredoc, red then green, with a control that a command that really lists process arguments is still refused. Kin: builder-probe-false-alarm (ready; a builder writing a probe under /tmp), heredoc-keep-gap-cases. A check change: round 3 applies if the verdict changes. One sighting; rate unmeasured.",
+ "source": "coordinator 09:06 CST Nov 14, from lane silent-undo-trailer-rewrite",
+ "note": "Filed 09:12 CST Nov 14 by triage. Tracker: the coordinator. No lane yet.",
+ "updatedAt": "2026-11-14T09:12:00-06:00"
+}
