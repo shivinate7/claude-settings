@@ -12162,10 +12162,12 @@ class PullsHost(merge.Host):
     per 100), and `files_error` fails that read. `changed_files` is the count `pulls/<n>` reports (None: the length of `files`). `repo` is the
     OWNER/NAME the host names its repo by (Host.repo): the header of a `--reviewed --root` block reads it. `commits` maps a commit sha to its
     parent shas: `gh` answers `commits/<sha>` with them, and a sha not listed is a 404, as GitHub answers an unknown commit. `trees` maps a
-    commit sha to its tree sha, which the same answer names under commit.tree.sha."""
+    commit sha to its tree sha, which the same answer names under commit.tree.sha. `post_refuse` is the output of a refused comment POST
+    (`issues/<n>/comments`, the one write the real Host.post_comment makes), and `post_swallow` makes a POST land on nothing: `posts` keeps
+    (n, body) of each POST the run makes, and a landed POST adds its body to `comments` as GitHub gives it."""
     def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
                  base_compare_error=None, comments=(), comments_error=None, count_gh=False, files=None, files_error=None, changed_files=None, repo=None,
-                 commits=None, trees=None):
+                 commits=None, trees=None, post_refuse=None, post_swallow=False):
         super().__init__(list(required), base="main", minute=60, pause=lambda s: None, ignore=ignore, repo=repo)
         self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
         self.comments, self.comments_error = list(comments), comments_error  # the repo-wide issue comments, oldest first
@@ -12183,6 +12185,7 @@ class PullsHost(merge.Host):
         self.commit_reads = []  # the sha of each commits/<sha> read, in order
         self.commits = dict(commits or {})  # sha -> its parent shas, the commit read's answer
         self.trees = dict(trees or {})  # sha -> its tree sha, which the same answer names under commit.tree.sha
+        self.post_refuse, self.post_swallow, self.posts = post_refuse, post_swallow, []  # the comment POSTs the run makes: (n, body) each
         self.rules = []  # main's effective rules, as rules/branches/main answers them: [] when no ruleset applies
 
     def gh(self, args, cwd=None):
@@ -12198,6 +12201,9 @@ class PullsHost(merge.Host):
                 return self.pull_reply(int(m.group(1)))
             return 0, self.answer(rel, args[1:])
         route = args[1] if args[:1] == ["api"] else ""
+        m = re.search(r"/issues/(\d+)/comments$", route)
+        if m and "POST" in args:  # Host.post_comment: the body is the JSON in the --input file the call names
+            return self.post_reply(int(m.group(1)), args)
         m = re.search(r"/pulls/(\d+)$", route)
         if m:
             return self.pull_reply(int(m.group(1)))
@@ -12228,6 +12234,18 @@ class PullsHost(merge.Host):
         count = len(self.files) if self.changed_files is None else self.changed_files
         return 0, json.dumps({**found[0], "state": "open", "merged": False, "mergeable": True, "mergeable_state": "clean", "body": "",
                               "changed_files": count})
+
+    def post_reply(self, n, args):
+        """-> (code, output) of a comment POST on pull request n, as gh gives it: a refused POST answers `post_refuse`; a landed one adds its body
+        to `comments` (unless post_swallow) and answers 0. The body is read from the JSON file the call's --input names; every POST is kept in `posts`."""
+        with open(args[args.index("--input") + 1], encoding="utf-8") as f:
+            body = json.load(f)["body"]
+        self.posts.append((n, body))
+        if self.post_refuse:
+            return 1, self.post_refuse
+        if not self.post_swallow:
+            self.comments.append(review_comment(900 + len(self.posts), n, body, created="2026-10-03T00:00:00Z"))
+        return 0, ""
 
     def files_reply(self, rel, params, flags):
         """`pulls/<n>/files`: the page asked for, 100 to a page (REST.listing). Under -i, a Link header with rel="next" while pages follow, as gh
@@ -14440,6 +14458,274 @@ class ReviewRecordWrite(ReviewEnv):
             with self.subTest(round=rnd):
                 out, _err = self.assert_usage_error("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head(), "--round", rnd)
                 self.assertNotIn(REVIEW_MARKER, out)
+
+# ------------------------------------------------------------------ --read-back and --post
+# `merge <pr> --review-record --read-back` reads the pull request's review record comments back through parse_review. It prints PASS (exit 0)
+# when one parses with the pull request's number at --head, else FAILED (exit 1) and the reason. `--post`, outside a cloud session, posts the printed
+# body with the host's comment POST, then reads it back the same way. In a cloud session `--post` posts nothing: the body goes out through the GitHub
+# MCP tool, and the lane then runs --read-back. Each flag case first asks the parser for its flag by name (ReadBackEnv.flags_known).
+# The restart check refuses a record whose top round is below an earlier record's, or equal to it below REVIEW_LAST_ROUND. A read-back case therefore names
+# rounds the check allows: THREE_ROUNDS over a three-round record, or FAIL_THEN_PASS over a one-round FAIL record.
+
+READ_BACK_FLAGS = ("--read-back", "--post")
+ONE_ROUND = ("1:reviewer:sonnet:PASS",)  # the --round values of the default argv
+THREE_ROUNDS = ("1:reviewer:sonnet:PASS", "2:reviewer:sonnet:PASS", "3:reviewer:opus:PASS")
+THREE_ROUND_LINES = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, opus, PASS")
+FAIL_THEN_PASS = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS")
+FAIL_ONE_ROUND_LINES = ("Round 1: reviewer, sonnet, FAIL",)
+PROSE_LINE = "Note: the lint was slow."  # prose that sits between a record's CI line and its --- line
+
+def lines_starting(text, prefix):
+    """The lines of `text` that start with `prefix`. A verdict is a line start: a record's round lines hold PASS and FAIL, never at a line start."""
+    return [line for line in text.splitlines() if line.startswith(prefix)]
+
+def both(out, err):
+    """stdout and stderr as one text, one after the other."""
+    return out + "\n" + err
+
+class ReadBackEnv(ReviewEnv):
+    """The --read-back and --post cases' one fixture: pull request 7 at REVIEW_HEAD on a PullsHost, whose comment POST is scripted
+    (post_refuse, post_swallow), the argv of a record run, and the run helpers. No test lives here."""
+
+    def argv(self, *extra, rounds=ONE_ROUND):
+        """The argv of --review-record for pull request 7 at REVIEW_HEAD, with one --round per value of `rounds`, then `extra`."""
+        round_flags = [x for r in rounds for x in ("--round", r)]
+        return ("7", "--review-record", "--kind", "normal", "--guard", "no", *round_flags, "--head", REVIEW_HEAD, *extra)
+
+    def read_back_host(self, *comments, post_refuse=None, post_swallow=False):
+        """A PullsHost whose pull request 7 is at REVIEW_HEAD, with the repo's comments as given, oldest first."""
+        return PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments=comments, post_refuse=post_refuse, post_swallow=post_swallow)
+
+    def three_record(self, n=7, head=REVIEW_HEAD, cid=1, created="2026-10-02T00:00:00Z"):
+        """The comment of a three-round record for pull request n at `head`, PASS in every round: the record a lane posts once its review passes."""
+        return review_comment(cid, n, record_text(rounds=THREE_ROUND_LINES, head=head, n=n), created=created)
+
+    def broken_body(self, head=REVIEW_HEAD, n=7):
+        """The body of a three-round record for pull request n at `head` with prose after its CI line, before the ---: a record that does not parse."""
+        return record_text(rounds=THREE_ROUND_LINES, head=head, n=n) + PROSE_LINE + "\n---\n"
+
+    def flags_known(self, *argv):
+        """The parser knows each --read-back or --post in argv, or the case fails by name: on this main the flag is absent."""
+        known = merge.build_parser()._option_string_actions
+        for flag in READ_BACK_FLAGS:
+            if flag in argv and flag not in known:
+                self.fail(f"merge's parser has no {flag} flag, so the read-back cannot run")
+
+    def run_flags(self, *argv, host=None):
+        """-> (rc, out, err) of merge with argv, after flags_known."""
+        self.flags_known(*argv)
+        return self.run_args(*argv, host=host)
+
+    @contextlib.contextmanager
+    def environment(self, remote=None):
+        """CLAUDE_CODE_REMOTE is `remote` inside the block (unset when None); the old environment comes back after it."""
+        with unittest.mock.patch.dict(os.environ):
+            os.environ.pop("CLAUDE_CODE_REMOTE", None)
+            if remote is not None:
+                os.environ["CLAUDE_CODE_REMOTE"] = remote
+            yield
+
+    def printed_record(self):
+        """The record a default run prints for the one-round argv, as posted_body reads it: the body --post sends."""
+        rc, out, err = self.run_args(*self.argv(), host=self.read_back_host())
+        self.assertEqual(rc, 0, both(out, err))
+        return posted_body(self, out)
+
+    def assert_passed(self, rc, out, err):
+        """Exit 0, a PASS line on stdout, and no FAILED line on either stream."""
+        self.assertEqual(rc, 0, both(out, err))
+        self.assertTrue(lines_starting(out, "PASS"), "no PASS line on stdout:\n" + both(out, err))
+        self.assertEqual(lines_starting(both(out, err), "FAILED"), [], "a FAILED line on a passing read-back:\n" + both(out, err))
+
+    def assert_failed(self, rc, out, err, *reasons):
+        """Exit 1, a FAILED line that names every one of `reasons`, and no PASS line on either stream."""
+        self.assertEqual(rc, 1, both(out, err))
+        failed = lines_starting(both(out, err), "FAILED")
+        self.assertTrue(failed, "no FAILED line:\n" + both(out, err))
+        self.assertTrue(any(all(r in line for r in reasons) for line in failed), f"no FAILED line names {reasons!r}:\n" + both(out, err))
+        self.assertEqual(lines_starting(both(out, err), "PASS"), [], "PASS printed on a failing read-back:\n" + both(out, err))
+
+class ReadBackArgs(ReadBackEnv):
+    """The flags, as argparse reads them: --read-back and --post go with --review-record, and not together. Each refusal has a control that
+    passes, so a parser that refuses everything fails here too."""
+
+    def test_read_back_and_post_together_is_a_usage_error(self):
+        argv = self.argv("--read-back", "--post")
+        self.flags_known(*argv)
+        self.assert_usage_error(*argv)
+        rc, out, err = self.run_flags(*self.argv("--read-back", rounds=THREE_ROUNDS), host=self.read_back_host(self.three_record()))
+        self.assert_passed(rc, out, err)
+
+    def test_read_back_and_post_need_the_record_flag(self):
+        for extra in (("--read-back",), ("--post",), ("--read-back", "--post")):
+            argv = ("7", *extra)
+            with self.subTest(argv=argv):
+                self.flags_known(*argv)
+                _out, err = self.assert_usage_error(*argv)
+                self.assertIn("--review-record", err, "the refusal does not name --review-record:\n" + err)
+        rc, out, err = self.run_flags(*self.argv("--read-back", rounds=THREE_ROUNDS), host=self.read_back_host(self.three_record()))
+        self.assert_passed(rc, out, err)
+
+class ReadBackReads(ReadBackEnv):
+    """--read-back reads the pull request's newest review record comment back through parse_review and prints PASS only when it parses with the
+    pull request's number at --head. Each failing read names its one cause on its FAILED line: no record comment, a newest record that does not
+    parse, or a newest record at another head."""
+
+    def test_no_record_comment_is_named_as_the_reason(self):
+        host = self.read_back_host()
+        self.assertEqual(host.comments, [], "fixture: the pull request has a comment")
+        rc, out, err = self.run_flags(*self.argv("--read-back"), host=host)
+        self.assert_failed(rc, out, err, "no record comment found")
+        self.assertEqual(host.posts, [], "--read-back posted a comment")
+
+    def test_a_parsing_record_at_the_head_passes(self):
+        comment = self.three_record()
+        rec = parse_text(self, comment["body"])
+        self.assertEqual((rec["n"], rec["head"]), (7, REVIEW_HEAD), "fixture: the record is not pull request 7 at the head")
+        host = self.read_back_host(comment)
+        rc, out, err = self.run_flags(*self.argv("--read-back", rounds=THREE_ROUNDS), host=host)
+        self.assert_passed(rc, out, err)
+        self.assertEqual(host.posts, [], "--read-back posted a comment")
+
+    def test_a_full_page_of_comments_still_finds_the_record(self):
+        ordinary = [review_comment(i, 9, "An ordinary comment on pull request 9.") for i in range(1, 151)]
+        host = self.read_back_host(*ordinary, self.three_record())
+        self.assertEqual(len(host.comments), 151, "fixture: the full page is not 150 ordinary comments and the record")
+        rc, out, err = self.run_flags(*self.argv("--read-back", rounds=THREE_ROUNDS), host=host)
+        self.assert_passed(rc, out, err)
+
+    def test_a_record_that_does_not_parse_names_its_first_bad_line(self):
+        bare = record_text(rounds=THREE_ROUND_LINES)
+        broken = bare + PROSE_LINE + "\n\n---\n_Generated by Claude Code_\n"  # the prose sits after the CI line, before the ---
+        self.assertIsNotNone(parse_text(self, bare), "fixture: the bare record does not parse")
+        self.assertIsNone(review_fn(self, "parse_review")(broken), "fixture: the record with prose after its CI line parses")
+        rc, out, err = self.run_flags(*self.argv("--read-back", rounds=THREE_ROUNDS), host=self.read_back_host(review_comment(1, 7, broken)))
+        self.assert_failed(rc, out, err, "does not parse", PROSE_LINE)
+        failed = lines_starting(both(out, err), "FAILED")
+        self.assertFalse(any("no record comment" in line for line in failed), "a record that does not parse reads as no record:\n" + both(out, err))
+
+    def test_a_parsing_record_for_another_head_names_both_heads(self):
+        other = record_text(rounds=FAIL_ONE_ROUND_LINES, head=REVIEW_OLD_HEAD)
+        rec = parse_text(self, other)
+        self.assertEqual((rec["n"], rec["head"]), (7, REVIEW_OLD_HEAD), "fixture: the record is not pull request 7 at the old head")
+        rc, out, err = self.run_flags(*self.argv("--read-back", rounds=FAIL_THEN_PASS), host=self.read_back_host(review_comment(1, 7, other)))
+        self.assert_failed(rc, out, err, REVIEW_OLD_HEAD[:9], REVIEW_HEAD[:9])
+        self.assertTrue(any(re.search("(?i)head", line) for line in lines_starting(both(out, err), "FAILED")),
+                        "the FAILED line does not name a head mismatch:\n" + both(out, err))
+
+    def test_pass_needs_the_head_compare(self):
+        """The mutant: a read-back that tests only the pull request number and that the record parses prints PASS for a record at another head.
+        The same read passes at --head, so a mutant that never passes fails here too."""
+        other = record_text(rounds=FAIL_ONE_ROUND_LINES, head=REVIEW_OLD_HEAD)
+        self.assertIsNotNone(parse_text(self, other), "fixture: the other-head record does not parse")
+        rc, out, err = self.run_flags(*self.argv("--read-back", rounds=FAIL_THEN_PASS), host=self.read_back_host(review_comment(1, 7, other)))
+        self.assert_failed(rc, out, err, REVIEW_OLD_HEAD[:9])
+        rc, out, err = self.run_flags(*self.argv("--read-back", rounds=THREE_ROUNDS), host=self.read_back_host(self.three_record()))
+        self.assert_passed(rc, out, err)
+
+    def test_a_record_for_another_pull_request_does_not_count(self):
+        body = record_text(rounds=THREE_ROUND_LINES, head=REVIEW_HEAD, n=8)
+        rec = parse_text(self, body)
+        self.assertEqual(rec["n"], 8, "fixture: the record is not for pull request 8, so the scope case proves nothing")  # the scope first: the record is pull request 8's
+        host = self.read_back_host(review_comment(1, 7, body))  # filed on pull request 7's comments, so only the number check keeps it out
+        self.assertEqual(host.review_comments("1970-01-01T00:00:00Z").get(7), [body], "fixture: pull request 7's comments do not hold pull request 8's record")
+        rc, out, err = self.run_flags(*self.argv("--read-back", rounds=THREE_ROUNDS), host=host)
+        self.assert_failed(rc, out, err, "no record comment found")
+
+    def test_a_newer_record_that_does_not_parse_fails_over_an_older_one_at_the_head(self):
+        """Only the newest record comment counts, as --reviewed reads it: a newer one that does not parse fails, even with an older parsing record
+        at the head."""
+        self.assertIsNone(review_fn(self, "parse_review")(self.broken_body()), "fixture: the newer record parses, so the case proves nothing")
+        older = self.three_record()
+        parse_text(self, older["body"])  # fixture: the older record parses at the head
+        host = self.read_back_host(older, review_comment(2, 7, self.broken_body(), created="2026-10-03T00:00:00Z"))
+        rc, out, err = self.run_flags(*self.argv("--read-back", rounds=THREE_ROUNDS), host=host)
+        self.assert_failed(rc, out, err, "does not parse", PROSE_LINE)
+
+    def test_a_newer_parsing_record_at_the_head_passes_over_an_older_one_that_does_not_parse(self):
+        """Only the newest record comment counts: a newer one that parses at the head passes, even with an older one that does not parse."""
+        self.assertIsNone(review_fn(self, "parse_review")(self.broken_body()), "fixture: the older record parses, so the case proves nothing")
+        newer = self.three_record(cid=2, created="2026-10-03T00:00:00Z")
+        parse_text(self, newer["body"])  # fixture: the newer record parses at the head
+        host = self.read_back_host(review_comment(1, 7, self.broken_body()), newer)
+        rc, out, err = self.run_flags(*self.argv("--read-back", rounds=THREE_ROUNDS), host=host)
+        self.assert_passed(rc, out, err)
+
+class ReadBackPost(ReadBackEnv):
+    """--post outside a cloud session posts the printed body with the host's comment POST, then reads it back: PASS only when the read-back parses
+    at --head. A refused or unread post prints FAILED, exit 1, and the exact body. In a cloud session --post posts nothing."""
+
+    def test_post_posts_the_printed_body_and_reads_it_back(self):
+        printed = self.printed_record()
+        host = self.read_back_host()
+        rc, out, err = self.run_flags(*self.argv("--post"), host=host)
+        self.assertEqual([(n, body.rstrip("\n")) for n, body in host.posts], [(7, printed.rstrip("\n"))],
+                         "the posted comment is not the printed record:\n" + both(out, err))
+        self.assert_passed(rc, out, err)
+
+    def test_a_refused_post_prints_failed_with_the_reason_and_the_body(self):
+        printed = self.printed_record()
+        host = self.read_back_host(post_refuse="HTTP 422: Unprocessable Entity")
+        rc, out, err = self.run_flags(*self.argv("--post"), host=host)
+        self.assertEqual(len(host.posts), 1, "the post was not attempted once:\n" + both(out, err))
+        self.assert_failed(rc, out, err, "422")
+        self.assertIn(printed.rstrip("\n"), both(out, err), "the FAILED run does not print the exact comment body:\n" + both(out, err))
+
+    def test_a_post_that_reads_back_nothing_prints_failed(self):
+        host = self.read_back_host(post_swallow=True)
+        rc, out, err = self.run_flags(*self.argv("--post"), host=host)
+        self.assertEqual(len(host.posts), 1, "the post was not attempted once:\n" + both(out, err))
+        self.assertEqual(host.comments, [], "fixture: the swallowed post left a comment on the pull request")
+        self.assert_failed(rc, out, err, "no record comment found")
+
+    def test_in_a_cloud_session_post_posts_nothing_and_names_the_mcp_route(self):
+        printed = self.printed_record()
+        host = self.read_back_host()
+        with self.environment("true"):
+            rc, out, err = self.run_flags(*self.argv("--post"), host=host)
+        self.assertEqual(host.posts, [], "--post in a cloud session posted a comment")
+        self.assert_failed(rc, out, err)
+        self.assertEqual(posted_body(self, both(out, err)).splitlines(), printed.splitlines(), "the FAILED run does not print the exact body:\n" + both(out, err))
+        self.assertTrue([line for line in both(out, err).splitlines() if "add_issue_comment" in line and "--read-back" in line],
+                        "no one line names add_issue_comment and --read-back:\n" + both(out, err))
+
+    def test_in_a_cloud_session_read_back_passes_once_the_record_is_posted_by_mcp(self):
+        host = self.read_back_host(self.three_record())
+        with self.environment("true"):
+            rc, out, err = self.run_flags(*self.argv("--read-back", rounds=THREE_ROUNDS), host=host)
+        self.assert_passed(rc, out, err)
+        self.assertEqual(host.posts, [], "--read-back in a cloud session posted a comment")
+
+class ReadBackDefault(ReadBackEnv):
+    """A default run prints the record on stdout and posts nothing. It names --post outside a cloud session, and add_issue_comment with --read-back
+    in one line inside one."""
+
+    def test_default_run_prints_the_record_and_posts_nothing(self):
+        """A control: the default run keeps printing the record, posts nothing and prints no verdict."""
+        host = self.read_back_host()
+        rc, out, err = self.run_args(*self.argv(), host=host)
+        self.assertEqual(rc, 0, both(out, err))
+        self.assertTrue(posted_body(self, out), "the default run prints no record")
+        self.assertEqual(host.posts, [], "the default run posted a comment")
+        self.assertEqual(lines_starting(both(out, err), "PASS") + lines_starting(both(out, err), "FAILED"), [], "the default run printed a verdict")
+
+    def test_outside_a_cloud_session_the_default_run_names_post(self):
+        host = self.read_back_host()
+        with self.environment(None):
+            rc, out, err = self.run_args(*self.argv(), host=host)
+        self.assertEqual(rc, 0, both(out, err))
+        self.assertTrue([line for line in err.splitlines() if "--post" in line], "the default run's stderr does not name --post:\n" + err)
+        self.assertEqual(host.posts, [], "the default run posted a comment")
+
+    def test_in_a_cloud_session_the_default_run_names_add_issue_comment_and_read_back(self):
+        host = self.read_back_host()
+        with self.environment("true"):
+            rc, out, err = self.run_args(*self.argv(), host=host)
+        self.assertEqual(rc, 0, both(out, err))
+        self.assertTrue(posted_body(self, out), "the default run prints no record")
+        self.assertEqual(host.posts, [], "the default run posted a comment in a cloud session")
+        self.assertTrue([line for line in err.splitlines() if "add_issue_comment" in line and "--read-back" in line],
+                        "the default run's stderr does not name add_issue_comment and --read-back in one line:\n" + err)
 
 class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
