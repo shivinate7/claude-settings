@@ -744,39 +744,46 @@ class Flips(unittest.TestCase):
         """cfg.txt: five lines, then the line v (no line when v is empty), then a tail."""
         return "".join("l%d\n" % i for i in range(1, 6)) + (v + "\n" if v else "") + "tail\n"
 
-    def resolve(self, base_line, a_line, result_line):
-        """main changes base_line to a_line (A). The branch merges main by hand and writes result_line."""
+    def resolve(self, base_line, a_line, result_line, path="cfg.txt"):
+        """main changes base_line to a_line (A) in `path`. The branch merges main by hand and writes result_line."""
         r = self.r = Repo()
-        r.commit("base", date="2025-12-01T10:00:00", cfg_txt=self.cfg_text(base_line))
+        r.put(path, self.cfg_text(base_line))
+        r.commit("base", date="2025-12-01T10:00:00")
         r.push()
         r.sh("checkout", "-q", "-b", "feat")
         r.commit("feat", date=self.T0, other_txt="x\n")
         r.sh("checkout", "-q", "main")
-        r.commit("A", date=self.T1, cfg_txt=self.cfg_text(a_line))
+        r.put(path, self.cfg_text(a_line))
+        r.commit("A", date=self.T1)
         r.push()
         r.sh("checkout", "-q", "feat")
         r.sh("merge", "--no-commit", "--no-ff", "main")
-        r.put("cfg.txt", self.cfg_text(result_line))
+        r.put(path, self.cfg_text(result_line))
         r.sh("add", "-A")
         r.sh("commit", "-q", "-m", "Merge main", date=self.T2)
+        self.assertIn(path, r.sh("diff", "--name-only", "main", "HEAD").split(), "premise: the merge changes %s" % path)
         return r.verdict()
 
-    def red(self, *case):
-        got = self.resolve(*case)
-        self.assertTrue(any("cfg.txt" in p for p in got), (case, got))
+    def red(self, *case, path="cfg.txt"):
+        got = self.resolve(*case, path=path)
+        self.assertTrue(any(path in p for p in got), (case, path, got))
 
-    def in_place(self, main_line, branch_line):
-        """PR 1 merges main with cfg.txt holding main_line. PR 2, cut after it, rewrites that line in place to branch_line. -> the verdict."""
+    def in_place(self, main_line, branch_line, path="cfg.txt"):
+        """PR 1 merges main with `path` holding main_line. PR 2, cut after it, rewrites that line in place to branch_line. -> the verdict."""
         r = self.r = Repo()
-        r.commit("base", date="2025-12-01T10:00:00", cfg_txt=self.cfg_text(""))
+        r.put(path, self.cfg_text(""))
+        r.commit("base", date="2025-12-01T10:00:00")
         r.push()
         r.sh("checkout", "-q", "-b", "pr1")
-        r.commit("main adds the line", date=self.T1, cfg_txt=self.cfg_text(main_line))
+        r.put(path, self.cfg_text(main_line))
+        r.commit("main adds the line", date=self.T1)
         r.sh("checkout", "-q", "main")
         r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", "pr1", date=self.T1)
         r.push()
         r.sh("checkout", "-q", "-b", "pr2")
-        r.commit("rewrite the line", date=self.T2, cfg_txt=self.cfg_text(branch_line))
+        r.put(path, self.cfg_text(branch_line))
+        r.commit("rewrite the line", date=self.T2)
+        self.assertIn(path, r.sh("diff", "--name-only", "main", "HEAD").split(), "premise: the rewrite changes %s" % path)
         return r.verdict()
 
     def test_a_stale_value_with_trailing_tokens_is_the_base_line(self):
@@ -858,6 +865,38 @@ class Flips(unittest.TestCase):
         self.assertFalse(C.extends("}", "} not reachable"), "a line with no words passed extends(): the negated clause was read as an addition")
         self.assertFalse(C.rewritten("}", [(("}",), ("} not reachable",))]), "rewritten() took a wordless line's negated change as a rewrite")
         self.assertTrue(C.extends("run(a)", "run(a), never past 55 minutes"), "control: a clause after the words no longer passes extends()")
+
+    # Code keeps the rule that a negation anywhere in the new line is a change. Only prose (.md, .txt, .rst) may take
+    # an appended negation clause as an addition, so these pin the code side of that split.
+
+    def test_a_code_conditional_added_to_a_merged_python_line_is_flagged(self):
+        self.red("", "retry = 3", "retry = 3 if not CI else 0", path="app.py")
+
+    def test_a_code_conditional_added_to_a_merged_shell_line_is_flagged(self):
+        self.red("", "if ready:", "if ready and not blocked:", path="run.sh")
+
+    def test_a_code_conditional_added_in_place_in_python_is_flagged(self):
+        got = self.in_place("retry = 3", "retry = 3 if not CI else 0", path="app.py")
+        self.assertTrue(any("app.py" in p for p in got), "an in-place conditional on a python line was not flagged: %r" % got)
+
+    def test_a_code_conditional_added_in_place_in_shell_is_flagged(self):
+        got = self.in_place("if ready:", "if ready and not blocked:", path="run.sh")
+        self.assertTrue(any("run.sh" in p for p in got), "an in-place conditional on a shell line was not flagged: %r" % got)
+
+    def test_a_negated_tail_after_a_python_string_with_a_hash_is_flagged(self):
+        self.red("", 's = "a#b"', 's = "a#b" if not CI', path="s.py")
+
+    def test_an_appended_negation_clause_is_not_a_merge_drop_in_markdown(self):  # control: green on the old code, a guard for the fix
+        self.assertEqual(self.resolve("", self.S0, self.S1, path="guide.md"), [],
+                         "a negation clause appended after every original word read as a drop in a .md file")
+
+    def test_a_lone_quote_in_prose_keeps_its_appended_clause(self):  # control: green on the old code, a guard for the fix
+        self.assertEqual(self.resolve("", "Don't do it", "Don't do it, never past 55 minutes", path="guide.md"), [],
+                         "a lone quote in a .md line made its appended clause read as a drop")
+
+    def test_a_url_in_prose_keeps_its_appended_clause(self):  # control: green on the old code, a guard for the fix
+        self.assertEqual(self.resolve("", "see http://x.io", "see http://x.io, not for CI", path="guide.md"), [],
+                         "the // inside a URL made the appended clause of a .md line read as a drop")
 
 
 class MainLineDrop:
