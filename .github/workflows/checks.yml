@@ -5,8 +5,6 @@ on:
     branches: [main]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-  schedule:
-    - cron: "17 3 * * *"
   workflow_dispatch:
     inputs:
       full_ste_audit:
@@ -325,6 +323,9 @@ jobs:
       - name: Nightly skip fixture suite
         run: python3 lint/test_nightly_skip.py
 
+      - name: No nightly schedule fixture suite
+        run: python3 lint/test_no_nightly_schedule.py
+
       - name: Windows rest split fixture suite
         run: python3 lint/test_windows_rest_split.py
 
@@ -618,6 +619,9 @@ jobs:
       - name: Claude Code compaction check fixture suite
         if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_cc_version_check.py
+
+      - name: CI-wait cap fixture suite
+        run: python3 hooks/test_ci_wait_cap.py
 
       - name: Handoff wave-2 fixture suite
         if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
