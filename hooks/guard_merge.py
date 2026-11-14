@@ -1206,12 +1206,12 @@ def local_session_id(session_id: str) -> str:
     return session_id if isinstance(session_id, str) and session_id and session_id == env_id else ""
 
 
-def _local_role_proves(session_id: str, tiers, repo) -> bool:
-    """True when the launcher's role file for this local session names one of `tiers` and the repo `repo`. Any failure is False."""
+def _local_role_proves(session_id: str, roles, repo) -> bool:
+    """True when the launcher's role file for this local session names one of `roles` and the repo `repo`. Any failure is False."""
     try:
         import session_role
         record = session_role.own_record(local_session_id(session_id))
-        return bool(record and record["role"] in tiers and repo and record.get("repo") == repo)
+        return bool(record and record["role"] in roles and repo and record.get("repo") == repo)
     except Exception:
         return False
 
@@ -1281,7 +1281,7 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int, local_se
                 continue
             repo = _merge_target_repo(segments, number, cwd, ends, flags.repo_dir)
             if local_session is not None:
-                if not flags.confirm or _local_role_proves(local_session, ROLE_TIERS, repo):
+                if not flags.confirm or _local_role_proves(local_session, ROLE_TIERS, repo)  # glossary-ok: ROLE_TIERS is the existing name:
                     continue
                 return True
             from override import remote_session_id
@@ -1308,19 +1308,19 @@ RECORD_REASON = (
 )
 
 
-def _own_tier_proved(transcript: str, tier: str, session_id: str = "", root=None) -> bool:
-    """True when the own newest get_session record lists cs-build:<tier> and no set_session_tags call
+def _own_role_proved(transcript: str, role: str, session_id: str = "", root=None) -> bool:
+    """True when the own newest get_session record lists cs-build:<role> and no set_session_tags call
     follows it. A session with no cloud id is local: it is proved when the launcher's role file for its own id (hook id equal to the
-    environment's, local_session_id) names `tier` and the repo of the checkout at `root`. Fails closed: no id, no transcript or any read error is False."""
+    environment's, local_session_id) names `role` and the repo of the checkout at `root`. Fails closed: no id, no transcript or any read error is False."""
     try:
         from override import remote_session_id
         own_id = remote_session_id()
         if not own_id:
             import git_reads
-            return _local_role_proves(session_id, (tier,), git_reads.github_repo(root) if root and os.path.isdir(root) else None)
+            return _local_role_proves(session_id, (role,), git_reads.github_repo(root) if root and os.path.isdir(root) else None)
         if transcript:
             tags, tagged_after = _own_session_read(transcript, own_id)
-            return tags is not None and not tagged_after and ROLE_TAG_PREFIX + tier in tags
+            return tags is not None and not tagged_after and ROLE_TAG_PREFIX + role in tags
     except Exception:
         pass
     return False
@@ -1406,7 +1406,7 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
             except Exception:
                 record = DEFAULT_RECORD_BRANCH
             if {record, DEFAULT_RECORD_BRANCH} & set(push_destinations(args, where, overrides)) and (
-                    not _own_tier_proved(transcript, RECORD_WRITER_TIER, session_id, root)):
+                    not _own_role_proved(transcript, RECORD_WRITER_TIER, session_id, root)):  # glossary-ok: RECORD_WRITER_TIER is the existing name
                 return "git push to the record branch"
     return ""
 
