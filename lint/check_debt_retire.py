@@ -36,7 +36,7 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 Unknown = records.Unknown  # a git read failed, so the closes are not known
 CITE = "Retire-run"
 HEARTBEAT = 60  # seconds between `still running` lines while a test runs
-TIMEOUT = 1800 # per suite; interim stopgap (owner 12:11 CST Nov 10, decision ci-job-caps; ends with step time-pinned-tests-go)
+TIMEOUT = 1800  # per suite; interim stopgap (owner 12:11 CST Nov 10, decision ci-job-caps; ends with step time-pinned-tests-go)
 # Each runnable suffix with the argv that starts it. The check never runs anything else.
 INTERPRETERS = {".py": ["python3"], ".mjs": ["node", "--test"], ".sh": ["bash"]}
 TEST_NAME = re.compile(r"^(?:test_[^/]+\.(?:py|mjs|sh)|[^/]+_test\.py|[^/]+\.test\.mjs)$")
@@ -147,7 +147,7 @@ def run_span(wt, span, timeout):
             except subprocess.TimeoutExpired:
                 if left <= HEARTBEAT:  # this wait used up the rest of the cap
                     proc.kill()
-                    proc.communicate()
+                    proc.wait()  # not communicate(): a grandchild may still hold the pipes open
                     return "unknown", "%s ran past %d s" % (span, timeout)
                 say("debt-retire: still running %s, %d s of %d s" % (span, time.monotonic() - start, timeout))
     if proc.returncode:
