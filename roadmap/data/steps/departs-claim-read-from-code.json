@@ -1,0 +1,14 @@
+{
+ "id": "departs-claim-read-from-code",
+ "title": "A page item's `Departs from:` line about what main does is read from main's files before it posts",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Incident (the lane of review-record-allow-entry via the coordinator, 15:09 CST Nov 14; n=1): item 839 stated \"Departs from: main — no rule names `merge --review-record`\" as fact; main already allows the bare form (entry \"Merge Tool Read Checks\"). The line came from a relayed report and was posted unchecked; the owner chose option a on that text (the grant stands, scope narrowed to flags). Guard that would have stopped it (rule building-mistake-names-its-guard): the writer of the page reads the cited file or setting before the Departs from line says what main does, or marks the line \"relayed, unread\". Rule: verification-report-unknown-reads. Not built: first act of a lane is to check whether question_form.py can compare a Departs from claim about main with a file named on the item, or whether the check is a writer step in skill waiting-page.",
+ "source": "coordinator 15:09 CST Nov 14 (lane review-record-allow-entry's read)",
+ "note": "Filed 15:11 CST Nov 14 by triage (my miss: posted an unread premise). Tracker: the coordinator.",
+ "updatedAt": "2026-11-14T15:11:00"
+}
