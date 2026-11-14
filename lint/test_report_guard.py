@@ -898,19 +898,31 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
 
-    def stop(self, records, reply, agent_model="sonnet"):
-        """Run the Stop hook over the turn's records, with the reply as its last text. Return its verdict or None."""
+    def stop(self, records, reply, agent_model="sonnet", agents_dir=None):
+        """Run the Stop hook over the turn's records, with the reply as its last text. Return its verdict or None.
+        `agents_dir` is a fixture agents folder for the guard's file pins; unset, the guard reads the repository's."""
         records = records + [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
                              assistant_text(reply)]
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
         env = dict(os.environ)
         env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)  # an unset spawn reads the agent file's pin, not this
+        env.pop("REPORT_GUARD_AGENTS_DIR", None)  # the repository's agents folder, unless a case names a fixture one
         if agent_model:
             env["CLAUDE_CODE_SUBAGENT_MODEL"] = agent_model
+        if agents_dir:
+            env["REPORT_GUARD_AGENTS_DIR"] = agents_dir
         run = run_guard(REPORT_GUARD, hook, env=env)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def unpinned_agents(self):
+        """A fixture agents folder whose builder has no model pin: a spawn with no model and no pin resolves to ''."""
+        folder = os.path.join(self.tmp.name, "fixture-agents")
+        os.makedirs(folder)
+        with open(os.path.join(folder, "builder.md"), "w", encoding="utf-8") as handle:
+            handle.write("---\nname: builder\n---\nbody\n")
+        return folder
 
     def verdict(self, reply, spawns, denied=(), running=(), agent_model="sonnet"):
         records = [human("do the task")]
@@ -991,9 +1003,9 @@ class DoneNamesModelsTests(unittest.TestCase):
     RUNNING_NEXT = "> **Next** reviewer round 1 running; Unstarted: none"
 
     @staticmethod
-    def file_pin(role):
-        """The model: key of agents/<role>.md's frontmatter, read from the file the way the guard reads it."""
-        with open(os.path.join(HERE, "..", "agents", role + ".md"), encoding="utf-8") as f:
+    def file_pin(role, folder=os.path.join(HERE, "..", "agents")):
+        """The model: key of <folder>/<role>.md's frontmatter, read from the file the way the guard reads it."""
+        with open(os.path.join(folder, role + ".md"), encoding="utf-8") as f:
             front = f.read().split("---")[1].splitlines()
         for line in front:
             key, _, value = line.partition(":")
@@ -1157,20 +1169,26 @@ class DoneNamesModelsTests(unittest.TestCase):
     def test_dm_red_earlier_unresolved_spawn_hides_window_mismatch_blocks(self):
         # An earlier builder with no resolvable model is '' in the transcript's map. That must not switch off
         # the builder check for the window's builder, which ran opus.
-        self.assertEqual(self.file_pin("builder"), "", "agents/builder.md pins a model, so no spawn is unresolved")
+        # Re-pointed, the coordinator's ruling of 20:38 CST Nov 9 (step builder-model-pin): a builder with no pin is
+        # ruled out in the repository, so this case reads an unpinned fixture folder through REPORT_GUARD_AGENTS_DIR.
+        folder = self.unpinned_agents()
+        self.assertEqual(self.file_pin("builder", folder), "", "fixture error: the builder fixture pins a model")
         records = self.turn_records(earlier=[self.BUILDER_NO_MODEL], window=[self.BUILDER_OPUS])
         out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none",
-                        agent_model=None)
+                        agent_model=None, agents_dir=folder)
         self.assertIsNotNone(out, "Done named builder sonnet against a window builder that ran opus, and passed")
         self.assertIn("'builder sonnet' matches no builder spawn, which ran opus", out["reason"])
 
     def test_dm_red_earlier_unresolved_spawn_hides_window_wrong_model_blocks(self):
         # The mirror: the window's builder ran sonnet, and Done names opus. The earlier unresolved spawn must
         # not let that wrong name pass.
-        self.assertEqual(self.file_pin("builder"), "", "agents/builder.md pins a model, so no spawn is unresolved")
+        # Re-pointed, the coordinator's ruling of 20:38 CST Nov 9 (step builder-model-pin): a builder with no pin is
+        # ruled out in the repository, so this case reads an unpinned fixture folder through REPORT_GUARD_AGENTS_DIR.
+        folder = self.unpinned_agents()
+        self.assertEqual(self.file_pin("builder", folder), "", "fixture error: the builder fixture pins a model")
         records = self.turn_records(earlier=[self.BUILDER_NO_MODEL], window=[self.BUILDER_SONNET])
         out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none",
-                        agent_model=None)
+                        agent_model=None, agents_dir=folder)
         self.assertIsNotNone(out, "Done named builder opus against a window builder that ran sonnet, and passed")
         self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
 
