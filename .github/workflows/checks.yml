@@ -817,19 +817,16 @@ jobs:
 
       # The engine parses with typescript, which a bare checkout lacks. The guard is the one map-check.sh uses.
       - name: Mutation JS engine fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: |
           [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
           python3 hooks/test_mutate_js.py
 
       - name: Mutation replay fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: |
           [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
           python3 hooks/test_mutate_replay.py
 
       - name: Mutation CI report fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: |
           [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
           python3 hooks/test_mutate_ci.py
@@ -884,15 +881,12 @@ jobs:
         run: pwsh -NoProfile -File install.test.ps1
 
       - name: Record stamp engine fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: node actions/stamp/test_stamp.mjs
 
       - name: Scanner trap lint
-        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: node lint/test_scanner_traps.mjs
 
       - name: Record stamp action fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         shell: bash
         run: bash actions/stamp/test_action.sh
 

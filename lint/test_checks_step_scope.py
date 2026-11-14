@@ -97,7 +97,6 @@ NO_MD = [
     'Scope detector fixture suite',
     'Touched-test selector fixture suite',
     'Mutation report-mode fixture suite',
-    'Mutation JS engine fixture suite',
     'Hook platform exit fixture suite',
     'Hook dup-name fixture suite',
     'Plan refuter fixture suite',
@@ -122,16 +121,11 @@ NO_MD = [
     'Unknown-read contract fixture suite',
     'Python 3.9 floor check',
     'Playwright setup action suite',
-    'Record stamp engine fixture suite',
-    'Scanner trap lint',
-    'Record stamp action fixture suite',
 ]
 
 # The audit's NAMES-ONLY steps: each names a file, or copies only hooks/ and lint/ files, which already set `code`.
 NAMES_ONLY = [
     'Windows split guard',
-    'Mutation replay fixture suite',
-    'Mutation CI report fixture suite',
     'Hook stub check',
 ]
 
@@ -202,6 +196,12 @@ MUST_STAY_UNSCOPED = [
     'Job runner fixture suite (bin/ci-job)',  # copies hooks/precompact_handoff_prompt.md into its fixture tree (audit hook, run-time open)
     'Deny checks never raise suite',  # opens hooks/precompact_handoff_prompt.md at run time (audit hook, run-time open)
     'CLAUDE.md size fixture suite',  # opens CLAUDE.md at run time (audit hook, run-time open)
+    'Mutation JS engine fixture suite',  # not audited: a multi-line, node or bash run that the in-process audit hook could not watch (fail safe)
+    'Mutation replay fixture suite',  # not audited: a multi-line, node or bash run that the in-process audit hook could not watch (fail safe)
+    'Mutation CI report fixture suite',  # not audited: a multi-line, node or bash run that the in-process audit hook could not watch (fail safe)
+    'Record stamp engine fixture suite',  # not audited: a multi-line, node or bash run that the in-process audit hook could not watch (fail safe)
+    'Scanner trap lint',  # not audited: a multi-line, node or bash run that the in-process audit hook could not watch (fail safe)
+    'Record stamp action fixture suite',  # not audited: a multi-line, node or bash run that the in-process audit hook could not watch (fail safe)
 ]
 
 # The steps that run only on a pull request, each with its own `if:`. The scope condition does not touch them.
@@ -392,11 +392,9 @@ MAIN_STEPS = [
 # folder or repo, named in a comment, or a hook's payload: it is not read from the repo. A new name in a scoped entry
 # turns the guard red; so does a listed name the file no longer names.
 ALLOWED = {
-    "actions/stamp/test_stamp.mjs": (["CLAUDE.md", "README.md"], "written into each case's temp root"),
     "hooks/test_call_judge.py": (["README.md", "docs/design/last-answer-notes.md"], "README.md is written into a temp repo; the other name is in comments"),
     "hooks/test_decision_watch.py": (["CLAUDE.md", "decisions/reply-judge-samples-never-refuses.md"], "CLAUDE.md is written into temp repos; the record name is in a comment"),
     "hooks/test_feedback_inbox.py": ([".claude/CLAUDE.md", "CLAUDE.md", "README.md", "docs/todo.md"], "fixture repos track or write these names in temp dirs"),
-    "hooks/test_mutate_replay.py": (["README.md"], "the base file of each temp repo"),
     "hooks/test_prose_judge.py": (["README.md", "decisions/test-strategy-reset.md"], "a hook payload's file path and edit text"),
     "hooks/test_question_form_letters_frozen.py": (["docs/decisions/option-keys-are-letters.md"], "named in the module docstring"),
     "hooks/test_session_start.py": ([".claude/CLAUDE.md", "CLAUDE.md"], "written into temp config and checkout dirs"),
