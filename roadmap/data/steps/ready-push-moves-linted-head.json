@@ -1,14 +1,14 @@
 {
  "id": "ready-push-moves-linted-head",
  "title": "`merge --ready` does not push a records page after the lane lint has passed, or the lint is read again at the new head",
- "status": "ready",
+ "status": "folded",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
  "owner": "triage",
  "blockedBy": [],
- "why": "Sighting (runner 10 11:44 CST Nov 14, its own words; triage read nothing): `merge --ready` pushed a records page to #3405 (its first push since 08:00) after the lane lint passed, so the linted head and the head now differ. Why it matters, from decision text triage read earlier tonight: a combined or ready PR needs a lane-lint PASS at its head (coordinator's 10:44 relay of the combine-train-tool lane's read of `--reviewed`). Whether a PASS on the older head still counts is unread. Kin: records-page-before-ready, fast-checks-before-ready (now merged: `merge --ready` runs the ready checks then the records step), lane-lint-before-push. First act of a lane: read the order of the ready checks and the records push in merge.py; reproduce, red then green: after `merge --ready` pushes a records page, the lint result is read at the new head (or the page is pushed before the lint). A check-order change; if a verdict changes, round 3 applies. SAME EVENT 12:00 CST Nov 14 (coordinator 11:44, relayed): the records-page push to #3405 (docs/records.md, e27cf69865da, about 11:36) moved the head after the record at 8364fb278a11; the cost is a fix check. n=1. Overlaps step records-page-before-ready; the coordinator decides whether to fold them.",
+ "why": "Sighting (runner 10 11:44 CST Nov 14, its own words; triage read nothing): `merge --ready` pushed a records page to #3405 (its first push since 08:00) after the lane lint passed, so the linted head and the head now differ. Why it matters, from decision text triage read earlier tonight: a combined or ready PR needs a lane-lint PASS at its head (coordinator's 10:44 relay of the combine-train-tool lane's read of `--reviewed`). Whether a PASS on the older head still counts is unread. Kin: records-page-before-ready, fast-checks-before-ready (now merged: `merge --ready` runs the ready checks then the records step), lane-lint-before-push. First act of a lane: read the order of the ready checks and the records push in merge.py; reproduce, red then green: after `merge --ready` pushes a records page, the lint result is read at the new head (or the page is pushed before the lint). A check-order change; if a verdict changes, round 3 applies. SAME EVENT 12:00 CST Nov 14 (coordinator 11:44, relayed): the records-page push to #3405 (docs/records.md, e27cf69865da, about 11:36) moved the head after the record at 8364fb278a11; the cost is a fix check. n=1. Overlaps step records-page-before-ready; the coordinator decides whether to fold them. FOLDED 11:50 CST Nov 14 into records-page-before-ready (coordinator pick 11:48, its own and undoable): same event, `merge --ready` pushes a records page, moving a head after its lint PASS and after its review record. Both facts are kept on records-page-before-ready.",
  "source": "runner 10 11:44 CST Nov 14",
  "note": "Filed 11:52 CST Nov 14 by triage. Tracker: the coordinator. No lane yet.",
- "updatedAt": "2026-11-14T12:00:00"
+ "updatedAt": "2026-11-14T11:50:00"
 }
