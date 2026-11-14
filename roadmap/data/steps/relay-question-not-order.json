@@ -1,0 +1,14 @@
+{
+ "id": "relay-question-not-order",
+ "title": "A relay never turns an owner question into a build order; a brief citing \"owner asked X\" cites the quote with its time",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Consultant 23:34 CST and coordinator 23:35 CST Nov 13 (relayed): the consultant's relay turned the owner's 23:26 question (\"dont we have some judge...?\") into a build order; the coordinator passed it on; the lane's record read caught it. Same class as triage's own error on the six stylisms changes (silence relayed as an order).",
+ "source": "Consultant message 23:35 CST and coordinator message 23:35 CST Nov 13 (relayed).",
+ "note": "Triage 23:37 CST Nov 13: guard idea: a check that a lane brief or relay that says \"owner asked X\" or \"owner ruled X\" carries a quote with its time, and that a quote ending in a question mark is not filed as a build order. Check first whether step inbox-owner-message-gets-fb-id or rule outcomes-grant-covers-named-act already covers it. A lane builds it; not started.",
+ "updatedAt": "2026-11-13T23:37:00-06:00"
+}
