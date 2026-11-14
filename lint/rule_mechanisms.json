@@ -224,9 +224,10 @@
     },
     "git-ci-wait-checks-in": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No hook sees that a cloud session is waiting on CI, or reads whether it set a send_later check-in. The ci-done comment covers the red-run wake; the check-in covers a lost wake."
-      }
+        "kind": "guard",
+        "ref": "ci-wait-cap"
+      },
+      "test": "hooks/test_guard.py::ci-wait-cap: a CI check-in of 90 minutes is refused"
     },
     "git-ci-done-comment-wakes": {
       "mechanism": {
