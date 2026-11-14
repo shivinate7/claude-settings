@@ -6255,6 +6255,27 @@ def names_kind(test, out, slug, kind):
     test.assertIn(kind, line, "the line for debt %s does not name its kind %s: %s" % (slug, kind, line))
 
 
+def unextended_checks(events, kind, bound):
+    """-> the positions in `events` of each check call of `kind` that no lock extension of at least `bound` seconds came before, since the check
+    call before it. `events` holds ("extend", wait) for each extend_for call and ("check", kind) for each check call, in the order the run made them."""
+    longest, found = 0, []
+    for pos, (what, arg) in enumerate(events):
+        if what == "extend":
+            longest = max(longest, arg)
+            continue
+        if arg == kind and longest < bound:
+            found.append(pos)
+        longest = 0  # each check call needs its own extension before it
+    return found
+
+
+class NoExtendLock(merge.GitLock):
+    """A GitLock with no extend_for attribute: getattr(lock, "extend_for", None) reads None, and a direct call raises."""
+    @property
+    def extend_for(self):
+        raise AttributeError("this lock has no extend_for")
+
+
 class DebtRetire(Env):
     """A PR that closes a debt (deletes the debt file) runs that debt's Retire check on the PR head before preview or confirm
     lets it through. The fixture debt names tests/test_retire_target.py, which exits with the code each case gives it."""
@@ -6376,6 +6397,73 @@ class DebtRetire(Env):
         self.assertIn("closes a debt without proof", out)
         self.assertEqual(self.show("feat", "docs/decisions/second.md"), record("pending", "second").strip())
         self.assertFalse(self.lock_ref(), "the merge lock was left on origin")
+
+    # The lock outlasts the long checks (debt_check runs each Retire test up to 1800 s; undo_check has no bound). Each check call is preceded by
+    # its own extend_for, so the lock is never left to the take's fixed expiry under a check.
+
+    def recording_lock(self, events):
+        """A GitLock whose extend_for appends ("extend", wait) to `events`, then runs the real method. confirm reads the method with getattr, so the
+        instance attribute is what it finds."""
+        lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)
+        real = lock.extend_for
+        def extend_for(wait):
+            events.append(("extend", wait))
+            return real(wait)
+        lock.extend_for = extend_for
+        return lock
+
+    def spy_checks(self, events):
+        """merge.undo_check and merge.debt_check append ("check", kind) to `events` at each call, then run the real check."""
+        real_undo, real_debt = merge.undo_check, merge.debt_check
+        def undo_spy(*a, **k):
+            events.append(("check", "undo"))
+            return real_undo(*a, **k)
+        def debt_spy(*a, **k):
+            events.append(("check", "debt"))
+            return real_debt(*a, **k)
+        for name, fn in (("undo_check", undo_spy), ("debt_check", debt_spy)):
+            patch = unittest.mock.patch.object(merge, name, fn)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def confirm_closed_debt_under_spies(self, events):
+        """A confirm of a PR that closes a debt, with each extension and check call logged in `events`. -> (rc, out)."""
+        self.pr_on_debt(0)
+        self.spy_checks(events)
+        return self.run_merge("7", "--confirm", lock=self.recording_lock(events))
+
+    def assert_claimed_and_checked_twice(self, events, out):
+        """Scope before subject (P7): the claim was pushed and merged, and each check ran twice, before the claim and inside prove."""
+        self.assertEqual(self.claims(), 1, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertGreaterEqual(events.count(("check", "debt")), 2, "the debt check ran fewer than twice, so the case misses the call inside prove")
+        self.assertGreaterEqual(events.count(("check", "undo")), 2, "the undo check ran fewer than twice, so the case misses the call inside prove")
+
+    def test_confirm_extends_the_lock_for_1800_s_before_each_debt_check(self):
+        events = []
+        rc, out = self.confirm_closed_debt_under_spies(events)
+        self.assertEqual(rc, 0, out)
+        self.assert_claimed_and_checked_twice(events, out)
+        lacking = unextended_checks(events, "debt", 1800)
+        self.assertEqual(lacking, [], f"a debt check at event {lacking} ran with no lock extension of 1800 s or more before it, since the check before it "
+                                      f"(run order: {events}). debt_check runs a Retire test for up to 1800 s, and the lock can expire under it")
+
+    def test_confirm_extends_the_lock_for_3600_s_before_each_undo_check(self):
+        events = []
+        rc, out = self.confirm_closed_debt_under_spies(events)
+        self.assertEqual(rc, 0, out)
+        self.assert_claimed_and_checked_twice(events, out)
+        lacking = unextended_checks(events, "undo", 3600)
+        self.assertEqual(lacking, [], f"an undo check at event {lacking} ran with no lock extension of 3600 s or more before it, since the check before it "
+                                      f"(run order: {events}). undo_check has no time bound, and the lock can expire under it")
+
+    def test_confirm_runs_under_a_lock_with_no_extend_for(self):  # control: green on the code before the change
+        self.pr_on_debt(0)
+        lock = NoExtendLock(self.co, now=lambda: self.now, pause=lambda s: None)
+        rc, out = self.run_merge("7", "--confirm", lock=lock)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("AttributeError", out, "a lock with no extend_for crashed confirm")
+        self.assertTrue(getattr(self.host, "merged", False), out)
 
 class DraftPreview(Env):
     """`merge <pr>` with no --confirm: a draft is previewed, not refused. The silent-undo check runs on the head
@@ -15465,6 +15553,53 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, older), review_comment(2, 7, newest), lint_of(7, REVIEW_HEAD)])
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+    # A done record with no lane-lint comment: the lint is skipped only when the all-jobs-passed rollup is green on the live head (rollup_green, the
+    # one home of that read, as lint_check uses it). The head's check runs are the one thing these cases vary.
+
+    def rollup_line(self, rows):
+        """-> (host, pull request 7's line) for a done record with no lane-lint comment, the check runs of each head given as `rows`."""
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, rows)
+        self.assertEqual(rc, 0, out + err)
+        return host, list_line(self, out, 7)
+
+    def test_a_done_record_with_a_green_rollup_on_the_live_head_reads_lint_skipped_not_no_lint(self):
+        # Red on the code before the change: the line reads `no lint` and names `merge --lane-lint 7`, though lint_check skips the lint on this rollup.
+        _, line = self.rollup_line({REVIEW_HEAD: [batch_run("all-jobs-passed", "completed", "success")]})
+        self.assertRegex(line, rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "a green rollup on the live head must leave the record done: " + line)
+        self.assertIn("lint skipped", line, "a green all-jobs-passed on the live head does not read as lint skipped: " + line)
+        self.assertNotIn("no lint", line, "a green all-jobs-passed on the live head still reads no lint: " + line)
+
+    def test_the_green_rollup_skip_is_read_through_rollup_green(self):
+        # Red on the code before the change: reviewed_read never asks rollup_green, so it cannot share the join's one reader of the rollup.
+        calls = []
+        def rollup_says_green(h, n, head):
+            calls.append((n, head))
+            return True
+        with unittest.mock.patch.object(merge, "rollup_green", rollup_says_green):
+            _, line = self.rollup_line({})
+        self.assertIn((7, REVIEW_HEAD), calls, "reviewed_read did not ask rollup_green about pull request 7 at its live head")
+        self.assertIn("lint skipped", line, "rollup_green said the rollup was green, and the line still does not read lint skipped: " + line)
+
+    def test_a_done_record_with_no_rollup_on_the_live_head_still_reads_no_lint(self):  # control: green on the code before the change
+        _, line = self.rollup_line({})
+        self.assertIn("no lint", line, "a done record with no rollup must still read no lint: " + line)
+        self.assertNotIn("lint skipped", line, line)
+
+    def test_a_done_record_with_a_red_rollup_on_the_live_head_still_reads_no_lint(self):  # control: green on the code before the change
+        _, line = self.rollup_line({REVIEW_HEAD: [batch_run("all-jobs-passed", "completed", "failure")]})
+        self.assertIn("no lint", line, "a red rollup on the live head must still read no lint: " + line)
+        self.assertNotIn("lint skipped", line, line)
+
+    def test_a_done_record_with_a_pending_rollup_on_the_live_head_still_reads_no_lint(self):  # control: green on the code before the change
+        _, line = self.rollup_line({REVIEW_HEAD: [batch_run("all-jobs-passed", "in_progress")]})
+        self.assertIn("no lint", line, "a pending rollup on the live head must still read no lint: " + line)
+        self.assertNotIn("lint skipped", line, line)
+
+    def test_a_done_record_with_a_green_rollup_on_another_head_still_reads_no_lint(self):  # control: green on the code before the change
+        _, line = self.rollup_line({REVIEW_OLD_HEAD: [batch_run("all-jobs-passed", "completed", "success")]})
+        self.assertIn("no lint", line, "a green rollup on another head must not clear the live head: " + line)
+        self.assertNotIn("lint skipped", line, line)
 
 class ReleaseHost(PullsHost):
     """A PullsHost for `merge --release-check`. A number in `closed` answers `pulls/<n>` as a closed pull request (the open list leaves it out),
@@ -19049,6 +19184,17 @@ class StaleBatchCites(unittest.TestCase):
         text = getattr(merge, "RED_CITE", "")
         self.assertIn(("rule", "git-red-main-reverts"), audit.CITE_RE.findall(text),
                       f"RED_CITE does not name rule git-red-main-reverts: {text!r}")
+
+    def test_the_frozen_block_cite_names_the_batch_freeze_decision(self):
+        # FREEZE_CITE governs the frozen-block refusals and the duplicate-head stop (decision batch-freeze-lane-set). Red on the code before the change:
+        # it names no-merge-during-batch-ci, the decision the batch brake's text came from.
+        text = getattr(merge, "FREEZE_CITE", "")
+        self.assertIn(("decision", "batch-freeze-lane-set"), audit.CITE_RE.findall(text),
+                      f"FREEZE_CITE does not name decision batch-freeze-lane-set: {text!r}")
+
+    def test_the_frozen_block_cite_is_not_the_batch_brake_cite(self):  # control: green on the code before the change
+        self.assertNotEqual(getattr(merge, "FREEZE_CITE", None), getattr(merge, "BATCH_CITE", None),
+                            "FREEZE_CITE is the batch brake's cite, BATCH_CITE, which does not govern the frozen block")
 
     def test_no_cite_names_a_line_number(self):
         for name in self.CITES:
