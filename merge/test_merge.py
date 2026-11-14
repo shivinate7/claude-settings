@@ -10959,8 +10959,8 @@ class RedMainBrake(Env):
         rc, out = self.run_merge("7", *(["--confirm"] if confirm else []), *flags)
         return rc, out, before
 
-    def refused(self, rc, out, before):
-        self.assertEqual(rc, 1, out)
+    def refused(self, rc, out, before, why=""):
+        self.assertEqual(rc, 1, f"{why}\n{out}" if why else out)  # `why` leads the message, as `merged` does
         self.assertFalse(getattr(self.host, "merged", False), out)
         self.assertEqual(self.refs(), before, "a refused run claims and pushes nothing")
         self.assertFalse(self.lock_ref(), "the lock is freed")
@@ -11723,6 +11723,60 @@ class RedMainBrake(Env):
                 self.refused(rc, out, before)
                 self.assertIn(f"run {self.OTHER_RUN} of {name}", out, "the red run with no revert is not named")
                 self.assertNotIn(f"run {self.RED_RUN} of checks", out, "the reverted red run is still named red")
+
+    # The red chain: two red runs of one group, with no green run of that group between them. Each red run since the group's last
+    # green run needs its own revert (decision no-merge-onto-red-main). Runs are listed newest first, as GET actions/runs lists them.
+    CHAIN_OLD, CHAIN_NEW, CHAIN_GREEN, CHAIN_DISPATCH = 2411, 2412, 2413, 2414
+    CHAIN_OLD_SHA, CHAIN_NEW_SHA = "a1d0" * 10, "b2e1" * 10
+
+    def chain_pair(self):
+        """-> (runs, jobs): the newer red run, then the older one, both red on their own head, in the push group of checks."""
+        runs = [main_run(self.CHAIN_NEW, "failure", sha=self.CHAIN_NEW_SHA), main_run(self.CHAIN_OLD, "failure", sha=self.CHAIN_OLD_SHA)]
+        return runs, {self.CHAIN_NEW: [main_job("checks", "failure", 20)], self.CHAIN_OLD: [main_job("checks", "failure", 20)]}
+
+    def test_red_chain_older_red_run_stands_when_only_the_newer_one_is_reverted(self):
+        self.revert_of(self.CHAIN_NEW_SHA)  # the revert covers the newer run alone
+        rc, out, before = self.go(*self.chain_pair())
+        self.refused(rc, out, before, why="the merge is not refused: a revert of the newer red run lifted the older red run of the same group, which has no revert")
+        self.assertIn(f"run {self.CHAIN_OLD} of checks", out, "the refusal does not name the older red run that still stands")
+
+    def test_red_chain_clears_when_each_red_run_has_its_own_revert(self):
+        old_rev = self.revert_of(self.CHAIN_OLD_SHA)
+        new_rev = self.revert_of(self.CHAIN_NEW_SHA)
+        rc, out, _ = self.go(*self.chain_pair())
+        self.merged(rc, out, "the merge is refused though each red run of the group has its own revert on main")
+        self.assertIn(f"run {self.CHAIN_OLD} of checks", out, "the clear does not name the older red run, which its own revert clears")
+        self.assertIn(old_rev[:7], out, "the clear does not name the revert of the older red run")
+        self.assertIn(f"run {self.CHAIN_NEW} of checks", out, "the clear does not name the newer red run, which its own revert clears")
+        self.assertIn(new_rev[:7], out, "the clear does not name the revert of the newer red run")
+
+    def test_red_chain_red_run_under_a_later_green_run_needs_no_revert(self):
+        # the older red run sits under a green run of its group, so only the red run above that green run needs a revert
+        self.revert_of(self.CHAIN_NEW_SHA)
+        runs = [main_run(self.CHAIN_NEW, "failure", sha=self.CHAIN_NEW_SHA), main_run(self.CHAIN_GREEN, "success"),
+                main_run(self.CHAIN_OLD, "failure", sha=self.CHAIN_OLD_SHA)]
+        jobs = {self.CHAIN_NEW: [main_job("checks", "failure", 20)], self.CHAIN_GREEN: [main_job("checks", "success", 20)],
+                self.CHAIN_OLD: [main_job("checks", "failure", 20)]}
+        rc, out, _ = self.go(runs, jobs)
+        self.merged(rc, out, "the merge is refused though the older red run sits under a green run of its group")
+
+    def test_red_chain_two_red_runs_on_one_head_sha_clear_with_one_revert(self):
+        # a dispatch of a red push run's commit is the same head: the two runs share one revert, which names that head
+        rev = self.revert_of(self.CHAIN_OLD_SHA)
+        runs = [main_run(self.CHAIN_DISPATCH, "failure", event="workflow_dispatch", sha=self.CHAIN_OLD_SHA),
+                main_run(self.CHAIN_OLD, "failure", sha=self.CHAIN_OLD_SHA)]
+        jobs = {self.CHAIN_DISPATCH: [main_job("checks", "failure", 20)], self.CHAIN_OLD: [main_job("checks", "failure", 20)]}
+        rc, out, _ = self.go(runs, jobs)
+        self.merged(rc, out, "the merge is refused though one revert of the head both red runs share is on main")
+        self.assertIn(rev[:7], out, "the clear does not name the revert of the shared head")
+        self.assertIn(f"run {self.CHAIN_DISPATCH} of checks", out, "the clear does not name the dispatch run it clears")
+        self.assertIn(f"run {self.CHAIN_OLD} of checks", out, "the clear does not name the push run it clears")
+
+    def test_red_chain_control_two_red_runs_with_no_revert_refuses(self):
+        # the control beside the clears above: the same two red runs and no revert, which refuses on the old code and on the new
+        rc, out, before = self.go(*self.chain_pair())
+        self.refused(rc, out, before)
+        self.assertIn(f"run {self.CHAIN_NEW} of checks", out, "the refusal does not name the newest red run")
 
     def test_a_revert_never_clears_an_unknown_run(self):
         self.revert_of(self.RED_SHA)
