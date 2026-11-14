@@ -772,33 +772,47 @@ def case_compact_threshold():
 def case_nudge_top_checkpoint_at_threshold():
     """500k window: the top checkpoint is threshold - 50k = 334k total. With a 30k overhead
     that is 304k messages, so the 340k case below blocks at the top bucket and nothing above
-    it fires."""
+    it fires. A pending checkpoint also refuses each Stop with no spawn after it (the gate). The
+    threshold checks follow a satisfied gate, so they measure the bucket and not the gate."""
     Case.nudge_path = lambda self: os.path.join(
         self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
     first = usage_line(30000)
     c = Case("ntop1")
     try:
+        put_handoff(c)
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(340000)])
         check("top: a 340k transcript (30k overhead) blocks at the top bucket",
               is_block(c, p) and stored_bucket(c) == 1,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
-        p = nudge(c, 0, overhead=None, lines=[first, usage_line(445000)])
-        check("top: 445k after 340k is not a new block (top bucket already reached)",
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(340000), usage_line(445000)])
+        check("top: 445k after 340k with no spawn is refused (refusal 2 of 3)",
+              block_reason(p) is not None, "out=%r" % p.stdout)
+        check("top: the refused 445k keeps bucket 1", stored_bucket(c) == 1,
+              "bucket=%r" % stored_bucket(c))
+        p = nudge(c, 0, overhead=None,
+                  lines=[first, usage_line(340000)] + satisfied(usage_line(445000)))
+        check("top: 445k after a satisfied 340k is not a new block (top bucket already reached)",
               p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == 1,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
     finally:
         c.cleanup()
     c = Case("ntop2")
     try:
+        put_handoff(c)
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(240000)])
         check("top: 240k blocks at bucket 0 before the top",
               is_block(c, p) and stored_bucket(c) == 0,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
-        p = nudge(c, 0, overhead=None, lines=[first, usage_line(333999)])
-        check("top: 333,999 is below the top checkpoint (silent, bucket 0)",
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(240000), usage_line(333999)])
+        check("top: 333,999 with no spawn after 240k is refused (refusal 2 of 3)",
+              block_reason(p) is not None, "out=%r" % p.stdout)
+        p = nudge(c, 0, overhead=None,
+                  lines=[first, usage_line(240000)] + satisfied(usage_line(333999)))
+        check("top: 333,999 after a satisfied 240k is below the top checkpoint (silent, bucket 0)",
               p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == 0,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
-        p = nudge(c, 0, overhead=None, lines=[first, usage_line(334000)])
+        p = nudge(c, 0, overhead=None,
+                  lines=[first, usage_line(240000)] + satisfied(usage_line(333999), usage_line(334000)))
         check("top: 334,000 (threshold - 50k) reaches the top bucket",
               is_block(c, p) and stored_bucket(c) == 1,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
@@ -1735,29 +1749,46 @@ def case_compact_threshold_pct_override_every_window():
 
 
 def case_nudge_reads_summary_flag():
+    """The flag fraction moves the top to 391,600. Each threshold is checked after a satisfied gate, so it
+    measures the bucket. A checkpoint with no spawn after it is refused, and each refusal is checked."""
     c = Case("nflag")
     try:
         c.set_flags(fraction_flags(0.08))
+        put_handoff(c)
         first = usage_line(30000)
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(230000)])
         check("flag nudge: total 230k (200k messages) blocks at the first checkpoint",
               is_block(c, p) and stored_bucket(c) == 0,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
-        p = nudge(c, 0, overhead=None, lines=[first, usage_line(340000)])
-        check("flag nudge: total 340k is silent (the 0.2 top of 334k no longer applies)",
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(230000), usage_line(340000)])
+        check("flag nudge: total 340k with no spawn after 200k is refused (refusal 2 of 3)",
+              block_reason(p) is not None, "out=%r" % p.stdout)
+        p = nudge(c, 0, overhead=None,
+                  lines=[first, usage_line(230000)] + satisfied(usage_line(340000)))
+        check("flag nudge: total 340k after a satisfied 200k is silent (0.2 top of 334k no longer applies)",
               p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == 0,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
-        p = nudge(c, 0, overhead=None, lines=[first, usage_line(391599)])
-        check("flag nudge: total 391,599 is silent (one under the top, 391,600)",
+        p = nudge(c, 0, overhead=None,
+                  lines=[first, usage_line(230000)] + satisfied(usage_line(391599)))
+        check("flag nudge: total 391,599 after a satisfied 200k is silent (one under the top, 391,600)",
               p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == 0,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
-        p = nudge(c, 0, overhead=None, lines=[first, usage_line(392000)])
+        p = nudge(c, 0, overhead=None,
+                  lines=[first, usage_line(230000)] + satisfied(usage_line(391599), usage_line(392000)))
         check("flag nudge: total 392,000 blocks at the top bucket",
               is_block(c, p) and stored_bucket(c) == 1,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
-        p = nudge(c, 0, overhead=None, lines=[first, usage_line(455000)])
-        check("flag nudge: 455k after the top is silent", p.returncode == 0
-              and not p.stdout.strip() and stored_bucket(c) == 1,
+        p = nudge(c, 0, overhead=None,
+                  lines=[first, usage_line(230000)]
+                  + satisfied(usage_line(391599), usage_line(392000)) + [usage_line(455000)])
+        check("flag nudge: 455k with no spawn after the top is refused (refusal 2 of 3)",
+              block_reason(p) is not None, "out=%r" % p.stdout)
+        p = nudge(c, 0, overhead=None,
+                  lines=[first, usage_line(230000)]
+                  + satisfied(usage_line(391599), usage_line(392000))
+                  + satisfied(usage_line(455000), tool_id="toolu_gate_top"))
+        check("flag nudge: 455k after a satisfied top is silent (no checkpoint above it)",
+              p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == 1,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
     finally:
         c.cleanup()
@@ -2072,8 +2103,7 @@ def nudge_at(c, text, mtime, active=False, lines=()):
     """Write the handoff as `text` leaves it, set its mtime, then run one Stop. With no `lines`, the
     messages sit below the first checkpoint, so only the section check can block. `lines` follow the
     first-turn entry, as nudge()'s do."""
-    put(c.handoff_path(), text)
-    os.utime(c.handoff_path(), (mtime, mtime))
+    put_handoff(c, text, mtime)
     return nudge(c, NUDGE_OVERHEAD, active=active, lines=list(lines))
 
 
@@ -2344,20 +2374,20 @@ def size_entry(size, ts=GATE_TS):
 
 
 def spawn_entry(model="sonnet", name="Agent", ts=GATE_SPAWN_TS, subagent_type="general-purpose",
-                prompt=REWRITE_BRIEF):
+                prompt=REWRITE_BRIEF, tool_id=GATE_TOOL_ID):
     """A main-chain entry that calls the subagent tool `name`, with input model `model`, a brief
     `prompt` and a `subagent_type`."""
     obj = {"type": "assistant", "timestamp": ts, "message": {"role": "assistant", "content": [
-        {"type": "tool_use", "id": GATE_TOOL_ID, "name": name,
+        {"type": "tool_use", "id": tool_id, "name": name,
          "input": {"description": "Rewrite the handoff", "prompt": prompt,
                    "subagent_type": subagent_type, "model": model}}]}}
     return json.dumps(obj)
 
 
-def spawn_result(ok=True, ts=GATE_RESULT_TS):
+def spawn_result(ok=True, ts=GATE_RESULT_TS, tool_id=GATE_TOOL_ID):
     """The result of the spawn: not an error when ok, else an error."""
     text = "Handoff rewritten." if ok else "Write failed: permission denied."
-    return tool_result(text, ts, is_error=not ok, tool_use_id=GATE_TOOL_ID)
+    return tool_result(text, ts, is_error=not ok, tool_use_id=tool_id)
 
 
 def boundary_entry(ts):
@@ -2370,6 +2400,19 @@ def filler_entries(n):
     """n text entries with no usage: a full-size transcript that the gate must read past."""
     return [transcript_line("assistant", [{"type": "text", "text": filler("gate filler", 200)}],
                             timestamp=GATE_RESULT_TS) for _ in range(n)]
+
+
+def satisfied(*entries, tool_id=GATE_TOOL_ID):
+    """Transcript entries that satisfy the pending checkpoint before them: a Sonnet spawn that returned,
+    then `entries`. The spawn sits after the checkpoint entry, so a case that only tests thresholds can
+    keep its Stop from being refused by the gate."""
+    return [spawn_entry("sonnet", tool_id=tool_id), spawn_result(ok=True, tool_id=tool_id)] + list(entries)
+
+
+def put_handoff(c, text=None, mtime=MTIME_1):
+    """The session's handoff as `text` (a complete one by default), with its mtime set."""
+    put(c.handoff_path(), handoff_text() if text is None else text)
+    os.utime(c.handoff_path(), (mtime, mtime))
 
 
 def names_sonnet_subagent(text):
