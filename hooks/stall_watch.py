@@ -85,7 +85,7 @@ Stop: stall_watch.py --stop
   running agent, one tail read per quiet agent. Any error, or stop_hook_active true, prints nothing and exits 0. No posix check.
   CI-wait check: the same Stop run reads the transcript once more, one record at a time. The newest
   ready call (`gh pr ready <N>` in Bash or PowerShell, outside quotes, heredoc bodies and `#` comments, not
-  --undo; or MCP update_pull_request with draft false) opens a wait. A `gh` global flag before `pr`
+  --undo; or MCP update_pull_request with draft false) opens a wait. An --undo, or draft true, closes the wait on its PR. A `gh` global flag before `pr`
   (`gh -R o/r pr ready 5`) is skipped. A later user or queued message with a
   `CI green|cancelled on <sha>` line closes it; a `CI unknown` line leaves it open. A merge or close that
   names the waited PR number closes it (bin/merge N, merge N, gh pr merge N, gh pr close N in Bash or
@@ -979,12 +979,13 @@ def ci_events(rec):
                 events.append(("merge", str(inp["pullNumber"])))
         elif tool == "update_pull_request" and inp.get("draft") is False:
             events.append(("ready", str(inp.get("pullNumber") or "")))
+        elif tool == "update_pull_request" and inp.get("draft") is True:
+            events.append(("undo", str(inp.get("pullNumber") or "")))
         elif isinstance(inp.get("command"), str) and name in ("Bash", "PowerShell"):
             for words in shell_calls(inp["command"]):
                 gh = gh_pr_call(words)
                 if gh and gh[0] == "ready":
-                    if "--undo" not in gh[1]:
-                        events.append(("ready", pr_ref(gh[1])))
+                    events.append(("undo" if "--undo" in gh[1] else "ready", pr_ref(gh[1])))
                 elif gh:
                     # --auto only queues the merge and --disable-auto drops it: neither has merged anything
                     if not {"--auto", "--disable-auto"} & set(gh[1]):
@@ -1001,8 +1002,9 @@ def open_ci_wait(transcript):
     """The PR of a CI wait that is open with no check-in, as a string ('' when the call named none), or
     None. The newest ready call opens a wait. A green or cancelled verdict closes it; an unknown verdict
     leaves it open. A merge or close closes a numbered wait only when it names that PR, or is a gh pr merge
-    or close that names no PR at all; it closes a wait whose ready call named no PR when it names any PR or
-    none. A
+    or close that names no PR at all; it closes a wait whose ready call named no number (bare, a branch or
+    a $var) when it names any PR or none. An undo (gh pr ready --undo, or MCP draft true) closes the wait on
+    its PR the same way. A
     red verdict keeps it open and voids the check-ins before it. A check-in after the anchor
     covers it, unless its result was an error. One streamed read, records in file order."""
     wait = None  # [pr, ids of the check-ins since the anchor]
@@ -1023,8 +1025,8 @@ def open_ci_wait(transcript):
                     wait[1].add(ev[1])
                 elif ev[0] == "failed":
                     wait[1].discard(ev[1])
-                elif ev[0] == "mergeany" or (ev[0] == "merge" and wait[0] in ("", ev[1])):
-                    wait = None
+                elif ev[0] == "mergeany" or (ev[0] in ("merge", "undo") and (not wait[0].isdigit() or wait[0] == ev[1])):
+                    wait = None  # a wait that names no number (bare, a branch, a $var) closes on any PR
                 elif ev[0] == "verdict":
                     if ev[1] == "red":
                         wait[1].clear()
