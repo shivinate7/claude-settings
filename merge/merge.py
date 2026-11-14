@@ -247,6 +247,7 @@ DROP_CITE = "(decision merge-deletes-batch-lanes, a batch that drops a lane by a
 BATCH_CITE = "(decision no-merge-during-batch-ci, nothing merges while another ready pull request's CI runs, and the required checks are never empty)"
 EXPRESS_CITE = "(decision owner-override, ruling R59 part 5 of 15:05 CST Nov 12, a ruled prose change skips the batch queue and runs only the checks that read its files)"
 FREEZE_CITE = BATCH_CITE  # the batch build and drop refusals cite the batch brake's decision, though the freeze decision governs them; a later change points this at the freeze decision
+PRIORITY_CITE = "(decision priority-vs-merge-order, a ready priority row merges before a lower pull request)"
 DRAFT_CITE = "(decision draft-until-reviewed, every pull request opens as a draft and only the one integration PR goes ready)"
 STAMP_RUN_CITE = "(decision one-shared-record-stamp, the claim runs before the merge, on the pull request branch, in the merge tool)"
 STAMP_CFG_CITE = "(decision one-shared-record-stamp, each repo keeps its config in its own tree, and the tool never guesses a config field)"
@@ -4484,7 +4485,7 @@ def priority_line(slug, verdict, why, number):
 def priority_format(row):
     """-> (slug, targets, repo, why) of one row. `why` is "" when the row is well formed, else why the reader cannot parse it: a line that is no
     `priority:` row, an empty value, more than one target, or a pr that is not owner/repo#N. A row naming no target is well formed (it reads flag).
-    The one home of what a malformed row is, for priority_judge and priority_gate. No read."""
+    The one home of what a malformed row is, for priority_judge and priority_order_check. No read."""
     if not row.startswith("priority:"):
         return row[:60], [], None, "not a priority row"
     slug, targets, repo = priority_row(row)
@@ -4580,7 +4581,7 @@ def priority_is_row(row, here, n, branch):
             return True
     return False
 
-def priority_gate(source, n, info, h, repo_dir=None):
+def priority_order_check(source, n, info, h, repo_dir=None):
     """merge N --confirm --priority-rows FILE, before the lock: refuse merging pull request N while a priority row's own pull request reads ok and N is no
     row's pull request or branch. A row that reads flag, waiting, done or unknown never blocks, and its line is printed so a lower pull request that
     goes says why; an unread row is unknown, never clear. A failed read of a well-formed row stays unknown because a network blip must not stop every
@@ -4589,10 +4590,10 @@ def priority_gate(source, n, info, h, repo_dir=None):
     are not read. Cost: the reads priority_judge makes, none when N is itself a row or a row is malformed; no process, timer, lock or file write."""
     rows, why = priority_text(source)
     if not rows:
-        raise Stop(f"--priority-rows could not read {source}: {why}. Nothing was checked; this is not clear. Nothing was merged." if why
-                   else f"--priority-rows: no rows in {source}. Nothing was checked; this is not clear. Nothing was merged.")
+        raise Stop(f"--priority-rows could not read {source}: {why}. Nothing was checked; this is not clear. Nothing was merged. {PRIORITY_CITE}" if why
+                   else f"--priority-rows: no rows in {source}. Nothing was checked; this is not clear. Nothing was merged. {PRIORITY_CITE}")
     if not any(r.startswith("priority:") for r in rows):
-        raise Stop(f"--priority-rows: {source} has no priority row. Nothing was checked; this is not clear. Nothing was merged.")
+        raise Stop(f"--priority-rows: {source} has no priority row. Nothing was checked; this is not clear. Nothing was merged. {PRIORITY_CITE}")
     here = priority_here(h, repo_dir)
     own = next((r for r in rows if priority_is_row(r, here, n, info["branch"])), None)
     if own:
@@ -4606,13 +4607,13 @@ def priority_gate(source, n, info, h, repo_dir=None):
             bad.append(f"{slug}{f' (pr {named})' if named else ''}: {reason}")
     if bad:
         raise Stop(f"--priority-rows: the priority row{'s' if len(bad) > 1 else ''} {'; '.join(bad)} cannot be read. "
-                   "Nothing was checked; this is not clear. Fix the row in the hand-off file. Nothing was merged.")
+                   f"Nothing was checked; this is not clear. Fix the row in the hand-off file. Nothing was merged. {PRIORITY_CITE}")
     judged = priority_judge(rows, h, here, repo_dir)
     say(*(priority_line(*j) for j in judged))
     ready = [f"{slug} (#{number})" for slug, verdict, _, number in judged if verdict == "ok"]
     if ready:
         raise Stop(f"#{n} is not a priority row, and the priority row{'s' if len(ready) > 1 else ''} {', '.join(ready)} {'are' if len(ready) > 1 else 'is'} ready. "
-                   "Merge " + ("them" if len(ready) > 1 else "it") + " first. Nothing was merged.")
+                   "Merge " + ("them" if len(ready) > 1 else "it") + f" first. Nothing was merged. {PRIORITY_CITE}")
 
 def build_parser():
     """The one home of merge's command line. The guard (hooks/guard_merge.py) parses a command with this, so its reading of -C and --repo-dir is the tool's own.
@@ -4688,8 +4689,8 @@ def main(argv, host=None, lock=None, hosts=None):
         p.error("--root goes with --reviewed")
     if a.root and a.repo_dir is not None:  # each --root names its own checkout, so a -C beside it would be read by nothing
         p.error("-C does not go with --root: each --root names its own checkout")
-    priority_gated = a.priority_rows is not None and a.confirm and a.pr is not None  # `merge N --confirm --priority-rows FILE`: the check before the merge, not the listing
-    if a.priority_rows is not None and not priority_gated and any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("priority_rows", "repo_dir", "config")):
+    priority_order_checked = a.priority_rows is not None and a.confirm and a.pr is not None  # `merge N --confirm --priority-rows FILE`: the check before the merge, not the listing
+    if a.priority_rows is not None and not priority_order_checked and any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("priority_rows", "repo_dir", "config")):
         p.error("--priority-rows stands alone (-C and --config may go with it), or goes with a pull request number and --confirm")
     if a.idle_lanes and (a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed
                          or a.review_record or a.lane_lint):
@@ -4705,7 +4706,7 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--lint-unknown-ok goes with --lane-lint")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
-    if a.idle_lanes or a.touches or a.release_check or (a.priority_rows is not None and not priority_gated):
+    if a.idle_lanes or a.touches or a.release_check or (a.priority_rows is not None and not priority_order_checked):
         pass  # stands alone: checked above
     elif a.ready:  # a lane's one act on its own draft: no lock, no merge
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record or a.lane_lint:
@@ -4767,7 +4768,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 print("merge: " + " ".join(unknown.split()), file=sys.stderr)
                 return 1
             return 0
-        if a.priority_rows is not None and not priority_gated:
+        if a.priority_rows is not None and not priority_order_checked:
             return priority_rows(a.priority_rows, a.repo_dir, host)  # before the role check and any lock: it reads, merges and posts nothing
         if a.idle_lanes:
             return idle_lanes(a.live, a.repo_dir)  # before the role check and any lock: it reads, merges and posts nothing
@@ -4895,8 +4896,8 @@ def main(argv, host=None, lock=None, hosts=None):
                 return 0
             return draft_step(root, cfg, a.pr, h, info)
         if a.confirm and not info["draft"]:  # a draft's --confirm is the records step and never merges; before the lock, so a refusal lands nothing
-            if priority_gated:
-                priority_gate(a.priority_rows, a.pr, info, h, a.repo_dir)
+            if priority_order_checked:
+                priority_order_check(a.priority_rows, a.pr, info, h, a.repo_dir)
             else:
                 say(PRIORITY_NO_ROWS)
         checked = None  # the head the lane-lint PASS names; confirm refuses any other
