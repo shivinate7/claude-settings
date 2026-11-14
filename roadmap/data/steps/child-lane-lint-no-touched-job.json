@@ -1,0 +1,14 @@
+{
+ "id": "child-lane-lint-no-touched-job",
+ "title": "Lane lint in a child repo with no lane-touched-tests job states what reads clear, and who may type --lint-unknown-ok there",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Child repos have no lane-touched-tests job, so lane lint there reads unknown. The child lane on home #728 typed --lint-unknown-ok with a reason on the verdict line. The coordinator granted no flag and asked for the rule that allows it.",
+ "source": "Coordinator 21:27 CST Nov 13; triage read the decision text.",
+ "note": "Triage 21:27 CST Nov 13: decision lanes-run-no-full-ci-job line 14 says an unknown refuses unless --lint-unknown-ok \"<reason>\" is given and the reason is logged; line 21 says the flag never lifts a stack stop, base check or cross-measure unknown. Neither line says who may type it. Past practice put it to the owner as a page act (items act-3126-lint-unknown-ok and act-lint-unknown-ok-3259, the second still open as item 775), so a lane typing it unasked may breach that practice. Unchecked by triage: the child lane's verdict line and the repo where it ran. Fix: the decision states what reads clear in a repo with no such job, and who types the flag; red case first. Not a lift of any guard.",
+ "updatedAt": "2026-11-13T21:27:18-06:00"
+}
