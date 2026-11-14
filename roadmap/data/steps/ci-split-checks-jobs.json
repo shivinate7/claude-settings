@@ -7,8 +7,8 @@
  "lane": "session_013NEJL2UPotZrZRQ9WLTshH",
  "owner": "triage",
  "blockedBy": [],
- "why": "Owner 11:34 CST Nov 13 via runner 10: \"the suites bend, not the wait\". Coordinator 11:35 CST: express.",
+ "why": "Owner 11:34 CST Nov 13 via runner 10: \"the suites bend, not the wait\". Coordinator 11:35 CST: express. MERGED 03:18 CST Nov 14: PR #3376 (ci-split-checks-v2, replaces #2980; the Linux `checks` job split into checks, checks-hooks and checks-rest) merged at 03:15:57 CST (09:15:57 UTC, REST merged=true, merged_by shivinate7; head c0476cab1241). Runner 10's main sha 4db2a9cf3c10 is unchecked by triage. Real wall times of the three new jobs are unmeasured until main's run after the merge; read them from that run (the PR body projected checks 18.5, checks-hooks 10.5, checks-rest 11.6 min each plus about 1 min setup).",
  "source": "owner 11:34 CST Nov 13 via runner 10; coordinator 11:35 CST",
  "note": "Split `checks` into parallel Linux jobs. Express (ruling drain-first-hold, part 5, a CI fix). Lane session_013NEJL2UPotZrZRQ9WLTshH. Overlap flagged by triage 11:36 CST: step ci-split-checks-family (doing, lane session_013NEJL12ERsRGRS2aoyXgQt, R55 express) also splits checks by family; the coordinator rules which lane keeps the split and which folds in. Folded into step ci-split-checks-family (coordinator 11:38 CST Nov 13): #2980 keeps the split. The coordinator's duplicate start; the step dup-check (lane-step-dup-check) would have caught it.",
- "updatedAt": "2026-11-13T11:38:54-06:00"
+ "updatedAt": "2026-11-14T03:18:30-06:00"
 }
