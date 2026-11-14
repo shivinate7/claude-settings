@@ -1452,7 +1452,8 @@ class Host:
         A cancelled run with no red job that nothing clears keeps its line, in the unknown detail and beside a red verdict. It is named with `gh run rerun <id>` only when its
         `head_sha` is the head_sha of the newest run on the page read (any status, any event in BASE_EVENTS, from the unfiltered list): runs on the base start at its head, and a re-run tests the run's own commit. Never named for a run with a red job or a re-run in flight.
         The revert clear (the one home of the rule): a red run R, one the verdict would list as red, is cleared when a commit reachable from origin/<base> other than R's head_sha carries
-        `This reverts commit <R's head_sha>` (40 hex) in its message and is not net-reverted (net_reverted, the net-revert read of read_lanes). Each red run needs its own revert.
+        `This reverts commit <R's head_sha>` (40 hex) in its message and is not net-reverted (net_reverted, the net-revert read of read_lanes). Each red run needs its own revert: a red run of a group that is older than the group's newest run and newer than its latest success
+        (the red streak) is judged like the newest, when the newest is itself a red run; a newer success of the group clears the red runs under it. A newest run that proves nothing (in flight, cancelled, timed out, skipped) never reaches under it to an older red run. Only the group's first standing red run starts a walk to the breaking line.
         The revert's own run does not matter while it is absent, queued or in progress; a completed red run of it is a red run of its own. A cancelled run with no red job, a re-run in flight and a
         failed read: those stay unknown. The revert read is one `git log` over the whole origin/<base> history (the ref base_workflows reads) per call, made only when a red run exists, so its cost grows with that history. Red runs that share one head_sha share one revert, since the revert names the head; a failed read is unknown.
         A red verdict's detail also holds breaking_line's segment for each red run judged (one per file and group), the head group's first: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).
@@ -1533,29 +1534,58 @@ class Host:
                     if all(theirs.get(x) and all(c == "success" for c in theirs[x]) for x in need) and all(x in theirs for x in names):
                         return True
                 return False
-            for r in newest.values():
+            streak = {k: [] for k in newest}  # per file and group: the completed runs older than its newest run and newer than its latest success, newest first (the red streak)
+            seen, closed = set(), set()
+            for r in judged:  # newest first
+                k = (r["path"], self.BASE_EVENTS[r["event"]])
+                if k not in seen:
+                    seen.add(k)
+                    if r["conclusion"] == "success":
+                        closed.add(k)
+                elif k in closed:
+                    continue
+                elif r["conclusion"] == "success":
+                    closed.add(k)  # a green run of the group clears every red run under it
+                elif r["status"] == "completed" and r["conclusion"] not in ("skipped", "neutral"):
+                    streak[k].append(r)
+            walked = set()  # the groups with a red run in red_runs
+
+            def judge(r, k, is_newest):
+                """Judge one run of group k. The newest run of a group is judged whole; an older run of its streak only for red (a cancelled or timed-out older run proves nothing, as before).
+                -> True when r is a red run, cleared by a revert or not: only then is the streak under it judged. A newest run that proves nothing (in flight, cancelled, timed out, skipped) is never swapped for an older red run."""
                 if r["status"] != "completed":  # a re-run in flight: its jobs are mid-change, so none are read
                     unknown.append(f"run {r['id']} of {r['name']} {RERUN_IN_FLIGHT} (attempt {r['run_attempt']}, {r['status']}) at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})")
-                    continue
+                    return False
                 if r["conclusion"] in ("success", "skipped", "neutral"):
-                    continue
+                    return False
                 got = self.buckets([self.run_row(j, j.get("html_url")) for j in jobs_of(r)], warn=False)
-                steps = {k: v for k, rows in got.items() if (v := [x for x in rows if x[0] != "cancel" and not x[0].startswith("timed out")])}
+                steps = {x: v for x, rows in got.items() if (v := [y for y in rows if y[0] != "cancel" and not y[0].startswith("timed out")])}
                 jobs = [j for j in self.classify(steps, [], self.ignore)[0] if "no check ran" not in j]
                 where = f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})"
                 if jobs:
                     if not cleared(r) and not reverted(r):
                         red.append(f"{where}: " + "; ".join(jobs))
-                        red_runs.append(r)
-                elif any(b.startswith("timed out") for rows in got.values() for b, _ in rows):
-                    continue
-                elif r["conclusion"] == "cancelled":
-                    if not cleared(r, cancelled=True):
+                        if k not in walked:
+                            walked.add(k)
+                            red_runs.append(r)
+                    return True
+                if any(b.startswith("timed out") for rows in got.values() for b, _ in rows):
+                    return False
+                if r["conclusion"] == "cancelled":
+                    if is_newest and not cleared(r, cancelled=True):
                         cancelled.append(f"{where} {CANCELLED_NO_RED}" + (f". `{RERUN_REMEDY} {r['id']}` re-runs that run's own commit, which is the base's head"
                                                                         if r.get("head_sha") and r["head_sha"] == base_head else ""))
-                elif not reverted(r):
+                    return False
+                if not reverted(r):
                     red.append(f"{where} ended {r['conclusion']} with no red job")
-                    red_runs.append(r)
+                    if k not in walked:
+                        walked.add(k)
+                        red_runs.append(r)
+                return True
+            for k, r in newest.items():
+                if judge(r, k, True):
+                    for o in streak[k]:
+                        judge(o, k, False)
             # One walk per red group (red_runs holds one run per file and group): a red nightly or a red run of another file never hides the
             # push run that broke the base. The head group (push, dispatch) goes first, so its breaking merge or re-run leads the detail red_base reads.
             order = sorted(red_runs, key=lambda r: (self.BASE_EVENTS[r["event"]] != self.BASE_EVENTS["push"], age[r["id"]]))
