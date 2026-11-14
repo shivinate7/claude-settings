@@ -4447,7 +4447,7 @@ def main(argv, host=None, lock=None, hosts=None):
         if a.fix_check and a.fix_check[0] == a.head:
             p.error("--fix-check: the reviewed head must differ from --head, or the fix diff is empty")
         # The reviewer row (decision agent-model-cap): every fix check runs Sonnet (owner item 444 a), and a later-round reviewer runs Sonnet,
-        # round 3 included (owner, 2026-11-13 14:05 CST); only a granted round 4 may run Opus. Checked here, never in parse_review, so a record posted before the rule still parses.
+        # the last allowed round included; only a granted extra round may run Opus. Checked here, never in parse_review, so a record posted before the rule still parses.
         if a.fix_check:
             fix_model = review_round_model(REVIEW_FIX_ROW)
             if a.fix_check[2].lower() != fix_model:

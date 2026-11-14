@@ -40,7 +40,7 @@ REMOTE_SERVER = _guard.REMOTE_SERVER
 LANE_RECORD = os.path.join(*layout.path(ROOT, "decisions").split("/"), "agent-model-cap.md")
 
 def lane_row_pattern(label: str):
-    """The row of one lane kind: its first cell is the label, whole, and the effort cell is the third."""
+    """The row for one lane kind. Its first cell is the label, whole, and the effort cell is the third."""
     return re.compile(r"^\|\s*" + re.escape(label) + r"\s*\|[^|]*\|\s*([^|]*?)\s*\|\s*$", re.M)
 
 

@@ -310,7 +310,7 @@ Other tools, in `judge` order:
                        the round forms, `Fix check`, `Round N of 3 (fix check)` and the role-model
                        sentence. An unread record
                        passes and is noted as `agent-role-model-unread`. The general override lifts an
-                       above-row refusal; no override lifts the no-model refusal or a reviewer's Round 3 on Opus,
+                       above-row refusal; no override lifts the no-model refusal or a reviewer's no-Opus round on Opus (ROLE_ROUND_NO_OPUS),
                        whose reason carries no override line. A Workflow
                        `agent()` call is judged as a spawn; one whose model or agentType the scan
                        cannot read is skipped, and an unread brief is judged as an empty brief.
@@ -3649,7 +3649,7 @@ def step_up_hit(tool: str, tool_input) -> str:
     """The step-up reason for a spawn whose marker and model disagree, or "". Only a line
     that starts with the marker, or the brief's first line, counts. A reviewer's
     frontmatter model is haiku, so a reviewer on a later-round or fix-verifier brief must name sonnet. A reviewer on either that names Opus
-    passes here and is refused by the role model row (round 3, role_model_one) or the Opus ceiling (opus_spawn_hit), so the remedy names Sonnet only (decision agent-model-cap)."""
+    passes here and is refused by the role model row (a no-Opus round, role_model_one) or the Opus ceiling (opus_spawn_hit), so the remedy names Sonnet only (decision agent-model-cap)."""
     if tool in SPAWN_TOOLS and isinstance(tool_input.get("prompt"), str):
         return step_up_reason(tool_input["prompt"], tool_input.get("subagent_type"), tool_input.get("model"))
     if tool == "Workflow" and isinstance(tool_input.get("script"), str):
@@ -4049,7 +4049,7 @@ def reviewer_free_rounds(rounds, row):
 
 
 # A reviewer's round in ROLE_ROUND_NO_OPUS runs on its round row's model and never above it, Opus included: the refusal is
-# never lifted and its reason names no override (owner ruling of 2026-11-13 14:05 CST, decision agent-model-cap).
+# never lifted and its reason names no override (decision agent-model-cap).
 ROLE_ROUND_NO_OPUS = ("3",)
 ROLE_ROUND_NO_OPUS_MATCH = "round no opus, role "   # the matched text of that refusal, which never_lifted and the refusal's call read
 ROLE_ROUND_NO_OPUS_REASON = (
@@ -4093,7 +4093,8 @@ def role_model_one(tool_input):
         if named is None:
             # A model the table does not rank is above every row below the top rank. Its own rank is unruled, so none is guessed.
             named = top if row == ROLE_MODEL_RANK[top] else top + 1
-        if role == "reviewer" and (no_opus := reviewer_no_opus(rounds, tool_input.get("prompt"), named)):
+        no_opus = reviewer_no_opus(rounds, tool_input.get("prompt"), named) if role == "reviewer" else ""
+        if no_opus:
             return no_opus, ROLE_ROUND_NO_OPUS_MATCH + model, False
         if named == top or row is None:
             return "", "", False
@@ -6954,7 +6955,7 @@ def judge(payload) -> None:
         refuse(tool, "deny", "lane-title-slug", LANE_TITLE_REASON, lane_title)
 
     # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
-    # The override lifts the above-row refusal and never the no-model one or a reviewer's Round 3 on Opus (never_lifted).
+    # The override lifts the above-row refusal and never the no-model one or a reviewer's no-Opus round on Opus (never_lifted).
     # An unread table or agent folder passes and logs one line. Opus is judged at 9d.
     role_reason, role_matched, role_unread = role_model_check(tool, tool_input)
     if role_unread:
