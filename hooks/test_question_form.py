@@ -2056,6 +2056,36 @@ def case_dismissed_reason_keeps_the_generic_remedy_for_other_fields():
           question_form.ITEM_FIELD_REASON in printed_reason(stray), printed_reason(stray)[:200])
 
 
+# ------------------------------------------------------------------ holdsLane: a lane wait's flag, which the page must draw
+#
+# A lane wait sets `holdsLane` true and `lane` (skills/waiting-page/SKILL.md, "Add an item"). The guard refuses a top-level
+# field that the page's itemFields block does not list, so the flag is refused until the page lists it. A merge or PR wait
+# sets `holds` alone and carries no flag.
+
+LANE_HOLDS = "Stops the batch run until the answer."
+LANE_WAIT = {"holds": LANE_HOLDS, "holdsLane": True, "lane": "batch-runner"}
+
+
+def case_lane_wait_flag_is_not_refused_as_undrawn():
+    """A session's set and update that carry holdsLane with lane and holds pass on both surfaces. The controls: an update
+    that names only lane passes, and a merge wait (holds alone, no flag) passes."""
+    got = call("item_field_hit", "update", {}, {"holdsLane": True, "lane": "batch-runner"})
+    check("item_field_hit: holdsLane with a lane is not an undrawn field", got == "", "want no hit, got %r" % (got,))
+    page("a set carrying holdsLane, lane and holds passes", "set", entry_of(page_item(**LANE_WAIT)), None)
+    page("an update carrying holdsLane, lane and holds passes", "update", entry_of(dict(LANE_WAIT)), None)
+    page("control: an update that names only lane passes", "update", entry_of({"lane": "batch-runner"}), None)
+    page("control: a merge wait, holds alone with no holdsLane, passes", "update", entry_of({"holds": LANE_HOLDS}), None)
+
+
+def case_page_lists_holds_lane():
+    """The page draws the lane-wait flag: its itemFields block lists holdsLane, the list the guard reads."""
+    fields = question_form._item_fields(question_form.ITEM_FIELDS_PAGE)
+    check("page: its itemFields block reads as a list", fields is not None,
+          "the itemFields block in skills/waiting-page/page.html did not read as a list of strings")
+    check("page: the itemFields block lists holdsLane", "holdsLane" in (fields or []),
+          "the page's itemFields block does not list holdsLane")
+
+
 # ------------------------------------------------------------------ a press link that is not a list; a partial edit of the Why yours line
 #
 # Each case below is also a pytest test (the test_ wrappers after it). A check the case records as failed fails
@@ -2666,6 +2696,7 @@ def main():
     for case in (case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
                  case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
                  case_dismissed_reason_keeps_the_generic_remedy_for_other_fields,
+                 case_lane_wait_flag_is_not_refused_as_undrawn, case_page_lists_holds_lane,
                  case_item_stray_field_refused_from_a_record_branch_checkout,
                  case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,

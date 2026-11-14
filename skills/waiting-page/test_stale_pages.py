@@ -1842,7 +1842,8 @@ class ParkedStale(FolderCase):
 # The mode reads no clock: what it lists depends on the saved files alone.
 WOKE = "2026-11-05T13:10:00Z"
 EARLY = "2026-11-05T02:40:00Z"  # long before WOKE: the incident shape, an answer that stayed unread that long
-UNREAD_LINE = re.compile(r"answer-unread \S+ \(|unread: clean$|unknown: ")  # the mode's own line shapes
+LATER_REPLY = "2026-11-05T03:40:00Z"  # an item reply an hour after EARLY, still before WOKE
+UNREAD_LINE = re.compile(r"answer-unread \S+ \(|answer-needs-reply \S+ \(|lane-missing \S+ \(|unread: clean$|unknown: ")  # the mode's own line shapes
 
 
 def good_files(meta=None):
@@ -1864,6 +1865,34 @@ def receipt_entry(item_id, **fields):
 def parked_data_answer(item_id, at):
     """An item's answer under its own key that carries parked: true and no act: the third form a park answer takes."""
     return {"id": item_id, "data": {"parked": True, "item": item_id, "n": 27, "at": at, "note": "Later."}}
+
+
+HOLDS = "Stops the batch run until the answer."  # the item's `holds` field: what a lane, a merge or a PR waits on (SKILL.md, "Add an item")
+WAITS = {"repo": REPO, "pr": PR}  # the item's `waits` field: the PR it waits on (SKILL.md, "Add an item"); a CI or PR wait, not a lane
+
+
+def lane_unread_line(item_id, n, owner, at, lane, woke=WOKE):
+    """The line for a listed answer on an item with `lane`: the plain line, with `lane <slug>` as its last field."""
+    before = "before wake %s" % woke if woke else "before wake: none recorded"
+    return "answer-unread %s (item %s, owner %s, answered %s, %s, lane %s)" % (item_id, n, owner, at, before, lane)
+
+
+def lane_missing_line(item_id, n, owner):
+    """The line for an open item whose lane wait is flagged (`holdsLane` true) with no `lane`."""
+    return "lane-missing %s (item %s, owner %s)" % (item_id, n, owner)
+
+
+def needs_reply_line(item_id, n, owner, at):
+    """The line for a `none` answer that asks a question with no item reply newer than the answer."""
+    return "answer-needs-reply %s (item %s, owner %s, answered %s)" % (item_id, n, owner, at)
+
+
+def none_answer_entry(item_id, at, note):
+    """An answer of `none` (none of these) with a note, under the item's own key."""
+    return {"id": item_id, "data": {"item": item_id, "n": 27, "at": at, "choice": "none", "note": note}}
+
+
+ROUTED_READ = "2026-11-05T03:00:00Z"  # the routing session's read, an hour after EARLY: it writes this receipt when it routes the answer
 
 
 class UnreadStale(FolderCase):
@@ -2119,6 +2148,530 @@ class UnreadStale(FolderCase):
         code, out, _, error = self.run_main("--unread", self.folder)
         self.assert_mode_lines(out, error)
         self.assertEqual((code, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "main() did not send --unread to its mode: " + out)
+
+    # The lane fields. An item that holds a lane carries it in `lane`, and a listed answer names that lane, so the wake can message
+    # it. An open item whose lane wait is flagged (`holdsLane` true) with no `lane` is named lane-missing. A merge or PR wait (`holds`
+    # alone, no `holdsLane`) is not, nor is a closed item, a holding item with a lane, or an item that holds nothing.
+
+    def test_an_answer_on_an_item_with_a_lane_names_that_lane(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="triage", lane="batch-runner")], answers=[pick_answer_entry("colour-pick", EARLY)])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [lane_unread_line("colour-pick", 143, "triage", EARLY, "batch-runner")]),
+                         "the answer on a lane item does not name its lane: " + out)
+
+    def test_an_answer_on_an_item_with_no_lane_keeps_the_plain_line(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="triage")], answers=[pick_answer_entry("colour-pick", EARLY)])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "triage", EARLY)]), "an answer on an item with no lane changed its line: " + out)
+
+    # A routed answer is the busy-lane path's: its item's lane and lastAnswer.at equal the answer's at. It is skipped only when a
+    # receipt with a `read` at or after the answer's at exists: the routing session writes that receipt when it routes the answer.
+    # Without it the line is listed and names the lane. A lastAnswer at another time leaves the answer unread, and the line names the lane.
+
+    def test_an_answer_already_routed_to_its_lane_is_not_listed(self):
+        item = item_entry("colour-pick", "open", n=143, owner="ops", lane=LANE, lastAnswer={"choice": "a", "note": "", "at": EARLY})
+        self.store(items=[item], answers=[pick_answer_entry("colour-pick", EARLY)], receipts=[receipt_entry("colour-pick", read=ROUTED_READ)])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "an answer already routed to its lane was listed again: " + out)
+
+    def test_a_lane_item_whose_last_answer_is_another_time_lists_its_answer_with_its_lane(self):
+        item = item_entry("colour-pick", "open", n=143, owner="ops", lane=LANE, lastAnswer={"choice": "a", "note": "", "at": ANSWERED})
+        self.store(items=[item], answers=[pick_answer_entry("colour-pick", EARLY)])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [lane_unread_line("colour-pick", 143, "ops", EARLY, LANE)]),
+                         "a lane item whose lastAnswer is another time did not list its unread answer with its lane: " + out)
+
+    def test_a_full_store_lists_each_lane_answer_not_yet_routed_and_no_routed_one(self):
+        count = 120  # every third lane answer is routed to its lane, and the rest are not; each routed one has its routing receipt
+        items, answers, receipts, expected = [], [], [], []
+        for i in range(count):
+            item_id, routed = "item-%03d" % i, i % 3 == 0
+            last_at = EARLY if routed else ANSWERED
+            items.append(item_entry(item_id, "open", n=i, owner="ops", lane=LANE, lastAnswer={"choice": "a", "note": "", "at": last_at}))
+            answers.append(pick_answer_entry(item_id, EARLY))
+            if routed:
+                receipts.append(receipt_entry(item_id, read=ROUTED_READ))
+            else:
+                expected.append(lane_unread_line(item_id, i, "ops", EARLY, LANE))
+        self.store(items=items, answers=answers, receipts=receipts)
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, expected), "a full store did not list each unrouted lane answer, and no routed one, in order: " + out[:300])
+
+    def test_a_routed_answer_with_no_routing_receipt_is_listed_with_its_lane(self):
+        item = item_entry("colour-pick", "open", n=143, owner="ops", lane=LANE, lastAnswer={"choice": "a", "note": "", "at": EARLY})
+        with self.subTest(case="one item"):
+            self.store(items=[item], answers=[pick_answer_entry("colour-pick", EARLY)])
+            rc, out = self.run_unread()
+            self.assertEqual((rc, output_lines(out)), (1, [lane_unread_line("colour-pick", 143, "ops", EARLY, LANE)]),
+                             "a routed answer with no routing receipt was not listed with its lane: " + out)
+        with self.subTest(case="full store"):  # a full page of routed answers and no receipt: each one is listed, in order
+            count = 120
+            items = [item_entry("item-%03d" % i, "open", n=i + 1, owner="ops", lane=LANE, lastAnswer={"choice": "a", "note": "", "at": EARLY})
+                     for i in range(count)]
+            self.store(items=items, answers=[pick_answer_entry("item-%03d" % i, EARLY) for i in range(count)])
+            rc, out = self.run_unread()
+            expected = [lane_unread_line("item-%03d" % i, i + 1, "ops", EARLY, LANE) for i in range(count)]
+            self.assertEqual((rc, output_lines(out)), (1, expected), "a full store of routed answers with no receipt did not list each one with its lane: " + out[:300])
+
+    def test_a_routed_answer_whose_receipt_was_read_before_it_is_still_listed_with_its_lane(self):
+        item = item_entry("colour-pick", "open", n=143, owner="ops", lane=LANE, lastAnswer={"choice": "a", "note": "", "at": EARLY})
+        with self.subTest(case="one item"):
+            self.store(items=[item], answers=[pick_answer_entry("colour-pick", EARLY)], receipts=[receipt_entry("colour-pick", read="2026-11-05T02:00:00Z")])
+            rc, out = self.run_unread()
+            self.assertEqual((rc, output_lines(out)), (1, [lane_unread_line("colour-pick", 143, "ops", EARLY, LANE)]),
+                             "a routed answer whose receipt was read before it was not listed with its lane: " + out)
+        with self.subTest(case="full store"):  # a full page of routed answers, each receipt read an hour before its answer: each one is listed
+            count = 120
+            items = [item_entry("item-%03d" % i, "open", n=i + 1, owner="ops", lane=LANE, lastAnswer={"choice": "a", "note": "", "at": EARLY})
+                     for i in range(count)]
+            answers = [pick_answer_entry("item-%03d" % i, EARLY) for i in range(count)]
+            receipts = [receipt_entry("item-%03d" % i, read="2026-11-05T01:40:00Z") for i in range(count)]
+            self.store(items=items, answers=answers, receipts=receipts)
+            rc, out = self.run_unread()
+            expected = [lane_unread_line("item-%03d" % i, i + 1, "ops", EARLY, LANE) for i in range(count)]
+            self.assertEqual((rc, output_lines(out)), (1, expected), "a full store of routed answers with an earlier receipt did not list each one with its lane: " + out[:300])
+
+    def test_a_holding_item_with_no_lane_is_reported_as_lane_missing(self):
+        cases = {"no lane key": item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS, holdsLane=True),
+                 "empty lane": item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS, holdsLane=True, lane="")}
+        for case, item in cases.items():
+            with self.subTest(case=case):
+                self.store(items=[item])
+                rc, out = self.run_unread(codes=(0, 1))
+                self.assertEqual((rc, output_lines(out)), (1, [lane_missing_line("colour-pick", 143, "ops")]),
+                                 "a holding item with %s was not reported as lane-missing: %s" % (case, out))
+
+    def test_a_holding_item_with_a_lane_is_not_reported_as_lane_missing(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS, lane="batch-runner")])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "a holding item with a lane was reported: " + out)
+
+    def test_an_item_that_holds_nothing_is_not_reported_for_its_empty_lane(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops", lane="")])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "an item that holds nothing was reported as lane-missing: " + out)
+
+    def test_a_holding_item_with_waits_and_no_lane_is_reported_as_lane_missing(self):
+        cases = {"no lane key": item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS, holdsLane=True, waits=WAITS),
+                 "empty lane": item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS, holdsLane=True, waits=WAITS, lane="")}
+        for case, item in cases.items():
+            with self.subTest(case=case):
+                self.store(items=[item])
+                rc, out = self.run_unread()
+                self.assertEqual((rc, output_lines(out)), (1, [lane_missing_line("colour-pick", 143, "ops")]),
+                                 "a holding item with waits and %s was not reported as lane-missing: %s" % (case, out))
+        with self.subTest(case="full store"):  # a full page of holding items that wait and have no lane: each one is named, in order
+            count = 120
+            self.store(items=[item_entry("item-%03d" % i, "open", n=i + 1, owner="ops", holds=HOLDS, holdsLane=True, waits=WAITS) for i in range(count)])
+            rc, out = self.run_unread()
+            expected = [lane_missing_line("item-%03d" % i, i + 1, "ops") for i in range(count)]
+            self.assertEqual((rc, output_lines(out)), (1, expected), "a full store of holding items with waits did not name each one as lane-missing: " + out[:300])
+
+    # `holds` alone is a merge or a PR wait: the item has no `holdsLane`, so it names no lane, with or without `waits`. The line is
+    # for a lane wait only, which `holdsLane` flags. Each case below also runs a full store of the same shape.
+
+    def assert_lane_lines(self, items, want, why):
+        """Stores `items` with no answers and checks the --unread lines: `want` lines and exit 1, or `unread: clean` and exit 0 when `want` is empty."""
+        self.store(items=items)
+        rc, out = self.run_unread(codes=(0, 1))
+        self.assertEqual((rc, output_lines(out)), (1, want) if want else (0, ["unread: clean"]), "%s: %s" % (why, out[:300]))
+
+    def test_a_merge_wait_with_holds_alone_is_not_reported_as_lane_missing(self):
+        self.assert_lane_lines([item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS)], [],
+                               "an open item with holds and no holdsLane and no lane was reported as lane-missing")
+        self.assert_lane_lines([item_entry("item-%03d" % i, "open", n=i + 1, owner="ops", holds=HOLDS) for i in range(120)], [],
+                               "a full store of open items with holds and no holdsLane and no lane was reported as lane-missing")
+
+    def test_a_pr_wait_with_holds_and_waits_and_no_holdsLane_is_not_reported_as_lane_missing(self):
+        self.assert_lane_lines([item_entry("colour-pick", "open", n=143, owner="ops", holds=HOLDS, waits=WAITS)], [],
+                               "an open item with holds and waits and no holdsLane and no lane was reported as lane-missing")
+        self.assert_lane_lines([item_entry("item-%03d" % i, "open", n=i + 1, owner="ops", holds=HOLDS, waits=WAITS) for i in range(120)], [],
+                               "a full store of open items with holds and waits and no holdsLane and no lane was reported as lane-missing")
+
+    # A lane wait is flagged by `holdsLane` true. With no `lane`, the open item is named lane-missing. The fixtures here carry the flag
+    # alone, so the line follows the flag, not the `holds` sentence; the re-pointed cases above carry both.
+
+    def test_an_open_item_flagged_as_a_lane_wait_with_no_lane_is_reported_as_lane_missing(self):
+        cases = {"no lane key": item_entry("colour-pick", "open", n=143, owner="ops", holdsLane=True),
+                 "empty lane": item_entry("colour-pick", "open", n=143, owner="ops", holdsLane=True, lane="")}
+        for case, item in cases.items():
+            with self.subTest(case=case):
+                self.assert_lane_lines([item], [lane_missing_line("colour-pick", 143, "ops")],
+                                       "an open item with holdsLane true and %s was not reported as lane-missing" % case)
+        with self.subTest(case="full store"):
+            items = [item_entry("item-%03d" % i, "open", n=i + 1, owner="ops", holdsLane=True) for i in range(120)]
+            self.assert_lane_lines(items, [lane_missing_line("item-%03d" % i, i + 1, "ops") for i in range(120)],
+                                   "a full store of open items with holdsLane true and no lane was not named lane-missing in order")
+
+    def test_an_open_item_flagged_as_a_lane_wait_with_a_lane_is_not_reported_as_lane_missing(self):
+        self.assert_lane_lines([item_entry("colour-pick", "open", n=143, owner="ops", holdsLane=True, lane="batch-runner")], [],
+                               "an open item with holdsLane true and a lane was reported as lane-missing")
+        self.assert_lane_lines([item_entry("item-%03d" % i, "open", n=i + 1, owner="ops", holdsLane=True, lane=LANE) for i in range(120)], [],
+                               "a full store of open items with holdsLane true and a lane was reported as lane-missing")
+
+    def test_a_closed_item_flagged_as_a_lane_wait_with_no_lane_is_not_reported_as_lane_missing(self):
+        self.assert_lane_lines([item_entry("colour-pick", "closed", n=143, owner="ops", holdsLane=True)], [],
+                               "a closed item with holdsLane true and no lane was reported as lane-missing")
+        self.assert_lane_lines([item_entry("item-%03d" % i, "closed", n=i + 1, owner="ops", holdsLane=True) for i in range(120)], [],
+                               "a full store of closed items with holdsLane true and no lane was reported as lane-missing")
+
+    # A `none` answer that asks a question (its note ends in `?`, or its note is not empty) needs a reply on the item: a `reply` with
+    # text, and `replied` later than the answer's `at`. Each case reads the answer's receipt back, so only the reply check can list it.
+
+    def test_a_none_answer_that_asks_a_question_with_no_reply_is_listed_as_needing_reply(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[none_answer_entry("colour-pick", EARLY, "Which shade?")],
+                   receipts=[receipt_entry("colour-pick", read=EARLY)])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [needs_reply_line("colour-pick", 143, "ops", EARLY)]),
+                         "a none answer that asks a question with no reply was not listed as needing a reply: " + out)
+
+    def test_a_none_answer_with_a_note_and_no_question_mark_is_listed_as_needing_reply(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[none_answer_entry("colour-pick", EARLY, "Cheaper, please")],
+                   receipts=[receipt_entry("colour-pick", read=EARLY)])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [needs_reply_line("colour-pick", 143, "ops", EARLY)]),
+                         "a none answer with a non-empty note and no question mark was not listed as needing a reply: " + out)
+
+    def test_a_none_answer_with_an_empty_note_asks_nothing(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[none_answer_entry("colour-pick", EARLY, "")],
+                   receipts=[receipt_entry("colour-pick", read=EARLY)])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "a none answer with an empty note was listed as needing a reply: " + out)
+
+    def test_a_none_answer_with_a_reply_newer_than_it_needs_no_reply(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops", reply="Red, not grey.", replied=LATER_REPLY)],
+                   answers=[none_answer_entry("colour-pick", EARLY, "Which shade?")], receipts=[receipt_entry("colour-pick", read=EARLY)])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "a none answer with a reply newer than it was listed: " + out)
+
+    def test_a_none_answer_with_a_reply_older_than_it_is_listed_as_needing_reply(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops", reply="Red, not grey.", replied="2026-11-05T02:00:00Z")],
+                   answers=[none_answer_entry("colour-pick", EARLY, "Which shade?")], receipts=[receipt_entry("colour-pick", read=EARLY)])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [needs_reply_line("colour-pick", 143, "ops", EARLY)]),
+                         "a none answer whose reply is older than it was not listed as needing a reply: " + out)
+
+    def test_a_none_answer_with_an_empty_reply_is_listed_even_when_replied_is_newer(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops", reply="", replied=LATER_REPLY)],
+                   answers=[none_answer_entry("colour-pick", EARLY, "Which shade?")], receipts=[receipt_entry("colour-pick", read=EARLY)])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [needs_reply_line("colour-pick", 143, "ops", EARLY)]),
+                         "a none answer with an empty reply was not listed as needing a reply: " + out)
+
+    def test_a_pick_answer_with_a_question_note_needs_no_reply(self):
+        answer = {"id": "colour-pick", "data": {"item": "colour-pick", "n": 27, "at": EARLY, "choice": "a", "note": "Why red?"}}
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[answer], receipts=[receipt_entry("colour-pick", read=EARLY)])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "a pick answer with a question note was listed as needing a reply: " + out)
+
+    def test_a_full_store_lists_each_none_question_with_no_reply_and_no_other(self):
+        count = 120  # a full page of answers: every third asks a question and has no reply, the others are picks
+        items = [item_entry("item-%03d" % i, "open", n=i + 1, owner="ops") for i in range(count)]
+        answers = [none_answer_entry("item-%03d" % i, EARLY, "Which shade?") if i % 3 == 0 else pick_answer_entry("item-%03d" % i, EARLY)
+                   for i in range(count)]
+        receipts = [receipt_entry("item-%03d" % i, read=EARLY) for i in range(count)]
+        self.store(items=items, answers=answers, receipts=receipts)
+        rc, out = self.run_unread()
+        expected = [needs_reply_line("item-%03d" % i, i + 1, "ops", EARLY) for i in range(count) if i % 3 == 0]
+        self.assertEqual((rc, output_lines(out)), (1, expected), "a full store did not list each none question with no reply, in order: " + out[:300])
+
+    def test_a_none_question_on_an_item_that_waits_is_listed_as_needing_reply_even_when_its_reply_is_newer(self):
+        # No receipt, so the answer is unread too: each answer prints its answer-unread line, then its answer-needs-reply line.
+        with self.subTest(case="one item"):
+            self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops", waits=WAITS, reply="Red, not grey.", replied=LATER_REPLY)],
+                       answers=[none_answer_entry("colour-pick", EARLY, "Which shade?")])
+            rc, out = self.run_unread()
+            self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY), needs_reply_line("colour-pick", 143, "ops", EARLY)]),
+                             "a none question on an item that waits was cleared by a reply newer than the answer: " + out)
+        with self.subTest(case="full store"):  # a full page of waiting items, each with a newer reply and a none question: each one is listed
+            count = 120
+            items = [item_entry("item-%03d" % i, "open", n=i + 1, owner="ops", waits=WAITS, reply="Red, not grey.", replied=LATER_REPLY) for i in range(count)]
+            answers = [none_answer_entry("item-%03d" % i, EARLY, "Which shade?") for i in range(count)]
+            self.store(items=items, answers=answers)
+            rc, out = self.run_unread()
+            expected = [line for i in range(count)
+                        for line in (unread_line("item-%03d" % i, i + 1, "ops", EARLY), needs_reply_line("item-%03d" % i, i + 1, "ops", EARLY))]
+            self.assertEqual((rc, output_lines(out)), (1, expected), "a full store of waiting items with a newer reply did not list each none question, in order: " + out[:300])
+
+    def test_a_none_question_on_an_item_that_waits_is_cleared_only_by_a_receipt_read_at_or_after_the_answer(self):
+        with self.subTest(case="receipt read at the answer's time"):  # `read` at `at` clears the line, so the comparison is inclusive
+            self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops", waits=WAITS, reply="Red, not grey.", replied=LATER_REPLY)],
+                       answers=[none_answer_entry("colour-pick", EARLY, "Which shade?")], receipts=[receipt_entry("colour-pick", read=EARLY)])
+            rc, out = self.run_unread(codes=(0,))
+            self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]),
+                             "a receipt read at the answer's time did not clear a none question on an item that waits: " + out)
+        with self.subTest(case="receipt read before the answer"):  # an earlier read clears neither line
+            self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops", waits=WAITS, reply="Red, not grey.", replied=LATER_REPLY)],
+                       answers=[none_answer_entry("colour-pick", EARLY, "Which shade?")], receipts=[receipt_entry("colour-pick", read="2026-11-05T02:00:00Z")])
+            rc, out = self.run_unread()
+            self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY), needs_reply_line("colour-pick", 143, "ops", EARLY)]),
+                             "a receipt read before the answer cleared a none question on an item that waits: " + out)
+        with self.subTest(case="full store"):  # a full page of waiting items, each with a receipt read at its answer: none is listed
+            count = 120
+            items = [item_entry("item-%03d" % i, "open", n=i + 1, owner="ops", waits=WAITS, reply="Red, not grey.", replied=LATER_REPLY) for i in range(count)]
+            answers = [none_answer_entry("item-%03d" % i, EARLY, "Which shade?") for i in range(count)]
+            self.store(items=items, answers=answers, receipts=[receipt_entry("item-%03d" % i, read=EARLY) for i in range(count)])
+            rc, out = self.run_unread(codes=(0,))
+            self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]),
+                             "a full store of waiting items, each with a receipt read at its answer, still listed a none question: " + out[:300])
+
+
+# The close batch (SKILL.md, "Route and close", steps 1 and 2 as one write). The mode reads no clock: its time is `--now`.
+CLOSE_ID = "colour-pick"
+CLOSE_NOW = "2026-11-13T13:40:00Z"
+CLOSE_AT = "2026-11-13T13:20:00Z"  # the answer's time, before CLOSE_NOW
+CLOSE_EARLIER = "2026-11-13T12:00:00Z"  # the lastAnswer.at of an earlier answer to the item: not CLOSE_AT, so the answer is not routed
+
+
+def item_data(**extra):
+    """An open decision item's data, as a fetched items/<id> document holds it."""
+    return dict({"id": CLOSE_ID, "kind": "decision", "status": "open", "n": 143, "owner": "triage", "title": "Colour"}, **extra)
+
+
+def answer_data(**extra):
+    """A pick answer's data, as a fetched answers/<id> document holds it."""
+    return dict({"item": CLOSE_ID, "n": 143, "at": CLOSE_AT, "choice": "a", "note": "Red please"}, **extra)
+
+
+def dropped(data, key):
+    """The same data with `key` left out."""
+    return {k: v for k, v in data.items() if k != key}
+
+
+# A routed lane item: the busy-lane path sent its answer to the lane, so lastAnswer.at is the answer's at. Only that match holds it open.
+ROUTED_LANE = {"lane": "batch-runner", "lastAnswer": {"choice": "a", "note": "Red please", "at": CLOSE_AT}}
+
+
+class CloseBatch(FolderCase):
+    """The --close-batch mode. It prints one ArtifactData batch payload, {"writes": [...]}: the receipt set, the item close and the
+    answer delete together, with the item and the answer each pinned to the version read. A refused read prints one unknown line,
+    exits 2 and prints no payload. Each fetched file is {"id", "data", "version"}, the shape an ArtifactData get returns."""
+    FOLDER = "close"
+
+    def write_doc(self, name, data, version):
+        write_text(os.path.join(self.folder, name), json.dumps({"id": CLOSE_ID, "data": data, "version": version}))
+
+    def store(self, item="default", answer="default"):
+        """Writes the item at version 4 and the answer at version 2. None leaves that file out; "default" writes the default data."""
+        if item is not None:
+            self.write_doc("item.json", item_data() if item == "default" else item, 4)
+        if answer is not None:
+            self.write_doc("answer.json", answer_data() if answer == "default" else answer, 2)
+
+    def close(self, *extra, now=CLOSE_NOW):
+        """Runs the mode on the item and answer files. `extra` adds flags, such as --reply."""
+        return Stale.run_script(self, "--close-batch", "--item", os.path.join(self.folder, "item.json"),
+                                "--answer", os.path.join(self.folder, "answer.json"), "--now", now, *extra)
+
+    def good_payload(self, *extra):
+        """The writes of a close that must succeed: exit 0 and one {"writes": [...]} payload."""
+        r = self.close(*extra)
+        self.assertEqual(r.returncode, 0, "the close exited %d, want 0: %s" % (r.returncode, r.stdout + r.stderr))
+        try:
+            doc = json.loads(r.stdout)
+        except ValueError:
+            doc = None
+        writes = doc.get("writes") if isinstance(doc, dict) else None
+        self.assertIsInstance(writes, list, 'the close printed no {"writes": [...]} payload: ' + r.stdout + r.stderr)
+        return writes
+
+    def write_for(self, writes, collection):
+        """The one write of `collection` in the payload, or None when there is not exactly one."""
+        found = [w for w in writes if isinstance(w, dict) and w.get("collection") == collection]
+        return found[0] if len(found) == 1 else None
+
+    def assert_refused(self, r, *names):
+        """The close exits 2 with an unknown line naming each of `names`, and prints no payload."""
+        self.assert_unknown(r.returncode, r.stdout, *names)
+        self.assertNotIn('"writes"', r.stdout, "a refused close printed a payload: " + r.stdout)
+
+    def test_a_close_batch_holds_the_receipt_the_item_close_and_the_answer_delete_together(self):
+        self.store()
+        writes = self.good_payload()
+        collections = sorted(str(w.get("collection")) for w in writes if isinstance(w, dict))
+        self.assertEqual(collections, ["answers", "items", "receipts"],
+                         "the close batch does not hold one receipts, one items and one answers write: %r" % writes)
+
+    def test_the_close_batch_sets_the_receipt_read_and_filed_to_the_given_time(self):
+        self.store()
+        receipt = self.write_for(self.good_payload(), "receipts")
+        self.assertIsNotNone(receipt, "the close batch has no single receipts write")
+        self.assertEqual((receipt.get("op"), receipt.get("doc_id"), receipt.get("data")), ("set", CLOSE_ID, {"read": CLOSE_NOW, "filed": CLOSE_NOW}),
+                         "the receipt write is not a set of read and filed to the given time: %r" % receipt)
+
+    def test_the_close_batch_closes_the_item_and_copies_the_answer_into_last_answer(self):
+        self.store()
+        item = self.write_for(self.good_payload(), "items")
+        self.assertIsNotNone(item, "the close batch has no single items write")
+        self.assertEqual((item.get("op"), item.get("doc_id")), ("update", CLOSE_ID), "the items write is not an update of the item: %r" % item)
+        self.assertEqual(item.get("data"), {"status": "closed", "closed": CLOSE_NOW, "lastAnswer": {"choice": "a", "note": "Red please", "at": CLOSE_AT}},
+                         "the item update does not close it with the answer copied into lastAnswer: %r" % item)
+
+    def test_the_close_batch_pins_the_item_update_to_the_version_read(self):
+        self.store()
+        item = self.write_for(self.good_payload(), "items")
+        self.assertIsNotNone(item, "the close batch has no single items write")
+        self.assertEqual(item.get("if_version"), 4, "the item update is not pinned to the version read: %r" % item)
+
+    def test_the_close_batch_deletes_the_answer_pinned_to_the_version_read(self):
+        self.store()
+        answer = self.write_for(self.good_payload(), "answers")
+        self.assertIsNotNone(answer, "the close batch has no single answers write")
+        self.assertEqual((answer.get("op"), answer.get("doc_id"), answer.get("if_version")), ("delete", CLOSE_ID, 2),
+                         "the answer write is not a delete of answers/<id> pinned to its version: %r" % answer)
+
+    def test_a_close_batch_refuses_when_the_answer_is_missing(self):
+        self.store(answer=None)
+        self.assert_refused(self.close(), CLOSE_ID)
+
+    def test_a_close_batch_refuses_an_answer_with_no_at(self):
+        self.store(answer=dropped(answer_data(), "at"))
+        self.assert_refused(self.close(), CLOSE_ID)
+
+    def test_a_close_batch_refuses_an_answer_with_an_unreadable_at(self):
+        self.store(answer=answer_data(at="not-a-time"))
+        self.assert_refused(self.close(), CLOSE_ID)
+
+    def test_a_close_batch_refuses_when_the_item_is_missing(self):
+        self.store(item=None)
+        self.assert_refused(self.close(), CLOSE_ID)
+
+    def test_a_close_of_a_question_none_answer_is_refused_without_a_reply(self):
+        self.store(answer=answer_data(choice="none", note="Which shade?"))
+        r = self.close()
+        self.assert_refused(r, CLOSE_ID)
+        self.assertTrue(any("reply" in line for line in output_lines(r.stdout) if line.startswith("unknown:")),
+                        "the refusal does not name the missing reply: " + r.stdout)
+
+    def test_a_close_of_a_question_none_answer_with_an_empty_reply_is_refused(self):
+        self.store(answer=answer_data(choice="none", note="Which shade?"))
+        r = self.close("--reply", "")
+        self.assert_refused(r, CLOSE_ID)
+        self.assertTrue(any("reply" in line for line in output_lines(r.stdout) if line.startswith("unknown:")),
+                        "the refusal does not name the empty reply: " + r.stdout)
+
+    def test_a_close_of_a_question_none_answer_with_a_reply_writes_the_reply_and_its_time(self):
+        self.store(answer=answer_data(choice="none", note="Which shade?"))
+        writes = self.good_payload("--reply", "Red, not grey.")
+        item = self.write_for(writes, "items")
+        self.assertIsNotNone(item, "the close batch has no single items write")
+        self.assertEqual(item.get("data"), {"status": "closed", "closed": CLOSE_NOW, "lastAnswer": {"choice": "none", "note": "Which shade?", "at": CLOSE_AT},
+                                            "reply": "Red, not grey.", "replied": CLOSE_NOW},
+                         "the item update does not carry the reply and its time in the same write: %r" % item)
+        self.assertEqual(len(writes), 3, "the reply close does not hold the receipt, the item close and the answer delete together: %r" % writes)
+
+    def test_a_close_batch_refuses_an_item_on_a_lane_or_with_waits_until_the_act_is_told_done(self):
+        with self.subTest(case="plain lane"):  # a plain pick on a lane is not routed, so it closes without a done report
+            self.store(item=item_data(lane="batch-runner"))
+            item = self.write_for(self.good_payload(), "items")
+            self.assertIsNotNone(item, "the close of a plain-pick lane item has no single items write")
+            self.assertEqual(item.get("data", {}).get("status"), "closed", "the close of a plain-pick lane item does not close it: %r" % (item,))
+        for case, extra in (("routed lane", ROUTED_LANE), ("waits", {"waits": WAITS})):
+            with self.subTest(case=case):
+                self.store(item=item_data(**extra))
+                r = self.close()
+                self.assertEqual(r.returncode, 2, "the close of a %s item exited %d, want 2 for a done report: %s" % (case, r.returncode, r.stdout + r.stderr))
+                self.assertTrue(any(line.startswith("unknown: item waits for a done report") for line in output_lines(r.stdout)),
+                                "the refusal of a %s item does not say it waits for a done report: %r" % (case, r.stdout))
+                self.assertNotIn('"writes"', r.stdout, "the refused close of a %s item printed a payload: %s" % (case, r.stdout))
+
+    def test_a_close_batch_with_done_closes_an_item_on_a_lane_or_with_waits(self):
+        for case, extra in (("lane", {"lane": "batch-runner"}), ("routed lane", ROUTED_LANE), ("waits", {"waits": WAITS})):
+            with self.subTest(case=case):
+                self.store(item=item_data(**extra))
+                item = self.write_for(self.good_payload("--done"), "items")
+                self.assertIsNotNone(item, "the --done close of a %s item has no single items write" % case)
+                self.assertEqual(item.get("data", {}).get("status"), "closed", "the --done close of a %s item does not close it: %r" % (case, item))
+
+    def test_a_closed_item_on_a_lane_or_with_waits_closes_without_done_and_the_open_one_still_waits(self):
+        for case, extra in (("lane", {"lane": "batch-runner"}), ("routed lane", ROUTED_LANE), ("waits", {"waits": WAITS})):
+            with self.subTest(case=case):
+                self.store(item=item_data(status="closed", **extra))  # a chat answer closed it, so no done report is owed
+                item = self.write_for(self.good_payload(), "items")
+                self.assertIsNotNone(item, "the close of a closed %s item has no single items write" % case)
+                self.assertEqual(item.get("data", {}).get("status"), "closed",
+                                 "the close of a closed %s item without --done does not keep it closed: %r" % (case, item))
+        for case, extra in (("routed lane", ROUTED_LANE), ("waits", {"waits": WAITS})):
+            with self.subTest(case=case):
+                self.store(item=item_data(**extra))  # the same item, open: it still waits for the done report
+                r = self.close()
+                self.assertEqual(r.returncode, 2, "the close of an open %s item exited %d, want 2 without --done: %s" % (case, r.returncode, r.stdout + r.stderr))
+                self.assertTrue(any(line.startswith("unknown: item waits for a done report") for line in output_lines(r.stdout)),
+                                "the refusal of an open %s item does not say it waits for a done report: %r" % (case, r.stdout))
+        with self.subTest(case="open plain lane"):  # an open plain pick on a lane is not routed, so it closes without --done
+            self.store(item=item_data(lane="batch-runner"))
+            item = self.write_for(self.good_payload(), "items")
+            self.assertIsNotNone(item, "the close of an open plain-pick lane item has no single items write")
+            self.assertEqual(item.get("data", {}).get("status"), "closed",
+                             "the close of an open plain-pick lane item without --done does not close it: %r" % (item,))
+
+    def notify_lines(self, r):
+        """The `notify-lane` lines on stderr: the line that names the lane the closer messages."""
+        return [line for line in output_lines(r.stderr) if line.startswith("notify-lane")]
+
+    def test_an_open_lane_item_with_no_routed_answer_names_its_lane_to_notify(self):
+        for case, extra in (("no lastAnswer", {}), ("lastAnswer at another time", {"lastAnswer": {"choice": "a", "note": "", "at": CLOSE_EARLIER}})):
+            with self.subTest(case=case):  # a plain pick on a lane was never relayed, so the closer tells that lane
+                self.store(item=item_data(lane="batch-runner", **extra))
+                r = self.close()
+                self.assertEqual(r.returncode, 0, "the close of an open %s lane item exited %d, want 0: %s" % (case, r.returncode, r.stdout + r.stderr))
+                self.assertEqual(self.notify_lines(r), ["notify-lane batch-runner"],
+                                 "the close of an open %s lane item did not print notify-lane on stderr: %r" % (case, r.stderr))
+                self.assertEqual(json.loads(r.stdout).get("notify"), "batch-runner",
+                                 "the close of an open %s lane item did not put its lane in the payload as notify: %r" % (case, r.stdout))
+
+    def test_a_routed_item_closed_with_done_names_no_lane_to_notify(self):
+        self.store(item=item_data(**ROUTED_LANE))  # routing already sent the answer to the lane, so the closer relays nothing
+        r = self.close("--done")
+        self.assertEqual(r.returncode, 0, "the --done close of a routed item exited %d, want 0: %s" % (r.returncode, r.stdout + r.stderr))
+        self.assertEqual(self.notify_lines(r), [], "the --done close of a routed item printed notify-lane on stderr: %r" % r.stderr)
+        self.assertNotIn("notify", json.loads(r.stdout), "the --done close of a routed item put notify in its payload: %r" % r.stdout)
+
+    def test_an_already_closed_lane_item_names_no_lane_to_notify(self):
+        self.store(item=item_data(status="closed", lane="batch-runner"))  # already closed, so the closer relays nothing
+        r = self.close()
+        self.assertEqual(r.returncode, 0, "the close of an already-closed lane item exited %d, want 0: %s" % (r.returncode, r.stdout + r.stderr))
+        self.assertEqual(self.notify_lines(r), [], "the close of an already-closed lane item printed notify-lane on stderr: %r" % r.stderr)
+        self.assertNotIn("notify", json.loads(r.stdout), "the close of an already-closed lane item put notify in its payload: %r" % r.stdout)
+
+    def test_a_close_with_no_version_known_says_unpinned_on_stderr_and_pinned_false_in_the_payload(self):
+        self.write_doc("item.json", item_data(), None)
+        self.write_doc("answer.json", answer_data(), None)
+        r = self.close()
+        self.assertEqual(r.returncode, 0, "the unpinned close exited %d, want 0: %s" % (r.returncode, r.stdout + r.stderr))
+        self.assertTrue(r.stderr.startswith("unpinned:"), "the close with no version known does not start its stderr with unpinned: %r" % r.stderr)
+        self.assertTrue("item" in r.stderr and "answer" in r.stderr, "the unpinned line does not name the item and the answer: %r" % r.stderr)
+        doc = json.loads(r.stdout)
+        self.assertIs(doc.get("pinned"), False, "the close with no version known does not print pinned false: %r" % r.stdout)
+        pinned = [w for w in doc.get("writes", []) if isinstance(w, dict) and "if_version" in w]
+        self.assertEqual(pinned, [], "a write with no version known carries an if_version: %r" % pinned)
+
+    def test_the_version_flags_pin_each_write_to_the_version_given(self):
+        self.write_doc("item.json", item_data(), None)
+        self.write_doc("answer.json", answer_data(), None)
+        self.write_doc("receipt.json", {"read": CLOSE_AT}, None)
+        r = self.close("--receipt", os.path.join(self.folder, "receipt.json"),
+                       "--item-version", "9", "--answer-version", "8", "--receipt-version", "6")
+        self.assertEqual(r.returncode, 0, "the close with version flags exited %d, want 0: %s" % (r.returncode, r.stdout + r.stderr))
+        doc = json.loads(r.stdout)
+        pins = {w.get("collection"): w.get("if_version") for w in doc.get("writes", []) if isinstance(w, dict)}
+        self.assertEqual(pins, {"receipts": 6, "items": 9, "answers": 8}, "the version flags do not pin their writes: %r" % doc)
+        self.assertIs(doc.get("pinned"), True, "a close with every version given does not print pinned true: %r" % r.stdout)
+
+    def test_a_version_flag_beats_the_wrapper_version_and_the_wrapper_still_pins_where_no_flag_is_given(self):
+        self.store()  # the wrapper holds item version 4 and answer version 2
+        r = self.close("--item-version", "9")
+        self.assertEqual(r.returncode, 0, "the close with --item-version exited %d, want 0: %s" % (r.returncode, r.stdout + r.stderr))
+        doc = json.loads(r.stdout)
+        pins = {w.get("collection"): w.get("if_version") for w in doc.get("writes", []) if isinstance(w, dict)}
+        self.assertEqual(pins.get("items"), 9, "--item-version does not beat the wrapper's version 4: %r" % doc)
+        self.assertEqual(pins.get("answers"), 2, "the answer with no flag does not keep its wrapper version 2: %r" % doc)
+
+    def test_the_close_batch_writes_no_file(self):
+        self.store()
+        before = self.tree()
+        self.close()
+        self.assertEqual(self.tree(), before, "the close batch wrote or removed a file")
 
 
 if __name__ == "__main__":
