@@ -324,6 +324,56 @@ class RulingKindTests(unittest.TestCase):
         self.put(REC, fx.PR_RECORD)
         self.assert_fails(REC, "found 2")
 
+    # A body paragraph that starts "Home:" is prose. The record's Home field is the footer's, the Home
+    # line under its Kind line. Each BODY_HOMES paragraph sits above a real "Kind: process" and
+    # "Home: merge/merge.py" footer, so the lint must not read it as a second Home field.
+    BODY_HOMES = (
+        "Home: `state/` is removed by no sweep. Checked with `grep -rn 'batch-build' janitor/*.py`.",
+        "Home: unmeasured. Nothing in the repo says who removes the log.",
+        "Home: none of the sweeps removes this folder, by design.",
+        "Home: `lint/check_ruling_kind.py` holds the Kind line, not the prose.",
+    )
+    FOOTER = "Kind: process\nHome: merge/merge.py"
+
+    def test_body_home_paragraph_above_the_footer_passes(self):
+        # Red on the current code: the lint reads each body Home line as a second Home field.
+        self.put("merge/merge.py", "# merge\n")
+        for body in self.BODY_HOMES:
+            with self.subTest(body=body):
+                self.put(REC, record(body + "\n\n" + self.FOOTER))
+                rc, out = self.lint(REC)
+                self.assertEqual(rc, 0, "a body paragraph that starts Home: was read as a Home field: " + out)
+
+    def test_body_home_line_does_not_stand_in_for_an_absent_footer_home(self):
+        # Red on the current code: a valid body Home line passes for the footer's missing Home line.
+        self.put("merge/merge.py", "# merge\n")
+        self.put(REC, record("Home: merge/merge.py\n\nKind: process"))
+        rc, out = self.lint(REC)
+        self.assertEqual(rc, 1, "a body Home line stood in for the footer's Home line: " + out)
+        self.assertIn("needs a Home line", out)
+
+    def test_body_home_paragraph_without_a_footer_still_fails(self):
+        # Green control, on the current code and after the fix: a body Home line is no footer.
+        self.put("merge/merge.py", "# merge\n")
+        for body in self.BODY_HOMES + ("Home: merge/merge.py",):
+            with self.subTest(body=body):
+                self.put(REC, record(body))
+                self.assert_fails(REC, "needs exactly one Kind line")
+
+    def test_footer_home_that_is_wrong_or_absent_still_fails(self):
+        # Green control, on the current code and after the fix: the footer's Home decides, body lines do not.
+        self.put("merge/merge.py", "# merge\n")
+        cases = [
+            ("Owner ruling. Process only.\n\nKind: process\nHome: rule:no-such-rule", "no-such-rule"),
+            ("Owner ruling. Process only.\n\nKind: process\nHome: plans/gone.md", "plans/gone.md"),
+            ("Owner ruling. Process only.\n\nKind: process", "needs a Home line"),
+            ("Home: merge/merge.py\n\nKind: process\nHome: rule:no-such-rule", "no-such-rule"),
+        ]
+        for ruling, token in cases:
+            with self.subTest(ruling=ruling):
+                self.put(REC, record(ruling))
+                self.assert_fails(REC, token)
+
     # --rules-file: a Home names a rule that lives in either rules file. Each file is one side:
     # the caller's CLAUDE.md and the claude-settings CLAUDE.md, passed by check.sh.
 
