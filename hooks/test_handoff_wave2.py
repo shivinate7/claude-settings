@@ -83,7 +83,7 @@ from test_precompact_handoff import (  # noqa: E402
 PRECOMPACT = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(
     HERE, "precompact_handoff.py")
 READ_CHECK = os.environ.get("READ_CHECK_UNDER_TEST") or os.path.join(HERE, "reread_check.py")
-GUARD = os.path.join(HERE, "guard.py")
+GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 PROMPT_NAME = os.path.join("hooks", "precompact_handoff_prompt.md")
 
 # Copied verbatim from mods/session-board/hooks/register.mjs (HANDOFF_PY, the .join('\n')).
@@ -135,6 +135,27 @@ def passes(proc):
     """Exit 0 and no block."""
     obj = json_or_none(proc.stdout)
     return proc.returncode == 0 and not (isinstance(obj, dict) and obj.get("decision") == "block")
+
+
+def audit_blocks(proc):
+    """Stop blocked for the compaction audit: the reason names the Audit: remedy, not the re-read."""
+    obj = json_or_none(proc.stdout)
+    reason = str(obj.get("reason", "")) if isinstance(obj, dict) else ""
+    return (proc.returncode == 0 and isinstance(obj, dict) and obj.get("decision") == "block"
+            and "Audit:" in reason and "not re-read" not in reason)
+
+
+def audit_then_pass(c, sid, label):
+    """After a read of the handoff, the next Stop names the Audit: remedy and not the re-read. The
+    session's Audit: spawn is allowed (AUDIT_SPAWN, part 4 below), and the next Stop passes."""
+    stop = c.stop(sid)
+    check("%s clears the re-read flag: the next Stop names the Audit: remedy, not the re-read" % label,
+          audit_blocks(stop), "rc=%r out=%r" % (stop.returncode, tail(stop.stdout)))
+    why = allowed_why(guard_call(c, sid, "Agent", AUDIT_SPAWN))
+    check("%s, then the Audit: spawn is allowed" % label, why == "", why)
+    after = c.stop(sid)
+    check("%s, then the Audit: spawn: the next Stop passes" % label, passes(after),
+          "rc=%r out=%r" % (after.returncode, tail(after.stdout)))
 
 
 def read_allowed(proc):
@@ -683,8 +704,7 @@ def case_read_of_handoff_clears_flag():
             rd = c.read("r-1", spelled)
             check("read by %s: the read is not denied" % label, read_allowed(rd),
                   "rc=%r out=%r" % (rd.returncode, tail(rd.stdout)))
-            check("read by %s clears the flag: the next Stop passes" % label,
-                  passes(c.stop("r-1")), "")
+            audit_then_pass(c, "r-1", "read by %s" % label)
         finally:
             c.cleanup()
 
@@ -731,8 +751,7 @@ def case_agent_read_keeps_flag():
         check("agent reads of the handoff keep the flag: the next Stop blocks",
               blocks(c, stop, "sub-1"), "rc=%r out=%r" % (stop.returncode, tail(stop.stdout)))
         c.read("sub-1", c.handoff("sub-1"))
-        check("the session's own Read after them clears the flag: the next Stop passes",
-              passes(c.stop("sub-1")), "")
+        audit_then_pass(c, "sub-1", "the session's own Read after them")
     finally:
         c.cleanup()
 
@@ -794,8 +813,7 @@ def case_read_by_8dot3_spelling_clears_flag():
             rd = c.read("d-1", spelled)
             check("read by %s name: the read is not denied" % tag, read_allowed(rd),
                   "rc=%r out=%r" % (rd.returncode, tail(rd.stdout)))
-            check("read by %s name clears the flag: the next Stop passes" % tag,
-                  passes(c.stop("d-1")), "rc=%r out=%r" % (rd.returncode, tail(rd.stdout)))
+            audit_then_pass(c, "d-1", "read by %s name" % tag)
         finally:
             c.cleanup()
 
@@ -865,7 +883,7 @@ def _live_pre_read(c):
     if not blocks(c, c.stop("live-1"), "live-1"):
         return False
     c.read("live-1", c.handoff("live-1"))
-    return passes(c.stop("live-1"))
+    return audit_blocks(c.stop("live-1"))
 
 
 def case_bad_stdin_and_live_control_per_mode():
