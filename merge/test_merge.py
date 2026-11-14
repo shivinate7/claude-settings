@@ -13416,6 +13416,9 @@ def bash_rule_matches(rule, command):
     pattern = rule[len("Bash("):-1]
     return re.fullmatch(".*".join(re.escape(part) for part in pattern.split("*")), command) is not None
 
+REVERT_PATH_MERGE_RULE = "Bash(merge * --confirm --head * --base-red-ok *)"  # the one merge rule the repo settings.json may hold
+
+
 class CloudAllow(unittest.TestCase):
     """merge/cloud_allow.json holds the `merge --confirm` and `merge --role` allow rules that only a cloud session's settings.json gets
     (install.sh's cloud branch). A local settings.json is a link to the repo's settings.json and gets none."""
@@ -13498,12 +13501,16 @@ class CloudAllow(unittest.TestCase):
         self.assertNotIn("cloud_allow", local)
         self.assertTrue(local.strip(), "the local branch of the settings step was not found")
 
-    def test_the_repo_settings_json_has_no_merge_allow_rule(self):
+    def test_the_repo_settings_json_has_one_merge_allow_rule_and_no_other(self):
         # The repo's settings.json is what a local session reads (a link to it). Not matched on a bare "merge": `Bash(gh pr merge:*)` is there.
+        # Only the red-main revert path's rule may be here, so a revert merge needs no prompt and every other merge act still does (decision auto-mode-owner-acts).
         with open(os.path.join(REPO_ROOT, "settings.json"), encoding="utf-8") as f:
             allow = json.load(f).get("permissions", {}).get("allow", [])
         self.assertTrue(allow)
+        self.assertIn(REVERT_PATH_MERGE_RULE, allow)
         for rule in allow:
+            if rule == REVERT_PATH_MERGE_RULE:
+                continue
             with self.subTest(rule=rule):
                 for needle in ("merge.py", "bin/merge", "--confirm"):
                     self.assertNotIn(needle, rule)
