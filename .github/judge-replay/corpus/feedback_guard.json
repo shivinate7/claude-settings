@@ -1,0 +1,56 @@
+[
+  {
+    "id": "different-words-same-change",
+    "expect": "deny",
+    "source": "hooks/feedback_guard.py PROMPT (the carousel and wheel example); docs/decisions/owner-feedback-inbox.md (Repeats)",
+    "input": {
+      "new": "Make the wheel on the home page spin faster",
+      "older": [
+        "Make the carousel rotate faster, it feels slow",
+        "Fix the typo on the about page"
+      ],
+      "repeats": 0
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "theme-switcher-is-a-dark-mode-toggle",
+    "expect": "deny",
+    "source": "hooks/feedback_guard.py PROMPT (the carousel and wheel example); docs/decisions/owner-feedback-inbox.md (Repeats)",
+    "input": {
+      "new": "Put a dark mode toggle in the header",
+      "older": [
+        "Add a theme switcher, light and dark, to the top bar",
+        "Rename the repo to something shorter"
+      ],
+      "repeats": 0
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "unrelated-footer-colour",
+    "expect": "allow",
+    "source": "hooks/feedback_guard.py PROMPT (the carousel and wheel example); docs/decisions/owner-feedback-inbox.md (Repeats)",
+    "input": {
+      "new": "Change the footer link colour to green",
+      "older": [
+        "Make the carousel rotate faster",
+        "Add a dark mode toggle"
+      ]
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "same-script-different-change",
+    "expect": "allow",
+    "source": "hooks/feedback_guard.py PROMPT (the carousel and wheel example); docs/decisions/owner-feedback-inbox.md (Repeats)",
+    "input": {
+      "new": "The export script crashes on empty input",
+      "older": [
+        "The export script is slow on big input",
+        "Add a --json flag to the export script"
+      ]
+    },
+    "agreement": "3/3"
+  }
+]

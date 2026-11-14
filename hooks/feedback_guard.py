@@ -132,7 +132,7 @@ Repeats (decision owner-feedback-inbox, "Repeats"): on every Stop, `stop_hook_ac
 guard judges the well-formed, open items, except `[repo]` items (feedback for another repo), whose ids
 the turn state's `judged` list does not hold. A
 state file that predates the key counts every item there as judged. One model call per Stop covers
-all new items (`invoke_model`, model REPEAT_MODEL, REPEAT_TIMEOUT seconds, no effort). The model
+up to REPEAT_BATCH new items, oldest first (`invoke_model`, model REPEAT_MODEL, REPEAT_TIMEOUT seconds, no effort). The model
 compares each item's owner message by meaning with at most REPEAT_MAX candidates (REPEAT_SHARES per
 source) of REPEAT_CUT
 characters: roadmap steps at the local ref (one `git grep`, never fetched), the layout's backlog files
@@ -140,8 +140,14 @@ in the working tree, this inbox's other blocks, and the blocks of the REPEAT_INB
 inboxes whose sidecar `<sid>.inbox.repo` (local_time.bind_repo) names a folder in this repo. A hit
 appends ` repeats <ref>` to the item line (one rewrite of the inbox) and is named in the block reason,
 or in systemMessage when stop_hook_active. No repo means only this inbox's blocks are candidates; no
-candidate means no call. A model error or odd answer marks nothing, adds one systemMessage line, and
-the items still count as judged. The call is the only extra cost: no timer, no new process type.
+candidate means no call. An item with no usable verdict this Stop stays out of `judged`, so the next Stop sends it again.
+Ruling: owner, 10:57 CST Nov 13, Cockpit items 664, 665, 666 (answers repeat-judge-retry, repeat-judge-batch-cap, repeat-judge-mark-split), pick a each.
+It covers the retry at each Stop, the cap of 20 (REPEAT_BATCH), and the check-then-mark split. No usable verdict: a model error, an off-shape answer, a raise
+while judging, or an answer entry that is not an object or names an unknown id or ref. A hit item is
+judged. Another entry's bad part leaves every other sent item unjudged and adds one systemMessage
+line, shown only when such an item remains. Items past REPEAT_BATCH wait for the next Stop. An
+exception while marking, after a verdict, keeps the sent items judged. While items wait that is one
+call per Stop; the prompt holds at most REPEAT_BATCH items. No timer, no new process type.
 Cost per Stop with no new item: none. Files written: the turn state, and the inbox when a hit lands.
 Format: see hooks/test_feedback_inbox.py. Exit 0 always. Any other error goes to stderr and passes.
 """
@@ -1008,6 +1014,7 @@ REPEAT_CUT = 300  # characters of one candidate in the prompt
 REPEAT_MAX = 400  # candidates in the prompt: roadmap, backlog, inbox blocks; open steps and newest first
 REPEAT_SHARES = {"roadmap": 200, "backlog": 100, "inbox": 100}  # per source, so one cannot crowd out the rest
 REPEAT_INBOXES = 50  # other sessions' inboxes read, newest by mtime
+REPEAT_BATCH = 20  # most new items one Stop sends to the judge, oldest first, so one model call stays bounded; the rest wait. Ruling: owner, 10:57 CST Nov 13, Cockpit items 664, 665, 666 (answers repeat-judge-retry, repeat-judge-batch-cap, repeat-judge-mark-split), pick a each
 MESSAGE_CUT = 1000  # characters of one new message in the prompt
 MARK = " repeats "  # appended to an item line, before the ref
 REF_KINDS = ("roadmap", "debt", "todo", "note", "inbox")  # the candidate ref prefixes
@@ -1195,7 +1202,10 @@ def candidates(homes, inbox, blocks, skip):
 
 def judge(homes, inbox, blocks, new):
     """Asks the model once which candidate each new item repeats. Returns ([(item id, ref, label)], why):
-    `why` is None, or the reason the check could not run. Nothing to compare with: ([], None), no call."""
+    `why` is None when the answer held no bad entry, else the reason the check was not whole: a model
+    error, an off-shape answer, or an entry that is not an object, or names an id that is not in `new`, or
+    a ref that is not a candidate. Hits are returned even when `why` is set. Nothing to compare with:
+    ([], None), no call."""
     found = candidates(homes, inbox, blocks, {n for _, n in new})
     if not found:
         return [], None
@@ -1207,15 +1217,17 @@ def judge(homes, inbox, blocks, new):
                                effort=None)
     if err is not None or not isinstance(answer, dict) or not isinstance(answer.get("repeats"), list):
         return [], " ".join(str(err or "odd answer").split())
-    ids, hits = {i for i, _ in new}, {}
+    ids, hits, why = {i for i, _ in new}, {}, None
     for entry in answer["repeats"]:
-        # a non-str id or ref is skipped alone: a list in a set test raises and would cost every hit
+        # a non-str id or ref is a bad entry alone: a list in a set test raises and would cost every hit
         if not isinstance(entry, dict) or not isinstance(entry.get("id"), str) \
                 or not isinstance(entry.get("ref"), str):
-            continue
-        if entry["id"] in ids and entry["ref"] in labels:
+            why = "odd answer entry"
+        elif entry["id"] not in ids or entry["ref"] not in labels:
+            why = "odd answer entry: unknown id or ref"
+        else:
             hits.setdefault(entry["id"], (entry["id"], entry["ref"], labels[entry["ref"]]))
-    return list(hits.values()), None
+    return list(hits.values()), why
 
 
 def mark_items(inbox, blocks, hits):
@@ -1263,18 +1275,30 @@ def not_checked(why):
 
 
 def judge_stop(homes, inbox, blocks, judged):
-    """Judges this Stop's new items and marks the hits on their lines. Returns (flag texts, note):
-    `note` is the systemMessage line when the check could not run, else None. A failure is a note,
-    never a block, and the items still count as judged."""
+    """Judges this Stop's new items and marks the hits on their lines. Returns (flag texts, note, retry):
+    `note` is the systemMessage line when some sent item got no usable verdict, else None. A failure is a
+    note, never a block. `retry` is the ids to keep out of `judged`: the new items past REPEAT_BATCH, and
+    each sent item without a usable verdict. A sent item has one when it has a hit, or when the answer
+    held no bad entry. An exception while judging gives no verdict for any sent item. An exception while
+    marking, after a verdict, keeps the sent items judged. Judging is checked first and marking second, so a
+    judging failure retries and a marking failure does not (ruling: owner, 10:57 CST Nov 13, Cockpit items 664, 665, 666 (answers repeat-judge-retry, repeat-judge-batch-cap, repeat-judge-mark-split), pick a each)."""
     new = [] if judged is None else new_items(blocks, judged)
     if not new:
-        return [], None
+        return [], None, set()
+    sent, later = new[:REPEAT_BATCH], {i for i, _ in new[REPEAT_BATCH:]}
     try:
-        hits, why = judge(homes, inbox, blocks, new)
+        hits, why = judge(homes, inbox, blocks, sent)
+    except Exception as e:
+        return [], not_checked(" ".join(str(e).split()) or type(e).__name__), later | {i for i, _ in sent}
+    try:
         placed = mark_items(inbox, blocks, hits) if hits else set()
     except Exception as e:
-        return [], not_checked(" ".join(str(e).split()) or type(e).__name__)
-    return [flag_text(*h, h[0] in placed) for h in hits], (None if why is None else not_checked(why))
+        return [], not_checked(" ".join(str(e).split()) or type(e).__name__), later
+    flags = [flag_text(*h, h[0] in placed) for h in hits]
+    if why is None:
+        return flags, None, later
+    unjudged = {i for i, _ in sent} - {h[0] for h in hits}
+    return flags, (not_checked(why) if unjudged else None), later | unjudged
 
 
 def _ts(rec):
@@ -1422,8 +1446,9 @@ def inbox_stop(hook):
         if blocks is not None:
             seen, burst, judged = read_state(turns, len(blocks))
             burst = burst_indexes(blocks, seen, burst)
-            flags, note = judge_stop(homes, inbox, blocks, judged)
-            ids = [it[0] for b in blocks for it in map(item, b["items"]) if it is not None and it[2]]
+            flags, note, retry = judge_stop(homes, inbox, blocks, judged)
+            ids = [it[0] for b in blocks for it in map(item, b["items"]) if it is not None and it[2]
+                   and it[0] not in retry]
             write_state(turns, len(blocks), burst, list(dict.fromkeys((judged or []) + ids)))
         if hook.get("stop_hook_active"):
             msg = " ".join(flags + ([note] if note else []))

@@ -1,0 +1,65 @@
+[
+  {
+    "id": "send-opus-judges",
+    "expect": "allow",
+    "source": "hooks/call_judge.py OPUS_ASK_PROMPT, its own examples; docs/decisions/owner-override.md (the Opus word)",
+    "input": {
+      "text": "send opus judges"
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "use-opus-for-the-reviewers",
+    "expect": "allow",
+    "source": "hooks/call_judge.py OPUS_ASK_PROMPT, its own examples; docs/decisions/owner-override.md (the Opus word)",
+    "input": {
+      "text": "use opus for the reviewers"
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "run-opus-builders-now",
+    "expect": "allow",
+    "source": "hooks/call_judge.py OPUS_ASK_PROMPT, its own examples; docs/decisions/owner-override.md (the Opus word)",
+    "input": {
+      "text": "go ahead and run the builders on opus now"
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "maybe-opus",
+    "expect": "deny",
+    "source": "hooks/call_judge.py OPUS_ASK_PROMPT, its own examples; docs/decisions/owner-override.md (the Opus word)",
+    "input": {
+      "text": "maybe opus?"
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "dont-use-opus",
+    "expect": "deny",
+    "source": "hooks/call_judge.py OPUS_ASK_PROMPT, its own examples; docs/decisions/owner-override.md (the Opus word)",
+    "input": {
+      "text": "don't use opus for anything on this one"
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "opus-in-the-past-tense",
+    "expect": "deny",
+    "source": "hooks/call_judge.py OPUS_ASK_PROMPT, its own examples; docs/decisions/owner-override.md (the Opus word)",
+    "input": {
+      "text": "last week I used opus for the builders and it was slow"
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "opus-price-question",
+    "expect": "deny",
+    "source": "hooks/call_judge.py OPUS_ASK_PROMPT, its own examples; docs/decisions/owner-override.md (the Opus word)",
+    "input": {
+      "text": "what does opus cost per run?"
+    },
+    "agreement": "3/3"
+  }
+]

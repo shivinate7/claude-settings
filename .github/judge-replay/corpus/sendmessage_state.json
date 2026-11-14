@@ -1,0 +1,68 @@
+[
+  {
+    "id": "busy-peer-told-the-base-moved",
+    "expect": "allow",
+    "source": "hooks/test_sendmessage_state.py BUSY_FLAG_ROWS (busy judge); hooks/sendmessage_state.py build_prompt",
+    "input": {
+      "judge": "state",
+      "to": "builder-two",
+      "message": "Stop: main was force-pushed a minute ago. Rebase your branch onto origin/main before you push, or your push will be refused."
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "busy-peer-told-a-correction",
+    "expect": "allow",
+    "source": "hooks/test_sendmessage_state.py BUSY_FLAG_ROWS (busy judge)",
+    "input": {
+      "judge": "state",
+      "to": "builder-two",
+      "message": "Correction: the check is python3 hooks/test_x.py, not test_y.py. test_y.py was removed on main."
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "busy-peer-asked-for-progress",
+    "expect": "deny",
+    "source": "hooks/test_sendmessage_state.py BUSY_FLAG_ROWS (busy judge); rule parallelism-no-mid-task-talk",
+    "input": {
+      "judge": "state",
+      "to": "builder-two",
+      "message": "How is it going? Any news yet? Just checking in."
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "busy-peer-sent-chat",
+    "expect": "deny",
+    "source": "hooks/test_sendmessage_state.py BUSY_FLAG_ROWS (busy judge); rule parallelism-no-mid-task-talk",
+    "input": {
+      "judge": "state",
+      "to": "builder-two",
+      "message": "Nice weather today. By the way, I think the new header looks great, what do you think of it?"
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "wording-resume-with-answer",
+    "expect": "allow",
+    "source": "hooks/test_sendmessage_state.py case_wording_judge_denies_any_receiver; hooks/sendmessage_state.py WORDING_PROMPT",
+    "input": {
+      "judge": "wording",
+      "to": "builder-two",
+      "message": "Resume the build of the screen. The owner answered your question: use option b, the cards layout."
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "wording-chat-between-peers",
+    "expect": "deny",
+    "source": "hooks/test_sendmessage_state.py case_wording_judge_denies_any_receiver (message Chat.)",
+    "input": {
+      "judge": "wording",
+      "to": "reviewer-one",
+      "message": "Hey, I was just thinking about lunch. Do you also prefer tabs over spaces? Just chatting."
+    },
+    "agreement": "3/3"
+  }
+]

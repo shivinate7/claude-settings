@@ -1,0 +1,60 @@
+[
+  {
+    "id": "write-record-with-kind-and-home",
+    "expect": "allow",
+    "source": "hooks/prose_judge.py RULES; hooks/test_prose_judge.py case_g (ONE_KIND_RECORD shape); docs/decisions/rulings-declare-kind.md",
+    "input": {
+      "tool": "Write",
+      "file_path": "docs/decisions/job-caps-are-measured.md",
+      "content": "# Job caps are measured\n\n## The ruling\n\nOwner, 2026-11-01: a job cap rises only with a measured figure beside it.\n\nKind: process\nHome: docs/records.md\n"
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "edit-adds-a-measured-line",
+    "expect": "allow",
+    "source": "hooks/prose_judge.py RULES; hooks/test_prose_judge.py case_b_md_edit_calls_model_once_with_rule_and_change",
+    "input": {
+      "tool": "Edit",
+      "file_path": "docs/decisions/ci-job-caps.md",
+      "old_string": "Owner, 2026-11-01: a job cap rises only with a measured figure beside it.",
+      "new_string": "Owner, 2026-11-01: a job cap rises only with a measured figure beside it. The slowest run of the last 30 is the figure."
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "write-record-without-kind",
+    "expect": "deny",
+    "source": "hooks/prose_judge.py RULES; hooks/test_prose_judge.py WRITE_RULE; docs/decisions/rulings-declare-kind.md",
+    "input": {
+      "tool": "Write",
+      "file_path": "docs/decisions/job-caps-are-measured.md",
+      "content": "# Job caps are measured\n\n## The ruling\n\nOwner, 2026-11-01: a job cap rises only with a measured figure beside it.\n"
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "edit-keeps-the-old-ruling-beside-the-new",
+    "expect": "deny",
+    "source": "hooks/prose_judge.py RULES; hooks/test_prose_judge.py COMMON rule; rule speak-rewrite-superseded-in-place",
+    "input": {
+      "tool": "Edit",
+      "file_path": "docs/decisions/ci-job-caps.md",
+      "old_string": "The cap is 10 minutes.",
+      "new_string": "The cap was 10 minutes until Nov 1. Then the owner raised it, and the old ruling stays below for the record.\n\nOld ruling: the cap is 10 minutes.\nNew ruling: the cap is 15 minutes."
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "edit-adds-a-second-ruling-section",
+    "expect": "deny",
+    "source": "hooks/prose_judge.py RULES; hooks/test_prose_judge.py case_g (ADD_NEW); docs/decisions/rulings-declare-kind.md",
+    "input": {
+      "tool": "Edit",
+      "file_path": "docs/decisions/test-strategy-reset.md",
+      "old_string": "## How to write a test that earns its keep",
+      "new_string": "## Where CI runs a suite\n\nOwner, 2026-11-05: each CI job runs only when a file that its suites read changes. This is a new ruling.\n\n## How to write a test that earns its keep"
+    },
+    "agreement": "3/3"
+  }
+]

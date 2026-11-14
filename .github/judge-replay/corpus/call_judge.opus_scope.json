@@ -1,0 +1,54 @@
+[
+  {
+    "id": "context-names-reviewers",
+    "expect": "allow",
+    "source": "hooks/call_judge.py OPUS_SCOPE_PROMPT; docs/decisions/owner-override.md (scope from context, else every role)",
+    "input": {
+      "text": "use opus",
+      "context": [
+        "the reviewers keep missing the same bug",
+        "make the reviewers sharper"
+      ]
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "context-names-builders",
+    "expect": "allow",
+    "source": "hooks/call_judge.py OPUS_SCOPE_PROMPT; docs/decisions/owner-override.md (scope from context, else every role)",
+    "input": {
+      "text": "use opus",
+      "context": [
+        "the builders keep skipping the check",
+        "use a stronger model for the builders"
+      ]
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "context-names-no-role",
+    "expect": "deny",
+    "source": "hooks/call_judge.py OPUS_SCOPE_PROMPT; docs/decisions/owner-override.md (scope from context, else every role)",
+    "input": {
+      "text": "use opus",
+      "context": [
+        "fix the typo in the readme",
+        "what time is it in Chicago"
+      ]
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "context-is-thanks-only",
+    "expect": "deny",
+    "source": "hooks/call_judge.py OPUS_SCOPE_PROMPT; docs/decisions/owner-override.md (scope from context, else every role)",
+    "input": {
+      "text": "use opus",
+      "context": [
+        "merge it",
+        "thanks, that works"
+      ]
+    },
+    "agreement": "3/3"
+  }
+]

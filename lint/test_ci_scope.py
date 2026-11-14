@@ -10,11 +10,13 @@ Output names pinned (the `scope` job re-exports them as job outputs):
   JOB_FLAGS  one per check job except the lint job `checks`: checks_windows, checks_windows_merge,
              checks_windows_rest, checks_macos, shell_macos, pointer_windows
   STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags; shoot turns on the checks-shoot and checks-waiting-page jobs)
+  judge_replay  set apart from ALL (class JudgeReplayFlag): the judge replay job's flag
 
 Run with:  python3 lint/test_ci_scope.py -v
 """
 import ast
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -27,6 +29,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies the script under test into a scratch tree; rm_tree removes the run folder
+import workflow_steps  # noqa: E402  the house parser of a workflow's jobs and steps (lint/workflow_steps.py)
 SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 JOB_FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
 STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
@@ -632,6 +635,132 @@ class ModTestsRunsEveryCheck(unittest.TestCase):
         r = self.run_phase(self.make_tree("red-test", test=self.node_script(1)))
         self.assertIn("mod tests:", r.stdout, "the mod phase printed no count line, so it did not run")
         self.assertNotEqual(r.returncode, 0, "a red *.test.mjs passed the mod phase")
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class JudgeReplayFlag(unittest.TestCase):
+    """The judge_replay output: on a pull request, true when the diff touches a judge's scope, corpus or runner, or the
+    script; true on workflow_dispatch; false on push and schedule."""
+
+    def flag(self, got):
+        self.assertIn("judge_replay", got, got)
+        return got["judge_replay"]
+
+    def test_a_judge_module_change_turns_it_on(self):
+        self.assertEqual(self.flag(run(["hooks/prose_judge.py"])), "true")
+
+    def test_a_docs_only_pull_request_turns_it_off(self):
+        self.assertEqual(self.flag(run(["README.md", "decisions/some-record.md"])), "false")
+
+    def test_push_and_schedule_turn_it_off_even_for_a_judge_change(self):
+        for event in ("push", "schedule"):
+            with self.subTest(event=event):
+                self.assertEqual(self.flag(run(["hooks/prose_judge.py"], event=event)), "false")
+
+    def test_workflow_dispatch_turns_it_on(self):
+        self.assertEqual(self.flag(run(["README.md"], event="workflow_dispatch")), "true")
+
+    def test_scope_script_change_turns_it_on(self):
+        self.assertEqual(self.flag(run([".github/scripts/ci-scope.sh"])), "true")
+
+    def test_shared_names_change_turns_it_on(self):
+        # The spawn and reply prompts take their marker and logins from this file, so a judge reads it.
+        self.assertEqual(self.flag(run(["hooks/shared_names.py"])), "true")
+
+    def test_nowindow_change_turns_it_on(self):
+        # Every judge's model call starts in this file (decision_watch.run calls _nowindow.run), so a change to it replays them.
+        self.assertEqual(self.flag(run(["hooks/_nowindow.py"])), "true")
+
+    def test_a_page_judge_file_change_turns_it_on(self):
+        # hooks/call_judge.py feeds the page judge and its siblings. The page judge has no corpus file yet, and the change still
+        # replays the judges it feeds, so the flag stays on.
+        self.assertEqual(self.flag(run(["hooks/call_judge.py"])), "true")
+
+
+# The judge-replay job of checks.yml, read by the house parser (lint/workflow_steps.py).
+WORKFLOW = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
+SCOPE_CLAUSE = "needs.scope.outputs.judge_replay == 'true'"
+FORK_CLAUSE = "github.event.pull_request.head.repo.fork != true"
+PR_EVENT = "github.event_name == 'pull_request'"
+DISPATCH_EVENT = "github.event_name == 'workflow_dispatch'"
+RUNS_THREE = re.compile(r"(?:^|\s)--runs\s+3(?:\s|$)")
+
+
+def scope_problems(block):
+    """One line per step of the job whose if: drops a condition the replay needs: the scope flag on every step, and the fork
+    skip on each step a pull request can run (its if: names the pull_request event)."""
+    problems = []
+    for step in workflow_steps.step_blocks(block):
+        name = workflow_steps.step_key(step, "name") or workflow_steps.step_key(step, "uses") or "(unnamed step)"
+        cond = workflow_steps.step_key(step, "if") or ""
+        if SCOPE_CLAUSE not in cond:
+            problems.append("%s: its if: drops the scope flag" % name)
+        # A step a pull request can run: its if: requires the pull_request event, or it does not require workflow_dispatch.
+        # The scope flag's own `!= 'pull_request'` is not a requirement, so it does not count.
+        pull_request = PR_EVENT in cond or DISPATCH_EVENT not in cond
+        if pull_request and FORK_CLAUSE not in cond:
+            problems.append("%s: a pull request runs it, and its if: drops the fork skip" % name)
+    return problems
+
+
+class JudgeReplayJob(unittest.TestCase):
+    """The judge-replay job of checks.yml. The CI replay takes three samples per case, so one flipped answer is outvoted.
+    Each step's if: keeps the scope flag, and each step a pull request can run keeps the fork skip."""
+
+    def job(self):
+        with open(WORKFLOW, encoding="utf-8") as f:
+            block = workflow_steps.job_block(f.read(), "judge-replay")
+        self.assertIsNotNone(block, "checks.yml has no judge-replay job")
+        self.assertTrue(workflow_steps.step_blocks(block), "the judge-replay job has no steps")
+        return block
+
+    def runner_steps(self, block, flag):
+        """The run: text of each step that calls the runner with `flag`."""
+        runs = [workflow_steps.step_key(step, "run") or "" for step in workflow_steps.step_blocks(block)]
+        return [run for run in runs if "judge_replay.py %s" % flag in run]
+
+    # Named failure: the CI replay of changed judges reads one sample per case, so one flipped answer decides a case.
+    def test_the_changed_replay_runs_three_samples_per_case(self):
+        steps = self.runner_steps(self.job(), "--changed")
+        self.assertEqual(len(steps), 1, "the judge-replay job has %d --changed replay steps, want 1" % len(steps))
+        self.assertRegex(steps[0], RUNS_THREE, "the --changed replay takes one sample per case: %s" % steps[0])
+
+    # Named failure: the dispatch replay of every judge reads one sample per case.
+    def test_the_dispatch_replay_runs_three_samples_per_case(self):
+        steps = self.runner_steps(self.job(), "--all")
+        self.assertEqual(len(steps), 1, "the judge-replay job has %d --all replay steps, want 1" % len(steps))
+        self.assertRegex(steps[0], RUNS_THREE, "the --all replay takes one sample per case: %s" % steps[0])
+
+    # Named failure: a replay step's if: drops the scope flag, so the step runs on a change that touches no judge.
+    def test_the_real_steps_carry_the_scope_flag_and_the_fork_skip(self):
+        problems = scope_problems(self.job())
+        self.assertFalse(problems, "judge-replay if: conditions: " + "; ".join(problems))
+
+    def replay_step(self, block):
+        hits = [step for step in workflow_steps.step_blocks(block)
+                if "judge_replay.py --changed" in (workflow_steps.step_key(step, "run") or "")]
+        self.assertEqual(len(hits), 1, "no single --changed replay step to mutate")
+        return hits[0]
+
+    # Control: the check goes red on a step whose if: drops the scope flag. The mutant is this text, never a repo file.
+    def test_a_replay_step_without_the_scope_flag_is_named(self):
+        block = self.job()
+        target = self.replay_step(block)
+        mutant = target.replace(SCOPE_CLAUSE + " || ", "")
+        self.assertNotEqual(mutant, target, "the replay step holds no scope flag to drop")
+        problems = scope_problems(block.replace(target, mutant))
+        self.assertEqual(len(problems), 1, "a step without the scope flag: %r" % problems)
+        self.assertIn("Replay the touched judges", problems[0], problems)
+
+    # Control: the check goes red on a pull request step whose if: drops the fork skip.
+    def test_a_pull_request_step_without_the_fork_skip_is_named(self):
+        block = self.job()
+        target = self.replay_step(block)
+        mutant = target.replace(" && " + FORK_CLAUSE, "")
+        self.assertNotEqual(mutant, target, "the replay step holds no fork skip to drop")
+        problems = scope_problems(block.replace(target, mutant))
+        self.assertEqual(len(problems), 1, "a pull request step without the fork skip: %r" % problems)
+        self.assertIn("fork skip", problems[0], problems)
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")

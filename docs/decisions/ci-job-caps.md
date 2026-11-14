@@ -52,6 +52,7 @@ Window: each row names its own. A row marked "window of 2026-11-05" or "window o
 | checks-windows | windows | 30 | 1.2 | 1.6 | 10 | 10 | 16 | 0 | yes |
 | checks-shoot (window of 2026-11-12: newest 29 completed push runs on main, latest attempt of each, run 42522167511 to run 43206612905) | ubuntu | 29 | 3.0 (15th of 29) | 7.9 (run 42700538152, before the waiting page suite moved out); 3.1 or less since run 42826151332 | 10 | 30 (interim, stopgap, owner 12:11 CST Nov 10) | 26 (7.9 of 30) | 0 in window | yes |
 | checks-waiting-page (new, split off checks-shoot; run 42733987294, red) | ubuntu | 1 | 12.7 | 12.7 | none | 60 (provisional) | 21 | 0 | provisional |
+| judge-replay (new) | ubuntu | 0 | none | none | none | 75 (interim, stopgap, owner 12:11 CST Nov 10; `--runs 3`) | unmeasured at 75 (about 11 min projected: 3 x 201 s from one local run of 58 cases at one run per case, scaled to 53 cases, plus 2 min for the install; if every call hung, 3 x 2122 s, about 106 min) | 0 | unmeasured |
 | scope, ci-done | ubuntu | 30, 19 | 0.1 | 0.1 | 5 | 5 | 3 | 1 (scope), run 42317209568, no step started; see the cap-end bullet | yes |
 | lane-touched-tests / touched (new, draft runs only; workflow lane-touched-tests.yml) | ubuntu | 1 | 0.25 | 0.25 (run 42480074302) | none | 5 | 5 | 0 | provisional |
 | lane-touched-tests / run (windows-latest, new, draft runs only) | windows | 4 | unmeasured | 4.7 (run 42487770521, with the ps1 tests) | 60 (provisional) | 10 (provisional) | 47 | 0 | provisional |

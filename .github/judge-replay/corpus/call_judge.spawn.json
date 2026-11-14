@@ -1,0 +1,84 @@
+[
+  {
+    "id": "builder-brief-names-files-and-check",
+    "expect": "allow",
+    "source": "rule roles-brief-contents; hooks/test_call_judge.py spawn_input builder row",
+    "input": {
+      "subagent_type": "builder",
+      "description": "replay case",
+      "prompt": "Build the change named below in your own worktree.\nTask: add a --json flag to hooks/example.py that prints the result as one JSON object.\nFiles: hooks/example.py and its suite hooks/test_example.py; read both first.\nGoverning rulings: decision output-format says a flag never changes the exit code.\nCheck: python3 hooks/test_example.py is green and python3 hooks/example.py --json prints valid JSON.\nReport: Done, Deviations, Input Needed, Next, under 20 lines. Commit and push your branch before you stop.",
+      "model": "sonnet"
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "explore-find-files-on-haiku",
+    "expect": "allow",
+    "source": "hooks/call_judge.py SPAWN_PROMPT, the Explore clause (find files, names or text)",
+    "input": {
+      "subagent_type": "Explore",
+      "description": "replay case",
+      "prompt": "Find every file under hooks/ that contains the text invoke_model and list the paths, one per line. Do not read them for meaning.",
+      "model": "haiku"
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "code-guide-spawn",
+    "expect": "allow",
+    "source": "hooks/call_judge.py SPAWN_PROMPT, the claude-code-guide clause",
+    "input": {
+      "subagent_type": "claude-code-guide",
+      "description": "replay case",
+      "prompt": "How does a PreToolUse hook return a deny decision in Claude Code?"
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "explore-audit-on-haiku",
+    "expect": "deny",
+    "source": "hooks/test_call_judge.py case_explore_row_is_vetoed and spawn_input (Explore, haiku, audit)",
+    "input": {
+      "subagent_type": "Explore",
+      "description": "replay case",
+      "prompt": "Audit the module hooks/prose_judge.py. Review whether each function is correct and rate its risk from 1 to 5. Compare it with hooks/call_judge.py.",
+      "model": "haiku"
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "explore-audit-no-model-field",
+    "expect": "deny",
+    "source": "docs/decisions/agent-model-cap.md, the audit Explore row; hooks/call_judge.py SPAWN_PROMPT",
+    "input": {
+      "subagent_type": "Explore",
+      "description": "replay case",
+      "prompt": "Review whether the three guards agree on the model name and judge which one is right."
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "lane-told-to-post-a-page-item",
+    "expect": "deny",
+    "source": "hooks/test_call_judge.py case_spawn_prompt_bars_a_lane_waiting_page_write; rule questions-go-to-owner",
+    "input": {
+      "subagent_type": "builder",
+      "description": "replay case",
+      "prompt": "Build the screen in hooks/screen.py and its suite hooks/test_screen.py. Governing ruling: decision screen-layout. Check: python3 hooks/test_screen.py is green. If you have a question for the owner, post an item on the waiting page with its options and a pick, and wait there for his answer before you go on. Commit and push your branch before you stop, and report in under 20 lines.",
+      "model": "sonnet"
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "builder-brief-pastes-code",
+    "expect": "deny",
+    "source": "rules roles-brief-contents and tokens-point-brief-at-files; hooks/test_call_judge.py case_agent_refusal",
+    "input": {
+      "subagent_type": "builder",
+      "description": "replay case",
+      "prompt": "Fix the bug in this function and make it pass.\n\n```python\ndef total(rows):\n    out = 0\n    for r in rows:\n        out += r['n']\n    return out\n\ndef average(rows):\n    return total(rows) / len(rows)\n\ndef spread(rows):\n    low = min(r['n'] for r in rows)\n    high = max(r['n'] for r in rows)\n    return high - low\n\ndef report(rows):\n    return {'total': total(rows), 'average': average(rows), 'spread': spread(rows)}\n```\n\nThe rows come from the loader and the report goes to the screen. Make the edit, run whatever you think is needed, and tell me when you are done. Take whatever time you need and fix anything else you notice on the way.",
+      "model": "sonnet"
+    },
+    "agreement": "3/3"
+  }
+]
