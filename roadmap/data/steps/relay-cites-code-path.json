@@ -1,0 +1,14 @@
+{
+ "id": "relay-cites-code-path",
+ "title": "A relayed root cause names the code line that acts, not a message string",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Consultant 01:46 CST Nov 14 (relayed): it relayed a root cause (the merge-tool batch brake) from a cite string without reading the code path; the coordinator found merge.py:1658 says the opposite (see merge-brake-text-stale). The refusal text and BATCH_CITE still said the brake held; the code no longer enforced it.",
+ "source": "Consultant 01:46 CST Nov 14 (relayed). Same family: act-claims-read-back (unstarted: a claim about an act is read back), the triage readings corrected on Nov 13 to 14 (#3279, the shard-order fix). A text string is a claim, not the code.",
+ "note": "Triage 01:53 CST Nov 14: the consultant names the step for itself. The mistake: a cause taken from a message the code prints, not from the line that decides. The guard that would have stopped it: a report that names a cause names the file and line that acts, or says \"text only, code unread\". Not built, not queued beyond this step; the consultant owns the design. Not started.",
+ "updatedAt": "2026-11-14T01:53:00-06:00"
+}
