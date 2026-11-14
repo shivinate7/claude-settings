@@ -1,0 +1,14 @@
+{
+ "id": "test-author-try-3-model",
+ "title": "A test-author spawned on a builder's round 3 of 3 runs the model its row says, so the table either names a step-up or says it stays on Haiku",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 00:51 CST Nov 14 (relayed from batch runner 12): on ios-adblock #167 round 3 the builder was refused by the test-edit guard, a test-author agent wrote the test, and its trailers show Haiku.",
+ "source": "Coordinator message 00:51 CST Nov 14 (relayed; unread by the coordinator beyond the runner's message). Triage read docs/decisions/agent-model-cap.md on the stable checkout /root/claude-settings-main: row \"test-author | haiku | xhigh\"; the only try-3 row is the builder's (\"builder, try 3 after a FAIL at review round 2 | opus\"); line 12 names a builder's `Round 3 of 3` as the Opus cover. No past ruling or step on a test-author at round 3 (searched rulings and steps for test-author with third, try 3, round 3, opus).",
+ "note": "Triage 00:53 CST Nov 14: by the table this is correct, not a spawn-path bug: a test-author stays on Haiku at every round; only the builder steps up. Whether a test-author at round 3 should run Sonnet (the ceiling) or Opus is policy, and Opus needs the owner's grant. Nothing is blocked by it (the #167 round runs). Parked as todo, no lane, no owner question yet; it becomes one when a round-3 test-author on Haiku causes a measured miss, or at the next table review. Unchecked by triage: the #167 trailers.",
+ "updatedAt": "2026-11-14T00:53:10-06:00"
+}
