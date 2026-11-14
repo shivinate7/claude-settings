@@ -7,6 +7,7 @@ Every case runs against a config directory of its own under the run folder (CLAU
 The reader fails closed: each id, file or role that does not prove a role gives None. A refused os.replace writes no role and
 leaves no temporary file. The folder is a pathlib path under the config directory.
 """
+import ast
 import json
 import os
 import io
@@ -281,6 +282,16 @@ class MergeRoleFault(SessionRoleCase):
                 self.fail("a role reader that raised crashed the merge's role read: %r" % (e,))
         self.assertTrue(reader.called, "the role read never reached the local role reader, so the case proved nothing")
         self.assertIsNone(role, "a role reader that raised gave the merge a role")
+
+
+class ModuleDocstring(unittest.TestCase):
+    def test_the_docstring_does_not_say_claude_cannot_write_the_folder(self):
+        # A doc claim that the guard backs, not the module: the docstring must not state it, since the guard's rules can change.
+        with open(session_role.__file__, encoding="utf-8") as handle:
+            doc = ast.get_docstring(ast.parse(handle.read())) or ""
+        self.assertTrue(doc, "session_role.py has no module docstring, so the claim check reads nothing")
+        self.assertNotIn("Claude cannot write the folder", doc,
+                         "session_role.py's module docstring says Claude cannot write the folder")
 
 
 if __name__ == "__main__":
