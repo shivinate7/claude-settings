@@ -4587,8 +4587,9 @@ def priority_order_check(source, n, info, h, repo_dir=None):
     row's pull request or branch. A row that reads flag, waiting, done or unknown never blocks, and its line is printed so a lower pull request that
     goes says why; an unread row is unknown, never clear. A failed read of a well-formed row stays unknown because a network blip must not stop every
     merge. A FILE the reader cannot use refuses, because the runner fixes it locally: an empty or missing FILE, a FILE with no `priority:` row, and a
-    malformed row (see priority_format), which is named by its slug and its pr. No override and no lifting flag. When N is itself a row the other rows
-    are not read. Cost: the reads priority_judge makes, none when N is itself a row or a row is malformed, plus at most one short `git rev-parse` per run (`priority_here`), plus at most one per branch row with no open pull request whose newest closed pull request merged into main (`priority_closed_branch`); no timer, lock or file write."""
+    malformed row (see priority_format). The refusal names each malformed row by its slug (a line that is no priority row, by its first 60 characters)
+    and names its pr only when the pr is the defect: a two-target row, or an empty branch or repo value, names none. No override and no lifting flag.
+    When N is itself a row the other rows are not read. Cost: the reads priority_judge makes, none when N is itself a row or a row is malformed, plus at most one short `git rev-parse` per run (`priority_here`), plus at most one per branch row with no open pull request whose newest closed pull request merged into main (`priority_closed_branch`); no timer, lock or file write."""
     rows, why = priority_text(source)
     if not rows:
         raise Stop(f"--priority-rows could not read {source}: {why}. Nothing was checked; this is not clear. Nothing was merged. {PRIORITY_CITE}" if why
