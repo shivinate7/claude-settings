@@ -1339,10 +1339,6 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_now_central.py
 
-      - name: Unknown-read contract (guard + session_start)
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
-        run: python3 lint/check_unknown_reads_contract.py
-
       # The suite's own watchdog (actions/stamp/suite_watchdog.mjs) ends it at 180 s; the slowest normal
       # run took 102 s (run 42456407663). A hang reads red there, with the hung test named, and its process
       # tree killed. A process the suite started and left running reads red too, killed and named with its

@@ -228,7 +228,6 @@ MACOS_SUITES = {
     "python3 hooks/test_guard_load_os.py": (MAC_CODE, None),
     "python3 lint/test_rm_shim.py": (MAC_CODE, None),
     "python3 lint/test_hook_platform_exit.py": (MAC_CODE, None),
-    "python3 lint/check_unknown_reads_contract.py": (MAC_CODE, None),
     "python3 janitor/test_sweep.py": (MAC_CODE, None),
     "python3 janitor/mutate_sweep.py": (MAC_SWEEP, None),
     "python3 hooks/test_config_watch.py": (MAC_OWN, None),
@@ -1509,42 +1508,27 @@ class SplitJobs(unittest.TestCase):
                     with self.subTest(defect=label):
                         self.assertTrue(macos_split_problems(text), label)
 
-    def test_the_unknown_reads_check_runs_once_in_each_split(self):
-        # Named failure: check_unknown_reads_contract.py runs twice, or not at all, in a split, and no case notices.
-        # Rows: a copy in checks-macos-b, a drop from checks-macos, and a drop from checks (Linux).
-        mac_step = ("      - name: Unknown-read contract (guard + session_start)\n"
-                    "        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}\n"
-                    "        run: python3 lint/check_unknown_reads_contract.py\n")
+    def test_the_unknown_reads_lint_runs_on_linux_only(self):
+        # Named failure: a pure lint runs on Windows or macOS too (decision test-strategy-reset: pure lints run on ubuntu
+        # only), so each batch pays for runs of a check Linux already proves, and macOS is the scarce runner.
+        def other_os_runs(text):
+            return {n: [st for st in step_blocks(job_block(text, n)) if "check_unknown_reads_contract" in (run_body(st) or "")]
+                    for n, j in all_jobs(text).items() if j["os"] != "ubuntu-latest"}
+
         linux_step = ("      - name: Unknown-read contract (guard + session_start)\n"
                       "        if: ${{ needs.scope.outputs.code == 'true' }}\n"
                       "        run: python3 lint/check_unknown_reads_contract.py\n")
-        self.assertIn(mac_step, self.text)  # the fixture: checks-macos runs the check
-        self.assertIn(linux_step, self.text)  # the fixture: checks runs the check
-        self.assertIn("  checks-macos-b:\n", self.text)
-        head, sep, tail = self.text.partition("  checks-macos-b:\n")
-        copied = head + sep + tail.replace("    steps:\n", "    steps:\n" + mac_step, 1)
-        cases = {
-            "a copy in checks-macos-b": (copied, macos_split_problems),
-            "the check dropped from checks-macos": (self.text.replace(mac_step, "", 1), macos_split_problems),
-            "the check dropped from checks (Linux)": (self.text.replace(linux_step, "", 1), linux_split_problems),
-        }
-        for label, (text, check) in cases.items():
-            with self.subTest(defect=label):
-                self.assertTrue([p for p in check(text) if "check_unknown_reads_contract" in p], label)
-
-    def test_the_unknown_reads_lint_never_runs_on_windows(self):
-        # Named failure: a pure lint runs on Windows too (decision test-strategy-reset: pure lints run on ubuntu only),
-        # so each batch pays for a Windows run of a check Linux already proves.
-        def windows_runs(text):
-            return {n: [st for st in step_blocks(job_block(text, n)) if "check_unknown_reads_contract" in (run_body(st) or "")]
-                    for n in windows_jobs(text)}
-
-        self.assertEqual({n: r for n, r in windows_runs(self.text).items() if r}, {})
-        # The checker sees the step in a block scalar, which a header-only read of `run:` misses.
+        self.assertIn(linux_step, self.text)  # the fixture: checks (Linux) runs the check
+        self.assertEqual({n: r for n, r in other_os_runs(self.text).items() if r}, {})
+        self.assertTrue([p for p in linux_split_problems(self.text.replace(linux_step, "", 1)) if "check_unknown_reads_contract" in p],
+                        "the check dropped from checks (Linux) went unseen")
+        # The checker sees a step in a block scalar, which a header-only read of `run:` misses.
         block = ("      - name: Unknown-read contract\n        run: |\n          python lint/check_unknown_reads_contract.py\n")
-        head, sep, tail = self.text.partition("  checks-windows-rest:\n")
-        mutant = head + sep + tail.replace("    steps:\n", "    steps:\n" + block, 1)
-        self.assertTrue([n for n, r in windows_runs(mutant).items() if r], "a block-scalar run in a Windows job went unseen")
+        for job in ("checks-windows-rest", "checks-macos"):
+            with self.subTest(job=job):
+                head, sep, tail = self.text.partition(f"  {job}:\n")
+                mutant = head + sep + tail.replace("    steps:\n", "    steps:\n" + block, 1)
+                self.assertTrue([n for n, r in other_os_runs(mutant).items() if r], "a block-scalar run in a non-Linux job went unseen")
 
     def test_the_linux_guard_runs_in_its_two_shard_jobs(self):
         # Named failure: the guard suite runs in one Linux job, or in a third, or in neither, so its cases do not each run once.
