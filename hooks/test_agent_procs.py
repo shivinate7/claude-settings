@@ -12,7 +12,9 @@ cases are in tests/guard/s71834-agent-owned-kill.py, and the simulator lease cas
 (class LeaseRecord). This file holds the cases that need the new module's own functions: the Office adapter and the
 visible-window rule, which take injected process lists so they run on Linux. Those cases have no entry point on the
 base, so they FAIL there on `hooks/agent_procs.py does not exist yet`. That failure is not a red (test-practices P3);
-the post-build mutant is what proves them.
+the post-build mutant is what proves them. The kill check's in-process cases (its start and marker reads patched, and the
+kill verbs `taskkill` and `Stop-Process`) are in classes KillCheckWithoutReads and KillVerbs below: a guard case runs the
+hook as a subprocess, so it cannot patch a read.
 
 The cost case is a control: it passes on the base, because the recording adds nothing to the tool-call path today.
 It pins the stated number, zero process starts, so a recording that starts a process there fails it.
@@ -21,14 +23,19 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import stall_watch  # noqa: E402  the tool-call path the cost pin counts (hooks/stall_watch.py)
+import guard_kill  # noqa: E402  the kill guard's agent check, read in-process (hooks/guard_kill.py)
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 
 try:
     import agent_procs  # noqa: E402  the one home of the per-agent record (hooks/agent_procs.py); absent on the base
@@ -36,12 +43,30 @@ except ImportError:
     agent_procs = None
 
 AGENT = "5c0a1e7d93b2f4860"  # 17 hex characters, the id the marker carries
+OTHER = "b71f3d0c2a9e56847"  # 17 hex characters, a second agent
+MARKER_NAMES = ("CLAUDE_AGENT_ID", "CLAUDE_CODE_SESSION_ID")
 OFFICE_IMAGES = ("EXCEL.EXE", "POWERPNT.EXE", "WINWORD.EXE")
+RUN_FOLDER = None  # the run folder of this run (test-temp-standard); every case's folder is inside it
 
 
 def need_module(case):
     """Fail the case with the one named cause when the module is not there yet."""
     case.assertIsNotNone(agent_procs, "hooks/agent_procs.py does not exist yet: no Office adapter, no visible-window rule")
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)
+
+
+def stop_child(child):
+    """Kill CHILD and reap it. A case's cleanup: the child may have exited already."""
+    child.kill()
+    child.wait(timeout=10)
 
 
 class OfficeAdapter(unittest.TestCase):
@@ -108,6 +133,91 @@ class ToolCallPathCost(unittest.TestCase):
         command = json.loads(out.getvalue())["hookSpecificOutput"]["updatedInput"]["command"]
         self.assertIn("export CLAUDE_AGENT_ID=" + AGENT, command, "scope: the call was not marked with the agent id")
         self.assertEqual(starts, [], "the tool-call path started %d process(es): %r" % (len(starts), starts))
+
+
+class KillCheckBase(unittest.TestCase):
+    """The kill check's in-process cases. Each case has its own record folder under the run folder, named by
+    CLAUDE_AGENT_PROCS_DIR, and one sleeping child with no agent marker: the pid the record names."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.folder, True)
+        patch = mock.patch.dict(os.environ, {"CLAUDE_AGENT_PROCS_DIR": os.path.join(self.folder, "agent-procs")})
+        patch.start()
+        self.addCleanup(patch.stop)
+        env = {k: v for k, v in os.environ.items() if k not in MARKER_NAMES}
+        self.child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=self.folder, env=env,
+                                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(stop_child, self.child)
+
+    def record(self, agent, start):
+        """AGENT's record names the child with START as its start (None when the start cannot be read)."""
+        self.assertTrue(agent_procs.write_record(agent, {"procs": [
+            {"pid": self.child.pid, "start": start, "owner": agent, "kind": "background"}]}), "scope: no record written")
+
+    def reads_fail(self):
+        """Both reads the kill check makes answer None: the process start ticks and the marker."""
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.object(agent_procs, "start_ticks", return_value=None))
+        stack.enter_context(mock.patch.object(guard_kill, "entry_value", None))
+        return stack
+
+
+class KillCheckWithoutReads(KillCheckBase):
+    """Finding 3: the start ticks and the marker both read None, and another agent's record lists the pid. The kill is
+    refused for the calling agent, because the record names its owner. The two controls answer under the same reads: a
+    pid recorded to the caller, and a pid in no record, are both allowed."""
+
+    def test_a_pid_another_agent_records_is_refused_when_the_start_and_marker_reads_fail(self):
+        self.record(OTHER, None)
+        self.assertTrue(any(e.get("pid") == self.child.pid for e in agent_procs.read_record(OTHER)["procs"]),
+                        "scope: the other agent's record does not list pid %d" % self.child.pid)
+        with self.reads_fail():
+            self.assertIsNone(agent_procs.start_ticks(self.child.pid), "scope: the start ticks still read")
+            answer = guard_kill.agent_pid_kill(["kill", str(self.child.pid)], AGENT)
+        self.assertEqual(answer, str(self.child.pid),
+                         "the kill of pid %d, recorded to another agent, was allowed with no start and no marker read"
+                         % self.child.pid)
+
+    def test_control_a_pid_recorded_to_the_caller_is_allowed_under_the_same_reads(self):
+        self.record(AGENT, None)
+        with self.reads_fail():
+            answer = guard_kill.agent_pid_kill(["kill", str(self.child.pid)], AGENT)
+        self.assertEqual(answer, "", "control: the kill of pid %d, recorded to the calling agent, was refused"
+                         % self.child.pid)
+
+    def test_control_a_pid_in_no_record_is_allowed_under_the_same_reads(self):
+        self.assertEqual(agent_procs.all_records(), {}, "scope: a record lists pid %d" % self.child.pid)
+        with self.reads_fail():
+            answer = guard_kill.agent_pid_kill(["kill", str(self.child.pid)], AGENT)
+        self.assertEqual(answer, "", "control: a pid in no record was refused under the failed reads")
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "the record's start ticks are read from /proc, which only Linux has")
+class KillVerbs(KillCheckBase):
+    """Finding 4: `taskkill /PID <n>` and `Stop-Process -Id <n>` reach the same agent check as `kill <n>`. The pid is
+    another agent's: its record lists it with its start ticks, which read here."""
+
+    def setUp(self):
+        super().setUp()
+        self.record(OTHER, agent_procs.start_ticks(self.child.pid))
+        self.assertEqual(agent_procs.held_by_others(self.child.pid, AGENT), [OTHER],
+                         "scope: the record does not name pid %d to the other agent" % self.child.pid)
+
+    def test_control_kill_by_pid_of_another_agents_pid_is_refused(self):
+        answer = guard_kill.agent_pid_kill(["kill", str(self.child.pid)], AGENT)
+        self.assertEqual(answer, str(self.child.pid), "control: kill of pid %d, recorded to another agent, was allowed"
+                         % self.child.pid)
+
+    def test_taskkill_by_pid_of_another_agents_pid_is_refused(self):
+        answer = guard_kill.agent_pid_kill(["taskkill", "/PID", str(self.child.pid)], AGENT)
+        self.assertEqual(answer, str(self.child.pid), "taskkill /PID of pid %d, recorded to another agent, was allowed"
+                         % self.child.pid)
+
+    def test_stop_process_by_id_of_another_agents_pid_is_refused(self):
+        answer = guard_kill.agent_pid_kill(["Stop-Process", "-Id", str(self.child.pid)], AGENT)
+        self.assertEqual(answer, str(self.child.pid), "Stop-Process -Id of pid %d, recorded to another agent, was allowed"
+                         % self.child.pid)
 
 
 if __name__ == "__main__":
