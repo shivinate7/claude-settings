@@ -232,15 +232,23 @@ class ClearRuleNightly(unittest.TestCase):
 
 
 class EmptyRun(unittest.TestCase):
-    """clear_rule.empty_without_evidence: a green run of the push group that ran no suite job and carries no evidence is no verdict."""
+    """clear_rule.empty_without_evidence: a green run of the push group that ran no suite job is passed over, with or without push-skip evidence
+    (owner ruling own-812-a-judge-suite-runs: only the runs that ran their suites are judged)."""
     EMPTY = [job("push-skip", "success"), job("scope", "success"), job("checks", "skipped"), job("checks-macos", "skipped")]
     EVIDENCE = [job("push-skip", "success"), job("scope", "skipped"), job("checks", "skipped"), job("checks-macos", "skipped")]
 
     def test_a_push_run_with_every_suite_job_skipped_and_scope_run_is_empty(self):
         self.assertTrue(clear_rule.empty_without_evidence(self.EMPTY, PUSH))
 
-    def test_a_push_run_whose_push_skip_succeeded_and_scope_was_skipped_carries_evidence(self):
-        self.assertFalse(clear_rule.empty_without_evidence(self.EVIDENCE, PUSH))
+    def test_a_push_run_that_skipped_its_suites_is_empty_even_when_push_skip_passed_and_scope_was_skipped(self):
+        # push-skip passing is no cover for the push: with every suite job skipped the run ran no suite, so it is passed over
+        self.assertTrue(clear_rule.empty_without_evidence(self.EVIDENCE, PUSH),
+                        "a push run that skipped every suite job reads as a verdict because push-skip passed and scope was skipped")
+
+    def test_a_full_size_push_skip_run_with_forty_suite_jobs_skipped_is_empty(self):
+        shape = [job("nightly-skip", "success"), job("push-skip", "success"), job("scope", "skipped")] + [job(f"job-{i:02d}", "skipped") for i in range(40)]
+        self.assertTrue(clear_rule.empty_without_evidence(shape, PUSH),
+                        "a full-size push-skip run with every suite job skipped reads as a verdict")
 
     def test_a_dispatch_run_never_carries_evidence_even_with_jobs_shaped_like_it(self):
         self.assertTrue(clear_rule.empty_without_evidence(self.EVIDENCE, "workflow_dispatch"))
