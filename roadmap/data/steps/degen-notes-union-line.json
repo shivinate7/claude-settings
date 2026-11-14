@@ -1,0 +1,14 @@
+{
+ "id": "degen-notes-union-line",
+ "title": "Degen's .gitattributes gets `docs/debts/notes.md merge=union`, in one small PR, after a check that its notes file is append-only",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 01:50 CST Nov 14 (relayed; the consultant relays the owner's paste, unread by triage): degen's debt notes file conflicts on every PR; the ask is one .gitattributes line. Tracker: runner 11. Path ALONE, one small PR. Triage read the claude-settings pattern in the checkout at /root/claude-settings-main (branch stable, refreshed at session start): .gitattributes there carries `docs/debts/notes.md merge=union` under the comment \"Debt notes merge by union (decision notes-merge-union). Only this path: records.md and catalog.md are generated\", and lint/test_notes_union_merge.py exists. So the line is a known pattern here, not new. (The coordinator's 01:42 read, \"main's .gitattributes has no such line\", may have read a different branch; unreconciled.)",
+ "source": "Revival caution (step notes-union-batch-revival, ready): union keeps a line when one side kept it, so a row one lane deletes comes back when another lane appends next to it (sightings Nov 8: #1852, #2199, #1471; 9 duplicate keys on main). It applies only where a lane or a batch DELETES or MOVES rows. A notes file that lanes only append to has no deletion to revive, so the caution does not apply to it; claude-settings' file gets deletions (batches retire rows), so it does. Whether degen's notes file ever gets a deletion or a move is unread. Mitigation that exists: step notes-slug-unique (ready, claude-settings: refuses a duplicate slug). Neighbour: notes-union-gitattributes (the shared scaffold side, ready).",
+ "note": "Triage 01:52 CST Nov 14: first check, in degen: read `git log -p --follow docs/debts/notes.md` for any deleted or moved row (a count with its sample), and whether a duplicate-slug check runs there. If none: add the one line (and a test that pins it, as lint/test_notes_union_merge.py does here), one small PR, path ALONE, tracker runner 11, hand in as a draft (grant Lane draft PR; only the batch runner marks ready). If rows are deleted or moved there: state it in the PR and name the revival cost (decision notes-merge-union) so the owner's paste is met knowingly; no owner question unless the lane finds deletions. The coordinator starts the lane when this reads ready.",
+ "updatedAt": "2026-11-14T01:52:00-06:00"
+}
