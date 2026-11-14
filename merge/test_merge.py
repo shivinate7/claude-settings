@@ -5162,6 +5162,7 @@ class GhHalf(Env):
 
 # Run ids on one head: a concurrency-cancelled run, the newer run of the same workflow, and a run of another workflow.
 OLD_RUN, NEW_RUN, CI_RUN = 41368432206, 41368432483, 41368432300
+MID_RUN = 41368432350  # a run of the same workflow between OLD_RUN and NEW_RUN
 
 def job_link(run, job):
     """A check run's details_url as GitHub writes it: the id of the run is in the link."""
@@ -5169,8 +5170,11 @@ def job_link(run, job):
 
 class SupersededRuns(Env):
     """A cancelled run of a workflow is superseded when a newer run of that same workflow (a larger run id) is on the head. Host.checks
-    drops that run's check rows, so every caller judges the head by the newer run. Never dropped: a row with no run link, a commit status,
-    a failed run, a cancelled run with no newer run of its workflow, and every row when the runs read fails or lists no such run.
+    drops that run's check rows, so every caller judges the head by the newer run. A failed or cancelled run's fail or timeout row drops
+    too when the newest run of its workflow that has a row of that check name passed or is pending. Never dropped: a row with no run link,
+    a commit status, a fail or timeout row whose newest same-name run is red or skipped, or is not listed by the runs read, a fail or
+    timeout row with no newer run of its workflow that has that check name, a cancelled run with no newer run of its workflow, and every
+    row when the runs read fails or lists no such run.
     Fixtures run through checks() then classify, and through head_read and head_state, with the fake's runs_seq as the workflow runs.
     Not a GhHalf subclass: the GhHalf tests must not run twice."""
     set, calls, gh_host, go = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go
@@ -5248,17 +5252,121 @@ class SupersededRuns(Env):
         self.assertNotIn("unit", detail)
         self.assertEqual(self.gh_host(required=["lint"]).head_state(7), "pending: lint")
 
-    def test_an_older_failed_run_beside_a_newer_green_run_is_refused(self):
-        # Only a cancelled run is superseded. A failed run's job stays red beside the newer run's pass.
+    def test_an_older_failed_run_beside_a_newer_green_run_is_green(self):
+        # A failed run is superseded like a cancelled one: the newer run of its workflow passed the same check, so the old red row drops.
         self.head_rows(
             [("lint", "fail", job_link(OLD_RUN, 101)), ("lint", "pass", job_link(NEW_RUN, 201))],
             [("checks", "completed", "success", NEW_RUN), ("checks", "completed", "failure", OLD_RUN)])
+        self.assertEqual(self.judged(["lint"]), ([], []))
+        rc, out = self.go(required=["lint"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+
+    def test_two_failed_runs_of_milestone_proof_beside_a_newer_green_run_are_green(self):
+        # The incident: "milestone-proof (suite)" failed in two older runs, and the newest run passed it.
+        name = "milestone-proof (suite)"
+        self.head_rows(
+            [(name, "fail", job_link(OLD_RUN, 101)), (name, "fail", job_link(MID_RUN, 151)), (name, "pass", job_link(NEW_RUN, 201))],
+            [("checks", "completed", "success", NEW_RUN), ("checks", "completed", "failure", MID_RUN), ("checks", "completed", "failure", OLD_RUN)])
+        self.assertEqual(self.judged([name]), ([], []))
+        rc, out = self.go(required=[name])
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
+
+    def test_a_failed_newest_run_is_refused_when_an_older_run_passed_the_check(self):
+        # The newest run decides. A pass in a run between two failures does not clear the newest run's failure.
+        self.head_rows(
+            [("lint", "fail", job_link(OLD_RUN, 101)), ("lint", "pass", job_link(MID_RUN, 151)), ("lint", "fail", job_link(NEW_RUN, 201))],
+            [("checks", "completed", "failure", NEW_RUN), ("checks", "completed", "success", MID_RUN), ("checks", "completed", "failure", OLD_RUN)])
         red, _ = self.judged(["lint"])
         self.assertTrue(any(r.startswith("lint: fail") for r in red), red)
         rc, out = self.go(required=["lint"])
         self.assertEqual(rc, 1, out)
         self.assertIn("a check is red: lint: fail", out)
         self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_newest_run_failed_row_beside_its_own_pass_of_the_same_name_is_refused(self):
+        # The newest run's pass row must not clear that run's own failure. Only the older run's red row may drop.
+        self.head_rows(
+            [("test", "fail", job_link(OLD_RUN, 101)), ("test", "pass", job_link(NEW_RUN, 201)), ("test", "fail", job_link(NEW_RUN, 202))],
+            [("checks", "completed", "failure", NEW_RUN), ("checks", "completed", "failure", OLD_RUN)])
+        self.assertEqual([r["databaseId"] for r in self.gh_host().runs(self.head())], [NEW_RUN, OLD_RUN], "the runs read's list")  # scope first
+        red, _ = self.judged(["test"])
+        self.assertTrue(any(r.startswith("test: fail") for r in red), red)
+        rc, out = self.go(required=["test"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is red: test: fail", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_an_older_failed_run_beside_a_newer_pending_run_is_pending(self):
+        # The newer run holds the wait, so the older run's failure is not red.
+        self.head_rows(
+            [("lint", "fail", job_link(OLD_RUN, 101)), ("lint", "pending", job_link(NEW_RUN, 201))],
+            [("checks", "in_progress", "", NEW_RUN), ("checks", "completed", "failure", OLD_RUN)])
+        red, _ = self.judged(["lint"])
+        self.assertEqual(red, [], "the older run's failure is not red beside the newer run's pending row")
+        verdict, detail = self.gh_host().head_read(7)
+        self.assertEqual(verdict, "pending", detail)
+        self.assertIn("lint", detail)
+        self.assertEqual(self.gh_host(required=["lint"]).head_state(7), "pending: lint")
+
+    def test_a_check_with_only_failed_runs_is_refused(self):
+        # Two failed runs and no green run: neither run's failure is superseded.
+        self.head_rows(
+            [("lint", "fail", job_link(OLD_RUN, 101)), ("lint", "fail", job_link(NEW_RUN, 201))],
+            [("checks", "completed", "failure", NEW_RUN), ("checks", "completed", "failure", OLD_RUN)])
+        red, _ = self.judged(["lint"])
+        self.assertTrue(any(r.startswith("lint: fail") for r in red), red)
+        rc, out = self.go(required=["lint"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is red: lint: fail", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_failed_run_of_another_workflow_with_the_same_check_name_stays_red(self):
+        # Workflows 7 and 8 both name their run "checks". The newer run is workflow 8's, so it does not supersede workflow 7's failed run.
+        self.head_rows(
+            [("lint", "fail", job_link(OLD_RUN, 101)), ("lint", "pass", job_link(NEW_RUN, 201)), ("unit", "pass", job_link(NEW_RUN, 202))],
+            [("checks", "completed", "success", NEW_RUN, 8), ("checks", "completed", "failure", OLD_RUN, 7)])
+        red, _ = self.judged(["lint", "unit"])
+        self.assertTrue(any(r.startswith("lint: fail") for r in red), red)
+        rc, out = self.go(required=["lint", "unit"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is red: lint: fail", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_failed_run_with_no_newer_row_of_its_check_name_is_refused(self):
+        # The newer run must carry a passing or pending row of the name, and the runs read must list that run. Each shape is refused.
+        two_runs = [("checks", "completed", "success", NEW_RUN), ("checks", "completed", "failure", OLD_RUN)]
+        cases = {
+            "the newer run has no row of the name": ([("lint", "fail", job_link(OLD_RUN, 101)), ("unit", "pass", job_link(NEW_RUN, 202))], two_runs, [NEW_RUN, OLD_RUN]),
+            "the newer run skipped the name": ([("lint", "fail", job_link(OLD_RUN, 101)), ("lint", "skipping", job_link(NEW_RUN, 201)),
+                                                ("unit", "pass", job_link(NEW_RUN, 202))], two_runs, [NEW_RUN, OLD_RUN]),
+            "the runs read does not list the newer run": ([("lint", "fail", job_link(OLD_RUN, 101)), ("lint", "pass", job_link(NEW_RUN, 201))],
+                                                          [("checks", "completed", "failure", OLD_RUN)], [OLD_RUN]),
+        }
+        for label, (rows, runs, listed) in cases.items():
+            with self.subTest(label):
+                self.head_rows(rows, runs)
+                self.assertEqual([r["databaseId"] for r in self.gh_host().runs(self.head())], listed, "the runs read's list")  # scope first
+                red, _ = self.judged(["lint", "unit"])
+                self.assertTrue(any(r.startswith("lint: fail") for r in red), red)
+                verdict, detail = self.gh_host().head_read(7)
+                self.assertEqual(verdict, "red", detail)
+                rc, out = self.go(required=["lint", "unit"])
+                self.assertEqual(rc, 1, out)
+                self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_green_check_on_another_open_head_does_not_clear_a_red_run_here(self):
+        # The other head's pass is its own. This head's runs list only its failed run, so nothing newer on this head clears the red row.
+        other = "c" * 40
+        self.set(open_prs=[["lane", other, "main"]], other_rows={other: [("lint", "pass", job_link(NEW_RUN, 201))]})
+        self.head_rows([("lint", "fail", job_link(OLD_RUN, 101))], [("checks", "completed", "failure", OLD_RUN)])
+        self.assertEqual(self.gh_host().checks(7, warn=False, sha=other), {"lint": [("pass", job_link(NEW_RUN, 201))]})  # scope first
+        self.assertEqual([r["databaseId"] for r in self.gh_host().runs(self.head())], [OLD_RUN], "the runs read's list")
+        red, _ = self.judged(["lint"])
+        self.assertTrue(any(r.startswith("lint: fail") for r in red), red)
+        verdict, detail = self.gh_host().head_read(7)
+        self.assertEqual(verdict, "red", detail)
 
     def test_two_workflows_on_one_head_do_not_hide_each_other(self):
         # checks: its cancelled run is superseded by its newer run. ci: its cancelled run has no newer ci run, though a newer checks run exists.
@@ -11266,18 +11374,19 @@ class RedMainBrake(Env):
     def test_a_run_of_a_workflow_file_gone_from_main_is_not_judged(self):
         # a renamed or deleted workflow: its last red run stays in the page, but no new run will ever replace it
         rc, out, _ = self.go([main_run(910, "success", name="checks"), main_run(909, "failure", path=".github/workflows/old-checks.yml")],
-                             {909: [main_job("checks", "failure", 20)]})
+                             {909: [main_job("checks", "failure", 20)], 910: self.RAN_PUSH})
         self.merged(rc, out)
 
     def test_runs_are_judged_per_workflow_file_not_per_name(self):
         # the workflow's name changed in the same file: the newer run is the verdict
-        rc, out, _ = self.go([main_run(912, "success", name="checks"), main_run(911, "failure", name="old-checks")], {911: [main_job("checks", "failure", 20)]})
+        rc, out, _ = self.go([main_run(912, "success", name="checks"), main_run(911, "failure", name="old-checks")],
+                             {911: [main_job("checks", "failure", 20)], 912: self.RAN_PUSH})
         self.merged(rc, out)
 
     def green_run_of(self, event):
-        # a newer dispatch and an older push share the head group: the dispatch supersedes the push, whatever its jobs
+        # a newer dispatch and an older push share the head group: the dispatch supersedes the push when it ran a suite job (an empty run is no verdict)
         rc, out, _ = self.go([main_run(915, "success", event=event), main_run(914, "failure")],
-                             {914: [main_job("checks", "failure", 20)], 915: [main_job("scope", "success")]})
+                             {914: [main_job("checks", "failure", 20)], 915: [main_job("scope", "success"), main_job("checks", "success", 20)]})
         self.merged(rc, out)
 
     def test_a_green_dispatch_run_clears_an_older_red_push_run(self):
@@ -11508,7 +11617,8 @@ class RedMainBrake(Env):
 
     def test_a_dynamic_event_run_is_not_judged(self):
         # a Pages build runs under the event "dynamic", which is no key of actions/ci-alarm/events.json
-        rc, out, _ = self.go([main_run(925, "failure", event="dynamic"), main_run(924, "success")], {925: [main_job("checks", "failure", 20)]})
+        rc, out, _ = self.go([main_run(925, "failure", event="dynamic"), main_run(924, "success")],
+                             {925: [main_job("checks", "failure", 20)], 924: self.RAN_PUSH})
         self.merged(rc, out)
 
     def test_base_events_are_the_keys_of_the_events_file(self):
@@ -11517,7 +11627,8 @@ class RedMainBrake(Env):
             self.assertEqual(set(merge.Host.BASE_EVENTS), set(json.load(f)))
 
     def test_a_pull_request_run_is_not_judged(self):
-        rc, out, _ = self.go([main_run(917, "failure", event="pull_request"), main_run(916, "success")], {917: [main_job("checks", "failure", 20)]})
+        rc, out, _ = self.go([main_run(917, "failure", event="pull_request"), main_run(916, "success")],
+                             {917: [main_job("checks", "failure", 20)], 916: self.RAN_PUSH})
         self.merged(rc, out)
 
     def test_a_newer_run_in_progress_is_skipped_for_the_latest_completed_one(self):
@@ -11528,11 +11639,99 @@ class RedMainBrake(Env):
         self.assertNotIn("run 906", out)
         self.assertNotIn("actions/runs/906/jobs", self.host.reads, "a run in progress is not judged")
 
-    def test_a_green_latest_run_reads_no_jobs_and_merges(self):
-        rc, out, _ = self.go([main_run(908, "success"), main_run(907, "failure")], {})
+    def test_a_green_latest_run_reads_its_own_jobs_once_and_merges(self):
+        # the newest run is read once, to see whether it is empty; an older run behind a green run that is not empty is never read
+        rc, out, _ = self.go([main_run(908, "success"), main_run(907, "failure")], {908: self.RAN_PUSH, 907: [main_job("checks", "failure", 20)]})
         self.merged(rc, out)
         self.assertEqual([r.count("actions/runs") for r in self.run_reads], [1, 1], "the latest-run list: one read in each run")
-        self.assertFalse([r for r in self.host.reads if r.endswith("/jobs")], "a green run needs no jobs read")
+        self.assertEqual([r.count("actions/runs/908/jobs") for r in self.run_reads], [1, 1], "the newest run is not read once, to see whether it is empty")
+        self.assertFalse([r for r in self.run_reads if "actions/runs/907/jobs" in r], "an older run behind a green run that is not empty is read")
+
+    # The empty push run (decision no-merge-onto-red-main). A green run of the push group that ran no suite job is no verdict, unless it
+    # carries evidence. Empty, no evidence: push-skip ran and did not skip (success), scope ran (success), every suite job skipped. Evidence:
+    # push-skip skipped the push (success), and scope was skipped with every suite job behind it.
+    EMPTY_PUSH = [main_job("push-skip", "success"), main_job("scope", "success"), main_job("checks", "skipped"), main_job("checks-macos", "skipped")]
+    DISPATCH_EMPTY = [main_job("scope", "success"), main_job("checks", "skipped"), main_job("checks-macos", "skipped")]  # no push-skip job in a dispatch
+    EVIDENCE_PUSH = [main_job("nightly-skip", "success"), main_job("push-skip", "success"), main_job("scope", "skipped"), main_job("checks", "skipped"), main_job("checks-macos", "skipped")]
+    RAN_PUSH = [main_job("nightly-skip", "success"), main_job("push-skip", "success"), main_job("scope", "success"), main_job("checks", "success", 20), main_job("checks-macos", "success", 30)]
+    RED_PUSH = [main_job("nightly-skip", "success"), main_job("push-skip", "success"), main_job("scope", "success"), main_job("checks", "failure", 20), main_job("checks-macos", "skipped")]
+
+    def forty_job_empty_push(self):
+        """A full-size empty push run: push-skip and scope ran, and each of forty suite jobs was skipped."""
+        return [main_job("nightly-skip", "success"), main_job("push-skip", "success"), main_job("scope", "success")] + [main_job(f"job-{i:02d}", "skipped") for i in range(40)]
+
+    def red_then_empty_green(self, event, n_jobs):
+        """A red push run 1700, then a newer green run 1701 of `event` with `n_jobs` and no evidence. -> (rc, out, before) of the merge."""
+        return self.go([main_run(1701, "success", event=event), main_run(1700, "failure")], {1700: self.RED_PUSH, 1701: n_jobs})
+
+    def assert_red_stays_over_empty_green(self, rc, out, before):
+        self.refused(rc, out, before)
+        self.assertIn("run 1700", out, "the empty green run hid the older red push run")
+        self.assertIn("checks: fail", out)
+        self.assertEqual(self.host.reads.count("actions/runs/1701/jobs"), 1, "the empty green run is not read once, to see that it is empty")
+
+    # A red push run, then a newer green push run that ran no suite job and carries no evidence. That run is no
+    # verdict, so the older red run is the verdict, and main stays red. One method per shape: a merge that goes through empties the fixture.
+    def test_an_empty_green_push_run_without_evidence_does_not_hide_an_older_red_push_run(self):
+        self.assert_red_stays_over_empty_green(*self.red_then_empty_green("push", self.EMPTY_PUSH))
+
+    def test_an_empty_green_dispatch_run_without_a_push_skip_job_does_not_hide_an_older_red_push_run(self):
+        self.assert_red_stays_over_empty_green(*self.red_then_empty_green("workflow_dispatch", self.DISPATCH_EMPTY))
+
+    def test_a_full_size_empty_green_push_run_does_not_hide_an_older_red_push_run(self):
+        self.assert_red_stays_over_empty_green(*self.red_then_empty_green("push", self.forty_job_empty_push()))
+
+    def test_an_empty_green_push_run_with_evidence_clears_an_older_red_push_run(self):
+        # control: push-skip skipped the push (success) and scope was skipped, so the empty run stands for a green integration run on this tree
+        rc, out, _ = self.go([main_run(1711, "success"), main_run(1710, "failure")], {1710: self.RED_PUSH, 1711: self.EVIDENCE_PUSH})
+        self.merged(rc, out)
+
+    def test_the_owners_order_red_push_then_empty_green_push_refuses_and_a_pull_request_run_between_them_is_not_read(self):
+        # a red pull_request run sits between the two push runs: the check judges no pull_request run, so it does not read one
+        runs = [main_run(1722, "success"), main_run(1721, "failure", event="pull_request"), main_run(1720, "failure")]
+        rc, out, before = self.go(runs, {1720: self.RED_PUSH, 1722: self.EMPTY_PUSH})
+        self.refused(rc, out, before)
+        self.assertIn("run 1720", out)
+        self.assertIn("checks: fail", out)
+        self.assertNotIn("actions/runs/1721/jobs", self.host.reads, "a pull_request run is not judged, so it is not read")
+
+    def test_a_red_nightly_stays_red_under_a_newer_push_run_that_the_proven_skip_skipped(self):
+        # The proven skip (a push whose tree a merged pull request's full green run covered) leaves push-skip success and scope skipped, with
+        # every suite job skipped. That run is the push group's verdict, but a skipped job is no pass, so it clears no red nightly.
+        red_nightly = [main_job("checks", "failure", 20), main_job("scope", "success"), main_job("checks-macos", "success", 30)]
+        rc, out, before = self.go([main_run(1801, "success", event="push"), main_run(1800, "failure", event="schedule")],
+                                  {1800: red_nightly, 1801: self.EVIDENCE_PUSH})
+        self.refused(rc, out, before)
+        self.assertIn("actions/runs/1801/jobs", self.host.reads, "the newer push run was not read, so the verdict did not weigh it")
+        self.assertIn("run 1800", out, "the newer skipped push run hid the red nightly")
+        self.assertIn("checks: fail", out)
+
+    def test_a_push_run_whose_suite_ran_and_passed_clears_an_older_red_push_run(self):
+        # control: a newer push run that ran its suite and passed is the verdict, whatever its bookkeeping jobs say
+        rc, out, _ = self.go([main_run(1731, "success"), main_run(1730, "failure")], {1730: self.RED_PUSH, 1731: self.RAN_PUSH})
+        self.merged(rc, out)
+
+    def test_an_empty_green_push_run_whose_jobs_cannot_be_read_is_unknown_not_green(self):
+        # the empty test reads the run's jobs: when that read fails, the verdict is UNKNOWN, never green
+        rc, out, before = self.go([main_run(1741, "success"), main_run(1740, "failure")], {1740: self.RED_PUSH},
+                                  jobs_fail_of={1741: "HTTP 500: Internal Server Error (fake jobs read)"})
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out)
+        self.assertIn("HTTP 500", out)
+        self.assertNotIn("latest completed run is red", out, "an unread run is unknown, not red")
+
+    def test_a_push_group_whose_only_run_is_empty_without_evidence_stays_green(self):
+        # control: no run of the group on the page is not empty, so the empty run is the verdict, as it was before the empty rule
+        rc, out, _ = self.go([main_run(1751, "success")], {1751: self.EMPTY_PUSH})
+        self.merged(rc, out)
+
+    def test_two_empty_green_runs_above_a_red_push_run_leave_the_red_run_the_verdict(self):
+        # the verdict walks past each empty run without evidence, to the newest run of the group that is not empty
+        runs = [main_run(1762, "success"), main_run(1761, "success", event="workflow_dispatch"), main_run(1760, "failure")]
+        rc, out, before = self.go(runs, {1760: self.RED_PUSH, 1761: self.DISPATCH_EMPTY, 1762: self.EMPTY_PUSH})
+        self.refused(rc, out, before)
+        self.assertIn("run 1760", out)
+        self.assertIn("checks: fail", out)
 
     def test_the_reason_flag_lifts_the_check_and_logs_its_reason(self):
         rc, out, _ = self.go([main_run(901, "failure")], self.OCT14, "--base-red-ok", "this batch carries the checks fix")
@@ -11583,7 +11782,7 @@ class RedMainBrake(Env):
 
     def test_the_green_main_preview_line_has_no_refusal_clause(self):
         # a green base refuses nothing, so its line names no refusal and no flag
-        rc, out, _ = self.go([main_run(908, "success")], {}, confirm=False)
+        rc, out, _ = self.go([main_run(908, "success")], {908: self.RAN_PUSH}, confirm=False)
         self.assertEqual(rc, 0, out)
         line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
         self.assertEqual(len(line), 1, out)
@@ -11653,18 +11852,18 @@ class RedMainBrake(Env):
     # Guards, which pass on the current code: the green control beside each red case, and the rules the re-run must leave alone.
     def test_an_attempt_one_run_still_going_waits_its_turn_under_an_older_green_run(self):
         # the same shape as the red cases at attempt 1: a newer run still going waits its turn, so the green run beneath it is the verdict
-        rc, out, _ = self.go([main_run(1301, None, status="in_progress"), main_run(1300, "success")], {})
+        rc, out, _ = self.go([main_run(1301, None, status="in_progress"), main_run(1300, "success")], {1300: self.RAN_PUSH})
         self.merged(rc, out)
         self.assertNotIn("actions/runs/1301/jobs", self.host.reads, "a run in progress is not judged, so it is not read")
 
     def test_a_run_with_no_run_attempt_field_is_attempt_one(self):
         running = main_run(1301, None, status="in_progress")
         del running["run_attempt"]
-        rc, out, _ = self.go([running, main_run(1300, "success")], {})
+        rc, out, _ = self.go([running, main_run(1300, "success")], {1300: self.RAN_PUSH})
         self.merged(rc, out)
 
     def test_a_re_run_in_flight_older_than_a_completed_green_run_leaves_the_verdict_to_that_run(self):
-        rc, out, _ = self.go([main_run(1303, "success"), main_run(1302, None, status="in_progress", run_attempt=2)], {})
+        rc, out, _ = self.go([main_run(1303, "success"), main_run(1302, None, status="in_progress", run_attempt=2)], {1303: self.RAN_PUSH})
         self.merged(rc, out)
         self.assertNotIn("actions/runs/1302/jobs", self.host.reads, "only the newest completed run of the group is judged")
 
