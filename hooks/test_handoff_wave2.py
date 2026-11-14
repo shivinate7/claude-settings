@@ -70,7 +70,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_precompact_handoff import (  # noqa: E402
-    HANDOFF_WITH_PREMISES, ids_in, put, transcript_line, write_transcript)
+    HANDOFF_WITH_PREMISES, RUN_FOLDER, ids_in, put, transcript_line, write_transcript)
 
 PRECOMPACT = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(
     HERE, "precompact_handoff.py")
@@ -221,7 +221,7 @@ class Case(object):
     """A scratch home: config dir, one project dir, and a helper to make more dirs."""
 
     def __init__(self, name):
-        self.root = tempfile.mkdtemp(prefix="wave2_%s_" % name)
+        self.root = tempfile.mkdtemp(prefix="wave2_%s_" % name, dir=RUN_FOLDER)
         self.home = os.path.join(self.root, "home")
         self.cfg = os.path.join(self.home, ".claude")
         os.makedirs(self.cfg, exist_ok=True)
