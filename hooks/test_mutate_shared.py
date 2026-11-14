@@ -702,7 +702,7 @@ def scaffold_sources(**extra):
     sources = {
         "sweep": "SWEEP\n", "guard": "GUARD\n", "session_end_sweep": "END\n",
         "agent_end_reap": "REAP\n", "test_sweep": "", "test_session_end_sweep": "",
-        "settings_json": "{}\n",
+        "settings_json": "{}\n", "agent_procs": "PROCS\n", "test_agent_procs": "",
     }
     sources.update(extra)
     return sources
