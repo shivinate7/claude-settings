@@ -5,6 +5,7 @@
 #   map skill tests, one CI step in each of the `checks`, `checks-windows` and `checks-macos` jobs), guard (guard mutation test), sweep (janitor mutation test), shoot (the checks-shoot and checks-waiting-page jobs: the bin/shoot suite and the page suites, which install a browser).
 #   The `checks` lint job and the checks-merge-install, checks-install-checkout and checks-merge-git jobs always run, so they have no flag (their suites carry `code`).
 #   checks_macos gates both checks-macos and checks-macos-b.
+#   checks_windows_rest_2 repeats checks_windows_rest's value (R62). No job reads it: checks-windows-rest-2 runs every step on a ready pull_request, so the output is kept only for the tests that derive it.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
@@ -122,6 +123,8 @@ echo "CI scope: event=${EVENT:-} range=${range:-none} on=$on"
 for n in $ALL; do
   case "$on" in *" $n "*) v=true ;; *) v=false ;; esac
   echo "$n=$v" >> "$GITHUB_OUTPUT"
+  # checks-windows-rest-2 is the second half of the rest suites (R62). Its output repeats the rest flag; no job reads it (the job runs every step on a ready pull_request).
+  [ "$n" = checks_windows_rest ] && echo "checks_windows_rest_2=$v" >> "$GITHUB_OUTPUT"
 done
 # mutation_report: the mutation-report job runs on a pull request from a `batch-` branch (HEAD_REF), and on any other event, where the
 # action skips a push or a schedule itself. It is outside ALL: a change to this script or the workflow must not start it on any other PR.

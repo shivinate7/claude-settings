@@ -8,7 +8,7 @@ import os
 import re
 import sys
 
-# The Linux jobs that hold the suites of the one old `checks` job, split for wall time. merge/merge.py reads suites from each.
+# The Linux jobs that hold the suites of the one old `checks` job, split for wall time. lint/test_windows_split.py checks that each suite runs in one of them.
 CHECKS_SUITE_JOBS = ("checks", "checks-merge-install", "checks-install-checkout", "checks-merge-git")
 
 

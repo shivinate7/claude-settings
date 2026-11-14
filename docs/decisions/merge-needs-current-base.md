@@ -1,32 +1,21 @@
-# A merge needs a green run on the current base
+# A merge needs a green run on its own base and a clean merge with the base tip
 
 ## The ruling
 
-Roadmap step c97, filed 2026-10-27; step c150, 2026-10-28: a batch merges only after a green run that holds for the current main.
+Owner pick A for R42 part 2 (per-lane merge). Rule M3, per lane: the head must already be green on its own base, and it must merge cleanly with the base tip. The head need not hold the tip.
 
-- The merge tool refuses a head that does not hold the base tip. The refusal names the fix: merge the base into the branch, push, and run again. It also says why the green run cannot stand.
-- The green run stands with no lint or suite run only when every commit on main since the merge base has the merge base's tree. The merge commit of the batch it was built on has that tree too. Then the merge of the head and the tip is the head's tree. This is the next batch after that merge commit (decision `no-merge-during-batch-ci`: no merge while a batch's CI runs). A main that changed a path and changed it back does not stand: a pull_request run tested the merge with the path in.
-- A small move is the one exception: the green run stands when all of these hold, and any read that fails refuses.
-  - The paths main changed since the merge base share no path with the batch's paths. The records page is the one exception, because the generator proves it on the merge.
-  - The head and the base tip merge cleanly.
-  - `.github/scripts/ci-scope.sh`, run on that merge, turns on no job and no suite for main's paths. A repo without the script gets no exception.
-  - On that merge, `bin/ci-job checks --lint --base <base>` passes.
-  - On that merge, each other suite of `checks`, `checks-merge-install`, `checks-install-checkout` and `checks-merge-git` that may read one of main's paths passes. The suites come from the workflow, not a list. All of them share a 3600 s budget. The records page is not matched: the records are.
-    - A Python suite, read with `ast`, is hit when its source names the exact path or file name anywhere. A root is a name bound from an expression that holds `__file__` or a root. A folder below the top or a stem is a hit in any string of an expression that holds a root, in any form: join, `/`, `+`, f-string, format or `%`. It is also a hit as a string given bare to a file reader such as `open` or `os.listdir`. A root that a call takes whole, as a walk does, hits every path under its folder; a root at the top hits every path. A path builder is not a read. It is a known path or string call, or a function in the same file that calls only those. Each local module the suite imports, from its own folder or a folder it puts on `sys.path`, is read the same way, one level deep. A folder named only under a temp dir is no hit. A suite `ast` cannot parse refuses.
-    - A node or bash suite is hit when its source names any of those words.
-    - A `checks` line of no suite form that names one of main's paths, its file name or one of its folders refuses.
-- It reads the head two times, with the same check. The first read is before the claim, so nothing is claimed. The second read is after the check wait, on the base tip fetched then. A base that moved during the wait, and is not a small move, reverts the claim.
-- During the check wait, a base branch retarget or a conflict (CONFLICTING or DIRTY) stops the merge (sweep row `wait-base-changed`, `wait_checks`); a base tip move goes to the small-move rule.
-- A heal merge commit holds the base tip, so it passes. Its own checks wait before the merge.
-- The preview prints a `base:` line that says whether the head holds the base tip, is a small move, or is BEHIND.
+- The green read is one read, with no wait under the lock.
+- The clean merge is `git merge-tree --write-tree` of the head and the base tip. `confirm` reads it before the claim and again after the claim push. A conflict refuses. So does a read that cannot run.
+- A confirm that must push a claim commit pushes it and stops. The next confirm merges a green claim head.
+- The batch's wait for the base to move, the heal merge commit and the small-move suite run are gone.
 
-Why: branch protection on `main` has `strict` false (`main-branch-protection`, main branch protection). GitHub reports BEHIND only when `strict` is on, so the tool's BEHIND refusal never fired. A batch could merge with a green run that never tested the main it lands on. A docs merge to main cannot change a code job, but it can break a cross-file lint, so the lints run on the merge.
+Why: branch protection on `main` has `strict` false, so GitHub reports BEHIND only when `strict` is on (`main-branch-protection`). The tool's own reads are the gate.
 
-Cost of a small move check: only when the head lacks the base tip, at most three times per merge. Each check starts about 10 git processes, one ci-scope run, two ci-job runs (a plan, and the lints at two processes per step, about 50 steps, about 4 minutes) and one process per hit suite (unmeasured). A records-only move (a new record and the page) hits 10 suites. merge/test_merge.py is one: it reads the whole repo, so every move hits it, and it takes about 8 minutes (unmeasured). The suites take about 9 minutes in all, inside their 3600 s budget, and the check about 13 minutes (estimated 2026-10-28 from one run to the lints and the timed suites) (not pinned). It writes one temp file, and keeps one ci-job log only on a failure (unmeasured). The lock is extended to cover each lint run.
-
-Residual risk: some suites that read a doc are not hit. One reads it through a module two imports away, or one that resolves to no file. One reads it through a root not bound from `__file__`, such as an attribute or an argument. One passes a root to a call this tool reads as a path builder. Node and bash suites are matched by words only, which fails safe.
-
-Risk: likely. Batches run while other batches merge, so main often moves under a green head. Landed 2026-10-27; the small move 2026-10-28; the empty move 2026-11-02.
+Residual risk: a clean merge can still break a suite. Main's run after the merge finds it. A red main is then held under the red-main rule (`git-red-main-reverts`) until its revert's run is green.
 
 Kind: process
 Home: merge/merge.py
+
+Cost: per merge, one green read of the head and two `git merge-tree --write-tree` starts (unmeasured).
+
+Risk: likely. Lanes merge while main moves, so main often moves under a green head.
