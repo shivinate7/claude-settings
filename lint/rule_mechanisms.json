@@ -680,22 +680,16 @@
         "reason": "Whether a step handed to the user was doable is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) samples 1 Stop in 5 and judges every report that carries Input Needed, for the reason and the check on each item. A finding writes one guard.log line. Guard rule task-names-check refuses a waiting-page task with no Why yours line (decision task-names-its-check). Guard rule task-why-cited refuses a waiting-page task whose Why yours line gives a capability reason with no cite that holds: a route row that says refused or asks, or a dated measured cite (decision claims-carry-backing, part (v)). The page reads no refusals file. The Stop guard (lint/report_guard.py cannot_problem) refuses a reply line that says an act cannot be done when the turn holds no failed try of that act, or the line names no check (decision claims-carry-backing)."
       }
     },
-    "style-hand-off-cleanup": {
-      "mechanism": {
-        "kind": "unmechanized",
-        "reason": "A hook would have to see each thing the session made, such as a test ID, a branch or data, and whether the session removed it before it ended; no hook sees that for branches, test IDs or data. hooks/sim_boot_record.py records each simulator a session boots."
-      }
-    },
     "style-hand-off-irreversible": {
       "mechanism": {
         "kind": "judgment",
-        "reason": "Whether an act can be undone, and whether the ask is one yes or no on the exact act with its cleanup named, are content judgments on the act and the reply."
+        "reason": "Whether an act can be undone, and whether the ask is one yes or no on the exact act with its cleanup named, are content judgments on the act and the reply. So is whether a thing the session made was cleaned up: a hook sees no test ID, branch or data a session made and left (hooks/sim_boot_record.py records each simulator a session boots)."
       }
     },
     "style-hand-off-runs-as-is": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Whether a block is runnable as is, with its `cd`, no blank lines and no admin step, is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) flags a command left to the owner without its own fenced code block, ready to run as is, outside the report blockquote, and files the finding under the id output-never-hand-off-doable-step, because JUDGED_RULES and its prompt name only that id; a finding writes one guard.log line."
+        "reason": "Whether a block is runnable as is, with its `cd`, no blank lines, no admin step and one shell, is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) flags a command left to the owner without its own fenced code block, ready to run as is, in one shell, outside the report blockquote, and files the finding under the id output-never-hand-off-doable-step, because JUDGED_RULES and its prompt name only that id; a finding writes one guard.log line."
       }
     },
     "style-hand-off-gh-login": {
@@ -703,12 +697,6 @@
         "kind": "guard",
         "ref": "gh-login-switch",
         "reason": "Guard rule gh-login-switch refuses a waiting-page task whose command runs gh with no gh auth switch to a known login before it (decision act-in-place). In a chat reply the Stop reply judge (hooks/reply_judge.py, a model, never blocks) flags a block that hands the owner a gh command with no such switch, and files the finding under the id output-never-hand-off-doable-step, because JUDGED_RULES and its prompt name only that id."
-      }
-    },
-    "style-hand-off-one-shell": {
-      "mechanism": {
-        "kind": "unmechanized",
-        "reason": "A block that mixes shells has no code check. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) is asked for one shell in the block and files its finding under the id output-never-hand-off-doable-step, because JUDGED_RULES and its prompt name only that id; a finding writes one guard.log line."
       }
     },
     "style-offer-screen-takeover": {
@@ -730,20 +718,6 @@
         "reason": "The guard refuses a waiting-page option, or task steps read together, that has a press verb and a web marker with no link to the exact page (decision act-in-place). It reads words, so a press verb outside its list (such as enable auto-merge, select or close) passes, and an unnumbered press passes with any link."
       },
       "test": "hooks/test_guard.py::press link: today's item (a press on home#374, no link) is denied"
-    },
-    "style-command-in-item": {
-      "mechanism": {
-        "kind": "guard",
-        "ref": "command-in-item",
-        "reason": "The guard refuses a waiting-page task whose steps, joined, name a file and a command in it, whose step holds a shell line in backticks, or whose command is not both powershell and mac (decision act-in-place). It reads words, so a step that sends the owner to a file in other words passes."
-      },
-      "test": "hooks/test_guard.py::command in item: a step that opens a plan file, then one that says run its command, is denied"
-    },
-    "style-question-inside-box": {
-      "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No check can see the question box. A hook reads the call input, not what the user sees, so whether the text sat inside the box or before it is unseen."
-      }
     },
     "style-time-central-24h": {
       "mechanism": {
