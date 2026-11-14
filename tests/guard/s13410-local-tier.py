@@ -118,4 +118,16 @@ sh("local-tier: the folder's path after a comment passes",
    config=LT_TRIAGE, silent=True)
 sh("local-tier: the folder's path in text with a lone quote passes",
    "echo \"it's state/session-roles\"", "allow", cwd=PUSHSSH, session=LT_SID, config=LT_TRIAGE, silent=True)
+# A local `merge <pr> --confirm` is judged by the role the launcher wrote. A triage or coordinator file never confirms; a
+# batch-runner file with both ids equal may. RED: the old guard allows every local confirm silently, whatever file is present.
+LT_CONFIRM = "~/.claude/bin/merge 7 --confirm --head 1234567"
+add("local-tier: a local confirm with a triage file is refused by the guard", "deny", rule=None,
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env={"CLAUDE_CODE_SESSION_ID": LT_SID}, config=LT_TRIAGE)
+add("local-tier: a local confirm with a coordinator file is refused by the guard", "deny", rule=None,
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env={"CLAUDE_CODE_SESSION_ID": LT_SID}, config=LT_COORD)
+# CONTROL, green on the old code: the batch-runner file with equal ids is allowed, as the old guard allows every confirm.
+add("local-tier: a local confirm with a batch-runner file and equal ids is allowed", "allow",
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env={"CLAUDE_CODE_SESSION_ID": LT_SID},
+    config=LT_BATCH, silent=True)
+
 FAMILY = _LT_PREV_FAMILY
