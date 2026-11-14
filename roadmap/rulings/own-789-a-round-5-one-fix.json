@@ -1,0 +1,10 @@
+{
+  "id": "own-789-a-round-5-one-fix",
+  "at": "2026-11-13T19:21:41-06:00",
+  "title": "Grant one more fix and review on PR #3288: serve any armed hold before the batch-brake read, none armed through the merge call",
+  "ruling": "Owner 19:21 CST Nov 13, page item 789 a: one more grant for one fix on PR #3288: serve any armed hold before the batch-brake read and arm none from there through the merge call (the coordinator adds holds_base; test first, then a fresh round 1). It covers this PR and this fix only (rule outcomes-grant-covers-named-act). Options b (park) and c (review only) are not chosen.",
+  "quote": "a",
+  "source": "Owner answer saved on the waiting page 19:21 CST Nov 13, thread fef57fc3; filed by triage.",
+  "status": "open",
+  "step": "gh-quota-budget"
+}

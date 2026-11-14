@@ -1,0 +1,10 @@
+{
+  "id": "own-773-a-machine-flag-field",
+  "at": "2026-11-13T19:21:41-06:00",
+  "title": "Amend decision item-field-rendered and the page.html comment so itemFields may hold a named machine flag",
+  "ruling": "Owner 19:21 CST Nov 13, page item 773 a: amend the decision item-field-rendered and the page.html comment so itemFields may hold a named machine flag (holdsLane), as ruling own-766-b-field-now needs. Option b (a separate machine-flags list) is not chosen.",
+  "quote": "a",
+  "source": "Owner answer saved on the waiting page 19:21 CST Nov 13, thread fef57fc3; filed by triage.",
+  "status": "open",
+  "step": "close-writes-receipt-answer-gone"
+}

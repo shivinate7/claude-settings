@@ -1,0 +1,10 @@
+{
+  "id": "own-777-a-lanes-stay-auto",
+  "at": "2026-11-13T19:21:41-06:00",
+  "title": "Keep lanes in auto mode, with the box and card guards",
+  "ruling": "Owner 19:21 CST Nov 13, page item 777 a: keep lanes in auto mode with the box and card guards. Option b (run the coordinator in dontAsk with an allow list) is not chosen.",
+  "quote": "a",
+  "source": "Owner answer saved on the waiting page 19:21 CST Nov 13, thread fef57fc3; filed by triage.",
+  "status": "open",
+  "step": "r13-lane-never-stalls-on-popup"
+}

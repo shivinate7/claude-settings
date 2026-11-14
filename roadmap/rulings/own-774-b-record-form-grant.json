@@ -1,0 +1,10 @@
+{
+  "id": "own-774-b-record-form-grant",
+  "at": "2026-11-13T19:21:41-06:00",
+  "title": "Grant the exact record command form for PR #3264, run unwrapped as the settings entry names it",
+  "ruling": "Owner 19:21 CST Nov 13, page item 774 b: he grants the exact command form of the round 1 record for PR #3264 (`merge --review-record 3264 --head 85824b473 --kind normal --guard yes --round 1:reviewer:sonnet:PASS`), run unwrapped as the settings entry \"Merge Tool Read Checks\" names it. The grant covers that command form for that PR only (rule outcomes-grant-covers-named-act).",
+  "quote": "b",
+  "source": "Owner answer saved on the waiting page 19:21 CST Nov 13, thread fef57fc3; filed by triage.",
+  "status": "open",
+  "step": "review-record-restart-on-doc-nit"
+}

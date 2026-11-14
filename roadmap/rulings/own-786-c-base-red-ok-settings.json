@@ -1,0 +1,10 @@
+{
+  "id": "own-786-c-base-red-ok-settings",
+  "at": "2026-11-13T19:21:41-06:00",
+  "title": "PR #3097: an allow rule for --base-red-ok in settings.json too, with the repo test re-pointed red then green",
+  "ruling": "Owner 19:21 CST Nov 13, page item 786 c, which the item marked as going against his ruling that a repo changes to fit a shared tool: add the rule `Bash(merge * --confirm --head * --base-red-ok *)` to settings.json, with test_the_repo_settings_json_has_no_merge_allow_rule re-pointed (red then green). The decision sentences that say entries never cover --base-red-ok (auto-mode-owner-acts lines 66 and 76) are rewritten in the same PR, and it gets a guard review (the item's own cost line).",
+  "quote": "c",
+  "source": "Owner answer saved on the waiting page 19:21 CST Nov 13, thread fef57fc3; filed by triage.",
+  "status": "open",
+  "step": "allow-merge-base-red-ok"
+}

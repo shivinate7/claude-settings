@@ -1,0 +1,10 @@
+{
+  "id": "own-783-b-interim-narrow-end",
+  "at": "2026-11-13T19:21:41-06:00",
+  "title": "Until the agent-end read works, the Opus grant ends at the next typed prompt or after 2 hours (PR #2928)",
+  "ruling": "Owner 19:21 CST Nov 13, page item 783 b: until the agent-end read works well, use PR #2928's end for the Opus grant: the owner's next typed prompt or 2 hours, for the session's own spawns only. Option a (keep main's 2-hour file) is not chosen. Follows ruling own-779-b-agent-end-later.",
+  "quote": "b",
+  "source": "Owner answer saved on the waiting page 19:21 CST Nov 13, thread fef57fc3; filed by triage.",
+  "status": "open",
+  "step": "opus-ask-grants-one-spawn"
+}
