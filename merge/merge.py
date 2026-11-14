@@ -3360,6 +3360,11 @@ RULING_LINE = re.compile(r"^Ruling:[ \t]*(.*?)[ \t\r]*$", re.M)  # only the firs
 RULING_ID = re.compile(r"[a-z0-9-]+")
 EXPRESS_PATHS_SHOWN = 8
 
+def flags_on(flags, *skip):
+    """-> the sorted names of ci-scope.sh's flags that are on, less `skip` and the lint_* flags. A lint flag on is not a job turned on:
+    --express relies on the PR's own CI lint steps, which run every lint."""
+    return sorted(k for k, v in flags.items() if k not in skip and not k.startswith("lint_") and v != "false")
+
 def express_refusal(root, wt, base_ref, info):
     """--express: -> why this PR may not take the express path, else None. It needs a `Ruling: <id>` line in the body whose entry is on
     origin/roadmap, and a diff that main's own ci-scope.sh turns no job or suite on for. The script is main's copy, read with `git show`,
@@ -3381,9 +3386,10 @@ def express_refusal(root, wt, base_ref, info):
     c2, base_tip = git(wt, "rev-parse", base_ref)
     jobs = re.search(r'^JOBS="([^"]*)"', script, re.M)
     every = re.search(r'^ALL="([^"]*)"', script, re.M)
-    if c or c2 or not jobs or not every:
+    lints = re.search(r'^LINTS="([^"]*)"', script, re.M)
+    if c or c2 or not jobs or not every or ("$LINTS" in every.group(1) and not lints):
         return f"unknown: {base_ref}'s {CI_SCOPE} cannot be read, so whether the diff is prose-only is unproven"
-    names = every.group(1).replace("$JOBS", jobs.group(1)).split()
+    names = every.group(1).replace("$JOBS", jobs.group(1)).replace("$LINTS", lints.group(1) if lints else "").split()
     fd, copy = tempfile.mkstemp(prefix="merge-express-", suffix=".sh")
     os.close(fd)
     fd, out_file = tempfile.mkstemp(prefix="merge-express-scope-")
@@ -3405,7 +3411,7 @@ def express_refusal(root, wt, base_ref, info):
     missing = [n for n in names if n not in flags]
     if c or missing:
         return f"unknown: {CI_SCOPE} " + (f"failed (exit {c}; last line: {(said.splitlines() or ['no output'])[-1][:200]})" if c else "wrote no flag for " + ", ".join(missing)) + ", so whether the diff is prose-only is unproven"
-    on = sorted(k for k, v in flags.items() if k != "mutation_report" and v != "false")
+    on = flags_on(flags, "mutation_report")
     if on:
         paths = git(wt, "diff", "--name-only", "--no-renames", f"{base_tip}...HEAD")[1].splitlines()
         shown = ", ".join(paths[:EXPRESS_PATHS_SHOWN]) + (f" and {len(paths) - EXPRESS_PATHS_SHOWN} more" if len(paths) > EXPRESS_PATHS_SHOWN else "")
