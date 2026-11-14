@@ -1158,6 +1158,22 @@ def device_check(d):
     return "valid" if zoned else "bad"
 
 
+def step_check_fields(d):
+    """"none" (neither of `done_check`, `ci_only` set; null is unset), "valid" (every set field is right: done_check a
+    string with text, ci_only exactly True), or "bad". Identity test on ci_only: 1 == True in Python."""
+    check, ci = d.get("done_check"), d.get("ci_only")
+    if check is None and ci is None:
+        return "none"
+    check_ok = check is None or (isinstance(check, str) and check.strip() != "")
+    ci_ok = ci is None or ci is True
+    return "valid" if check_ok and ci_ok else "bad"
+
+
+def unreadable_check_fields(steps):
+    """Ids, sorted, of each step of any status whose done_check or ci_only reads "bad"."""
+    return [k for k, d in sorted(steps.items()) if step_check_fields(d) == "bad"]
+
+
 def names_step(pull, sid):
     """True when the pull's branch is the step id, or its title holds the id as a whole token, ignoring case.
     An empty id names nothing."""
@@ -1798,6 +1814,7 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
             ("live threads naming no open step", (work or {}).get("strays", [])),
             ("live file entries skipped", (work or {}).get("skipped", [])),
             ("open step waits on a closed unmerged PR", waits_on_closed_pulls(open_, work, repo, ref)),
+            ("steps with an unreadable done_check or ci_only", unreadable_check_fields(steps)),
             ("done without check", done_without_check(steps))]
     # A hold line is shown, never counted as a lane to archive.
     print("upkeep: " + "; ".join(
