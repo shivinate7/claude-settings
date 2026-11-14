@@ -329,3 +329,43 @@ Each job that needs `scope` starts. Its CI step carries the scope flag. The job 
 The scope flag comes from the scope job's outputs. A draft PR skips the scope job, so every job that
 needs it skips too (step 11). That draft skip is the only job-level skip. A job that runs only off
 pull requests skips at its CI steps the same way. A skipped job fails the rollup.
+
+## 20. Skip a push whose tree a PR run already proved
+
+The `push-skip` job asks the shared action whether the pushed commit's tree is the head tree of a
+merged PR whose run passed. `scope` waits on the job. The suite jobs need `scope`, so a skip
+reaches every job through `needs`, and the run ends green.
+
+```yaml
+  push-skip:
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      actions: read
+    outputs:
+      skip: ${{ steps.decide.outputs.skip }}
+    steps:
+      - uses: actions/checkout@<full-sha>  # v5.0.0
+        with: {persist-credentials: false}
+      - name: Decide whether the push can skip
+        id: decide
+        uses: shivinate7/claude-settings/actions/push-skip@<full-sha>  # <version>
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.sha }}
+          PUSH_TREE: ${{ github.event.head_commit.tree_id }}
+          EVENT: ${{ github.event_name }}
+  scope:
+    if: ${{ !cancelled() && needs.push-skip.outputs.skip != 'true' }}
+    needs: [push-skip]
+```
+
+The action reads your suite jobs from your own `.github/workflows/checks.yml`: the jobs your
+`all-jobs-passed` needs, except `scope`, `push-skip` and the rollup. Set the `workflow` input when
+the file has another name. A step that scope skips in a suite job does not stop the skip: a narrowed
+PR run that passed still skips the push. A `schedule` or manual run never skips on this action.
