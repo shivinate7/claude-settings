@@ -1409,6 +1409,20 @@ class SplitJobs(unittest.TestCase):
     def test_each_linux_suite_runs_once_in_its_split(self):
         self.assertEqual(linux_split_problems(self.text), [])
 
+    def test_every_lint_form_step_stays_in_the_checks_job(self):
+        """`merge --lane-lint` runs the `checks` job by name (bin/ci-job checks --lint), so a lint step moved into checks-hooks or
+        checks-rest would run in CI but never in lane lint. Twice a merge of main put one there (the page-writer, ruled-store and
+        stable-workflow suites)."""
+        stray = []
+        for job in CHECKS_SUITE_JOBS:
+            if job in ("checks", "checks-merge-install"):
+                continue
+            for step in step_blocks(job_block(self.text, job)):
+                cmd = run_body(step) or ""
+                if re.search(r"(?:^|\s)(?:python3? lint/|bin/ci-job )", cmd):
+                    stray.append((job, cmd.strip().splitlines()[0]))
+        self.assertEqual(stray, [])
+
     def test_each_macos_suite_runs_once_in_its_split_and_the_guard_slice_in_checks_macos(self):
         self.assertEqual(macos_split_problems(self.text), [])
 
