@@ -1,0 +1,14 @@
+{
+ "id": "lane-late-commit-after-review-warns",
+ "title": "A lane push after its last review round says the review record is now stale",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 21:56 CST Nov 13: lane question-form-widens-label (#3326) pushed two debt notes and a glossary marker after its round 3 PASS at 1c99d8695; head is afc8b1526; the merge tool refuses a record at the old head, and --fix-check needs one.",
+ "source": "Coordinator 21:56 CST Nov 13 (relayed; triage did not see the PR).",
+ "note": "Triage 21:56 CST Nov 13: guard idea, not built. Harm: a ready PR with no record at its head. Mistake it stops: a push after review that leaves the record at an old head. Open question for the lane: can --fix-check read a record from a head the PR no longer has (unchecked). Coordinator pick for #3326 meanwhile: a fresh round 1 at afc8b1526. Needs a past-ruling and guard-record read before any build.",
+ "updatedAt": "2026-11-13T21:56:56-06:00"
+}
