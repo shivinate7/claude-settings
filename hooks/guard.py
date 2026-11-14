@@ -6809,7 +6809,7 @@ def workflow_args_hit(tool: str, tool_input: dict) -> str:
 # main() logs the crash and lets the call through: a lost source is never turned into a made-up limit.
 CI_WAIT_TOOL = REMOTE_SERVER + "__send_later"
 CI_WAIT_WORDS = re.compile(
-    r"(?<!\w)(?:ci|checks|pr\s+runs?|workflow\s+runs?|check\s+run|pipeline|github\s+actions)(?!\w)", re.IGNORECASE)
+    r"(?<!\w)(?:ci|checks|pr\s+runs?|workflow\s+runs?|check\s+runs?|pipelines?|github\s+actions)(?!\w)", re.IGNORECASE)
 CI_WAIT_DIGITS = re.compile(r"\d+(?:\.\d+)?")
 CI_WAIT_REASON = ("A check-in that waits on CI may wait at most %d minutes, because under the 1-hour prompt cache a later "
                   "wake pays a full context rewrite. Set send_later with delay_minutes of %d or less, or an `at` no more "
