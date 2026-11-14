@@ -849,7 +849,6 @@ REFUSAL_UNCITED_EXEMPT = {
     "merge:Host.base_state: out": ("refusal-matches-rule", "the base state read failed, and the stop prints gh's output unchanged"),
     "merge:Host.gh: network error from `gh": ("refusal-matches-rule", "gh failed on a network error after its retries, and the stop prints gh's output"),
     "merge:Host.pages: reading from GitHub failed": ("refusal-matches-rule", "a repo file could not be read from GitHub, and the stop names the file and the error"),
-    "merge:Host.pr: reading the pull request failed": ("refusal-matches-rule", "the pull request could not be read, and the stop prints gh's output"),
     "merge:Host.pr_number: no pull request is named": ("refusal-matches-rule", "no pull request is named and the branch cannot be read, so the stop prints git's output"),
     "merge:Host.pr_number: open pull requests have the head": ("refusal-matches-rule", "more than one open pull request has the same head, so the stop names the branch"),
     "merge:Host.required_names: merge.ignoreChecks names a required check": ("refusal-matches-rule", "the config names a required check to ignore, and the stop states that rule with no decision cite"),
