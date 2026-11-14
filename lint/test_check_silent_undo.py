@@ -2507,8 +2507,12 @@ class DropsLinesHint(unittest.TestCase):
         self.assertEqual(got, [], "premise: the revert is excused by the PR body")
         self.assertEqual(notes, ["ALLOWED app.txt: BODY reason"], "check() does not print the PR body's reason")
 
-    def test_the_remedy_says_the_oldest_reason_is_kept(self):  # red on this head: the remedy has no such sentence
-        self.assertIn("oldest", C.remedy_text(), "the remedy does not say that the oldest commit's reason is the one kept")
+    def test_the_remedy_says_a_pr_body_line_replaces_the_reason_only_where_the_merge_tool_reads_it(self):
+        """The remedy tells the reader that the oldest commit's reason is kept, and that a PR-body line replaces it only
+        where the merge tool reads the body. One line of the text must hold both halves, so a word in another line cannot pass."""
+        self.assertTrue(any("oldest" in line and "PR-body line replaces it only where the merge tool reads the body" in line
+                            for line in C.remedy_text().splitlines()),
+                        "the remedy does not say the oldest reason is kept, and that a PR-body line replaces it only where the merge tool reads the body")
 
     # ------------------------------------------------ reads of the message
 
