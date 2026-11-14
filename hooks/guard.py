@@ -156,8 +156,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        the working directory) has a repo (`git_reads.github_repo`) that no cs-repo tag of the
                        session's own newest get_session record names (`repo_tag_names`), or when a
                        set_session_tags follows that record. No record, an unreadable checkout or unparseable
-                       flags is a refusal. --lane-lint is not judged. Outside the cloud nothing is judged.
-                       (merge-confirm-repo)
+                       flags is a refusal. --lane-lint is not judged. A local session is judged on --confirm
+                       by its own role file (hooks/session_role.py local_judgement): the file must name
+                       batch-runner and the repo, and CS_SESSION_ROLE with no matching file refuses. A local
+                       session with neither is not judged. (merge-confirm-repo)
+  self-role-claim      deny. A Bash or PowerShell call that sets CS_SESSION_ROLE or runs bin/claude-role,
+                       also inside `bash -c`, `sh -c` or `eval`: a session does not start a child session that
+                       claims a role. Reads of the variable or the launcher are not judged. (self-role-claim)
   roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
                        the checkout's record branch (lint/layout.py record_branch) or `roadmap`, except a
                        dry run, unless the session's own get_session record (read
@@ -585,9 +590,9 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
+            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, SELF_ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
-            records_page_hit, repo_proof_hit, role_proof_hit,
+            records_page_hit, repo_proof_hit, role_proof_hit, self_role_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
@@ -4806,6 +4811,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = repo_proof_hit(stripped, cwd, transcript, session_id)
     if matched:
         refuse(tool, "deny", "merge-confirm-repo", REPO_REASON if is_cloud() else LOCAL_REPO_REASON, matched)
+
+    # 6a1a. A session that sets the role variable or runs the launcher: it would start a child session that claims a role (rule
+    # self-role-claim). Cost: one substring test per call.
+    matched = self_role_hit(stripped)
+    if matched:
+        refuse(tool, "deny", "self-role-claim", SELF_ROLE_REASON, matched)
 
     # 6a2. A push to the record branch from a session its own record does not prove triage (rule
     # roadmap-one-writer). Cost: one `git rev-parse` and one small file read per push, and one

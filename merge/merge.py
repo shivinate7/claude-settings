@@ -4261,7 +4261,7 @@ def read_merge_role():
     role = data.get("role")
     return role if isinstance(role, str) and role in MERGE_ROLES else None  # a list is unhashable: test the type first
 
-LOCAL_ROLE_REFUSAL = "this session may not merge: the launcher recorded no batch-runner role for it. Start the batch runner with `claude-role batch-runner`. Nothing was claimed or pushed. " + ROLE_CITE
+LOCAL_ROLE_REFUSAL = "this session may not merge: its own role record does not name the batch runner. Hand the pull request to the batch runner, or ask the owner. Nothing was claimed or pushed. " + ROLE_CITE
 
 def local_role_allows_confirm():
     """A local session's confirm check, judged by the session's OWN record only (hooks/session_role.py local_judgement, rules a, b, c). The id is

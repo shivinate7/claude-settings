@@ -1138,6 +1138,78 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
     return ""
 
 
+# ---- self-role-claim: a session does not start a child session that claims a role (decision session-tiers)
+SELF_ROLE_VARIABLE = "CS_SESSION_ROLE"
+SELF_ROLE_LAUNCHERS = ("claude-role", "claude-role.cmd")
+SELF_ROLE_REASON = (
+    "self-role-claim: a session does not claim a role for a session it starts, because a role proves who may merge and who writes "
+    "the roadmap. The owner starts a role session from his own terminal. Do the work in this session, or ask the owner to start "
+    "the session he wants. "
+    "(decision session-tiers, a local role comes from the owner's launcher, never from a session's own call)"  # glossary-ok: session-tiers is the decision's file name
+)
+
+
+def _claims_a_role(tokens) -> bool:
+    """True when one tokenized command sets the role variable (a `VAR=x` prefix, `env VAR=x`, `export VAR=x`, PowerShell `$env:VAR=x`,
+    `Set-Item Env:VAR`, `SetEnvironmentVariable('VAR', ...)`) or runs the launcher, as its command word or as the script of a python call."""
+    index = resolve_command(tokens)
+    before = tokens if index is None else tokens[:index]
+    if any(t.startswith(SELF_ROLE_VARIABLE + "=") for t in before):
+        return True
+    lowered = [t.lower() for t in tokens]
+    variable = SELF_ROLE_VARIABLE.lower()
+    if any(t.startswith("$env:" + variable) and t[len("$env:" + variable):].lstrip().startswith("=") for t in lowered):
+        return True
+    if any(t == "$env:" + variable for t in lowered) and any(t.startswith("=") for t in lowered):
+        return True
+    if any(t in ("env:" + variable, "env:\\" + variable) for t in lowered):
+        return True
+    if any("setenvironmentvariable" in t for t in lowered) and variable in lowered:
+        return True
+    if index is None:
+        return False
+    word = basename(tokens[index])
+    rest = tokens[index + 1:]
+    if word in ("export", "declare", "typeset", "setenv") and any(t.startswith(SELF_ROLE_VARIABLE + "=") for t in rest):
+        return True
+    if word in SELF_ROLE_LAUNCHERS:
+        return True
+    if word.startswith("python"):
+        script = next((t for t in rest if not t.startswith("-")), None)
+        return script is not None and basename(script) in SELF_ROLE_LAUNCHERS
+    return False
+
+
+def _self_role_hit(text: str, depth: int) -> bool:
+    segments = split_segments(text)
+    for segment in segments:
+        if not segment.strip():
+            continue
+        tokens = segment_tokens(segment)
+        if tokens is None:
+            return True   # a quote left open: the segment names the variable or the launcher and cannot be read, so it is refused
+        if _claims_a_role(tokens):
+            return True
+        for script in inner_commands(tokens):
+            if depth >= MERGE_NEST_DEPTH or _self_role_hit(script, depth + 1):
+                return True
+    return False
+
+
+def self_role_hit(stripped: str) -> str:
+    """Return a short label when a Bash or PowerShell call sets the role variable or runs the launcher, else ''. Reads each segment and each
+    script a `bash -c`, `sh -c` or `eval` hands on, so quoted text, `echo $VAR`, `grep claude-role` and `cat bin/claude-role` are no claim.
+    Fails closed inside the clause: a call that names the variable or the launcher and cannot be read is refused, because the guard-wide crash
+    path fails open. Cost: one substring test per call; a parse only for a call that names the variable or the launcher."""
+    lowered = stripped.lower()
+    if SELF_ROLE_VARIABLE.lower() not in lowered and "claude-role" not in lowered:
+        return ""
+    try:
+        return "a session claims a role" if _self_role_hit(stripped, 0) else ""
+    except Exception:
+        return "a session claims a role"
+
+
 # ---- merge --confirm: the checkout it acts in must be a repo the own record names (rule merge-confirm-repo)
 REPO_REASON = (
     "merge-confirm-repo: this session's own record does not prove it may merge in the checkout this command acts in. "
@@ -1191,10 +1263,9 @@ def _merge_target_repo(segments, number: int, cwd: str, ends, repo_dir):
 
 
 LOCAL_REPO_REASON = (
-    "merge-confirm-repo: the role file the launcher recorded for this session does not prove it may merge in the checkout "
-    "this command acts in. A local merge runs only from a batch runner started with `claude-role batch-runner` in that repo, "
-    "and a session the launcher did not start has no role file. A session of any other role hands the pull request to a "
-    "batch runner. "
+    "merge-confirm-repo: the role file recorded for this session does not prove it may merge in the checkout "
+    "this command acts in. A local merge runs only from a session whose own role file names the batch runner for that repo. "
+    "Hand the pull request to the batch runner, or ask the owner. "
     "(decision merge-confirm-repo, a merge acts only in a repo its own record names)"
 )
 
