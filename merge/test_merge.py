@@ -3291,6 +3291,9 @@ try:
     num = S.get("pr_number", 7)
     rows = S.get("open_prs", [])
     numbered = {(r[3] if len(r) > 3 else 101 + i): r for i, r in enumerate(rows)}
+    def named_pr(n):  # a named pull request's state, merged flag and body: pr_extra, open and empty unless a case sets them
+        ex = (S.get("pr_extra") or {}).get(str(n), {})
+        return {"state": ex.get("state", "open"), "merged": ex.get("merged", False), "body": ex.get("body", "")}
     canon = rel or "(repo)"
     line = "%s %s%s%s" % (method, canon, "".join(" %s=%s" % kv for kv in sorted(params.items())), "".join(" --" + f for f in ("paginate", "slurp") if f in flags))
     m_pr, m_put = re.fullmatch(r"pulls/(\d+)", rel), re.fullmatch(r"pulls/(\d+)/merge", rel)
@@ -3315,14 +3318,14 @@ try:
             raise Refused(S["open_pulls_fail"])
         if params.get("state", "open") != "open" or set(params) - {"state", "per_page", "page"}:
             raise Refused(api_error(422, "fake gh: the open pull requests are read with state=open and per_page only, then matched on head.ref"))
-        items = [list_item(n, r[1], r[0], r[2]) for n, r in numbered.items()]
+        items = [list_item(n, r[1], r[0], r[2], body=named_pr(n)["body"]) for n, r in numbered.items() if named_pr(n)["state"] == "open"]
         answer_list(items, None)
 
     elif method == "GET" and m_pr:
         n = int(m_pr.group(1))
         if n in numbered and n != num:
-            r = numbered[n]
-            finish(one(pull(n, r[1], r[0], r[2]), jq), 0, include)
+            r, ex = numbered[n], named_pr(n)
+            finish(one(pull(n, r[1], r[0], r[2], state=ex["state"], merged=ex["merged"], body=ex["body"]), jq), 0, include)
         if n != num:
             raise Refused(api_error(404, "Not Found"))
         head = feat_head()
@@ -3331,7 +3334,7 @@ try:
                 raise Refused(S["state_read_fail"])
             head = S.get("state_head") or head
             merged = bool(S.get("oid"))
-            pr = pull(n, head, "feat", S.get("base", "main"), "closed" if merged else "open", merged, False, None if merged else True,
+            pr = pull(n, head, S.get("head_ref", "feat"), S.get("base", "main"), "closed" if merged else "open", merged, False, None if merged else True,
                       "unknown" if merged else "clean", S.get("body", ""), S["oid"] if merged else TEST_MERGE_SHA)
         else:  # the head read
             lag = S.get("lag")
@@ -3348,12 +3351,21 @@ try:
                 val = not (S.get("dirty_after_checks") is not None and S.get("checks_calls", 0) >= S["dirty_after_checks"])
             locked = bool(ref("refs/heads/merge-lock/main"))
             draft = bool(S.get("draft")) or (bool(S.get("draft_when_locked")) and locked)  # draft_when_locked: the PR turns draft once the merge lock is taken
-            pr = pull(n, head, "feat", S.get("base", "main"), "open", False, draft, val, {True: "clean", False: "dirty", None: "unknown"}[val], S.get("body", ""))
+            pr = pull(n, head, S.get("head_ref", "feat"), S.get("base", "main"), "open", False, draft, val, {True: "clean", False: "dirty", None: "unknown"}[val], S.get("body", ""))
             if locked and S.get("merge_state_when_locked"):  # mergeable_state once the merge lock is taken: clean for the preview read, this for every read after it
                 pr["mergeable_state"] = S["merge_state_when_locked"]
             S["shown"] = S.get("shown", []) + [head]; save()
         pr.update(S.get("pr_raw") or {})  # a test's own raw fields, for the mapping table
         finish(one(pr, jq), 0, include)
+
+    elif method == "PATCH" and m_pr:  # a close of a named pull request (the REST close): the call is in calls.log, and the row turns closed
+        n = int(m_pr.group(1))
+        if n == num or n not in numbered:
+            raise Refused(api_error(404, "Not Found"))
+        if S.get("close_fail"):  # the text gh prints when GitHub refuses the close
+            raise Refused(S["close_fail"])
+        ex = S.setdefault("pr_extra", {}).setdefault(str(n), {}); ex["state"] = "closed"; save()
+        finish(one(pull(n, numbered[n][1], numbered[n][0], numbered[n][2], state="closed", body=ex.get("body", "")), jq), 0, include)
 
     elif method == "PUT" and m_put and int(m_put.group(1)) == num:
         S["put_done"] = True; S.setdefault("merge_fields", []).append(dict(params)); save()  # each merge call's fields, as sent: a case reads what the merge carried
@@ -5880,6 +5892,132 @@ class RestRoutes(Env):
             self.gh_host().pr(7)
         self.assertNotIsInstance(raised.exception, merge.NetStop)
         self.assertEqual((self.paused, self.gh_state("route_failed")), ([], {"pr": 1}))
+
+class CloseReplaced(Env):
+    """The draft step (`merge <pr> --ready`) closes each open pull request that the lane's body names as replaced or carried, `Replaces #N` or
+    `Carries #N`, with a pointer comment to the kept pull request (step close-replaced-at-open; decision session-tiers, the replaced drafts).
+    A name counts only as the body's own text: not inside a code span or fence, not on a quote line, not the pull request itself, not in another
+    repo, and not as `see #N` or `related #N`. Each case reads the fake gh's calls: at most one read of each named pull request, one
+    `PATCH pulls/<N> state=closed` and one pointer comment for each open one, and no call at all to a pull request the body does not close.
+    The close does not wait on the ready mark: the real Host's ready returns False, and the step still closes. Not a GhHalf subclass: the GhHalf tests must not run twice."""
+    set, calls, gh_host, go, gh_state = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go, GhHalf.gh_state
+
+    def setUp(self):
+        super().setUp()
+        gh_case_setup(self)
+
+    def ready(self, number, body, named=(), **state):
+        """`merge <number> --ready` on a draft lane whose body is `body`. `named` is [(pull request number, "open" | "closed" | "merged")]: each one
+        a pull request of this repo. -> (rc, stdout and stderr together)."""
+        rows = [[f"named-{n}", f"{n:040x}", "main", n] for n, _s in named]
+        extra = {str(n): {"state": "open" if s == "open" else "closed", "merged": s == "merged"} for n, s in named}
+        self.set(pr_number=number, draft=True, body=body, open_prs=rows, pr_extra=extra, **state)
+        return self.run_merge(str(number), "--ready", host=self.gh_host())
+
+    def lines_naming(self, n):
+        """The fake gh's calls that name pull request n: its reads, its close and the comments on it."""
+        return [line for line in self.calls().splitlines() if re.search(rf"(?:pulls|issues)/{n}(?:\s|/|$)", line)]
+
+    def reads_of(self, n):
+        """How many times the step read pull request n, one `GET pulls/<n>` each (a query string on the line does not change the count)."""
+        return sum(1 for line in self.calls().splitlines() if re.fullmatch(rf"GET pulls/{n}(?: .*)?", line))
+
+    def posts_on(self, n):
+        """The comment bodies posted on pull request n."""
+        return [p["body"] for p in self.gh_state("posted") or [] if p["n"] == n]
+
+    def assert_closed_with_pointer(self, n, by, out):
+        """Pull request n was closed, and exactly one comment on it names the kept pull request `by`."""
+        self.assertIn(f"PATCH pulls/{n} state=closed", self.calls().splitlines(), f"#{n} stayed open, though the body names it as replaced by #{by}:\n{out}")
+        posted = self.posts_on(n)
+        self.assertEqual(len(posted), 1, f"#{n} got {len(posted)} comments, want one pointer to #{by}:\n{out}")
+        self.assertIn(f"#{by}", posted[0], f"the pointer on #{n} does not name #{by}:\n{posted[0]}")
+
+    def assert_untouched(self, n, out):
+        """Nothing read, closed or commented on pull request n: the body does not name it as replaced."""
+        self.assertEqual(self.lines_naming(n), [], f"#{n} was read or changed, though the body does not name it as replaced:\n{out}")
+        self.assertEqual(self.posts_on(n), [], f"#{n} got a comment, though the body does not name it as replaced:\n{out}")
+
+    def test_a_replaces_line_closes_the_named_open_pull_request_at_ready(self):
+        rc, out = self.ready(3210, "Replaces #1636", named=[(1636, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_carries_line_closes_the_named_open_pull_request_at_ready(self):  # the #3277 behind #3278 incident
+        rc, out = self.ready(3278, "Carries #3277", named=[(3277, "open")])
+        self.assert_closed_with_pointer(3277, 3278, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_name_inside_a_fenced_code_block_closes_nothing(self):
+        rc, out = self.ready(3210, "Replaces #1636\n\n```\nReplaces #1700\n```\n", named=[(1636, "open"), (1700, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assert_untouched(1700, out)
+
+    def test_a_name_inside_an_inline_code_span_closes_nothing(self):
+        rc, out = self.ready(3210, "Replaces #1636\n\nThe old form was `Replaces #1700`.", named=[(1636, "open"), (1700, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assert_untouched(1700, out)
+
+    def test_a_name_on_a_quote_line_closes_nothing(self):
+        rc, out = self.ready(3210, "Replaces #1636\n\n> Replaces #1700", named=[(1636, "open"), (1700, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assert_untouched(1700, out)
+
+    def test_a_pull_request_that_names_itself_is_not_closed_and_the_other_name_is(self):
+        rc, out = self.ready(3210, "Replaces #3210\nReplaces #1636", named=[(1636, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assertNotIn("PATCH pulls/3210 state=closed", self.calls().splitlines(), "the step closed its own pull request:\n" + out)
+        self.assertEqual(self.posts_on(3210), [], "the step commented on its own pull request:\n" + out)
+
+    def test_a_named_pull_request_already_closed_or_merged_gets_no_close_and_no_comment(self):
+        rc, out = self.ready(3210, "Replaces #1636\nReplaces #1700\nReplaces #1701", named=[(1636, "open"), (1700, "closed"), (1701, "merged")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        for n in (1700, 1701):
+            with self.subTest(n=n):
+                self.assertNotIn(f"PATCH pulls/{n} state=closed", self.calls().splitlines(), f"#{n} was closed again:\n{out}")
+                self.assertEqual(self.posts_on(n), [], f"#{n} got a pointer comment though it is not open:\n{out}")
+
+    def test_a_name_in_another_repo_is_never_closed_here(self):
+        body = "Replaces other/repo#1800\nReplaces https://github.com/other/repo/pull/1801\nReplaces #1636"
+        rc, out = self.ready(3210, body, named=[(1636, "open"), (1800, "open"), (1801, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assert_untouched(1800, out)
+        self.assert_untouched(1801, out)
+        p = pathlib.Path(self.state, "repos.log")
+        self.assertNotIn("other/repo", set(p.read_text().split()) if p.exists() else set(), "the step called another repo's pull requests:\n" + out)
+
+    def test_see_and_related_names_close_nothing(self):
+        rc, out = self.ready(3210, "Replaces #1636\n\nSee #1700 and related #1701.", named=[(1636, "open"), (1700, "open"), (1701, "open")])
+        self.assert_closed_with_pointer(1636, 3210, out)
+        self.assert_untouched(1700, out)
+        self.assert_untouched(1701, out)
+
+    def test_a_refused_close_stops_the_step_and_names_the_pull_request(self):
+        rc, out = self.ready(3210, "Replaces #1636", named=[(1636, "open")], close_fail=rest_err(422, "Unprocessable Entity"))
+        self.assertIn("PATCH pulls/1636 state=closed", self.calls().splitlines(), "the close of #1636 was never sent:\n" + out)
+        self.assertNotEqual(rc, 0, "a refused close left the step at exit 0, so the lane read as done:\n" + out)
+        self.assertIn("1636", out, "the stop does not name #1636:\n" + out)
+
+    def test_each_named_open_pull_request_costs_at_most_one_read_one_close_and_one_comment(self):
+        named = [(1636, "open"), (1637, "open"), (1638, "open")]
+        rc, out = self.ready(3210, "Replaces #1636\nReplaces #1637\nReplaces #1638", named=named)
+        for n, _s in named:
+            with self.subTest(n=n):
+                self.assertEqual(self.calls().splitlines().count(f"PATCH pulls/{n} state=closed"), 1, f"the close of #{n} was not one call:\n{out}")
+                self.assertLessEqual(self.reads_of(n), 1, f"#{n} was read more than once:\n{out}")
+                self.assertEqual(len(self.posts_on(n)), 1, f"#{n} did not get one pointer comment:\n{out}")
+
+    def test_a_body_that_names_no_pull_request_closes_nothing(self):  # control: green on the old code
+        rc, out = self.ready(3210, "Lane work. See the record.", named=[(1636, "open")])
+        self.assertEqual(rc, 0, out)
+        self.assert_untouched(1636, out)
+
+    def test_a_preview_of_the_lane_closes_nothing(self):  # control: green on the old code; the close belongs to the ready act only
+        self.set(pr_number=3210, draft=True, body="Replaces #1636", open_prs=[["named-1636", f"{1636:040x}", "main", 1636]])
+        rc, out = self.run_merge("3210", host=self.gh_host())
+        self.assertEqual(rc, 0, out)
+        self.assert_untouched(1636, out)
+
 
 def put_base_config(env, text):
     """Commit `text` as .github/stamp.json on origin's main from the other clone. env.co keeps its local checkout."""
