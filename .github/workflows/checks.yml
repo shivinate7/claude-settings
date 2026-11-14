@@ -130,6 +130,7 @@ jobs:
       sweep: ${{ steps.scope.outputs.sweep }}
       shoot: ${{ steps.scope.outputs.shoot }}
       mutation_report: ${{ steps.scope.outputs.mutation_report }}
+      records_only_skip: ${{ steps.scope.outputs.records_only_skip }}
       lint_red_run: ${{ steps.scope.outputs.lint_red_run }}
       lint_plan_refuter: ${{ steps.scope.outputs.lint_plan_refuter }}
       lint_ruling_kind: ${{ steps.scope.outputs.lint_ruling_kind }}
@@ -599,131 +600,173 @@ jobs:
           python-version: "3.11"
 
       - name: Config watch fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_config_watch.py
 
       - name: Config watch fast-exit suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_config_watch_fast_exit.py
 
       - name: Shared names suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_shared_names.py
 
       - name: Precompact handoff fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_precompact_handoff.py
 
       - name: Claude Code compaction check fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_cc_version_check.py
 
       - name: Handoff wave-2 fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_handoff_wave2.py
 
       - name: Decision watch fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_decision_watch.py
 
       - name: Reply judge fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_reply_judge.py
 
       - name: Prose judge fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_prose_judge.py
 
       - name: SendMessage state fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_sendmessage_state.py
 
       - name: Refusal note fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_refusal_note.py
 
       - name: Refusal note agent row suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_refusal_note_agent.py
 
       - name: Refusal note route row suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_refusal_note_route.py
 
       - name: Call judge fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_call_judge.py
 
       - name: Question form fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_question_form.py
 
       - name: Question form option-key gap suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_question_form_option_gap.py
 
       - name: Question form option-label suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_question_form_option_labels.py
 
       - name: Question form letters-frozen suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_question_form_letters_frozen.py
 
       - name: Remove-prompt answer fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_rm_prompt_answer.py
 
       - name: Agent brief fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_agent_brief.py
 
       - name: Blind brief fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_blind_brief.py
 
       - name: Local time line fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_local_time.py
 
       - name: Guard probe helper fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_probe.py
 
       - name: CI wake-up fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_ci_wake.py
 
       - name: Feedback inbox fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_feedback_inbox.py
 
       - name: Waiting export check suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_waiting_export.py
 
       - name: Daily note fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_daily_note.py
 
       - name: Git mailbox suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_mail.py
 
       - name: Git mailbox wait suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_mail_wait.py
 
       - name: No-window helper fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_nowindow.py
 
       - name: Auto-mode allow entry suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_auto_mode_allow.py
 
       # Windows is not covered: the stall watch is posix only (see the stall-watch decision).
       - name: Stall watch fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_stall_watch.py
 
       - name: Stall watch stop suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_stall_watch_stop.py
 
       - name: Proc env read suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_proc_env.py
 
       - name: Simulator boot-record fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_sim_boot_record.py
 
       - name: Guard wrappers fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_wrappers.py
 
       # Fuzzes every deny check that judge_shell and judge reach, with each tool judge branches on. Linux only, like the other guard-module suites here.
       - name: Deny checks never raise suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_checks_never_raise.py
 
       - name: Session start notice suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_session_start.py
 
       - name: Session role file suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_session_role.py
 
       - name: Directory before a segment suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_dir_before_segment.py
 
       - name: Ruling home fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_ruling_home.py
 
       - name: Scratchpad owner fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_scratchpad_owner.py
 
   # The janitor, mutation, skills, actions-script, PowerShell and mod suites of the old `checks` job. See checks-hooks for why it split.
@@ -748,70 +791,86 @@ jobs:
           python-version: "3.11"
 
       - name: Janitor sweep fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' && needs.scope.outputs.sweep == 'true' }}
+        if: ${{ (needs.scope.outputs.code == 'true' && needs.scope.outputs.sweep == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 janitor/test_sweep.py
 
       - name: Janitor sweep mutation test
-        if: ${{ needs.scope.outputs.sweep == 'true' }}
+        if: ${{ (needs.scope.outputs.sweep == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 janitor/mutate_sweep.py
 
       - name: Reap proof Git Bash one-home suite
-        if: ${{ needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 janitor/test_prove_agent_end_reap.py
 
       - name: Mutation verdict fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_mutate_shared.py
 
       - name: Mutation report-mode fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_mutate_report.py
 
       # The engine parses with typescript, which a bare checkout lacks. The guard is the one map-check.sh uses.
       - name: Mutation JS engine fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: |
           [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
           python3 hooks/test_mutate_js.py
 
       - name: Mutation replay fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: |
           [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
           python3 hooks/test_mutate_replay.py
 
       - name: Mutation CI report fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: |
           [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
           python3 hooks/test_mutate_ci.py
 
       - name: Map check
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: bash .github/scripts/map-check.sh
 
       - name: Waiting page staleness fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/waiting-page/test_stale_pages.py
 
       - name: Waiting page splice fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/waiting-page/test_splice.py
 
       - name: Waiting page grant check suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/waiting-page/test_page_grant.py
       - name: Waiting page grant answer-label suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/waiting-page/test_page_grant_label.py
       - name: Waiting page grant held suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/waiting-page/test_page_grant_held.py
       - name: Waiting page question source suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/waiting-page/test_question_source.py
       - name: Waiting page park relay prose suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/waiting-page/test_skill_park_relay.py
 
       - name: Roadmap builder fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/roadmap/test_build.py
 
       - name: project-ops skill scaffold suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/project-ops/tests/test_scaffold.py
 
       - name: ios-apps skill starter suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/ios-apps/tests/test_new_app.py
 
       - name: PowerShell syntax check, install.ps1
-        if: ${{ needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         shell: pwsh
         run: |
           $e = $null
@@ -819,21 +878,24 @@ jobs:
           if ($e) { $e; exit 1 }
 
       - name: Pointer encoding test, install.test.ps1
-        if: ${{ needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: pwsh -NoProfile -File install.test.ps1
 
       - name: Record stamp engine fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: node actions/stamp/test_stamp.mjs
 
       - name: Scanner trap lint
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: node lint/test_scanner_traps.mjs
 
       - name: Record stamp action fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         shell: bash
         run: bash actions/stamp/test_action.sh
 
       - name: Mod and map-skill tests
-        if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
+        if: ${{ (!cancelled() && needs.scope.outputs.mods == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         shell: bash
         run: bash .github/scripts/mod-tests.sh
 
@@ -1756,8 +1818,11 @@ jobs:
   # The guard fixture suite on Windows, split off checks-windows by cut F. Every run, a ready pull_request included (R62, owner
   # 15:55 CST Nov 12: the integration PR run carries the full guard so the push to main can skip it), runs the full suite in shards:
   # shard 1 here, the rest in checks-windows-guard-<i> (the shard switch in hooks/test_guard.py; lint/test_windows_split.py proves each
-  # case runs once). The Windows guard, merge and rest jobs run every step on a ready pull_request whatever the scope flags say (the
-  # draft test stands in for scope there, which skips on a draft); push, schedule and dispatch run them whole too.
+  # case runs once). The Windows guard, merge and rest jobs run every step on a ready pull_request (the draft test stands in for scope
+  # there, which skips on a draft), except a records-only push after a fully green head (records_only_skip, from .github/scripts/ci-scope.sh
+  # and green-head.sh), where every job is skipped. R62 ("each suite runs once per batch, on the batch PR"; "Part 3 keeps the full shards
+  # once per batch") puts the full suites on every ready pull_request; own-830-c ("every job", owner 15:02 CST Nov 14) narrows that:
+  # a push that changes docs/records.md alone adds nothing the green head's run has not proved. Push, schedule and dispatch run them whole.
   checks-windows-guard:
     runs-on: windows-latest
     needs: scope
@@ -1779,7 +1844,7 @@ jobs:
           python-version: "3.11"
 
       - name: Guard fixture suite (shard 1 of 3)
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
         env:
           GUARD_SHARD: 1/3
         run: python hooks/test_guard.py
@@ -1803,7 +1868,7 @@ jobs:
           python-version: "3.11"
 
       - name: Guard fixture suite (shard 2 of 3)
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
         env:
           GUARD_SHARD: 2/3
         run: python hooks/test_guard.py
@@ -1827,7 +1892,7 @@ jobs:
           python-version: "3.11"
 
       - name: Guard fixture suite (shard 3 of 3)
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
         env:
           GUARD_SHARD: 3/3
         run: python hooks/test_guard.py
@@ -1854,17 +1919,17 @@ jobs:
           python-version: "3.11"
 
       - name: Merge launcher fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python merge/test_launch.py
 
       - name: Merge tool git-half fixture suite (shard 1 of 5)
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
         env:
           MERGE_SHARD: 1/5
         run: python merge/test_merge.py
 
       - name: Merge launcher fixture suite (merge.cmd)
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python merge/test_cmd.py
 
   checks-windows-merge-2:
@@ -1888,7 +1953,7 @@ jobs:
           python-version: "3.11"
 
       - name: Merge tool git-half fixture suite (shard 2 of 5)
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
         env:
           MERGE_SHARD: 2/5
         run: python merge/test_merge.py
@@ -1914,7 +1979,7 @@ jobs:
           python-version: "3.11"
 
       - name: Merge tool git-half fixture suite (shard 3 of 5)
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
         env:
           MERGE_SHARD: 3/5
         run: python merge/test_merge.py
@@ -1940,7 +2005,7 @@ jobs:
           python-version: "3.11"
 
       - name: Merge tool git-half fixture suite (shard 4 of 5)
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
         env:
           MERGE_SHARD: 4/5
         run: python merge/test_merge.py
@@ -1966,7 +2031,7 @@ jobs:
           python-version: "3.11"
 
       - name: Merge tool git-half fixture suite (shard 5 of 5)
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
         env:
           MERGE_SHARD: 5/5
         run: python merge/test_merge.py
@@ -2020,119 +2085,119 @@ jobs:
           python-version: "3.11"
 
       - name: Config watch fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_config_watch.py
 
       - name: Config watch fast-exit suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_config_watch_fast_exit.py
 
       - name: Shared names suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_shared_names.py
 
       - name: Precompact handoff fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_precompact_handoff.py
 
       - name: Claude Code compaction check fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_cc_version_check.py
 
       - name: Handoff wave-2 fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_handoff_wave2.py
 
       - name: Decision watch fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_decision_watch.py
 
       - name: Reply judge fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_reply_judge.py
 
       - name: Prose judge fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_prose_judge.py
 
       - name: SendMessage state fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_sendmessage_state.py
 
       - name: Refusal note fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_refusal_note.py
 
       - name: Refusal note agent row suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_refusal_note_agent.py
 
       - name: Refusal note route row suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_refusal_note_route.py
 
       - name: Call judge fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_call_judge.py
 
       - name: Question form fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_question_form.py
 
       - name: Question form option-key gap suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_question_form_option_gap.py
 
       - name: Remove-prompt answer fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_rm_prompt_answer.py
 
       - name: Agent brief fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_agent_brief.py
 
       - name: Blind brief fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_blind_brief.py
 
       - name: Local time line fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_local_time.py
 
       - name: Now-central helper fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python lint/test_now_central.py
 
       - name: Guard probe helper fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_probe.py
 
       - name: Stall watch stop suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_stall_watch_stop.py
 
       - name: CI wake-up fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_ci_wake.py
 
       - name: Feedback inbox fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_feedback_inbox.py
 
       - name: Waiting export check suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_waiting_export.py
 
       - name: Daily note fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_daily_note.py
 
       - name: Git mailbox suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_mail.py
 
       - name: Git mailbox wait suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_mail_wait.py
 
   # The second half of the Windows rest suites, from the Guard wrappers suite on. Same scope flag and step shape as checks-windows-rest.
@@ -2155,83 +2220,83 @@ jobs:
           python-version: "3.11"
 
       - name: Guard wrappers fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_wrappers.py
 
       - name: Session start notice suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_session_start.py
 
       - name: Refusal settle fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python lint/test_report_guard_refusal.py
 
       - name: Stop-hook guard fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python lint/test_report_guard.py
 
       - name: Stop-hook question route suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python lint/test_report_guard_route.py
 
       - name: Stop-hook stamped copy suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python lint/test_report_guard_stamped.py
 
       - name: Stop-hook route row falsifier suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python lint/test_report_guard_falsifier.py
 
       - name: Stop-hook hand-off cite suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python lint/test_report_guard_handoff.py
 
       - name: Clause parser suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python lint/test_clause.py
 
       - name: Stop-hook cannot-claim suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python lint/test_report_guard_cannot.py
 
       - name: Stop-hook landing fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python lint/test_report_guard_landing.py
 
       - name: Stop-hook owner-safe reason suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python lint/test_report_guard_remedy.py
 
       - name: Ruling home fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_ruling_home.py
 
       - name: Ruling census fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python lint/test_ruling_census.py
 
       - name: Verdict runner fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python lint/test_verdict.py
 
       - name: Hook platform exit fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python lint/test_hook_platform_exit.py
 
       - name: Unknown-read contract (guard + session_start)
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python lint/check_unknown_reads_contract.py
 
       - name: Janitor triggers fixture suite (SessionEnd hook)
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python janitor/test_session_end_sweep.py
 
       - name: Janitor triggers fixture suite (launchd installer)
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python janitor/test_install_launchd.py
 
       - name: Janitor triggers fixture suite (schtasks installer)
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python janitor/test_install_schtasks.py
 
       # The suite's own watchdog (actions/stamp/suite_watchdog.mjs) ends it at 180 s; the slowest normal
@@ -2242,12 +2307,12 @@ jobs:
       # case, with every bounded call counted: 180 s cap + 30 s hard stop + 35 s longest blocking call
       # + 10 s kills + 2 s output drain = 257 s. The CI step's timeout-minutes (300 s) is the backstop.
       - name: Record stamp engine fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         timeout-minutes: 5
         run: node actions/stamp/test_stamp.mjs
 
       - name: Record stamp action fixture suite
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         shell: bash
         run: bash actions/stamp/test_action.sh
 

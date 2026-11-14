@@ -18,6 +18,7 @@
 # BASE_SHA, HEAD_REF, GREEN_HEAD (optional: the sha green-head.sh prints, the pull request's newest earlier fully green head), PR_HEAD
 # (optional: the pull request's head sha; HEAD when unset). GREEN_HEAD turns the 13 job and suite flags off on a pull request when it is an
 # ancestor of PR_HEAD and the delta from it to PR_HEAD is docs/records.md alone; the lint flags and mutation_report keep their whole-PR values. Any unreadable read: no skip.
+# The last output line, records_only_skip=true|false, is true exactly in that case.
 set -u
 JOBS="checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos pointer_windows"
 LINTS="lint_red_run lint_plan_refuter lint_ruling_kind lint_comment_narration"
@@ -164,6 +165,7 @@ case "$on" in *" code "*) case "$on" in *" guard "*) on="$on checks_guard " ;; e
 # The delta must be exactly one path: an empty or longer delta, an unreadable one or a head that is not an ancestor keeps `on`.
 # The delta runs to PR_HEAD, the pull request's own head: HEAD in CI is the merge commit, which also holds every base change since.
 # PR_HEAD counts only when it is a full hex sha, a commit, and an ancestor of HEAD; otherwise the delta runs to HEAD.
+skip=false
 end=HEAD
 if [[ "${PR_HEAD:-}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] && git cat-file -e "$PR_HEAD^{commit}" 2>/dev/null &&
    git merge-base --is-ancestor "$PR_HEAD" HEAD 2>/dev/null; then
@@ -177,6 +179,7 @@ if [ "$whole_read" = 1 ] && [[ "${GREEN_HEAD:-}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})
     case " $JOBS checks_guard code mods guard sweep shoot " in *" $t "*) ;; *) kept="$kept$t " ;; esac
   done
   on="$kept"
+  skip=true
   echo "CI scope: records-only push after green head $GREEN_HEAD"
 fi
 echo "CI scope: event=${EVENT:-} range=${range:-none} on=$on"
@@ -193,3 +196,5 @@ case "${EVENT:-}" in
   *) v=true ;;
 esac
 echo "mutation_report=$v" >> "$GITHUB_OUTPUT"
+# records_only_skip: true exactly when the records-only shortcut above forced the 13 flags off; checks.yml reads it to skip the run steps of the test jobs.
+echo "records_only_skip=$skip" >> "$GITHUB_OUTPUT"
