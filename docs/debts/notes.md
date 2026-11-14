@@ -2279,5 +2279,5 @@
 - clean-merges-cost-wording: cost wording omits this: a record that survives clean merges of main still costs one gh compare per merge commit (`clean_merges_after`), and a no-list build reads `reviewed_read` twice.
 - lane-mail-done-unmailed: lane mail covers open and bad records only. A done record with no lane lint or a stale head is neither mailed nor named left out. Only the 6 h row catches it. A lane that merges main while its record is open is mailed at each new head.
 - layout-read-non-utf8: `_read` in lint/layout.py does not map a non-UTF-8 extras file to a LayoutError, so `lost_work_branches` (merge/merge.py) raises a traceback there instead of reading unknown. Loud, not clear; unlikely in normal work.
-- record-branch-fork-name: state f skips only the record branch of the repo the run is rooted at, so a fork's own record branch (`roadmap-<fork>`) still lists as an f row in a run rooted at main.
+- record-branch-fork-name: state f skips only the record branch of the repo the run is rooted at. A fork's own record branch (`roadmap-<fork>`) still lists as an f row in a run rooted at main.
 - ledger-invalid-key-untested: no test runs an invalid `record-branch` key through the ledger path; it shares `lost_work_rows` with the covered failed-fetch ledger case.
