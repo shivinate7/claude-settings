@@ -1090,4 +1090,111 @@ sh("pwsh-followups: pwsh -c, an apostrophe inside smart quotes, then Add-Content
    "product file, is allowed [pwsh-followups green]",
    "pwsh -c \"Set-Content docs/a.md “it's”; Add-Content 'src/app.py' v\"", "allow", **BR)
 
+# PWSH-R3. A comma list is one PowerShell argument, so the test path after the first comma is a write too.
+# The allow pins below name a test path in a read, a here-string or an escape, and no write follows them.
+sh("pwsh-r3 L1: PowerShell tool, Set-Content of a docs file and a test file in one comma list, is refused "
+   "[pwsh-r3 red]",
+   "Set-Content docs/a.md, 'hooks/test_x.py' x", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **BR)
+sh("pwsh-r3: PowerShell tool, a backtick escape in a double-quoted Write-Host, then a Get-Content of a "
+   "test file, is allowed [pwsh-r3 green]",
+   'Write-Host "line`n" ; Get-Content hooks/test_x.py', "allow", tool="PowerShell", **BR)
+sh("pwsh-r3: PowerShell tool, a single-quoted here-string whose body has an apostrophe and names a test "
+   "file, with nothing after it that writes, is allowed [pwsh-r3 green]",
+   "@'\nit's in hooks/test_x.py\n'@", "allow", tool="PowerShell", **BR)
+sh("pwsh-r3 control: PowerShell tool, Write-Host of a smart-apostrophe line, then Get-Date, is allowed "
+   "[pwsh-r3 green]",
+   "Write-Host it’s done; Get-Date", "allow", tool="PowerShell", **BR)
+sh("pwsh-r3 control: PowerShell tool, a smart-quoted here-string that names a test file with no write, "
+   "is allowed [pwsh-r3 green]",
+   "@“\nedit hooks/test_x.py later\n”@", "allow", tool="PowerShell", **BR)
+# An UNQUOTED comma joins a docs path and a test path into one PowerShell argument, so the test path is a write.
+sh("pwsh-r3 unquoted comma: PowerShell tool, Set-Content of a docs file and a test file joined by a comma, "
+   "is refused [pwsh-r3 green]",
+   "Set-Content docs/a.md,hooks/test_x.py x", "deny", rule=BT, carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-r3 unquoted comma: PowerShell tool, Set-Content -Path with a docs file and a test file joined by a "
+   "comma, is refused [pwsh-r3 green]",
+   "Set-Content -Path docs/a.md,hooks/test_x.py -Value x", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **BR)
+sh("pwsh-r3 unquoted comma: PowerShell tool, Set-Content of a docs file, a space, then a test file after a "
+   "comma, is refused [pwsh-r3 green]",
+   "Set-Content docs/a.md ,hooks/test_x.py x", "deny", rule=BT, carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-r3 unquoted comma control: PowerShell tool, Set-Content of a docs file and a product file joined by "
+   "a comma, is allowed [pwsh-r3 green]",
+   "Set-Content docs/a.md,src/app.py x", "allow", tool="PowerShell", **BR)
+# A mutating command inside a scriptblock is a command, so a test path it writes is refused.
+sh("pwsh-r3 scriptblock: PowerShell tool, Set-Content of a test file inside a ForEach-Object block is refused "
+   "[pwsh-r3 red]",
+   "ForEach-Object { Set-Content hooks/test_x.py x }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **BR)
+sh("pwsh-r3 scriptblock control: PowerShell tool, Set-Content of a product file inside a ForEach-Object block "
+   "is allowed [pwsh-r3 green]",
+   "ForEach-Object { Set-Content src/app.py x }", "allow", tool="PowerShell", **BR)
+# The target is the listing's $_, so the write can land on the test in a folder that holds one: it is refused there.
+sh("pwsh-r3 scriptblock: pwsh -c, a listing of a folder that holds a test, then Set-Content of $_, is refused "
+   "[pwsh-r3 red]",
+   "pwsh -c 'ls | % { Set-Content $_ 1 }'", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 scriptblock control: pwsh -c, a listing of a folder with no test in it, then Set-Content of $_, "
+   "is allowed [pwsh-r3 green]",
+   "pwsh -c 'ls | % { Set-Content $_ 1 }'", "allow", **BR)
+# L2 and L3: `$_` is the target only of a write that names it. A log named as text ALLOWS though the listed
+# folder holds tests. The twins write `$_` itself, so they are REFUSED.
+sh("pwsh-r3 listing: PowerShell tool, Add-Content to log.txt of each name in a hooks listing, is allowed "
+   "[pwsh-r3 red]",
+   "Get-ChildItem hooks | % { Add-Content log.txt $_.Name }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 listing: PowerShell tool, Set-Content -Path log.txt of each name in a hooks listing, is allowed "
+   "[pwsh-r3 red]",
+   "Get-ChildItem hooks | % { Set-Content -Path log.txt -Value $_.Name }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 listing twin: PowerShell tool, Set-Content of $_ from a hooks listing, is refused "
+   "[pwsh-r3 green]",
+   "Get-ChildItem hooks | % { Set-Content $_ x }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 listing: PowerShell tool, a rewrite of each tests file from a tests listing, is refused "
+   "[pwsh-r3 red]",
+   "Get-ChildItem tests | % { (Get-Content $_) -replace 'a','b' | Set-Content $_ }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 listing control: PowerShell tool, the same rewrite over a docs listing with no test, is allowed "
+   "[pwsh-r3 green]",
+   "Get-ChildItem docs | % { (Get-Content $_) -replace 'a','b' | Set-Content $_ }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+# L4: a comma inside quotes is text, so a quoted line that names a test path ALLOWS. The unquoted comma forms
+# DENY, and the Add-Content twin below pins the same verb unquoted.
+sh("pwsh-r3 quoted comma: PowerShell tool, Add-Content to a docs file of a quoted line that names a test and "
+   "ends in a comma, is allowed [pwsh-r3 red]",
+   'Add-Content docs/a.md "Updated hooks/test_x.py,"', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 quoted comma: PowerShell tool, Add-Content to a docs file of a quoted comma then a test path, is "
+   "allowed [pwsh-r3 red]",
+   'Add-Content docs/a.md ",hooks/test_x.py"', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 quoted comma twin: PowerShell tool, Add-Content to a docs file and a test file joined by an unquoted "
+   "comma, is refused [pwsh-r3 green]",
+   "Add-Content docs/a.md,hooks/test_x.py x", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+# L5: text in a here-string, in a double-quoted string or in quotes inside a block is data, so each ALLOWS. Each
+# twin runs the same words as code and is REFUSED.
+sh("pwsh-r3 scanner: PowerShell tool, a here-string with a comment, a quote and a Remove-Item of a test, piped "
+   "to Set-Content of a product file, is allowed [pwsh-r3 red]",
+   "@'\n# it's\nif ($x) { Remove-Item hooks/test_x.py }\n'@ | Set-Content src/c.ps1", "allow",
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 scanner twin: PowerShell tool, an if block that runs Remove-Item of a test is refused "
+   "[pwsh-r3 green]",
+   "if ($x) { Remove-Item hooks/test_x.py }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 scanner: PowerShell tool, a lone apostrophe in a double-quoted string in a block, then a product "
+   "write, is allowed [pwsh-r3 green]",
+   'if ($x) { Write-Host "it\'s done" }; Set-Content src/c.ps1 x', "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 scanner twin: PowerShell tool, a test write after a lone apostrophe in a block's string is refused "
+   "[pwsh-r3 green]",
+   'if ($x) { Write-Host "it\'s" }; Set-Content hooks/test_x.py x', "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 scanner: PowerShell tool, braces and a Remove-Item of a test inside double quotes, is allowed "
+   "[pwsh-r3 green]",
+   'Write-Host "{ Remove-Item hooks/test_x.py }"', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 scanner twin: PowerShell tool, a call block that runs Remove-Item of a test is refused "
+   "[pwsh-r3 green]",
+   "& { Remove-Item hooks/test_x.py }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+
 # ---- the diff, judged at commit, push and SubagentStop

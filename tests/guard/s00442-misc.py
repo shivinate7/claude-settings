@@ -2460,6 +2460,17 @@ def _build_links():
     _require_status(WTCTRLNESTED, ["?? vendor/"])
 
 
+# TESTHOLD: a checkout whose root holds a test file, so a listing of it names one. A builder's shell write
+# whose target comes from that listing (`$_`) could land on the test, so this folder is the case's cwd.
+# hooks/ and tests/ hold tests, and docs/ holds none, so a listing of each names a test or a plain file.
+TESTHOLD = os.path.join(ROOT, "testhold")
+
+
+def _build_testhold():
+    make_repo(TESTHOLD, {"test_app.py": "pass\n", "app.py": "x = 1\n", "hooks/test_x.py": "pass\n",
+                         "tests/test_x.py": "pass\n", "docs/a.md": "x\n"})
+
+
 build_fixtures()
 _start_ghdev_check()
 _mark("build_fixtures: eager config, fake gh writes, GHNONE and the link probe")
@@ -2494,6 +2505,7 @@ lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALE
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
 lazy_fixture([LINKMAIN, LINKOUT, WTLINKDIR, WTLINKFILE, WTCTRLFILE, WTCTRLTRACKED, WTCTRLDIR,
               WTCTRLNESTED], _build_links)
+lazy_fixture([TESTHOLD], _build_testhold)
 
 # DOTDOTWT: a path spelled through GITMAIN's .claude/worktrees/ that climbs back out with "..",
 # resolving to GITWT itself (a linked worktree OUTSIDE .claude/worktrees). It must be judged on

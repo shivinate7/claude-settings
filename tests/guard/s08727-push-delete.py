@@ -48,6 +48,16 @@ push_case("a force beside a lease and includes", "--force" + LEASE, "deny")
 push_case("includes alone is not a force, so a plain push allows", "--force-if-includes", "allow")
 push_case("a force while the default branch is trunk, main is ordinary there",
           "--force origin HEAD:main", "deny", cwd=PUSHTRUNK)
+# The short flag to main in a trunk repo denies in Bash, and the PowerShell tool's ASCII form denies too. The
+# smart-quoted destination is the same main once PowerShell reads its quotes, so it denies the same way.
+push_case("the short flag to main, in a trunk repo, denies [pwsh-r3 green]", "-f origin main", "deny",
+          cwd=PUSHTRUNK)
+push_case("the short flag to main from the PowerShell tool, in a trunk repo, denies [pwsh-r3 green]",
+          "-f origin main", "deny", cwd=PUSHTRUNK, tool="PowerShell")
+push_case("the short flag to a smart-quoted main from the PowerShell tool, in a trunk repo, denies "
+          "[pwsh-r3 green]", "-f origin “main”", "deny", cwd=PUSHTRUNK, tool="PowerShell")
+push_case("the short flag to a single smart-quoted main from the PowerShell tool, in a trunk repo, denies "
+          "[pwsh-r3 green]", "-f origin ‘main’", "deny", cwd=PUSHTRUNK, tool="PowerShell")
 push_case("a push option value is not the remote", "--force-with-lease --force-if-includes -o x origin HEAD:trunk",
           "ask", cwd=PUSHTRUNK)
 push_case("a push option value with --push-option is not the remote",
