@@ -631,6 +631,9 @@ jobs:
       - name: CI wake-up fixture suite
         run: python3 hooks/test_ci_wake.py
 
+      - name: Ready-mark subscribe warning fixture suite
+        run: python3 hooks/test_ready_subscribe_warn.py
+
       - name: Feedback inbox fixture suite
         run: python3 hooks/test_feedback_inbox.py
 
