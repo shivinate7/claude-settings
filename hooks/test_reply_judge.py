@@ -1411,6 +1411,82 @@ def case_widens_finding_logs_its_rule():
           (run.code, run.out))
 
 
+# ------------------------------------------ the not-widening and still-widening sentences (uniform-over-variants)
+#
+# The style-question-form rule names one change for every repo, and a tighter rule with no per-repo entry, as not
+# widening, once. An option for every repo that also adds an entry, a second form or an exception still widens.
+# A pin is a sentence that holds a word from each group, so the wording can be tuned. The same phrases are in
+# test_call_judge.py, which runs the call judge's prompt.
+NOT_WIDENING_ONE_CHANGE = (("every repo", "all repos"), ("not widen", "not a widen", "n't widen"))
+NOT_WIDENING_TIGHTER = (("tighter", "stricter", "narrower"), ("per-repo", "per repo"),
+                        ("not widen", "not a widen", "n't widen"))
+STILL_WIDENING_CLAUSE = (("every repo", "all repos"), ("also add",), ("still widen",))
+CONTROL_WORDS = ("second accepted form", "allow-list entry", "per-repo exception")
+
+
+def sentences_with(text, *groups):
+    """The sentences of text, lowercased, that hold a word from each group."""
+    return [s for s in re.split(r"[.\n]", text.lower()) if all(any(w in s for w in g) for g in groups)]
+
+
+def style_rule_text(prompt_head):
+    """The style-question-form rule's text in the lowercased prompt head, cut where the next rule starts. "" when absent."""
+    head = prompt_head.lower()
+    start = head.find(WIDENS_RULE + ":")
+    if start < 0:
+        return ""
+    end = head.find("verification-counts-from-rest:", start)
+    return head[start:end] if end > start else head[start:]
+
+
+def widens_prompt_head():
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    return run.prompt().split(WIDENS_ASK, 1)[0]
+
+
+def case_prompt_says_one_change_for_every_repo_is_not_widening():
+    # Case 10: the style-question-form rule names one change for every repo as not widening, once, and the prompt holds it once.
+    head = widens_prompt_head()
+    rule = style_rule_text(head)
+    in_rule = sentences_with(rule, *NOT_WIDENING_ONE_CHANGE)
+    in_prompt = sentences_with(head, *NOT_WIDENING_ONE_CHANGE)
+    check("prompt: the style-question-form rule names one change for every repo as not widening, once",
+          bool(rule) and len(in_rule) == 1 and len(in_prompt) == 1,
+          "style-question-form rule %s; sentences naming it: %d in the rule, %d in the prompt (want 1 and 1)"
+          % ("present" if rule else "missing", len(in_rule), len(in_prompt)))
+
+
+def case_prompt_says_a_tighter_rule_with_no_per_repo_entry_is_not_widening():
+    # Case 11: the style-question-form rule names a tighter rule with no per-repo entry as not widening, once.
+    head = widens_prompt_head()
+    rule = style_rule_text(head)
+    in_rule = sentences_with(rule, *NOT_WIDENING_TIGHTER)
+    in_prompt = sentences_with(head, *NOT_WIDENING_TIGHTER)
+    check("prompt: the style-question-form rule names a tighter rule with no per-repo entry as not widening, once",
+          bool(rule) and len(in_rule) == 1 and len(in_prompt) == 1,
+          "style-question-form rule %s; sentences naming it: %d in the rule, %d in the prompt (want 1 and 1)"
+          % ("present" if rule else "missing", len(in_rule), len(in_prompt)))
+
+
+def case_prompt_says_an_option_for_every_repo_that_adds_an_entry_still_widens():
+    # Case 12: the style-question-form rule says an option for every repo that also adds an entry, form or exception still widens.
+    rule = style_rule_text(widens_prompt_head())
+    hits = sentences_with(rule, *STILL_WIDENING_CLAUSE)
+    check("prompt: the style-question-form rule says an option for every repo that also adds an entry, form or exception still widens",
+          bool(rule) and len(hits) >= 1,
+          "style-question-form rule %s; sentences naming the still-widening clause: %d (want at least 1)"
+          % ("present" if rule else "missing", len(hits)))
+
+
+def case_prompt_keeps_the_control_words_in_the_widening_rule():
+    # Case 13 (a control, green on the current build): the original words that name a widening option stay in the rule.
+    rule = style_rule_text(widens_prompt_head())
+    missing = [w for w in CONTROL_WORDS if w not in rule]
+    check("prompt: the style-question-form rule keeps second accepted form, allow-list entry and per-repo exception",
+          bool(rule) and not missing, "style-question-form rule %s; missing control words: %s"
+          % ("present" if rule else "missing", missing))
+
+
 # --------------------------------------------------------------------------- d9
 # A pick between visual options needs a picture of each option in the reply. A reply that asks the
 # owner to pick and only links to the mockups (a folder, a repo or a file) is flagged.
@@ -2185,6 +2261,10 @@ CASES = (
     case_prompt_count_matches_judged_rules,
     case_prompt_flags_a_recommended_option_that_widens,
     case_widens_finding_logs_its_rule,
+    case_prompt_says_one_change_for_every_repo_is_not_widening,
+    case_prompt_says_a_tighter_rule_with_no_per_repo_entry_is_not_widening,
+    case_prompt_says_an_option_for_every_repo_that_adds_an_entry_still_widens,
+    case_prompt_keeps_the_control_words_in_the_widening_rule,
     case_prompt_flags_a_pick_one_question_whose_options_could_combine,
     case_route_cite_carries_cited_same_act_and_alternate_rows,
     case_route_cite_skips_other_acts_in_a_full_rows_file,

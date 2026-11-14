@@ -1390,6 +1390,92 @@ def case_widening_rule_names_the_mark():
     check("widening key: WIDENING_RULE contains WIDENS_KEY", bool(rule) and bool(key) and key in rule, cause)
 
 
+# ------------------------------------------------- the not-widening and still-widening sentences (uniform-over-variants)
+#
+# One change that applies to every repo, or a tighter rule with no per-repo entry, is not widening. An option for
+# every repo that also adds a per-repo entry, a second form or an exception still widens. Each sentence sits once in
+# the widening slot. A pin is a sentence that holds a word from each group, so the wording can be tuned.
+NOT_WIDENING_ONE_CHANGE = (("every repo", "all repos"), ("not widen", "not a widen", "n't widen"))
+NOT_WIDENING_TIGHTER = (("tighter", "stricter", "narrower"), ("per-repo", "per repo"),
+                        ("not widen", "not a widen", "n't widen"))
+STILL_WIDENING_CLAUSE = (("every repo", "all repos"), ("also add",), ("still widen",))
+CONTROL_WORDS = ("second accepted form", "allow-list entry", "per-repo exception")
+
+
+def sentences_with(text, *groups):
+    """The sentences of text, lowercased, that hold a word from each group."""
+    return [s for s in re.split(r"[.\n]", text.lower()) if all(any(w in s for w in g) for g in groups)]
+
+
+def set_prompt_region():
+    """The widening slot of the judge's prompt for a set with options ("" when the slot or the call is absent)."""
+    r = run_hook(page_input("set", good_page_item()), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    return widening_region(prompt, "PAGE_PROMPT") or ""
+
+
+def case_widening_one_change_is_not_widening():
+    # Case 7: one change for every repo is named not widening, once, in the widening slot of a set with options.
+    region = set_prompt_region()
+    hits = sentences_with(region, *NOT_WIDENING_ONE_CHANGE)
+    check("widening not-widening: one change for every repo is named not widening, once, in the widening slot",
+          bool(region) and len(hits) == 1,
+          "widening slot %s; sentences naming one change for every repo as not widening: %d (want 1)"
+          % ("present" if region else "missing", len(hits)))
+
+
+def case_widening_tighter_rule_is_not_widening():
+    # Case 8: a tighter rule with no per-repo entry is named not widening, once, in the widening slot.
+    region = set_prompt_region()
+    hits = sentences_with(region, *NOT_WIDENING_TIGHTER)
+    check("widening not-widening: a tighter rule with no per-repo entry is named not widening, once, in the widening slot",
+          bool(region) and len(hits) == 1,
+          "widening slot %s; sentences naming a tighter rule with no per-repo entry as not widening: %d (want 1)"
+          % ("present" if region else "missing", len(hits)))
+
+
+def case_widening_still_widens_clause():
+    # Case 9: an option for every repo that also adds a per-repo entry, a second form or an exception still widens.
+    region = set_prompt_region()
+    hits = sentences_with(region, *STILL_WIDENING_CLAUSE)
+    check("widening still-widens: an option for every repo that also adds an entry, form or exception is named still widening",
+          bool(region) and len(hits) >= 1,
+          "widening slot %s; sentences naming the still-widening clause: %d (want at least 1)"
+          % ("present" if region else "missing", len(hits)))
+
+
+def case_widening_control_words_remain():
+    # Case 10 (a control, green on the current build): the three original words that name a widening option stay in the rule.
+    rule = widening_rule()
+    missing = [w for w in CONTROL_WORDS if w not in rule]
+    check("widening controls: the rule keeps second accepted form, allow-list entry and per-repo exception",
+          bool(rule) and not missing, "WIDENING_RULE is %s; missing control words: %s"
+          % ("present" if rule else "missing", missing))
+
+
+def case_widening_not_widening_only_in_the_slot():
+    # Case 11 (a control, green on the current build): the not-widening sentences sit in no other judged prompt, nor in
+    # a template. Each absence first asserts that its call was made, so an early exit cannot pass it.
+    context = good_page_item()["context"]
+    names = ("PAGE_PROMPT", "QUESTION_PROMPT", "SPAWN_PROMPT")
+    template_hits = [(n, s) for n in names for g in (NOT_WIDENING_ONE_CHANGE, NOT_WIDENING_TIGHTER)
+                     for s in sentences_with(hook_template(n), *g)]
+    check("widening slot only: the judge templates hold no not-widening sentence",
+          all(hook_template(n) for n in names) and not template_hits,
+          "templates with a not-widening sentence: %s" % template_hits)
+    for label, inp, template in (
+        ("a context-only update", page_input("update", {"context": context}), "PAGE_PROMPT"),
+        ("an AskUserQuestion box with options", question_input(), "QUESTION_PROMPT"),
+        ("an Agent spawn", spawn_input("builder", model="sonnet"), "SPAWN_PROMPT"),
+    ):
+        r = run_hook(inp, answer=ALLOW)
+        prompt = r.calls[0]["prompt"] if r.calls else ""
+        hits = [s for g in (NOT_WIDENING_ONE_CHANGE, NOT_WIDENING_TIGHTER) for s in sentences_with(prompt, *g)]
+        check("widening slot only: %s is judged once, and carries no not-widening sentence" % label,
+              len(r.calls) == 1 and r.code == 0 and not hits,
+              "%s; not-widening sentences in its prompt: %s" % (detail(r), hits))
+
+
 def case_fail_open():
     for label, inp, kwargs in (
         ("a model failure on a spawn", spawn_input("builder", model="sonnet"), {"model_fail": True}),
@@ -1821,6 +1907,9 @@ def main():
                  case_widening_set_holds_rule_once, case_widening_batch_holds_rule_once,
                  case_widening_absent_without_options, case_widening_refusal_names_the_option,
                  case_widening_fair_option_passes_code_path, case_widening_rule_names_the_mark,
+                 case_widening_one_change_is_not_widening, case_widening_tighter_rule_is_not_widening,
+                 case_widening_still_widens_clause, case_widening_control_words_remain,
+                 case_widening_not_widening_only_in_the_slot,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
