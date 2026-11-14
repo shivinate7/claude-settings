@@ -35,9 +35,9 @@
                           print the review record for the head SHA that was reviewed. It refuses a Kind or Guard that the diff contradicts. Stops (exit 1) when the PR's live head is another
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
-                          unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
-                          PR's issue comments since the PR opened; or (a fix after a merge of main) that record reads done with a PASS Fix check line and SHA is a merge commit whose first
-                          parent is HEAD and whose second parent is on the base, with no edit beyond git's own merge (a merge that conflicts may edit its conflicted paths only).
+                          unless HEAD is the Head of the newest earlier record on the PR, read from the PR's issue comments since the PR opened, and that record
+                          has no Fix check line or a PASS one (owner item 741); after a PASS one, when SHA is a merge commit (a fix after a merge of main), that record reads done and SHA's first
+                          parent is HEAD and its second parent is on the base, with no edit beyond git's own merge (a merge that conflicts may edit its conflicted paths only).
                           MODEL must be sonnet on every record (exit 2 otherwise).
                           A review log stays done when the live head differs from its Head only by clean merges of main: each
                           commit after Head is a merge with two parents, its second parent on main and its tree `git merge-tree --write-tree` of them.
@@ -1463,8 +1463,12 @@ class Host:
         unknown. Any other run that did not succeed is red (a broken workflow file runs no job).
         A cancelled run with no red job that nothing clears keeps its line, in the unknown detail and beside a red verdict. It is named with `gh run rerun <id>` only when its
         `head_sha` is the head_sha of the newest run on the page read (any status, any event in BASE_EVENTS, from the unfiltered list): runs on the base start at its head, and a re-run tests the run's own commit. Never named for a run with a red job or a re-run in flight.
+        An empty run is no verdict (clear_rule.empty_without_evidence, the one home): a completed success run of the push group (push and dispatch) that ran no check, and carries
+        no evidence that a green integration run covered its tree. The newest run of the group that is not empty is the group's verdict, so an older red run stays red; a page with no run of the
+        group that is not empty keeps the newest run. A schedule run is judged as it is.
         A red verdict's detail also holds breaking_line's segment for each red run judged (one per file and group), the head group's first: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).
-        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A failed read is unknown."""
+        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A newest-first walk of the push group's
+        green runs costs one jobs read each, down to the first that is not empty (the newest, when it ran a suite). A failed read is unknown."""
         try:
             if os.path.dirname(ALARM_EVENTS) not in sys.path:
                 sys.path.insert(0, os.path.dirname(ALARM_EVENTS))
@@ -1483,7 +1487,19 @@ class Host:
                 if r["id"] not in read:
                     read[r["id"]] = self.pages(f"actions/runs/{r['id']}/jobs", "jobs")
                 return read[r["id"]]
-            newest = {(r["path"], self.BASE_EVENTS[r["event"]]): r for r in reversed(judged)}
+            rule_events = clear_rule.rule_events()
+
+            def empty(r):  # a green run of the push group that ran no suite and carries no evidence: no verdict (clear_rule.empty_without_evidence); one jobs read, cached
+                return r["conclusion"] == "success" and r["event"] in rule_events and clear_rule.empty_without_evidence(jobs_of(r), r["event"])
+            newest, settled = {}, set()  # per (file, group): the newest run, but never an empty one while an older run of the group is not; with none, the newest run
+            for r in judged:  # newest first
+                key = (r["path"], self.BASE_EVENTS[r["event"]])
+                if key in settled:
+                    continue
+                newest.setdefault(key, r)
+                if not empty(r):
+                    newest[key] = r
+                    settled.add(key)
             age = {r["id"]: i for i, r in enumerate(judged)}  # `judged` is newest first
 
             texts = {}
@@ -3657,15 +3673,17 @@ def parse_review(text):
 
 def review_state(rec, head):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
-    The done rules follow roles-review-cap-three and the decision pr-review-record: the last round is all PASS, or a fix check PASS counts as that round
-    passing (only a sonnet one; every fix check runs on sonnet), and the last design-reviewer line (by position, across all rounds) is PASS or absent; or the final allowed round is done and Guard or check is no; or the final allowed round is done, Guard or check is yes and Net value is zero or positive; or Kind is delete-only,
-    Guard or check is no and the first round is done; or Kind is docs-only with no round. A guard or check change owes the net-value test after the
-    final allowed round whatever the verdict, and owes the later rounds when the first fails, even if it only deletes. Net value negative holds the change.
-    A fix check PASS on a guard or check change leaves it open until the final round is recorded with its net value (decision hold-unsafe-after-round-3, item 402 a).
-    A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a final-round or delete-only done names it.
+    The done rules follow roles-review-cap-three and the decision pr-review-record. A passing round, or a passing sonnet fix check
+    after any round (whatever that round's verdict), ends the review for every change, Guard or check yes or no, with no net value owed.
+    The last round is all PASS, or a fix check PASS counts as that round passing (every fix check runs on sonnet), and the last
+    design-reviewer line (by position, across all rounds) is PASS or absent; or Kind is delete-only, Guard or check is no and the first
+    round is done; or Kind is docs-only with no round. Net value negative holds the change. A design-reviewer FAIL or PARTIAL as the
+    last such line keeps the PASS path open, and the why of a delete-only done names it.
+    A failed round with no fix check is open. The builder's third try runs the final round (a Grant line adds one more after it): a failed
+    final round is done when Guard or check is no, or when Net value is zero or positive, and open while a guard or check change owes its net value.
     A fix check (rec["fix"], decision hold-unsafe-after-round-3) is not a round and is read after the held rule. A FAIL is open, whatever the
-    rounds say. A PASS on a guard or check no change counts as the last recorded round passing, even when that round failed. The design-reviewer hold stays, and with no round recorded it is open. On the final
-    round the rules above run as written: it keeps the net value that round gave and settles none that is owed."""
+    rounds say. A non-sonnet fix check is open. With no round recorded it is open. A PASS counts as the last recorded round passing, even when that round failed.
+    """
     if rec is None:
         return "bad", "the newest record does not parse"
     if rec["head"] != head:
@@ -3685,21 +3703,21 @@ def review_state(rec, head):
         return "open", f"the fix check must run on {fix_model}, not {fix[2]}"
     if fix and not top:
         return "open", "the fix check passed, but no round is recorded"
-    final = REVIEW_LAST_ROUND + bool(rec.get("grant"))  # a Grant line makes the one round past REVIEW_LAST_ROUND the final round
-    if top >= final:  # before the PASS rule: a final-round PASS on a guard or check change still owes the net-value test
-        if rec["guard"] == "no":
-            return "done", f"round {final} is done, no guard or check changed" + note
-        if rec["net"] in ("zero", "positive"):
-            return "done", f"round {final} is done, net value {rec['net']}" + note
-        return "open", f"round {final} is done on a guard or check change, and its net value is owed"
-    if fix and rec["guard"] == "yes":
-        return "open", f"a guard or check change owes the final round and its net value after a fix check; round {top} is recorded"
+    final = REVIEW_LAST_ROUND + bool(rec.get("grant"))  # REVIEW_LAST_ROUND is the final round, and a Grant line adds one
     top_pass = all(v == "PASS" for i, _, _, v in rounds if i == top)
     passed = top and (fix or top_pass)  # a fix PASS, read here, counts as round `top` passing
     # the why keeps a failed round in view, so a fix PASS never reads as a passed round
     lead = f"round {top} is FAIL, and the fix check passed" if fix and not top_pass else f"round {top} passed"
-    if passed and not bad:
+    if passed and not bad:  # a passing round, or a fix check after a passed round, ends the review, a guard or check change too
         return "done", lead
+    if top >= final:  # a passing final round is done above, so this reads a failed one
+        if rec["guard"] == "no":
+            return "done", f"round {final} is done, no guard or check changed" + note
+        if rec["net"] in ("zero", "positive"):
+            return "done", f"round {final} is done, net value {rec['net']}" + note
+        if bad and (fix or all(v == "PASS" for i, role, _, v in rounds if i == top and role == REVIEW_ROLES[0])):  # the reviewer passed and the design reviewer did not
+            return "open", f"{lead}, but the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}"
+        return "open", f"round {final} is done on a guard or check change, and its net value is owed"
     if rec["kind"] == "delete-only" and rec["guard"] == "no" and top >= 1:  # before the design hold: the first review closes a delete-only change with no guard or check
         return "done", "delete-only change, round 1 is done" + note
     if passed:
@@ -4405,9 +4423,9 @@ def build_parser():
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
-    p.add_argument("--fix-check", type=fix_verifier_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the `Fix check:` line, after the rounds; HEAD is the reviewed head the fix diff starts from; a fix after a merge of main also qualifies: the newest review log reads done with a PASS Fix check line, and the head is a merge of the base into that Head with no edit beyond git's own merge")
+    p.add_argument("--fix-check", type=fix_verifier_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the `Fix check:` line, after the rounds; HEAD is the reviewed head the fix diff starts from; the newest review log has no Fix check line or a PASS one; after a PASS one, a head that is a merge of main must be a merge of the base into that Head with no edit beyond git's own merge")
     p.add_argument("--grant", type=grant_arg, metavar="TEXT", help="with --review-record: the owner's grant of round 4, `#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT`, with PR the pull request's own number; the rounds must then reach round 4")
-    p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant)")
+    p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant) when that round failed; a passing round, or a passing fix check after any round, owes none")
     p.add_argument("--touches", action="store_true", help="list the open pull requests that touch a failing case or a named file; takes no lock, merges and posts nothing")
     p.add_argument("--run", default=None, metavar="RUN", help="a workflow run, by its id or its Actions run URL. With --touches: the run whose failing log lines name the cases")
     p.add_argument("--case", action="append", default=[], metavar="TEXT", help="with --touches: a case to find in the `+` lines of an open pull request's patch; repeat it")
@@ -4595,16 +4613,19 @@ def main(argv, host=None, lock=None, hosts=None):
                     ok = False
                 elif not last["fix"]:
                     ok = True
-                else:  # a fix never follows a fix, but a fix after a merge of main is allowed: the earlier record reads done on its own head (a sonnet PASS Fix check line, no hold), and the head is a merge of the base into that Head
-                    parents, tree = h.commit_read(a.head) if review_state(last, last["head"])[0] == "done" else ([], None)  # after a FAIL Fix check line, or any record that is not done, no merge qualifies
-                    ok = len(parents) == 2 and h.holds_head(parents[1], info["base"])
-                    if ok and parents[0] != a.fix_check[0]:  # clean merges of main may sit between the Head and the last merge: the record survives them
+                else:  # a fix after a FAIL fix is refused. After a PASS fix, a plain commit takes a further fix check; a merge head qualifies only as a merge of the base: the earlier record reads done on its own head (a sonnet PASS Fix check line, no hold), and the head is a merge of the base into that Head
+                    parents, tree = h.commit_read(a.head) if last["fix"][3] == "PASS" else ([], None)
+                    plain = last["fix"][3] == "PASS" and len(parents) != 2
+                    if not plain and review_state(last, last["head"])[0] != "done":  # after a FAIL Fix check line, or any record that is not done, no merge qualifies
+                        parents = []
+                    ok = plain or (len(parents) == 2 and h.holds_head(parents[1], info["base"]))
+                    if ok and not plain and parents[0] != a.fix_check[0]:  # clean merges of main may sit between the Head and the last merge: the record survives them
                         try:
                             ok = clean_merges_after(h, a.fix_check[0], parents[0], info["base"])
                         except (Stop, subprocess.TimeoutExpired, OSError) as e:
                             print(f"merge: --fix-check: whether only clean merges of main sit between {a.fix_check[0][:9]} and {a.head[:9]} is unknown ({' '.join(str(e).split())[:300]}), so the fix verifier is refused. " + REVIEW_CITE, file=sys.stderr)
                             return 2
-                    if ok:  # a clean merge with an extra edit does not qualify, and a merge git cannot read proves nothing, so it refuses too
+                    if ok and not plain:  # a clean merge with an extra edit does not qualify, and a merge git cannot read proves nothing, so it refuses too
                         merged, unread = merge_state(h, parents, tree)
                         ok = merged in ("clean", "conflicted")
                         if merged == "conflicted":  # a conflicted merge takes a hand edit at its conflicted paths only
@@ -4617,7 +4638,7 @@ def main(argv, host=None, lock=None, hosts=None):
                             print(f"merge: --fix-check: whether {a.head[:9]} is git's own merge of the base is unknown ({unread}), so the fix verifier is refused. Fetch both parents of that head into this checkout, then run again. " + REVIEW_CITE, file=sys.stderr)
                             return 2
                 if not ok:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line. One exception, a fix after a merge of main: the log reads done with a PASS Fix check line, and the pull request head is a merge of the base into that Head with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
+                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line or a PASS one. After a PASS one, a head that is a merge must be a merge of the base into that Head, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
