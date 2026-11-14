@@ -1316,6 +1316,31 @@ class CostTests(unittest.TestCase):
             left = cost_probe.group_members(leader)
         self.assertEqual(left, [], "nothing in the reader's group outlives the hook; still alive: %r" % left)
 
+    @POSIX_ONLY
+    def test_group_members_lists_the_live_group_when_proc_is_missing(self):
+        # macOS has no /proc. With /proc missing from the helper's view, group_members must list the live members
+        # of the group it is given, must not raise, and its own read must start no child that children() counts.
+        child = subprocess.Popen([sys.executable, "-c", "import time\nwhile True: time.sleep(1)"], start_new_session=True)
+        self.addCleanup(cost_probe.stop_group, child)
+        real_listdir = os.listdir
+
+        def listdir_without_proc(path="."):
+            if path == "/proc":
+                raise FileNotFoundError("No such file or directory: '/proc'")
+            return real_listdir(path)
+
+        argv = [sys.executable, "-c", "pass"]
+        with mock.patch.object(cost_probe.os, "listdir", listdir_without_proc):
+            self.assertRaises(FileNotFoundError, os.listdir, "/proc")  # the scope: /proc is missing in this case
+            with cost_probe.children() as log:
+                try:
+                    members = cost_probe.group_members(child.pid)
+                except OSError as err:
+                    self.fail("group_members raised %s with /proc missing" % type(err).__name__)
+                subprocess.run(argv, check=True)  # a known start, so the counter is live
+        self.assertEqual(log.argvs, [argv], "group_members starts no child that children() counts; got %r" % log.argvs)
+        self.assertEqual(members, [child.pid], "the one live member of the group it was given; got %r" % members)
+
 
 if __name__ == "__main__":
     write_launchers()

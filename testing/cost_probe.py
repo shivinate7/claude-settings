@@ -77,10 +77,35 @@ def stop_group(proc):
         pass
 
 
-def group_members(pgid):
-    """The pids in process group `pgid` that are alive, not zombies (Linux /proc). [] when none is."""
+# The Popen class the `ps` read starts with, captured at import, before children() replaces subprocess.Popen.
+# That read is the helper's own: it must not count as a child start of the code under test.
+_HELPER_POPEN = subprocess.Popen
+
+
+def _group_members_ps(pgid):
+    """group_members for a system with no /proc (macOS): the same pids, read from `ps`."""
+    proc = _HELPER_POPEN(["ps", "-A", "-o", "pid=", "-o", "pgid=", "-o", "stat="],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    out, err = proc.communicate(timeout=30)
+    if proc.returncode:
+        raise OSError("ps exited %d: %s" % (proc.returncode, err.strip()))
     found = []
-    for name in os.listdir("/proc"):
+    for line in out.splitlines():
+        fields = line.split()
+        if len(fields) == 3 and int(fields[1]) == pgid and not fields[2].startswith("Z"):
+            found.append(int(fields[0]))
+    return found
+
+
+def group_members(pgid):
+    """The pids in process group `pgid` that are alive, not zombies. [] when none is. Reads /proc, or `ps`
+    where /proc is missing (macOS)."""
+    try:
+        names = os.listdir("/proc")
+    except FileNotFoundError:
+        return _group_members_ps(pgid)
+    found = []
+    for name in names:
         if not name.isdigit():
             continue
         try:
