@@ -10,6 +10,8 @@
 # rule as Host.base_state.
 # A group whose newest run is a re-run still going (queued or in progress, attempt above 1) is unknown: a warning, no issue, never
 # green, never the older run. A first attempt still going is skipped, and the older run is judged.
+# An empty green run of the push group (no check ran, no evidence: clear_rule.py) is no verdict; the group's newest counting run that is
+# not empty is, so an older red run stays red. A group with only empty runs keeps its newest run. The same rule as Host.base_state.
 # Cap end (owner, page item 549 a, 12:07 CST Nov 12; judged in every run of the window, coordinator pick 12:26 CST): a job cancelled
 # at its cap ran at least its job-level `timeout-minutes` (completed_at - started_at, from the jobs read), the cap read from the run's
 # workflow file at its head. A job with no job-level `timeout-minutes` has GitHub's default cap, 360 minutes. Every such job is named
@@ -38,7 +40,8 @@
 # Cost per alarm: two fixed reads (runs, workflows list), one jobs read for each failed and each cancelled run of the 100-run window (at
 # most 100), one per earlier attempt of a failed, cancelled or succeeded re-run, one contents read of a run's workflow file when a job of
 # it was cancelled. A clear candidate N adds one jobs read, and one contents read of N's workflow file at N's head (headSha) unless N
-# leaves a red job of R unpassed (a certain red), and two clear_rule.py starts at most. Each woken attempt adds one pulls read, one
+# leaves a red job of R unpassed (a certain red), and two clear_rule.py starts at most. Each green run of the push group, newest first, down
+# to the first that is not empty, adds one jobs read (the empty-run test). Each woken attempt adds one pulls read, one
 # comments read of its pull request (one per 100 comments) and at most one comment write (wake.sh). No long-lived process starts: short jq (unmeasured),
 # awk (unmeasured), gh and python3 processes run. The files written are temp cache files in a folder this script removes on exit, and a failed wake
 # appends one message to GITHUB_STEP_SUMMARY.
@@ -64,13 +67,6 @@ judged="$(jq -c --arg self "${SELF:-}" --slurpfile ev "$here/events.json" --argj
   | map(select(.workflowName != $self and (.workflowDatabaseId as $i | $ids | index($i)) and ($ev[0][.event] != null))
         | . + {group: $ev[0][.event]})' <<<"$runs")" \
   || unknown "could not read the runs"
-# Latest run per workflow and event group, one JSON array. A run counts when it is completed or is a re-run still going (attempt
-# above 1); a first attempt still going waits its turn and is left out.
-newest="$(jq -c '
-  map(select(.status == "completed" or (.attempt // 1) > 1))
-  | group_by([.workflowDatabaseId, .group])
-  | map(sort_by(.createdAt) | last)' <<<"$judged")" \
-  || unknown "could not read the runs"
 cache="$(mktemp -d)" || unknown "could not make a temp dir"
 trap 'rm -rf "$cache"' EXIT
 # The jobs of run $1 (of its attempt $2 when given, else its newest attempt), as a JSON array; a failed read returns 1. Each is read once.
@@ -83,6 +79,34 @@ jobs_of() {
   fi
   cat "$cache/$key"
 }
+# The runs of each workflow and event group, newest first: one JSON array of arrays. A run counts when it is completed or is a re-run
+# still going (attempt above 1); a first attempt still going waits its turn and is left out.
+groups="$(jq -c '
+  map(select(.status == "completed" or (.attempt // 1) > 1))
+  | group_by([.workflowDatabaseId, .group])
+  | map(sort_by(.createdAt) | reverse)' <<<"$judged")" \
+  || unknown "could not read the runs"
+# The latest counting run per workflow and event group, one JSON array. An empty run (clear_rule.py, the one home of the rule: a green run of
+# the push group that ran no check and carries no evidence) is no verdict: the group's latest run that is not empty is. A group with
+# none keeps its latest run. One jobs read per green run of the push group, down to the first that is not empty.
+rule_events="$(python3 "$here/clear_rule.py" --rule-events)" || unknown "clear_rule.py failed"
+newest="[]"
+while IFS= read -r g; do
+  [ -n "$g" ] || continue
+  pick="$(jq -c '.[0]' <<<"$g")"
+  while IFS= read -r r; do
+    [ -n "$r" ] || continue
+    if jq -e --argjson ev "$rule_events" '.conclusion == "success" and (.event | IN($ev[]))' >/dev/null <<<"$r"; then
+      id="$(jq -r .databaseId <<<"$r")"
+      jobs_of "$id" >/dev/null || unknown "gh api jobs failed"
+      python3 "$here/clear_rule.py" --empty-run --event "$(jq -r .event <<<"$r")" "$cache/$id"
+      case $? in 0) continue ;; 1) ;; *) unknown "clear_rule.py failed" ;; esac
+    fi
+    pick="$r"
+    break
+  done < <(jq -c '.[]' <<<"$g")
+  newest="$(jq -c --argjson p "$pick" '. + [$p]' <<<"$newest")"
+done < <(jq -c '.[]' <<<"$groups")
 # The workflow file at the head of run $1, in $cache/wf-$1 (one read per run); a failed read returns 1.
 workflow_of() {
   [ -f "$cache/wf-$1" ] && return 0

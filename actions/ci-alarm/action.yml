@@ -6,7 +6,7 @@ description: >
   group that is its group's newest and passed every job of the failed run (exact names), so a green nightly that ran
   other jobs never hides a red push. A job the failed run did not fail is left out of that need when its job-level `if:` has a
   top-level `&&` conjunct `github.event_name == 'X'` for another event than the green run's (`all-jobs-passed` and `ci-done` run on
-  pull_request only), so a newer green push run clears a red nightly. Cost: per clear candidate one read of the workflow file at the green
+  pull_request only), so a newer green push run that ran those jobs clears a red nightly. Cost: per clear candidate one read of the workflow file at the green
   run's head (contents API, once), besides the jobs reads; the step needs python3 and runs `clear_rule.py` from the action path.
   A job cancelled at its own job-level `timeout-minutes` (a cap end) wakes its run's merged pull request, and opens no issue, wherever it sits in the 100-run window: in any
   cancelled run (not only the newest of its group), in any earlier attempt of a cancelled, failed or succeeded re-run, and in any
