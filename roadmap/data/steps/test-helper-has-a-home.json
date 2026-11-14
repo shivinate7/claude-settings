@@ -1,14 +1,14 @@
 {
  "id": "test-helper-has-a-home",
  "title": "A test-support helper has one allowed home: the role guards and check_landed_dirs agree on where it may be written",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL3kAdP2WqoWYSYypxM",
  "owner": "triage",
  "blockedBy": [],
  "why": "Coordinator 03:39 CST Nov 14 (relayed from the lane of PR #3238, which read the guards; neither the coordinator nor triage read the guard code): `builders-cannot-edit-tests` counts hooks/test_support/ as a test path (a builder may not write it), a test-author may not write a non-test path such as hooks/cost_probe.py, so no one agent can move a helper across that line; a create-here delete-there split was refused by the auto-mode classifier; check_landed_dirs.py then fails a helper in a subfolder of a landed folder (hooks/test_support/cost_probe.py).",
  "source": "Neighbours: builder-probe-false-alarm and test-author-ci-step-false-alarm (false alarms of the same role-scope guard), builder-bash-test-write, mixed-merge-resolver (a role that spans test and product files), refusal-names-way-out (each refusal names an allowed way out: here none exists for a helper). Decision builders-cannot-edit-tests (read by name only). Coordinator pick for #3238 only: rename the helper to hooks/test_cost_probe.py (a test path, the test-author does it), after the lane reads how test_*.py files are collected; fall back to the owner's computer if that breaks something. Option c of the lane (a known exception in the shared check) widens a shared tool, and is not taken.",
- "note": "Triage 03:40 CST Nov 14: done check: a doc line and a test say where a new test-support helper may live (a name or folder the role guards call a test path AND check_landed_dirs accepts), so one role can create it with no second role; red first: a helper at that home fails today (or is unwritable) and passes after. The lane first reads builders-cannot-edit-tests, the guard's path list and check_landed_dirs.py, and says whether the answer is a rename convention (test_*.py) or a rule change. A guard or check verdict may move: round 3 rule applies. Own lane; tracker: the coordinator. Not started. No owner question yet; a pick that widens a shared tool would go to the owner as a widening option.",
- "updatedAt": "2026-11-14T03:40:00-06:00"
+ "note": "Triage 03:40 CST Nov 14: done check: a doc line and a test say where a new test-support helper may live (a name or folder the role guards call a test path AND check_landed_dirs accepts), so one role can create it with no second role; red first: a helper at that home fails today (or is unwritable) and passes after. The lane first reads builders-cannot-edit-tests, the guard's path list and check_landed_dirs.py, and says whether the answer is a rename convention (test_*.py) or a rule change. A guard or check verdict may move: round 3 rule applies. Own lane; tracker: the coordinator. Not started. No owner question yet; a pick that widens a shared tool would go to the owner as a widening option. Lane started 03:40 CST Nov 14 (coordinator 03:40, relayed): Sonnet medium, tracker the coordinator, path ALONE, draft PR; guard or check change, so round 3 and the net-value test apply. Grant line: standing rule parallelism-keep-going.",
+ "updatedAt": "2026-11-14T03:40:40-06:00"
 }
