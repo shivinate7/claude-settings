@@ -6219,6 +6219,47 @@ class CloseReplaced(Env):
         self.assert_untouched(3302, out)
         self.assertEqual(rc, 0, out)
 
+    @staticmethod
+    def replaces_list(sep, ending):
+        """One Replaces line that names 40 distinct pull requests (#1000, #1007, ...) joined by `sep`, then `ending`."""
+        return "Replaces " + sep.join(f"#{1000 + 7 * i}" for i in range(40)) + ending
+
+    def replaced_names_timed(self, body):
+        """`merge.replaced_names` on pull request 3210 whose body is `body`. The cases here call that function directly, not the ready act.
+        It runs in a child process: a backtracking regex holds the GIL, so a thread could not stop it. The child is killed at 10 s, and that fails the case.
+        The clock runs in the child, around the call only, so the import of merge is not counted. -> (the names, the seconds the call took)."""
+        code = ("import json, sys, time\n"
+                "sys.path.insert(0, sys.argv[1])\n"
+                "import merge\n"
+                "t0 = time.monotonic()\n"
+                "names = merge.replaced_names({'branch': 'lane', 'body': sys.argv[2]}, 3210)\n"
+                "print(json.dumps({'elapsed': time.monotonic() - t0, 'names': names}))\n")
+        try:
+            r = subprocess.run([sys.executable, "-B", "-c", code, HERE, body], capture_output=True, text=True, timeout=10)
+        except subprocess.TimeoutExpired:
+            self.fail("replaced_names did not return within 10 s on a 40-number Replaces list: the number-list regex backtracks")
+        self.assertEqual(r.returncode, 0, "the child that calls replaced_names exited %d:\n%s" % (r.returncode, r.stderr))
+        got = json.loads(r.stdout)
+        return got["names"], got["elapsed"]
+
+    def test_backtrack_comma_space_list_then_a_clause_returns_fast_and_names_none(self):
+        """The line does not end at its number list, so it names none. Head takes past the 10 s kill on this body."""
+        names, elapsed = self.replaced_names_timed(self.replaces_list(", ", " from the backlog"))
+        self.assertLess(elapsed, 2, "replaced_names took %.2f s on a 40-number list joined by ', ' then a clause; the bound is 2 s" % elapsed)
+        self.assertEqual(names, [], "a line whose number list does not end the line names none, and replaced_names named %s" % names)
+
+    def test_backtrack_comma_space_list_ending_in_a_period_names_all_forty(self):  # control: green on the old code
+        names, elapsed = self.replaced_names_timed(self.replaces_list(", ", "."))
+        self.assertLess(elapsed, 2, "replaced_names took %.2f s on a 40-number list ending in '.'; the bound is 2 s" % elapsed)
+        self.assertEqual(names, [1000 + 7 * i for i in range(40)], "the period-ended list should name all 40 numbers in order, and it named %s" % names)
+
+    def test_backtrack_and_amp_and_comma_lists_then_a_clause_return_fast_and_name_none(self):  # control: green on the old code
+        for sep in (" and ", " & ", ","):
+            with self.subTest(sep=sep):
+                names, elapsed = self.replaced_names_timed(self.replaces_list(sep, " from the backlog"))
+                self.assertLess(elapsed, 2, "replaced_names took %.2f s on a 40-number list joined by %r then a clause; the bound is 2 s" % (elapsed, sep))
+                self.assertEqual(names, [], "a line whose number list does not end the line names none, and replaced_names named %s" % names)
+
 
 class ReadyUsage(unittest.TestCase):
     """The usage text of `merge <pr> --ready` says the draft step also closes the pull requests the body names as replaced (step close-replaced-at-open).
