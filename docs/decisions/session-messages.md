@@ -43,7 +43,7 @@ Wake routes under study. All unmeasured.
 
 Home of the measurement: roadmap step `mailbox-wake-routes` (the wake-route measurement, filed by triage).
 
-State: the code still sends cloud to cloud by `send_message` until a build lands. No build is started.
+State: `mail send` takes a cloud address, so a session with `MAILBOX_REPO` in its env sends cloud to cloud through the mailbox. Skill `waiting-page` routes it there (step mailbox-all-messages). The page-writer and lane-to-parent tells in that skill, and the guards that read a `send_message` as proof of a send, still use cloud `send_message` (debt mail-guards-read-send-message).
 Timed check-ins: Q4, see its bullet.
 
 ## The doorbell: mail wait

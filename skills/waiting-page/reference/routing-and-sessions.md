@@ -45,7 +45,7 @@ The Mac and Windows round trips passed (2026-11-12); the 20-message trial (build
 
 Decision `session-messages` (messages between sessions) sets this.
 
-- Cloud to cloud: `send_message` to the `session_id` of the `list_sessions` row that holds all of the target's tags: `cs-repo:<owner>/<name>`, `cs-build:<tier>` or `cs-step:<step id>` (forms in `skills/project-ops/templates/operating-model.md`). Never match on `cs-repo` alone.
+- Cloud to cloud: `mail send --to cloud/<row id>`, where the row id is `session_<id>` (so the address is `cloud/session_<id>`). Never send it with the cloud message tool: that leaves no copy, and "delivered" is not a read. It needs `MAILBOX_REPO` in the session's env, as the mailbox bullet below says. Take the row id from the `list_sessions` row that holds all of the target's tags: `cs-repo:<owner>/<name>`, `cs-build:<tier>` or `cs-step:<step id>` (forms in `skills/project-ops/templates/operating-model.md`). Never match on `cs-repo` alone. The mailbox is read at turn start and wakes no one. A session that waits on one reply may set one `send_later` check-in for it (owner, 2026-11-10 09:39 CST). The doorbell, a wake for an idle session, is open with no owner pick: build none.
 - Local: `SendMessage` to the name `ListAgents` gives.
 - To or from the owner's computer, use the git mailbox. Cloud `send_message` to the owner's computer is refused.
 - The mailbox commands: `mail send --to <addr> --kind request|inform|reply [--re <id>] --body-file <file|->`, `mail read [--addr <addr>] [<id>]`, `mail take [--addr <addr>] <id>`. They need `MAILBOX_REPO` in the session's env. `settings.json` `env` sets the default (owner page item 556 a).
