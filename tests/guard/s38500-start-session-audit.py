@@ -45,8 +45,15 @@ def audit_hook_file():
     return os.path.join(REPO, "hooks", named.group(1)), ""
 
 
-def audit_run(payload, state):
-    """(stdout, "") from the audit hook file on one payload, with `state` as the config folder, else ("", the reason)."""
+# A `-c` wrapper that makes `import guard` fail, as a broken guard file would: sys.modules holds None for it, so the
+# import raises. The hook file runs as __main__ after it, with the same stdin.
+AUDIT_GUARD_UNAVAILABLE = ("import sys, runpy; sys.modules['guard'] = None; sys.argv = sys.argv[1:]; "
+                           "runpy.run_path(sys.argv[0], run_name='__main__')")
+
+
+def audit_text(stdin_text, state, wrapper=None):
+    """(stdout, "") from the audit hook file on one stdin text, with `state` as the config folder, else ("", the reason).
+    A nonzero exit is a reason too, so a crash never reads as silence."""
     path, reason = audit_hook_file()
     if path is None:
         return "", reason
@@ -54,20 +61,29 @@ def audit_run(payload, state):
     env.pop("CLAUDE_CODE_REMOTE", None)
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env["CLAUDE_CONFIG_DIR"] = state
-    result = subprocess.run([sys.executable, path], input=json.dumps(payload), capture_output=True, text=True,
-                            env=env, timeout=60)
+    command = [sys.executable, path] if wrapper is None else [sys.executable, "-c", wrapper, path]
+    result = subprocess.run(command, input=stdin_text, capture_output=True, text=True, env=env, timeout=60)
     if result.returncode != 0:
         return "", "the audit exited %d: %s" % (result.returncode, result.stderr.strip()[-120:])
     return result.stdout, ""
 
 
-def audit_start(model, state):
-    """Run the audit on a start_session call that names `model`; a None model leaves the field out."""
+def audit_run(payload, state):
+    return audit_text(json.dumps(payload), state)
+
+
+def audit_payload(model, response="session started"):
+    """The PostToolUse payload of a start_session call that names `model`, with `response` as its tool_response; a None
+    model leaves the field out."""
     tool_input = {"initiation": "user_asked", "prompt": "x"}
     if model is not None:
         tool_input["model"] = model
-    return audit_run({"hook_event_name": "PostToolUse", "session_id": HU_SID, "cwd": ROOT,
-                      "tool_name": AUDIT_TOOL, "tool_input": tool_input, "tool_response": "session started"}, state)
+    return {"hook_event_name": "PostToolUse", "session_id": HU_SID, "cwd": ROOT,
+            "tool_name": AUDIT_TOOL, "tool_input": tool_input, "tool_response": response}
+
+
+def audit_start(model, state, response="session started"):
+    return audit_run(audit_payload(model, response), state)
 
 
 def audit_context(stdout):
@@ -91,12 +107,12 @@ def audit_folder(name):
     return folder
 
 
-def audit_expect(model, folder, setup, flagged, fragments=()):
+def audit_expect(model, folder, setup, flagged, fragments=(), response="session started"):
     """(ok, note) for one audit run. `setup(folder)` writes the handoff state first. A flagged start must print
     additionalContext that holds each fragment; an unflagged start must print nothing."""
     if setup is not None:
         setup(folder)
-    stdout, reason = audit_start(model, folder)
+    stdout, reason = audit_start(model, folder, response)
     if reason:
         return False, reason
     context, reason = audit_context(stdout)
@@ -177,6 +193,77 @@ def floor_hit_flags_haiku_start():
     return verdict == "haiku", "floor_hit names %r for a haiku start" % verdict
 
 
+# The new session's id, named the way the session-board test's start result names it ("session_x started").
+AUDIT_SESSION_ID = "session_x"
+AUDIT_ID_TEXT = [{"type": "text", "text": AUDIT_SESSION_ID + " started"}]
+
+
+def audit_text_silent(stdin_text, folder, wrapper=None):
+    """(ok, note) for one raw stdin: silent and exit 0 is the pass. A nonzero exit is a reason, never silence."""
+    stdout, reason = audit_text(stdin_text, folder, wrapper)
+    if reason:
+        return False, reason
+    return (not stdout.strip()), ("silent, exit 0" if not stdout.strip() else "printed: %s" % stdout[:80])
+
+
+def audit_names_id_text():
+    return audit_expect("haiku", audit_folder("id-text"), None, True, (AUDIT_SESSION_ID,),
+                        response=AUDIT_SESSION_ID + " started")
+
+
+def audit_names_id_content_list():
+    return audit_expect("haiku", audit_folder("id-list"), None, True, (AUDIT_SESSION_ID,), response=AUDIT_ID_TEXT)
+
+
+def audit_names_id_content_dict():
+    return audit_expect("haiku", audit_folder("id-dict"), None, True, (AUDIT_SESSION_ID,),
+                        response={"content": AUDIT_ID_TEXT})
+
+
+def audit_names_id_result_dict():
+    return audit_expect("haiku", audit_folder("id-result"), None, True, (AUDIT_SESSION_ID,),
+                        response={"result": {"content": AUDIT_ID_TEXT}})
+
+
+def audit_no_id_says_unread():
+    # The start result names no session id: the start still flags, and the flag says the id is unread.
+    return audit_expect("haiku", audit_folder("id-none"), None, True, ("id is unread",),
+                        response={"content": [{"type": "text", "text": "done"}]})
+
+
+def audit_bad_json_silent_exit0():
+    return audit_text_silent("{not json", audit_folder("bad-json"))
+
+
+def audit_json_list_silent_exit0():
+    return audit_text_silent("[1, 2]", audit_folder("json-list"))
+
+
+def audit_number_response_silent():
+    # A tool_response that is neither text, a content list nor a dict cannot be read, so the audit says nothing.
+    return audit_expect("haiku", audit_folder("num-response"), None, False, response=42)
+
+
+def audit_import_failure_silent_exit0():
+    # The floor's module cannot import. The audit says nothing and exits 0, as it does for any read it cannot make.
+    return audit_text_silent(json.dumps(audit_payload("haiku")), audit_folder("import-fail"),
+                             wrapper=AUDIT_GUARD_UNAVAILABLE)
+
+
+def audit_is_error_silent():
+    return audit_expect("haiku", audit_folder("is-error"), None, False,
+                        response={"is_error": True, "content": [{"type": "text", "text": "no such repo"}]})
+
+
+def audit_isError_silent():
+    return audit_expect("haiku", audit_folder("isError"), None, False,
+                        response={"isError": True, "result": "no such repo"})
+
+
+def audit_deny_silent():
+    return audit_expect("haiku", audit_folder("deny"), None, False, response={"deny": "refused"})
+
+
 for _label, _check in (
         ("the one PostToolUse command is wired, once", audit_wired_once),
         ("a haiku start is flagged, with the stop line", audit_haiku_flagged),
@@ -187,6 +274,18 @@ for _label, _check in (
         ("a flag with no handoff file is silent", audit_flag_without_handoff_silent),
         ("a handoff with no flag is silent", audit_handoff_without_flag_silent),
         ("the audit flags each model guard.floor_hit flags", audit_matches_floor_hit),
-        ("control: guard.floor_hit names a haiku start", floor_hit_flags_haiku_start)):
+        ("control: guard.floor_hit names a haiku start", floor_hit_flags_haiku_start),
+        ("the flag names the new session's id from a text response", audit_names_id_text),
+        ("the flag names the id from a content-list response", audit_names_id_content_list),
+        ("the flag names the id from a content dict response", audit_names_id_content_dict),
+        ("the flag names the id from a result dict response", audit_names_id_result_dict),
+        ("a start with no readable id still flags, saying the id is unread", audit_no_id_says_unread),
+        ("fail open: bad JSON on stdin is silent, exit 0", audit_bad_json_silent_exit0),
+        ("fail open: a JSON list on stdin is silent, exit 0", audit_json_list_silent_exit0),
+        ("fail open: a number tool_response is silent, exit 0", audit_number_response_silent),
+        ("fail open: a floor module that cannot import is silent, exit 0", audit_import_failure_silent_exit0),
+        ("an errored start (is_error) with haiku prints nothing", audit_is_error_silent),
+        ("an errored start (isError) with haiku prints nothing", audit_isError_silent),
+        ("a denied start with haiku prints nothing", audit_deny_silent)):
     LOG_CHECKS_EXTRA.append(("start-session: " + _label, _check))
     FIXTURELESS_CHECKS.add(_check)
