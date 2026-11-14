@@ -2678,6 +2678,97 @@ def refuse_incomplete_tree(wt, head, base):
         raise UnknownStop("\n".join([f"the lint of {head[:9]} against {base} is unknown, not a pass: the lint worktree lacks {', '.join(missing)}, so no step ran.",
                                      "Run again. If it keeps happening, the lint worktree made for this head is incomplete. --lint-unknown-ok does not lift this. " + LANE_LINT_REMEDY]))
 
+PARENT_LINE = re.compile(r"merge after(.*)", re.I)
+# A backticked `git diff [flags] <start> <end>`, `<start>..<end>` or `<start>...<end>`, flags or `-- path` after the end allowed. Leading flags are
+# skipped; a lone `--` is no flag, since paths follow it. Group 1 is the start, group 2 the end.
+REVIEW_RANGE = re.compile(r"`git diff\s+(?:-(?!-(?:\s|`))[^\s`]+\s+)*(?!-)([^\s`]+?)(?:\.\.\.?|\s+)((?!-)[^\s`]+)[^`]*`")
+SHORT_HEX = re.compile(r"[0-9a-fA-F]{1,6}")
+LONG_HEX = re.compile(r"[0-9a-fA-F]{7,40}")
+
+def parent_prs(body):
+    """The PR numbers of each `merge after` line in a PR body, in order, once each: every `#N` after the words on that line (case, colon, `**` and bullet free).
+    A line in a fenced block (stale_cites.fenced_lines, the one home of what a fence is) is an example and names no parent."""
+    import stale_cites
+    rows = (body or "").split("\n")
+    fenced = stale_cites.fenced_lines(rows)
+    found = (int(n) for i, line in enumerate(rows, 1) if i not in fenced for m in [PARENT_LINE.search(line)] if m for n in re.findall(r"#(\d+)", m.group(1)))
+    return list(dict.fromkeys(found))
+
+def review_range_starts(body):
+    """The (start, end) of each backticked range (REVIEW_RANGE) in a PR body, read row by row. It reads the whole body: the range sits in the first paragraph.
+    A range in a fenced block (stale_cites.fenced_lines) is an example, and a range whose start holds <>{} is a placeholder: both are skipped.
+    An end that holds <>{} is a placeholder too: the range is still judged by its start, and its end is None, so the end check skips it."""
+    import stale_cites
+    rows = (body or "").split("\n")
+    fenced = stale_cites.fenced_lines(rows)
+    return [(start, None if re.search(r"[<>{}]", end) else end) for i, row in enumerate(rows, 1) if i not in fenced
+            for start, end in REVIEW_RANGE.findall(row) if not re.search(r"[<>{}]", start)]
+
+def check_review_ranges(root, host, info, base, body):
+    """A lane that names a parent (`Merge after: #N`) asks its reviewer to read `git diff <start> <end>`. A start judged by ancestry, not by string, also passes
+    a lane built on a parent that gained commits, or on a merge of its parents (decision lanes-run-no-full-ci-job):
+    a start S passes when (1) S is an ancestor of, or is, the lane head; (2) for each named parent P, merge-base(lane head, P's head) is an ancestor of, or is, S;
+    (3) `git rev-list --no-merges S --not <each parent head> origin/<base>` is empty. A start that does not resolve, or a hex start under 7 digits, refuses.
+    A start equal to a parent's branch, bare or as origin/<branch>, is that parent's head. `info` is the lane PR's read and `base` its base branch.
+    The end of each judged range must be the lane head: a 7 or more hex prefix of `info["head"]`, or `info["branch"]`, bare or as origin/<branch>. Else it refuses.
+    The caller has fetched the base and the lane head (fetch_pr_head, in lane_lint). It fetches each parent's head by its sha. Any git or host error refuses.
+    A parent with no range passes with one note line. Raises Stop on the first bad start. Reads each parent's PR once."""
+    parents = parent_prs(body)
+    if not parents:
+        return
+    starts = review_range_starts(body)
+    if not starts:
+        say(f"note: the body names {', '.join('#%d' % n for n in parents)} as parent, but holds no `git diff <start> <end>` range, so no review range was checked.")
+        return
+    infos = {n: host.pr(n) for n in parents}
+    lane, heads = info["head"], [i["head"] for i in infos.values()]
+    named = "; ".join(f"#{n} is at {i['head'][:9]} on {i['branch']}" for n, i in infos.items())
+
+    def refuse(start, why):
+        raise Stop(f"the review range starts at {start}, which {why}. The parents the body names: {named}; the lane head is {lane[:9]}. "
+                   f"A start off the lane's fork from its parents makes the reviewer read the wrong commits. Restate the range from the head of the parent "
+                   f"the lane is built on, or from the commit that merges its parents (7 or more hex digits). {LANE_LINT_CITE}")
+
+    for n, i in infos.items():  # by sha, not branch: a merged parent's branch may be deleted while its head stays on origin
+        c, out = git(root, "fetch", "-q", "origin", i["head"])
+        if c:
+            refuse(starts[0][0], f"cannot be judged: git fetch origin {i['head'][:9]} (#{n}'s head) failed, so that head is on no remote this clone reads: {out}")
+    branch_heads = {name: i["head"] for i in infos.values() for name in (i["branch"], f"origin/{i['branch']}")}
+    lane_ends = {info["branch"], f"origin/{info['branch']}"}
+    for start, end in starts:
+        if end is not None and end not in lane_ends and not (LONG_HEX.fullmatch(end) and lane.startswith(end.lower())):  # an end below the lane head leaves the commits above it unread
+            raise Stop(f"the review range ends at {end}, which is not the lane head {lane[:9]}. The end must be the lane head: {info['branch']}, "
+                       f"origin/{info['branch']}, or 7 or more hex digits of {lane[:9]}. End the range at the lane branch. {LANE_LINT_CITE}")
+        if SHORT_HEX.fullmatch(start):
+            refuse(start, "is a hex start under 7 digits")
+        sha = branch_heads.get(start)
+        if sha is None:
+            c, sha = git(root, "rev-parse", "--verify", "-q", f"{start}^{{commit}}")
+            if c or not sha:
+                refuse(start, "does not resolve to a commit in this clone")
+        at = start if sha.startswith(start.lower()) else f"{start} ({sha[:9]})"
+        inside = ancestor(root, sha, lane)
+        if inside is None:
+            refuse(at, f"cannot be judged: git could not say whether it is an ancestor of the lane head {lane[:9]}")
+        if not inside:
+            refuse(at, f"is off the lane: it is not an ancestor of the lane head {lane[:9]}")
+        for n, i in infos.items():
+            c, fork = git(root, "merge-base", lane, i["head"])
+            if c or not fork:
+                refuse(at, f"cannot be judged against #{n}: git found no merge base of the lane head and #{n}'s head {i['head'][:9]}")
+            below = ancestor(root, fork, sha)
+            if below is None:
+                refuse(at, f"cannot be judged against #{n}: git could not say whether it holds the lane's fork from #{n} at {fork[:9]}")
+            if not below:
+                refuse(at, f"is below #{n}'s head {i['head'][:9]}: the lane meets #{n} at {fork[:9]}, which this start does not hold")
+        c, extra = git(root, "rev-list", "--no-merges", sha, "--not", *heads, f"refs/remotes/origin/{base}")
+        if c:
+            refuse(at, f"cannot be judged: git rev-list failed: {extra}")
+        if extra:
+            rows = extra.split()
+            refuse(at, f"is above the parent heads: it holds {len(rows)} commit{'s' if len(rows) != 1 else ''} that no named parent and not origin/{base} holds, "
+                       f"such as {rows[0][:9]}")
+
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
@@ -2685,6 +2776,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     Then every head, a ref or commit too, is merged into origin/<base> with merge_reason: a conflict is a FAIL that names the base, and an unknown is a Stop.
     Then cross_measure checks a PR's head against the lane's other open PRs and `with_prs`: an unknown there is a Stop too.
     A FAIL above (the base conflict, a clash that counts) or an unknown stops before the ci-job run, as one refusal that lists every FAIL block; the ci-job never runs beside it.
+    A PR-number target also runs check_review_ranges on its body before the ci-job run.
     Any other target is a commit or ref. ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     A FAIL above, and exit 1 of ci-job (a FAIL), refuse always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
@@ -2733,6 +2825,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                 say(f"merge: draft run of {head[:9]} is {draft}, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *draft_lines)
         if fails or stop:  # as on main, a counted FAIL or an unknown ends the run before the ci-job
             raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop if stop else LANE_LINT_REMEDY]))
+        if target.isdigit() and info.get("body"):  # after the worktree above, whose fetch the check's git reads need
+            check_review_ranges(root, host, info, base, info["body"])
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", pr_body=pr_body, notes=pin_notes)
         if state == "pass" and touched_tests:
             touched = run_touched_tests(wt, base, head)

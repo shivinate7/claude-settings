@@ -9,6 +9,7 @@ fixture come from merge/test_merge.py: a case extends that fixture, it does not 
 (class ReadyChecks) runs the same stub, through CiJobStub.
 The SIGTERM case runs merge in a subprocess through HARNESS, which names the same stub; it is the one case that does not patch CI_JOB.
 BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a batch's four checks.yml lint CI steps, each script logged once with its argv; cost per case: one ci-job copy and run, one worktree, four CI step runs, 0.5 s measured (3 runs of 2 cases). Its two lint-set cases (no lint step; a step that runs only off a pull request) run the same way with their own checks job.
+The review-range cases (LaneLint's test_review_range_*) answer the parent pull requests a body names from ParentHost, so no case reads a parent from git or GitHub.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, importlib.util, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
@@ -23,6 +24,7 @@ import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importi
 from test_merge import LANE_LINT_MARKER, NOT_OWNER, lint_comment  # noqa: E402  the lint comment's one form, in test_merge.py (decision lanes-run-no-full-ci-job)
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import merge  # noqa: E402
+import stale_cites  # noqa: E402  the one home of what a fence is (lint/stale_cites.py, fenced_lines)
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
@@ -210,6 +212,51 @@ class IntermediateHeadHost(LagHost):
         if len(self.pr_calls) == self.lag + 1:
             info["head"] = self.middle
         return info
+
+
+PARENT_PR = 1785  # the parent a review-range body names on its `Merge after:` line
+PARENT_BRANCH = "parent-base"  # the parent's head branch
+SECOND_PARENT_PR = 1700  # a second parent, for a body that names two
+SECOND_PARENT_BRANCH = "second-parent-base"
+FIRST_PARENT_PR = 1676  # the first of two parents on one Merge after line
+FIRST_PARENT_BRANCH = "first-parent-base"
+LAST_PARENT_PR = 1742  # the second of the two
+LAST_PARENT_BRANCH = "last-parent-base"
+PLACEHOLDER_START = "c05c0e626"  # the start INCIDENT_BODY names: a placeholder that body_at replaces with a real commit
+INCIDENT_BODY = ("Lane review-range-check, stacked on its parent.\n\n"
+                 "Merge after: #1785\n\n"
+                 "Review only `git diff c05c0e626 feat`.\n")
+
+
+def one_parent(head):
+    """The parents a case names: the parent PR at `head`, on its branch."""
+    return {PARENT_PR: (head, PARENT_BRANCH)}
+
+
+def body_at(start):
+    """INCIDENT_BODY with its range start at `start`."""
+    return INCIDENT_BODY.replace(PLACEHOLDER_START, start)
+
+
+def ancestry_body(start, end="feat"):
+    """A lane body that names the parent and reads `git diff <start> <end>`, the end the lane branch by default."""
+    return "Merge after: #%d\n\nReview only `git diff %s %s`.\n" % (PARENT_PR, start, end)
+
+
+class ParentHost(tm.FakeHost):
+    """FakeHost that also answers the parent pull requests a body names: `parents` maps a number to (head, branch). The lane is answered as FakeHost answers it."""
+
+    def __init__(self, root, other, parents):
+        super().__init__(root, other)
+        self.parents = parents
+
+    def pr(self, n):
+        if n not in self.parents:
+            return super().pr(n)
+        self.pr_calls.append(n)
+        head, branch = self.parents[n]
+        return {"head": head, "branch": branch, "base": "main", "state": "OPEN", "mergeable": "MERGEABLE",
+                "merge_state": "CLEAN", "draft": False, "body": ""}
 
 
 class LaneFixture(CiJobStub, tm.CloudSession):
@@ -883,6 +930,498 @@ class LaneLint(LaneFixture):
         self.assertNotIn("coordinator", err.lower())
         self.assertNotIn("batch-runner", err.lower())
         self.assertFalse(os.path.exists(self.role_file), "a refused role wrote the role file")
+
+    def commit_in_other(self, parent, name, message):
+        """A commit on `parent` in the second clone, adding the file `name`. -> its sha."""
+        o = self.other
+        tm.sh(o, "git", "checkout", "-q", "--detach", parent)
+        tm.put(os.path.join(o, name), message + "\n")
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-q", "-m", message)
+        return tm.sh(o, "git", "rev-parse", "HEAD")
+
+    def push_ref(self, ref, sha):
+        """Point origin's `ref` at `sha` (a force push: a case rebuilds the lane), then fetch origin into the lane checkout."""
+        tm.sh(self.other, "git", "push", "-q", "-f", "origin", "%s:refs/heads/%s" % (sha, ref))
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+
+    def fork_history(self):
+        """The parent branch at P, two commits above the fork point O, and the lane feat one commit above P: the lane contains P.
+        -> {"O", "P", "L"}, the shas."""
+        tm.sh(self.other, "git", "fetch", "-q", "origin")
+        o = self.commit_in_other(self.head("main"), "fork.txt", "fork point")
+        a = self.commit_in_other(o, "step.txt", "parent step")
+        p = self.commit_in_other(a, "parent.txt", "parent head")
+        self.push_ref(PARENT_BRANCH, p)
+        lane = self.commit_in_other(p, "lane.txt", "lane commit")
+        self.push_ref("feat", lane)
+        return {"O": o, "P": p, "L": lane}
+
+    def lagging_history(self):
+        """The lane forks at O, the parent's head then. The parent gains the commit X after that. -> {"O", "X", "L"}, the shas."""
+        tm.sh(self.other, "git", "fetch", "-q", "origin")
+        o = self.commit_in_other(self.head("main"), "fork.txt", "fork point")
+        self.push_ref(PARENT_BRANCH, o)
+        lane = self.commit_in_other(o, "lane.txt", "lane commit")
+        self.push_ref("feat", lane)
+        x = self.commit_in_other(o, "parent-later.txt", "parent gains a commit")
+        self.push_ref(PARENT_BRANCH, x)
+        return {"O": o, "X": x, "L": lane}
+
+    def use_review_range_host(self, body, parents):
+        """The host of a lane whose PR 7 has `body`. `parents` ({number: (head, branch)}) answers the parent pull requests the body names."""
+        self.host = ParentHost(self.co, self.other, parents)
+        self.host.body = body
+
+    def review_range_run(self, body, parents):
+        """Run the lane lint of PR 7 with `body`, with no lint assertion. -> (rc, stdout and stderr together, the lint runs)."""
+        self.use_review_range_host(body, parents)
+        if os.path.exists(self.log):
+            os.remove(self.log)
+        rc, text = self.run_lane("--lane-lint", "7")
+        return rc, text, self.lint_calls()
+
+    def assert_review_range_refused(self, body, start, what, parents):
+        """The lint refuses `body` before ci-job runs: rc 1, no lint run, and a refusal that names the start, each parent PR and its head.
+        `what` names the range in each message."""
+        self.assertRegex(body, "(?i)merge after", "the body names no parent, so the check is not in play")  # scope before subject (P7)
+        self.assertIn("`git diff", body, "the body holds no backticked range, so the check is not in play")
+        rc, text, runs = self.review_range_run(body, parents)
+        self.assertEqual(rc, 1, "the lint passed %s, whose start %s is not a named parent's head:\n%s" % (what, start, text))
+        self.assertEqual(runs, [], "ci-job ran for %s, whose start %s is refused: %s" % (what, start, runs))
+        self.assertIn(start, text, "the refusal for %s does not name its start %s:\n%s" % (what, start, text))
+        for number, (head, _) in parents.items():
+            self.assertIn(str(number), text, "the refusal for %s does not name the parent PR #%d:\n%s" % (what, number, text))
+            self.assertIn(head[:7], text, "the refusal for %s does not name the head of #%d:\n%s" % (what, number, text))
+        self.assertEqual(self.worktrees(), 1, "the refused lint left a tree behind")
+
+    def assert_review_range_end_refused(self, body, end, what, parents):
+        """The lint refuses `body` before ci-job runs for its end: rc 1, no lint run, and a refusal that names the end. `what` names the range."""
+        self.assertRegex(body, "(?i)merge after", "the body names no parent, so the check is not in play")  # scope before subject (P7)
+        self.assertIn("`git diff", body, "the body holds no backticked range, so the check is not in play")
+        rc, text, runs = self.review_range_run(body, parents)
+        self.assertEqual(rc, 1, "the lint passed %s, whose end %s is not the lane head, its branch or a prefix of the head:\n%s" % (what, end, text))
+        self.assertEqual(runs, [], "ci-job ran for %s, whose end %s is refused: %s" % (what, end, runs))
+        self.assertIn(end, text, "the refusal for %s does not name its end %s:\n%s" % (what, end, text))
+        self.assertEqual(self.worktrees(), 1, "the refused lint left a tree behind")
+
+    def fenced_rows(self, body):
+        """The rows (from 1) that stale_cites.fenced_lines fences in `body`: the one rule of what a fence is."""
+        return stale_cites.fenced_lines(body.split("\n"))
+
+    def assert_fence_rule(self, body, text, fenced):
+        """Scope before subject (P7): stale_cites.fenced_lines says the row holding `text` is fenced, or not, as the case names it."""
+        rows = [n for n, row in enumerate(body.split("\n"), 1) if text in row]
+        self.assertEqual(len(rows), 1, "%r is on %d rows, want one" % (text, len(rows)))
+        held = rows[0] in self.fenced_rows(body)
+        self.assertEqual(held, fenced, "stale_cites.fenced_lines gives fenced=%s for the row holding %r, want %s, so the case tests no fence rule"
+                         % (held, text, fenced))
+
+    def test_review_range_refuses_a_start_below_the_parent_head_before_ci_job_runs(self):
+        """The incident body, with its start at a real commit two commits below the parent head that the lane contains."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        self.assertEqual(tm.sh(self.co, "git", "merge-base", h["O"], h["P"]), h["O"], "the fixture's start is not below the parent head")
+        self.assert_review_range_refused(body_at(h["O"]), h["O"], "the incident range, below the parent head", one_parent(h["P"]))
+
+    def test_review_range_refuses_a_start_above_the_parent_head_before_ci_job_runs(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        above = h["L"]  # the lane's own head: a commit above the parent head
+        self.assertEqual(tm.sh(self.co, "git", "merge-base", above, h["P"]), h["P"], "the lane head does not contain the parent head")
+        self.assert_review_range_refused(body_at(above), above, "a range that starts above the parent head", one_parent(h["P"]))
+
+    def test_review_range_refuses_a_start_that_names_another_branch_before_ci_job_runs(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        self.push_ref("some-other-branch", h["O"])  # a real branch, and not the parent's
+        self.assert_review_range_refused(body_at("some-other-branch"), "some-other-branch", "a range that starts at another branch",
+                                         one_parent(h["P"]))
+
+    def test_review_range_refuses_a_hex_start_under_seven_characters_before_ci_job_runs(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        short = h["P"][:6]  # a prefix of the parent head, one character short of the seven a start needs
+        self.assert_review_range_refused(body_at(short), short, "a range with a 6-character start", one_parent(h["P"]))
+
+    def test_review_range_refuses_a_bad_range_after_a_good_one_before_ci_job_runs(self):
+        """Each range is checked: the first starts at the parent head, the second at a commit below it, and the second is refused."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        good = h["P"][:9]
+        body = body_at(good) + "\nAlso `git diff %s feat`.\n" % h["O"]
+        self.assertIn("`git diff %s " % good, body, "the good range is not in the body")
+        self.assert_review_range_refused(body, h["O"], "the second range", one_parent(h["P"]))
+
+    def test_review_range_refuses_a_below_start_in_the_dotdot_and_triple_dot_forms_before_ci_job_runs(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        for sep in ("..", "..."):
+            rng = "`git diff %s%sfeat`" % (h["O"], sep)
+            body = body_at(h["O"]).replace("`git diff %s feat`" % h["O"], rng)
+            self.assertIn(rng, body, "the fixture did not take the %r form" % sep)
+            self.assert_review_range_refused(body, h["O"], "the range " + rng, one_parent(h["P"]))
+
+    def test_review_range_refuses_a_parent_head_that_is_on_no_remote(self):
+        """The parent's branch is gone and its head was never pushed: the start is on no remote, so the check refuses before ci-job runs."""
+        self.use_ci_job(PASSING, 0)
+        tm.sh(self.other, "git", "fetch", "-q", "origin")
+        unpushed = self.commit_in_other(self.head("main"), "unpushed.txt", "parent head never pushed")
+        self.assertEqual(tm.sh(self.other, "git", "branch", "-r", "--contains", unpushed), "", "the fixture's parent head is on origin")
+        self.push_ref("feat", self.commit_in_other(self.head("main"), "lane.txt", "lane commit"))
+        rc, text, runs = self.review_range_run(body_at(unpushed[:9]), one_parent(unpushed))
+        self.assertNotIn("Traceback", text, "the check crashed, which is not a refusal:\n%s" % text)
+        self.assertEqual(rc, 1, "the check passed a start that is on no remote:\n%s" % text)
+        self.assertEqual(runs, [], "ci-job ran for a start that is on no remote: %s" % runs)
+        self.assertEqual(self.worktrees(), 1, "the refused lint left a tree behind")
+
+    def test_review_range_refuses_an_end_that_is_an_older_lane_commit_before_ci_job_runs(self):
+        """The range ends at a lane commit below the lane head, so the commits above that end are skipped: refused."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        older = h["L"]
+        self.push_ref("feat", self.commit_in_other(older, "lane-above.txt", "lane commit above the first"))
+        self.assertEqual(tm.sh(self.co, "git", "merge-base", older, "origin/feat"), older, "the fixture's end is not below the lane head")
+        self.assert_review_range_end_refused(ancestry_body(h["P"][:9], older[:9]), older[:9], "a range that ends at an older lane commit", one_parent(h["P"]))
+
+    def test_review_range_refuses_an_end_that_names_another_branch_before_ci_job_runs(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        self.assert_review_range_end_refused(ancestry_body(h["P"][:9], PARENT_BRANCH), PARENT_BRANCH, "a range that ends at another branch", one_parent(h["P"]))
+
+    def test_review_range_refuses_a_hex_end_under_seven_characters_before_ci_job_runs(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        short = h["L"][:6]  # a prefix of the lane head, one character short of the seven an end needs
+        self.assert_review_range_end_refused(ancestry_body(h["P"][:9], short), short, "a range with a 6-character end", one_parent(h["P"]))
+
+    def test_review_range_refuses_a_wrong_start_with_a_placeholder_end_before_ci_job_runs(self):
+        """A start below the parent head is judged even when its end is a placeholder such as `<head>`: refused, with no lint run."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        below = h["O"][:9]
+        self.assert_review_range_refused(ancestry_body(below, "<head>"), below, "a range from a start below the parent head to a placeholder end", one_parent(h["P"]))
+
+    def test_review_range_refuses_a_start_below_a_bold_merge_after_line(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        body = body_at(h["O"]).replace("Merge after: #1785", "**Merge after: #1785**")
+        self.assert_review_range_refused(body, h["O"], "the incident range under a bold Merge after line", one_parent(h["P"]))
+
+    def test_review_range_refuses_a_start_below_a_bulleted_merge_after_line(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        body = body_at(h["O"]).replace("Merge after: #1785", "- Merge after: #1785")
+        self.assert_review_range_refused(body, h["O"], "the incident range under a bulleted Merge after line", one_parent(h["P"]))
+
+    def test_review_range_refuses_a_start_below_a_mid_line_merge_after(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        body = body_at(h["O"]).replace("Merge after: #1785", "Built on the parent lane, and merge after #1785.")
+        self.assert_review_range_refused(body, h["O"], "the incident range under a mid-line merge after", one_parent(h["P"]))
+
+    def test_review_range_refuses_a_start_followed_by_a_flag(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        body = body_at(h["O"]).replace("`git diff %s feat`" % h["O"], "`git diff %s feat --stat`" % h["O"])
+        self.assertIn("--stat`", body, "the fixture did not take the flag")
+        self.assert_review_range_refused(body, h["O"], "the incident range followed by --stat", one_parent(h["P"]))
+
+    def test_review_range_refuses_a_start_followed_by_a_path(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        body = body_at(h["O"]).replace("`git diff %s feat`" % h["O"], "`git diff %s feat -- merge/merge.py`" % h["O"])
+        self.assertIn("-- merge/merge.py`", body, "the fixture did not take the path")
+        self.assert_review_range_refused(body, h["O"], "the incident range followed by a path", one_parent(h["P"]))
+
+    def test_review_range_refuses_a_stat_flag_before_the_range_with_a_wrong_start(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        rng = "`git diff --stat %s..feat`" % h["O"]
+        body = body_at(h["O"]).replace("`git diff %s feat`" % h["O"], rng)
+        self.assertIn(rng, body, "the fixture did not take the --stat range")
+        self.assert_review_range_refused(body, h["O"], "a --stat range that starts below the parent head", one_parent(h["P"]))
+
+    def test_review_range_refuses_a_context_flag_before_the_range_with_a_wrong_start(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        rng = "`git diff -U0 %s feat`" % h["O"]
+        body = body_at(h["O"]).replace("`git diff %s feat`" % h["O"], rng)
+        self.assertIn(rng, body, "the fixture did not take the -U0 range")
+        self.assert_review_range_refused(body, h["O"], "a -U0 range that starts below the parent head", one_parent(h["P"]))
+
+    def test_review_range_refuses_a_wrong_start_after_a_closed_fence(self):
+        """The control for the fence cases: once the fence closes, stale_cites.fenced_lines no longer fences the row, and the wrong start is refused."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        body = ("Merge after: #1785\n\n"
+                "```\ncode\n```\n\n"
+                "Review only `git diff %s feat`.\n") % h["O"]
+        self.assert_fence_rule(body, "git diff %s" % h["O"], fenced=False)
+        self.assert_review_range_refused(body, h["O"], "the range after a closed fence", one_parent(h["P"]))
+
+    def test_review_range_refuses_a_start_two_commits_below_a_parent_the_lane_contains(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        self.assertEqual(tm.sh(self.co, "git", "merge-base", h["O"], h["P"]), h["O"], "the fixture's start is not below the parent head")
+        self.assert_review_range_refused(ancestry_body(h["O"]), h["O"], "a start two commits below the parent head, which the lane contains",
+                                         one_parent(h["P"]))
+
+    def test_review_range_refuses_a_start_that_is_a_lane_commit_past_the_parent_head(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        self.push_ref("feat", self.commit_in_other(h["L"], "lane2.txt", "lane commit two"))
+        self.assert_review_range_refused(ancestry_body(h["L"]), h["L"], "a start that is a lane commit past the parent head", one_parent(h["P"]))
+
+    def test_review_range_refuses_a_parent_branch_name_that_moved_past_the_lane(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.lagging_history()
+        self.assert_review_range_refused(ancestry_body(PARENT_BRANCH), PARENT_BRANCH,
+                                         "the parent's branch name, which moved past the lane's fork point", one_parent(h["X"]))
+
+    def test_review_range_refuses_a_start_that_does_not_resolve(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        missing = "1234567890abcdef1234567890abcdef12345678"
+        self.assertNotEqual(merge.git(self.co, "cat-file", "-e", missing + "^{commit}")[0], 0, "the fixture's start exists in the repo")
+        self.assert_review_range_refused(ancestry_body(missing), missing, "a start that resolves to no commit", one_parent(h["P"]))
+
+    def side_parent(self, branch, message):
+        """A commit on origin's main, pushed as `branch`: a parent that shares no history with the lane's parent. -> its sha."""
+        tm.sh(self.other, "git", "fetch", "-q", "origin")
+        sha = self.commit_in_other(self.head("main"), branch + ".txt", message)
+        self.push_ref(branch, sha)
+        return sha
+
+    def integration_history(self):
+        """Parent #1785 at P1 and parent #1700 at P2, both on main. The lane is built on S, their merge. -> {"P1", "P2", "S", "L"}, the shas."""
+        tm.sh(self.other, "git", "fetch", "-q", "origin")
+        main = self.head("main")
+        p1 = self.commit_in_other(main, "one.txt", "first parent")
+        p2 = self.commit_in_other(main, "two.txt", "second parent")
+        self.push_ref(PARENT_BRANCH, p1)
+        self.push_ref(SECOND_PARENT_BRANCH, p2)
+        tm.sh(self.other, "git", "checkout", "-q", "--detach", p1)
+        tm.sh(self.other, "git", "merge", "-q", "--no-ff", "-m", "integrate both parents", p2)
+        s = tm.sh(self.other, "git", "rev-parse", "HEAD")
+        lane = self.commit_in_other(s, "lane.txt", "lane commit")
+        self.push_ref("feat", lane)
+        return {"P1": p1, "P2": p2, "S": s, "L": lane}
+
+    def merged_history(self):
+        """Parent #1785's head P, pushed as its branch and then merged: origin's main is P. The branch is deleted on origin, and the lane is built on P. -> {"P", "L"}, the shas."""
+        tm.sh(self.other, "git", "fetch", "-q", "origin")
+        p = self.commit_in_other(self.head("main"), "parent.txt", "parent head")
+        self.push_ref(PARENT_BRANCH, p)
+        self.push_ref("main", p)
+        tm.sh(self.other, "git", "push", "-q", "origin", ":refs/heads/%s" % PARENT_BRANCH)
+        lane = self.commit_in_other(p, "lane.txt", "lane commit")
+        self.push_ref("feat", lane)
+        return {"P": p, "L": lane}
+
+    def assert_review_range_passes(self, body, what, parents):
+        """The check passes `body` and the lint runs once: rc 0, one lint run, one PASS line. `what` names the body in each message."""
+        rc, text, runs = self.review_range_run(body, parents)
+        self.assertEqual(rc, 0, "the check refused %s, which it must pass:\n%s" % (what, text))
+        self.assertEqual(len(runs), 1, "the lint ran %d times for %s, want once: %s" % (len(runs), what, text))
+        self.assertEqual(len(pass_lines(text)), 1, "no PASS line for %s: %s" % (what, text))
+
+    def test_review_range_passes_a_start_at_the_parent_head_in_nine_or_seven_characters(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        for short in (h["P"][:9], h["P"][:7]):
+            with self.subTest(start=short):
+                self.use_review_range_host(body_at(short), one_parent(h["P"]))
+                rc, out = self.lint_run("--lane-lint", "7")
+                self.assertEqual(rc, 0, out)
+                self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_review_range_passes_a_start_naming_the_parent_branch_bare_or_as_origin(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        for start in (PARENT_BRANCH, "origin/" + PARENT_BRANCH):
+            with self.subTest(start=start):
+                self.use_review_range_host(body_at(start), one_parent(h["P"]))
+                rc, out = self.lint_run("--lane-lint", "7")
+                self.assertEqual(rc, 0, out)
+                self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_review_range_passes_a_lowercase_merge_after_without_a_colon_with_the_dotdot_form(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        short = h["P"][:9]
+        body = body_at(short).replace("Merge after: #1785", "merge after #1785").replace(
+            "`git diff %s feat`" % short, "`git diff %s..feat`" % short)
+        self.assertIn("merge after #1785", body, "the fixture did not take the lowercase line")
+        self.use_review_range_host(body, one_parent(h["P"]))
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_review_range_passes_a_full_sha_start_with_the_triple_dot_form(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        body = body_at(h["P"]).replace("`git diff %s feat`" % h["P"], "`git diff %s...feat`" % h["P"])
+        self.assertIn("`git diff %s...feat`" % h["P"], body, "the fixture did not take the triple-dot form")
+        self.use_review_range_host(body, one_parent(h["P"]))
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_review_range_skips_the_check_when_no_merge_after_line_names_a_parent(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        cases = (
+            ("the incident body without its Merge after line", body_at(h["O"]).replace("Merge after: #1785\n", "")),
+            ("an empty body", ""),
+            ("a body at the largest size GitHub keeps", "x" * 65536 + "\n`git diff %s feat`\n" % h["O"]),
+        )
+        for name, body in cases:
+            with self.subTest(name):
+                self.assertNotIn("Merge after", body, "the fixture still names a parent")
+                self.use_review_range_host(body, one_parent(h["P"]))
+                rc, out = self.lint_run("--lane-lint", "7")
+                self.assertEqual(rc, 0, out)
+                self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_review_range_passes_a_start_at_the_head_of_either_named_parent(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        second = self.side_parent(SECOND_PARENT_BRANCH, "second parent")
+        self.push_ref("feat", self.commit_in_other(second, "lane.txt", "lane commit on the second parent"))
+        body = body_at(second[:9]).replace("Merge after: #1785\n", "Merge after: #1785\nMerge after: #1700\n")
+        self.assertEqual(body.count("Merge after: #"), 2, "the fixture does not name two parents")
+        parents = {PARENT_PR: (h["P"], PARENT_BRANCH), SECOND_PARENT_PR: (second, SECOND_PARENT_BRANCH)}
+        self.use_review_range_host(body, parents)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_review_range_passes_a_parent_named_with_no_range(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        self.use_review_range_host("Merge after: #1785\n\nThis body holds no range.\n", one_parent(h["P"]))
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_review_range_passes_a_placeholder_start_beside_a_real_range(self):
+        """`<start>` and `{reviewed-head}` are placeholders in prose: a start holding any of <>{} is skipped, and the real range is judged."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        body = ("Merge after: #1785\n\n"
+                "Review the range `git diff <start> <end>`, or `git diff {reviewed-head}..{head}`, against the parent. "
+                "The range to read is `git diff %s feat`.\n") % h["P"][:9]
+        self.assert_review_range_passes(body, "a body with placeholder ranges in prose beside a real range", one_parent(h["P"]))
+
+    def test_review_range_passes_a_git_diff_inside_a_fenced_block(self):
+        """A range inside a fenced block is an example: the wrong start in the fence is skipped, and the real range outside it is judged."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        body = ("Merge after: #1785\n\n"
+                "```\n`git diff %s feat`\n```\n\n"
+                "Review only `git diff %s feat`.\n") % (h["O"], h["P"][:9])
+        self.assert_review_range_passes(body, "a body whose only wrong range sits in a fenced block", one_parent(h["P"]))
+
+    def test_review_range_passes_every_number_on_a_merge_after_line(self):
+        """`Merge after: #1676, #1742` names two parents, so a range at the head of #1742 passes. The lane is built on that head."""
+        self.use_ci_job(PASSING, 0)
+        self.fork_history()
+        first = self.side_parent(FIRST_PARENT_BRANCH, "first parent of two")
+        last = self.side_parent(LAST_PARENT_BRANCH, "last parent of two")
+        self.push_ref("feat", self.commit_in_other(last, "lane.txt", "lane commit on the last parent"))
+        body = body_at(last[:9]).replace("Merge after: #1785", "Merge after: #%d, #%d" % (FIRST_PARENT_PR, LAST_PARENT_PR))
+        self.assertIn("Merge after: #1676, #1742", body, "the fixture did not take the two-number line")
+        parents = {FIRST_PARENT_PR: (first, FIRST_PARENT_BRANCH), LAST_PARENT_PR: (last, LAST_PARENT_BRANCH)}
+        self.assert_review_range_passes(body, "a Merge after line that names #1676 and #1742", parents)
+
+    def test_review_range_passes_a_start_at_a_merged_parent_head_whose_branch_is_gone(self):
+        """The parent PR is merged: its head is origin's main, and its branch is deleted. The fake host still names that head and branch,
+        and the lane holds the head, so a range that starts there passes."""
+        self.use_ci_job(PASSING, 0)
+        h = self.merged_history()
+        self.assertEqual(self.head("main"), h["P"], "the fixture's parent head is not origin's main")
+        self.assertEqual(self.head(PARENT_BRANCH), "", "the fixture's parent branch is still on origin")
+        self.assert_review_range_passes(body_at(h["P"][:9]), "a range that starts at a parent head merged to main, whose branch is gone", one_parent(h["P"]))
+
+    def test_review_range_passes_an_end_that_is_the_lane_branch_or_a_prefix_of_its_head(self):
+        """The end may be the lane branch, bare or as origin/<branch>, or a 7-character-or-longer prefix of the lane head, with the .. and ... forms too."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        start = h["P"][:9]
+        for rng in ("git diff %s feat", "git diff %s origin/feat", "git diff %s " + h["L"][:7], "git diff %s..feat", "git diff %s...feat"):
+            with self.subTest(range=rng):
+                body = "Merge after: #%d\n\nReview only `%s`.\n" % (PARENT_PR, rng % start)
+                self.assert_review_range_passes(body, "a range that reads `%s`" % (rng % start), one_parent(h["P"]))
+
+    def test_review_range_passes_a_correct_start_with_a_placeholder_end(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        self.assert_review_range_passes(ancestry_body(h["P"][:9], "<head>"), "a range from the parent head to a placeholder end", one_parent(h["P"]))
+
+    def test_review_range_passes_a_stat_flag_before_the_range_with_the_right_start(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        rng = "`git diff --stat %s..feat`" % h["P"][:7]
+        body = body_at(h["O"]).replace("`git diff %s feat`" % h["O"], rng)
+        self.assertIn(rng, body, "the fixture did not take the --stat range")
+        self.assert_review_range_passes(body, "a --stat range that starts at the parent head", one_parent(h["P"]))
+
+    def test_review_range_passes_a_context_flag_before_the_range_with_the_right_start(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        rng = "`git diff -U0 %s feat`" % h["P"][:7]
+        body = body_at(h["O"]).replace("`git diff %s feat`" % h["O"], rng)
+        self.assertIn(rng, body, "the fixture did not take the -U0 range")
+        self.assert_review_range_passes(body, "a -U0 range that starts at the parent head", one_parent(h["P"]))
+
+    def test_review_range_skips_a_wrong_start_inside_a_tilde_fence(self):
+        """A `~~~` fence is a fence for stale_cites.fenced_lines, so the wrong start inside it is an example and the check passes."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        body = ("Merge after: #1785\n\n"
+                "~~~\n`git diff %s feat`\n~~~\n\n"
+                "Review only `git diff %s feat`.\n") % (h["O"], h["P"][:9])
+        self.assert_fence_rule(body, "git diff %s" % h["O"], fenced=True)
+        self.assert_review_range_passes(body, "a body whose only wrong range sits in a tilde fence", one_parent(h["P"]))
+
+    def test_review_range_skips_a_wrong_start_after_an_unclosed_fence(self):
+        """A ``` line with an info string, such as ```python, does not close a fence (stale_cites.fenced_lines), so the fence runs on and
+        the wrong start after it is an example."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        body = ("Merge after: #1785\n\n"
+                "Review only `git diff %s feat`.\n\n"
+                "```\n```python\n`git diff %s feat`\n") % (h["P"][:9], h["O"])
+        self.assert_fence_rule(body, "git diff %s" % h["O"], fenced=True)
+        self.assert_review_range_passes(body, "a body whose wrong range follows an unclosed fence", one_parent(h["P"]))
+
+    def test_review_range_passes_a_merge_after_line_inside_a_fence_as_naming_no_parent(self):
+        """A `Merge after: #N` line inside a fence is an example and names no parent: with no parent named, the check is skipped."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        body = body_at(h["O"]).replace("Merge after: #1785", "```\nMerge after: #1785\n```")
+        self.assertIn("```\nMerge after: #1785\n```", body, "the fixture did not take the fence")
+        self.assert_fence_rule(body, "Merge after: #1785", fenced=True)
+        self.assert_review_range_passes(body, "a body whose only Merge after line sits in a fence", one_parent(h["P"]))
+
+    def test_review_range_passes_the_fork_point_under_a_parent_that_gained_commits(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.lagging_history()
+        self.assert_review_range_passes(ancestry_body(h["O"]), "the fork point of a lane whose parent gained commits after it forked",
+                                        one_parent(h["X"]))
+
+    def test_review_range_passes_a_start_that_merges_both_named_parents(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.integration_history()
+        body = "Merge after: #%d\nMerge after: #%d\n\nReview only `git diff %s feat`.\n" % (PARENT_PR, SECOND_PARENT_PR, h["S"])
+        parents = {PARENT_PR: (h["P1"], PARENT_BRANCH), SECOND_PARENT_PR: (h["P2"], SECOND_PARENT_BRANCH)}
+        self.assert_review_range_passes(body, "a start that merges the two named parents", parents)
+
+    def test_review_range_passes_a_parent_branch_name_at_a_head_the_lane_contains(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        self.assert_review_range_passes(ancestry_body(PARENT_BRANCH), "the parent's branch name, at a head the lane contains", one_parent(h["P"]))
 
 
 # The stack cross-measure (roadmap step stack-cross-measure): `merge --lane-lint <pr>` checks the PR's head against each other open PR of its
