@@ -2480,7 +2480,7 @@ class LintTreeFileMain(LaneFixture):
         self.assertEqual(len(self.lint_calls()), 1, "the lint did not run once on the control head: " + text)
 
 
-DECLARED_READY = ["STE lint", "Windows split guard", "Cost line pins", "project-ops skill scaffold suite"]  # the checks-job steps the pre-ready run runs by name
+DECLARED_READY = ["STE lint", "Windows split guard", "Cost line pins"]  # the checks-job steps the pre-ready run runs by name
 
 
 def steps_for(failing=()):
@@ -2842,16 +2842,34 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assert_fast_checks_changed_nothing(out, refs_before)
 
 
+    def log_merge_trees_naming(self, sha):
+        """Log each git merge-tree call that names commit `sha`; every call still runs for real. -> the list the logged calls are appended to."""
+        real_sh = merge.sh
+        calls = []
+
+        def logged(args, *rest, **kwargs):
+            if "merge-tree" in args and sha in args:
+                calls.append(list(args))
+            return real_sh(args, *rest, **kwargs)
+        patch = unittest.mock.patch.object(merge, "sh", logged)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return calls
+
     def test_pre_ready_reports_a_clash_with_a_draft_pr_and_does_not_fail_on_it(self):  # a ready PR counts; a draft PR is a report line
         self.pre_ready_lane()
-        self.clashing_pair(n=9, draft=True)
+        _head, other = self.clashing_pair(n=9, draft=True)
         self.assertTrue(self.host.pulls[9]["draft"], "precondition: PR 9 is not a draft, so the case probes no draft scope")
         self.use_ci_job(steps_for(), 0)
+        merge_trees = self.log_merge_trees_naming(other)
         rc, out = self.pre_ready()
         self.assertFalse(verdict_line(out, "fail", "open-PR clash"), "a clash with draft PR #9 printed a `fail open-PR clash` line: " + out)
         self.assertEqual(rc, 0, "a clash with draft PR #9 refused the pre-ready run: " + out)
-        self.assertTrue(names_pr(out, 9), "the report line does not name draft PR #9: " + out)
-        self.assertIn("shared.txt", out, "the report line does not name the clashing file: " + out)
+        report = [line for line in out.splitlines() if "shared.txt" in line and names_pr(line, 9)]
+        self.assertTrue(report, "no report line names draft PR #9 and its shared file shared.txt: " + out)
+        self.assertIn("shares files", report[0], "the draft's report line does not say `shares files`: " + out)
+        self.assertNotIn("conflict", report[0], "the draft's report line says conflict, where it reports shared files: " + out)
+        self.assertEqual(merge_trees, [], "git merge-tree ran on draft PR #9's head, so the draft was not read from shared paths alone: %s" % merge_trees)
         self.assertEqual(self.host.readies, [7], "a clash with draft PR #9 kept the draft from going ready: " + out)
 
 
