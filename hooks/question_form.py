@@ -382,6 +382,30 @@ COMMAND_REASON = ("A step never sends the owner to a file for a command, and nev
                   "command in the item's `command` field as {powershell, mac}: a PowerShell 5.1-safe "
                   "string (no &&, ||, <<, <<<, /dev/null or export) and a bash or zsh string for the Mac, both non-empty. "
                   "Say \"paste the command below\" in the step.")
+# docs/decisions/question-form.md, rule `task-options`: the page draws `options` only for a decision
+# (skills/waiting-page/page.html, the item render's decision branch), so a task's options never reach the owner.
+TASK_OPTIONS_REASON = ("The page draws `options` only for a decision, so a task's options (and the `how` and `links` "
+                       "inside them) never reach the owner. Make the item kind `decision`, or keep it a task and put "
+                       "the prompt in the item's `command` field as {powershell, mac}, with the steps and links on the "
+                       "task itself. (decision question-form, rule task-options)")
+
+
+def task_options_hit(op, data) -> str:
+    """A non-empty `options` list on an item the page draws as a task: kind task, or a set with no kind key (a
+    missing kind reads as task, as in command_in_item_hit). An update with no kind key leaves the stored kind
+    alone, so it may be a decision's options. A non-list `options` is not this rule's."""
+    if not isinstance(data, dict):
+        return ""
+    if op == "update" and "kind" not in data:
+        return ""
+    if data.get("kind", "task") != "task":
+        return ""
+    options = data.get("options")
+    if isinstance(options, list) and options:
+        return "task carries options"
+    return ""
+
+
 # A press: press, click, tap in any form; an imperative approve, merge, hit, turn on at the start of
 # a clause, `you` allowed before it (a command to the owner, so "the PR merged" and "to merge"
 # pass); mark ... ready with a PR or #N as its object, or with "on <ref>" after ready. "press on"
@@ -1026,6 +1050,9 @@ def item_hit(op, entry, cwd="", session_id=None):
     hit = command_in_item_hit(data)
     if hit:
         return "command-in-item", hit
+    hit = task_options_hit(op, data)
+    if hit:
+        return "task-options", hit
     hit = gh_login_hit(data)
     if hit:
         return "gh-login-switch", hit
@@ -1811,7 +1838,7 @@ def cross_repo_hit(op, data, page_repo, session_id=None):
 # ------------------------------------------------------------------ the reasons, one table per surface
 
 PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "press-link": PRESS_LINK_REASON,
-                "command-in-item": COMMAND_REASON, "gh-login-switch": GH_LOGIN_REASON,
+                "command-in-item": COMMAND_REASON, "task-options": TASK_OPTIONS_REASON, "gh-login-switch": GH_LOGIN_REASON,
                 "task-names-check": TASK_REASON, WHY_RULE: WHY_CITED_REASON, CROSS_REPO_RULE: CROSS_REPO_REASON,
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
                 "item-field-page-only": PAGE_ONLY_REASON,
