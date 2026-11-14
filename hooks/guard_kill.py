@@ -17,6 +17,14 @@ try:
 except ImportError:  # same fallback as _nowindow above: no read, so a PPID-1 pid stays foreign
     def holds_session_tag(pid, session_id):
         return False
+try:
+    from proc_env import AGENT_TAG_NAME, entry_value  # the agent marker's name and read (hooks/proc_env.py)
+except ImportError:  # no read, so no live marker answers
+    AGENT_TAG_NAME, entry_value = "CLAUDE_AGENT_ID", None
+try:
+    import agent_procs  # the one home of the per-agent process record (hooks/agent_procs.py)
+except ImportError:  # no record, so only the live marker answers
+    agent_procs = None
 
 from guard_core import (
     QUOTE_MARKS,
@@ -321,10 +329,53 @@ def in_own_agent_worktree(pid: int, transcript: str) -> bool:
     return bool(found) and os.path.isfile(own_session.agent_transcript_path(transcript, found.group(1)))
 
 
-def _kill_pids(tokens):
+WINDOWS_PID_FLAGS = {"taskkill": ("/pid", "-pid"), "stop-process": ("-id",)}
+
+
+def _windows_tool(word):
+    """The Windows kill verb a command word names (`taskkill`, `stop-process`), with an `.exe` image suffix dropped,
+    or "" for any other word."""
+    tool = basename(word)
+    tool = tool[:-4] if tool.endswith(".exe") else tool
+    return tool if tool in WINDOWS_PID_FLAGS else ""
+
+
+def _windows_kill_pids(tool, rest):
+    """The numeric pids `taskkill /PID <n>` or `Stop-Process -Id <n>[,<n>]` names, as text. `Stop-Process`
+    also takes the pid as its first positional argument. The flag may be glued to its value by `:` or `=`
+    (`/PID=<n>`), and Git Bash's `//PID` spelling (a doubled slash stops its path conversion) reads as `/PID`."""
+    flags = WINDOWS_PID_FLAGS[tool]
+    take_next = False
+    for position, arg in enumerate(rest):
+        value = None
+        flag = arg.lower()
+        flag = flag[1:] if flag.startswith("//") else flag
+        glued = next((sep for sep in ":=" if sep in flag), "")
+        if take_next:
+            value, take_next = arg, False
+        elif flag in flags:
+            take_next = True
+        elif glued and flag.split(glued, 1)[0] in flags:
+            value = arg.split(glued, 1)[1]
+        elif tool == "stop-process" and position == 0 and not arg.startswith("-"):
+            value = arg
+        for part in (value or "").split(","):
+            if KILL_PID_RE.match(part):
+                yield part
+
+
+def _kill_pids(tokens, windows=False):
     """The numeric pid arguments of a `kill` segment, as text, in order. Nothing for any other
-    command, or for `kill -l`. Signal flags and their values are skipped."""
+    command, or for `kill -l`. Signal flags and their values are skipped. With WINDOWS, a `taskkill /PID` or
+    `Stop-Process -Id` segment names its pids too (also `taskkill.exe`, `//PID` and `/PID=<n>`): the agent check
+    (`agent_pid_kill`) judges them as it judges a `kill`, while the session-ownership check (`foreign_pid_kill`) still
+    reads `kill` alone (unmeasured there: no `ps`). A named limit: a kill nested in `cmd /c "..."` or
+    `powershell -Command "..."` is not read here, because this reads one segment's own tokens, not the inner text."""
     index = resolve_command(tokens)
+    tool = _windows_tool(tokens[index]) if windows and index is not None else ""
+    if tool:
+        yield from _windows_kill_pids(tool, tokens[index + 1:])
+        return
     if index is not None and basename(tokens[index]) == "pkill":
         for value in parent_filter_pids(tokens[index + 1:]) or ():
             if KILL_PID_RE.match(value):
@@ -391,6 +442,30 @@ def foreign_pid_kill(tokens, transcript: str = "", session_id: str = "") -> str:
         if pid_is_owned(abs(number) if number < -1 else number, root) is False:
             if _under_init(abs(number)) and holds_session_tag(abs(number), session_id):
                 continue
+            return arg
+    return ""
+
+
+def agent_pid_kill(tokens, agent_id: str) -> str:
+    """Return the first numeric pid a `kill`, `taskkill /PID` or `Stop-Process -Id` segment names that another agent
+    started, for a call by AGENT_ID. The taskkill spellings `taskkill.exe`, `//PID` and `/PID=<n>` count too
+    (`_kill_pids`).
+
+    Step agent-owned-processes. Another agent's pid is one whose live exec environment holds a different
+    `CLAUDE_AGENT_ID` (proc_env), or that a record in `agent_procs` lists to another agent (`held_by_others`: a record
+    whose start cannot be compared still names its owner; a pid reused since is not listed). A main-session call
+    (AGENT_ID "") judges nothing here. Cost: one environment read and the record folder's files per named pid; no
+    process start."""
+    if not agent_id:
+        return ""
+    for arg in _kill_pids(tokens, windows=True):
+        pid = abs(int(arg))
+        if pid <= 1:
+            continue
+        marker = entry_value(pid, AGENT_TAG_NAME) if entry_value else None
+        if marker and marker != agent_id:
+            return arg
+        if agent_procs is not None and agent_procs.held_by_others(pid, agent_id):
             return arg
     return ""
 

@@ -67,6 +67,10 @@ sys.path.insert(0, HERE)
 import git_reads  # noqa: E402
 import sweep  # noqa: E402
 try:
+    import agent_procs  # the one home of the per-agent process record (hooks/agent_procs.py)
+except ImportError:  # a hook never dies for a missing helper; with no record, no process is ended
+    agent_procs = None
+try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
     _nowindow = subprocess
@@ -691,6 +695,75 @@ def reap_worktrees(target: str, deadline: float, payload=None):
     return rows
 
 
+DISPLAY_ENV_NAMES = ("DISPLAY", "WAYLAND_DISPLAY")  # a process with one may own a visible window (Linux)
+AGENT_END_SETTLE_SECONDS = 3  # how long the stop waits for a signalled process to leave
+
+
+def marked_processes(agent: str):
+    """The pids that hold AGENT's marker (`sweep.agent_mark`), never this process or its ancestors, or None when the
+    process list could not be read."""
+    pids = sweep.list_all_pids()
+    if pids is None:
+        return None
+    own = sweep._own_chain_pids()
+    return [pid for pid in pids if pid > 1 and pid not in own and sweep.agent_mark(pid) == agent]
+
+
+def has_display(pid: int) -> bool:
+    """True when `pid`'s exec-time environment names a display (DISPLAY or WAYLAND_DISPLAY), so it may hold a window.
+    Read from the same environment as the marker. Linux has no window list to read here: a pid whose environment
+    cannot be read is the same pid the marker read fails on, and it is not a candidate."""
+    return any(sweep.proc_env.entry_value(pid, name) for name in DISPLAY_ENV_NAMES) if sweep.proc_env else False
+
+
+def end_agent_processes(payload: dict):
+    """The ending agent's process record (step agent-owned-processes). Writes the processes that hold the agent's
+    marker to its `agent_procs` record, and ends only those `agent_procs.plan_ends` clears: the marker is the agent's,
+    the account running the hook owns the pid, its start ticks match the record (or no record held it), and no other
+    agent's record lists it, and no display is in its environment (a headed process is reported, never ended). A pid whose start differs, or whose start cannot be read (macOS, Windows), is recorded
+    as kind "unclear" and kept. Windows adds the Office diff. Returns {"ended", "reported"} pid lists for the
+    payload log, or None when the payload names no agent."""
+    agent = payload.get("agent_id")
+    if agent_procs is None or payload.get("hook_event_name") != "SubagentStop" or not isinstance(agent, str) \
+            or not AGENT_ID.match(agent):
+        return None
+    record = agent_procs.read_record(agent) or {"procs": []}
+    entries = {e["pid"]: e for e in record["procs"]}
+    pids = marked_processes(agent)
+    if pids is None:
+        return {"ended": [], "reported": [], "error": "unreadable-subject: the process table"}
+    candidates = []
+    for pid in pids:
+        current, prior = agent_procs.start_ticks(pid), entries.get(pid)
+        start_ok = current is not None and (prior is None or prior.get("start") == current)
+        kind = prior.get("kind", "background") if prior and start_ok else "background" if start_ok else "unclear"
+        owner = agent if sweep.is_current_user_process(pid) is True else None
+        entries[pid] = {"pid": pid, "start": current if start_ok or prior is None else prior.get("start"),
+                        "owner": agent, "kind": kind}
+        candidates.append({"pid": pid, "owner": owner, "kind": kind, "visible": has_display(pid), "start_ok": start_ok,
+                           "shared": bool(agent_procs.held_by_others(pid, agent))})
+    for candidate in agent_procs.office_candidates(agent):
+        entries[candidate["pid"]] = {"pid": candidate["pid"], "start": None, "owner": agent, "kind": "office"}
+        candidates.append(candidate)
+    ends = []
+    for pid in agent_procs.plan_ends(candidates, agent):
+        # Read again just before the signal: a pid reused since the scan is not the agent's.
+        if entries[pid]["kind"] == "office" or agent_procs.start_ticks(pid) == entries[pid]["start"]:
+            if sweep.send_signal(pid):
+                ends.append(pid)
+    settle_by = time.monotonic() + AGENT_END_SETTLE_SECONDS
+    while any(agent_procs.is_running(pid) for pid in ends) and time.monotonic() < settle_by:
+        time.sleep(SETTLE_POLL_SECONDS)
+    gone = [pid for pid in ends if not agent_procs.is_running(pid)]
+    for pid, entry in entries.items():
+        entry["ended"] = pid in gone or entry.get("ended") is True  # keep a sim-lease give's mark
+    had_office = record.pop("office_before", None) is not None  # a later agent's stop no longer waits on this one
+    record["procs"] = sorted(entries.values(), key=lambda e: e["pid"])
+    if entries or had_office:
+        agent_procs.write_record(agent, record)
+    return {"ended": gone, "reported": [c["pid"] for c in candidates if c["pid"] not in gone]}
+
+
 def handle(raw: str, started=None):
     try:
         payload = json.loads(raw)
@@ -700,6 +773,10 @@ def handle(raw: str, started=None):
         return {"raw": raw, "target": None}
     target = target_worktree(payload)
     record = {"raw": raw, "target": target}
+    try:
+        record["agentProcs"] = end_agent_processes(payload)
+    except Exception as exc:  # the process record never stops the worktree stage
+        record["agentProcs"] = {"error": repr(exc)}
     if not target:
         return record
     reason, decisions = _decide(target)
