@@ -1,0 +1,10 @@
+{
+ "id": "own-rollup-note-a",
+ "at": "2026-11-13T23:43:00-06:00",
+ "title": "Skipped-rollup case is a one-line note, not a fix",
+ "ruling": "Owner 23:41 CST Nov 13 (relayed by lane rollup-skipped-reads-pending, session_013NEJL2uUCB4vkfGme3aQhA; triage did not see it), to the lane's second question whose option a was \"open the draft PR with that one line, then stop\": \"A, and mention this pushback you had to triage\". So: the ready-PR-head-with-a-dispatch-run-and-no-pull-request-run case (classify, merge/merge.py line 1628) is a note in docs/debts/notes.md (PR #3369, note only), not a debt and not a fix; a real incident makes it a debt. The pushback: the lane did not act on triage's 23:38 message alone, since it came from another session and opens a PR, and asked the owner first. The owner wants triage to know that.",
+ "quote": "A, and mention this pushback you had to triage",
+ "source": "Lane message to triage 23:42 CST Nov 13 (relayed, quoting the owner with the time 23:41); filed by triage.",
+ "status": "open",
+ "step": "rollup-skipped-reads-pending"
+}
