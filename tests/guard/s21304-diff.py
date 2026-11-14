@@ -557,6 +557,18 @@ for _constant in REMEDY_CONSTANTS:
     _remedy_label = "wait-until remedy: every command form the %s names is allowed" % _constant
     LOG_CHECKS_EXTRA.append((_remedy_label, remedy_check(_constant)))
     LOG_FAMILY[_remedy_label] = "stream"
+# The check-timeout remedy and its hygiene check (section 6591) are registered here too. The remedy is not in
+# REMEDY_CONSTANTS: that loop labels each entry as a wait-until remedy, and this one names a time limit.
+CHECK_TIMEOUT_REMEDY_LABEL = "check-timeout remedy: every command form the CHECK_TIMEOUT_REASON names is allowed under the limit"
+LOG_CHECKS_EXTRA.append((CHECK_TIMEOUT_REMEDY_LABEL, remedy_check(
+    "CHECK_TIMEOUT_REASON",
+    trigger=(CHECK_TIMEOUT_RULE, {"command": CHECK_TIMEOUT_LINT, "run_in_background": True,
+                                  "timeout": CHECK_TIMEOUT_LOW_MS, "description": TAIL_BG_UNTIL}),
+    limit=CHECK_TIMEOUT_MS)))
+LOG_FAMILY[CHECK_TIMEOUT_REMEDY_LABEL] = "stream"
+CHECK_TIMEOUT_HYGIENE_LABEL = "check-timeout: the refusal's remedy names the limit to use and no part of the refused call"
+LOG_CHECKS_EXTRA.append((CHECK_TIMEOUT_HYGIENE_LABEL, check_timeout_hygiene_case))
+LOG_FAMILY[CHECK_TIMEOUT_HYGIENE_LABEL] = "stream"
 # The octopus-push remedy check is defined in its section above. It builds only the fixture it reads, through
 # decide, so it is fixtureless and a family run does not build every fixture. Its family is set by hand.
 OCT_REMEDY_LABEL = "octopus-push: the refusal's remedy names the two-parent form and not the forbidden target"

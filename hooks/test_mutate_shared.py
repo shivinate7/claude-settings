@@ -37,6 +37,7 @@ import sys
 import tempfile
 import textwrap
 import threading
+import time
 import unittest
 from unittest import mock
 
@@ -93,17 +94,20 @@ class ReportVerdictTests(unittest.TestCase):
 class ShardTests(unittest.TestCase):
     """MUTATE_SHARD=i/n runs entries[i-1::n]; the n shards together run every mutant once."""
 
-    def run_shard(self, value, entries):
+    def run_shard(self, value, entries, finish_in_reverse=False):
         ran = []
 
         def run_one(entry):
+            if finish_in_reverse:  # the later the entry, the sooner it finishes
+                time.sleep(0.05 * (len(entries) - entries.index(entry)))
             ran.append(entry)
             return entry, 1, RED_RIGHT, REQUIRED, None
         env = dict(os.environ)
         env.pop("MUTATE_SHARD", None)
         if value is not None:
             env["MUTATE_SHARD"] = value
-        with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(io.StringIO()):
+        with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(io.StringIO()), \
+                mock.patch.object(mutate_shared, "job_count", return_value=len(entries)):
             return mutate_shared.run_mutants(entries, run_one), ran
 
     def test_shards_together_run_each_mutant_once(self):
@@ -116,7 +120,10 @@ class ShardTests(unittest.TestCase):
         self.assertEqual(sorted(seen), entries)
 
     def test_no_shard_runs_all(self):
-        self.assertEqual(self.run_shard(None, list("abc"))[1], list("abc"))
+        # Mutants run on parallel threads, so `ran` fills in finish order, which carries no meaning.
+        for reverse in (False, True):
+            code, ran = self.run_shard(None, list("abc"), finish_in_reverse=reverse)
+            self.assertEqual((code, sorted(ran)), (0, list("abc")))
 
     def test_bad_value_or_empty_slice_fails_without_running(self):
         for value in ("0/3", "4/3", "x", "1/0"):
@@ -1050,6 +1057,32 @@ class FamilySuiteEngineTests(unittest.TestCase):
         profile = {"tests": r"(^|/)test_[^/]*\.py$", "select": [sys.executable, "select.py", "{path}"]}
         names, note = mutate_shared._select_suites(profile, dest, "widget.py", None, 60)
         self.assertEqual(names, [], "a family line whose file is missing is no suite: %s" % note)
+
+
+class LinuxOnlySweepMutationsTests(unittest.TestCase):
+    """A sweep mutation whose one proving case is skipped off Linux carries `only_on="linux"`, so
+    Windows and macOS count it skipped. Without it the mutation reads survived there and the job
+    goes red."""
+
+    PROVEN_ON_LINUX_ONLY = (
+        "finish gate: a dead host's live lock frees its tree with no finish proof (ungated verdict)",
+        "cut-short restore: a finished dead-host tree is not restored (the finish proof is read as absent)",
+    )
+
+    def test_a_mutation_proven_only_by_the_linux_only_suite_is_marked_linux(self):
+        by_label = {mutate_sweep.mutation_parts(e)[0]: mutate_sweep.mutation_parts(e)[5]
+                    for e in mutate_sweep.MUTATIONS}
+        for label in self.PROVEN_ON_LINUX_ONLY:
+            with self.subTest(label=label):
+                self.assertIn(label, by_label, "the mutation is gone from the list")
+                self.assertEqual(by_label[label], "linux")
+
+    def test_linux_runs_only_on_linux_and_posix_still_runs_on_macos(self):
+        for platform, linux, posix in (("linux", True, True), ("darwin", False, True), ("win32", False, False)):
+            with mock.patch.object(sys, "platform", platform):
+                with self.subTest(platform=platform):
+                    self.assertEqual(mutate_shared.skip_reason("linux") is None, linux)
+                    self.assertEqual(mutate_shared.skip_reason("posix") is None, posix)
 
 
 if __name__ == "__main__":
