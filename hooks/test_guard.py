@@ -132,6 +132,7 @@ FAMILIES = {
     "scratchpad-message": "a git commit whose -F message file sits in a session scratchpad: an agent's call is refused in every flag form, through a link into the scratchpad, and an orchestrator's call, a heredoc, -m and a gh body file pass",
     "frozen": "frozen paths",
     "model-cap": "the agent model cap",
+    "local-allow-global": "rule local-allow-global: a write that adds an allow rule to a project settings.local.json asks, naming the shared settings.json first; the shared file, the non-allow writes, the scanner shapes, and the re-writes of a rule on disk pass",
     "ask-alone": "an ask command chained with other commands denies, except a leading cd, export or an output tail; a lone ask command still asks",
     "paths": "path rules, builders and the test-author",
     "diff": "the diff judged at commit, push and stop",

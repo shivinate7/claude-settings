@@ -241,6 +241,9 @@ FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT),"settings.json", "CLAUDE.md", "g
 # rule 8's reason too.
 REASON_MAY_NAME = {
     "agent-model-cap": (ROOT, slash(ROOT), "settings.json", ".claude"),
+    # The ask names the shared settings.json, where a lane PR puts a rule every session needs, and its
+    # File line names the local file the write is to. The config folder may show there, as rule 8's does.
+    "local-allow-global": (ROOT, slash(ROOT), "settings.json", ".claude"),
     # The refusal names the handoff the session must read: under the config folder, which is ROOT here
     # and ~/.claude in a session. That path is the remedy, so the rule may name its folder.
     "handoff-unread": (ROOT, slash(ROOT), ".claude"),
