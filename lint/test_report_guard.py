@@ -4297,17 +4297,36 @@ class UICopyRoundTwoTests(unittest.TestCase):
 
     def test_114_many_generics_lint_in_linear_time(self):
         import time
-        lines = []
-        for i in range(600):
-            lines.append("const f%d = <T extends X>(a: T): T => a;" % i)
-            lines.extend(["const v%d_%d = %d;" % (i, j, j) for j in range(7)])
-        lines.append("const y = <p>In order to go.</p>;")
-        text = "\n".join(lines) + "\n"
-        self.assertGreaterEqual(len(lines), 4800)
-        started = time.monotonic()
-        codes = self.check("a.tsx", text)
-        self.assertLess(time.monotonic() - started, 2.0)
-        self.assertEqual(codes, ["STE011"])
+
+        def build(generics):
+            lines = []
+            for i in range(generics):
+                lines.append("const f%d = <T extends X>(a: T): T => a;" % i)
+                lines.extend(["const v%d_%d = %d;" % (i, j, j) for j in range(7)])
+            lines.append("const y = <p>In order to go.</p>;")
+            return "\n".join(lines) + "\n"
+
+        def cpu_seconds(text):
+            # The least of five runs: load adds CPU time to a run, it never takes CPU time away.
+            best = None
+            for _ in range(5):
+                started = time.process_time()
+                self.check("a.tsx", text)
+                took = time.process_time() - started
+                best = took if best is None else min(best, took)
+            return best
+
+        small, large = build(600), build(2400)
+        self.assertGreaterEqual(small.count("\n"), 4800)
+        self.assertEqual(self.check("a.tsx", small), ["STE011"])
+        self.assertEqual(self.check("a.tsx", large), ["STE011"])
+        t_small, t_large = cpu_seconds(small), cpu_seconds(large)
+        # Four times the lines take about four times as long. A scan to the end of the file for each
+        # generic takes about thirteen times as long. The floor stops a very fast small run from
+        # making the ratio noise.
+        # The 8x bound catches a Python-speed scan only: a C-speed scan (str.find) gives about 4.3x and passes.
+        ratio = t_large / max(t_small, 0.01)
+        self.assertLess(ratio, 8, "4x the lines took %.1fx the time: the check is not linear" % ratio)
 
 
 class TurnReaderTests(unittest.TestCase):

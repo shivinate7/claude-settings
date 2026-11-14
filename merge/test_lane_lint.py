@@ -744,11 +744,12 @@ class LaneLint(LaneFixture):
             with open(text_path, encoding="utf-8") as f:
                 return f.read()
 
-        deadline = time.time() + 60
-        while not self.lint_calls() and proc.poll() is None and time.time() < deadline:
-            time.sleep(0.05)
+        for _ in range(1200):
+            if self.lint_calls() or proc.poll() is not None:
+                break
+            time.sleep(0.05)  # poll interval of a condition wait; the try count is the deadline
         self.assertIsNone(proc.poll(), "the run ended before its lint started: " + run_text())
-        self.assertTrue(self.lint_calls(), "the lint did not start within 60 s: " + run_text())
+        self.assertTrue(self.lint_calls(), "the lint did not start after 1200 polls of 0.05 s: " + run_text())
         lint_tree = self.lint_calls()[0]["cwd"]
         temp_dir = os.path.dirname(lint_tree)
         self.assertTrue(os.path.isdir(lint_tree), "the lint tree was not on disk while the lint ran")
