@@ -263,23 +263,28 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
     quote, so a call bash runs is always in a segment. When that reading ends inside a quote, bash
     runs nothing past the open mark, yet `echo don't; wsl --shutdown` must still show its call: a
     second reading takes each contraction-shaped `'` (CONTRACTION) as text, and its segments are
-    judged too. Two linear passes; no `'` reads the rest of the command again."""
+    judged too. Two linear passes; no `'` reads the rest of the command again.
+
+    PowerShell reads a smart quote as its ASCII twin (PS_STRAIGHT_QUOTES), so `view` makes each
+    decision on the straightened text: an ASCII `'` inside `“...”` is text and cuts no
+    statement in two. The segments keep the text as written, smart quotes and all."""
     segments = []
     current = []
     quote = ""
     shaped = False
     powershell = is_powershell(cmd)
+    view = PowerShellScript(cmd.translate(PS_STRAIGHT_QUOTES)) if powershell else cmd
     index = 0
     length = len(cmd)
     while index < length:
-        char = cmd[index]
+        char = view[index]
         if quote == BLIND:   # PowerShell text the walk cannot read: no quote, escape or comment
             if char in ("'", '"', "`", "#", "<", "@"):
-                current.append(char)
+                current.append(cmd[index])
                 index += 1
                 continue
         elif quote:
-            width, after = quote_advance(cmd, index, quote)
+            width, after = quote_advance(view, index, quote)
             if quote != "<#":
                 current.append(cmd[index:index + width])
             elif not after:
@@ -294,19 +299,19 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
         if char == "\\" and cmd[index + 1:index + 2] == "\n" and not powershell:
             index += 2   # a POSIX backslash-newline is a continuation; in PowerShell it ends a path
             continue
-        if char == "'" and CONTRACTION.match(cmd, index):
+        if char == "'" and CONTRACTION.match(view, index):
             shaped = True
             if contractions_are_text:
-                current.append(char)   # `don't` as text: it must not hide the rest of the command
+                current.append(cmd[index])   # `don't` as text: it must not hide the rest of the command
                 index += 1
                 continue
         # The quote walk owns every escape, `$'`, and each PowerShell span, so `\;` and `` `; `` are
         # text and cut no segment.
         if char in ("'", '"') or (not powershell and (
                 char == "\\" or cmd[index:index + 2] == "$'")) or (
-                powershell and (char == "`" or token_start(cmd, index) and (
-                    cmd.startswith("<#", index) or HERE_OPEN.match(cmd, index)))):
-            width, quote = quote_advance(cmd, index, "")
+                powershell and (char == "`" or token_start(view, index) and (
+                    view.startswith("<#", index) or HERE_OPEN.match(view, index)))):
+            width, quote = quote_advance(view, index, "")
             if quote != "<#":
                 current.append(cmd[index:index + width])
             index += width
@@ -326,7 +331,7 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
             index += 2
             continue
         if char == "|" and cmd[index - 1:index] == ">":
-            current.append(char)   # `>|` overrides noclobber: a redirect, no pipe
+            current.append(cmd[index])   # `>|` overrides noclobber: a redirect, no pipe
             index += 1
             continue
         if char == "|":
@@ -342,7 +347,7 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
             current = []
             index += 1
             continue
-        current.append(char)
+        current.append(cmd[index])
         index += 1
     segments.append("".join(current))
     ends is None or ends.append("")
@@ -630,7 +635,8 @@ def _wrapper_flags(word: str, tokens, index: int):
     """Read a wrapper's flags from `index`, getopt-style. Return (the index after them,
     [(flag, value)]). A short-flag cluster is read letter by letter: the first letter that takes a
     value (WRAPPER_VALUE_FLAGS) takes the rest of the cluster, or the next word when it is the last
-    letter. So `sudo -Eu root cmd`, `xargs -rn 1 pkill` and `env -iS 'cmd'` each skip the value."""
+    letter. So `sudo -Eu root cmd`, `xargs -rn 1 pkill` and `env -iS 'cmd'` each skip the value. Each
+    flag is (flag, value, the index after it and its value): `env -S` reads the words after that."""
     takes = WRAPPER_VALUE_FLAGS.get(word, ())
     end = len(tokens)
     found = []
@@ -642,18 +648,18 @@ def _wrapper_flags(word: str, tokens, index: int):
             if not glued and flag in takes:
                 value = tokens[index] if index < end else ""
                 index += 1
-            found.append((flag, value))
+            found.append((flag, value, index))
             continue
         for at in range(1, len(token)):
             flag = "-" + token[at]
             if flag not in takes:
-                found.append((flag, ""))
+                found.append((flag, "", index))
                 continue
             value = token[at + 1:]
             if not value:
                 value = tokens[index] if index < end else ""
                 index += 1
-            found.append((flag, value))
+            found.append((flag, value, index))
             break
     return index, found
 
@@ -1576,7 +1582,7 @@ def _wrapper_chdir(tokens):
     folder joins onto the one before it, as `env -C a env -C b` does."""
     found = None
     for word, flags in _walk_wrappers(tuple(tokens))[1]:
-        for flag, value in flags:
+        for flag, value, _ in flags:
             if flag in WRAPPER_CHDIR_FLAGS.get(word, ()) and value:
                 found = _chain_chdir(found, value)
     return found
@@ -2271,12 +2277,14 @@ CMD_EXE_NAMES = {"cmd", "cmd.exe"}
 def _env_split_string(tokens) -> str:
     """The command string `env -S STRING` (or `--split-string`, `-iS STRING`) runs, else ''. Only
     an `env` the segment runs as a wrapper counts, at its start or after a `(` or `$(`:
-    `echo env -S x` runs echo."""
+    `echo env -S x` runs echo. `env` appends the words after STRING to it, so `env -S pwsh -c 'x'`
+    runs `pwsh -c x`: those words are joined on, each quoted as one word."""
     for start in _command_starts(tokens):
-        for word, flags in _walk_wrappers(tuple(tokens[start:]))[1]:
-            for flag, value in flags if word == "env" else ():
+        here = tuple(tokens[start:])
+        for word, flags in _walk_wrappers(here)[1]:
+            for flag, value, after in flags if word == "env" else ():
                 if flag in ("-S", "--split-string"):
-                    return value
+                    return " ".join([value, *map(shlex.quote, here[after:])])
     return ""
 
 
@@ -2360,7 +2368,7 @@ def wrapped_commands(tokens, at: int, strict: bool = False):
     index, flags = _wrapper_flags(word, rest, 0)
     if strict and word in ("docker", "podman"):
         known = WRAPPER_VALUE_FLAGS[word] | EXEC_BARE_FLAGS
-        if any(flag not in known for flag, _ in flags):
+        if any(flag not in known for flag, _, _ in flags):
             return []
     inner = rest[index + skip:]
     return [shlex.join(inner)] if inner else []
