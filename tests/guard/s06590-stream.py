@@ -223,6 +223,19 @@ sh("ln: a hard link over a directory name is not symbolic", "ln /opt/tool/x real
 # run_in_background, so the backgrounded cases use add(), the form the background-end section uses.
 TAIL_BG_UNTIL = "Lane lint in the background. until: the lint prints its verdict"
 
+# THE TIME LIMIT OF A BACKGROUND LANE LINT (rule check-timeout). The lint waits for a pushed head and then runs
+# one ci-job under LINT_SECONDS, so a call's limit must exceed both or the limit ends the run before its verdict.
+# The bound is read from the merge tool, never copied. The check-tail allow rows below set the limit too: they
+# pin check-tail, not the limit, so the limit is set only to let them pass.
+import guard_merge  # the one home of merge_module (hooks/guard_merge.py)
+MERGE_TOOL = guard_merge.merge_module()
+if MERGE_TOOL is None:
+    sys.exit("fixture setup failed: merge/merge.py does not load, so the lane-lint time limit has no bound")
+CHECK_TIMEOUT_MS = (MERGE_TOOL.LINT_SECONDS + MERGE_TOOL.PUSHED_HEAD_WAIT_MINUTES * 60) * 1000
+CHECK_TIMEOUT_RULE = "check-timeout"
+CHECK_TIMEOUT_LINT = "merge --lane-lint 3270 --touched-tests"  # the incident's run
+CHECK_TIMEOUT_LOW_MS = 590000  # the limit the incident run had, under the bound
+
 add("check-tail: the incident line, backgrounded, is refused", "deny",
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8")
@@ -257,23 +270,23 @@ add("verdict-pipe: the incident line through verdict piped to tail, backgrounded
     "verdict-pipe", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8")
 add("check-tail: the incident line through verdict with no pipe, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    cwd=NOGIT, run_in_background=True, timeout=CHECK_TIMEOUT_MS, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 1476 2>&1")
 add("verdict-pipe: a python3 verdict wrapper piped to tail, backgrounded, is refused", "deny",
     "verdict-pipe", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="python3 ~/.claude/bin/verdict merge --lane-lint 1476 | tail -3")
 add("check-tail: a python3 verdict wrapper with no pipe, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    cwd=NOGIT, run_in_background=True, timeout=CHECK_TIMEOUT_MS, description=TAIL_BG_UNTIL,
     command="python3 ~/.claude/bin/verdict merge --lane-lint 1476")
 add("check-tail: wait-pid piped to tail, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/wait-pid 1836 2>&1 | tail -3")
 add("check-tail: output kept in a file, then grep piped to tail, backgrounded, is allowed",
-    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    "allow", cwd=NOGIT, run_in_background=True, timeout=CHECK_TIMEOUT_MS, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/merge --lane-lint 1476 > /tmp/x/lanelint.log 2>&1; echo \"rc=$?\"; "
             "grep -E '^(PASS|FAIL)' /tmp/x/lanelint.log | tail -15")
 add("check-tail: merge --lane-lint piped to tee, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    cwd=NOGIT, run_in_background=True, timeout=CHECK_TIMEOUT_MS, description=TAIL_BG_UNTIL,
     command="merge --lane-lint 1476 2>&1 | tee run.out")
 add("check-tail: a tee between the check and grep and tail, backgrounded, is refused", "deny",
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
@@ -285,7 +298,7 @@ add("check-tail: ci-job checks --lint through tee and head, backgrounded, is ref
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tee lint.log | head -20")
 add("check-tail: merge --lane-lint through tee with nothing after it, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    cwd=NOGIT, run_in_background=True, timeout=CHECK_TIMEOUT_MS, description=TAIL_BG_UNTIL,
     command="merge --lane-lint 7 2>&1 | tee lint.log")
 add("check-tail: grep naming the script, piped to tail, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
