@@ -655,7 +655,7 @@ def main(argv):
             base = "origin/main"
             print("base: origin/main (default; pass --base to change)")
         else:
-            idle = {"base": "", "github.base_ref": "", "github.event.pull_request.head.sha": ""}
+            idle = {"base": "", "github.base_ref": "", "github.event.pull_request.head.sha": "", "github.token": ""}
             unread = [step_key(st, "name") or ("step %d" % n) for n, st in enumerate(step_blocks(block), 1)
                       if is_lint(st) and plan(st, False, idle, top)[0] == "skipped"]
             if unread:
@@ -663,7 +663,8 @@ def main(argv):
                       "steps are skipped: %s" % ", ".join(unread))
                 no_base = True
     values = {"base": base or "", "github.base_ref": base.split("/", 1)[1] if base and "/" in base else (base or ""),
-              "github.event.pull_request.head.sha": git("rev-parse", "HEAD", cwd=top) or ""}
+              "github.event.pull_request.head.sha": git("rev-parse", "HEAD", cwd=top) or "",
+              "github.token": ""}  # no runner token here (RUNNER_UNSET): a step that maps it into GH_TOKEN reads gh's own login
     log = os.environ.get("VERDICT_LOG")
     if not log and not dry:
         fd, log = tempfile.mkstemp(prefix="ci-job-%s-" % re.sub(r"[^\w-]", "_", job), suffix=".log")
