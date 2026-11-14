@@ -339,16 +339,43 @@ meets each item below. What the tool does when it runs is written in `confirm` i
 5. `merge.afterMerge` is a list of shell commands. Each runs with `bash -c` in the repo root,
    after the local base branch moves. `merge.deleteBranch` is a boolean. When it is true, the
    command deletes the head branch on origin after the merge. It deletes the local branch too,
-   unless a worktree holds it or it has local-only commits. The same run also deletes the lane
-   branches the batch took in: `merge-deletes-batch-lanes`, a merge deletes its batch's lane branches.
-6. `merge.keepBranches` is an optional list of branch names. The lane cleanup never deletes a name
-   in the list. Name each long-lived branch that must survive a merge.
+   unless a worktree holds it or it has local-only commits. It deletes no other branch
+   (decision `merge-deletes-batch-lanes`: a merge deletes its own branch only).
+6. `merge.keepBranches` is an optional list of branch names. The merge tool checks it for a valid shape, and its
+   branch delete does not read it (debt `long-lived-head-lost-in-batch`).
 7. `merge.standingGrant` is an optional boolean, read from the base branch. It is the owner's
    standing merge grant for the repo: `standing-merge-grant`, the coordinator's standing merge grant.
    Absent means true. When it is false, a cloud session's `merge <pr> --confirm` stops.
 8. `merge.readyChecks` is an optional list of step names of the repo's `checks` job. On a draft, `merge <pr> --confirm` runs
    them through `bin/ci-job checks --step NAME ...` before any push and before the ready mark. A FAIL or unknown stops the
    draft: `lanes-run-no-full-ci-job`, a lane runs no full CI job. Absent: no ready check runs, and one line says so.
+   With the list present, the same run also reads two more checks: the debt-close lint and the open-PR clash. That run is the pre-ready run:
+   `merge <pr> --ready`, or `--confirm` on a draft.
+   The clash compares the PR's head with every other open PR on its base. It counts a clash only with a PR that is not a draft.
+   A draft is read by its changed files alone, with no merge-tree. A file it shares with the head is a report line: `#N shares files: a, b`.
+   One switch sets that: `PRE_READY_CLASH_SCOPE` in `merge/merge.py`.
+   The pre-ready run covers five of the six checks a lane needs before ready: the declared steps, the debt-close lint and the open-PR clash. It does not cover
+   the project-ops scaffold suite: it moved to the `checks-rest` job, which `readyChecks` cannot name (`ci-job --step` reads one job). Every run prints
+   `unknown scaffold: not run (lives in checks-rest, ci-job --step reads one job)` as a coverage note. The note is no check and moves no exit code.
+   It reads the list through the merge tool's own host,
+   GitHub REST `GET pulls`, which a lane or a runner can call. A PR whose changed paths meet none of this head's is skipped before any merge-tree.
+   A draft whose changed files cannot be read (its head is not in the clone) reads `unknown open-PR clash`, never a pass.
+   A head that conflicts with its base reads `unknown open-PR clash` too: its clashes would come through the base.
+   The run prints one line per check: `pass NAME`, `fail NAME: why` or `unknown NAME: why`.
+   Each declared step reads from its own ci-job line: a PASS stays a pass beside a FAIL in a failing run, and a step ci-job printed no line for reads `unknown`, even when ci-job exited 0.
+   A SKIP line (the step ran and skipped tests, exit 0: `bin/ci-job` verdicts) reads pass.
+   A PR whose base is not the default branch is checked on the merge of its head with that base.
+   `merge <pr> --fast-checks` is the same run on a dry merge of the PR onto its base:
+   a temporary worktree and one commit object, no ref. It takes no lock, pushes nothing, marks nothing ready, posts no comment
+   and builds no records page. It exits 0 only when every line is a pass. With no `merge.readyChecks` it prints
+   `unknown pre-ready: no merge.readyChecks declared` and exits 1: a run that checked nothing is not a pass.
+   "Read-only" names what it does not do: no push, lock, ready mark, comment or ref. It still writes:
+   the fetch writes `refs/remotes/origin/*` and `FETCH_HEAD`, `git worktree add` writes `.git/worktrees/<name>` (removed at the end),
+   and the dry merge adds merge-tree and commit-tree objects to the object store.
+   Cost: one ci-job run, one debt-close lint and one list read (a page per 100 open PRs). The debt-close lint makes a scratch worktree
+   and runs one Retire test for each closed debt (`lint/check_debt_retire.py`).
+   One fetch of every branch head, one `git diff` per other open PR on the base, a merge-tree per overlap, and two worktrees (the dry merge and the debt lint's scratch).
+   The files written are ci-job's log and the temporary worktrees.
 
 ## Adoption checklist, the merge tool
 
