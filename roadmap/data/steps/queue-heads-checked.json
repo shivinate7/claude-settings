@@ -1,0 +1,16 @@
+{
+ "id": "queue-heads-checked",
+ "title": "The combine train tool refuses a queue file whose PR head sha is not that PR's head in the checkout, naming the PR on one `unknown` line",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "combine-train-tool"
+ ],
+ "why": "Coordinator 03:25 CST Nov 14 (relayed; the lane's own claim, unchecked by the coordinator and triage): lane combine-train-tool typed one PR head wrong by hand in a dry-run queue file (PR 1536) and only a manual check against the ref list caught it.",
+ "source": "Neighbour: combine-train-tool (doing; its PR #3392 holds combine_train.py and is not merged; the lane's slug ask was queue-heads-checked). A small follow-up that extends that tool, not a second home (rule building-one-home-per-capability). A bad head is a mistake Claude made once in normal work (rule building-guard-needs-incident: the incident is the PR 1536 typo).",
+ "note": "Triage 03:25 CST Nov 14: blockedBy PR #3392 (combine-train-tool). Done check: combine_train.py refuses a queue file whose PR head sha differs from `git rev-parse` of that PR's fetched pull ref in --root, with one `unknown` line naming the PR (an unreadable ref is unknown, never clear). Red first: a queue file with one wrong head sha is accepted on the old tool (the test fails); control: a queue file with right heads passes. Path ALONE; a small follow-up after #3392 merges; tracker: the coordinator. No lane started. No owner question.",
+ "updatedAt": "2026-11-14T03:25:00-06:00"
+}
