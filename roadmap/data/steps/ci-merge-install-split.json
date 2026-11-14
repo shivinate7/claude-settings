@@ -7,8 +7,8 @@
  "lane": "session_013NEJL2f2X9djC8H2WDPV8f",
  "owner": "triage",
  "blockedBy": [],
- "why": "Retrospective CI audit 14:12 CST Nov 12: checks-merge-install takes 29.4 min; install.sh checkout detection 13.8 min, again 13.8 min on macOS; the merge tool git half 10.7 min.",
+ "why": "Retrospective CI audit 14:12 CST Nov 12: checks-merge-install takes 29.4 min; install.sh checkout detection 13.8 min, again 13.8 min on macOS; the merge tool git half 10.7 min. Update 04:06 CST Nov 14 (coordinator 04:05, relayed): lane ci-merge-install-split handed in #2942, head 5421dc496f78, record with Fix check posted; the expected halves are derived, not measured: about 13.8 min + setup, 10.7 min + setup, about 5 min + setup, against 28.2 min today; a batch run is the proof.",
  "source": "retrospective 14:12 CST Nov 12 (CI audit)",
  "note": "R55 express (owner 14:05 CST Nov 12). Split the job so the three parts run in parallel. Lane started 14:22 CST Nov 12.",
- "updatedAt": "2026-11-12T14:24:57-06:00"
+ "updatedAt": "2026-11-14T04:06:52-06:00"
 }

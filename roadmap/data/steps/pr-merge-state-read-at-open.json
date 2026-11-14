@@ -1,0 +1,14 @@
+{
+ "id": "pr-merge-state-read-at-open",
+ "title": "A lane reads a PR's merge state right after opening it, because a dirty PR gets no CI run",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lesson 2 of 4 from lane priority-vs-merge-order (04:04 CST Nov 14, relayed; the lane's read, unchecked by triage): a PR whose merge state is dirty (a conflict with its base) gets no CI run, so a lane that does not read the state after opening waits on a run that never starts. Coordinator 04:05 CST found no step that owns this (read from step titles on origin/roadmap 78da521a2, not bodies). Triage grep of step file names for \"merge-state\" and \"dirty\" found none. Check idea (unbuilt): the opening act or the handoff reads the PR's merge state and says \"dirty\" in its output. Owner-visible effect: a lane stops waiting on a run that cannot start.",
+ "source": "coordinator 04:05 CST Nov 14 (from lane priority-vs-merge-order)",
+ "note": "Filed 04:06 CST Nov 14 by triage. Tracker: the coordinator. Path ALONE. No lane yet.",
+ "updatedAt": "2026-11-14T04:06:52-06:00"
+}

@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "A lane can fix and push after a FAIL round that was never recorded, so the round count and the restart rule lose it.",
  "source": "Lane R67-drain 14:31 CST Nov 13 (mistake on #3222 and #1938).",
- "note": "Filed 14:33 CST Nov 13 as the lane's candidate debt; triage judges it a real gap (two lanes made the mistake today). Guard idea: refuse a push after a FAIL round when the PR holds no record for the head that failed. Home: hooks/guard_merge.py, near record-before-fix-push. Past rulings not checked; unread by triage.",
- "updatedAt": "2026-11-13T14:33:35-06:00"
+ "note": "Filed 14:33 CST Nov 13 as the lane's candidate debt; triage judges it a real gap (two lanes made the mistake today). Guard idea: refuse a push after a FAIL round when the PR holds no record for the head that failed. Home: hooks/guard_merge.py, near record-before-fix-push. Past rulings not checked; unread by triage.  Related 04:06 CST Nov 14: lesson 1 of 4 from lane priority-vs-merge-order (record after each passing round) is sorted to record-after-each-round; this step keeps its FAIL-round title.",
+ "updatedAt": "2026-11-14T04:06:52-06:00"
 }
