@@ -884,9 +884,11 @@ SKILL_COPY_DIR="$CLAUDE_DIR/backups/skill-copies"
 
 # Print a hash of a directory tree: every file path and every file content.
 # It covers file names and contents only, so a mode, empty-folder or symlink-only change is replaced with no backup.
+# Only *.pyc files inside a __pycache__ folder are skipped: Python writes them at run time, and counting
+# them would make each cloud start see a changed skill and back it up. Any other file there is a real change.
 tree_hash() {
   [ -d "$1" ] || return 1
-  ( cd "$1" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do
+  ( cd "$1" && find . -type f ! \( -name '*.pyc' -path '*/__pycache__/*' \) -print | LC_ALL=C sort | while IFS= read -r f; do
       printf '%s ' "$f"; sha256_of < "$f"
     done ) | sha256_of
 }
