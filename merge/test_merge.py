@@ -18744,7 +18744,7 @@ class OwnRunSuites(Env):
     HEAD_RUN = 2001  # the PR head's workflow run, newer than main's run 901
     REASON = "this batch carries the checks fix"
     LIFT = "--base-red-ok, reason: " + REASON  # the lift line red_base prints on old code and new
-    OWN_LINE = re.compile(r"^merge: own run of #7 ran (\d+) suites on ([0-9a-f]{9})((?:: the run proves nothing, do not advise forcing this PR)?)$", re.M)
+    OWN_LINE = re.compile(r"^merge: own run of #7 ran (\d+) suites on ([0-9a-f]{9})((?:: the run proves nothing, do not advise forcing this PR)?)(?: \(decision [^)]*\))$", re.M)
     UNKNOWN_LINE = re.compile(r"^merge: own run (?:of #7 )?unknown: (.*)$", re.M)
 
     THREE_SUITES = [main_job("scope", "success"), main_job("checks", "success"), main_job("checks-guard", "success"), main_job("checks-macos", "success")]
@@ -18783,7 +18783,7 @@ class OwnRunSuites(Env):
             self.assertEqual(h9, merged[:9], "the own-run line names a head other than the one the merge call sent")
 
     def test_suites_ran_counts_the_jobs_outside_scope_that_did_not_skip(self):
-        # the rule the own-run line reads: a job is a suite unless it is the scope gate or skipped. A failed job is a suite.
+        # the rule the own-run line reads: a job is a suite unless it is the scope job or skipped. A failed job is a suite.
         jobs = [{"name": "scope", "conclusion": "success"}, {"name": "a", "conclusion": "success"},
                 {"name": "b", "conclusion": "skipped"}, {"name": "c", "conclusion": "failure"}]
         self.assertEqual(merge.suites_ran(jobs), 2, "suites_ran does not count the two jobs outside scope that did not skip")
@@ -18843,7 +18843,7 @@ class OwnRunSuites(Env):
         self.assertNotIn(self.LIFT, out, "the lift line prints for a green base, so the lift was used")
         self.assertNotRegex(out, r"own run (?:of #7 )?(?:ran|unknown)", "an own-run line prints with a green base, where the lift is unused")
 
-    GATE_AND_ROLLUP = ("scope", "nightly-skip", "all-jobs-passed", "ci-done")  # checks.yml's jobs that are not suites
+    SCOPE_AND_ROLLUP = ("scope", "nightly-skip", "all-jobs-passed", "ci-done")  # checks.yml's jobs that are not suites
 
     def checks_yml_job_ids(self):
         """-> the job ids of the real checks.yml, the file as it is on disk: the ids the exclusion matches."""
@@ -18864,27 +18864,27 @@ class OwnRunSuites(Env):
         self.assertTrue(advice, "the red-base preview prints no line that names --base-red-ok")
         self.assertLess(own[0], advice[0], "the own-run line comes after the advice to pass --base-red-ok")
 
-    def test_suites_ran_leaves_out_the_gate_nightly_skip_and_rollup_jobs_when_no_suite_ran(self):
-        # checks.yml's gate and rollup jobs are not suites: a run of only those, with every suite skipped, ran none
-        gate = [{"name": "scope", "conclusion": "success"}, {"name": "nightly-skip", "conclusion": "success"},
+    def test_suites_ran_leaves_out_the_scope_nightly_skip_and_rollup_jobs_when_no_suite_ran(self):
+        # checks.yml's scope and rollup jobs are not suites: a run of only those, with every suite skipped, ran none
+        scope_jobs = [{"name": "scope", "conclusion": "success"}, {"name": "nightly-skip", "conclusion": "success"},
                 {"name": "all-jobs-passed", "conclusion": "success"}, {"name": "ci-done", "conclusion": "success"}]
         skipped = [{"name": "checks", "conclusion": "skipped"}, {"name": "checks-macos", "conclusion": "skipped"}]
-        self.assertEqual(merge.suites_ran(gate + skipped), 0, "suites_ran counts nightly-skip, all-jobs-passed or ci-done as a suite that ran")
-        self.assertEqual(merge.suites_ran(gate + skipped + [{"name": "checks-guard", "conclusion": "success"}]), 1,
-                         "suites_ran does not count the one suite that ran beside the gate and rollup jobs")
+        self.assertEqual(merge.suites_ran(scope_jobs + skipped), 0, "suites_ran counts nightly-skip, all-jobs-passed or ci-done as a suite that ran")
+        self.assertEqual(merge.suites_ran(scope_jobs + skipped + [{"name": "checks-guard", "conclusion": "success"}]), 1,
+                         "suites_ran does not count the one suite that ran beside the scope and rollup jobs")
 
-    def test_every_checks_yml_job_ran_counts_every_job_but_the_gate_and_rollup_jobs(self):
+    def test_every_checks_yml_job_ran_counts_every_job_but_the_scope_and_rollup_jobs(self):
         # full size: each job of the real checks.yml ran and passed
         ids = self.checks_yml_job_ids()
         self.assertTrue(ids, "checks.yml names no jobs, so the full-size case has nothing to count")
         full = [{"name": i, "conclusion": "success"} for i in ids]
-        self.assertEqual(merge.suites_ran(full), len([i for i in ids if i not in self.GATE_AND_ROLLUP]),
+        self.assertEqual(merge.suites_ran(full), len([i for i in ids if i not in self.SCOPE_AND_ROLLUP]),
                          "suites_ran counts a gate or rollup job of checks.yml as a suite when every job ran")
 
-    def test_the_gate_and_rollup_job_ids_are_checks_yml_job_ids(self):
+    def test_the_scope_and_rollup_job_ids_are_checks_yml_job_ids(self):
         # the exclusion matches job ids: a renamed job would slip past the cases above, so this reads the ids from the real checks.yml
         ids = self.checks_yml_job_ids()
-        for name in self.GATE_AND_ROLLUP:
+        for name in self.SCOPE_AND_ROLLUP:
             self.assertIn(name, ids, f"{name} is not a job id in checks.yml")
         self.assertEqual(merge.ROLLUP_JOB, "all-jobs-passed", "merge.ROLLUP_JOB is not checks.yml's rollup job id")
 
