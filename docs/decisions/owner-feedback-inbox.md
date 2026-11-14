@@ -153,7 +153,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   A line that cannot be found is reported as not marked. The session merges the work or drops the
   mark. A dropped mark is not judged again. A model error or odd answer marks nothing and adds one
   systemMessage line. The items count as judged, so there is no retry loop. Cost: a Stop with no new
-  item or no candidate makes no call. Otherwise it makes one call, one `git grep` and one rev-parse (unmeasured).
+  item or no candidate makes no call. Otherwise it makes one call, one `git grep` and one rev-parse (unmeasured). A stale roadmap ref adds one `git fetch` of at most 2 seconds, once per Stop (a failed fetch may add one `git log`). A fresh one adds none.
   It lists the handoffs folder and reads one sidecar per inbox there. It writes the turn state, and
   on a hit the inbox. Capture adds one small file per session and no process (unmeasured). Risk kind: named
   incident. On 2026-11-01 17:44 CST the owner said "carousel" in a repo whose code said "wheel", and
