@@ -1,0 +1,10 @@
+{
+  "id": "own-794-c-park-3288",
+  "at": "2026-11-13T20:09:00-06:00",
+  "title": "PR #3288 is parked: no more work, the quota back-off does not ship",
+  "ruling": "Owner 20:09 CST Nov 13, page item 794, option c \"Park the PR\": PR #3288 (quota back-off) gets no more work. Finding 2 (serve the hold before the base fetch) is not built; the back-off does not ship. Options a (one more fix) and b (ship with a debt) are not chosen. Grant 789 a stays as ruled.",
+  "quote": "C: Park the PR",
+  "source": "Owner answer saved on the waiting page 20:09 CST Nov 13, thread c22fb4ec; filed by triage.",
+  "status": "open",
+  "step": "gh-quota-budget"
+}
