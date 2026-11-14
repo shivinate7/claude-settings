@@ -1148,12 +1148,17 @@ MISTAKE_GUARD_WORD_RE = re.compile(r"\b(?:guard|check|hook)s?\b", re.I)
 # A guard label opens a sentence: a line start after a bullet, a bold section label (the blockquote mark is already
 # stripped), or a space after . ; ! ?. It is guard or guards, then a colon, a dash, or a spaced - or --. Markdown
 # emphasis (**, * or _) may wrap the word, with the colon inside or outside it: **Guard:**, **Guard**:, *Guard:*.
-# The emphasis mark must touch the word, so a "* " bullet is no emphasis. So `guard_merge.py`, `push-guard` and
-# "the push guard - refuses" are no label.
+# The emphasis mark must touch the word, so a "* " bullet is no emphasis. "Missing guard:" is a label too, because a
+# report that admits a gap writes it so. The colon form also counts mid-sentence, after a dash, a spaced hyphen, a
+# comma, the word "and" or "(", because a writer tucks the label in after the admission it answers. The dash form
+# opens a sentence only, so `guard_merge.py`, `push-guard`, "the push guard - refuses" and "the push guard --
+# refused it" are no label: prose with a guard word in it must not block.
 _EMPHASIS = r"(?:\*\*|\*|_)"
+_GUARD_WORD = r"(?:missing\s+)?" + _EMPHASIS + r"?guards?" + _EMPHASIS + r"?"
 MISTAKE_GUARD_LABEL_RE = re.compile(
     r"(?:^\s*(?:(?:[-*+]|\d+[.)])\s+)?(?:\*\*[^*\n]+\*\*:?\s*)?|(?<=[.;!?])\s+)"
-    + _EMPHASIS + r"?guards?" + _EMPHASIS + r"?(?:\s*:|\s*[\u2014\u2013]|\s+--?\s)" + _EMPHASIS + r"?", re.I)
+    + _GUARD_WORD + r"(?:\s*:|\s*[\u2014\u2013]|\s+--?\s)" + _EMPHASIS + r"?"
+    r"|(?:[\u2014\u2013,(]|\s-{1,2}\s|\band\b)\s*" + _GUARD_WORD + r"\s*:" + _EMPHASIS + r"?", re.I)
 # A guard line's ref is stricter than DONE_REF_RE. "PR #N" and a /pull/N URL name a PR with any digits. A bare #N and
 # "PR N" need 2+ digits, so a list item "#1" is no PR. A bare sha needs 7-40 hex digits with a digit and a letter
 # a-f, so a plain number is no sha.
