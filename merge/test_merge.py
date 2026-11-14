@@ -11011,7 +11011,7 @@ def live_nightly():
     return runs, jobs
 
 
-# The two real push shapes, read from the jobs API (owner ruling own-812-a-judge-suite-runs: judge only the runs that ran their suites). LIVE_PUSH_SKIP is run
+# The two real push shapes, read from the jobs API (decision no-merge-onto-red-main: judge only the runs that ran their suites). LIVE_PUSH_SKIP is run
 # 43553756879: push-skip ran and passed, scope was skipped, and every suite job of checks.yml was skipped with it (31 jobs). OLD_DEFECT_PUSH_SKIP is
 # run 43515441901: scope passed, nightly-skip was skipped, and no push-skip job ran (29 jobs). Each names its jobs as the API does.
 LIVE_PUSH_SKIP = [main_job("nightly-skip", "success"), main_job("push-skip", "success")] + [main_job(name, "skipped") for name in (
@@ -11491,7 +11491,7 @@ class RedMainBrake(Env):
         self.assertEqual([r.count("actions/runs/908/jobs") for r in self.run_reads], [1, 1], "the newest run is not read once, to see whether it is empty")
         self.assertFalse([r for r in self.run_reads if "actions/runs/907/jobs" in r], "an older run behind a green run that is not empty is read")
 
-    # The empty push run (decision no-merge-onto-red-main; owner ruling own-812-a-judge-suite-runs). A green run of the push group that ran no
+    # The empty push run (decision no-merge-onto-red-main). A green run of the push group that ran no
     # suite job is passed over, with or without push-skip evidence: the group's verdict is its newest run that ran its suites, and none on the
     # page is UNKNOWN. EMPTY_PUSH: scope ran, every suite job skipped. EVIDENCE_PUSH: scope skipped, push-skip ran, every suite job skipped.
     EMPTY_PUSH = [main_job("push-skip", "success"), main_job("scope", "success"), main_job("checks", "skipped"), main_job("checks-macos", "skipped")]
@@ -11598,7 +11598,7 @@ class RedMainBrake(Env):
         """The line Host.base_state (merge.py) prints when no run of the push group on the page ran its suites. `newest_id` is the run it names."""
         return f"no run of checks {merge.NO_SUITE_RUN} (newest, run {newest_id}"
 
-    # The suites-run verdict (decision no-merge-onto-red-main; owner ruling own-812-a-judge-suite-runs): the push group's verdict is its newest run
+    # The suites-run verdict (decision no-merge-onto-red-main): the push group's verdict is its newest run
     # that ran its suites. A run that skipped its suites is passed over, whatever its push-skip job says. A page with no such run is UNKNOWN.
     def test_a_live_push_skip_run_over_a_failed_suites_run_refuses_and_names_the_failed_run(self):
         rc, out, before = self.go([main_run(1811, "success"), main_run(1810, "failure")], {1810: self.RED_PUSH, 1811: LIVE_PUSH_SKIP})

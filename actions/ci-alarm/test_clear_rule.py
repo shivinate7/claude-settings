@@ -233,7 +233,7 @@ class ClearRuleNightly(unittest.TestCase):
 
 class EmptyRun(unittest.TestCase):
     """clear_rule.empty_without_evidence: a green run of the push group that ran no suite job is passed over, with or without push-skip evidence
-    (owner ruling own-812-a-judge-suite-runs: only the runs that ran their suites are judged)."""
+    (decision no-merge-onto-red-main: only the runs that ran their suites are judged)."""
     EMPTY = [job("push-skip", "success"), job("scope", "success"), job("checks", "skipped"), job("checks-macos", "skipped")]
     EVIDENCE = [job("push-skip", "success"), job("scope", "skipped"), job("checks", "skipped"), job("checks-macos", "skipped")]
 
