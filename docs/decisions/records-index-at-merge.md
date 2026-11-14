@@ -23,9 +23,10 @@ Record-claim on a base with no stamp kinds first reverts that claim commit, sinc
 claim head. A current page makes no
 commit. A claim stays at confirm under the lock, so its numbers are free on the base tip, as before. The
 claim commit carries the rebuilt page, so the claim and the page share one commit.
-After a stale-page refusal, the second CI run was timed at 70 min, n=2 timed runs in this repo (runner 10, PR
-3349). Other repos are unmeasured. The page changes in about 1 of 3 to 1 of 2 PR merges (triage's approximate walk
-of PR merges: 4 of 11 since Nov 13, 20 of 38 since Nov 10). The draft step refuses a claim head,
+A second CI run was timed at 70 min, n=2 timed runs in this repo (relayed by the coordinator from runner 10's
+log, PR 3349; not re-measured). Other repos are unmeasured. The page changes in about 1 of 3 to 1 of 2 PR merges
+(triage's approximate walk of PR merges, two overlapping windows: 4 of 11 since Nov 13, 20 of 38 since
+Nov 10). The draft step refuses a claim head,
 so the claim cannot move earlier. A resumed claim with a stale page still pushes the page, for the same
 reason. When only the page conflicts with the base, the tool rebuilds it on the merged tree. That heal is
 unchanged. Owner ask to stop the double CI run: Oct 31 14:12 CDT, repeated Nov 1 20:51 CST.
