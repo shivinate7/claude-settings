@@ -495,7 +495,7 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_h
         if e.problems:  # an octopus merge the check could not read, and a finding it made anyway: the flag lifts only the first
             for n in e.notes:
                 say("merge: " + n)
-            raise Dropped("the branch silently undoes earlier work:\n  " + "\n  ".join(e.problems) + f"\nThe check also could not read the whole history: {e}\nPut the work back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message. {UNDO_FLAG} does not lift a finding. {UNDO_CITE}")
+            raise Dropped("the branch silently undoes earlier work:\n  " + "\n  ".join(e.problems) + f"\nThe check also could not read the whole history: {e}\nRemedy: {undo.remedy_text()}\n{UNDO_FLAG} does not lift a finding. {UNDO_CITE}")
         if unknown_ok.strip():
             say(f"merge: silent-undo check UNKNOWN ({e}). {UNDO_FLAG}, reason: {unknown_ok.strip()}")
             return unknown_ok.strip()
@@ -504,7 +504,7 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_h
     for n in notes:
         say("merge: " + n)
     if problems:
-        raise Dropped("the branch silently undoes earlier work:\n  " + "\n  ".join(problems) + f"\nPut it back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message. {UNDO_CITE}")
+        raise Dropped("the branch silently undoes earlier work:\n  " + "\n  ".join(problems) + f"\nRemedy: {undo.remedy_text()}\n{UNDO_CITE}")
 
 def load_debt_retire():
     """The debt-close lint module (lint/check_debt_retire.py), the one home of its TIMEOUT. Imported late: a missing module stops only a debt check."""
