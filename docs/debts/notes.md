@@ -2114,3 +2114,7 @@
 - draft-guard-only-skips-one-output: draft_guard_only and push_guard_only in lint/test_windows_split.py vary the nightly-skip output only, never the push-skip output. Harmless today: a shard needs only scope. Found in review round 1 of PR 3302. Decision: roles-findings-are-debts-or-notes.
 - ci-hygiene-slice-text-stale: skills/ci-hygiene/SKILL.md steps 16 and 19 still say a Windows PR runs a slice; since R62 a ready PR runs the full shards behind the draft guard. Found in review round 2 of PR 3302. Decision: roles-findings-are-debts-or-notes.
 - dead-host-lock-off-linux-never-frees: off Linux a dead host's live-form lock reads as unproven, so Windows and macOS keep the tree and never free it (janitor/sweep.py `_ticks_lock_stale`). Two Linux-only mutants are a bandaid for this. Fix: step:dead-host-lock-form-off-linux
+- progress-owner-wait-abusable: "waiting on you" is exempt from the progress check by word, so "Lane 4 is waiting on you and CI" and a false "waiting on you" pass; the owner can check his own queue.
+- progress-owner-wait-wording: "waiting on owner approval" (no "the") and "waiting on <a name>" are refused as progress claims.
+- progress-table-subject-carry: the subject carries from any earlier table row, not only the header, so `| deploy | waiting on CI |` after a `| Lane 4 | merged |` row is refused; the record says header only.
+- progress-remedy-omits-rest-api: the refusal text does not name "REST API" or "REST read", which the check accepts; a heading then a list item ("Lane 4 status:" then "- in progress") also passes.

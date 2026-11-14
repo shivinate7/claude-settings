@@ -5038,7 +5038,7 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
 
     def test_an_cost_no_word_opens_only_transcript_and_guard_py(self):
         # Catches: the check reads a file, such as a glossary or a record, even when the reply has no "answered".
-        for reply in ("Lane 4 is still running.", "The owner answers in chat.", "The lane is answering now."):
+        for reply in ("Lane 4 is running the check.", "The owner answers in chat.", "The lane is answering now."):
             with self.subTest(reply=reply):
                 out, opened, transcript = self.guard_opens(reply)
                 self.assertEqual(out, "")

@@ -1,0 +1,461 @@
+#!/usr/bin/env python3
+"""The progress-claim check of report_guard.py (rule progress-claims-cite-live-read), run at Stop.
+
+A reply line that says how far a step, lane, batch or PR has got ("still in progress", "nearly done", "waiting on CI")
+must cite a named read made this turn, on the same line: get_session, list_events, pull_request_read,
+list_pull_requests, a REST API or REST read, or a PR URL. A read stamp such as "read at 11:43 CST" counts only beside one
+of those. "unmeasured", "not read" and "unknown" also pass. A bare "live read", a bare REST and a bare stamp are no cite.
+A bare `#n` names a PR and reads nothing. A line with no subject is no claim. A state word such
+as "merged" or "finished", with no progress phrase, is no claim either.
+
+Each case runs the Stop hook as a subprocess, as the other report_guard suites do. The Stop runner, the transcript
+records, the run folder and the in-process opens watch come from lint/test_report_guard.py, the one home. Each case holds
+a flagged twin beside its control, so a control that passes on code that does not yet check still fails here. Run with:
+
+    python3 lint/test_report_guard_progress.py -v
+"""
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import test_report_guard as trg  # noqa: E402  the Stop runner, the transcript records, the run folder (one home)
+
+RULE = "progress-claims-cite-live-read"
+GET_SESSION = "get_session"
+PULL_READ = "pull_request_read"
+UNMEASURED = "unmeasured"
+INCIDENT = "Step rounds-rules-one-record is still in progress."
+LANE_NEAR = "Lane counts-from-rest is nearly done."
+BATCH_WAIT = "Batch 133 is waiting on CI."
+ANSWERED = "Answered: no permission rule can lift it."  # the answered check's own line, for the joined-reasons case
+
+# One line per progress phrase, each with a lane subject. Each must be flagged.
+PHRASE_LINES = (
+    "Lane counts-from-rest is in progress.",
+    "Lane counts-from-rest is still going.",
+    "Lane counts-from-rest is still running.",
+    "Lane counts-from-rest is nearly done.",
+    "Lane counts-from-rest is almost done.",
+    "Lane counts-from-rest is almost there.",
+    "Lane counts-from-rest is almost finished.",
+    "Lane counts-from-rest is close to done.",
+    "Lane counts-from-rest is waiting on CI.",
+    "Lane counts-from-rest is waiting for review.",
+    "Lane counts-from-rest is in flight.",
+    "Lane counts-from-rest is 40% done.",
+    "Lane counts-from-rest is stalled.",
+    "Lane counts-from-rest hasn't finished.",
+)
+
+# A step, a lane, a batch, a PR by its name, and a PR by its number alone. Each must be flagged.
+SUBJECT_LINES = (
+    "Step rounds-rules-one-record is nearly done.",
+    "Lane counts-from-rest is nearly done.",
+    "Batch 133 is nearly done.",
+    "PR #2888 is nearly done.",
+    "#2888 is nearly done.",
+)
+
+# (bare line, its live read). Each bare line is flagged, and passes with its read on the same line.
+CITED = (
+    (INCIDENT, "get_session at 11:43 CST: idle"),
+    (LANE_NEAR, "list_events at 11:43 CST: last event idle"),
+    (LANE_NEAR, "get_session at 11:43 CST: idle"),
+    (LANE_NEAR, "REST read at 11:43 CST: idle"),
+    (BATCH_WAIT, "pull_request_read on #2888: open, checks pending"),
+    (BATCH_WAIT, "list_pull_requests: 1 open"),
+    (BATCH_WAIT, "https://github.com/shivinate7/claude-settings/pull/2888"),
+    (BATCH_WAIT, "pull_request_read at 11:43 CST: open"),
+)
+
+# Lines that say "unmeasured", "not read" or "unknown" in place of a read. Each passes.
+UNREAD = (
+    "Lane counts-from-rest is nearly done (unmeasured).",
+    "Lane counts-from-rest is nearly done; progress unmeasured.",
+    "Lane counts-from-rest is nearly done; not read.",
+    "Lane counts-from-rest is nearly done, how far unknown.",
+)
+
+
+# Runs report_guard.py's main with progress_claim_problem replaced by a call that raises, so the check cannot run.
+FORCE_PROGRESS_CODE = (
+    "import os, sys\n"
+    "sys.path.insert(0, os.path.dirname(sys.argv[1]))\n"
+    "import report_guard as RG\n"
+    "assert hasattr(RG, 'progress_claim_problem'), 'premise: the check is named progress_claim_problem'\n"
+    "def forced(text):\n"
+    "    raise RuntimeError('forced by the test')\n"
+    "RG.progress_claim_problem = forced\n"
+    "sys.argv = sys.argv[1:2]\n"
+    "RG.main()\n"
+)
+UNKNOWN_NOTE = "Progress-claim guard: UNKNOWN, the check did not run"
+
+
+def with_cite(line, read):
+    """The line with `(read)` before its full stop, as a reply writes a cite."""
+    return line[:-1] + " (" + read + ")."
+
+
+def setUpModule():
+    trg.setUpModule()  # the run folder, CLAUDE_CONFIG_DIR, the model stub and the missing route-rows seam
+
+
+def tearDownModule():
+    trg.tearDownModule()
+
+
+class ProgressClaimTests(unittest.TestCase):
+    """The progress-claim verdict, in report_guard.py's Stop hook. On any turn, each reply line that says how far a
+    step, lane, batch or PR has got must cite its live read on that line. Every case is red on the old code."""
+
+    # The one home of the in-process opens watch is AnsweredNeedsSourceTests.guard_opens. It calls self.hook(reply).
+    guard_opens = trg.AnsweredNeedsSourceTests.guard_opens
+
+    def hook(self, reply, landed=False, stop_hook_active=False):
+        records = [trg.human("ask the owner")]
+        if landed:
+            records += [trg.tool_use_msg("Bash", {"command": "git commit -m x"}), trg.tool_result_msg()]
+        records.append(trg.assistant_text(reply))
+        path = trg.write_transcript(records, tempfile.mkdtemp(dir=trg.RUN_FOLDER))
+        return {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": stop_hook_active}
+
+    def verdict(self, reply, **kw):
+        run = trg.run_guard(trg.REPORT_GUARD, self.hook(reply, **kw))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn("Traceback", run.stderr, "the Stop hook crashed: " + run.stderr[-300:])
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def assert_blocked(self, reply, *needles, **kw):
+        """A block for `reply` whose reason holds each needle. Returns the reason."""
+        out = self.verdict(reply, **kw)
+        self.assertIsNotNone(out, "the check did not refuse the reply ending %r" % reply[-120:])
+        self.assertEqual(out.get("decision"), "block", "not a block, ending %r" % reply[-120:])
+        reason = out.get("reason", "")
+        for needle in needles:
+            self.assertIn(needle, reason)
+        return reason
+
+    def assert_allowed(self, reply, **kw):
+        out = self.verdict(reply, **kw)
+        self.assertIsNone(out, "the check refused the reply ending %r: %s" % (reply[-120:], out and out.get("reason")))
+
+    # Each method holds its flagged twin first, so a control fails on code that does not check yet.
+
+    def test_pc_red_incident_replay_step_still_in_progress_blocks(self):
+        # Incident replay: a step's "still in progress" with no read blocks, and the refusal offers unmeasured.
+        # Catches: a step line with a progress phrase passes.
+        self.assert_blocked(INCIDENT, INCIDENT, RULE, UNMEASURED)
+
+    def test_pc_red_lane_nearly_done_blocks_and_names_get_session(self):
+        # Catches: a lane line with "nearly done" passes, or the refusal does not name the lane's read.
+        self.assert_blocked(LANE_NEAR, LANE_NEAR, RULE, GET_SESSION, UNMEASURED)
+
+    def test_pc_red_batch_waiting_on_ci_blocks_and_names_pull_request_read(self):
+        # Catches: a batch line with "waiting on" passes, or the refusal does not name the batch PR's read.
+        self.assert_blocked(BATCH_WAIT, BATCH_WAIT, RULE, PULL_READ, UNMEASURED)
+
+    def test_pc_red_pr_lines_block_and_name_pull_request_read(self):
+        # Catches: a PR line passes when the PR is named as "PR #n" or by "#n" alone, or the refusal names no PR read.
+        for line in ("PR #2888 is still going.", "#2888 is stalled."):
+            with self.subTest(line=line):
+                self.assert_blocked(line, line, RULE, PULL_READ, UNMEASURED)
+
+    def test_pc_red_each_progress_phrase_blocks(self):
+        # Catches: a phrase on the list passes.
+        for line in PHRASE_LINES:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line, RULE)
+
+    def test_pc_red_each_subject_blocks(self):
+        # Catches: a step, a lane, a batch, or a PR by "PR #n" or "#n" passes as no subject.
+        for line in SUBJECT_LINES:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line, RULE)
+
+    def test_pc_red_a_claim_blocks_on_landed_and_unlanded_turns(self):
+        # Catches: the check runs on one kind of turn only, or a live read on a landed turn is refused.
+        self.assert_blocked(INCIDENT, INCIDENT, RULE)
+        self.assert_blocked(INCIDENT + "\n\n" + trg.GOOD_REPORT, INCIDENT, RULE, landed=True)
+        cited = with_cite(INCIDENT, "get_session at 11:43 CST: idle")
+        self.assert_allowed(cited + "\n\n" + trg.GOOD_REPORT, landed=True)
+
+    def test_pc_red_a_claim_inside_a_report_item_blocks(self):
+        # Catches: a claim in a blockquote report item passes, since the quote marker hides its line.
+        self.assert_blocked("> **Next** " + BATCH_WAIT, BATCH_WAIT, RULE)
+        self.assert_allowed("> **Next** " + with_cite(BATCH_WAIT, "pull_request_read: open"))
+
+    def test_pc_red_one_refusal_lists_both_bad_lines(self):
+        # Catches: the second bad line is dropped, or the two lines come as two refusals.
+        reason = self.assert_blocked(INCIDENT + "\n" + LANE_NEAR, INCIDENT, LANE_NEAR, RULE)
+        self.assertEqual(reason.count(RULE), 1, "the reason names the rule more than once: %s" % reason)
+
+    def test_pc_red_joins_an_answered_refusal_in_one_block(self):
+        # Catches: the progress line is dropped when another check refuses the same reply, or comes as a second block.
+        reason = self.assert_blocked(ANSWERED + "\n" + LANE_NEAR, ANSWERED, LANE_NEAR, RULE)
+        self.assertEqual(reason.count(RULE), 1, "the reason names the rule more than once: %s" % reason)
+
+    def test_pc_red_a_line_after_a_closed_fence_blocks_and_the_fenced_line_does_not(self):
+        # Catches: a fence that never closes hides the line after it, or a fenced line is listed as a claim.
+        reason = self.assert_blocked("```\n" + LANE_NEAR + "\n```\n" + BATCH_WAIT, BATCH_WAIT, RULE)
+        self.assertNotIn(LANE_NEAR, reason, "a fenced line is listed: %s" % reason)
+
+    def test_pc_red_a_line_after_a_closed_tilde_fence_blocks_and_the_fenced_line_does_not(self):
+        # Catches: a ~~~ fence is read as text, so its lines are listed as claims.
+        reason = self.assert_blocked("~~~\n" + LANE_NEAR + "\n~~~\n" + BATCH_WAIT, BATCH_WAIT, RULE)
+        self.assertNotIn(LANE_NEAR, reason, "a fenced line is listed: %s" % reason)
+
+    def test_pc_red_a_claim_at_the_end_of_a_long_reply_blocks_and_a_cited_one_passes(self):
+        # Full-size state: 400 prose lines, then one claim. Catches: the scan stops before the last line.
+        prose = ["Line %d of the reply is plain prose." % n for n in range(400)]
+        self.assert_blocked("\n".join(prose + [LANE_NEAR]), LANE_NEAR, RULE)
+        self.assert_allowed("\n".join(prose + [with_cite(LANE_NEAR, "get_session at 11:43 CST: idle")]))
+
+    def test_pc_red_an_empty_reply_passes_and_a_claim_blocks(self):
+        # Empty state: a reply with no text holds no claim. Catches: an empty reply is refused or crashes the check.
+        self.assert_blocked(LANE_NEAR, LANE_NEAR, RULE)
+        self.assert_allowed("")
+
+    def test_pc_red_a_progress_phrase_needs_a_subject(self):
+        # Scope first: a lane with the phrase blocks. The same phrase with no step, lane, batch or PR is no claim.
+        self.assert_blocked("Lane counts-from-rest is in progress.", RULE)
+        self.assert_allowed("Work is in progress on my laptop.")
+
+    def test_pc_red_a_state_word_on_a_pr_is_no_claim(self):
+        # Scope first: a lane's progress phrase on a PR blocks. A state word on the same PR passes.
+        self.assert_blocked("Lane x is still going in #2888.", RULE)
+        self.assert_allowed("Lane x merged in #2888.")
+        self.assert_allowed("PR #2888 merged.")
+
+    def test_pc_red_finished_is_a_state_and_almost_finished_is_a_claim(self):
+        # Scope first: "almost finished" blocks. "finished" with a time and no progress phrase passes.
+        self.assert_blocked("Lane counts-from-rest is almost finished.", RULE)
+        self.assert_allowed("Lane counts-from-rest finished at 19:42 CST Nov 12.")
+
+    def test_pc_red_a_live_read_on_the_line_passes_and_the_bare_line_blocks(self):
+        # Each bare line blocks. With its live read on the same line, it passes.
+        for bare, read in CITED:
+            with self.subTest(read=read):
+                self.assert_blocked(bare, bare, RULE)
+                self.assert_allowed(with_cite(bare, read))
+
+    def test_pc_red_a_bare_pr_ref_is_no_live_read(self):
+        # Catches: a PR named in parentheses counts as a live read, so a claim that names its PR and reads nothing passes.
+        self.assert_blocked(with_cite(BATCH_WAIT, "PR #2888"), with_cite(BATCH_WAIT, "PR #2888"), RULE)
+        self.assert_allowed(with_cite(BATCH_WAIT, "pull_request_read on PR #2888: open"))
+
+    def test_pc_red_unmeasured_not_read_or_unknown_passes(self):
+        # Each bare line blocks. Each line that says unmeasured, not read or unknown in its place passes.
+        self.assert_blocked(LANE_NEAR, LANE_NEAR, RULE)
+        for line in UNREAD:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pc_red_a_question_line_passes_and_the_statement_blocks(self):
+        # Catches: a line that ends in "?" asks and claims nothing, so it is read as a claim.
+        self.assert_blocked(LANE_NEAR, LANE_NEAR, RULE)
+        self.assert_allowed("Is the lane counts-from-rest nearly done?")
+
+    def test_pc_red_an_inline_code_mention_passes(self):
+        # Catches: a phrase or line inside an inline code span is read as a claim.
+        self.assert_blocked(LANE_NEAR, LANE_NEAR, RULE)
+        self.assert_allowed("The check flags `Lane counts-from-rest is nearly done.` as a claim.")
+        self.assert_allowed("The check reads the phrase `nearly done` on a lane line.")
+
+    def test_pc_red_a_comment_opener_in_a_code_span_does_not_hide_the_claim(self):
+        # Scanner respects strings: `//`, `#` and `/*` in a code span open no comment, so the claim after the span is read.
+        # A `#` also starts a PR subject, so it is the opener that could hide a claim.
+        # Catches: a comment opener inside a code span cuts off the rest of the line.
+        for opener in ("//", "#", "/*"):
+            line = "Typed `%s` then: Lane x is nearly done." % opener
+            with self.subTest(opener=opener):
+                self.assert_blocked(line, line, RULE)
+        # Control: a phrase held in a code span, with no claim outside it, is no claim.
+        self.assert_allowed("Typed `#` then the phrase `nearly done` on a lane line.")
+
+    def test_pc_red_a_lone_quote_or_backtick_does_not_hide_the_claim(self):
+        # Scanner respects strings: a quote or a backtick with no pair is text, so the claim on its line is still read.
+        # Catches: an unpaired quote or backtick opens a span that hides the rest of the line.
+        for line in ('Lane x is nearly done, per the 9" note.', "Use a lone ` here. Lane x is nearly done."):
+            with self.subTest(line=line):
+                self.assert_blocked(line, line, RULE)
+        # Control: the same lone quote on a line with no claim is no claim.
+        self.assert_allowed('Lane x finished, per the 9" note.')
+
+    def test_pc_red_a_code_span_across_a_line_break_hides_its_text(self):
+        # Scanner respects strings: a code span may break across lines, so its text is code and no claim.
+        # Twin first: the same claim with no span around it blocks.
+        # Catches: a span read one line at a time leaves its text as a claim.
+        self.assert_blocked(LANE_NEAR, LANE_NEAR, RULE)
+        self.assert_allowed("Typed `see\n" + LANE_NEAR + "` for the mark.")
+
+    def test_pc_red_a_repo_path_commit_or_item_number_is_no_live_read(self):
+        # Catches: a source that the answered check accepts (a repo path, a commit hash, item <n>) read as a live read.
+        for source in ("in lint/report_guard.py", "at 1a2b3c4d", "from item 143"):
+            line = "Lane counts-from-rest is nearly done %s." % source
+            with self.subTest(line=line):
+                self.assert_blocked(line, line, RULE)
+
+    def test_pc_red_a_table_row_under_a_lane_header_flags(self):
+        # Catches: a table row names its lane only in the header, so its phrase reads with no subject on the line.
+        row = "| 4 | in progress |"
+        self.assert_blocked("| Lane | Status |\n|---|---|\n" + row, row, RULE)
+
+    def test_pc_red_a_table_row_with_a_code_span_step_flags(self):
+        # Catches: a subject held in a code span is masked, so a row that names its step in code reads as no subject.
+        line = "| `rounds-rules-one-record` | still in progress |"
+        self.assert_blocked(line, line, RULE)
+
+    def test_pc_red_a_bullet_with_a_code_span_step_flags(self):
+        # Catches: a bullet whose step is named in a code span passes, since the span is masked as no subject.
+        line = "- `rounds-rules-one-record`: nearly done"
+        self.assert_blocked(line, line, RULE)
+
+    def test_pc_red_a_code_span_lane_subject_flags(self):
+        # Catches: a lane named in a code span, with the phrase outside the span, passes.
+        line = "`lane 4` is nearly done."
+        self.assert_blocked(line, line, RULE)
+
+    def test_pc_red_a_code_span_pr_subject_flags(self):
+        # Catches: a PR named in a code span, with the phrase outside the span, passes.
+        line = "`PR #3171` is in progress."
+        self.assert_blocked(line, line, RULE)
+
+    def test_pc_red_a_code_span_pr_without_a_hash_flags(self):
+        # Catches: a PR named without a hash, in a code span, passes. Control: the plain form already flags.
+        line = "`PR 3171` is nearly done."
+        self.assert_blocked(line, line, RULE)
+        self.assert_blocked("PR 3171 is nearly done.", "PR 3171 is nearly done.", RULE)
+
+    def test_pc_red_a_code_step_with_a_state_word_is_no_claim(self):
+        # Catches: a step named in a code span reads as no subject, so its phrase passes.
+        # Controls: a state word on a step is no claim, since the step covers how far, not state.
+        line = "`rounds-rules-one-record` is nearly done."
+        self.assert_blocked(line, line, RULE)
+        self.assert_allowed("Step `x` is done.")
+        self.assert_allowed("Lane x merged in #2888.")
+
+    def test_pc_red_a_trailing_question_does_not_hide_a_claim(self):
+        # Catches: a line that ends in "?" is skipped whole, so a claim before its question passes.
+        line = "Lane 4 is nearly done with the merge. Want me to wait?"
+        self.assert_blocked(line, line, RULE)
+        # Control: a pure question stays exempt.
+        self.assert_allowed("Is the lane counts-from-rest nearly done?")
+
+    def test_pc_red_a_claim_split_across_sentences_flags(self):
+        # Catches: a subject in one sentence and a phrase in the next, with neither sentence holding both, passes.
+        reply = "Lane 4 is being merged. It is nearly done."
+        self.assert_blocked(reply, reply, RULE)
+
+    def test_pc_red_a_claim_split_across_a_soft_wrap_flags(self):
+        # Catches: a claim wrapped over two lines is read one line at a time, so neither line holds it.
+        self.assert_blocked("Lane 4 is\nnearly done.", "nearly done.", RULE)
+
+    def test_pc_red_a_later_sentence_keeps_the_subject_of_a_claim(self):
+        # Catches: a later sentence with a phrase and no subject passes, though its subject is carried from the sentence before.
+        reply = "Lane 4 finished its checks. It has not finished the merge."
+        self.assert_blocked(reply, "It has not finished the merge.", RULE)
+
+    def test_pc_red_an_uppercase_rest_alone_is_no_cite(self):
+        # Catches: a bare REST, as in "the REST tests" or "REST at 11:43 CST", is read as a live read.
+        self.assert_blocked("Batch 133 is waiting on the REST tests.", "the REST tests.", RULE)
+        self.assert_blocked("Batch 133 is waiting on CI (REST at 11:43 CST: idle).", "(REST at 11:43 CST: idle).", RULE)
+        # Control: a named read with a verb still cites.
+        self.assert_allowed("Batch 133 is waiting on CI (REST read: open).")
+
+    def test_pc_red_a_stamp_alone_is_no_read(self):
+        # Catches: a read stamp with no named read beside it passes as a cite.
+        reply = "Lane 4 is nearly done (read at 11:43 CST)."
+        self.assert_blocked(reply, reply, RULE)
+        # Controls: the stamp passes beside a named read.
+        self.assert_allowed("Lane 4 is nearly done (get_session read at 11:43 CST: idle).")
+        self.assert_allowed("Lane 4 is nearly done (list_events read at 11:43 CST: idle).")
+        self.assert_allowed("Lane 4 is nearly done (REST API read at 11:43 CST: idle).")
+
+    def test_pc_red_a_live_read_alone_is_no_cite(self):
+        # Catches: a bare "live read" beside a stamp passes, though the phrase names no read.
+        reply = "Lane 4 is nearly done (live read at 11:43 CST)."
+        self.assert_blocked(reply, reply, RULE)
+        # Control: the same stamp beside a named read passes.
+        self.assert_allowed("Lane 4 is nearly done (get_session at 11:43 CST: idle).")
+
+    def test_pc_red_the_refusal_does_not_offer_a_bare_stamp(self):
+        # Catches: the refusal names "read at 11:43 CST" as a read to make, so a session writes the bare stamp.
+        reason = self.assert_blocked("Lane 4 is nearly done.", RULE)
+        self.assertNotIn("read at", reason, "the refusal offers a bare stamp: %s" % reason)
+
+    def test_pc_red_a_work_in_progress_marker_noun_is_no_claim(self):
+        # Scope first: a lane with the phrase blocks. Catches: the noun in "work in progress marker" is read as a phrase.
+        self.assert_blocked("Lane 4 is in progress.", "Lane 4 is in progress.", RULE)
+        self.assert_allowed("Lane 4 adds the work in progress marker to the guard.")
+        self.assert_allowed("Lane 4 adds the in-progress marker to the guard.")
+
+    def test_pc_red_an_owner_wait_is_no_progress_claim(self):
+        # Scope first: a lane or batch waiting on CI flags. Catches: a wait on the owner is read as a progress claim,
+        # and a Done item's subject carries into the Next item of the same block.
+        self.assert_blocked("Lane 4 is waiting on CI.", "Lane 4 is waiting on CI.", RULE)
+        self.assert_blocked("Batch 133 is waiting on CI.", "Batch 133 is waiting on CI.", RULE)
+        self.assert_allowed("> **Done** BUILT PR #3172 merged\n> **Next** Waiting on your pick.")
+        self.assert_allowed("> **Done** BUILT PR #3172 merged\n> **Next** Waiting on your pick of the lane model.")
+        self.assert_allowed("Lane 4 is waiting on the owner's answer.")
+        self.assert_allowed("Lane 4 is waiting on you.")
+        self.assert_allowed("I am waiting for your answer on A or B")
+
+    def session_hook(self, records, sid, active=False):
+        path = trg.write_transcript(records, tempfile.mkdtemp(dir=trg.RUN_FOLDER))
+        return {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": active, "session_id": sid}
+
+    def plain_run(self, hook):
+        run = trg.run_guard(trg.REPORT_GUARD, hook)
+        self.assertEqual(run.returncode, 0, run.stderr[-300:])
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def forced_run(self, hook):
+        """The Stop run with the progress check made to raise. Returns the hook's JSON, or None."""
+        run = subprocess.run([sys.executable, "-c", FORCE_PROGRESS_CODE, trg.REPORT_GUARD], input=json.dumps(hook),
+                             capture_output=True, text=True, timeout=30)
+        self.assertEqual(run.returncode, 0, run.stderr[-300:])
+        self.assertNotIn("Traceback", run.stderr, "the Stop hook crashed: " + run.stderr[-300:])
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def test_pc_red_a_failing_progress_check_on_a_rewrite_reads_unknown_not_silence(self):
+        # Catches: a rewrite after a missing-report block drops an error in the progress check with no word, so the
+        # rewrite passes in silence. Control: the first Stop of a claim reads UNKNOWN in its systemMessage, with no block.
+        sid = "pc-rewrite-%d" % id(self)
+        turn = [trg.human("ask the owner"), trg.tool_use_msg("Bash", {"command": "git commit -m x"}),
+                trg.tool_result_msg()]
+        missing = self.plain_run(self.session_hook(turn + [trg.assistant_text("All done.")], sid))
+        self.assertIsNotNone(missing, "premise: the missing report did not block, so no rewrite marker was written")
+        self.assertIn("does not end with the report", missing["reason"])
+        out = self.forced_run(self.session_hook(turn + [trg.assistant_text("Lane 4 is nearly done.")], sid, active=True))
+        self.assertIsNotNone(out, "the rewrite passed in silence, so the progress check's error went unread")
+        self.assertNotEqual(out.get("decision"), "block", out)
+        self.assertIn(UNKNOWN_NOTE, out.get("systemMessage", ""), out)
+        first = self.forced_run(self.session_hook([trg.human("ask the owner"),
+                                                   trg.assistant_text("Lane 4 is nearly done.")], sid + "-first"))
+        self.assertIsNotNone(first, "the first Stop of a claim passed in silence")
+        self.assertNotEqual(first.get("decision"), "block", first)
+        self.assertIn(UNKNOWN_NOTE, first.get("systemMessage", ""), first)
+
+    def test_pc_red_a_rewrite_under_stop_hook_active_stays_quiet(self):
+        # Same shape as answered-needs-source: the rewrite that follows a block is not refused again.
+        self.assert_blocked(LANE_NEAR, LANE_NEAR, RULE)
+        self.assert_allowed(LANE_NEAR, stop_hook_active=True)
+
+    def test_pc_red_the_check_reads_only_the_transcript_and_guard(self):
+        # Cost: a regex over the reply, with no other file read. A flagged line is refused, and a claim-free line is not.
+        out, opened, transcript = self.guard_opens(LANE_NEAR)
+        self.assertEqual((json.loads(out) if out else {}).get("decision"), "block", out)
+        self.assertEqual(set(opened), {transcript, trg.GUARD_PY})
+        out, opened, transcript = self.guard_opens("Lane counts-from-rest finished at 19:42 CST Nov 12.")
+        self.assertEqual(out, "")
+        self.assertEqual(set(opened), {transcript, trg.GUARD_PY})
+
+
+if __name__ == "__main__":
+    unittest.main()

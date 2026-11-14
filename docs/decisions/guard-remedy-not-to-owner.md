@@ -63,6 +63,15 @@ Text: `ANSWERED_REASON`, rule `answered-needs-source` (a claim of "answered" nee
 - A mention of the word, not a claim, can go in an inline code span.
 - Lines inside a code fence, and lines that end in a question mark, are not checked.
 
+### Progress-claim guard (any reply)
+
+Text: `PROGRESS_REASON`, rule `progress-claims-cite-live-read` (a line that says how far a step, lane, batch or PR has got cites a live read).
+
+- On each listed line, cite a named live read made this turn, in the same block as the claim (its line, or the lines soft-wrapped with it): `get_session` on the lane (a step's lane too), `list_events`, `pull_request_read` on the PR (a batch's PR too), `list_pull_requests`, "REST API" or "REST read", or a PR URL. A time stamp, a PR number or the words "live read" alone are no read. A stamp counts only beside a named read.
+- Or write "unmeasured" on the line.
+- A mention of a phrase, not a claim, can go in an inline code span.
+- Lines inside a code fence are not checked. A question sentence is not a claim, and a wait on the owner ("waiting on your pick") is no progress claim.
+
 ### Recovered guard (any reply whose report shape holds)
 
 Text: two inline facts in `recovered_problem`. The two line forms below live here only.
