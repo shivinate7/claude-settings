@@ -827,17 +827,26 @@ STORE_KINDS = ("full", "origin", "empty", "stale-local", "broken")  # the kinds 
 
 
 def prime(kind):
-    """A fresh roadmap FETCH_HEAD in the repo of store `kind`, written by each run. One written at build time ages past
+    """A fresh roadmap read in the repo of store `kind`, primed by each run. One written at build time ages past
     roadmap_ref.MAX_AGE on a slow runner, and the run then reads the ref as stale. A kind with no roadmap ref gets none,
     so the freshness check finds no roadmap fetch on record for it."""
     if kind in STORE_KINDS:
-        fixture.write_fetch_head(store(kind), "roadmap")
+        fixture.prime_roadmap(store(kind))
+
+
+def unprime(kind):
+    """Undoes prime(kind), so the shared store returns to its built state after the run."""
+    if kind in STORE_KINDS:
+        fixture.unprime_roadmap(store(kind))
 
 
 def past_run(text, kind, **kwargs):
     """Run the hook on `text`, the payload's cwd in store `kind`, the child's own cwd in the plain folder."""
     prime(kind)
-    return run_hook(hook_input(message=text, cwd=store(kind)), reader_mode="idle", cwd=store("plain"), **kwargs)
+    try:
+        return run_hook(hook_input(message=text, cwd=store(kind)), reader_mode="idle", cwd=store("plain"), **kwargs)
+    finally:
+        unprime(kind)
 
 
 def denied(r):
@@ -993,13 +1002,11 @@ def case_a_store_aged_by_a_slow_runner_reads_fresh():
     The run primes its own store first, so a FETCH_HEAD aged 61 s still reads fresh: the read denies, starts no fetch
     and says nothing on stderr."""
     repo = store("full")
+    fixture.prime_roadmap(repo)  # the FETCH_HEAD to age; past_run primes it again and undoes that after its run
     head = fixture.fetch_head(repo)
     last = os.stat(head).st_mtime
     os.utime(head, (last - 61, last - 61))  # 61 s before its last write: stale by roadmap_ref.MAX_AGE
-    try:
-        r = past_run(settled_text(SETTLING[0][1], "`decision %s`" % SLUG), "full")
-    finally:
-        fixture.write_fetch_head(repo, "roadmap")  # the shared store is left fresh for the cases after this one
+    r = past_run(settled_text(SETTLING[0][1], "`decision %s`" % SLUG), "full")
     reason = denied(r) or ""
     check("aged store: the read reaches the store (deny naming %s and r44)" % SLUG,
           reason.startswith("past-ruling: ") and SLUG in reason and "r44" in reason, detail(r))

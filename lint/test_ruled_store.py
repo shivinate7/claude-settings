@@ -146,11 +146,39 @@ def real_origin(repo):
     return url is not None and url.startswith(REAL_ORIGIN)
 
 
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # git's empty tree: every repo holds it, so no index is needed
+PRIMED = {}  # repo -> True when prime_roadmap created the ref, so unprime_roadmap removes it; a repo is in it while primed
+
+
+def prime_roadmap(repo):
+    """One run's fresh roadmap read of `repo`. A fresh FETCH_HEAD line names the ref's tip, and a missing ref is stale, so
+    when origin/roadmap does not resolve it is pointed at an empty-tree commit (no rulings, no steps). A ref that resolves
+    is never moved. FETCH_HEAD then gets a fresh line naming the tip (set_fetch_head). unprime_roadmap undoes this run's
+    part, so a shared repo returns to its built state for the cases after it."""
+    created = ref_tip(repo) is None
+    if created:
+        git(repo, "update-ref", STORE_REF, git(repo, "commit-tree", EMPTY_TREE, "-m", "primed roadmap ref"))
+    PRIMED.setdefault(repo, created)
+    set_fetch_head(repo)
+
+
+def unprime_roadmap(repo):
+    """Undoes prime_roadmap for `repo`: removes FETCH_HEAD, and the ref when prime_roadmap created it. A repo that was
+    never primed, or None, is left as it is."""
+    if repo is None or repo not in PRIMED:
+        return
+    created = PRIMED.pop(repo)
+    without_fetch_head(repo)
+    if created:
+        git(repo, "update-ref", "-d", STORE_REF)
+
+
 def prime_origin(repo):
     """Primes the roadmap fetch of a repo whose origin is a real URL, so a reader reads origin/roadmap without a fetch.
-    The window is roadmap_ref.MAX_AGE, so each run calls this for its own repo; a repo with a local origin is left as it is."""
+    The window is roadmap_ref.MAX_AGE, so each run calls this for its own repo, and unprime_roadmap after it. A repo with a
+    local origin is left as it is."""
     if repo is not None and real_origin(repo):
-        set_fetch_head(repo)
+        prime_roadmap(repo)
 
 
 def _log_spy(spy, record):

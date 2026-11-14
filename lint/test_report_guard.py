@@ -4566,9 +4566,9 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
                 os.remove(path)
 
     def fresh_ci(self):
-        # A fresh roadmap FETCH_HEAD line, so the roadmap read starts no fetch. Removed again after the case.
-        fixture.write_fetch_head(self.ci)
-        self.addCleanup(fixture.without_fetch_head, self.ci)
+        # A fresh roadmap read, so the roadmap read starts no fetch. Undone after the case.
+        fixture.prime_roadmap(self.ci)
+        self.addCleanup(fixture.unprime_roadmap, self.ci)
 
     def git_starts(self):
         # The git processes the guard spawned, counted by the stub's Popen (hooks/test_call_judge.py).
@@ -5762,12 +5762,13 @@ class CostTests(unittest.TestCase):
         hook = json.dumps({"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
                            "cwd": repo})
         if fresh:
-            fixture.set_fetch_head(repo)
+            fixture.prime_roadmap(repo)
         else:
             fixture.without_fetch_head(repo)
         try:
             return cost_probe.run_hook(REPORT_GUARD, hook, folder, answers)
         finally:
+            fixture.unprime_roadmap(repo)
             fixture.without_fetch_head(repo)
 
     def test_a_reply_with_no_question_starts_nothing(self):

@@ -880,7 +880,10 @@ def homed(cfg, sid, items, handoff_ids=(), cwd=None, text="homes burst", extra_e
     write_file(inbox_of(cfg, sid), render_block(text, items=items))
     write_file(handoff_of(cfg, sid), "# Handoff\n" + "".join("- %s\n" % i for i in handoff_ids))
     fixture.prime_origin(cwd)
-    return guard(cfg, sid, cwd=cwd, extra_env=extra_env)
+    try:
+        return guard(cfg, sid, cwd=cwd, extra_env=extra_env)
+    finally:
+        fixture.unprime_roadmap(cwd)
 
 
 def fail_open_line(p):
@@ -4206,15 +4209,21 @@ def record_step(root, slug):
         return None
 
 
-def page_comment_run(cfg, sid, wake, items, url=PAGE_CODE_URL, cwd=None, writer=None):
+def page_comment_run(cfg, sid, wake, items, url=PAGE_CODE_URL, cwd=None, writer=None, prime=True):
     """Captures one page comment through the capture hook, jots its item lines, names `writer` as the page writer
-    (this session when None), and runs the guard at its Stop. Returns the guard's Proc."""
+    (this session when None), and runs the guard at its Stop. `prime` False leaves the repo's roadmap ref as the case
+    built it, for a case whose premise is that the ref does not resolve. Returns the guard's Proc."""
     capture(cfg, sid, PAGE_COMMENT.format(url=url, wake=wake), cwd=cwd)
     for line in items:
         add_item(cfg, sid, line)
     write_transcript(cfg, sid, writer_records(sid if writer is None else writer))
-    fixture.prime_origin(cwd)
-    return guard(cfg, sid, cwd=cwd, transcript=transcript_of(cfg, sid))
+    if prime:
+        fixture.prime_origin(cwd)
+    try:
+        return guard(cfg, sid, cwd=cwd, transcript=transcript_of(cfg, sid))
+    finally:
+        if prime:
+            fixture.unprime_roadmap(cwd)
 
 
 def page_comment_facts(cfg, sid, root, url, wake):
@@ -4365,7 +4374,7 @@ def case_page_form_failed_record_read_stands_down():
     cfg, sid = new_cfg(), "page-form-no-record"
     root = claude_settings_no_record_repo()
     name = "page-form stand-down: origin's record branch does not resolve"
-    p = page_comment_run(cfg, sid, ASKED_WAKE, ["- fb-0961-5 [task] -> step:%s" % PLAIN_STEP], cwd=root)
+    p = page_comment_run(cfg, sid, ASKED_WAKE, ["- fb-0961-5 [task] -> step:%s" % PLAIN_STEP], cwd=root, prime=False)
     check(name + ": scope the record branch's step file does not resolve", record_step(root, PLAIN_STEP) is None,
           record_step(root, PLAIN_STEP))
     if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, ASKED_WAKE), SCOPE_IN):

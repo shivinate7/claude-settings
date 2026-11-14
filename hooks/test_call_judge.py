@@ -351,13 +351,20 @@ def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None):
     if model_fail:
         env["CJ_MODEL_FAIL"] = "1"
     env["FETCH_SPY_LOG"] = os.path.join(ROOT, fixture.FETCH_SPY)
-    fixture.prime_origin(payload_cwd(stdin_text))  # a hook reads origin/roadmap for the payload's folder
+    # A hook reads origin/roadmap for the payload's folder. This run undoes only the priming it made, not a case's own.
+    payload_repo = payload_cwd(stdin_text)
+    owned = payload_repo is not None and payload_repo not in fixture.PRIMED
+    fixture.prime_origin(payload_repo)
     if not os.path.exists(FETCH_PROBE):
         with open(FETCH_PROBE, "w", encoding="utf-8") as f:
             f.write(FETCH_PROBE_SOURCE)
-    proc = subprocess.run([sys.executable, FETCH_PROBE, os.path.join(HERE, "..", "lint"), HERE, HOOK],
-                          input=stdin_text, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", env=env, timeout=120)
+    try:
+        proc = subprocess.run([sys.executable, FETCH_PROBE, os.path.join(HERE, "..", "lint"), HERE, HOOK],
+                              input=stdin_text, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", env=env, timeout=120)
+    finally:
+        if owned:
+            fixture.unprime_roadmap(payload_repo)
     return Run(proc, base)
 
 
@@ -1609,12 +1616,12 @@ def case_past_ruling_cost():
           question_form.chat_hit(box))
     # Each judged run starts with a fresh roadmap FETCH_HEAD line, so the roadmap read starts no fetch. The git starts
     # left are its cat-file and the store's ls-tree (one start when the store is absent).
-    fixture.write_fetch_head(CI_REPO)
+    fixture.prime_roadmap(CI_REPO)
     r = run_hook(question_input(box=box, cwd=CI_REPO), answer=ALLOW)
     check("past ruling cost: a judged question runs two git processes, the roadmap read and the store's ls-tree",
           len(r.calls) == 1 and r.git == 2, detail(r))
     item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
-    fixture.write_fetch_head(CI_REPO)
+    fixture.prime_roadmap(CI_REPO)
     p = run_hook(page_input("set", item, doc_id="c133", cwd=CI_REPO), answer=ALLOW)
     check("past ruling cost: a judged page write runs two git processes", len(p.calls) == 1 and p.git == 2, detail(p))
     fixture.write_fetch_head(BARE_REPO)
@@ -1628,7 +1635,7 @@ def case_past_ruling_cost():
     check("past ruling cost: the stale-ref question reaches the model once", len(s.calls) == 1, detail(s))
     check("past ruling cost: a stale roadmap ref is fetched exactly once per judged question", s.fetches == 1,
           "fetches=%d; %s" % (s.fetches, detail(s)))
-    fixture.write_fetch_head(CI_REPO)
+    fixture.prime_roadmap(CI_REPO)
     t = run_hook(question_input(box=good_box(), cwd=CI_REPO), answer=ALLOW)
     check("past ruling cost: the fresh-ref question reaches the model once", len(t.calls) == 1, detail(t))
     check("past ruling cost: a fresh roadmap ref is fetched by no judged question", t.fetches == 0,
@@ -1638,6 +1645,7 @@ def case_past_ruling_cost():
     f = run_hook(question_input(box=good_box(problem=None), cwd=CI_REPO), answer=ALLOW)
     check("past ruling cost: a box refused by the form makes no model call and no git process",
           f.calls == [] and f.git == 0 and (f.deny() or {}).get("permissionDecision") == "deny", detail(f))
+    fixture.unprime_roadmap(CI_REPO)
 
 
 # ------------------------------------------------------------------ unvetted marker and docs/debts
@@ -1817,13 +1825,14 @@ class CostTests(unittest.TestCase):
         repo = payload_cwd(stdin_text)
         if repo is not None:
             if fresh:
-                fixture.set_fetch_head(repo)
+                fixture.prime_roadmap(repo)
             else:
                 fixture.without_fetch_head(repo)
         try:
             return cost_probe.run_hook(HOOK, stdin_text, folder, answers)
         finally:
             if repo is not None:
+                fixture.unprime_roadmap(repo)
                 fixture.without_fetch_head(repo)
 
     def test_a_tool_this_hook_does_not_judge_starts_nothing(self):
