@@ -683,6 +683,72 @@ def case_batch_check_missing_echo_not_mistaken_for_blob():
     check("missing_echo_not_blob: blocks", bool(reason), reason)
 
 
+# --------------------------------------------------------------------------- resolve_paths: one answer per path
+# The batch's answers are one line each, split on "\n" alone. A path or ref name holding a VT, FF or U+2028
+# must not shift the answers after it, since str.splitlines() breaks on those characters.
+
+def _resolve_counting_batches(repo, refs, paths):
+    """(resolve_paths' answer, how many cat-file processes it started)."""
+    calls = {"cat_file": 0}
+    real_run_git = rh._run_git
+
+    def counting_run_git(cwd, args, input_text=None):
+        if args and args[0] == "cat-file":
+            calls["cat_file"] += 1
+        return real_run_git(cwd, args, input_text=input_text)
+
+    rh._run_git = counting_run_git
+    try:
+        answer = rh.resolve_paths(repo, refs, paths)
+    finally:
+        rh._run_git = real_run_git
+    return answer, calls["cat_file"]
+
+
+def case_resolve_paths_separator_does_not_shift_later_answers():
+    repo = make_repo("case_resolve_separator_repo")
+    write(os.path.join(repo, "docs", "a.md"), "a\n")
+    commit_all(repo)
+    refs = rh._list_refs(repo)
+    alone, _ = _resolve_counting_batches(repo, refs, ["docs/a.md"])
+    check("separator: docs/a.md asked alone resolves", alone.get("docs/a.md") is True, alone)
+    rows = (
+        ("vt_and_ff_in_path", refs, ["a\x0bq\x0cz", "docs/a.md"]),
+        ("u2028_in_path", refs, ["a q", "docs/a.md"]),
+        ("u2028_in_ref_name", ["refs/heads/x y"] + refs, ["docs/a.md"]),
+        ("cr_in_path", refs, ["a\rq", "docs/a.md"]),
+        ("lf_in_path", refs, ["a\nq", "docs/a.md"]),
+    )
+    for label, row_refs, paths in rows:
+        got, _ = _resolve_counting_batches(repo, row_refs, paths)
+        check("separator %s: docs/a.md gets its alone answer" % label, got.get("docs/a.md") is True, got)
+        for path in paths:
+            if "\n" in path:
+                check("separator %s: a path holding LF reads not resolved" % label, got.get(path) is False, got)
+
+
+def case_resolve_paths_one_answer_per_path_in_order_in_one_batch():
+    repo = make_repo("case_multi_path_repo")
+    write(os.path.join(repo, "docs", "a.md"), "a\n")
+    write(os.path.join(repo, "docs", "b.md"), "b\n")
+    write(os.path.join(repo, "docs", "dir", "c.md"), "c\n")
+    commit_all(repo)
+    refs = rh._list_refs(repo)
+    blobs = {"docs/a.md", "docs/b.md"}
+    rows = (
+        ("empty", []),
+        ("mixed", ["docs/a.md", "docs/gone.md", "docs/dir", "docs/b.md"]),
+        ("full_size", ["docs/a.md"] + ["docs/gone-%03d.md" % n for n in range(298)] + ["docs/b.md"]),
+    )
+    for label, paths in rows:
+        got, cat_files = _resolve_counting_batches(repo, refs, paths)
+        check("multi_path %s: one answer per path, in order" % label, list(got) == paths, list(got)[:4])
+        wrong = [p for p in paths if got.get(p) != (p in blobs)]
+        check("multi_path %s: each answer matches its path" % label, not wrong, wrong[:4])
+        if paths:
+            check("multi_path %s: one cat-file process for all paths" % label, cat_files == 1, cat_files)
+
+
 # --------------------------------------------------------------------------- main(), end to end
 
 def _run_main(hook_payload, env=None, timeout=30):
@@ -824,6 +890,8 @@ def main():
     case_batch_check_single_process_call()
     case_unreadable_file_skipped_others_still_reported()
     case_batch_check_missing_echo_not_mistaken_for_blob()
+    case_resolve_paths_separator_does_not_shift_later_answers()
+    case_resolve_paths_one_answer_per_path_in_order_in_one_batch()
     case_main_silent_no_memory_folder()
     case_main_blocks()
     case_main_missing_git_binary_stands_down()

@@ -233,6 +233,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 LINT = HERE.parent.parent / "lint"
 sys.path.insert(0, str(HERE.parent.parent / "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+import ruling_home  # noqa: E402  the one home of resolving a repo path against every branch's tree (hooks/ruling_home.py)
 import git_reads  # noqa: E402  the one home of a checkout's GitHub repo, shared with the guard (hooks/git_reads.py)
 from shared_names import (  # noqa: E402,F401  REPO_TAG: test_build pins build.REPO_TAG to the shared object  the one home of the tag names and lane head refs, shared with the guard (hooks/shared_names.py)
     BUILD_TAG, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, lane_head_refs, repo_tag_names,
@@ -304,7 +305,8 @@ class Ref:
         return [n for n in self.names(prefix) if n.endswith(".json") and "/" not in n[len(prefix):]]
 
     def read(self, names):
-        """Every blob in one git cat-file process."""
+        """Every blob in one git cat-file process. A name that is not a blob (a folder, a submodule) reads as missing:
+        its bytes are a tree's entries, never a file's text."""
         if not names:
             return {}
         try:
@@ -321,8 +323,10 @@ class Ref:
             at = end + 1
             if head.endswith(b" missing"):
                 continue
-            size = int(head.rsplit(b" ", 1)[1])
-            found[name] = raw[at:at + size].decode("utf-8", errors="replace")
+            _oid, kind, size = head.split(b" ")
+            size = int(size)
+            if kind == b"blob":
+                found[name] = raw[at:at + size].decode("utf-8", errors="replace")
             at += size + 1
         return found
 
@@ -338,14 +342,19 @@ def record_source(repo, branch):
     return None, "no %s branch in this checkout" % branch
 
 
-def conflict_markers(source):
+def scanned_texts(source):
+    """{name: text} of each file under SCANNED but the page, read once: the conflict scan and the outbox check both use it."""
+    names = [n for n in source.names(*SCANNED) if n != OUTPUT]
+    return source.read(names)
+
+
+def conflict_markers(source, texts=None):
     """file:line of each conflict marker in the files under SCANNED.
 
     A `=======` line counts only between `<<<<<<< ` and `>>>>>>> `, so a Markdown setext heading passes.
     """
-    names = [n for n in source.names(*SCANNED) if n != OUTPUT]
     hits = []
-    for name, text in sorted(source.read(names).items()):
+    for name, text in sorted((scanned_texts(source) if texts is None else texts).items()):
         inside = False
         for n, line in enumerate(text.splitlines(), 1):
             if line.startswith("<<<<<<< "):
@@ -935,9 +944,10 @@ def main(argv=None):
     else:
         raise SystemExit("This checkout is not on the %s branch, so name the page to write with --out FILE."
                          % args.record_branch)
-    data = None
+    data, texts = None, {}
     if source is not None:
-        hits = conflict_markers(source)
+        texts = scanned_texts(source)
+        hits = conflict_markers(source, texts)
         if hits:
             print("Conflict markers on %s, so no page was written. Resolve them, then build again:" % source.label)
             print("\n".join("  " + h for h in hits))
@@ -981,7 +991,7 @@ def main(argv=None):
     for sid, mid, why in unread_files:
         print("%s: %s %s (%s)" % (MOCKUP_UNREAD_LINE, sid, mid, why))
     upkeep(data["steps"], added_at(source), marks, strays if not unread else ["unknown (%s)" % unread], info["live"],
-           slug, repo, args.main_branch, unread, ref)
+           slug, repo, args.main_branch, unread, ref, texts)
     lines = stalled_lines(info["stalled"])
     if lines:
         print("\n".join(lines))
@@ -1751,7 +1761,74 @@ def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
     return idle_lanes(work, steps, marks, slug, repo, main_branch, unread)
 
 
-def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None, ref=None):
+# The outbox line that records one ruling, in the format the outbox README template in skills/project-ops gives:
+#   - <step> [ruling] -> <home>: "<exact words>" (owner, <time>)
+# The words need one non-blank character: blank words fold to "", which every home holds, so they read malformed.
+OUTBOX_RULING = re.compile(r'^- (?P<step>\S+) \[ruling\] -> (?P<home>[^\s:]+): "(?P<words>\s*\S.*)" \(owner, [^)]*\)\s*$')
+OUTBOX_RULING_LINE = "outbox ruling"
+OUTBOX_FOLDER = "roadmap/outbox/"
+
+
+def outbox_rulings(texts):
+    """([(step, home, words)], [file:line]): each owner-ruling line in the record branch's outbox files, then each
+    line that carries `[ruling]` but misses the format (nothing may drop silently), in file then line order. The
+    folder's README.md and any fenced code line are skipped: the README template shows the format."""
+    found, malformed = [], []
+    for name, text in sorted(texts.items()):
+        if not (name.startswith(OUTBOX_FOLDER) and name.endswith(".md")) or name == OUTBOX_FOLDER + "README.md":
+            continue
+        fenced = False
+        for n, line in enumerate(text.splitlines(), 1):
+            if line.lstrip().startswith(ruling_home.FENCE_MARKERS):
+                fenced = not fenced
+            elif not fenced and "[ruling]" in line:
+                hit = OUTBOX_RULING.match(line)
+                if hit:
+                    found.append((hit["step"], hit["home"], hit["words"]))
+                else:
+                    malformed.append("%s:%d" % (name, n))
+    return found, malformed
+
+
+def outbox_ruling_lines(rulings, malformed, repo, ref):
+    """One output line per malformed ruling line (`unknown: malformed`), then one per outbox ruling: `held` when the home's text on `ref` holds the words (whitespace folded),
+    `not held` when the home exists on some branch but its text on `ref` lacks them or `ref` has no such file, and
+    `unknown` when no branch holds the home or git cannot read it. A home that is not a repo path (a decision id,
+    an absolute or climbing path) or that is a folder reads unknown. One pair of backticks around a home is
+    unwrapped as hooks/ruling_home.py does. Three git starts at most: one batch read of the homes on `ref`,
+    one ref list, one batch for every branch (the last two only for homes `ref` lacks)."""
+    lines = ["%s: %s -> unknown: malformed" % (OUTBOX_RULING_LINE, where) for where in malformed]
+    if not rulings:
+        return lines
+    paths = {}
+    for _step, home, _words in rulings:
+        bare = ruling_home._unwrap(home)
+        norm = os.path.normpath(bare).replace(os.sep, "/")
+        if not (os.path.isabs(bare) or norm in (".", "..") or norm.startswith("../")) and ("/" in norm or "." in norm):
+            paths[home] = norm
+    on_main = Ref(repo, ref).read(sorted(set(paths.values()))) if ref and paths else {}
+    elsewhere = {}
+    lacking = sorted({n for n in paths.values() if n not in on_main})
+    if lacking and ref:
+        try:
+            elsewhere = ruling_home.resolve_paths(str(repo), ruling_home._list_refs(str(repo)), lacking)
+        except ruling_home._GitFailure:
+            elsewhere = {}
+    for step, home, words in rulings:
+        norm = paths.get(home)
+        if norm is None or ref is None:
+            verdict = "unknown"
+        elif norm in on_main:
+            # a substring match after whitespace folding: the words must appear as quoted, not as a whole phrase
+            verdict = "held" if " ".join(words.split()) in " ".join(on_main[norm].split()) else "not held"
+        else:
+            verdict = "not held" if elsewhere.get(norm) else "unknown"
+        lines.append("%s: %s -> %s: %s" % (OUTBOX_RULING_LINE, step, home, verdict))
+    return lines
+
+
+def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None, ref=None,
+           texts=None):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = open_steps(steps)
     live = {d.get("phase") for _, d in open_ if d.get("status") in LIVE_STATUS and d.get("phase")}
@@ -1805,6 +1882,9 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
     for label, v in rows:
         if v:
             print(f"  {label}: {', '.join(v)}")
+    rulings, malformed = outbox_rulings(texts or {})
+    for line in outbox_ruling_lines(rulings, malformed, repo, ref):
+        print(line)
 
 
 if __name__ == "__main__":

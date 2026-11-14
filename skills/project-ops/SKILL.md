@@ -30,7 +30,8 @@ Without a project, each session holds one or more roles, and the owner acts as t
   such as `roadmap-<fork>`, in the extras key `record-branch`. For a fork's page, see skill
   `waiting-page`, "Make a repo's page".
 - **The outbox.** `roadmap/outbox/`, one file per session, for non-urgent notes to triage. Its
-  README gives the format. `templates/operating-model.md` says when to message instead.
+  README gives the format, including the one line an owner ruling takes (triage's status check reads it).
+  `templates/operating-model.md` says when to message instead.
 - **Briefs and role handoffs.** `templates/brief.md` and `templates/role-handoff.md`.
 
 A role handoff note and a session handoff are two cases of one meaning: notes one holder writes so the next
