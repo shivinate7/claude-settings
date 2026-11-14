@@ -1,14 +1,14 @@
 {
  "id": "runner-queue-on-record",
  "title": "The batch runner's working state lives in one file on branch roadmap that it rewrites at each merge and re-reads at start and after compaction",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJKzngb7eVxWuaoEuzrC",
  "owner": "triage",
  "blockedBy": [],
  "why": "Owner 22:47 CST Nov 13 (relayed): the batch runner seemed to have amnesia after compaction. Third cause, by the consultant: its working state (merge queue order, train batches and members, gos, holds with their end events, archive pass) lives only in its handoff.",
  "source": "Consultant 22:49 CST Nov 13 (relayed); ruling own-runner-handoff-resilient.",
- "note": "Triage 22:48 CST Nov 13: one file on branch roadmap (the wave plan or a sibling file) that the runner rewrites at each merge and re-reads at start and after compaction; its handoff points to the file and never copies the list (handoff prompt step 4: \"name the home and never copy the list\"). Open problem, runner 10's own words earlier tonight (relayed): it cannot push to the record branch. Options for the lane to weigh: the runner sends the state to triage, who commits it (a per-merge message); or the runner is given push access to roadmap by its own grant. Neither is chosen. Not started; the coordinator assigns a lane. Needs a past-ruling and guard-record read first.",
- "updatedAt": "2026-11-13T22:48:38-06:00"
+ "note": "Triage 22:48 CST Nov 13: one file on branch roadmap (the wave plan or a sibling file) that the runner rewrites at each merge and re-reads at start and after compaction; its handoff points to the file and never copies the list (handoff prompt step 4: \"name the home and never copy the list\"). Open problem, runner 10's own words earlier tonight (relayed): it cannot push to the record branch. Options for the lane to weigh: the runner sends the state to triage, who commits it (a per-merge message); or the runner is given push access to roadmap by its own grant. Neither is chosen. Not started; the coordinator assigns a lane. Needs a past-ruling and guard-record read first. Coordinator 22:59 CST (relayed): lane session_013NEJKzngb7eVxWuaoEuzrC started. Its pick for the push problem (coordinator's, not the owner's): no new grant; runner 10 sends its state to triage per merge and triage commits; schema and seed file in the lane's PR. The lane stops and reports if a past ruling contradicts it.",
+ "updatedAt": "2026-11-13T23:01:00-06:00"
 }
