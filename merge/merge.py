@@ -1156,25 +1156,19 @@ class Host:
         records, lints = {}, {}
         for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
             sort_comment(c, records, lints)
-        self.comment_rows = (records, lints)  # the last read, which source_comments takes the parts of a source from
         return records, lints
 
     def source_comments(self, m):
         """-> (records, lints) of issue `m`, in issue_comments' shapes ({m: [...]}, so each holds the list for `m`, oldest first): the comments a
         replacement pull request carries from its source (step review-carries-by-tree). Always one paged read of issues/<m>/comments, once a run per
-        `m`: the repo-wide issue_comments read is windowed by `since`, so what it holds of `m` is a part of `m`'s list and never the whole. A comment
-        of `m` that the last repo-wide read holds and the issue's own read lacks goes first, so it can never be newer than the issue's list. The
-        issue's own list holds every such comment on GitHub, so this is a bandaid for a host that serves the two reads apart. A failed read is a
-        Stop: the caller reads it as unknown, never as no carry. Cost: one paged read per named source."""
+        `m`: the repo-wide issue_comments read is windowed by `since`, so what it holds of `m` is a part of `m`'s list and never the whole. A failed
+        read is a Stop: the caller reads it as unknown, never as no carry. Cost: one paged read per named source."""
         cache = self.__dict__.setdefault("source_rows", {})
         if m not in cache:
             records, lints = {}, {}
             for c in self.pages(f"issues/{m}/comments"):
                 sort_comment(c, records, lints, m)
-            window = getattr(self, "comment_rows", None) or ({}, {})
-            own = (records.get(m, []), lints.get(m, []))
-            cache[m] = ({m: [r for r in window[0].get(m, []) if r not in own[0]] + own[0]},
-                        {m: [b for b in window[1].get(m, []) if b not in own[1]] + own[1]})
+            cache[m] = (records, lints)
         return cache[m]
 
     def review_records(self, since):
