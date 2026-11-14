@@ -10,11 +10,14 @@ Output names pinned (the `scope` job re-exports them as job outputs):
   JOB_FLAGS  one per check job except the lint job `checks`: checks_windows, checks_windows_merge,
              checks_windows_rest, checks_macos, shell_macos, pointer_windows
   STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags; shoot turns on the checks-shoot and checks-waiting-page jobs)
+  LINT_FLAGS lint_red_run, lint_plan_refuter, lint_ruling_kind, lint_comment_narration (the four pull-request lint steps of
+             the `checks` job; LintStepScope and LintStepWorkflow pin them)
 
 Run with:  python3 lint/test_ci_scope.py -v
 """
 import ast
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -27,6 +30,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies the script under test into a scratch tree; rm_tree removes the run folder
+from workflow_steps import job_block, job_workflow, step_blocks, step_key  # noqa: E402  the one home of the step parser
 SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 JOB_FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
 STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
@@ -36,6 +40,17 @@ STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
 DERIVED_FLAGS = ["checks_windows_sweep", "checks_guard"]
 ALL = JOB_FLAGS + STEP_FLAGS
 BASH = shutil.which("bash")
+# This module's run folder (test-temp-standard). run() makes its scratch repos under it; the module teardown removes it.
+RUN_DIR = None
+
+
+def setUpModule():
+    global RUN_DIR
+    RUN_DIR = _test_temp.run_folder()
+
+
+def tearDownModule():
+    tracked_tree.rm_tree(RUN_DIR)
 
 
 def git(cwd, *a):
@@ -45,7 +60,7 @@ def git(cwd, *a):
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref=""):
     """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `head_ref` is HEAD_REF,
     empty when not given, so no HEAD_REF of the caller's environment reaches the script."""
-    with tempfile.TemporaryDirectory() as d:
+    with tempfile.TemporaryDirectory(dir=RUN_DIR) as d:
         git(d, "init", "-q")
         git(d, "config", "user.email", "t@t")
         git(d, "config", "user.name", "t")
@@ -559,11 +574,7 @@ class ModTestsRunsEveryCheck(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.run_dir = _test_temp.run_folder()
-
-    @classmethod
-    def tearDownClass(cls):
-        tracked_tree.rm_tree(cls.run_dir)
+        cls.run_dir = RUN_DIR
 
     def setUp(self):
         # In CI a missing node is a red run, never a skip: the mod phase cannot run without it.
@@ -632,6 +643,156 @@ class ModTestsRunsEveryCheck(unittest.TestCase):
         r = self.run_phase(self.make_tree("red-test", test=self.node_script(1)))
         self.assertIn("mod tests:", r.stdout, "the mod phase printed no count line, so it did not run")
         self.assertNotEqual(r.returncode, 0, "a red *.test.mjs passed the mod phase")
+
+
+# The four pull-request lint steps of the `checks` job. Each runs on a pull request only when ci-scope.sh sets its flag, so a
+# lint runs only when a file it reads changed. The flags stay out of ALL, as DERIVED_FLAGS does, so the exact-set cases
+# above stay about the base flags.
+LINT_FLAGS = ("lint_red_run", "lint_plan_refuter", "lint_ruling_kind", "lint_comment_narration")
+LINT_STEPS = {  # flag -> the `name:` of the step it gates in checks.yml
+    "lint_red_run": "Red-run trailer",
+    "lint_plan_refuter": "Plan refuter line",
+    "lint_ruling_kind": "Ruling kind check",
+    "lint_comment_narration": "Comment narration check",
+}
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class LintStepScope(unittest.TestCase):
+    """Each lint flag is set by the paths its lint reads. A docs-only change sets none of the four. Fail-safe: a push, a
+    schedule, a dispatch, an unreadable or empty diff, an unmapped path, and a change to the scope script or the workflow
+    set all four on."""
+
+    def lint_on(self, got, why):
+        """-> the set of lint flags that are true. A flag that ci-scope.sh writes no line for fails here, by name."""
+        for n in LINT_FLAGS:
+            self.assertIn(n, got, f"{why}: ci-scope.sh writes no {n} line: {got}")
+        return {n for n in LINT_FLAGS if got[n] == "true"}
+
+    def test_docs_only_change_sets_all_four_lint_flags_off(self):
+        for p in ("docs/notes.md", "README.md"):
+            with self.subTest(path=p):
+                self.assertEqual(self.lint_on(run([p]), p), set())
+
+    def test_decision_record_sets_only_the_ruling_kind_lint(self):
+        self.assertEqual(self.lint_on(run(["docs/decisions/x.md"]), "docs/decisions/x.md"), {"lint_ruling_kind"})
+
+    def test_plan_record_sets_only_the_plan_refuter_lint(self):
+        for p in ("docs/plans/x.md", "docs/plans/sub/x.md"):
+            with self.subTest(path=p):
+                self.assertEqual(self.lint_on(run([p]), p), {"lint_plan_refuter"})
+
+    def test_each_lint_script_sets_its_own_flag(self):
+        # A non-.md path sets lint_red_run and lint_comment_narration, since the red-run check and the narration check read
+        # every non-.md file. Each script also sets the flag of its own lint.
+        rows = (
+            ("lint/check_red_run.py", {"lint_red_run", "lint_comment_narration"}),
+            ("lint/check_plan_refuter.py", {"lint_red_run", "lint_comment_narration", "lint_plan_refuter"}),
+            ("lint/check_ruling_kind.py", {"lint_red_run", "lint_comment_narration", "lint_ruling_kind"}),
+            ("lint/check_comment_narration.py", {"lint_red_run", "lint_comment_narration"}),
+        )
+        for path, want in rows:
+            with self.subTest(path=path):
+                self.assertEqual(self.lint_on(run([path]), path), want)
+
+    def test_hooks_change_sets_comment_narration_and_red_run_only(self):
+        self.assertEqual(self.lint_on(run(["hooks/foo.py"]), "hooks/foo.py"), {"lint_red_run", "lint_comment_narration"})
+
+    def test_lint_input_paths_set_the_flags_of_the_lints_that_read_them(self):
+        rows = (
+            ("CLAUDE.md", {"lint_ruling_kind"}),
+            ("output-styles/shiv-stylisms.md", {"lint_ruling_kind"}),
+            ("hooks/guard_core.py", {"lint_red_run", "lint_comment_narration", "lint_plan_refuter"}),
+            ("lint/test_check_red_run.py", {"lint_red_run", "lint_comment_narration"}),
+            ("lint/comment_scan.mjs", {"lint_red_run", "lint_comment_narration"}),
+            ("lint/code_check_standard.json", {"lint_red_run", "lint_comment_narration"}),
+            ("lint/layout.py", {"lint_red_run", "lint_comment_narration", "lint_plan_refuter", "lint_ruling_kind"}),
+            ("lint/layout.json", {"lint_red_run", "lint_comment_narration", "lint_plan_refuter", "lint_ruling_kind"}),
+        )
+        for path, want in rows:
+            with self.subTest(path=path):
+                self.assertEqual(self.lint_on(run([path]), path), want)
+
+    def test_md_under_a_test_folder_sets_red_run_only(self):
+        for p in ("tests/notes.md", "test/notes.md", "__tests__/notes.md", "Tests/notes.md", "skills/x/tests/fixture.md"):
+            with self.subTest(path=p):
+                self.assertEqual(self.lint_on(run([p]), p), {"lint_red_run"})
+        # Control: a file whose name starts with `tests` sits in no test folder, so it is docs.
+        self.assertEqual(self.lint_on(run(["docs/tests-notes.md"]), "docs/tests-notes.md"), set())
+
+    def test_full_size_docs_diff_sets_the_union_of_its_paths(self):
+        paths = [f"docs/notes/{i}.md" for i in range(60)] + ["docs/decisions/x.md", "docs/plans/y.md", "tests/z.md"]
+        self.assertEqual(self.lint_on(run(paths), "a 63-file docs diff"),
+                         {"lint_red_run", "lint_plan_refuter", "lint_ruling_kind"})
+
+    def test_unreadable_diff_sets_all_four_on(self):
+        for base in ("0" * 40, ""):
+            with self.subTest(base=base):
+                self.assertEqual(self.lint_on(run(["docs/notes.md"], base=base), f"base {base!r}"), set(LINT_FLAGS))
+
+    def test_empty_diff_sets_all_four_on(self):
+        self.assertEqual(self.lint_on(run([]), "an empty diff"), set(LINT_FLAGS))
+
+    def test_push_schedule_and_dispatch_set_all_four_on(self):
+        for ev in ("push", "schedule", "workflow_dispatch"):
+            with self.subTest(event=ev):
+                self.assertEqual(self.lint_on(run(["docs/notes.md"], event=ev), ev), set(LINT_FLAGS))
+
+    def test_unmapped_path_sets_all_four_on(self):
+        self.assertEqual(self.lint_on(run(["zz-unmapped/blob.bin"]), "zz-unmapped/blob.bin"), set(LINT_FLAGS))
+
+    def test_scope_script_or_workflow_change_sets_all_four_on(self):
+        for p in (".github/scripts/ci-scope.sh", ".github/workflows/checks.yml"):
+            with self.subTest(path=p):
+                self.assertEqual(self.lint_on(run([p]), p), set(LINT_FLAGS))
+
+
+def conjuncts(value):
+    """The `&&` parts of one `${{ ... }}` expression, each stripped, as a set. None when the value is no such expression."""
+    m = re.fullmatch(r"\$\{\{(.*)\}\}", value or "")
+    return None if m is None else {part.strip() for part in m.group(1).split("&&")}
+
+
+class LintStepWorkflow(unittest.TestCase):
+    """checks.yml: each pull-request lint step names its scope flag with the pull-request condition, the scope job declares
+    each flag, and the Silent undo check, which reads every merge, keeps the pull-request condition alone."""
+
+    def setUp(self):
+        path, why = job_workflow(os.path.join(HERE, ".."), "checks")
+        if why:
+            self.fail(why)
+        with open(path, encoding="utf-8") as f:
+            self.text = f.read()
+        self.checks = job_block(self.text, "checks")
+        self.scope = job_block(self.text, "scope")
+
+    def step_if(self, name):
+        """The `if:` of the `checks` job's step named `name`. A missing step, or a step with no if:, fails by name."""
+        self.assertIsNotNone(self.checks, "checks.yml has no checks job")
+        for s in step_blocks(self.checks):
+            if step_key(s, "name") == name:
+                raw = step_key(s, "if")
+                self.assertIsNotNone(raw, f"the step {name!r} has no if:")
+                return raw
+        self.fail(f"the checks job has no step named {name!r}")
+
+    def test_each_lint_step_names_its_flag_and_the_pull_request_condition(self):
+        for flag, name in LINT_STEPS.items():
+            with self.subTest(step=name):
+                raw = self.step_if(name)
+                self.assertEqual(conjuncts(raw), {f"needs.scope.outputs.{flag} == 'true'", "github.event_name == 'pull_request'"},
+                                 f"{name} must run on {flag} and on a pull request; its if: is {raw!r}")
+
+    def test_the_scope_job_declares_each_lint_flag(self):
+        self.assertIsNotNone(self.scope, "checks.yml has no scope job")
+        declared = dict(re.findall(r"^      (\w+): \$\{\{ steps\.scope\.outputs\.(\w+) \}\}[ \t]*$", self.scope, re.M))
+        for flag in LINT_FLAGS:
+            with self.subTest(flag=flag):
+                self.assertEqual(declared.get(flag), flag, f"the scope job does not declare {flag} from steps.scope.outputs")
+
+    def test_the_silent_undo_check_stays_on_the_pull_request_condition_only(self):
+        raw = self.step_if("Silent undo check")
+        self.assertEqual(conjuncts(raw), {"github.event_name == 'pull_request'"}, f"the Silent undo check's if: is {raw!r}")
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")

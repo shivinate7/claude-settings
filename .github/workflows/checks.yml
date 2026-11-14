@@ -127,6 +127,10 @@ jobs:
       sweep: ${{ steps.scope.outputs.sweep }}
       shoot: ${{ steps.scope.outputs.shoot }}
       mutation_report: ${{ steps.scope.outputs.mutation_report }}
+      lint_red_run: ${{ steps.scope.outputs.lint_red_run }}
+      lint_plan_refuter: ${{ steps.scope.outputs.lint_plan_refuter }}
+      lint_ruling_kind: ${{ steps.scope.outputs.lint_ruling_kind }}
+      lint_comment_narration: ${{ steps.scope.outputs.lint_comment_narration }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -407,14 +411,19 @@ jobs:
         run: python3 lint/check_cost_pins.py
 
       # Pull requests only: the range is base..HEAD, and a push has no base. The checkout is full-depth (fetch-depth 0).
+      # Each of the four pull-request lint steps (this one, Plan refuter line, Ruling kind check, Comment narration check) also needs its
+      # scope flag (.github/scripts/ci-scope.sh), so it runs only when a file it reads changed. Red-run trailer reads every non-.md
+      # path and a .md path under a test folder. Plan refuter line reads docs/plans/ and the files check_plan_refuter.py imports.
+      # Ruling kind check reads docs/decisions/, CLAUDE.md and output-styles/shiv-stylisms.md. Comment narration check reads every non-.md path.
+      # Silent undo check reads every merge, so it keeps the pull-request condition alone.
       - name: Red-run trailer
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ github.event_name == 'pull_request' && needs.scope.outputs.lint_red_run == 'true' }}
         env:
           BASE_REF: ${{ github.base_ref }}
         run: python3 lint/check_red_run.py --base "origin/$BASE_REF"
 
       - name: Plan refuter line
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ github.event_name == 'pull_request' && needs.scope.outputs.lint_plan_refuter == 'true' }}
         env:
           BASE_REF: ${{ github.base_ref }}
         run: python3 lint/check_plan_refuter.py --base "origin/$BASE_REF"
@@ -484,7 +493,7 @@ jobs:
         run: python3 lint/test_check_ruling_kind.py
 
       - name: Ruling kind check
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ github.event_name == 'pull_request' && needs.scope.outputs.lint_ruling_kind == 'true' }}
         env:
           BASE_REF: ${{ github.base_ref }}
         run: python3 lint/check_ruling_kind.py --base "origin/$BASE_REF"
@@ -506,7 +515,7 @@ jobs:
         run: python3 lint/test_check_comment_narration.py
 
       - name: Comment narration check
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ github.event_name == 'pull_request' && needs.scope.outputs.lint_comment_narration == 'true' }}
         env:
           BASE_REF: ${{ github.base_ref }}
         run: python3 lint/check_comment_narration.py --base "origin/$BASE_REF"
@@ -580,6 +589,15 @@ jobs:
           bash githooks/test_pre_commit.sh
           node --test testing/skip-locally-fail-in-ci.test.mjs
           bash actions/push-skip/test_action.sh
+
+      - name: Claude role launcher suite
+        run: python3 lint/test_claude_role.py
+
+      - name: Refusal route suite
+        run: python3 lint/test_refusal_route.py
+
+      - name: guard_merge import suite
+        run: python3 lint/test_guard_merge_imports.py
 
       # Last step, so a red test here skips none of the steps above, and a red step above does not hide
       # a mod test (!cancelled() runs it anyway). The script is the one home of the mod tests and the
@@ -750,6 +768,9 @@ jobs:
       - name: Session start notice suite
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/test_session_start.py
+
+      - name: Session role file suite
+        run: python3 hooks/test_session_role.py
 
       - name: Directory before a segment suite
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
@@ -946,6 +967,10 @@ jobs:
       - name: Idle-lanes reader fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_idle_lanes.py
+
+      - name: Combine-train tool fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_combine_train.py
 
       - name: install_from_main suite
         if: ${{ needs.scope.outputs.code == 'true' }}

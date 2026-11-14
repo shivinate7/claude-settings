@@ -51,8 +51,8 @@ os.environ.update(LC_ALL="C", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os
                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
 # CI sets none of these and a cloud session sets all three. A cloud session's values would make every `--confirm` case below meet the
 # merge-role check and make a role writer write the live session's role file. A case that needs one sets it (CloudSession.cloud).
-for _name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CONFIG_DIR"):
-    os.environ.pop(_name, None)
+for _name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_SESSION_ID", "CS_SESSION_ROLE"):
+    os.environ.pop(_name, None)  # the local role reads (a launcher run sets the last two) must not leak into a case
 
 def windows_slice(x):
     """Mark a test or a leaf class as Windows-specific. MERGE_TESTS=windows-slice runs only these.
@@ -1649,6 +1649,12 @@ class Guards(Env):
             merge.drop_worktree(self.co, tmp, wt)
 
 SCOPE_SCRIPT = os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")  # the real script: the one home of which jobs read which paths
+def scope_line(name):
+    """The words of ci-scope.sh's `NAME="..."` line (JOBS, LINTS, ALL). A fixture that fakes the script's flags takes its names here, so it cannot drift from the script."""
+    with open(SCOPE_SCRIPT, encoding="utf-8") as f:
+        m = re.search(r'^%s="([^"]*)"' % name, f.read(), re.M)
+    return m.group(1) if m else ""
+
 CHECKS_YML = ("name: checks\non: pull_request\njobs:\n"  # `checks` comes last: a test that appends steps puts them in `checks`, the last job
              "  checks-merge-install:\n    runs-on: ubuntu-latest\n    steps:\n"
              "      - name: Merge install suite\n        run: python3 hooks/x.py\n"
@@ -1703,6 +1709,40 @@ class ScopedRepo:
         for path, text in files.items():
             (put_lf if path.endswith(".sh") else put)(os.path.join(o, path), text)  # bash reads a CRLF script as a bad option on Windows
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", f"{branch} moves"); sh(o, "git", "push", "-q", "origin", branch)
+
+    def scope_run(self, branch="feat", head_ref="", base=False):
+        """Run a ci-scope.sh against `branch` as the express check runs it: EVENT, BASE_SHA, HEAD_REF and GITHUB_OUTPUT set, in the other
+        checkout at branch. base=True runs origin/main's copy, the one the classifier reads; base=False runs the copy at branch.
+        -> (exit code, {flag: value}). This is the fixture's own proof, read before any case relies on it."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "--detach", f"origin/{branch}")
+        script = os.path.join(o, ".github/scripts/ci-scope.sh")
+        if base:
+            script = os.path.join(self.t, "base-ci-scope.sh")
+            put_lf(script, sh(o, "git", "show", "origin/main:.github/scripts/ci-scope.sh") + "\n")
+        out_file = os.path.join(self.t, "scope.out")
+        if os.path.exists(out_file):
+            os.remove(out_file)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
+        env.update(EVENT="pull_request", BASE_SHA=sh(o, "git", "rev-parse", "origin/main"), HEAD_REF=head_ref, GITHUB_OUTPUT=out_file)
+        r = subprocess.run([merge.resolve_program("bash", env), script], cwd=o, env=env, capture_output=True, text=True, timeout=120)
+        flags = {}
+        if os.path.exists(out_file):
+            with open(out_file, encoding="utf-8") as f:
+                flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
+        return r.returncode, flags
+
+    @staticmethod
+    def turned_on(flags):
+        """The job and suite flags that are on. Not mutation_report (it is set only for a batch branch), and not the lint_* flags: merge
+        counts no lint as a job, since every merge runs the lints anyway (ci-job checks --lint)."""
+        return sorted(k for k, v in flags.items() if k != "mutation_report" and not k.startswith("lint_") and v != "false")
+
+    @staticmethod
+    def lints_on(flags):
+        """The lint_* flags that are on."""
+        return sorted(k for k, v in flags.items() if k.startswith("lint_") and v != "false")
 
 class SmallBaseMove(ScopedRepo, Env):
     """The base-move cases under the per-lane merge (act 4, owner 09:48 CST Nov 12): a conflicting base is refused, a merge-tree read that
@@ -12688,8 +12728,10 @@ class ExpressPath(ScopedRepo, Env):
     FLAG_ARGV = ("7", "--confirm", "--express")
     FAIL_PRELUDE = 'for n in code mods; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 3\n'  # for stub_scope: prints two flags off, then fails
     SILENT_PRELUDE = "exit 0\n"  # for stub_scope: exits 0 and writes no flag
-    ALL_OFF_PRELUDE = ('for n in checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos '
-                       'pointer_windows checks_guard code mods guard sweep shoot; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n')  # for stub_scope: every flag off, exits 0
+    JOB_FLAGS_OFF = ('checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos '
+                     'pointer_windows checks_guard code mods guard sweep shoot')  # the script's JOBS and suite names, minus the lint flags
+    ALL_OFF_PRELUDE = ('for n in %s %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n' % (JOB_FLAGS_OFF, scope_line("LINTS")))  # for stub_scope: every flag off, the lint flags too, exits 0
+    NO_LINT_PRELUDE = ('for n in %s; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n' % JOB_FLAGS_OFF)  # for stub_scope: every job and suite flag off, no lint flag written, exits 0
 
     def setUp(self):
         super().setUp()
@@ -12710,29 +12752,6 @@ class ExpressPath(ScopedRepo, Env):
             o = self.other
             sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
 
-    def scope_run(self, branch="feat", head_ref="", base=False):
-        """Run a ci-scope.sh against `branch` as the express check runs it: EVENT, BASE_SHA, HEAD_REF and GITHUB_OUTPUT set, in the other
-        checkout at branch. base=True runs origin/main's copy, the one the classifier reads; base=False runs the copy at branch.
-        -> (exit code, {flag: value}). This is the fixture's own proof, read before any case relies on it."""
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "--detach", f"origin/{branch}")
-        script = os.path.join(o, ".github/scripts/ci-scope.sh")
-        if base:
-            script = os.path.join(self.t, "base-ci-scope.sh")
-            put_lf(script, sh(o, "git", "show", "origin/main:.github/scripts/ci-scope.sh") + "\n")
-        out_file = os.path.join(self.t, "scope.out")
-        if os.path.exists(out_file):
-            os.remove(out_file)
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
-        env.update(EVENT="pull_request", BASE_SHA=sh(o, "git", "rev-parse", "origin/main"), HEAD_REF=head_ref, GITHUB_OUTPUT=out_file)
-        r = subprocess.run([merge.resolve_program("bash", env), script], cwd=o, env=env, capture_output=True, text=True, timeout=120)
-        flags = {}
-        if os.path.exists(out_file):
-            with open(out_file, encoding="utf-8") as f:
-                flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
-        return r.returncode, flags
-
     def test_scope_run_finds_bash_through_resolve_program(self):
         """A bare `bash` on a Windows runner is the WSL stub in System32, which exits 1 on any script (decision
         bare-bash-on-windows-can-resolve-to-the-wsl-stub): scope_run runs the program merge.resolve_program returns for bash, as the merge tool does."""
@@ -12745,11 +12764,6 @@ class ExpressPath(ScopedRepo, Env):
             self.scope_run()
         self.assertEqual(argvs[-1][0], "/resolved/bash", "scope_run did not run the program merge.resolve_program found for bash")
         self.assertTrue(argvs[-1][1].endswith("ci-scope.sh"), argvs[-1])
-
-    @staticmethod
-    def turned_on(flags):
-        """The flags that are on, not counting mutation_report (it is set only for a batch branch)."""
-        return sorted(k for k, v in flags.items() if k != "mutation_report" and v != "false")
 
     def assert_prose_only(self):
         rc, flags = self.scope_run()
@@ -12844,6 +12858,58 @@ class ExpressPath(ScopedRepo, Env):
         self.assertTrue(self.host.merged, out)
         self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
 
+    def assert_lint_only_on(self, *lints):
+        """The scope assert, before a prose case relies on it (P7): the real ci-scope.sh turns on no job and no suite for the fixture's feat,
+        and exactly the lint flags `lints`."""
+        self.assert_prose_only()
+        rc, flags = self.scope_run()
+        self.assertEqual(self.lints_on(flags), sorted(lints), "the real ci-scope.sh's lint flags for the fixture: %r" % flags)
+
+    def test_a_claude_md_change_merges(self):
+        """CLAUDE.md sets lint_ruling_kind and no job. A ruled prose change with it still goes on to the merge."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"CLAUDE.md": "rules\n"})
+        self.assert_lint_only_on("lint_ruling_kind")
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
+
+    def test_a_plan_record_change_merges(self):
+        """A file under docs/plans/ sets lint_plan_refuter and no job, beside the decision record's lint_ruling_kind."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"docs/plans/example.md": "# Plan\n"})
+        self.assert_lint_only_on("lint_plan_refuter", "lint_ruling_kind")
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
+
+    def test_a_test_folder_note_merges(self):
+        """A .md under a test folder sets lint_red_run and no job: the red-run lint reads it, no suite does."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"skills/example/tests/notes.md": "# Notes\n"})
+        self.assert_lint_only_on("lint_red_run", "lint_ruling_kind")
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
+
+    def test_a_job_flag_beside_a_lint_flag_still_turns_the_job_on(self):
+        """The control for the lint-only cases: a code path beside the decision record turns its job on, and the lint flag is on too.
+        A count that skips the lint flags must not skip a job."""
+        self.on("feat", {"hooks/note.py": "X = 2\n"})
+        rc, flags = self.scope_run()
+        self.assertEqual(rc, 0, "the real ci-scope.sh exits %d on the fixture's feat" % rc)
+        self.assertIn("lint_ruling_kind", self.lints_on(flags), "the decision record no longer sets its lint flag: %r" % flags)
+        self.assertIn("code", self.turned_on(flags), "the code path no longer turns the code job on beside a lint flag: %r" % flags)
+
     def test_a_code_file_in_the_pr_is_refused(self):
         self.store(self.RULINGS)
         self.host.body = "Ruling: r55\n"
@@ -12879,6 +12945,31 @@ class ExpressPath(ScopedRepo, Env):
         before = self.refs()
         rc, out = self.run_express()
         self.assert_refused(rc, out, before, "skills/plain-english-map/x.md")
+
+    def test_a_mods_file_beside_a_lint_flag_is_refused_naming_the_job(self):
+        """mods/* turns checks_windows, checks_macos and mods on. The decision record's lint flag rides along, and the refusal still names the job."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"mods/notes.md": "# Notes\n"})
+        rc_scope, flags = self.scope_run()
+        self.assertEqual(rc_scope, 0, "the real ci-scope.sh exits %d on the fixture's feat" % rc_scope)
+        self.assertIn("checks_windows", self.turned_on(flags), "mods/notes.md no longer turns checks_windows on: %r" % flags)
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "mods/notes.md", "checks_windows")
+
+    def test_a_scope_script_with_no_lint_flag_is_refused_naming_each_lint(self):
+        """merge reads the lint flags from the script's LINTS line, as it reads the job flags. A script that writes every job flag and no lint
+        flag is refused as unknown, and the refusal names each lint flag the script lacks."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope(self.NO_LINT_PRELUDE, branch="main")
+        rc_scope, flags = self.scope_run()
+        self.assertEqual(rc_scope, 0, "the stub scope script does not exit 0: %d" % rc_scope)
+        self.assertEqual(self.lints_on(flags), [], "the stub scope script wrote a lint flag, so the case proves nothing: %r" % flags)
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "unknown", *scope_line("LINTS").split())
 
     def test_a_missing_store_entry_is_refused(self):
         self.store(self.RULINGS)
@@ -17758,10 +17849,11 @@ class JudgeStub:
     """Stands in for decision_watch.invoke_model. `answer(prompt)` gives (verdict, error), or raises. Each call's prompt is
     kept, so a case reads what the judge sent as well as what it got back."""
     def __init__(self, answer):
-        self.answer, self.prompts = answer, []
+        self.answer, self.prompts, self.shapes = answer, [], []
 
     def __call__(self, prompt, *args, **kwargs):
         self.prompts.append(prompt)
+        self.shapes.append(kwargs.get("shape"))
         return self.answer(prompt)
 
 
@@ -17895,9 +17987,9 @@ class ProseJudge(Env):
         with unittest.mock.patch.object(merge, CAP_NAME, cap):  # no create=True: a renamed constant fails here, not passes
             return self.run_merge("7", "--confirm")
 
-    def judge(self, answer, cap=PROSE_CAP):
-        """The merge with `answer` in place of invoke_model, at `cap` model calls (None: the default). -> (stub, rc, out)."""
-        stub = JudgeStub(answer)
+    def judge(self, answer, cap=PROSE_CAP, stub_class=JudgeStub):
+        """The merge with `answer` in place of invoke_model, at `cap` model calls (None: the default), through `stub_class`. -> (stub, rc, out)."""
+        stub = stub_class(answer)
         with unittest.mock.patch.object(decision_watch, "invoke_model", stub):
             rc, out = self.run_capped(cap)
         return stub, rc, out
@@ -18496,6 +18588,379 @@ class ProseJudge(Env):
             self.assertLessEqual(len(got), 40, "the call carries %d lines of %s, want at most 40" % (len(got), path))
         size = len(prompt.encode("utf-8"))
         self.assertLess(size, 12 * 1024, "the prompt is %d bytes for three named paths, want under 12 KB" % size)
+
+    # The where-else judge (merge.py prose_judge_plan, prose_judge_run, prose_judge_prompt). A merge that lands a ruling asks the model
+    # where else the same mistake class applies. The fixture ruling is the claim-at-merge rule; its other number-minting place is a guard
+    # section file (hooks/test_guard.py load_sections). The stub answers the where-else prompt, the one that names SECTION_PATH, and holds
+    # every prose line, so the prose judge's own call never reads as the where-else call.
+    def changed_paths(self):
+        """The paths the PR changes against main: the range's own diff, read after setup_range has taken main's base."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        return set(sh(self.other, "git", "diff", "--name-only", "origin/main...origin/feat").split())
+
+    def setup_landing(self, main_files, feat_files, later=None, renames=None):
+        """setup_range for a PR that lands something, then the records page the generator writes for the head, committed on the head when the
+        page changed. The merge's records check rebuilds the page on the merged tree and stops the merge when the head's page would change.
+        `later` is setup_range's one more feat commit, after main's base is taken: a change to a file main already has."""
+        self.setup_range(main_files, feat_files, later=later, renames=renames)
+        o = self.other
+        sh(o, sys.executable, merge.RECORDS, "--root", o, "--records-only")
+        sh(o, "git", "add", "-A")
+        if sh(o, "git", "status", "--porcelain"):
+            sh(o, "git", "commit", "-qm", "feat: the records page the generator writes for this head")
+        sh(o, "git", "push", "-q", "origin", "feat")
+
+    def setup_ruling(self, main_files):
+        self.setup_landing(main_files, {RULING_PATH: RULING_DOC})
+
+    def setup_record_edit(self, appended):
+        """The PR edits the existing decision record: `appended` lines go on its end, and nothing else in it changes."""
+        added = "".join("A line the edit adds, %d.\n" % i for i in range(appended))
+        self.setup_landing(SECTIONS, {"docs/decisions/first.md": record("D-001", "first") + added})
+
+    def judge_where_else(self, answer):
+        """The merge with a where-else stub: a where-else call that does not ask in the PLACES shape gets no answer. -> (stub, rc, out)."""
+        return self.judge(answer, stub_class=WhereElseStub)
+
+    def where_else_limit(self, name):
+        """A named limit of the where-else judge, read from merge.py by name. A name it does not define fails the case as an assert."""
+        value = getattr(merge, name, None)
+        self.assertIsNotNone(value, "merge.%s is not defined: the where-else judge has no %s" % (name, name))
+        return value
+
+    def assert_where_else_unknown(self, answer, cause):
+        """One where-else UNKNOWN line naming `cause`, no candidate line, and the merge landed with exit status 0: the judge is report-only."""
+        self.setup_ruling(SECTIONS)
+        before = self.head("main")
+        stub, rc, out = self.judge_where_else(route(answer))
+        lines = where_else_unknown_lines(out)
+        self.assertEqual(len(lines), 1, "where-else UNKNOWN lines: %d, want 1: one count line for the one call\n%s" % (len(lines), out))
+        self.assertIn(cause, lines[0], "the where-else UNKNOWN line does not name the cause %r: %r" % (cause, lines[0]))
+        self.assertEqual(where_else_candidates(out), [], "a failed call printed a candidate line\n" + out)
+        self.assertEqual(rc, 0, "the where-else failure changed the exit status to %s: the judge is report-only\n%s" % (rc, out))
+        self.assertNotEqual(self.head("main"), before, "origin main did not move: the merge did not land\n" + out)
+
+    def test_a_ruling_pr_sends_the_ruling_and_the_section_files_in_one_where_else_call(self):
+        self.setup_ruling(SECTIONS)
+        self.assertEqual(self.changed_paths(), {RULING_PATH, merge.RECORDS_PAGE},
+                         "scope: the PR must land the ruling and its records page, and nothing else")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = [p for p in stub.prompts if SECTION_PATH in p]
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: one ruling PR makes one call\n%s" % (len(where), out))
+        self.assertIn("Claim the number at merge.", where[0], "the where-else prompt does not carry the ruling text")
+        self.assertIn("# section 442", where[0], "the where-else prompt does not carry the section file's first line, so the model cannot name its number")
+        self.assertRegex(where[0], r"(?i)other repo|another repo|cross-repo|other repositories",
+                         "the where-else prompt does not say that other repos are unread")
+
+    def test_a_where_else_reply_naming_a_section_prints_one_candidate_line(self):
+        self.setup_ruling(SECTIONS)
+        stub, rc, out = self.judge_where_else(route(lambda prompt: (WHERE_ELSE_REPLY, None)))
+        candidates = where_else_candidates(out)
+        self.assertEqual(len(candidates), 1, "candidate lines: %d, want 1: one reply that names one place\n%s" % (len(candidates), out))
+        self.assertIn("section 442", candidates[0], "the candidate line does not name section 442: %r" % candidates[0])
+        self.assertIn("vary", candidates[0], "the candidate line does not say that model verdicts vary run to run: %r" % candidates[0])
+        self.assertEqual(rc, 0, "the candidate line changed the exit status to %s: the judge is report-only\n%s" % (rc, out))
+
+    def test_a_pr_that_lands_no_ruling_makes_no_model_call(self):
+        self.setup_range(SECTIONS, {BACKING: BACKING_TEXT})
+        self.assertEqual(self.changed_paths(), {BACKING}, "scope: the PR must land no ruling, rule or guard")
+        stub, rc, out = self.judge_where_else(route(lambda prompt: (WHERE_ELSE_REPLY, None)))
+        self.assertEqual(stub.prompts, [], "model calls: %d, want 0: no ruling landed\n%s" % (len(stub.prompts), out))
+        self.assertEqual(where_else_candidates(out), [], "a PR with no ruling printed a candidate line\n" + out)
+
+    def test_a_where_else_model_error_prints_one_unknown_line_and_the_merge_lands(self):
+        self.assert_where_else_unknown(raises(RuntimeError("model exited 1")), CAUSE_MODEL_ERROR)
+
+    def test_a_where_else_timeout_prints_one_unknown_line_and_the_merge_lands(self):
+        self.assert_where_else_unknown(lambda prompt: (None, decision_watch.MODEL_TIMEOUT_ERROR), CAUSE_TIMED_OUT)
+
+    def test_a_where_else_reply_with_no_verdict_text_prints_one_unknown_line_and_the_merge_lands(self):
+        self.assert_where_else_unknown(
+            lambda prompt: (None, decision_watch.REPLY_RESULT_ERROR + " carried no JSON verdict: a stray reply"), CAUSE_NO_VERDICT)
+
+    def test_a_where_else_reply_of_the_wrong_shape_prints_one_unknown_line_and_the_merge_lands(self):
+        self.assert_where_else_unknown(lambda prompt: ({"places": "several"}, None), CAUSE_NO_VERDICT)
+
+    def test_a_tree_with_sixty_section_files_names_every_one_in_the_where_else_prompt(self):
+        sections = {**SECTIONS, **{"tests/guard/s%05d-case-%d.py" % (n, n): "# section %d\n" % n for n in range(1, 60)}}
+        self.setup_ruling(sections)
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = [p for p in stub.prompts if SECTION_PATH in p]
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1 for sixty section files\n%s" % (len(where), out))
+        missing = [path for path in sections if path not in where[0]]
+        self.assertEqual(missing, [], "the where-else prompt leaves out %d of %d section files" % (len(missing), len(sections)))
+
+    def assert_where_else_seam_unknown(self, fault, reached, text):
+        """The merge with merge.git replaced by `fault` at one read: one where-else UNKNOWN line that says `text`, no model call, the merge lands."""
+        before = self.head("main")
+        stub = WhereElseStub(route(no_places))
+        with unittest.mock.patch.object(merge, "git", fault), unittest.mock.patch.object(decision_watch, "invoke_model", stub):
+            rc, out = self.run_capped()
+        self.assertEqual(len(reached), 1, "the seam was reached %d times, want 1: the case did not hit its seam" % len(reached))
+        self.assertEqual(where_else_calls(stub), [], "a where-else call was made without what it needs\n" + out)
+        lines = where_else_unknown_lines(out)
+        self.assertEqual(len(lines), 1, "where-else UNKNOWN lines: %d, want 1\n%s" % (len(lines), out))
+        self.assertIn(text, lines[0], "the where-else UNKNOWN line does not say %r: %r" % (text, lines[0]))
+        self.assertEqual(rc, 0, "the unreadable read changed the exit status to %s\n%s" % (rc, out))
+        self.assertNotEqual(self.head("main"), before, "origin main did not move: the merge did not land\n" + out)
+
+    def test_the_where_else_call_asks_in_the_places_shape(self):
+        self.setup_ruling(SECTIONS)
+        stub, rc, out = self.judge_where_else(route(no_places))
+        self.assertEqual(len(where_else_calls(stub)), 1, "where-else calls: %d, want 1\n%s" % (len(where_else_calls(stub)), out))
+        self.assertEqual(where_else_shapes(stub), [decision_watch.PLACES],
+                         "the where-else call asked in another shape, and a reply in that shape is no answer\n" + out)
+
+    def test_a_reply_past_the_places_cap_prints_the_cap_and_a_count_line(self):
+        cap = self.where_else_limit("WHERE_ELSE_MAX_PLACES")
+        self.assertEqual(cap, 10, "the places cap is ten, the value the decision record gives")  # pinned: a read by name alone would follow a changed cap
+        places = [{"path": "hooks/place-%02d.py" % i, "section": None, "why": "the same mistake"} for i in range(12)]
+        self.setup_ruling(SECTIONS)
+        stub, rc, out = self.judge_where_else(route(lambda prompt: ({"places": places}, None)))
+        candidates = where_else_candidates(out)
+        self.assertEqual(len(candidates), cap, "candidate lines: %d, want %d: one line per place up to the cap\n%s" % (len(candidates), cap, out))
+        counts = [line for line in out.splitlines() if re.search(r"\b2 more places not shown\b", line)]
+        self.assertEqual(len(counts), 1, "the count line for the places past the cap: %d, want 1\n%s" % (len(counts), out))
+        self.assertEqual(rc, 0, "the cap changed the exit status to %s\n%s" % (rc, out))
+
+    def test_a_new_decision_record_lands_and_makes_one_where_else_call(self):
+        self.setup_landing(SECTIONS, {"docs/decisions/landed-place.md": record("pending", "landed-place")})
+        self.assertIn("docs/decisions/landed-place.md", self.changed_paths(), "scope: the PR must add the decision record")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = where_else_calls(stub)
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: a new decision record lands\n%s" % (len(where), out))
+        self.assertIn("landed-place", where[0], "the where-else prompt does not carry the new record")
+
+    def test_a_new_guard_rule_name_lands_and_makes_one_where_else_call(self):
+        self.setup_landing({**SECTIONS, GUARD_PATH: GUARD_MAIN}, {}, later={GUARD_PATH: GUARD_FEAT})
+        self.assertIn(GUARD_PATH, self.changed_paths(), "scope: the PR must change the guard file")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = where_else_calls(stub)
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: a new guard rule name lands\n%s" % (len(where), out))
+        self.assertIn("widget-slug-rule", where[0], "the where-else prompt does not carry the new guard rule name")
+
+    def test_an_unchanged_anchor_sentence_makes_no_where_else_call(self):
+        self.setup_landing({**SECTIONS, RULING_PATH: RULING_DOC}, {},
+                           later={RULING_PATH: RULING_DOC + "\nA note under the rule that names no anchor.\n"})
+        changed = self.changed_paths()
+        self.assertIn(RULING_PATH, changed, "scope: the PR must edit the rule file")
+        self.assertLessEqual(changed, {RULING_PATH, merge.RECORDS_PAGE}, "scope: the PR must change the rule file and its records page, nothing else")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        self.assertEqual(where_else_calls(stub), [], "where-else calls: %d, want 0: no anchor sentence changed\n%s" % (len(where_else_calls(stub)), out))
+        self.assertEqual(where_else_unknown_lines(out), [], "an unchanged anchor printed an UNKNOWN line\n" + out)
+        self.assertEqual(where_else_candidates(out), [], "an unchanged anchor printed a candidate line\n" + out)
+
+    def test_a_where_else_base_unknown_prints_one_unknown_line_and_the_merge_lands(self):
+        self.setup_ruling(SECTIONS)
+        real_git, reached = merge.git, []
+
+        def base_unreadable(cwd, *a, **kw):
+            if sys._getframe(1).f_code.co_name == "confirm" and a == ("rev-parse", "--verify", "-q", "origin/main^{commit}"):
+                reached.append(a)
+                return 1, ""
+            return real_git(cwd, *a, **kw)
+        self.assert_where_else_seam_unknown(base_unreadable, reached, "the base could not be read")
+
+    def test_a_where_else_files_unknown_prints_one_unknown_line_and_the_merge_lands(self):
+        self.setup_ruling(SECTIONS)
+        real_git, reached = merge.git, []
+
+        def names_unreadable(cwd, *a, **kw):
+            if sys._getframe(1).f_code.co_name == "confirm" and a[:2] == ("diff", "--name-only"):
+                reached.append(a)
+                return 1, ""
+            return real_git(cwd, *a, **kw)
+        self.assert_where_else_seam_unknown(names_unreadable, reached, "the changed files could not be read")
+
+    def test_seventy_five_records_are_capped_and_the_rest_are_named_as_not_judged(self):
+        cap_records = self.where_else_limit("WHERE_ELSE_MAX_RECORDS")
+        cap_chars = self.where_else_limit("WHERE_ELSE_MAX_CHARS")
+        self.setup_landing(SECTIONS, {"docs/decisions/place-%02d.md" % i: big_record(i) for i in range(MANY_RECORDS)})
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = where_else_calls(stub)
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: one call for the merge\n%s" % (len(where), out))
+        self.assertLessEqual(len(where[0]), cap_chars,
+                             "the where-else prompt is %d characters, want at most %d (WHERE_ELSE_MAX_CHARS)" % (len(where[0]), cap_chars))
+        slugs = ["place-%02d" % i for i in range(MANY_RECORDS)]  # a claim may rename a record's file, but not its slug
+        judged = [s for s in slugs if s in where[0]]
+        self.assertEqual(judged, slugs[:cap_records],
+                         "the where-else prompt judges %d records, want the first %d (WHERE_ELSE_MAX_RECORDS)" % (len(judged), cap_records))
+        lines = [line for line in out.splitlines() if "too many records" in line]
+        self.assertEqual(len(lines), 1, "lines that name too many records: %d, want 1: the cap never goes silent\n%s" % (len(lines), out))
+        self.assertIn("too many records, judged first %d" % cap_records, lines[0],
+                      "the too-many-records line does not say how many it judged: %r" % lines[0])
+        not_judged = MANY_RECORDS - cap_records
+        self.assertTrue(re.search(r"\b%d\b" % not_judged, lines[0]) and "not judged" in lines[0],
+                        "the too-many-records line does not count the %d records not judged: %r" % (not_judged, lines[0]))
+
+    def test_a_string_section_number_prints_on_the_candidate_line(self):
+        reply = {"places": [{"path": "hooks/elsewhere.py", "section": "442", "why": "the same mistake"}]}
+        self.setup_ruling(SECTIONS)
+        stub, rc, out = self.judge_where_else(route(lambda prompt: (reply, None)))
+        candidates = where_else_candidates(out)
+        self.assertEqual(len(candidates), 1, "candidate lines: %d, want 1\n%s" % (len(candidates), out))
+        self.assertIn("442", candidates[0], "the candidate line drops the section number the model gave as a string: %r" % candidates[0])
+
+    def test_a_four_line_edit_of_an_existing_record_makes_no_where_else_call(self):
+        self.setup_record_edit(4)
+        self.assertIn("docs/decisions/first.md", self.changed_paths(), "scope: the PR must edit the existing record")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        self.assertEqual(where_else_calls(stub), [], "where-else calls: %d, want 0: a four-line edit is under the threshold\n%s" % (len(where_else_calls(stub)), out))
+        self.assertEqual(where_else_candidates(out), [], "a four-line edit printed a candidate line\n" + out)
+
+    def test_a_record_edit_at_the_threshold_makes_one_where_else_call(self):
+        threshold = self.where_else_limit("WHERE_ELSE_MIN_EDIT_LINES")
+        self.assertEqual(threshold, 5, "the edit threshold is five lines, the value the spec gives")  # pinned: a read by name alone would follow a changed threshold
+        self.setup_record_edit(threshold)
+        self.assertIn("docs/decisions/first.md", self.changed_paths(), "scope: the PR must edit the existing record")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        self.assertEqual(len(where_else_calls(stub)), 1,
+                         "where-else calls: %d, want 1: an edit of %d lines is at the threshold\n%s" % (len(where_else_calls(stub)), threshold, out))
+
+    def setup_record_delete(self):
+        """The PR deletes the existing decision record, and the records page follows it."""
+        self.setup_landing(SECTIONS, {})
+        o = self.other
+        sh(o, "git", "rm", "-q", "docs/decisions/first.md")
+        sh(o, sys.executable, merge.RECORDS, "--root", o, "--records-only")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-qm", "feat: drop the first record")
+        sh(o, "git", "push", "-q", "origin", "feat")
+
+    def test_a_failing_added_paths_read_prints_one_unknown_line_and_the_merge_lands(self):
+        self.setup_landing(SECTIONS, {"docs/decisions/landed-place.md": record("pending", "landed-place")})
+        real_git, reached = merge.git, []
+
+        def added_read_fails(cwd, *a, **kw):
+            if "--diff-filter=A" in a:
+                reached.append(a)
+                return 1, "the added-paths read failed"
+            return real_git(cwd, *a, **kw)
+        self.assert_where_else_seam_unknown(added_read_fails, reached, "git diff failed")
+
+    def test_a_failing_numstat_read_prints_one_unknown_line_and_the_merge_lands(self):
+        self.setup_landing(SECTIONS, {"docs/decisions/landed-place.md": record("pending", "landed-place")})
+        real_git, reached = merge.git, []
+
+        def counts_read_fails(cwd, *a, **kw):
+            if "--numstat" in a:
+                reached.append(a)
+                return 1, "the changed-line read failed"
+            return real_git(cwd, *a, **kw)
+        self.assert_where_else_seam_unknown(counts_read_fails, reached, "git diff failed")
+
+    def test_an_edit_of_three_added_and_two_removed_lines_lands(self):
+        self.setup_landing(SECTIONS, {"docs/decisions/first.md": FIVE_LINE_EDIT})
+        self.assertIn("docs/decisions/first.md", self.changed_paths(), "scope: the PR must edit the existing record")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = where_else_calls(stub)
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: five changed lines (three added, two removed) is the threshold\n%s" % (len(where), out))
+        self.assertIn("title: Renamed", where[0], "the where-else prompt does not carry the edited record")
+
+    def test_a_changed_anchor_sentence_lands(self):
+        self.setup_landing({**SECTIONS, RULING_PATH: RULING_DOC}, {}, later={RULING_PATH: CHANGED_RULE_DOC})
+        self.assertIn(RULING_PATH, self.changed_paths(), "scope: the PR must change the rule file")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = where_else_calls(stub)
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: a changed sentence before a known anchor lands\n%s" % (len(where), out))
+        self.assertIn("or in a commit", where[0], "the where-else prompt does not carry the changed sentence")
+
+    def test_a_changed_source_line_of_a_known_guard_rule_lands(self):
+        self.setup_landing({**SECTIONS, GUARD_PATH: GUARD_FEAT}, {}, later={GUARD_PATH: GUARD_CHANGED})
+        self.assertIn(GUARD_PATH, self.changed_paths(), "scope: the PR must change the guard file")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = where_else_calls(stub)
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: a known rule name with a source line the base lacks lands\n%s" % (len(where), out))
+        self.assertIn("twice", where[0], "the where-else prompt does not carry the changed guard line")
+
+    def test_a_deleted_record_makes_no_where_else_call(self):
+        self.setup_record_delete()
+        self.assertFalse(os.path.exists(os.path.join(self.other, "docs", "decisions", "first.md")), "scope: the PR must delete the record")
+        self.assertIn("docs/decisions/first.md", self.changed_paths(), "scope: the deletion must be in the PR's changed paths")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        self.assertEqual(where_else_calls(stub), [], "where-else calls: %d, want 0: a deleted record lands nothing\n%s" % (len(where_else_calls(stub)), out))
+        self.assertEqual(where_else_unknown_lines(out), [], "a deleted record printed a where-else UNKNOWN line\n" + out)
+        self.assertEqual(rc, 0, "the deletion changed the exit status to %s\n%s" % (rc, out))
+
+    def test_a_pure_rename_of_a_record_triggers_one_where_else_call(self):
+        self.setup_landing(SECTIONS, {}, renames={"docs/decisions/first.md": "docs/decisions/renamed-first.md"})
+        self.assertIn("docs/decisions/renamed-first.md", self.changed_paths(), "scope: the PR must move the record")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = where_else_calls(stub)
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: the code counts the moved record's lines as changed\n%s" % (len(where), out))
+        self.assertIn("renamed-first.md", where[0], "the where-else prompt does not carry the moved record")
+
+
+# The where-else judge's fixtures. RULING_DOC is the claim-at-merge rule as CLAUDE.md states it, with its anchor line. SECTIONS is one
+# guard section file on main, the other number-minting place. WHERE_ELSE_REPLY is the reply shape the where-else judge reads: a `places` list.
+RULING_PATH = "CLAUDE.md"
+RULING_DOC = ("# Rules\n\nNever allocate a numbered record on a branch. Write a slug of 32 characters or fewer. "
+              "Claim the number at merge.<!-- rule:git-slug-then-claim-number --> Ids, not paths.\n")
+SECTION_PATH = "tests/guard/s00442-lane-title.py"
+SECTIONS = {SECTION_PATH: "# section 442\nFAMILY = \"lane-title\"\n"}
+WHERE_ELSE_REPLY = {"places": [{"path": SECTION_PATH, "section": 442,
+                                "why": "the guard suite numbers its sections the way the rule numbers records"}]}
+CAUSE_TIMED_OUT, CAUSE_MODEL_ERROR, CAUSE_NO_VERDICT = UNKNOWN_CAUSES[0], UNKNOWN_CAUSES[1], UNKNOWN_CAUSES[2]  # the buckets of UNKNOWN_CAUSES, by name
+
+
+def no_places(prompt):
+    return {"places": []}, None
+
+
+def route(where_else):
+    """A JudgeStub answer: the where-else prompt, the one that names SECTION_PATH, goes to `where_else`; every prose line is held."""
+    def answer(prompt):
+        if SECTION_PATH in prompt:
+            return where_else(prompt)
+        numbers = [int(n) for n in re.findall(r"^Line (\d+): ", prompt, re.M)]
+        return {"verdicts": [{"line": n, "verdict": "holds", "why": "w"} for n in numbers]}, None
+    return answer
+
+
+GUARD_PATH = "hooks/guard.py"
+GUARD_MAIN = "def check(ctx):\n    return None\n"
+GUARD_FEAT = GUARD_MAIN + 'def widget(ctx):\n    return refuse(ctx, "a widget was made", "widget-slug-rule")\n'
+MANY_RECORDS = 75  # decision records one PR lands, for the cap case
+GUARD_CHANGED = GUARD_MAIN + 'def widget(ctx):\n    return refuse(ctx, "a widget was made twice", "widget-slug-rule")\n'  # the same rule name, its source line changed
+CHANGED_RULE_DOC = ("# Rules\n\nNever allocate a numbered record on a branch, or in a commit. Write a slug of 32 characters or fewer. "
+                    "Claim the number at merge.<!-- rule:git-slug-then-claim-number --> Ids, not paths.\n")  # the same anchor, its sentence changed
+FIVE_LINE_EDIT = "---\nid: D-001\nslug: first\ntitle: Renamed\n---\nbody, reworded\nan added line\n"  # record("D-001", "first") with two lines changed and one added: the slug stays, a numbered record keeps its key
+
+
+def big_record(i):
+    """A decision record of about 4 KB, so that 75 of them could not fit any sensible prompt."""
+    body = "".join("Sentence %d of place %d keeps this record long enough to matter.\n" % (k, i) for k in range(60))
+    return "---\nid: pending\nslug: place-%02d\ntitle: Place %02d\n---\n%s" % (i, i, body)
+
+
+class WhereElseStub(JudgeStub):
+    """A JudgeStub that answers a where-else call only when it asks in the PLACES shape. Any other shape reads as a call with no answer, so
+    a case that drops the shape fails on its own count, not on a quiet pass. Each call's shape is kept in `shapes`."""
+    def __call__(self, prompt, *args, **kwargs):
+        if SECTION_PATH in prompt and kwargs.get("shape") is not decision_watch.PLACES:
+            self.prompts.append(prompt)
+            self.shapes.append(kwargs.get("shape"))
+            return None, "stub: the where-else call did not ask in the PLACES shape"
+        return super().__call__(prompt, *args, **kwargs)
+
+
+def where_else_calls(stub):
+    """The where-else prompts a stub took: the ones that name SECTION_PATH, the evidence every where-else prompt carries."""
+    return [p for p in stub.prompts if SECTION_PATH in p]
+
+
+def where_else_shapes(stub):
+    return [s for p, s in zip(stub.prompts, stub.shapes) if SECTION_PATH in p]
+
+
+def where_else_unknown_lines(out):
+    """The merge's where-else UNKNOWN lines. The prose judge's own UNKNOWN lines do not name the where-else judge."""
+    return [line for line in out.splitlines() if "UNKNOWN" in line and re.search(r"where[ -]else", line, re.I)]
+
+
+def where_else_candidates(out):
+    """The merge's candidate lines from the where-else judge: each names a candidate and no UNKNOWN."""
+    return [line for line in out.splitlines() if "candidate" in line.lower() and "UNKNOWN" not in line]
 
 
 NAMED = "hooks/x.py"  # a tracked code path that a prose line names in backticks
@@ -19393,6 +19858,115 @@ class TouchesRead(Env):
         entry = "\n".join(lines[start:end])
         for kind in ("pull list", "pulls/N/files", "jobs read", "log read"):
             self.assertIn(kind, entry, f"the `merge --touches` entry of merge.py's docstring does not name the {kind} read")
+
+
+LOCAL_SID = "local-tier-check-session"  # what a local Bash call carries in CLAUDE_CODE_SESSION_ID
+LOCAL_OTHER = "local-tier-other-session"
+
+
+class LocalSessionRoleCheck(CloudSession):
+    """A local session's `merge <pr> --confirm` reads the role the launcher wrote for it: <config dir>/state/session-roles/<session id>.json,
+    {"session", "role", "repo"}. The id is the one a local Bash call carries in CLAUDE_CODE_SESSION_ID, and the cloud remote id is unset.
+    The session is judged by its OWN file: one that exists must name batch-runner, and a corrupt one refuses. With no own file the confirm
+    is today's, even when another session's file lingers. CS_SESSION_ROLE, when the launcher set it, must agree with the own file (rule (c)).
+    run_main is overridden to run as a local session, so the CloudSession assertions (no host read, no lock, no push on a refusal) apply."""
+
+    def run_main(self, *argv, **env):
+        """-> (rc, stdout, stderr) of merge.main in a local session: the cloud variables unset, CLAUDE_CODE_SESSION_ID as this case names
+        (default LOCAL_SID; None unsets it), and this case's config dir."""
+        values = {"CLAUDE_CODE_REMOTE": None, "CLAUDE_CODE_REMOTE_SESSION_ID": None, "CLAUDE_CODE_SESSION_ID": LOCAL_SID,
+                  "CS_SESSION_ROLE": None, "CLAUDE_CONFIG_DIR": self.cfg, **env}
+        out, err = io.StringIO(), io.StringIO()
+        with unittest.mock.patch.dict(os.environ):
+            for name, value in values.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+            try:
+                rc = self.run_merge(*argv, stdout=out, stderr=err)[0]
+            except SystemExit as e:
+                rc = e.code
+        return rc, out.getvalue(), err.getvalue()
+
+    def put_local_role(self, role, session=LOCAL_SID, name=LOCAL_SID):
+        """The launcher's role file for this session: `session` is the id inside, `name` the id the file is named for."""
+        put(os.path.join(self.cfg, "state", "session-roles", name + ".json"),
+            json.dumps({"session": session, "role": role, "repo": "o/r"}))
+
+    # The refusal and reach assertions have one home, MergeRoleCheck. They call run_main, which this class overrides.
+    assert_refused = MergeRoleCheck.assert_refused
+    assert_reaches_host = MergeRoleCheck.assert_reaches_host
+
+    # RED: the old local confirm reads no role file, so a triage file does not refuse it.
+    def test_a_triage_file_refuses_a_local_confirm(self):
+        self.put_local_role("triage")
+        self.assert_refused()
+
+    # RED: the old local confirm reads no role file, so a coordinator file does not refuse it.
+    def test_a_coordinator_file_refuses_a_local_confirm(self):
+        self.put_local_role("coordinator")
+        self.assert_refused()
+
+    # RED: the old local confirm reads no role file, so a file for another session does not refuse it.
+    def test_a_file_that_names_another_session_refuses_a_local_confirm(self):
+        self.put_local_role("batch-runner", session=LOCAL_OTHER)
+        self.assert_refused()
+
+    # Unequal ids leave the session with no own file, so today's confirm applies and the host is read.
+    def test_unequal_ids_leave_the_session_with_no_own_file(self):
+        self.put_local_role("batch-runner")
+        self.assert_reaches_host("7", "--confirm", CLAUDE_CODE_SESSION_ID=LOCAL_OTHER)
+
+    # With no id there is no own file, so a batch-runner file elsewhere does not refuse the confirm.
+    def test_an_absent_id_leaves_the_session_with_no_own_file(self):
+        self.put_local_role("batch-runner")
+        self.assert_reaches_host("7", "--confirm", CLAUDE_CODE_SESSION_ID=None)
+
+    # Another session's lingering file does not refuse a session that has no file of its own.
+    def test_another_sessions_lingering_file_does_not_refuse_a_session_with_no_file(self):
+        self.put_local_role("triage", session=LOCAL_OTHER, name=LOCAL_OTHER)
+        self.assert_reaches_host("7", "--confirm")
+
+    # Rule (c): CS_SESSION_ROLE is set and no own file exists, so the hook failed to bind the session and the confirm refuses.
+    def test_a_launcher_session_with_no_own_file_refuses_the_confirm(self):
+        self.assert_refused(CS_SESSION_ROLE="batch-runner")
+
+    # Rule (c): CS_SESSION_ROLE is set and the session has no id at all, so the hook could not bind it and the confirm refuses.
+    def test_a_launcher_session_with_no_id_at_all_refuses_the_confirm(self):
+        self.assert_refused(CLAUDE_CODE_SESSION_ID=None, CS_SESSION_ROLE="batch-runner")
+
+    # Rule (c): the own file says batch-runner and CS_SESSION_ROLE says coordinator. They differ, so the confirm refuses.
+    def test_a_launcher_session_whose_own_file_differs_refuses_the_confirm(self):
+        self.put_local_role("batch-runner")
+        reads = len(self.host.pr_calls)
+        rc, out, err = self.run_main("7", "--confirm", "--head", self.head(), CS_SESSION_ROLE="coordinator")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(len(self.host.pr_calls), reads, "the run read the host although CS_SESSION_ROLE and the own file differ")
+
+    # CONTROL, green on the builder's head: CS_SESSION_ROLE agrees with the own batch-runner file, so the confirm passes the check.
+    def test_a_launcher_session_whose_own_file_agrees_passes_the_check(self):
+        self.put_local_role("batch-runner")
+        self.assert_reaches_host("7", "--confirm", "--head", self.head(), CS_SESSION_ROLE="batch-runner")
+
+    # RED: the old local confirm reads no role file, so a malformed file does not refuse it.
+    def test_a_malformed_file_refuses_a_local_confirm(self):
+        put(os.path.join(self.cfg, "state", "session-roles", LOCAL_SID + ".json"), '{"session": ')
+        self.assert_refused()
+
+    # CONTROL, green on the old code: a batch-runner file with both ids present and equal passes the gate and reads the host.
+    def test_a_batch_runner_file_with_equal_ids_passes_the_check(self):
+        self.put_local_role("batch-runner")
+        self.assert_reaches_host("7", "--confirm", "--head", self.head())
+
+    # CONTROL, green on the old code: with no file, a local confirm keeps today's behaviour and reads the host.
+    def test_no_file_keeps_the_local_confirm_as_it_is(self):
+        self.assert_reaches_host("7", "--confirm", "--head", self.head())
+
+    # CONTROL, green on the old code: no file and no id keeps today's local confirm as it is.
+    def test_no_file_and_no_id_keeps_the_local_confirm_as_it_is(self):
+        self.assert_reaches_host("7", "--confirm", CLAUDE_CODE_SESSION_ID=None)
+
 
 # ------------------------------------------------------------------ the take's lock TTL is one fixed bound (decision merge-lock; debt lock-ttl-sized-for-gone-waits)
 FIXED_TAKE_TTL = 1200  # seconds, twenty minutes at every deadline: the value LOCK_TTL_SECONDS must hold and confirm must pass
