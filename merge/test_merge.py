@@ -6211,7 +6211,7 @@ class ReadyChecksRun(unittest.TestCase):
         def stub(args, *a, **k):
             if args[1:2] == [merge.CI_JOB]:
                 calls.append(list(args))
-                return 0, ""
+                return 0, "\n".join("PASS " + c for c in checks)  # a step with no line reads unknown (step_verdicts)
             return real(args, *a, **k)
         with unittest.mock.patch.object(merge, "sh", stub):
             merge.run_ready_checks(wt, 7, "main", checks)
@@ -18732,6 +18732,8 @@ class DraftReady(CloudSession):
         def answer(wt, *args, **kw):
             if "--pinned" in args:
                 ran.append(args)
+                if checks_state == "pass" and kw.get("raw") is not None:  # ci-job prints one PASS line per step it ran: a declared step with no line reads unknown
+                    kw["raw"].extend("PASS %s: ok" % args[i + 1] for i, arg in enumerate(args) if arg == "--step")
                 return LINT_STATES[checks_state]
             return LINT_STATES["pass"]
         with unittest.mock.patch.object(merge, "ci_job_run", side_effect=answer), \
