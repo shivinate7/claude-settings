@@ -7,6 +7,8 @@ Modes:
 - SubagentStop: When a builder, test-author or record-writer stops, judges its whole diff
   against its role, for example a builder that changed a test path. A builder's offence
   is refused at its first stop; any other role's offence is logged for the reviewer.
+- PostToolUse: After a builder's Bash or PowerShell call, reads git status once and refuses
+  the call's result when a test path changed.
 
 Claude Code runs this script before each matched tool call. The script reads one
 JSON object on stdin and answers on stdout.
@@ -2855,14 +2857,27 @@ def diff_rule(role: str) -> str:
             DESIGNER_ROLE: "designer-diff"}.get(role, "builder-diff")
 
 
+# The undo route of a builder's test change, shared by the diff refusal and the shell-write block.
+BUILDER_UNDO_ROUTE = (
+    "Undo it: restore each test file you changed to its text at HEAD, and delete each test file "
+    "you added. "
+)
+
+
+# The merge step of a builder's test conflict, shared by the diff refusal and the shell-write block.
+BUILDER_MERGE_ABORT_ROUTE = (
+    "If a merge is in progress and the refusal is about a test conflict, run `git merge --abort` "
+    "and report it, so the orchestrator hands the whole merge to a test-author. "
+)
+
+
 def builder_diff_reason() -> str:
     """The refusal text for a builder's test change. It names no path: it gives the undo route."""
     return (
         BUILDER_TEST_REASON + " The guard refuses a test change you made, at commit, push and stop. "
-        "Undo it: restore each test file you changed to its text at HEAD, and delete each test file "
-        "you added. If a commit of yours holds the change, stop and report it. "
-        "If a merge is in progress and the refusal is about a test conflict, run `git merge --abort` "
-        "and report it, so the orchestrator hands the whole merge to a test-author. "
+        + BUILDER_UNDO_ROUTE +
+        "If a commit of yours holds the change, stop and report it. "
+        + BUILDER_MERGE_ABORT_ROUTE +
         "This refusal is final: never write the files another way. (decision builders-cannot-edit-tests)"
     )
 
@@ -2909,6 +2924,104 @@ def judge_stop(payload) -> None:
         sys.exit(0)
     elif found or noted:
         record("SubagentStop", "noted", diff_rule(role), found or noted[0])
+
+
+def builder_shell_write_reason(merging: bool = False) -> str:
+    """The block text for a test change a builder's shell call left in its worktree. It names no path.
+    `merging`: a merge is in progress (MERGE_HEAD), so the merge-abort step is named."""
+    return (
+        BUILDER_TEST_REASON + " Your shell call left a test change in your worktree. " + BUILDER_UNDO_ROUTE
+        + "If you cannot undo it yourself, stop and report, so the orchestrator hands the paths to a test-author. "
+        + (BUILDER_MERGE_ABORT_ROUTE if merging else "")
+        + "This refusal is final: never write the files another way. (decision builders-cannot-edit-tests)"
+    )
+
+
+# The two-letter `git status --porcelain` codes of a path a merge left unmerged.
+UNMERGED_CODES = ("DD", "AU", "UD", "UA", "DU", "AA", "UU")
+
+
+# The git-dir entries of a merge, rebase or cherry-pick that stopped on a conflict. Each brings the other
+# side's files into the worktree, so git status lists them as changed though the builder wrote none.
+# REVERT_HEAD, SQUASH_MSG and MERGE_MSG are left out: those stops are not judged as incoming here.
+BUILDER_CONFLICT_STATES = ("MERGE_HEAD", "rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD")
+
+
+def conflict_states(where: str) -> tuple:
+    """The BUILDER_CONFLICT_STATES present in the git dir of the checkout at or above `where`: file reads, no git
+    call. Empty on any read failure, so the caller judges the call as outside a stop."""
+    root = _checkout_root_by_stat(os.path.abspath(where))
+    gitdir = _git_dir_by_file(root) if root else ""
+    if not gitdir:
+        return ()
+    return tuple(name for name in BUILDER_CONFLICT_STATES if os.path.exists(os.path.join(gitdir, name)))
+
+
+def status_entries(raw: str):
+    """(code, path) for each path a `git status --porcelain -z` answer names. A rename or copy names both
+    ends, each with the entry's code: the old path is a change too, so a test moved out of a test path counts."""
+    records = raw.split("\0")
+    entries, index = [], 0
+    while index < len(records):
+        entry = records[index]
+        index += 1
+        if len(entry) < 4:
+            continue
+        entries.append((entry[:2], entry[3:]))
+        if entry[0] in "RC" or entry[1] in "RC":
+            if index < len(records) and records[index]:
+                entries.append((entry[:2], records[index]))
+            index += 1
+    return entries
+
+
+def status_paths(raw: str):
+    """The paths a `git status --porcelain -z` answer names (see `status_entries`)."""
+    return [path for _code, path in status_entries(raw)]
+
+
+def unmerged_test_path(raw: str) -> str:
+    """The first test path a `git status --porcelain -z` answer lists as unmerged, else ''."""
+    return next((path for code, path in status_entries(raw)
+                 if code in UNMERGED_CODES and is_builder_test_rel(path)), "")
+
+
+def judge_shell_write(payload) -> None:
+    """PostToolUse, a builder's Bash or PowerShell call (rule `builder-bash-test-write`). The PreToolUse shell
+    check reads command text, so a script that computes its paths passes it. This reads the result: one
+    `git status --porcelain` in the call's cwd, each changed path tested with `is_builder_test_rel`. A hit blocks
+    the call's result, with the undo route. A status git cannot answer logs `builder-bash-test-write-unread`
+    and allows. In a stopped merge, rebase or cherry-pick (`conflict_states`) with no unmerged test path, the hit
+    logs `builder-bash-test-write-merging`, noted, and allows. Any other session, and any other tool, returns
+    before a git call."""
+    if agent_role(payload) != BUILDER_ROLE:
+        return
+    tool = payload.get("tool_name", "") or ""
+    if tool not in ("Bash", "PowerShell"):
+        return
+    where = payload.get("cwd", "") or os.getcwd() or ""
+    # -z: paths arrive unquoted, so a name with a space or a non-ASCII letter is read as written.
+    # --untracked-files=all: a new folder is listed by its files, so a test inside it is seen.
+    answer = guard_core._git(where, "status", "--porcelain", "-z", "--untracked-files=all") if where else None
+    if answer is None or answer.returncode != 0:
+        record(tool, "noted", "builder-bash-test-write-unread", where)
+        return
+    found = next((rel for rel in status_paths(answer.stdout) if is_builder_test_rel(rel)), "")
+    if not found:
+        return
+    # Every read runs before the deny row, so no read failure can log a deny without its block.
+    states = conflict_states(where)
+    if states and not unmerged_test_path(answer.stdout):
+        # The test path came in with the other side of a stopped merge, rebase or cherry-pick. The merge-aware
+        # commit and stop check (own_changes) judges that change.
+        record(tool, "noted", "builder-bash-test-write-merging", states[0] + " " + found)
+        return
+    # A role guard stays outside every override (decision owner-override): a block is final.
+    guard_core.set_override_veto(lambda: True)
+    record(tool, "deny", "builder-bash-test-write", found)
+    print(json.dumps({"decision": "block", "reason": "builder-bash-test-write: "
+                      + builder_shell_write_reason("MERGE_HEAD" in states)}))
+    sys.exit(0)
 
 
 SPAWN_TOOLS = ("Agent", "Task")
@@ -5853,19 +5966,34 @@ def _checkout_root_by_stat(folder: str) -> str:
     return ""
 
 
+def _git_dir_by_file(root: str) -> str:
+    """The per-worktree git directory of the checkout at ROOT, read from files alone, else ''. A `.git`
+    folder is its own; a `.git` file names `gitdir: <dir>`, relative to ROOT or absolute. No git is
+    spawned. An unreadable or undecodable `.git` file is ''."""
+    dot = os.path.join(root, ".git")
+    if os.path.isdir(dot):
+        return dot
+    try:
+        with open(dot, encoding="utf-8") as handle:
+            first = handle.readline(4096).strip()
+    except (OSError, ValueError):  # ValueError: UnicodeDecodeError, or a NUL in the path
+        return ""
+    if not first.startswith("gitdir:"):
+        return ""
+    return os.path.join(root, first[len("gitdir:"):].strip())
+
+
 def _git_common_dir(root: str) -> str:
     """The git common directory of the checkout at ROOT, read from files alone, else ''. A `.git`
-    folder is its own; a `.git` file names `gitdir: <dir>`, and `<dir>/commondir` names the common
-    one, relative to `<dir>`. No git is spawned."""
+    folder is its own; a `.git` file names `gitdir: <dir>` (`_git_dir_by_file`), and `<dir>/commondir`
+    names the common one, relative to `<dir>`. No git is spawned."""
     dot = os.path.join(root, ".git")
     try:
         if os.path.isdir(dot):
             return os.path.realpath(dot)
-        with open(dot, encoding="utf-8") as handle:
-            first = handle.readline(4096).strip()
-        if not first.startswith("gitdir:"):
+        git_dir = _git_dir_by_file(root)
+        if not git_dir:
             return ""
-        git_dir = os.path.join(root, first[len("gitdir:"):].strip())
         try:
             with open(os.path.join(git_dir, "commondir"), encoding="utf-8") as handle:
                 git_dir = os.path.join(git_dir, handle.readline(4096).strip())
@@ -7060,6 +7188,9 @@ def workflow_args_hit(tool: str, tool_input: dict) -> str:
 def judge(payload) -> None:
     if payload.get("hook_event_name") == "SubagentStop":
         judge_stop(payload)
+        return
+    if payload.get("hook_event_name") == "PostToolUse":
+        judge_shell_write(payload)
         return
     tool = payload.get("tool_name", "") or ""
     tool_input = payload.get("tool_input", {}) or {}
