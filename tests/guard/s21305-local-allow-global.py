@@ -189,6 +189,21 @@ add("local-allow: a valid JSON write naming Documents under additionalDirectorie
 add("local-allow: a rule-shaped string at the top of a fragment still asks", "ask", "local-allow-global",
     tool="Write", cwd=NOGIT, file_path=LA_LOCAL, content='"' + RULE_NEW + '",  // the shared file\n',
     carries=ASK_CARRIES + (RULE_NEW,), lacks=NO_OVERRIDE)
+# FALSE ALARMS, LISTS OF LISTS. A list inside a list has no key of its own, so it is not a list of unknown key at the top
+# of a fragment, and its strings are no rule. A valid JSON text that is not an object holds no settings rule either.
+add("local-allow: a Write of valid JSON that is a list, not an object, naming rule-shaped strings does not ask", "allow",
+    tool="Write", cwd=NOGIT, file_path=LA_LOCAL, content='["Documents","Github"]', lacks=NOT_RULE)
+add("local-allow: a write that does not parse, with a list of lists under a non-allow key, does not ask", "allow",
+    tool="Write", cwd=NOGIT, file_path=LA_LOCAL, content='{"matrix": [["Alpha","Beta"]],}', lacks=NOT_RULE)
+# Controls: an allow rule under the real key still asks in a write that does not parse, alone and behind a list of
+# lists, so a fix to the nested-list case leaves the allow key's rules counted.
+add("local-allow: a write that does not parse, with an allow rule under the allow key, still asks", "ask",
+    "local-allow-global", tool="Write", cwd=NOGIT, file_path=LA_LOCAL, content=broken_allow([RULE_NEW]),
+    carries=ASK_CARRIES + (RULE_NEW,), lacks=NO_OVERRIDE)
+add("local-allow: a write that does not parse, with a list of lists ahead of an allow rule, still asks", "ask",
+    "local-allow-global", tool="Write", cwd=NOGIT, file_path=LA_LOCAL,
+    content='{"matrix": [["Alpha","Beta"]], "permissions": {"allow": ["' + RULE_NEW + '"],}}',
+    carries=ASK_CARRIES + (RULE_NEW,), lacks=NO_OVERRIDE)
 
 # FRAGMENT SCANNER. A text that does not parse is read by `_local_allow_fragment`, so each write below holds a
 # trailing comma and the JSON parser never reads it. Each case pins one arm no case above reaches: // and # inside
