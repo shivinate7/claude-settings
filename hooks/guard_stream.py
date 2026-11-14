@@ -340,17 +340,25 @@ def check_timeout_hit(stripped: str, background: bool, timeout_ms=None) -> str:
     return hit if timeout_ms < bound else ""
 
 
+CHECK_TIMEOUT_TEMPLATE = (
+    "a lane lint with a time limit shorter than its own bound ends before it prints a verdict "
+    "(decision background-check-through-verdict). "
+    "A run in the foreground is capped below that bound. "
+    "Remedy: start it in the background, as `verdict <cmd>`, with a time limit of %s. "
+    "That is LINT_SECONDS plus PUSHED_HEAD_WAIT_MINUTES times 60, times 1000. "
+    "Read the verdict when the run ends."
+)
+
+
+def check_timeout_limit_text() -> str:
+    """The limit the refusal names, read from the merge tool when it loads."""
+    bound = check_timeout_bound_ms()
+    return "at least %d ms" % bound if bound is not None else "above the bound"
+
+
 def _check_timeout_reason() -> str:
     """The text of CHECK_TIMEOUT_REASON, with the bound read from the merge tool."""
-    bound = check_timeout_bound_ms()
-    limit = "at least %d ms" % bound if bound is not None else "above the bound"
-    return (
-        "a lane lint with a time limit shorter than its own bound ends before it prints a verdict. "
-        "A run in the foreground is capped below that bound. "
-        "Remedy: start it in the background, as `verdict <cmd>`, with a time limit of " + limit + ". "
-        "That is LINT_SECONDS plus PUSHED_HEAD_WAIT_MINUTES times 60, times 1000. "
-        "Read the verdict when the run ends."
-    )
+    return CHECK_TIMEOUT_TEMPLATE % check_timeout_limit_text()
 
 
 def __getattr__(name):
