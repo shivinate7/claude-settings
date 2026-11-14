@@ -1341,13 +1341,14 @@ def _cleared(exports, results, newest, page_id):
 
 def export_check(cwd, transcript_path, session_id):
     """(reason, note) of the export check (roadmap step waiting-export-check). `reason` is the block text
-    when this session is the page writer and the transcript holds a successful ArtifactData write of an
-    exported collection to the repo's waiting page that is newer than the newest commit on origin/<record
-    branch> touching the waiting copy folder, and no later shell run of export_page.py cleared it (a line
-    `same`, or `<page id>: same` under --all, anywhere in its output). This session is the writer when the newest meta/page get names
-    `session_id` or the id the remote env names (override.remote_session_id). A writer named there decides
-    alone. Only when none is named does an interpreter run of export_page.py (EXPORT_RUN) before the write
-    make this session the writer. A session that is not the writer, or whose writer cannot be told, passes
+    when this session is the page writer and the transcript holds a page write or a page wake (below) that is
+    newer than the newest commit on origin/<record branch> touching the waiting copy folder, and no later shell
+    run of export_page.py cleared it (a line `same`, or `<page id>: same` under --all, anywhere in its output).
+    A page write is a successful ArtifactData write of an exported collection to the repo's waiting page. This
+    session is the writer when the newest meta/page get names `session_id` or the id the remote env names
+    (override.remote_session_id). A writer named there decides alone. Only when none is named does the extras key
+    or an interpreter run of export_page.py (EXPORT_RUN), as the last sentence says, make this session the
+    writer. A session that is not the writer, or whose writer cannot be told, passes
     with no note. `note` is the systemMessage text only after a page write was found and a read of the repo
     or the layout failed: that is never a block. A transcript that cannot be read gives neither. The whole
     transcript is read and timestamps decide, so a write in an earlier turn still counts. A wake (a user record
