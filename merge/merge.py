@@ -1454,7 +1454,7 @@ class Host:
         unknown. Any other run that did not succeed is red (a broken workflow file runs no job).
         A cancelled run with no red job that nothing clears keeps its line, in the unknown detail and beside a red verdict. It is named with `gh run rerun <id>` only when its
         `head_sha` is the head_sha of the newest run on the page read (any status, any event in BASE_EVENTS, from the unfiltered list): runs on the base start at its head, and a re-run tests the run's own commit. Never named for a run with a red job or a re-run in flight.
-        An empty run is no verdict (clear_rule.empty_without_evidence, the one home; owner ruling own-812-a-judge-suite-runs): a completed success run of the push group
+        An empty run is no verdict (clear_rule.empty_without_evidence, the one home; decision no-merge-onto-red-main): a completed success run of the push group
         (push and dispatch) that ran no suite job, whatever its push-skip job says. The newest run of the group that is not empty is the group's verdict, so an older failed
         run stays failed. A group with no such run on the page is unknown, never green or red. A page with no run of the group at all is not judged. A schedule run is judged as it is.
         A red verdict's detail also holds breaking_line's segment for each red run judged (one per file and group), the head group's first: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).

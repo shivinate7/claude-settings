@@ -20,7 +20,7 @@ workflow is never read for it. Step two reads the workflow, once step one finds 
 A job name maps to a job when exactly one job has it as `name:` or key. Two matches, or none, map to no job, and the job is kept. A plain
 `if:` that goes on over later lines is read whole; a quoted one over several lines is not read, and the job is kept.
 
-The empty-run rule (decision no-merge-onto-red-main; owner ruling own-812-a-judge-suite-runs). Only a run that ran its suites is judged. A completed
+The empty-run rule (decision no-merge-onto-red-main). Only a run that ran its suites is judged. A completed
 `success` run of the push group (the events of events.json that share a group with `push`: push and workflow_dispatch) is EMPTY when no job of it
 concluded `success` except the bookkeeping jobs `scope`, `push-skip` and `nightly-skip`. A run with no jobs is empty. Why: a push can run no suite
 (push-skip skips the whole run, so scope and every suite job skip), yet the run concludes `success` and must not hide an older failed run
