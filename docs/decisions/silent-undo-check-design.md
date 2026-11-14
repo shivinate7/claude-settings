@@ -26,7 +26,8 @@ nothing. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so th
 reason. No switch turns the check off.
 
 A refusal prints the whole remedy, so the author can copy it: a commit message between the lines
-`--- begin commit message ---` and `--- end commit message ---`, then the command
+`--- begin commit message ---` and `--- end commit message ---`. The two marker lines are not part of the
+message, and the refusal says to drop them. Then it prints the command
 `git log -1 --format='%(trailers:key=Drops-lines)'` to run after the commit. Git reads trailers only in a
 message's last paragraph, so the `Drops-lines`, `Co-Authored-By` and `Claude-Session` lines sit together in
 one paragraph under the subject. `remedy_text()` in `lint/check_silent_undo.py` is the one home of that text.
@@ -82,6 +83,9 @@ changed lines are a new edit, so the reversal dial stays at one line until a mea
   tokens to a line (a new argument, a trailing clause) is a rewrite. A negation voids that only when it sits
   inside the original words (`deploy now` became `deploy not now`). A negation after the last original word
   is new text beside the old, so the line is not lost. Trailing punctuation of the old line is no word.
+  Two cases keep the plain rule, where a negation anywhere counts: an old line with no word (`}`), and a
+  new line with a comment opener (`#`, `//`, `--`, `/*`) that the old line lacks, since the old words may
+  sit inside a comment.
 - A stale value put back is a reversal, never a rewrite. A similar line excuses a drop only when it
   differs from both the lost line and the base line, and its operators and negation match the lost line.
   Numbers may differ only when both sides changed the base line (a third value).

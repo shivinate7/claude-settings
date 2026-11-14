@@ -237,6 +237,7 @@ def pool_of(cwd, p, m):
 
 
 TOKEN = re.compile(r"[A-Za-z_]+|\d+(?:\.\d+)?|[<>=!]=?|[-+*/%&|^~]|\S")
+OPENER = re.compile(r"#|//|--|/\*")  # a comment opener of the languages the repo holds
 NEGATION = re.compile(r"\b(?:not|no|never|none|nor|cannot|without)\b|n't\b", re.I)
 
 
@@ -259,7 +260,10 @@ def extends(line, g):
     original word is new text beside the old, so it is no drop (`... pending record.` became
     `... pending record, for an unproven push, not for a proven one.`). The count runs to the end of the last
     matched word. Trailing punctuation of line is no word: a final `.` of line may match the final `.` of g.
-    g may not hold more negations in that span than line does (`deploy now` became `deploy not now`)."""
+    g may not hold more negations in that span than line does (`deploy now` became `deploy not now`).
+    Two cases keep the plain rule, a negation anywhere in g counts. A line with no word has no original words
+    to keep in order (`}` became `} not reachable`). A g with a comment opener (`#`, `//`, `--`, `/*`) that line
+    lacks may hold the original words inside a comment (`x = run(cfg)` became `x = true  // run(cfg) is not needed`)."""
     lt = list(TOKEN.finditer(line))
     gm = list(TOKEN.finditer(g))
     if not lt or not gm or lt[0].group() != gm[0].group():
@@ -273,7 +277,8 @@ def extends(line, g):
         spans.append(gm[pos])
         pos += 1
     words = [m for t, m in zip(lt, spans) if t.group()[0].isalnum() or t.group()[0] == "_"]
-    end = (words[-1] if words else spans[-1]).end()
+    pasted = len(OPENER.findall(g)) > len(OPENER.findall(line))
+    end = words[-1].end() if words and not pasted else len(g)
     return len(NEGATION.findall(g[:end])) <= len(NEGATION.findall(line))
 
 
@@ -882,7 +887,8 @@ def remedy_text():
     The first line is the sentence the caller prefixes. The rest is printed as it stands, so the message can be
     copied whole."""
     return "\n".join([
-        "put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message, in its last paragraph:" % TRAILER,
+        "put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message, in its last paragraph."
+        " The two marker lines are not part of the message: drop them when you copy it:" % TRAILER,
         REMEDY_BEGIN,
         "Drop lines from <path> on purpose",
         "",
