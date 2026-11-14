@@ -206,8 +206,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     slice, never full guard shards: `checks-macos` and `checks-macos-b` run a mac-tagged slice. A push
     to main starts no macOS job (a job-level `github.event_name != 'push'`, since a step-level skip
     still starts the runner). It starts no suite on a tree that a green integration PR run tested.
-    A reused run counts for a suite only if that suite ran on the same tree. A lane's touched-tests
-    macOS leg runs only for files whose subject is macOS. Windows keeps its full guard and merge
+    A lane's touched-tests macOS leg runs only for files whose subject is macOS. Windows keeps its full guard and merge
     shards, once, in the integration PR run. Dropping them to a tagged slice is held (R62 part 4).
     The install.sh tests run on both Linux and macOS. The nightly skips when main's head has a green
     push run and the newest completed nightly is green (the `nightly-skip` job), and `scope` waits on
