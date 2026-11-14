@@ -21,6 +21,18 @@ The owner's reading, Nov 1 20:54 CST: the rule keeps main from moving under a ru
 - The refusal names the other PR, and the check with its link or the workflow that runs. It says to wait. `--express` keeps the brake and adds the prose-only entry rule (ruling R59 part 5, a ruled prose change skips the batch queue and runs only the checks that read its files; decision owner-override). The session that watches the other PR wakes when its run ends. A red run also posts the CI-done comment (rule git-ci-done-comment-wakes).
 - No reason flag lifts this refusal in the tool.
 
+Express lane:
+
+- R55, merge-flow fixes take an express lane. It puts a fix ahead of every other lane.
+- R67, drain first, puts a fix ahead of the drain too.
+- R65, ready express lanes share one batch: express lanes ready at the same time merge together.
+- If a batch is in CI when an express fix is ready, the batch runner cancels that run first. Rule git-no-merge-during-batch-ci still holds: no run is in progress at the merge.
+- The list names kinds of fix. It is not a closed list of step slugs. Every fix that tracks or lands work takes the express lane. Kinds named so far: merge flow, CI fixes, lane-start and hand-in guards, lost-work sweep, the pick-to-page guard, and the ruling-challenge and deference fixes.
+- A fix of one of these kinds takes the lane even when no list names its slug. The test is whether the fix tracks or lands work. Sheer new work does not take the express lane.
+- This is not the `--express` flag above.
+
+Reason: R67 part 4 (owner grant, 10:54 and 10:56 CST Nov 13). Owner, 10:54 CST: "my rulings are being read too strictly". Owner, 10:56 CST: "fast track all of those". R55's list is read by kind, not word by word.
+
 Not counted:
 
 - Drafts. CI skips them.
