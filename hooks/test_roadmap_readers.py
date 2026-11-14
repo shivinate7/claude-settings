@@ -10,6 +10,7 @@ ref is fetched, and a failed fetch says "read as of" where the reader's verdict 
 store fixtures of lint/test_ruled_store.py, one home for the roadmap refs. No network: every origin is a local path.
 """
 import contextlib
+import datetime
 import importlib
 import io
 import json
@@ -26,8 +27,12 @@ sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import test_ruled_store as fixture  # noqa: E402  the one home of the roadmap-ref fixtures
 import override  # noqa: E402
 import question_form  # noqa: E402
+import roadmap_ref  # noqa: E402  its clock is pinned by the case that reads a line behind the ref
 import sendmessage_state  # noqa: E402
 
+# A fixed clock, the instant lint/test_roadmap_ref.py also uses: 12:45 CST. A real clock would age a fixture line.
+NOW = datetime.datetime(2026, 11, 13, 18, 45, tzinfo=datetime.timezone.utc).timestamp()
+BEHIND_SHA = "1" * 40  # a sha the local ref does not name
 OLD_DECISION = "old-decision"  # a bare decision slug: a ruling that names it supersedes the whole decision
 RULING = "r-old"
 MESSAGE = "The owner settled it: decisions/%s covers this, so the old rule stands." % OLD_DECISION
@@ -59,6 +64,11 @@ def fresh_helper(fake):
     return fake
 
 
+def behind_head(repo):
+    """FETCH_HEAD as a fetch 30 s before NOW whose roadmap line names BEHIND_SHA, a commit the local ref does not hold."""
+    fixture.write_fetch_head(repo, "roadmap", NOW - 30, sha=BEHIND_SHA)
+
+
 class RulingsReadTests(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="roadmap_readers_", dir=fixture.run_folder())
@@ -82,16 +92,31 @@ class RulingsReadTests(unittest.TestCase):
         self.assertEqual(hit, (OLD_DECISION, RULING), "a ruling only on origin, behind a stale ref, was not read: %r"
                          % (hit,))
 
-    def test_a_pass_after_a_failed_fetch_says_read_as_of(self):
-        gone = os.path.join(self.root, "gone-pass.git")
-        repo = fixture.clone_with_origin(self.root, "pass", gone, EMPTY)
-        fixture.without_fetch_head(repo)
+    def failed_fetch_read(self, name, head):
+        """(hit, stderr) of one past-ruling read of a store with no superseding ruling, whose origin is gone, so its
+        fetch fails. `head` sets the repo's FETCH_HEAD first."""
+        gone = os.path.join(self.root, "gone-%s.git" % name)
+        repo = fixture.clone_with_origin(self.root, name, gone, EMPTY)
+        head(repo)
         said = io.StringIO()
         with contextlib.redirect_stderr(said):
             hit = sendmessage_state.past_ruling_hit({"cwd": repo}, MESSAGE)
+        return hit, said.getvalue()
+
+    def test_a_pass_after_a_failed_fetch_says_read_as_of(self):
+        hit, said = self.failed_fetch_read("pass", fixture.without_fetch_head)
         self.assertIsNone(hit, "control: a store with no superseding ruling gave a hit: %r" % (hit,))
-        self.assertIn("read as of", said.getvalue(), "the pass said nothing about a fetch that failed: %r"
-                      % said.getvalue())
+        self.assertIn("read as of", said, "the pass said nothing about a fetch that failed: %r" % said)
+
+    def test_a_roadmap_line_behind_the_ref_says_read_as_of_when_the_fetch_fails(self):
+        # fresh_ref reads the clock once. Pinned at NOW, the line is 30 s old: fresh by age, so only its sha can make
+        # the read stale, and the failed fetch is then named.
+        clock = mock.Mock(time=mock.Mock(return_value=NOW))
+        with mock.patch.object(roadmap_ref, "time", clock):
+            hit, said = self.failed_fetch_read("behind", behind_head)
+        self.assertIsNone(hit, "control: a store with no superseding ruling gave a hit: %r" % (hit,))
+        self.assertIn("read as of", said, "a read whose roadmap line is behind the ref said nothing about its failed "
+                      "fetch: %r" % said)
 
     def test_a_refusal_after_a_failed_fetch_says_read_as_of(self):
         gone = os.path.join(self.root, "gone-refuse.git")

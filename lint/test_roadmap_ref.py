@@ -328,9 +328,23 @@ def kill_quietly(pid):
         pass
 
 
+# A sha that no store in these cases names. A roadmap line that names it is behind the local ref.
+BEHIND_SHA = "1" * 40
+
+
+def roadmap_line_sha(repo):
+    """The sha on the roadmap line of the repo's FETCH_HEAD, or None when the file has no roadmap line."""
+    with open(fixture.fetch_head(repo), encoding="utf-8") as handle:
+        for line in handle:
+            if helper().ROADMAP_LINE in line:
+                return line.split("\t", 1)[0]
+    return None
+
+
 class FetchRuleTests(unittest.TestCase):
-    """The roadmap ref is fresh only when FETCH_HEAD names the roadmap branch. A fresh FETCH_HEAD of another branch
-    says nothing about the roadmap, so the roadmap is fetched."""
+    """The roadmap ref is fresh only when FETCH_HEAD's roadmap line names the ref's tip and is fresh by mtime. A fresh
+    FETCH_HEAD of another branch says nothing about the roadmap, so the roadmap is fetched. A plain fetch of the roadmap
+    in a single-branch clone moves FETCH_HEAD and not origin/roadmap: a fresh line that names another commit is stale."""
 
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="roadmap_rule_", dir=fixture.run_folder())
@@ -344,13 +358,54 @@ class FetchRuleTests(unittest.TestCase):
         self.assertEqual(len(calls), 1, "a fresh FETCH_HEAD of master counted as a fresh roadmap: %d roadmap fetch(es),"
                          " want 1" % len(calls))
 
-    def test_a_fresh_roadmap_line_starts_no_fetch(self):
+    def test_a_fresh_roadmap_line_at_the_ref_tip_starts_no_fetch(self):
         repo = fixture.clone_with_origin(self.root, "roadmap-fresh", None, OLD_STORE)
-        fixture.write_fetch_head(repo, "roadmap", NOW - 30)
+        fixture.write_fetch_head(repo, "roadmap", NOW - 30, sha=fixture.ref_sha(repo))
+        self.assertEqual(roadmap_line_sha(repo), fixture.ref_sha(repo),
+                         "control: the roadmap line does not name the ref's tip, so this case tests no fresh tip")
         fetch, calls = counting_fetch()
         note = helper().fresh_ref(repo, now=NOW, fetch=fetch)
-        self.assertEqual(calls, [], "a fresh roadmap line started %d fetch(es), want none" % len(calls))
-        self.assertEqual(note, "", "a fresh roadmap line gave the note %r, want empty" % note)
+        self.assertEqual(calls, [], "a fresh roadmap line at the tip started %d fetch(es), want none" % len(calls))
+        self.assertEqual(note, "", "a fresh roadmap line at the tip gave the note %r, want empty" % note)
+
+    def test_a_roadmap_line_behind_the_ref_is_fetched_and_moves_the_ref(self):
+        newer = fixture.ruling_files({"old": fixture.entry("old"), "new": fixture.entry("new")})
+        origin = fixture.bare_origin(self.root, "behind-origin", OLD_STORE)
+        repo = fixture.clone_with_origin(self.root, "behind", origin, OLD_STORE)
+        # A single-branch clone: the plain fetch below writes FETCH_HEAD and does not move origin/roadmap.
+        fixture.git(repo, "config", "remote.origin.fetch", "+refs/heads/main:refs/remotes/origin/main")
+        newest = fixture.point_ref(origin, "refs/heads/roadmap", newer, self.root)
+        fixture.git(repo, "fetch", "--quiet", "origin", "roadmap")
+        os.utime(fixture.fetch_head(repo), (NOW - 30, NOW - 30))
+        stale = fixture.ref_sha(repo)
+        self.assertEqual(roadmap_line_sha(repo), newest, "control: FETCH_HEAD does not name the fetched roadmap commit")
+        self.assertNotEqual(stale, newest, "control: origin/roadmap already names the fetched commit, so it is not behind")
+        note = helper().fresh_ref(repo, now=NOW)
+        self.assertEqual(fixture.ref_sha(repo), newest, "a roadmap line behind the ref was judged fresh: origin/roadmap "
+                         "stayed at %s, want %s" % (stale, newest))
+        self.assertEqual(note, "", "a fetched ref gave the note %r, want empty" % note)
+
+    def test_a_roadmap_line_behind_the_ref_starts_one_fetch_and_gives_the_note_when_it_fails(self):
+        gone = os.path.join(self.root, "gone-behind.git")
+        repo = fixture.clone_with_origin(self.root, "behind-gone", gone, OLD_STORE)
+        fixture.write_fetch_head(repo, "roadmap", NOW - 30, sha=BEHIND_SHA)
+        self.assertNotEqual(roadmap_line_sha(repo), fixture.ref_sha(repo), "control: the roadmap line names the ref's tip")
+        fetch, calls = counting_fetch(result=False)
+        note = helper().fresh_ref(repo, now=NOW, fetch=fetch)
+        self.assertEqual(len(calls), 1, "a roadmap line behind the ref started %d fetch(es), want 1" % len(calls))
+        self.assertTrue(note.startswith("read as of "), "a failed fetch of a ref behind its roadmap line gave %r, want a"
+                        " read as of note" % note)
+
+    def test_the_roadmap_line_decides_not_the_first_line(self):
+        repo = fixture.clone_with_origin(self.root, "two-lines", None, OLD_STORE)
+        fixture.write_fetch_lines(repo, [(fixture.ref_sha(repo), "main"), (BEHIND_SHA, "roadmap")], when=NOW - 30)
+        self.assertEqual(roadmap_line_sha(repo), BEHIND_SHA, "control: the roadmap line does not name the behind sha")
+        fetch, calls = counting_fetch(result=False)
+        note = helper().fresh_ref(repo, now=NOW, fetch=fetch)
+        self.assertEqual(len(calls), 1, "a FETCH_HEAD whose first line names the tip, with a roadmap line behind it, "
+                         "started %d fetch(es), want 1" % len(calls))
+        self.assertTrue(note.startswith("read as of "), "a FETCH_HEAD with a roadmap line behind the ref gave %r, want a"
+                        " read as of note" % note)
 
 
 @unittest.skipUnless(os.name == "posix", "the fake git is a POSIX script, and a process group is a POSIX notion")
