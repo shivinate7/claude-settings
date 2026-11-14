@@ -1,7 +1,7 @@
 {
  "id": "red-gate-reads-suite-run",
  "title": "The no-merge-onto-red-main gate reads a skipped push run as green only when a green PR run of that tree backs it",
- "status": "todo",
+ "status": "blocked",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL2oxYMVKoXseeKacVG",
@@ -10,5 +10,5 @@
  "why": "The gate read a run of one success and 28 skipped as main's green though no green PR run backed that tree and the parent run had a failed job, so a red parent read green.",
  "source": "Coordinator 16:05 CST Nov 13: run 43515441901 on ab27336489 is 1 success and 28 skipped, so the gate read green above a red parent. The coordinator's mistake below.",
  "note": "Rewritten 16:08 CST Nov 13 (coordinator 16:06, answering the owner's 16:06 question). A skipped push run is BY DESIGN when a green PR run of the same tree stands behind it (ruling own-769-a-narrowed-pr-push). The gap is narrower: the gate read run 43515441901 on ab27336489 (1 success, 28 skipped) as main's green while no green PR run backed that tree (#3278 was web-merged with its draft run still queued) and its parent run 43509070895 has a failed `checks` job (coordinator's reads, unchecked by triage). Fix: the gate reads a skipped push run as green only when a green PR run of that tree exists; otherwise it reads the newest run that ran its suites. A check change: test-author red case first (a skipped run with no backing green PR run over a red parent reads red or unknown; a skipped run with a backing green PR run reads green), builder, reviewer. Lane session_013NEJL2oxYMVKoXseeKacVG (coordinator's order); not started. Relations: push-skip-proven-tree, cancelled-run-blame-unknown, blame-on-finished-red-job. The runner pause at 16:05 stands on the real red (the catalog job), not on the skip; the coordinator withdrew the \"mistake\" line for the 16:01 go, and triage reads it the same way. Past rulings not checked.",
- "updatedAt": "2026-11-13T16:08:35-06:00"
+ "updatedAt": "2026-11-13T18:09:36-06:00"
 }
