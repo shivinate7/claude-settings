@@ -19,8 +19,8 @@ any size. Keep a fix under 40 lines, against reading cost alone.<!-- rule:roles-
 designer, design reviewer, refuter, or Explore, never two. A lane that touches a screen gets a designer before
 the builder and a design reviewer after it. A text-only change on an existing screen skips the designer (decision `design-agents`).<!-- rule:roles-one-role-per-agent --> A workflow agent takes the builder or reviewer role through `agentType`. Each
 agent runs its role's model and effort from `agent-model-cap`, the model-per-role table.<!-- rule:roles-model-per-role-table --> Sonnet is
-the ceiling, except Plan, the built-in advisor (`advisorModel`), the designer, the design reviewer,
-the refuter, which run Opus. An Explore whose brief's first non-blank line carries the audit marker `Audit:` may run Sonnet or Opus. Any other agent runs Opus, or any
+the ceiling, except Plan, the built-in advisor (`advisorModel`), the designer and
+the refuter, which run Opus. The design reviewer runs Sonnet at high effort. An Explore whose brief's first non-blank line carries the audit marker `Audit:` may run Sonnet or Opus. Any other agent runs Opus, or any
 model above Sonnet, only on my grant for the spawn I name, or by override: `opus 2h` for a time,
 `opus builders 2h` for one role.<!-- rule:roles-sonnet-is-the-ceiling --> After a Plan agent returns, a refuter gets
 the task brief and the plan, word for word, and nothing else. It tries to refute the plan's premises and find a

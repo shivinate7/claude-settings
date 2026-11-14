@@ -52,7 +52,7 @@ At a later agent end, the reaper stops the processes inside a finished agent's h
 
 Measured facts (Linux): an orphaned server lands on PID 1, not on the host. Each Bash call is its own session leader, so a process group or session id cannot span calls. An export reaches exec'd children and not the call's own bash. The job's `( )` subshell is a fork, so unmarked; its exec'd children are marked. The harness sets no agent marker. The macOS read of the marker is unmeasured. Windows reads no marker, so its processes are unmarked and keep the tree.
 
-Cost, per finished tree with a process inside: one environment read per pid listed inside, and one `ps` read per ancestor climbed from each marked pid (none for an unmarked pid; macOS adds one `lsof` batch for the cwds, in the enumeration). The hook also reads `ps` once per ancestor of its own (`_own_chain_pids`, the protected set). No timer, no file. A test pins the `ps` count.
+Cost, per finished tree with a process inside: an environment read per pid listed inside, and a `ps` read per ancestor climbed from each marked pid (none for an unmarked pid; macOS adds an `lsof` batch for the cwds, in the enumeration). The hook also reads `ps` for each ancestor of its own (`_own_chain_pids`, the protected set). No timer, no file. A test pins the `ps` count.
 
 The guard's kill rule is separate from the reaper's reads. The guard's ownership change
 (`a-kill-by-pid-needs-an-owned-pid`) did not change them (owner ruling, 2026-10-10).
