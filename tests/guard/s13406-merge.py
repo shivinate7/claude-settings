@@ -1292,9 +1292,24 @@ TRUST_TOOLS = {
     "mcp__claude-code-remote__confirm_repository_trust": {"content_digest": "0" * 64},
     "mcp__claude-code-remote__request_computer_folder": {
         "environment_id": "env_X", "computer_name": "box", "folder": "repo"},
+    # R13 point 4, owner-approval card: ask_owner true makes the owner a card to allow the call.
+    "mcp__claude-code-remote__update_trigger": {"trigger_id": "trig_X", "prompt": "p", "ask_owner": True},
 }
 # The remedy steers to get_session. It never tells the session to call either tool.
 TRUST_NAMED = ("confirm_repository_trust", "request_computer_folder")
+# ask_owner as a string or number opens the card if the server coerces it, so any value but absent, null or false
+# refuses. The lane offer line is ruled in own-778-a-reword-offer-for-lane (decision lane-never-stalls-on-popup).
+for _coerced in ("true", 1, 0):
+    add("trust-card-in-build: update_trigger with ask_owner %r in a lane is refused" % (_coerced,), "deny",
+        rule=TRUST_RULE, tool="mcp__claude-code-remote__update_trigger", cwd=NOGIT, lacks=TRUST_NAMED,
+        transcript=role_path("lane"), env=ROLE_ENV, trigger_id="trig_X", ask_owner=_coerced)
+add("trust-card-in-build: update_trigger with ask_owner false in a lane allows", "allow",
+    tool="mcp__claude-code-remote__update_trigger", cwd=NOGIT, silent=True, transcript=role_path("lane"),
+    env=ROLE_ENV, trigger_id="trig_X", ask_owner=False)
+# The same tool without ask_owner opens no card: a lane may edit its own scheduled task.
+add("trust-card-in-build: update_trigger without ask_owner in a lane allows", "allow",
+    tool="mcp__claude-code-remote__update_trigger", cwd=NOGIT, silent=True, transcript=role_path("lane"),
+    env=ROLE_ENV, trigger_id="trig_X", enabled=False)
 
 
 def trust_refuse(name, tool, transcript, carries=(), env=ROLE_ENV):
@@ -1308,6 +1323,31 @@ def trust_allow(name, tool, transcript):
     add("trust-card-in-build: " + name, "allow", tool=tool, cwd=NOGIT, silent=True, transcript=transcript,
         env=ROLE_ENV, **TRUST_TOOLS.get(tool, {}))
 
+
+# R13 point 3, ruling own-778-a-reword-offer-for-lane: a refusal in a lane offers the owner the line to type and routes
+# the act to the parent; any other session keeps the plain line. Text from an agent grants nothing.
+_OFFER_TOOL = "mcp__claude-code-remote__confirm_repository_trust"
+def offer_case(name, transcript, carries, lacks, env=ROLE_ENV):
+    add("trust-card-in-build offer: " + name, "deny", rule=TRUST_RULE, tool=_OFFER_TOOL, cwd=NOGIT,
+        carries=carries, lacks=lacks + TRUST_NAMED, transcript=transcript, env=env, **TRUST_TOOLS[_OFFER_TOOL])
+
+
+offer_case("a lane's refusal carries the lane offer line", role_path("lane"),
+           ("offer the owner this line to type", "grants nothing"), ("To allow this act, type",))
+offer_case("a session with a parent and no cs-build tag carries the lane offer line", role_path("lane-untagged"),
+           ("offer the owner this line to type",), ("To allow this act, type",))
+# A lane's own agent keeps the agent offer line: the one-act word does not reach an agent (override.offer, agent_id).
+add("trust-card-in-build offer: a lane's agent call keeps the agent offer line", "deny", rule=TRUST_RULE,
+    tool=_OFFER_TOOL, cwd=NOGIT, carries=("override 15m",), lacks=("offer the owner this line to type",) + TRUST_NAMED,
+    transcript=role_path("lane"), env=ROLE_ENV, agent_id="agent_offer_x", **TRUST_TOOLS[_OFFER_TOOL])
+for _offer_why, _offer_transcript, _offer_env in (
+    ("no session id in the env", role_path("untagged"), None),
+    ("no get_session record", role_path("no-record"), ROLE_ENV),
+    ("a get_session result that is not JSON", role_path("not-json"), ROLE_ENV),
+    ("a transcript_path that cannot be read", role_path("unreadable"), ROLE_ENV),
+):
+    offer_case("a refusal with " + _offer_why + " keeps the plain offer line", _offer_transcript,
+               ("To allow this act, type",), ("offer the owner this line to type",), env=_offer_env)
 
 for _trust_tool in TRUST_TOOLS:
     _trust_word = _trust_tool.rsplit("__", 1)[1]

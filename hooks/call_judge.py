@@ -364,7 +364,7 @@ def refuse(payload, tool, args, rule, reason):
     try:
         import guard_core
         guard_core.set_log_session(payload.get("session_id"))
-        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"))
+        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"), None, payload.get("transcript_path"))
         guard_core.set_override_veto(lambda: vetoed)
         guard_core.refuse(tool, "deny", rule, text, "")
     except Exception:  # no guard_core: no override can be read, so the refusal stands
