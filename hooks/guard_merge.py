@@ -1396,7 +1396,7 @@ def trust_card_hit(tool: str, transcript: str, tool_input=None) -> str:
     """Return the tool name when it opens a trust card and the own record does not prove a plain session (no cs-build
     tag and no parent: a session with a parent is a lane, R13 point 4), else ''. Fails closed: any error in the
     reads is a refusal, because the guard-wide crash path fails open."""
-    owner_card = tool == OWNER_CARD_TOOL and isinstance(tool_input, dict) and tool_input.get("ask_owner") not in (None, False)
+    owner_card = tool == OWNER_CARD_TOOL and isinstance(tool_input, dict) and (tool_input.get("ask_owner") is not None and tool_input.get("ask_owner") is not False)
     if tool not in TRUST_TOOLS and not owner_card:
         return ""
     try:  # cost: one transcript read, only on a card call
