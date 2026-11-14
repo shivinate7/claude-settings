@@ -1,0 +1,14 @@
+{
+ "id": "review-record-held-and-top3-remedy",
+ "title": "A held record (Net value negative) no longer gets the fix-verifier route, and the remedy at round 3 with Head equal to the live head names rounds 1 to 3 again",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Two open round 1 notes of lane review-record-restart-on-doc-nit on #3320 (head f459fce17ed9, lint PASS, stacked on #3269).",
+ "source": "Coordinator 21:00 CST Nov 13, from the lane's round 1 notes; triage has read none of the code.",
+ "note": "Triage 21:01 CST Nov 13: (1) a held record (Net value negative) still gets the fix-verifier route; (2) at top 3 with Head equal to the live head, the refusal remedy does not name rounds 1 to 3 again. Fix after #3269 and #3320 merge. Red case first.",
+ "updatedAt": "2026-11-13T21:01:18-06:00"
+}

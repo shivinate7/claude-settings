@@ -1,14 +1,14 @@
 {
  "id": "merge-lock-ttl-waits",
  "title": "The merge lock's TTL waits (WAITS=3, merge.py ~3214) no longer block up to 250 minutes after a crash",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1k9L6aaoYwt9rkang",
  "owner": "triage",
  "blockedBy": [],
  "why": "A crashed holder can block the next merge for up to 250 min (debt lock-ttl-sized-for-gone-waits; consultant's figure, unmeasured by triage).",
  "source": "Consultant 20:59 CST Nov 13, from its Opus read-only audit of merge/merge.py at origin/main 309fa5ed5b; line numbers and debts are its, unchecked by triage.",
- "note": "Triage 21:00 CST Nov 13: red case first: a lock whose holder is gone frees within a bound the record states.",
- "updatedAt": "2026-11-13T21:00:15-06:00"
+ "note": "Triage 21:00 CST Nov 13: red case first: a lock whose holder is gone frees within a bound the record states. Coordinator 21:01 CST Nov 13 (21:00): lane merge-tool-audit-fixes (session_013NEJL1k9L6aaoYwt9rkang) started, built on #3269. Whether it covers this step: unchecked by triage.",
+ "updatedAt": "2026-11-13T21:01:18-06:00"
 }

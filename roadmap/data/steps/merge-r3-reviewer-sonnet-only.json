@@ -1,14 +1,14 @@
 {
  "id": "merge-r3-reviewer-sonnet-only",
  "title": "Land #3269 and make --review-record round 3 accept only a Sonnet reviewer",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1k9L6aaoYwt9rkang",
  "owner": "triage",
  "blockedBy": [],
  "why": "The merge tool's round 3 check (merge.py ~4458) does not match ruling own-r3-reviewer-sonnet-high (14:05 CST Nov 13).",
  "source": "Consultant 20:59 CST Nov 13, from its Opus read-only audit of merge/merge.py at origin/main 309fa5ed5b; line numbers and debts are its, unchecked by triage.",
- "note": "Triage 21:00 CST Nov 13: #3269 is the open R9 merge-tool draft, clean, head d02e8aa8f24b (consultant). Wave plan part 1 already orders #3269 before lane-cards #3328. Land it, then the round 3 change. Unchecked by triage.",
- "updatedAt": "2026-11-13T21:00:15-06:00"
+ "note": "Triage 21:00 CST Nov 13: #3269 is the open R9 merge-tool draft, clean, head d02e8aa8f24b (consultant). Wave plan part 1 already orders #3269 before lane-cards #3328. Land it, then the round 3 change. Unchecked by triage. Coordinator 21:01 CST Nov 13 (21:00): lane merge-tool-audit-fixes (session_013NEJL1k9L6aaoYwt9rkang) started, built on #3269. Whether it covers this step: unchecked by triage.",
+ "updatedAt": "2026-11-13T21:01:18-06:00"
 }

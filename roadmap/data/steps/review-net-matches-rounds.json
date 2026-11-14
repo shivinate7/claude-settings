@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Lane ci-speed-stack-4 wrote \"Net value: not owed\" on #3302 after round 3 on a guard change; #3302 is held. Distinct from step review-body-rejects-bad-net, which covers a value outside the table.",
  "source": "Consultant 20:50 CST Nov 13.",
- "note": "Triage 20:51 CST Nov 13: the rule is in decision hold-unsafe-after-round-3: the net-value test runs when a guard or check change reaches round 3. Fix: parse_review refuses \"not owed\" when the record has a round 3 on a guard or check change; red case first. Unchecked: the #3302 record itself and where parse_review reads the rounds. Coordinator 20:56 CST Nov 13 (20:56): lane started, session_013NEJL1BEfSP9KGDwUasAuK (Sonnet, medium); alone via runner 10; tracker the coordinator.",
- "updatedAt": "2026-11-13T20:56:10-06:00"
+ "note": "Triage 20:51 CST Nov 13: the rule is in decision hold-unsafe-after-round-3: the net-value test runs when a guard or check change reaches round 3. Fix: parse_review refuses \"not owed\" when the record has a round 3 on a guard or check change; red case first. Unchecked: the #3302 record itself and where parse_review reads the rounds. Coordinator 20:56 CST Nov 13 (20:56): lane started, session_013NEJL1BEfSP9KGDwUasAuK (Sonnet, medium); alone via runner 10; tracker the coordinator. Triage 21:01 CST Nov 13: check against #3269 (step merge-lint-fix-no-round-3, ruling r9). Its body says a guard or check change is done at the first passing round or fix check, no round 3 and no net value owed after a pass; round 3 still runs after a round 2 FAIL. That rewrites the decision this step cites. The lane should read #3269 first. Read from the PR body by triage; the diff is unread.",
+ "updatedAt": "2026-11-13T21:01:18-06:00"
 }
