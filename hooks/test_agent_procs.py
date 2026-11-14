@@ -111,4 +111,4 @@ class ToolCallPathCost(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main(verbosity=2)  # one line per case, which the mutation runner reads to know a case ran
