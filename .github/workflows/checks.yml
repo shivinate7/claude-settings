@@ -529,6 +529,9 @@ jobs:
       - name: Waiting page park relay prose suite
         run: python3 skills/waiting-page/test_skill_park_relay.py
 
+      - name: Waiting page asks wake prose suite
+        run: python3 skills/waiting-page/test_asks_wake.py
+
       - name: Artifact cite fixture suite
         run: python3 lint/test_check_artifact_cites.py
 
