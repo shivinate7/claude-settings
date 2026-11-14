@@ -14,6 +14,8 @@ check reads that debt's Retire paragraph from the base and runs what it names, o
             green and on the PR head or a commit above it. A cite also clears a check that could not run here (unknown);
             a red check is never cleared by a cite.
 
+A running test prints `running` once and `still running` every HEARTBEAT seconds on stdout, so a long suite is never silent.
+
 Exit 1 on any finding. Design: decision debt-close-runs-retire.
 """
 import argparse
@@ -24,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import check_record_slugs as records  # noqa: E402  the one home of the record markers and the changed-files read
 import check_silent_undo as undo  # noqa: E402  the one home of the PR body's key-line reading
@@ -32,6 +35,7 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 
 Unknown = records.Unknown  # a git read failed, so the closes are not known
 CITE = "Retire-run"
+HEARTBEAT = 60  # seconds between `still running` lines while a test runs
 TIMEOUT = 1800  # per suite; interim stopgap (owner 12:11 CST Nov 10, decision ci-job-caps; ends with step time-pinned-tests-go)
 # Each runnable suffix with the argv that starts it. The check never runs anything else.
 INTERPRETERS = {".py": ["python3"], ".mjs": ["node", "--test"], ".sh": ["bash"]}
@@ -127,16 +131,28 @@ def run_span(wt, span, timeout):
     exe = shutil.which(argv[0])
     if not exe:
         return "unknown", "%s is not on PATH, so %s did not run" % (argv[0], span)
+    say("debt-retire: running %s (cap %d s)" % (span, timeout))
+    start = time.monotonic()
     try:
-        r = _nowindow.run([exe, *argv[1:], span], cwd=wt, capture_output=True, encoding="utf-8", errors="replace",
-                                  timeout=timeout, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
-    except subprocess.TimeoutExpired:
-        return "unknown", "%s ran past %d s" % (span, timeout)
+        proc = _nowindow.Popen([exe, *argv[1:], span], cwd=wt, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8", errors="replace",
+                               env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
     except OSError as e:
         return "unknown", "%s did not start: %s" % (span, e)
-    if r.returncode:
-        tail = " | ".join((r.stdout + r.stderr).strip().splitlines()[-5:])
-        return "red", "%s exited %d%s" % (span, r.returncode, ": " + tail[:400] if tail else "")
+    with proc:
+        while True:
+            left = timeout - (time.monotonic() - start)
+            try:
+                out, err = proc.communicate(timeout=max(0, min(HEARTBEAT, left)))
+                break
+            except subprocess.TimeoutExpired:
+                if left <= HEARTBEAT:  # this wait used up the rest of the cap
+                    proc.kill()
+                    proc.wait()  # not communicate(): on POSIX a grandchild holding the pipes would block it (case h5). Windows: unmeasured
+                    return "unknown", "%s ran past %d s" % (span, timeout)
+                say("debt-retire: still running %s, %d s of %d s" % (span, time.monotonic() - start, timeout))
+    if proc.returncode:
+        tail = " | ".join((out + err).strip().splitlines()[-5:])
+        return "red", "%s exited %d%s" % (span, proc.returncode, ": " + tail[:400] if tail else "")
     return None
 
 
@@ -265,7 +281,7 @@ def retired(wt, base_ref, head="HEAD", pr_body="", run_state=None, isolate=False
 
 def say(line):
     enc = getattr(sys.stdout, "encoding", None) or "utf-8"
-    print(line.encode(enc, "backslashreplace").decode(enc))
+    print(line.encode(enc, "backslashreplace").decode(enc), flush=True)
 
 
 def main(argv):

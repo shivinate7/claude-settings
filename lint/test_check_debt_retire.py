@@ -6,7 +6,7 @@ commits a base and a head, and asks the check for its findings. A fixture test s
 working folder to the file named by RETIRE_MARKS, so a case shows that a Retire check ran, or did not, from that file.
 No case waits on a clock. The Retire-run cases pass a fake run_state, so no case reads the network.
 """
-import atexit, json, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
+import atexit, json, os, shutil, signal, subprocess, sys, tempfile, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -549,6 +549,150 @@ class RetireRun(Case):
         body = "Retire-run: d-prose -- %s\n" % RUN_URL
         self.assertEqual(pairs(self.findings(pr_body=body)), [("d-prose", "unknown")], "scope")
         self.assertEqual(self.retired_of(body, None), {})
+
+
+class Heartbeat(Case):
+    """run_span prints a start line, then a `still running` line every D.HEARTBEAT seconds while its span runs. A span that
+    ends before its first beat prints only the start line. The slow script waits for a release file, which the recorder
+    touches on a beat, and gives up after its own bound (exit 3)."""
+
+    WAIT = ("import time\n"
+            "for _ in range(200):  # the script's own bound: 200 x 0.1 s, 20 s\n"
+            "    if os.path.exists(os.environ['RETIRE_RELEASE']):\n"
+            "        sys.exit(0)\n"
+            "    time.sleep(0.1)\n"
+            "sys.exit(3)\n")
+    SLOW = MARKED.replace("sys.exit(%d)\n", WAIT)  # MARKED's mark, then the wait
+    SLOW_RETIRE = "Delete the old helper. Check: `tests/test_slow.py`."
+    LATE = SLOW.replace("sys.exit(3)\n", "open(os.environ['RETIRE_AFTER'], 'w').close()  # written only after the bound loop\nsys.exit(3)\n")
+    TAIL = SLOW.replace("import time\n", "print('tailmark', flush=True)\nimport time\n").replace("sys.exit(0)\n", "sys.exit(1)\n")
+    HOLD = ("import os, subprocess, sys, time\n"
+            "grand = subprocess.Popen([sys.executable, os.environ['RETIRE_GRAND']])  # inherits this script's stdout and stderr\n"
+            "with open(os.environ['RETIRE_GRAND_PID'], 'w', encoding='utf-8') as f:\n"
+            "    f.write(str(grand.pid))\n"
+            "for _ in range(200):  # the script's own bound: 200 x 0.1 s, 20 s\n"
+            "    time.sleep(0.1)\n"
+            "sys.exit(3)\n")
+    GRAND = ("import os, time\n"
+             "time.sleep(20)  # the grandchild's own bound\n"
+             "open(os.environ['RETIRE_GRAND_MARK'], 'w').close()\n")
+
+    def setUp(self):
+        super().setUp()
+        self.release, self.lines = os.path.join(self.folder, "release"), []
+        self.after = os.path.join(self.folder, "after")  # LATE writes it after its bound (h3b)
+        self.grand = os.path.join(self.folder, "grand.py")  # the grandchild script HOLD starts (h5)
+        self.grand_mark = os.path.join(self.folder, "grand-mark")  # GRAND writes it when its bound ends
+        self.grand_pid = os.path.join(self.folder, "grand-pid")  # HOLD writes the grandchild's pid
+        patch = unittest.mock.patch.dict(os.environ, {"RETIRE_RELEASE": self.release, "RETIRE_AFTER": self.after,
+                                                      "RETIRE_GRAND": self.grand, "RETIRE_GRAND_MARK": self.grand_mark,
+                                                      "RETIRE_GRAND_PID": self.grand_pid})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def beat(self, seconds):
+        """Set D.HEARTBEAT for this case. create=True: the old code has no such name, so the case fails by assert, not by error."""
+        patch = unittest.mock.patch.object(D, "HEARTBEAT", seconds, create=True)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def record(self, release=True):
+        """Keep each line run_span prints. With release, a `still running` line touches the release file, so the slow script exits 0."""
+        def say(line):
+            self.lines.append(line)
+            if release and "still running" in line:
+                put(self.release, "go")
+        patch = unittest.mock.patch.object(D, "say", say)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def starts(self, span):
+        return [line for line in self.lines if "debt-retire: running %s (cap %d s)" % (span, D.TIMEOUT) in line]
+
+    def beats(self, span):
+        return [line for line in self.lines if "still running" in line and span in line]
+
+    def kill_grandchild(self):
+        """Stop the grandchild a case left sleeping. Once its mark exists it has finished, and its pid may belong to another process now."""
+        if os.path.exists(self.grand_mark):
+            return
+        try:
+            with open(self.grand_pid, encoding="utf-8") as f:
+                os.kill(int(f.read()), signal.SIGTERM)
+        except OSError:  # no pid was written, or the grandchild is gone: POSIX raises ProcessLookupError, Windows another OSError
+            pass
+
+    def test_h1_a_slow_span_prints_its_start_line_and_a_beat_and_passes_once_released(self):
+        self.repo(debts={"d-slow": self.SLOW_RETIRE})
+        self.change(write={"tests/test_slow.py": self.SLOW}, rm=["docs/debts/d-slow.md"])
+        self.beat(0.1)
+        self.record()
+        found = self.findings()
+        self.assertEqual(self.ran(), [("test_slow.py", self.dir)], "scope: the slow span's check did not run in the head folder")
+        self.assertTrue(self.starts("tests/test_slow.py"), "the start line with the span and its cap was not printed")
+        self.assertTrue(self.beats("tests/test_slow.py"), "no still running line named the span while it ran")
+        self.assertEqual(pairs(found), [], "a slow span read red although its beat reached the release")
+
+    def test_h2_a_fast_span_prints_its_start_line_and_no_beat(self):
+        self.repo(debts={"d-pass": PASS})
+        self.change(rm=["docs/debts/d-pass.md"])
+        self.beat(30)  # far above a fast span's run, so no beat can fall inside it
+        self.record()
+        self.findings()
+        self.assertEqual(self.ran(), [("test_pass.py", self.dir)], "scope: the fast span's check did not run in the head folder")
+        self.assertTrue(self.starts("tests/test_pass.py"), "the start line with the span and its cap was not printed")
+        self.assertEqual(self.beats("tests/test_pass.py"), [], "a span that ended before its first beat printed a still running line")
+
+    def test_h3_a_span_cut_off_at_its_cap_prints_beats_before_the_cut(self):
+        self.repo()
+        put(os.path.join(self.dir, "tests", "test_slow.py"), self.SLOW)
+        self.beat(0.1)
+        self.record(release=False)
+        kind, text = D.run_span(self.dir, "tests/test_slow.py", 1)
+        self.assertEqual((kind, "ran past" in text), ("unknown", True), "scope: a span past its cap did not read unknown with ran past")
+        self.assertTrue(self.beats("tests/test_slow.py"), "a span cut off at its cap printed no still running line before the cut")
+
+    def test_h3b_a_span_cut_off_at_its_cap_never_reaches_the_file_its_bound_loop_writes(self):
+        self.repo()
+        put(os.path.join(self.dir, "tests", "test_late.py"), self.LATE)
+        self.beat(0.1)
+        self.record(release=False)
+        kind, text = D.run_span(self.dir, "tests/test_late.py", 1)
+        self.assertEqual(self.ran(), [("test_late.py", self.dir)], "scope: the late span did not start in the head folder")
+        self.assertEqual(kind, "unknown", "scope: a span past its cap did not read unknown")
+        self.assertIn("ran past", text, "scope: a span past its cap did not say ran past")
+        self.assertFalse(os.path.exists(self.after), "the span kept running past its cap and wrote its file before run_span returned")
+
+    def test_h4_the_cli_prints_the_start_line_on_stdout(self):
+        self.repo(debts={"d-pass": PASS})
+        self.change(rm=["docs/debts/d-pass.md"])
+        r = self.cli()
+        self.assertEqual(r.returncode, 0, "scope: the CLI did not close the passing debt green: " + r.stdout + r.stderr)
+        self.assertIn("debt-retire: running tests/test_pass.py (cap %d s)" % D.TIMEOUT, r.stdout, "the CLI printed no start line for its span")
+
+    def test_h5_a_span_cut_off_at_its_cap_does_not_wait_on_a_grandchild_that_holds_its_pipes(self):
+        self.repo()
+        put(os.path.join(self.dir, "tests", "test_holder.py"), self.HOLD)
+        put(self.grand, self.GRAND)
+        self.addCleanup(self.kill_grandchild)
+        self.beat(0.1)
+        self.record(release=False)
+        kind, text = D.run_span(self.dir, "tests/test_holder.py", 1)
+        self.assertTrue(os.path.exists(self.grand_pid), "scope: the holder never started its grandchild, so the cut-off proves nothing")
+        self.assertEqual(kind, "unknown", "a span past its cap did not read unknown")
+        self.assertIn("ran past", text, "a span past its cap did not say ran past")
+        self.assertFalse(os.path.exists(self.grand_mark), "run_span returned only after the grandchild finished: it waited on the grandchild's pipes")
+
+    def test_h6_a_red_tail_printed_before_the_beats_survives_them(self):
+        self.repo()
+        put(os.path.join(self.dir, "tests", "test_tail.py"), self.TAIL)
+        self.beat(0.1)
+        self.record()
+        kind, text = D.run_span(self.dir, "tests/test_tail.py", 30)
+        self.assertTrue(self.beats("tests/test_tail.py"), "scope: no still running line came before the exit, so no beat was crossed")
+        self.assertIn("exited 1", text, "scope: the script did not exit 1 after its release")
+        self.assertEqual(kind, "red", "a script that exited 1 did not read red")
+        self.assertIn("tailmark", text, "the tail line printed before the beats was lost")
 
 
 class TemplateExcuses(unittest.TestCase):
