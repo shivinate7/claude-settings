@@ -17,7 +17,7 @@ The rules:
 - The check runs before the lock, the claim and any push, so a refusal lands nothing: no merge, no claim on main, no lock held, no ref moved. A draft's `--confirm` is the records step and never merges, so it skips the check.
 - `merge --priority-rows FILE` alone behaves as before, and still stands alone. With a pull request number and `--confirm`, the flag goes with them.
 
-Cost: the reads `priority_judge` already makes for `merge --priority-rows FILE`, at most two per `pr:` row, plus the shared open-pull list read for branch rows. None when N is itself a row or a row is malformed. No process, timer, lock or file write. Test: `merge/test_priority_vs_merge_order.py` counts the reads and checks that a refusal moves nothing.
+Cost: the reads `priority_judge` already makes for `merge --priority-rows FILE`, at most two per `pr:` row, plus the shared open-pull list read for branch rows. None when N is itself a row or a row is malformed. One short `git rev-parse` per run (`priority_here`), no timer, no lock, no file write. Test: `merge/test_priority_vs_merge_order.py` counts the reads and checks that a refusal moves nothing.
 
 Kind: build
 Plan: docs/decisions/priority-vs-merge-order.md#the-ruling (all)

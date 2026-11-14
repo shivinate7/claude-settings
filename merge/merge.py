@@ -4408,13 +4408,14 @@ def priority_landed(base, why):
 
 def priority_verdict(h, number):
     """-> (verdict, why) of pull request `number`, read once for its state and once for the runs on its head, the runs only when the verdict needs them.
-    A draft and a dirty head are both named. A read that fails raises; the caller reports it as unknown."""
+    A draft, a dirty head and an open pull request based on anything but main are each named, since a stacked pull request is not ready to land on main.
+    A read that fails raises; the caller reports it as unknown."""
     info = h.pr(number)
     if info["state"] == "MERGED":
         return priority_landed(info["base"], "merged")
     if info["state"] != "OPEN":
         return "flag", "closed, not on main"
-    why = (["draft"] if info["draft"] else []) + (["dirty, conflicts with base"] if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY" else [])
+    why = (["draft"] if info["draft"] else []) + ([f"based on {info['base']}, not {PRIORITY_LANDS_ON}"] if info["base"] != PRIORITY_LANDS_ON else []) + (["dirty, conflicts with base"] if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY" else [])
     if why:
         return "flag", "; ".join(why)
     if "UNKNOWN" in (info["mergeable"], info["merge_state"]):
@@ -4587,7 +4588,7 @@ def priority_order_check(source, n, info, h, repo_dir=None):
     goes says why; an unread row is unknown, never clear. A failed read of a well-formed row stays unknown because a network blip must not stop every
     merge. A FILE the reader cannot use refuses, because the runner fixes it locally: an empty or missing FILE, a FILE with no `priority:` row, and a
     malformed row (see priority_format), which is named by its slug and its pr. No override and no lifting flag. When N is itself a row the other rows
-    are not read. Cost: the reads priority_judge makes, none when N is itself a row or a row is malformed; no process, timer, lock or file write."""
+    are not read. Cost: the reads priority_judge makes, none when N is itself a row or a row is malformed, plus one short `git rev-parse` per run (priority_here); no timer, lock or file write."""
     rows, why = priority_text(source)
     if not rows:
         raise Stop(f"--priority-rows could not read {source}: {why}. Nothing was checked; this is not clear. Nothing was merged. {PRIORITY_CITE}" if why
@@ -4601,12 +4602,11 @@ def priority_order_check(source, n, info, h, repo_dir=None):
         return
     bad = []
     for row in rows:
-        slug, targets, _, reason = priority_format(row)
+        slug, _, _, reason = priority_format(row)
         if reason:
-            named = next((v for k, v in targets if k == "pr"), None)
-            bad.append(f"{slug}{f' (pr {named})' if named else ''}: {reason}")
+            bad.append(f"the priority row {slug} cannot be read: {reason}.")
     if bad:
-        raise Stop(f"--priority-rows: the priority row{'s' if len(bad) > 1 else ''} {'; '.join(bad)} cannot be read. "
+        raise Stop(f"--priority-rows: {' '.join(bad)} "
                    f"Nothing was checked; this is not clear. Fix the row in the hand-off file. Nothing was merged. {PRIORITY_CITE}")
     judged = priority_judge(rows, h, here, repo_dir)
     say(*(priority_line(*j) for j in judged))
