@@ -2815,7 +2815,7 @@ class CiCoverageScope(unittest.TestCase):
     def test_a_helper_named_with_an_underscore_is_not_reported(self):
         # A `_test_` name is a helper (lint/_test_git.py). The test-file row shows the scope is live, so the
         # helper rows cannot pass on a scan that reads nothing.
-        helpers = ["lint/_test_helper.py", "lint/_test_helper.mjs", "lint/_test_git.mjs", "hooks/_test_cost_probe.py"]
+        helpers = ["lint/_test_helper.py", "lint/_test_helper.mjs", "lint/_test_git.mjs"]
         text = gap_text(make_repo(tracked=["lint/test_ok.py", "lint/test_x.mjs"] + helpers, checks=TEST_FILE_CHECKS))
         with self.subTest("test file"):
             self.assertIn("lint/test_x.mjs", text, "a tracked test_*.mjs with no run line is not reported")

@@ -389,18 +389,13 @@ add("test-author: Edit of hooks/guard_core.py is refused", "deny", rule=TA, tool
 add("builder-test: Edit of hooks/mutate_guard.py is refused", "deny", rule=BT, tool="Edit",
     file_path="hooks/mutate_guard.py", carries=("test-author", "Report"),
     agent_id="bld1", agent_type="builder", cwd=GITMAIN)
-# A test-support helper goes flat, beside its tests, named _test_<name>.py (coordinator ruling, 03:58 CST, decision
-# builders-cannot-edit-tests). The underscore name is no test path (TEST_BASENAME reads test_*.py), so a builder
-# writes it and a test-author may not. The plain test_<name>.py form stays a test path, as the control.
+# A test-support helper shared by tests lives in the testing/ folder (coordinator ruling, 04:21 CST). testing/ is a
+# test folder: a builder may not write it, and a test-author writes it.
 for _tool in ("Edit", "Write"):
-    add("builder-test: %s of hooks/_test_cost_probe.py is allowed" % _tool, "allow", tool=_tool,
-        file_path="hooks/_test_cost_probe.py", **B)
-    add("test-author: %s of hooks/_test_cost_probe.py is refused" % _tool, "deny", rule=TA, tool=_tool,
-        file_path="hooks/_test_cost_probe.py", carries=("builder", "Report"), **A)
-    add("test-author: %s of hooks/test_cost_probe.py is allowed (control)" % _tool, "allow", tool=_tool,
-        file_path="hooks/test_cost_probe.py", **A)
-    add("builder-test: %s of hooks/test_cost_probe.py is refused (control)" % _tool, "deny", rule=BT, tool=_tool,
-        file_path="hooks/test_cost_probe.py", carries=("test-author", "Report"), **B)
+    add("builder-test: %s of testing/cost_probe.py is refused" % _tool, "deny", rule=BT, tool=_tool,
+        file_path="testing/cost_probe.py", carries=("test-author", "Report"), **B)
+    add("test-author: %s of testing/cost_probe.py is allowed (control)" % _tool, "allow", tool=_tool,
+        file_path="testing/cost_probe.py", **A)
 # The near misses stay a builder's product code: a later mutate_*.py is not a mutation test. A listed
 # name in another case is the same file on Windows, so it is refused for a builder too.
 add("builder-test: Edit of hooks/mutate_x.py is allowed", "allow", tool="Edit",

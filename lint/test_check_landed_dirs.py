@@ -181,29 +181,29 @@ class CheckLandedDirsTests(unittest.TestCase):
                          "a file in hooks/.notes/, a dot-folder that is no cache, passed the check: %s" % result.stdout)
         self.assertIn("probe.txt", result.stderr)
 
-    def test_a_test_helper_in_a_subfolder_names_the_flat_home(self):
-        # Why: a builder that hits this refusal needs the one way out: a flat _test_<name>.py file beside its tests,
-        # which a builder writes. The helper home is the underscore name (lint/_test_git.py), not test_<name>.py.
+    def test_a_helper_in_a_subfolder_is_refused_and_named(self):
+        # Why: a subfolder of a landed folder stays refused, and the refusal names the file. The wording of the
+        # message is not pinned here: the helper home is the testing/ folder, which the record names.
         result = run_in_copy(add_file("hooks/test_support/x.py", "case\n"))
         self.assertEqual(result.returncode, 1,
                          "a helper in hooks/test_support/, a subfolder of landed hooks/, passed the check: %s" % result.stdout)
         self.assertIn("hooks/test_support/x.py", result.stderr,
                       "the refusal does not name the refused helper: %s" % result.stderr)
-        self.assertIn("_test_<name>.py", result.stderr,
-                      "the refusal does not name the way out, a flat _test_<name>.py file: %s" % result.stderr)
-        self.assertIn("flat", result.stderr,
-                      "the refusal does not say the way out is flat: %s" % result.stderr)
-        self.assertIn("beside", result.stderr,
-                      "the refusal does not say the way out sits beside its tests: %s" % result.stderr)
-        self.assertIn("builder writes", result.stderr,
-                      "the refusal does not say a builder writes the flat file: %s" % result.stderr)
 
-    def test_a_flat_test_file_beside_its_tests_passes_the_check(self):
-        # Why: the way out the refusal names must pass. A flat _test_<name>.py at the top of a landed folder is landed.
-        result = run_in_copy(add_file("hooks/_test_cost_probe.py", "case\n"))
+    def test_a_file_at_the_testing_folder_is_not_reported(self):
+        # Why: testing/ holds the shared test helpers (tracked_tree.py), and landed-dirs.txt does not list it,
+        # so the check never reports a file there.
+        result = run_in_copy(add_file("testing/x.py", "case\n"))
         self.assertIn("check_landed_dirs: ok", result.stdout,
                       "the check did not reach its ok line: %s" % result.stderr)
-        self.assertEqual(result.returncode, 0, "a flat hooks/test_cost_probe.py was refused: %s" % result.stderr)
+        self.assertEqual(result.returncode, 0, "a file at testing/x.py was reported: %s" % result.stderr)
+
+    def test_a_file_in_a_testing_subfolder_is_not_reported(self):
+        # Why: the testing/ folder is not landed, so a subfolder there is no landing concern either.
+        result = run_in_copy(add_file("testing/sub/y.py", "case\n"))
+        self.assertIn("check_landed_dirs: ok", result.stdout,
+                      "the check did not reach its ok line: %s" % result.stderr)
+        self.assertEqual(result.returncode, 0, "a file at testing/sub/y.py was reported: %s" % result.stderr)
 
     def test_a_helper_in_a_test_support_subfolder_still_fails_the_check(self):
         # Why: the verdict must not widen. A helper in a subfolder of a landed folder stays refused.
@@ -230,17 +230,22 @@ def record_section(text, heading):
 
 class HelperHomeRecordTests(unittest.TestCase):
 
-    def test_the_decision_record_names_the_flat_home_for_a_test_helper(self):
+    def test_the_decision_record_names_the_testing_home_for_a_test_helper(self):
         # Why: a builder reads the record for where a helper goes. The test reads that one section only,
         # so no other line of the record can satisfy it.
         with open(RECORD_PATH, encoding="utf-8") as f:
             section = record_section(f.read(), HELPER_HOME_HEADING)
         self.assertIsNotNone(section, "the decision record has no '%s' section" % HELPER_HOME_HEADING)
-        self.assertIn("_test_<name>.py", section,
-                      "the '%s' section does not name the flat _test_<name>.py home" % HELPER_HOME_HEADING)
-        self.assertIn("flat", section, "the '%s' section does not say the home is flat" % HELPER_HOME_HEADING)
-        self.assertIn("builder writes", section,
-                      "the '%s' section does not say a builder writes the flat file" % HELPER_HOME_HEADING)
+        self.assertIn("testing/", section,
+                      "the '%s' section does not name the testing/ folder as the home" % HELPER_HOME_HEADING)
+        self.assertIn("test-author writes it", section,
+                      "the '%s' section does not say a test-author writes the helper" % HELPER_HOME_HEADING)
+        self.assertIn("private to one test", section,
+                      "the '%s' section does not say a helper private to one test is one" % HELPER_HOME_HEADING)
+        self.assertIn("stays inside that test", section,
+                      "the '%s' section does not say a private helper stays inside that test" % HELPER_HOME_HEADING)
+        self.assertNotIn("_test_", section,
+                         "the '%s' section still names the underscore _test_ home" % HELPER_HOME_HEADING)
 
 
 if __name__ == "__main__":
