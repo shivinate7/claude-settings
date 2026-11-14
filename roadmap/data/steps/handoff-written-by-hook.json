@@ -1,0 +1,16 @@
+{
+ "id": "handoff-written-by-hook",
+ "title": "A hook writes the post-compaction handoff itself, once per compaction, instead of nudging the session",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "owner: item 810"
+ ],
+ "why": "Owner 22:49 CST Nov 13 (relayed by the consultant, triage did not see it): can a guard handle the handoff mechanically, like the judge hooks, so it cannot be slipped away. Today it is a nudge, and the batch runner lost its queue after compaction.",
+ "source": "Consultant 22:49 CST Nov 13 (relayed); decision precompact-handoff item 4; page item 810.",
+ "note": "Triage 22:50 CST Nov 13: blocked on the owner's pick on item 810. If a: the post-compaction hook calls invoke_model (hooks/decision_watch.py, runs `claude -p`) once per compaction on the transcript and the prior handoff, writes the handoff, and the session reads and corrects it; on any failure it falls back to today's nudge (invoke_model reports failures as unknown). Rewrite item 4 of decision precompact-handoff in place. First measure on a Mac desktop session whether `claude -p` runs with no other login (the premise item 4 protected). Cost to state in the record: one model call per compaction. Not started.",
+ "updatedAt": "2026-11-13T22:50:44-06:00"
+}
