@@ -14,8 +14,9 @@ diff touches hooks/mutate_*.py (a .mjs counts). Each case is one lane lint: the 
 command runs, and timed_lint fakes the wall clock, so no case waits on real minutes. Cost per lint: one stub ci-job start, one head worktree,
 and one mutate stub start where the step runs (the untouched controls start none). The lint_with_report cases and the tally form run_mutants
 prints cost the same per lint. The wrong-cause loop runs six lints. A stub exits 0, or 1 where a case says so: a table is judged by its counts
-at any exit code, and a tally at exit 1 fails. Measured: the 30 mutation cases took 16.1 s in one run, with the module's import; their lint-run
-count is unmeasured since the batch-head cases were added.
+at any exit code, and a tally at exit 1 fails. Measured: the 30 mutation cases took 16.1 s in one run, with the module's import, before the shard
+cases were added; their time and lint-run count are unmeasured since. The shard cases (test_mutation_test_shard_*) run checks-mutate-guard's shard
+jobs: a clean lint starts three mutate stubs (unmeasured), and a stop or a FAIL starts fewer.
 BatchHeadMutation (class BatchHeadMutation) lints a touched lane's head at the batch runner's pre-join call, `--lane-lint <pr>`, through the gh shim,
 in a cloud session with the batch-runner role or with none; the shim's comment list holds the hand-off PASS record. Cost per case: one ci-job stub
 start, and one mutate stub start where the run starts. Its times are unmeasured since the batch-build cases were removed.
@@ -227,21 +228,25 @@ MUTATE_SHARD_STEP = "Guard mutation test, shard 1/3"  # main's name for that ste
 WORKFLOW_REL = ".github/workflows/checks.yml"
 MUTATE_LOG = "mutate-calls.jsonl"  # one line per start of a mutate stub, in this case's folder
 MUTATE_STUB ='''import json, os, subprocess, sys
-LOG, OUT, ERR, RC = __LOG__, __OUT__, __ERR__, __RC__
+LOG, OUT, ERR, RC, SHARDS = __LOG__, __OUT__, __ERR__, __RC__, __SHARDS__
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
+shard = os.environ.get("MUTATE_SHARD")
 with open(LOG, "a", encoding="utf-8") as f:
-    print(json.dumps({"argv": sys.argv, "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"),
+    print(json.dumps({"argv": sys.argv, "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "shard": shard,
                       "detached": subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0}), file=f)
+OUT, ERR, RC = SHARDS.get(shard, (OUT, ERR, RC))
 sys.stdout.write(OUT)
 sys.stderr.write(ERR)
 sys.exit(RC)
 '''
 
 
-def mutate_script(log, out="", err="", rc=0):
-    """The file a lane commits as the mutate command's script: it logs its start to `log`, prints `out` and `err`, and exits `rc`."""
-    return MUTATE_STUB.replace("__LOG__", repr(log)).replace("__OUT__", repr(out)).replace("__ERR__", repr(err)).replace("__RC__", repr(rc))
+def mutate_script(log, out="", err="", rc=0, shards=None):
+    """The file a lane commits as the mutate command's script: it logs its start to `log` with its MUTATE_SHARD, prints `out` and `err`, and exits
+    `rc`. `shards` maps a MUTATE_SHARD value such as "2/3" to the (out, err, rc) of that shard's run; the other runs print `out`, `err` and `rc`."""
+    return (MUTATE_STUB.replace("__LOG__", repr(log)).replace("__OUT__", repr(out)).replace("__ERR__", repr(err))
+            .replace("__RC__", repr(rc)).replace("__SHARDS__", repr(shards or {})))
 
 
 def mutate_report(made, killed, crashed, survived):
@@ -305,11 +310,11 @@ def real_mutate_job():
     return body, shlex.split(run_body(step).strip())[1]
 
 
-def job_cap(body):
+def job_cap(body, job=MUTATE_JOB):
     """The job's own timeout-minutes. Its keys sit at four spaces; a step's cap sits deeper."""
     m = re.search(r"^    timeout-minutes:[ \t]*(\d+)", body, re.M)
     if m is None:
-        raise AssertionError("job %s has no timeout-minutes of its own" % MUTATE_JOB)
+        raise AssertionError("job %s has no timeout-minutes of its own" % job)
     return int(m.group(1))
 
 
@@ -324,6 +329,26 @@ def with_edit(body, pattern, replacement):
 def workflow_of(body):
     """A checks.yml of one job, MUTATE_JOB, with `body`."""
     return "name: checks\non: pull_request\njobs:\n  %s:%s" % (MUTATE_JOB, body)
+
+
+SHARD_JOBS = ("checks-mutate-guard", "checks-mutate-guard-b", "checks-mutate-guard-c")  # main's three shard jobs, in shard order: shard i/3 is job i
+
+
+def shard_jobs():
+    """-> {job id: body} of the three shard jobs, read at test time from checks.yml as main has them: each body is the job's text after its
+    `  name:` line, with its own step and run: line and timeout-minutes. No value here is copied from checks.yml."""
+    with open(CHECKS_YML, encoding="utf-8") as f:
+        text = f.read()
+    jobs = {job: job_block(text, job) for job in SHARD_JOBS}
+    absent = [job for job, body in jobs.items() if body is None]
+    if absent:
+        raise AssertionError("checks.yml has no job %s" % ", ".join(absent))
+    return jobs
+
+
+def sharded_workflow(jobs):
+    """A checks.yml of the shard jobs in `jobs` ({job id: body}), in shard order. A job the dict lacks is absent from the file."""
+    return "name: checks\non: pull_request\njobs:\n" + "".join("  %s:%s" % (job, jobs[job]) for job in SHARD_JOBS if job in jobs)
 
 
 def wall_time_shown(text, seconds):
@@ -1068,17 +1093,28 @@ class LaneLint(LaneFixture):
                 unittest.mock.patch("time.monotonic", clock.now), unittest.mock.patch("time.perf_counter", clock.now):
             return self.run_lane(*argv)
 
+    def assert_mutation_test_runs_at(self, head, count):
+        """The mutate command ran `count` times, each in a detached tree at `head`, and every tree is gone afterwards."""
+        calls = self.mutation_test_calls()
+        self.assertEqual(len(calls), count, "the mutation test run started %d times, want %d" % (len(calls), count))
+        for call in calls:
+            self.assertEqual(call["head"], head, "the mutation test run ran on a head other than the PR head")
+            self.assertTrue(call["detached"], "the mutation test run ran on a branch, not a detached tree")
+            self.assertNotEqual(call["cwd"], os.path.realpath(self.co), "the mutation test run ran in the lane checkout")
+            self.assertFalse(os.path.exists(call["cwd"]), "the mutate tree is still on disk")
+            self.assertFalse(tm.tree_listed(self.co, call["cwd"]), "git still lists the mutate tree")
+        self.assertEqual(self.worktrees(), 1, "a worktree is still listed after the lint")
+
     def assert_one_mutation_test_run(self, head):
         """The mutate command ran once, in a detached tree at `head`, and both trees are gone afterwards."""
-        calls = self.mutation_test_calls()
-        self.assertEqual(len(calls), 1, "the mutation test run started %d times, want once" % len(calls))
-        call = calls[0]
-        self.assertEqual(call["head"], head, "the mutation test run ran on a head other than the PR head")
-        self.assertTrue(call["detached"], "the mutation test run ran on a branch, not a detached tree")
-        self.assertNotEqual(call["cwd"], os.path.realpath(self.co), "the mutation test run ran in the lane checkout")
-        self.assertFalse(os.path.exists(call["cwd"]), "the mutate tree is still on disk")
-        self.assertFalse(tm.tree_listed(self.co, call["cwd"]), "git still lists the mutate tree")
-        self.assertEqual(self.worktrees(), 1, "a worktree is still listed after the lint")
+        self.assert_mutation_test_runs_at(head, 1)
+
+    def push_sharded_lane(self, jobs, shards=None):
+        """The lane's commit: the mutate script, which prints a clean 694-mutant report except for the shards `shards` names
+        ({MUTATE_SHARD value: (out, err, rc)}), and checks.yml with the shard jobs `jobs` names. -> the lane's head."""
+        _, script = real_mutate_job()
+        return self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0), shards=shards),
+                               WORKFLOW_REL: sharded_workflow(jobs)})
 
     def test_mutation_test_touched_file_reads_670_unknown_fails_and_names_the_counts_and_time(self):
         body, script = real_mutate_job()
@@ -1402,6 +1438,94 @@ class LaneLint(LaneFixture):
         rc, text = self.timed_lint(437, "--lane-lint", "7")
         self.assertEqual(rc, 0, text)
         self.assert_one_mutation_test_run(head)
+
+    def test_mutation_test_shard_jobs_each_start_in_turn_under_their_own_cap(self):
+        """Why: main runs the mutation test in three shard jobs, each with its own cap. The lint starts each shard's run in turn, with that shard's
+        MUTATE_SHARD and under its own job's cap. The caps differ here, since equal caps cannot tell a job's own cap from the first job's."""
+        jobs = shard_jobs()
+        jobs[SHARD_JOBS[1]] = with_edit(jobs[SHARD_JOBS[1]], r"^    timeout-minutes: \d+", "    timeout-minutes: 45")
+        jobs[SHARD_JOBS[2]] = with_edit(jobs[SHARD_JOBS[2]], r"^    timeout-minutes: \d+", "    timeout-minutes: 30")
+        for i, job in enumerate(SHARD_JOBS, 1):
+            self.assertIn("      - name: Guard mutation test, shard %d/3\n" % i, jobs[job], "precondition: %s has no step for shard %d/3" % (job, i))
+        self.use_ci_job(PASSING, 0)
+        head = self.push_sharded_lane(jobs)
+        rc, text = self.timed_lint(60, "--lane-lint", "7")
+        self.assertEqual(rc, 0, "the lint refused a sharded head whose three shard runs are clean: " + text)
+        self.assertEqual([c["shard"] for c in self.mutation_test_calls()], ["1/3", "2/3", "3/3"],
+                         "the lint did not start the three shard runs in shard order, one each: " + text)
+        self.assertEqual([k.get("timeout") for k in self.mutation_test_kwargs], [job_cap(jobs[job], job) * 60 for job in SHARD_JOBS],
+                         "a shard run was not started under its own job's cap: " + text)
+        self.assert_mutation_test_runs_at(head, 3)
+
+    def test_mutation_test_one_job_head_with_the_old_step_name_still_runs_once(self):  # the control: the one-job head the lint read before the split still runs once
+        body, script = real_mutate_job()
+        self.assertIn("      - name: %s\n" % MUTATE_STEP, body, "precondition: the one-job head's step does not carry the old name, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        head = self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0)), WORKFLOW_REL: workflow_of(body)})
+        rc, text = self.timed_lint(437, "--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        self.assert_one_mutation_test_run(head)
+
+    def test_mutation_test_shard_job_whose_run_is_not_one_line_stops_the_lint_and_names_that_job(self):  # the first job reads clean, so the stop is the third job's
+        jobs = shard_jobs()
+        jobs[SHARD_JOBS[2]] = with_edit(jobs[SHARD_JOBS[2]], r"^        run: python3 hooks/mutate_guard\.py$",
+                                        "        run: |\n          python3 hooks/mutate_guard.py\n          echo shard 3")
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(jobs)
+        rc, text = self.timed_lint(60, "--lane-lint", "7")
+        self.assertNotEqual(rc, 0, "the lint passed a shard job whose run is not one line: " + text)
+        self.assertIn(SHARD_JOBS[2], text, "the stop does not name the shard job whose run is not one line: " + text)
+
+    def test_mutation_test_shard_job_without_a_timeout_stops_the_lint_and_names_that_job(self):  # the second job, not the first, is the one without a cap
+        jobs = shard_jobs()
+        jobs[SHARD_JOBS[1]] = with_edit(jobs[SHARD_JOBS[1]], r"^    timeout-minutes: \d+\n", "")
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(jobs)
+        rc, text = self.timed_lint(60, "--lane-lint", "7")
+        self.assertNotEqual(rc, 0, "the lint passed a shard job with no timeout-minutes: " + text)
+        self.assertIn(SHARD_JOBS[1], text, "the stop does not name the shard job with no timeout-minutes: " + text)
+
+    def test_mutation_test_shard_that_fails_fails_the_lint_names_its_job_and_starts_no_later_shard(self):
+        """Why: a FAIL in one shard decides the lint, so the shards after it are not run. Shard 2/3 lets a mutant survive here."""
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(shard_jobs(), shards={"2/3": (real_tally(693, survived=1), "", 1)})
+        rc, text = self.timed_lint(60, "--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint passed a head whose shard 2/3 run let a mutant survive: " + text)
+        self.assertIn(SHARD_JOBS[1], text, "the FAIL does not name the shard job that failed: " + text)
+        self.assertEqual([c["shard"] for c in self.mutation_test_calls()], ["1/3", "2/3"],
+                         "the lint started a shard after the one that failed, or did not start the one before it: " + text)
+
+    def test_mutation_test_shard_that_times_out_fails_the_lint_names_its_job_and_starts_no_later_shard(self):
+        """Why: a shard that reaches its cap is a FAIL, and the shards after it are not run, as for a shard that FAILs. Shard 2/3 times out here."""
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(shard_jobs())
+        real_sh = merge.sh
+        started = []
+
+        def sh_timing_out_on_shard_2(args, *rest, **kwargs):
+            if mutation_test_run(args):
+                shard = (kwargs.get("env") or {}).get("MUTATE_SHARD")
+                started.append(shard)
+                if shard == "2/3":
+                    raise subprocess.TimeoutExpired(args, kwargs.get("timeout"))
+            return real_sh(args, *rest, **kwargs)
+
+        with unittest.mock.patch.object(merge, "sh", sh_timing_out_on_shard_2):
+            rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint did not FAIL a shard run that timed out: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed a PASS line for a shard run that timed out: " + text)
+        self.assertIn(SHARD_JOBS[1], text, "the FAIL does not name the shard job that timed out: " + text)
+        self.assertEqual(started, ["1/3", "2/3"], "the lint started a shard after the one that timed out, or did not start the one before it: " + text)
+
+    def test_mutation_test_missing_shard_stops_the_lint_and_names_the_missing_shard(self):
+        jobs = shard_jobs()
+        del jobs[SHARD_JOBS[1]]
+        self.assertNotIn("shard 2/3\n", sharded_workflow(jobs), "precondition: the head's checks.yml still holds shard 2/3, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(jobs)
+        rc, text = self.timed_lint(60, "--lane-lint", "7")
+        self.assertNotEqual(rc, 0, "the lint passed a head whose checks.yml has no shard 2/3: " + text)
+        self.assertIn("2/3", text, "the stop does not name the missing shard 2/3: " + text)
 
 
 # The stack cross-measure (roadmap step stack-cross-measure): `merge --lane-lint <pr>` checks the PR's head against each other open PR of its
