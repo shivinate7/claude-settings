@@ -21,6 +21,7 @@ Sources:
 | Every branch (`--all`, `--branches`, or a glob refspec such as `refs/heads/*:refs/heads/*`), to a network remote, when it would update main or master there, when a local agent-worktree branch is among the branches it sends, or when a glob or the branch list cannot be read. The agent-checkout `--all` and `--branches` row above takes precedence | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-all-main` (kind `all-agent` for an agent branch sent; a failed read is kind `all`) |
 | Any other plain push | allow | |
 
+- Code: `names_default_branch` in `hooks/guard_push_delete.py` judges the push; `hooks/guard.py` judges the MCP file writes.
 - Item 207 a, `push-main`: main moves only by pull request (`git-main-only-by-pr`). The names are
   literal, `main` and `master`. The remote's HEAD is not read. It asks only for a network remote
   (https, http, ssh, git, or `host:path`). A remote with no URL, or a local path or `file://`
@@ -128,4 +129,5 @@ Cost: no new long-lived process or file. The reads run per push, in the guard's 
 Risk: incident (banchi, 2026-09-12).
 
 Kind: process
-Home: hooks/guard_push_delete.py (`names_default_branch`); hooks/guard.py for the MCP file writes.
+Home: hooks/guard_push_delete.py
+Home: hooks/guard.py
