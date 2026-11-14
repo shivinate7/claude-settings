@@ -2609,7 +2609,9 @@ TOUCHED_TAIL_LINES = 15  # last output lines a failing test shows; the whole log
 def run_touched_tests(wt, base, head):
     """Run the test files the diff base...head touches, inside the lint worktree `wt`, once the lint has passed. A test the selector keeps out (HEAVY, NEEDS_SETUP) or a .ps1 with no pwsh on the PATH is
     skipped with its reason, never run and never a pass. The whole stage shares one LINT_SECONDS bound.
+    A path the head's diff touches that the merge with the base dropped (the base deleted or renamed it) gets a skip line, so no pass reads as covering it.
     -> (run count, skip lines, fail texts, unknown lines). An unreadable diff, an unloadable selector and a timeout are unknowns, not passes."""
+    skips = []
     c, diff = git(wt, "diff", "--name-only", "--no-renames", "-z", f"origin/{base}...{head}")  # -z: git quotes a non-ASCII or spaced name otherwise
     if c:
         return 0, [], [], [f"the diff origin/{base}...{head[:9]} could not be read: {diff}"]
@@ -2624,6 +2626,12 @@ def run_touched_tests(wt, base, head):
     except (Exception, SystemExit) as e:  # the lane's own file: any failure to load it says nothing about the tests
         return 0, [], [], [f"the lint worktree's {TOUCHED_SELECTOR} could not be loaded: {type(e).__name__}: {e}"]
     tracked = set(listed.split("\0")) - {""}
+    gone = sorted(p for p in diff.split("\0") if p and p not in tracked)
+    if gone:  # the merge dropped it (main deleted or renamed it), so no test of it runs; a path the lane itself deleted is not in the head's tree either
+        c, held = git(wt, "ls-tree", "-r", "--name-only", "-z", head, "--", *gone)
+        if c:
+            return 0, [], [], [f"the head's tree could not be listed to find the paths the merge dropped: {held}"]
+        skips.extend(f"skip {p}: the head changes it, but the merge with {base} no longer has it" for p in held.split("\0") if p)
     try:
         # a path the diff deleted or renamed away is not in the tree, so it is no test to run; the selector's own main() drops it the same way
         tests = sorted(set().union(*(candidates(p, tracked) for p in diff.split("\0") if p and p in tracked)))
@@ -2631,7 +2639,7 @@ def run_touched_tests(wt, base, head):
         return 0, [], [], [f"the selector's candidates() raised {type(e).__name__}: {e}"]
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
     end = time.monotonic() + LINT_SECONDS
-    ran, skips, fails, unknowns = 0, [], [], []
+    ran, fails, unknowns = 0, [], []
     for t in tests:
         try:
             why = reason(t, heavy) or reason(t, needs_setup)
@@ -2668,13 +2676,13 @@ def run_touched_tests(wt, base, head):
 
 LINT_TREE_FILES = ("lint/check_python_floor.py", ".github/workflows/checks.yml")  # files the lint reads from its own tree: the floor check and the workflow that names the steps
 
-def refuse_incomplete_tree(wt, head, base):
-    """UNKNOWN, before any ci-job step runs, when the lint worktree `wt` lacks a file of LINT_TREE_FILES that `head` (a commit or a tree) holds: a worktree
+def refuse_incomplete_tree(wt, head, base, tree=None):
+    """UNKNOWN, before any ci-job step runs, when the lint worktree `wt` lacks a file of LINT_TREE_FILES that `tree` (a commit; default `head`) holds: a worktree
     cut incomplete (the incident's lacked both), not a head that never had the file. Without it the floor step only crashes on the file and its
     FAIL blames the lane for a worktree defect. Names each missing file; --lint-unknown-ok never lifts it (UnknownStop, not Liftable).
-    A head whose tree git cannot list is the same unknown. lane_lint asks twice: at the head before the merged tree goes in, since read-tree restores a file
-    the worktree lost, and at the merged tree after, whose files are what the lint reads (a file main deleted is not held there)."""
-    c, listed = git(wt, "ls-tree", "-r", "--name-only", "-z", head, "--", *LINT_TREE_FILES)
+    A tree git cannot list is the same unknown. Messages name the `head`, never the tree. lane_lint asks twice: at the head before the merge commit is checked
+    out, since a checkout restores a file the worktree lost, and at the merge commit after, whose files are what the lint reads (a file main deleted is not held there)."""
+    c, listed = git(wt, "ls-tree", "-r", "--name-only", "-z", tree or head, "--", *LINT_TREE_FILES)
     if c:
         raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the head's tree could not be listed, so the lint worktree was not checked: {listed} {LANE_LINT_CITE}")
     held = [p for p in listed.split("\0") if p]
@@ -2688,8 +2696,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR, and a stacked PR (base other than main) whose head lacks its base's head stops first.
     Then every head, a ref or commit too, is merged into origin/<base> with merge_reason: a conflict is a FAIL that names the base, and an unknown is a Stop.
-    Once those pass, the merged tree is read into the lint worktree (`git read-tree -u --reset`; HEAD stays the head), so every step and the touched tests read
-    the files of the merge, not the head's older copy. A read-tree that fails is an UnknownStop, which no flag lifts.
+    Once those pass, the merged tree is made a commit (`git commit-tree`, first parent the base tip, second the head) and the lint worktree checks it out, so every step
+    and the touched tests read the files of the merge, not the head's older copy, and a diff of the base against HEAD or the work tree shows only the lane's own changes.
+    ci-job's `github.event.pull_request.head.sha` is then that merge commit, not the head. A commit-tree or checkout that fails is an UnknownStop, which no flag lifts.
     Then cross_measure checks a PR's head against the lane's other open PRs and `with_prs`: an unknown there is a Stop too.
     A FAIL above (the base conflict, a clash that counts) or an unknown stops before the ci-job run, as one refusal that lists every FAIL block; the ci-job never runs beside it.
     Any other target is a commit or ref. ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
@@ -2740,12 +2749,15 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                 say(f"merge: draft run of {head[:9]} is {draft}, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *draft_lines)
         if fails or stop:  # as on main, a counted FAIL or an unknown ends the run before the ci-job
             raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop if stop else LANE_LINT_REMEDY]))
-        # The files the lint reads are the merge of head and base, so a head cut before the base fixed a file lints the fix. HEAD stays the head: the commit,
-        # trailer and diff-against-base steps read the lane's own history, which a merge commit would extend.
-        c, out = git(wt, "read-tree", "-u", "--reset", merged[0])
-        if c:
-            raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the merge of the head with {base} could not be read into the lint worktree: {out} {LANE_LINT_CITE}")
-        refuse_incomplete_tree(wt, merged[0], base)
+        # The lint tree is a merge commit of the base (first parent) and the head, so every file is the merged copy and HEAD is clean: a step that diffs the
+        # base against HEAD or the work tree reads only the lane's own changes, and the history steps see the lane's commits under one merge commit.
+        c, made = sh(["git", "-C", wt, "-c", "user.name=merge-lane-lint", "-c", "user.email=merge-lane-lint@invalid", "commit-tree", merged[0],
+                      "-p", f"refs/remotes/origin/{base}", "-p", head, "-m", f"lane-lint merge of {head[:9]} into {base}"])
+        merge_commit = made.strip()
+        c2, out = (c, made) if c else git(wt, "checkout", "-q", "--detach", merge_commit)
+        if c2:
+            raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the merge of the head with {base} could not be made the lint worktree's HEAD: {out} {LANE_LINT_CITE}")
+        refuse_incomplete_tree(wt, head, base, merge_commit)
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
         if state == "pass" and touched_tests:
             touched = run_touched_tests(wt, base, head)
