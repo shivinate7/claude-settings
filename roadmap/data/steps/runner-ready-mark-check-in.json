@@ -1,0 +1,14 @@
+{
+ "id": "runner-ready-mark-check-in",
+ "title": "A runner sets a one-time check-in at each ready mark, so a green ready run does not wait unmerged after a gap in its own turns",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Debt named by runner 10 (09:07 CST Nov 14, relayed; triage read nothing): after a gap with no event, a green ready run waits unmerged; on #3238 it waited 17 min. Earlier sample on the record: #3377, green 06:15 CST to merge call 06:44 (that gap was inside the merge tool, not idle), and runner 10's own session idle 05:41 to 06:03 CST (coordinator 06:47, relayed). Mistake it would stop: a runner has no turn between \"ready marked\" and \"CI ends\", and the CI end sends no wake for a green run (decision ci-wait-reads-run-status: only a red run posts a comment). Fix (runner 10's): a one-time check-in set at each ready mark, naming the one outside event (that ready run), firing once, written to no local file, no long-lived process; the root rule git-ci-wait-checks-in already allows it (\"sets a one-time check-in when it starts to wait\"). So this may be a rule in the runner's handoff or brief only, not a new tool. Cost: one check-in per ready mark. Measure: wait from green to merge call over the next 5 merges (so far 17 min on #3238, n=1). Ask the coordinator whether runner 10 already does this in its handoff.",
+ "source": "runner 10 09:07 CST Nov 14, relayed",
+ "note": "Filed 09:14 CST Nov 14 by triage. Tracker: the coordinator. No lane yet.",
+ "updatedAt": "2026-11-14T09:14:00-06:00"
+}
