@@ -188,5 +188,33 @@ class ClearRuleScanner(unittest.TestCase):
                          "a real || means the job may run in a push run, so it stays needed and its skip blocks the clear")
 
 
+class ClearRuleNightly(unittest.TestCase):
+    """R61 part 3: how a skipped nightly is classified. Controls: each holds on the rule as it stands, since a job whose `!=`
+    if can run in the newer run is kept needed, and its skip there blocks the clear. They pin the classification the gate
+    relies on: a skipped nightly never supersedes a red one."""
+    MAC_IF = "if: ${{ github.event_name != 'push' }}"
+    SKIP_IF = "if: ${{ github.event_name == 'schedule' }}"
+
+    def test_a_skipped_nightly_behind_a_green_skip_does_not_clear_a_red_macos_nightly(self):
+        # The red nightly failed checks-macos. The newer scheduled run's gate read skip: its checks-macos and checks were skipped,
+        # and only the gate passed. Named failure: the skipped jobs read as passed, and the skipped run clears the red one.
+        r = [job("checks-macos", "failure"), job("nightly-skip", "success"), job("checks", "success")]
+        n = [job("nightly-skip", "success"), job("checks-macos", "skipped"), job("checks", "skipped")]
+        text = workflow(("nightly-skip", ["runs-on: ubuntu-latest", self.SKIP_IF, *STEPS]),
+                        ("checks", [RUNS_ON, *STEPS]),
+                        ("checks-macos", ["runs-on: macos-latest", self.MAC_IF, *STEPS]))
+        self.assertFalse(clear_rule.clears(r, n, "schedule", text),
+                         "a skipped nightly cleared a red macOS nightly: its skipped jobs must not read as passed")
+
+    def test_a_green_push_run_with_the_macos_job_skipped_does_not_clear_a_red_macos_nightly(self):
+        # The push run skips checks-macos at job level (its != 'push' if). That job may run in a PR or a schedule run, so it stays
+        # needed here, and its skip in the push run blocks the clear. Named failure: the push guard leaves the job out.
+        r = [job("checks-macos", "failure"), job("checks", "success")]
+        n = [job("checks", "success"), job("checks-macos", "skipped")]
+        text = workflow(("checks", [RUNS_ON, *STEPS]), ("checks-macos", ["runs-on: macos-latest", self.MAC_IF, *STEPS]))
+        self.assertFalse(clear_rule.clears(r, n, PUSH, text),
+                         "a green push run cleared a red macOS nightly: the != push job was left out, so its skip read as passed")
+
+
 if __name__ == "__main__":
     unittest.main()
