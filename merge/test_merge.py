@@ -18166,11 +18166,11 @@ class ProseJudge(Env):
         sh(self.other, "git", "fetch", "-q", "origin")
         return set(sh(self.other, "git", "diff", "--name-only", "origin/main...origin/feat").split())
 
-    def setup_landing(self, main_files, feat_files, later=None):
+    def setup_landing(self, main_files, feat_files, later=None, renames=None):
         """setup_range for a PR that lands something, then the records page the generator writes for the head, committed on the head when the
         page changed. The merge's records check rebuilds the page on the merged tree and stops the merge when the head's page would change.
         `later` is setup_range's one more feat commit, after main's base is taken: a change to a file main already has."""
-        self.setup_range(main_files, feat_files, later=later)
+        self.setup_range(main_files, feat_files, later=later, renames=renames)
         o = self.other
         sh(o, sys.executable, merge.RECORDS, "--root", o, "--records-only")
         sh(o, "git", "add", "-A")
@@ -18385,6 +18385,79 @@ class ProseJudge(Env):
         self.assertEqual(len(where_else_calls(stub)), 1,
                          "where-else calls: %d, want 1: an edit of %d lines is at the threshold\n%s" % (len(where_else_calls(stub)), threshold, out))
 
+    def setup_record_delete(self):
+        """The PR deletes the existing decision record, and the records page follows it."""
+        self.setup_landing(SECTIONS, {})
+        o = self.other
+        sh(o, "git", "rm", "-q", "docs/decisions/first.md")
+        sh(o, sys.executable, merge.RECORDS, "--root", o, "--records-only")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-qm", "feat: drop the first record")
+        sh(o, "git", "push", "-q", "origin", "feat")
+
+    def test_a_failing_added_paths_read_prints_one_unknown_line_and_the_merge_lands(self):
+        self.setup_landing(SECTIONS, {"docs/decisions/landed-place.md": record("pending", "landed-place")})
+        real_git, reached = merge.git, []
+
+        def added_read_fails(cwd, *a, **kw):
+            if "--diff-filter=A" in a:
+                reached.append(a)
+                return 1, "the added-paths read failed"
+            return real_git(cwd, *a, **kw)
+        self.assert_where_else_seam_unknown(added_read_fails, reached, "git diff failed")
+
+    def test_a_failing_numstat_read_prints_one_unknown_line_and_the_merge_lands(self):
+        self.setup_landing(SECTIONS, {"docs/decisions/landed-place.md": record("pending", "landed-place")})
+        real_git, reached = merge.git, []
+
+        def counts_read_fails(cwd, *a, **kw):
+            if "--numstat" in a:
+                reached.append(a)
+                return 1, "the changed-line read failed"
+            return real_git(cwd, *a, **kw)
+        self.assert_where_else_seam_unknown(counts_read_fails, reached, "git diff failed")
+
+    def test_an_edit_of_three_added_and_two_removed_lines_lands(self):
+        self.setup_landing(SECTIONS, {"docs/decisions/first.md": FIVE_LINE_EDIT})
+        self.assertIn("docs/decisions/first.md", self.changed_paths(), "scope: the PR must edit the existing record")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = where_else_calls(stub)
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: five changed lines (three added, two removed) is the threshold\n%s" % (len(where), out))
+        self.assertIn("title: Renamed", where[0], "the where-else prompt does not carry the edited record")
+
+    def test_a_changed_anchor_sentence_lands(self):
+        self.setup_landing({**SECTIONS, RULING_PATH: RULING_DOC}, {}, later={RULING_PATH: CHANGED_RULE_DOC})
+        self.assertIn(RULING_PATH, self.changed_paths(), "scope: the PR must change the rule file")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = where_else_calls(stub)
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: a changed sentence before a known anchor lands\n%s" % (len(where), out))
+        self.assertIn("or in a commit", where[0], "the where-else prompt does not carry the changed sentence")
+
+    def test_a_changed_source_line_of_a_known_guard_rule_lands(self):
+        self.setup_landing({**SECTIONS, GUARD_PATH: GUARD_FEAT}, {}, later={GUARD_PATH: GUARD_CHANGED})
+        self.assertIn(GUARD_PATH, self.changed_paths(), "scope: the PR must change the guard file")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = where_else_calls(stub)
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: a known rule name with a source line the base lacks lands\n%s" % (len(where), out))
+        self.assertIn("twice", where[0], "the where-else prompt does not carry the changed guard line")
+
+    def test_a_deleted_record_makes_no_where_else_call(self):
+        self.setup_record_delete()
+        self.assertFalse(os.path.exists(os.path.join(self.other, "docs", "decisions", "first.md")), "scope: the PR must delete the record")
+        self.assertIn("docs/decisions/first.md", self.changed_paths(), "scope: the deletion must be in the PR's changed paths")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        self.assertEqual(where_else_calls(stub), [], "where-else calls: %d, want 0: a deleted record lands nothing\n%s" % (len(where_else_calls(stub)), out))
+        self.assertEqual(where_else_unknown_lines(out), [], "a deleted record printed a where-else UNKNOWN line\n" + out)
+        self.assertEqual(rc, 0, "the deletion changed the exit status to %s\n%s" % (rc, out))
+
+    def test_a_pure_rename_of_a_record_triggers_one_where_else_call(self):
+        self.setup_landing(SECTIONS, {}, renames={"docs/decisions/first.md": "docs/decisions/renamed-first.md"})
+        self.assertIn("docs/decisions/renamed-first.md", self.changed_paths(), "scope: the PR must move the record")
+        stub, rc, out = self.judge_where_else(route(no_places))
+        where = where_else_calls(stub)
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: the code counts the moved record's lines as changed\n%s" % (len(where), out))
+        self.assertIn("renamed-first.md", where[0], "the where-else prompt does not carry the moved record")
+
 
 # The where-else judge's fixtures. RULING_DOC is the claim-at-merge rule as CLAUDE.md states it, with its anchor line. SECTIONS is one
 # guard section file on main, the other number-minting place. WHERE_ELSE_REPLY is the reply shape the where-else judge reads: a `places` list.
@@ -18416,6 +18489,10 @@ GUARD_PATH = "hooks/guard.py"
 GUARD_MAIN = "def check(ctx):\n    return None\n"
 GUARD_FEAT = GUARD_MAIN + 'def widget(ctx):\n    return refuse(ctx, "a widget was made", "widget-slug-rule")\n'
 MANY_RECORDS = 75  # decision records one PR lands, for the cap case
+GUARD_CHANGED = GUARD_MAIN + 'def widget(ctx):\n    return refuse(ctx, "a widget was made twice", "widget-slug-rule")\n'  # the same rule name, its source line changed
+CHANGED_RULE_DOC = ("# Rules\n\nNever allocate a numbered record on a branch, or in a commit. Write a slug of 32 characters or fewer. "
+                    "Claim the number at merge.<!-- rule:git-slug-then-claim-number --> Ids, not paths.\n")  # the same anchor, its sentence changed
+FIVE_LINE_EDIT = "---\nid: D-001\nslug: first\ntitle: Renamed\n---\nbody, reworded\nan added line\n"  # record("D-001", "first") with two lines changed and one added: the slug stays, a numbered record keeps its key
 
 
 def big_record(i):
