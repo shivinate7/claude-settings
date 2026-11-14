@@ -155,12 +155,15 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             handle.write("@%s/CLAUDE.md\n" % pointer.replace("\\", "/"))
 
     def hook_launch(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False,
-                    remote_session_id=None, path_dir=None, trace_file=None, ref=None):
+                    remote_session_id=None, path_dir=None, trace_file=None, ref=None, session_id=SESSION, role=None):
         """The hook's argv, environment, stdin payload and cwd, as the harness starts it. The arguments are run_hook's,
-        and run_hook and the cut-off runs both start here, so the environment is built in one place."""
+        and run_hook and the cut-off runs both start here, so the environment is built in one place.
+        session_id: the payload's session_id, or None to send none. role: the launcher's CS_SESSION_ROLE, or None to unset it."""
         where = self.primary if session_cwd is None else session_cwd
         # Forward slashes: the hook reads "cwd" with sed, and a doubled backslash is not a path.
-        body = {"cwd": where.replace("\\", "/"), "session_id": SESSION}
+        body = {"cwd": where.replace("\\", "/")}
+        if session_id is not None:
+            body["session_id"] = session_id
         if source is not None:
             body["source"] = source
         payload = json.dumps(body, separators=(",", ":") if compact else None)
@@ -172,9 +175,13 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         # The test runner may itself be a cloud session, so each run sets the variable it means.
         env.pop("CLAUDE_CODE_REMOTE", None)
         env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+        env.pop("CLAUDE_CODE_SESSION_ID", None)
         env.pop("CLAUDE_SETTINGS_REF", None)
+        env.pop("CS_SESSION_ROLE", None)
         if ref is not None:
             env["CLAUDE_SETTINGS_REF"] = ref
+        if role is not None:
+            env["CS_SESSION_ROLE"] = role
         if remote is not None:
             env["CLAUDE_CODE_REMOTE"] = remote
         if remote_session_id is not None:
@@ -182,7 +189,7 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         return sh_argv(path_dir, HOOK), env, payload, where
 
     def run_hook(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False,
-                 remote_session_id=None, path_dir=None, trace_file=None, ref=None):
+                 remote_session_id=None, path_dir=None, trace_file=None, ref=None, session_id=SESSION, role=None):
         """The hook's stdout lines. Its stderr lands in self.last_stderr.
 
         remote: the CLAUDE_CODE_REMOTE value, or None to unset it as a non-cloud runner does.
@@ -193,11 +200,12 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         path_dir: a folder put first on PATH, such as a git shim's folder, or None for the runner's own PATH.
         trace_file: a file git appends its own trace to (GIT_TRACE), or None for no trace.
         ref: the CLAUDE_SETTINGS_REF value, or None to unset it (the recovery is off unless a case turns it on).
+        session_id: the payload's session_id, or None to send none. role: the launcher's CS_SESSION_ROLE, or None.
         """
         argv, env, payload, where = self.hook_launch(remote=remote, fetch_timeout=fetch_timeout,
                                                      session_cwd=session_cwd, source=source, compact=compact,
                                                      remote_session_id=remote_session_id, path_dir=path_dir,
-                                                     trace_file=trace_file, ref=ref)
+                                                     trace_file=trace_file, ref=ref, session_id=session_id, role=role)
         answer = subprocess.run(argv, input=payload, capture_output=True, text=True, env=env, cwd=where,
                                 timeout=120)
         self.last_stderr = answer.stderr
@@ -2395,6 +2403,47 @@ class SessionStartStableFreshnessTests(GitFixtureMixin, SessionStartAgentWorktre
         self.assertEqual(self.resolve("origin/main"), main_next, "scope: the hook did not fetch origin's main")
         self.assertEqual(self.stale_lines(lines), [("1", "origin/main")],
                          "under CLAUDE_SETTINGS_REF=main want one stale line counting the pin 1 behind origin/main, got %r" % lines)
+
+
+class SessionStartRoleFileTests(SessionStartAgentWorktreeNoticeTests):
+    """The launcher's role (bin/claude-role sets CS_SESSION_ROLE) is written at session start to
+    <CLAUDE_CONFIG_DIR>/state/session-roles/<session id>.json, and that file is removed when the variable is unset. The guard
+    and the merge read it for a local session (lane local-tier-file). A /clear gives a session a new id, so the entry that runs
+    the hook must fire on clear as well: the entry test is a scope check, then the subject."""
+
+    def role_file(self, sid=SESSION):
+        return os.path.join(self.config, "state", "session-roles", sid + ".json")
+
+    def test_a_session_start_with_the_launcher_role_writes_the_role_file(self):
+        self.run_hook(role="triage")
+        path = self.role_file()
+        self.assertTrue(os.path.isfile(path), "session start with CS_SESSION_ROLE=triage wrote no role file at %s" % path)
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        self.assertEqual(data.get("session"), SESSION, "the role file names session %r" % (data.get("session"),))
+        self.assertEqual(data.get("role"), "triage", "the role file names role %r" % (data.get("role"),))
+
+    def test_a_session_start_with_no_role_variable_removes_the_own_role_file(self):
+        self.put(self.role_file(), json.dumps({"session": SESSION, "role": "triage"}))
+        self.run_hook(role=None)
+        self.assertFalse(os.path.exists(self.role_file()),
+                         "session start with no CS_SESSION_ROLE left the own role file in place")
+
+    def test_no_session_id_writes_no_role_file(self):
+        # Control, green on the old code, which writes no role file at all. It pins that a file is never keyed on a missing id.
+        self.run_hook(session_id=None, role="triage")
+        folder = os.path.join(self.config, "state", "session-roles")
+        found = os.listdir(folder) if os.path.isdir(folder) else []
+        self.assertEqual(found, [], "a session start with no session id wrote a role file: %r" % (found,))
+
+    def test_the_entry_that_runs_the_hook_fires_on_clear(self):
+        with open(os.path.join(HERE, "..", "settings.json"), encoding="utf-8") as handle:
+            entries = json.load(handle)["hooks"]["SessionStart"]
+        runs = [e for e in entries if any("session_start" in h.get("command", "") for h in e.get("hooks", []))]
+        self.assertTrue(runs, "scope: no SessionStart entry runs session_start.sh")
+        matchers = [e.get("matcher", "") for e in runs]
+        self.assertTrue(any(re.fullmatch(m or ".*", "clear") for m in matchers),
+                        "no SessionStart entry that runs session_start.sh fires on clear: matchers %r" % (matchers,))
 
 
 if __name__ == "__main__":

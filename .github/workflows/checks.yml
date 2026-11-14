@@ -536,6 +536,15 @@ jobs:
           node --test testing/skip-locally-fail-in-ci.test.mjs
           bash actions/push-skip/test_action.sh
 
+      - name: Claude role launcher suite
+        run: python3 lint/test_claude_role.py
+
+      - name: Refusal route suite
+        run: python3 lint/test_refusal_route.py
+
+      - name: guard_merge import suite
+        run: python3 lint/test_guard_merge_imports.py
+
       # Last step, so a red test here skips none of the steps above, and a red step above does not hide
       # a mod test (!cancelled() runs it anyway). The script is the one home of the mod tests and the
       # plain-english-map skill tests. The same step ends checks-windows and checks-macos. The `mods` flag
@@ -680,6 +689,9 @@ jobs:
 
       - name: Session start notice suite
         run: python3 hooks/test_session_start.py
+
+      - name: Session role file suite
+        run: python3 hooks/test_session_role.py
 
       - name: Directory before a segment suite
         run: python3 hooks/test_dir_before_segment.py
@@ -840,6 +852,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_merge_grant.py
 
+      - name: Merge tool stall-watch beat suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_merge_beat.py
+
       - name: Merge launcher fixture suite (bin/merge)
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_cmd.py
@@ -855,6 +871,10 @@ jobs:
       - name: Idle-lanes reader fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_idle_lanes.py
+
+      - name: Combine-train tool fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_combine_train.py
 
       - name: install_from_main suite
         if: ${{ needs.scope.outputs.code == 'true' }}
