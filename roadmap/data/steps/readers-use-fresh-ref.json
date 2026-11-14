@@ -1,0 +1,14 @@
+{
+ "id": "readers-use-fresh-ref",
+ "title": "Readers of origin/<branch> that skip fresh_ref use it, or the record names why the filing read fetches nothing",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Debts found by the lane roadmap-ref-fresh (coordinator 09:51 CST Nov 14, relayed; the lane's own file and line list, unread by the coordinator and triage): readers of origin/<branch> without fresh_ref: filing and export reads in hooks/feedback_guard.py at lines 1424, 638 and 558; check_store in ruled_store.py lines 386-417. Also: merge.py line 3050 has its own fetch (a second home for the same job); session_start has a 10 s budget (a fetch must fit it). Coordinator's pick: those readers stay debts, not routed into #3253. Open point (stale-decision protocol, coordinator 09:51): record docs/decisions/owner-feedback-inbox.md, \"Page filing\" bullet (line 118 on main, read by triage by grep): \"The guard reads the waiting copy, the `items/` folder of the waiting export on `origin/<record branch>`, as of the last fetch. It fetches nothing.\" The lines triage read cite no ruling and give no reason for fetching nothing. Claim measured: unmeasured (how stale the copy is when the guard reads it; the lane found fresh_ref counting a stale FETCH_HEAD line as fresh). Outcome the sentence likely protected (unread; guess, not a record): a guard that makes no network call on each tool use, which the root rule says (tracking reads on demand inside a running process; a timer or watcher must cost less than it saves). What protects it now: nothing named. Proposed fix: one home for the fresh read (fresh_ref), all readers call it, the guard reads fresh only when its answer would block (a rare path), so the hot path still fetches nothing; and the sentence is rewritten in place to say so. Wait for the owner's grant before the sentence changes; the readers can use fresh_ref without changing the sentence if they fetch only on a block. Not an owner page item yet: the coordinator's pick keeps them as debts.",
+ "source": "coordinator 09:51 CST Nov 14, from lane roadmap-ref-fresh",
+ "note": "Filed 09:52 CST Nov 14 by triage. Tracker: the coordinator. No lane yet. Rule: one home per capability (building-one-home-per-capability).",
+ "updatedAt": "2026-11-14T09:52:00"
+}
