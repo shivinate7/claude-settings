@@ -159,6 +159,7 @@ if LINT not in sys.path:
     sys.path.insert(0, LINT)
 
 import _transcript  # noqa: E402  the one home of the transcript readers and the owner-record test
+import fence_rule  # noqa: E402  the one home of the inbox and markdown fence loops
 import local_time  # noqa: E402  the one home of the inbox paths
 import override  # noqa: E402  the one home of the roadmap record ref and folder
 import ruling_home  # noqa: E402  the one home of "a branch's tree holds this file"
@@ -199,8 +200,8 @@ CLOSED_TOKEN = re.compile(r"(?<!\S)\[closed\](?!\S)")
 # A grant's [ruling] home may also be one of these root files, when git tracks it on some branch.
 GRANT_ROOT_HOMES = ("settings.json", ".claude/CLAUDE.md")
 READ_VERBS = ("get", "list", "query")  # the ArtifactData reads whose result holds the documents
-HEADING_PREFIX = local_time.HEADING_PREFIX  # the heading and stamp the writer emits
-HEADER = re.compile(re.escape(HEADING_PREFIX) + local_time.STAMP_PATTERN + "$")
+HEADING_PREFIX = fence_rule.HEADING_PREFIX  # the heading and stamp the writer emits
+HEADER = fence_rule.HEADER
 STAMP_HHMM = re.compile(local_time.STAMP_PATTERN)
 # The home each kind without a file home takes, as the decision gives it.
 KIND_WORDS = {"question": "answered", "note": "noted (closed: a tracked file, step:<slug> or page:<n>; "
@@ -283,23 +284,7 @@ def parse(text):
     """[{stamp, line, text, items, item_at}] from the inbox, `line` being the heading's 1-based line number and
     `item_at` the line numbers of `items`. Lines inside a fence are never headers or items, and a
     `### ` line that is not the hook's own Central header is plain text."""
-    blocks, fence = [], None
-    for number, ln in enumerate(text.split("\n"), 1):
-        ln = ln.rstrip("\r")
-        if fence is not None:
-            if re.fullmatch(r"`+", ln) and len(ln) >= len(fence):
-                fence = None
-            else:
-                blocks[-1]["text"] = ln if blocks[-1]["text"] is None else blocks[-1]["text"] + "\n" + ln
-        elif HEADER.match(ln):
-            blocks.append({"stamp": ln[len(HEADING_PREFIX):], "line": number, "text": None, "items": [],
-                           "item_at": [], "fenced": False})
-        elif blocks and not blocks[-1]["fenced"] and re.fullmatch(r"`{3,}", ln):
-            fence, blocks[-1]["fenced"] = ln, True
-        elif blocks and ln.startswith("- fb-"):
-            blocks[-1]["items"].append(ln)
-            blocks[-1]["item_at"].append(number)
-    return blocks
+    return fence_rule.inbox_scan(text)[0]  # the loop is fence_rule's, also read by state_parse_check.py
 
 
 def item(ln):
@@ -872,17 +857,7 @@ def answer_problem(b, text, k, homes, pages):
 
 def unfenced(text):
     """`text` without the lines of its own code fences, an unclosed fence running to the end."""
-    kept, fence = [], None
-    for ln in text.split("\n"):
-        mark = re.match(r"\s*(`{3,}|~{3,})", ln)
-        if fence is None:
-            if mark:
-                fence = mark.group(1)
-            else:
-                kept.append(ln)
-        elif mark and mark.group(1)[0] == fence[0] and len(mark.group(1)) >= len(fence):
-            fence = None
-    return "\n".join(kept)
+    return "\n".join(fence_rule.fence_scan(text)[0])
 
 
 def is_grant(text):

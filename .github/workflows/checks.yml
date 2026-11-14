@@ -240,6 +240,9 @@ jobs:
       - name: CI wake-up fixture suite
         run: python3 hooks/test_ci_wake.py
 
+      - name: State file parse check fixture suite
+        run: python3 hooks/test_state_parse_check.py
+
       - name: Feedback inbox fixture suite
         run: python3 hooks/test_feedback_inbox.py
 
@@ -1302,6 +1305,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_ci_wake.py
 
+      - name: State file parse check fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_state_parse_check.py
+
       - name: Feedback inbox fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_feedback_inbox.py
@@ -1931,6 +1938,10 @@ jobs:
       - name: CI wake-up fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_ci_wake.py
+
+      - name: State file parse check fixture suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python hooks/test_state_parse_check.py
 
       - name: Feedback inbox fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
