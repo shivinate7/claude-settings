@@ -14429,12 +14429,14 @@ class ReviewEnv(Env):
         sh(self.co, "git", "push", "-q", "-f", "origin", f"{sha}:refs/heads/main")
         sh(self.co, "git", "fetch", "-q", "origin")
 
-    def claim_over(self, parent, changes):
-        """-> the sha of a claim commit over `parent`: one parent, and the tree git_commit builds for `changes`, under the message a claim commit
-        carries (a Record-claim trailer, claim_only reads it). The tree is git_commit's, so the fixture stays one home; only the message differs."""
+    def claim_over(self, parent, changes, message="Claim record numbers\n\nRecord-claim: D-002", more_parents=()):
+        """-> the sha of a commit over `parent`: its tree is the one git_commit builds for `changes`, and its message is a claim commit's (a Record-claim
+        trailer, which claim_only reads) unless `message` names another. `more_parents` follow `parent`. The tree is git_commit's, so the fixture
+        stays one home; only the message and the parents differ."""
         plain = self.git_commit(parent, changes)
         tree = sh(self.co, "git", "rev-parse", f"{plain}^{{tree}}")
-        return sh(self.co, "git", "commit-tree", tree, "-p", parent, "-m", "Claim record numbers\n\nRecord-claim: D-002")
+        parents = [arg for p in (parent, *more_parents) for arg in ("-p", p)]
+        return sh(self.co, "git", "commit-tree", tree, *parents, "-m", message)
 
 class ReviewArgs(ReviewEnv):
     """The flags, as argparse reads them. --reviewed and --role each stand alone. --review-record needs a PR number and a --head, and takes no
@@ -16129,7 +16131,8 @@ MODEL_RECORD = "/".join((layout.path(os.path.dirname(HERE), "decisions"), hook_g
 class ClaimOnlyReviewed(ReviewEnv):
     """`merge --reviewed` reads a one-parent claim commit as the head it stacks on: the record done at the reviewed head survives the claim, and the
     lane-lint PASS on the reviewed head carries to the claim head (claim_only, the rule lint_check already uses). A claim-shaped commit that
-    writes a code file carries neither, so the control reads not done."""
+    writes a code file carries neither, so the control reads not done. A records-page commit (page_only: one parent, the subject PAGE_SUBJECT,
+    the records page alone) carries both the same way; a commit that breaks one of those rules carries neither."""
 
     def claim_host(self, fx, claim, record_head, lint_head):
         """The host of `merge --reviewed` for pull request 7 at `claim`: its one record for `record_head`, and a lane-lint PASS on `lint_head`."""
@@ -16163,6 +16166,94 @@ class ClaimOnlyReviewed(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertNotIn(" done: ", list_line(self, out, 7), "a code-file commit carried the lint of its parent:\n" + out)
         self.assertIn("merge --lane-lint 7", out, out)
+
+    def page_over(self, parent, changes=None, message=merge.PAGE_SUBJECT):
+        """-> the sha of a records-page commit over `parent`: one parent, and the records page alone changed unless `changes` names more. Its
+        subject is PAGE_SUBJECT, the subject page_only reads; `message` replaces it for a case that needs another."""
+        return self.claim_over(parent, changes or {merge.RECORDS_PAGE: "records page, rebuilt\n"}, message=message)
+
+    def assert_page_not_carried(self, fx, page, cause):
+        """`page` carries neither the record nor the lint. The record done at the reviewed head reads stale on `page`, and a lint PASS on the reviewed
+        head does not carry to `page` (the record done on `page` then reads done, and the lane lint is still owed)."""
+        with self.subTest(cause=cause, carry="record"):
+            rc, out, err = self.run_args("--reviewed", host=self.claim_host(fx, page, record_head=fx.fixed, lint_head=page))
+            self.assertEqual(rc, 0, out + err)
+            self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {page[:9]} stale: ", f"{cause}: a record done at the reviewed head carried to the page head:\n{out}")
+        with self.subTest(cause=cause, carry="lint"):
+            rc, out, err = self.run_args("--reviewed", host=self.claim_host(fx, page, record_head=page, lint_head=fx.fixed))
+            self.assertEqual(rc, 0, out + err)
+            self.assertNotIn(" done: ", list_line(self, out, 7), f"{cause}: a lint PASS on the reviewed head carried to the page head:\n{out}")
+            self.assertIn("merge --lane-lint 7", out, out)
+
+    def test_m_a_record_done_at_the_reviewed_head_reads_done_on_a_records_page_head(self):
+        # Catches: the clean-merge walk refusing a records-page commit, so the record done at the reviewed head reads stale on the page head.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        page = self.page_over(fx.fixed)
+        self.facts(fx, [page])
+        self.reviewed_line(self.claim_host(fx, page, record_head=fx.fixed, lint_head=page), page, "done",
+                           "a records-page head reads stale for a record done at the reviewed head")
+
+    def test_n_a_lint_pass_on_the_reviewed_head_carries_to_the_records_page_head(self):
+        # Catches: lint_check's carry (claim_only) refusing a records-page commit, so the PASS on the reviewed head reads as no lint at the page head.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        page = self.page_over(fx.fixed)
+        self.facts(fx, [page])
+        self.reviewed_line(self.claim_host(fx, page, record_head=page, lint_head=fx.fixed), page, "done",
+                           "a lint PASS on the reviewed head does not carry to a records-page head")
+
+    def test_o_two_records_page_commits_stacked_carry_the_record_and_the_lint_of_the_reviewed_head(self):
+        # Catches: the walk and the carry stopping at the first records-page commit, so the second one breaks a chain the first one kept.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        first = self.page_over(fx.fixed)
+        second = self.page_over(first, {merge.RECORDS_PAGE: "records page, rebuilt again\n"})
+        self.facts(fx, [first, second])
+        self.reviewed_line(self.claim_host(fx, second, record_head=fx.fixed, lint_head=fx.fixed), second, "done",
+                           "two records-page commits on the reviewed head break the record or the lint carry")
+
+    def test_p_a_claim_then_a_records_page_commit_carry_the_record_and_the_lint_of_the_reviewed_head(self):
+        # Catches: a records-page commit after a claim commit breaking the chain the claim alone keeps (test_j, test_k), or the page's walk stopping there.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
+        page = self.page_over(claim)
+        self.facts(fx, [claim, page])
+        self.reviewed_line(self.claim_host(fx, page, record_head=fx.fixed, lint_head=fx.fixed), page, "done",
+                           "a records-page commit after a claim commit breaks the record or the lint carry")
+
+    def test_q_a_records_page_subject_on_a_commit_that_also_touches_a_file_is_not_carried(self):  # control: green on the old code
+        # page_only needs the records page alone. A page-subject commit that also writes notes.txt is no page commit, so nothing carries over it.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        page = self.page_over(fx.fixed, {merge.RECORDS_PAGE: "records page, rebuilt\n", "notes.txt": "notes\n"})
+        self.facts(fx, [page])
+        self.assert_page_not_carried(fx, page, "a records-page subject on a commit that also touches notes.txt")
+
+    def test_r_a_records_page_only_commit_with_another_subject_and_no_trailer_is_not_carried(self):  # control: green on the old code
+        # The records page alone is not enough: the subject must be PAGE_SUBJECT, and a commit with no Record-claim trailer is no claim either.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        page = self.page_over(fx.fixed, message="Fix the records page")
+        self.facts(fx, [page])
+        self.assert_page_not_carried(fx, page, "a records-page-only commit with another subject and no Record-claim trailer")
+
+    def test_s_a_two_parent_commit_with_the_records_page_subject_is_not_carried(self):  # control: green on the old code
+        # The second parent is feat, which main does not hold. A two-parent commit is a merge, and only a clean merge of main carries.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        merged = self.claim_over(fx.fixed, {merge.RECORDS_PAGE: "records page, rebuilt\n"}, message=merge.PAGE_SUBJECT, more_parents=(fx.feat,))
+        self.facts(fx, [merged])
+        self.assert_page_not_carried(fx, merged, "a two-parent commit with the records-page subject, the second parent off main")
+
+    def test_t_a_records_page_commit_whose_parent_is_off_the_reviewed_head_is_not_carried(self):  # control: green on the old code
+        # The page commit stacks on feat, which is not the reviewed head's chain: the head it reads is not the record's head plus clean steps.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        page = self.page_over(fx.feat)
+        self.facts(fx, [page])
+        self.assert_page_not_carried(fx, page, "a records-page commit on a parent that is not the reviewed head's chain")
 
 class ReviewGuardPaths(unittest.TestCase):
     """merge.GUARD_PATHS: the rule dirs of lint/stale_cites.py, then merge/ and githooks/, folder prefixes only. merge.GUARD_FILES: settings.json,
