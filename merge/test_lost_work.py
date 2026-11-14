@@ -24,6 +24,8 @@ THE CONTRACT THE CASES PIN (the builder meets it):
   `lost-work branch <name> (f): <why>; owner <owner>`; the owner is the coordinator (LOST_WORK_OWNER["f"]). The branch list comes from the
   live file's branches list and the ahead counts from local git: no gh call per branch. Its newest commit is six hours old or more
   (LOST_WORK_DONE_HOURS, the six-hour constant): a younger branch lists no row.
+  A branch named as the repo's record branch (lint/layout.py record_branch: the extras file's "record-branch" key, else roadmap) lists no row.
+  A "record-branch" key that is not a branch name reads the branch list unknown: `lost-work branches unknown: WHY; owner coordinator`, no branch row.
 - reviewed_ledger(h, live, verdicts, subsumed) -> (rows, count_line, ok), the ledger. Its rows are the lost-work rows, one per pull request and one
   per f branch (pr = the branch name), with the keys in LEDGER_FIELDS, ordered by pr; the newest review log's state is under review_log. It
   reads the live file once, through lost_work_rows. `verdicts` is the path of docs/backlog-drain/verdicts.tsv: a header row, then tab-separated
@@ -56,6 +58,7 @@ sys.path.insert(1, str(HERE.parent / "lint"))
 sys.path.insert(2, str(HERE.parent / "skills" / "roadmap"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
+import layout  # noqa: E402  lint/layout.py: the record branch (record_branch) and the extras file's path, one home
 import test_build as roadmap  # noqa: E402  the roadmap fixture: make_repo, session_row, STEP, git, iso_ago (one home)
 
 REPO_SLUG = "owner/fixture"
@@ -217,6 +220,13 @@ class LostWorkFixture(unittest.TestCase):
             return merge.reviewed_block(h)[0]
         lines, _ok = merge.reviewed_block(h, live=str(self.live) if live else None)
         return lines
+
+    def write_extras(self, keys):
+        """Write the repo's extras file with `keys`, at the path lint/layout.py reads it from: the layout's `extras` path, under the repo root.
+        The file must hold a "kinds" object, empty here: the reader rejects a file without one."""
+        path = pathlib.Path(self.repo).joinpath(*layout.layout()["extras"].split("/"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"kinds": {}, **keys}), encoding="utf-8")
 
 class LostWorkRows(LostWorkFixture):
     """reviewed_block's lost-work rows: the five pull request states, and the pushed branches (state f)."""
@@ -586,6 +596,57 @@ class LostWorkRows(LostWorkFixture):
                          "control: no state-f row for claude/over-the-floor, whose newest commit is past the six-hour floor: %r" % lines)
         self.assertEqual(branch_rows(lines, "claude/under-the-floor"), [],
                          "a state-f row for claude/under-the-floor, whose newest commit is under the six-hour floor: %r" % lines)
+
+    def test_f_record_branch_roadmap_with_no_pr_lists_no_row(self):
+        # The record branch roadmap has no pull request and is never merged. The control is an ordinary no-PR branch, which lists in the same run.
+        self.assertEqual(layout.record_branch(str(self.repo)), "roadmap", "scope: the repo's record branch is not roadmap, so the case reads another branch")
+        self.push_branch("roadmap", self.commit_on(self.main, {"docs/record-notes.md": "notes\n"}))
+        self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(len(branch_rows(lines, BRANCH)), 1, "control: no state-f row for %s, ahead of main with no pull request: %r" % (BRANCH, lines))
+        self.assertEqual(branch_rows(lines, "roadmap"), [], "a state-f row for roadmap, the record branch, which has no pull request: %r" % lines)
+
+    def test_f_branch_the_extras_file_names_as_record_branch_lists_no_row_and_roadmap_lists_as_ordinary(self):
+        # The extras file's record-branch key moves the record branch to field-notes: field-notes lists no row, and roadmap, no longer the record
+        # branch, lists as an ordinary no-PR branch. BRANCH is the control in the same run.
+        self.write_extras({layout.RECORD_BRANCH: "field-notes"})
+        self.assertEqual(layout.record_branch(str(self.repo)), "field-notes", "scope: the extras file's record-branch key does not name field-notes")
+        self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
+        self.push_branch("field-notes", self.commit_on(self.main, {"docs/field-notes.md": "field\n"}))
+        self.push_branch("roadmap", self.commit_on(self.main, {"docs/roadmap-plan.md": "plan\n"}))
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(len(branch_rows(lines, BRANCH)), 1, "control: no state-f row for %s, ahead of main with no pull request: %r" % (BRANCH, lines))
+        self.assertEqual(branch_rows(lines, "field-notes"), [], "a state-f row for field-notes, the record branch the extras file names: %r" % lines)
+        self.assertEqual(len(branch_rows(lines, "roadmap")), 1,
+                         "no state-f row for roadmap, which the extras file no longer names as the record branch: %r" % lines)
+
+    def test_f_ordinary_no_pr_branches_still_list_beside_the_record_branch_name(self):
+        # The guard against a skip of everything: an ordinary no-PR branch lists, and so does one whose name only starts with roadmap, since the
+        # record branch is an exact name, not a prefix.
+        self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
+        self.push_branch("roadmap-notes", self.commit_on(self.main, {"docs/roadmap-notes.md": "notes\n"}))
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(len(branch_rows(lines, BRANCH)), 1, "no state-f row for %s, an ordinary no-PR branch ahead of main: %r" % (BRANCH, lines))
+        self.assertEqual(len(branch_rows(lines, "roadmap-notes")), 1,
+                         "no state-f row for roadmap-notes, which is not the record branch roadmap (the name is an exact match): %r" % lines)
+
+    def test_f_invalid_record_branch_key_reads_the_branch_list_unknown(self):
+        # An invalid key is not silently cleared: the branch list reads unknown with a reason that names the key, the review read is not ok, and
+        # no branch row lists beside it.
+        self.write_extras({layout.RECORD_BRANCH: "field notes"})  # a space: not a git branch name
+        with self.assertRaises(layout.BranchNameError):
+            layout.record_branch(str(self.repo))  # scope: the home rejects the key
+        self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
+        self.publish()
+        lines, ok = merge.reviewed_block(self.host(), live=str(self.live))
+        unknown = [line for line in lines if line.startswith("lost-work branches unknown: ")]
+        self.assertEqual(len(unknown), 1, "no `lost-work branches unknown` row for the invalid record-branch key, so the branch list reads clear: %r" % lines)
+        self.assertIn(layout.RECORD_BRANCH, unknown[0], "the unknown row gives no reason that names the record-branch key: %r" % unknown[0])
+        self.assertIs(ok, False, "an unread branch list leaves the review read ok: %r" % ok)
+        self.assertEqual(branch_rows(lines, BRANCH), [], "a state-f row listed beside an unread branch list: %r" % lines)
 
     def test_lost_work_rows_name_the_review_log_not_the_record(self):
         # One row for each of states a, b and c. Each names the review log, the glossary's term for the pull request comment: the word record
