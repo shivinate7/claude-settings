@@ -1,0 +1,14 @@
+{
+ "id": "child-ci-actions-follow-stable",
+ "title": "Child repos run claude-settings actions from @stable, not a commit pin (R44 part 1, design step 6)",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner R44, 14:05 CST Nov 11 (\"on r44 yea agreed A build all 3\"; item 1 of the build: child CI runs claude-settings actions from the stable branch, not a commit pin, so each tested change reaches every child at once). docs/plans/r42-part2-design.md P7 and step 6 (\"Child repos on @stable, last: zizmor policy, bin/ste-changed and --pinned learn @stable. Done: one q_max PR green on @stable\"). Triage grep on the stable checkout 15e8899, 03:36 CST Nov 14: no workflow or script uses @stable yet; q_max's 9 claude-settings action pins sat 2758 commits behind main at the Nov 11 14:04 scan (restart-plan R44; unmeasured now).",
+ "source": "Stale-decision protocol (triage 03:37 CST Nov 14): decision action-pins-follow-sessions (owner 2026-10-26, \"doesn't this just mean CI is old? why would we conform\": a pin moves when a session notices) and ci-hygiene SKILL.md/snippets.md (pin by full SHA) are older than R44 part 1 (owner 14:05 CST Nov 11, later; it names \"not a commit pin\"). Outcome the older decision protected: a lane never loses a CI run to a lint claude-settings main already replaced. What protects it now: only the manual pin moves (unmeasured how often; the q_max scan shows it drifts). Third-party actions stay pinned by SHA (SKILL.md:237 is about third-party, untouched). Neighbours: stable-switch-map-check, child-repo-gap, push-skip-text-says-stable (the text follows this step), stable-branch (decision).",
+ "note": "Triage 03:37 CST Nov 14: the owner's R44 A already rules the direction, so no new owner ruling: what stays open is the order (switch first, then the text; or text that states both), a coordinator pick. Done check: one q_max PR green with its claude-settings actions at @stable (design step 6), then bin/ste-changed, zizmor policy and --pinned read @stable, and the skill, snippets, action.yml, test text and the decision action-pins-follow-sessions are rewritten in place to say it; third-party actions stay SHA-pinned. A change to what a child CI run trusts (stable moves between a PR run and its push: unmeasured, the degen #706 lane's own note); guard or check verdicts may move: reviewer and round 3 rule apply. The lane first reads restart-plan R44 item 1 and design step 6 on origin/restart-plan and says how much is built. Own lane; tracker: the coordinator. Not started.",
+ "updatedAt": "2026-11-14T03:37:00-06:00"
+}
