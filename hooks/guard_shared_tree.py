@@ -222,6 +222,47 @@ def reset_discards(args) -> bool:
     return any(flag in args for flag in RESET_DISCARD_FLAGS)
 
 
+# Step agent-git-reset-refused. The incident: a builder ran `git reset --soft` in its own worktree. The call
+# moves the branch and touches no file, so the discard check above rightly passes it. For an agent the branch
+# move is the harm: its commits, or a commit a peer pushed onto the shared branch, drop off the branch. An
+# agent's reset may only UNSTAGE, which names no commit but HEAD.
+RESET_UNSTAGE_TARGETS = ("HEAD", "@")
+
+
+def agent_reset_moves_branch(args) -> bool:
+    """True when a `git reset` call, run by an agent, names a target other than HEAD, or a lone operand that
+    git may read as a commit. The discard modes are left to `reset_discards`, which already judges them.
+
+    Allowed: bare `reset`, `reset -q`, `reset HEAD`, `reset --soft HEAD`, `reset -- <path>`,
+    `reset HEAD [--] <path>`. A lone bare path (`reset f.txt`) is refused too, because git reads a name that is
+    also a revision as a commit; the route is `git restore --staged <path>` or `git reset -- <path>`.
+    """
+    if reset_discards(args):
+        return False
+    plain = []
+    skip = False
+    for arg in args:
+        if skip:
+            skip = False
+            continue
+        if arg == "--":
+            break
+        if arg.startswith("-"):
+            skip = arg in RESET_OPT_WITH_VALUE
+            continue
+        plain.append(arg)
+    return bool(plain) and plain[0] not in RESET_UNSTAGE_TARGETS
+
+
+AGENT_RESET_REASON = (
+    "Rule (agent git reset): an agent's `git reset` may only unstage. This one names a commit, so it moves the "
+    "branch, and the commits it passes over drop off the branch that other sessions share. "
+    "Remedy: to unstage, run `git restore --staged <path>` or `git reset -- <path>`. "
+    "To undo a commit, run `git revert <commit>`. To drop work, commit it on your own branch. "
+    "(decision agent-git-reset-refused, an agent's reset never moves a branch)"
+)
+
+
 def restore_discards(args) -> bool:
     """True when a `git restore` call writes the working tree.
 

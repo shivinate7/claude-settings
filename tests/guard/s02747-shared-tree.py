@@ -94,6 +94,26 @@ sh("reset: a bare reset with no argument", VCS + " reset", "allow", cwd=NOGIT)
 sh("reset: an explicit mixed reset", VCS + " reset --mixed HEAD~1", "allow", cwd=NOGIT)
 sh("reset: a soft reset moves the branch and touches nothing else", VCS + " reset --soft HEAD~1",
    "allow", cwd=NOGIT)
+# Step agent-git-reset-refused (incident: a builder ran `git reset --soft` in lane writer-lists-awaiting-threads).
+# An agent's `git reset` may only unstage: no commit operand but HEAD. Any other target moves the branch.
+AGENT_RESET = dict(agent_id="rst-sub1", agent_type="builder")
+for _name, _cmd in (("--soft at another commit", " reset --soft HEAD~1"),
+                    ("--mixed at another commit", " reset --mixed HEAD~1"),
+                    ("a plain reset at another commit", " reset HEAD~1"),
+                    ("a plain reset at a branch", " reset origin/main")):
+    sh("reset: an agent's " + _name + " moves the branch and is refused", VCS + _cmd, "deny", "agent-git-reset",
+       cwd=GITWT, carries=("git restore --staged",), **AGENT_RESET)
+for _name, _cmd in (("a bare reset", " reset"), ("a reset of HEAD", " reset HEAD"), ("--soft HEAD", " reset --soft HEAD"),
+                    ("-q", " reset -q"), ("a path unstage", " reset -- f.txt"), ("a HEAD path unstage", " reset HEAD -- f.txt"),
+                    ("a HEAD path unstage, no dashes", " reset HEAD f.txt")):
+    sh("reset: an agent's " + _name + " only unstages and stays allowed", VCS + _cmd, "allow", cwd=GITWT, **AGENT_RESET)
+# A script handed to another shell is read as a command of its own.
+for _name, _cmd in (("sh -c", "sh -c '" + VCS + " reset --soft HEAD~1'"), ("bash -c", 'bash -c "' + VCS + ' reset --mixed HEAD~1"'),
+                    ("eval", 'eval "' + VCS + ' reset --soft HEAD~1"'), ("sh -c in sh -c", "sh -c \"sh -c '" + VCS + " reset HEAD~1'\"")):
+    sh("reset: an agent's reset at another commit inside " + _name + " is refused", _cmd, "deny", "agent-git-reset",
+       cwd=GITWT, **AGENT_RESET)
+sh("reset: an agent's unstage inside sh -c stays allowed", "sh -c '" + VCS + " reset HEAD -- f.txt'", "allow", cwd=GITWT, **AGENT_RESET)
+sh("reset: the orchestrator's --soft at another commit stays allowed", VCS + " reset --soft HEAD~1", "allow", cwd=GITWT)
 sh("reset: --keep at another commit refuses where there is no git tree",
    VCS + " reset --keep HEAD~1", "deny", "shared-tree", cwd=NOGIT)
 sh("reset: --merge at another commit refuses where there is no git tree",
