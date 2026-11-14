@@ -1,10 +1,10 @@
 {
- "id": "own-act6-draft-prs-when-green",
- "at": "2026-11-13T16:10:28-06:00",
- "title": "Child-repo draft PRs open once claude-settings main is green; the switch waits for the drain to end",
- "ruling": "Owner 16:09 CST Nov 13, chat with the consultant, relayed 16:10 CST: \"if main gets green then it can already open the draft pr but once the drain finishes should / can the switch happen\". Act 6 of the merge-flow list: the one draft PR per child repo (q_max first) that gives each a stable branch and revert route may open once claude-settings main is green, meaning a run that ran its suites (a skipped run does not count unless a green PR run of that tree backs it, ruling own-769-a-narrowed-pr-push). The switch itself waits for the drain to end. Replaces the consultant's 16:08 filing (owner 16:07: \"wait for the drain given main on claude-settings isn't green yet\"). Cites decision all-repos-switch-together: every repo switches together, none alone. The 16:09 words end in a question about the switch; read as: the switch happens when the drain ends. Unconfirmed by the owner in those words.",
- "quote": "if main gets green then it can already open the draft pr",
- "source": "Owner chat with the consultant 16:09 CST Nov 13, relayed 16:10 CST; filed by triage.",
- "status": "open",
- "step": "merge-flow-after-anthropic"
+  "id": "own-act6-draft-prs-when-green",
+  "at": "2026-11-13T16:10:28-06:00",
+  "title": "Child-repo draft PRs open once claude-settings main is green; the switch waits for the drain to end",
+  "ruling": "Owner 16:09 CST Nov 13, chat with the consultant, relayed 16:10 CST: \"if main gets green then it can already open the draft pr but once the drain finishes should / can the switch happen\". Act 6 of the merge-flow list: the one draft PR per child repo (q_max first) that gives each a stable branch and revert route may open once claude-settings main is green, meaning a run that ran its suites (a skipped run does not count unless a green PR run of that tree backs it, ruling own-769-a-narrowed-pr-push). The switch itself waits for the drain to end. Replaces the consultant's 16:08 filing (owner 16:07: \"wait for the drain given main on claude-settings isn't green yet\"). Cites decision all-repos-switch-together: every repo switches together, none alone. The 16:09 words end in a question about the switch; read as: the switch happens when the drain ends. Unconfirmed by the owner in those words. Exception, owner 22:13 CST: degen and home switch now (ruling own-degen-home-switch-now); the switch waiting for the drain holds for every other child repo.",
+  "quote": "if main gets green then it can already open the draft pr",
+  "source": "Owner chat with the consultant 16:09 CST Nov 13, relayed 16:10 CST; filed by triage.",
+  "status": "open",
+  "step": "merge-flow-after-anthropic"
 }

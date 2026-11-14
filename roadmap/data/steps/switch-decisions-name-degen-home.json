@@ -1,0 +1,14 @@
+{
+ "id": "switch-decisions-name-degen-home",
+ "title": "Decisions all-repos-switch-together and draft-until-reviewed name degen and home as switched and the rest as waiting",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 22:13 CST Nov 13 (ruling own-degen-home-switch-now, relayed): degen and home switch to per-lane merge now. The coordinator says runner 11's stop guard reads those decision records, so they must change before its merge acts (unchecked by triage).",
+ "source": "Coordinator 22:14 CST Nov 13 (relayed); ruling own-degen-home-switch-now.",
+ "note": "Triage 22:14 CST Nov 13: the decisions live on main, so a lane changes them by draft PR; triage does not edit main. Rewrite in place, no history lines: all-repos-switch-together names degen and home as switched and every other child repo as waiting for the drain; draft-until-reviewed gets the same one line if it states the all-together rule. This changes what a guard reads, so a fresh reviewer reads it. Done check: merged, and runner 11's stop guard passes for a degen or home merge (read, not assumed). Not started; the coordinator assigns the lane.",
+ "updatedAt": "2026-11-13T22:14:32-06:00"
+}
