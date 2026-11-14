@@ -163,7 +163,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        dry run, unless the session's own get_session record (read
                        from the transcript) shows the tag cs-build:triage with no set_session_tags after
                        it. No record, no transcript or no env id is a refusal. An override lifts it.
-  trust-card-in-build  deny. A call to either tool that opens the owner's trust card, unless the session's own
+  trust-card-in-build  deny. A call to either tool that opens the owner's trust card, or an update_trigger call with
+                       `ask_owner` set (any value but absent, null or false; an owner-approval card), unless the session's own
                        get_session record (read from the transcript) proves no cs-build tag. No record,
                        no transcript or no env id is a refusal.
   lane-closes-after-records
@@ -6803,7 +6804,7 @@ def judge(payload) -> None:
     # one of these tools gets the specific remedy. Each reads only its own tools, so none reorders with the spawn rules below.
     # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
     trust_transcript = payload.get("transcript_path")
-    matched = trust_card_hit(tool, trust_transcript if isinstance(trust_transcript, str) else "")
+    matched = trust_card_hit(tool, trust_transcript if isinstance(trust_transcript, str) else "", tool_input)
     if matched:
         refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
 
@@ -7121,7 +7122,8 @@ def main() -> None:
     except Exception:
         pass  # a guard_core without the setter still judges: its line has no session cell (unknown session)
     try:
-        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"), payload.get("cwd"))
+        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"), payload.get("cwd"),
+                                        payload.get("transcript_path"))
     except Exception:
         pass  # a guard_core without the setter has no override: every refusal stands
     try:

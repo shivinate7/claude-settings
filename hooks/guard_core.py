@@ -2034,14 +2034,30 @@ def _log_unlock(handle) -> None:
 
 _override_who = ("", None)  # (session id, agent id) of the call this process judges
 _override_cwd = ""  # the call's directory, where the step grant is read
+_override_transcript = ""  # the call's transcript, read once on a refusal to tell a lane (a session with a parent)
 
 
-def set_override_context(session_id, agent_id, cwd=None) -> None:
+def _in_lane() -> bool:
+    """True when the own record read from the transcript has a parent. An unread record, no id or an error is no lane,
+    so the plain offer line stays. Cost: one transcript read, only on a printed refusal."""
+    try:
+        import override
+        import own_session
+        own_id = override.remote_session_id()
+        if own_id is None or not _override_transcript:
+            return False
+        return own_session.own_session_read(_override_transcript, own_id)[2] is not None
+    except Exception:
+        return False
+
+
+def set_override_context(session_id, agent_id, cwd=None, transcript=None) -> None:
     """Name the session and agent whose call this process judges, and its directory, for the owner
     override."""
-    global _override_who, _override_cwd
+    global _override_who, _override_cwd, _override_transcript
     _override_who = (session_id, agent_id or None)
     _override_cwd = cwd if isinstance(cwd, str) else ""
+    _override_transcript = transcript if isinstance(transcript, str) else ""
 
 
 def set_override_veto(veto) -> None:
@@ -2085,7 +2101,7 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
     record(tool, decision, rule, matched)
     try:  # the line the owner types to lift this refusal, or the words that none does; last in the reason
         import override
-        line = override.NO_OVERRIDE if vetoed else override.offer(rule, spawn_role, _override_who[1])
+        line = override.NO_OVERRIDE if vetoed else override.offer(rule, spawn_role, _override_who[1], _in_lane())
         reason = reason.rstrip() + " " + line
     except Exception:
         pass

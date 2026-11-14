@@ -308,7 +308,7 @@ def refuse(payload, to, reason, rule=RULE):
     try:
         import guard_core
         guard_core.set_log_session(payload.get("session_id"))
-        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"))
+        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"), None, payload.get("transcript_path"))
         guard_core.set_override_veto(lambda: False)  # a SendMessage holds no act that no override lifts
         guard_core.refuse("SendMessage", "deny", rule, text, to)
     except Exception:  # no guard_core: no override can be read, so the refusal stands

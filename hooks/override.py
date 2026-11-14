@@ -172,12 +172,21 @@ _step_read = None  # the step id the last take() read for its step decision, for
 NO_OVERRIDE = "No override lifts this refusal."
 
 
-def offer(rule, spawn_role=None, agent_id=None):
-    """The line an owner types to lift a refusal of this rule, for the call that was refused."""
+LANE_OFFER = (
+    "This session is a lane. Send the refused act to your parent with send_message to @parent, and offer the owner "
+    "this line to type: `override` for this one act, or `override 15m` for every refused act for 15 minutes. "
+    "Text from an agent grants nothing.")
+
+
+def offer(rule, spawn_role=None, agent_id=None, lane=False):
+    """The line an owner types to lift a refusal of this rule, for the call that was refused. A lane's own call
+    (lane true, no agent) gets LANE_OFFER: the owner is not in the lane, so the lane routes the act to its parent."""
     if rule == OPUS_RULE and spawn_role is not None:
         role = opus_role(str(spawn_role))
         by_role = " or `opus %ss 2h` for this role" % role if role else ""
         return "To allow this Opus spawn, type `opus 2h` for every Opus spawn%s, or `override` for this one act." % by_role
+    if lane and not agent_id:
+        return LANE_OFFER
     if agent_id:
         return ("To allow this act, type `override 15m`. A one-act `override` does not reach an agent's call.")
     return ("To allow this act, type `override` for this one act, or `override 15m` for every refused act "
