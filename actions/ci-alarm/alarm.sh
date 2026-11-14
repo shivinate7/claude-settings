@@ -9,9 +9,10 @@
 # skips them). So a newer green push run clears a red nightly. An R with no red job (no jobs,
 # all passed, cancelled or skipped only) is never cleared this way. A cancelled run never alarms. Cost, only for a failed group that has
 # such an N: one jobs read for R, and for each N one jobs read and, unless N leaves a red job of R unpassed (a certain red), one contents read of N's workflow file at N's head (headSha), each once;
-# a failed read is unknown. An empty green run of the push group (no check ran, no evidence: clear_rule.py) is no verdict; the group's
-# newest run that is not empty is, so an older red run stays red. Cost: one jobs read per green run of the push group, newest first, down to
-# the first that is not empty. The same rules as Host.base_state. Needs python3 (stdlib only) and
+# a failed read is unknown. An empty green run of the push group (no suite ran: clear_rule.py) is passed over, never read as green or red; the group's
+# newest run that is not empty is the verdict, so an older red run stays red. A group whose every run is empty keeps its newest run and never alarms
+# (the alarm raises red only; merge.py's Host.base_state reads such a group as unknown). Cost: one jobs read per green run of the push group, newest first,
+# down to the first that is not empty. Otherwise the same rules as Host.base_state. Needs python3 (stdlib only) and
 # clear_rule.py beside this file; no checkout. Env: BRANCH, SELF
 # (this workflow's name, left out), GH_TOKEN, GITHUB_REPOSITORY. Exit 0 always: the alarm is the
 # issue, not a red job. Prints "green", "red" or "unknown"; a failed read or write is unknown, never red.
@@ -50,7 +51,7 @@ groups="$(jq -c --arg self "${SELF:-}" --slurpfile ev "$here/events.json" --argj
   | map(sort_by(.createdAt) | reverse)' <<<"$runs")" \
   || unknown "could not read the runs"
 # The latest completed run per workflow and event group, one JSON array. An empty run (clear_rule.py, the one home of the rule: a green run of
-# the push group that ran no check and carries no evidence) is no verdict: the group's latest run that is not empty is. A group with
+# the push group that ran no suite) is passed over: the group's latest run that is not empty is the verdict. A group with
 # none keeps its latest run. One jobs read per green run of the push group, down to the first that is not empty.
 rule_events="$(python3 "$here/clear_rule.py" --rule-events)" || unknown "clear_rule.py failed"
 newest="[]"

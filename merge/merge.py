@@ -1453,9 +1453,9 @@ class Host:
         unknown. Any other run that did not succeed is red (a broken workflow file runs no job).
         A cancelled run with no red job that nothing clears keeps its line, in the unknown detail and beside a red verdict. It is named with `gh run rerun <id>` only when its
         `head_sha` is the head_sha of the newest run on the page read (any status, any event in BASE_EVENTS, from the unfiltered list): runs on the base start at its head, and a re-run tests the run's own commit. Never named for a run with a red job or a re-run in flight.
-        An empty run is no verdict (clear_rule.empty_without_evidence, the one home): a completed success run of the push group (push and dispatch) that ran no check, and carries
-        no evidence that a green integration run covered its tree. The newest run of the group that is not empty is the group's verdict, so an older red run stays red; a page with no run of the
-        group that is not empty keeps the newest run. A schedule run is judged as it is.
+        An empty run is no verdict (clear_rule.empty_without_evidence, the one home; owner ruling own-812-a-judge-suite-runs): a completed success run of the push group
+        (push and dispatch) that ran no suite job, whatever its push-skip job says. The newest run of the group that is not empty is the group's verdict, so an older red
+        run stays red. A group with no such run on the page is unknown, never green or red. A page with no run of the group at all is not judged. A schedule run is judged as it is.
         A red verdict's detail also holds breaking_line's segment for each red run judged (one per file and group), the head group's first: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).
         One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A newest-first walk of the push group's
         green runs costs one jobs read each, down to the first that is not empty (the newest, when it ran a suite). A failed read is unknown."""
@@ -1479,18 +1479,22 @@ class Host:
                 return read[r["id"]]
             rule_events = clear_rule.rule_events()
 
-            def empty(r):  # a green run of the push group that ran no suite and carries no evidence: no verdict (clear_rule.empty_without_evidence); one jobs read, cached
+            def empty(r):  # a green run of the push group that ran no suite: no verdict (clear_rule.empty_without_evidence); one jobs read, cached
                 return r["conclusion"] == "success" and r["event"] in rule_events and clear_rule.empty_without_evidence(jobs_of(r), r["event"])
-            newest, settled = {}, set()  # per (file, group): the newest run, but never an empty one while an older run of the group is not; with none, the newest run
+            newest, settled, passed_over = {}, set(), {}  # per (file, group): the newest run that is not empty; a group with only empty runs has none, and `passed_over` holds its newest run
             for r in judged:  # newest first
                 key = (r["path"], self.BASE_EVENTS[r["event"]])
                 if key in settled:
                     continue
-                newest.setdefault(key, r)
-                if not empty(r):
+                if empty(r):
+                    passed_over.setdefault(key, r)
+                else:
                     newest[key] = r
                     settled.add(key)
             age = {r["id"]: i for i, r in enumerate(judged)}  # `judged` is newest first
+            for r in passed_over.values():  # a group whose every run on the page ran no suite has no verdict
+                if (r["path"], self.BASE_EVENTS[r["event"]]) not in settled:
+                    unknown.append(f"no run of {r['name']} in the push group on the page ran its suites, so main has no verdict (newest, run {r['id']} at {str(r.get('head_sha'))[:9]}, ran none: {r.get('html_url')})")
 
             texts = {}
 
