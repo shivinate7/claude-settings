@@ -166,6 +166,74 @@ add("local-allow: a Write re-stating all 150 rules on disk does not ask", "allow
 add("local-allow: a Write of an empty allow list over an empty file does not ask", "allow",
     tool="Write", cwd=NOGIT, file_path=LA_EMPTY, content=local_json(allow=[]), lacks=NOT_RULE)
 
+# FALSE ALARMS. A rule-shaped string is an allow rule only at the top of a fragment, or under the real `allow` key.
+# A string under any other list key, such as a directory or an MCP server name, is not one, whether the text parses.
+# The two cases below read the fragment scanner: an absent file, and a text that does not parse.
+def broken_allow(items, key="allow"):
+    """A settings.local.json text that does not parse (a trailing comma), with the strings under `key`.
+    Each item is the text between its quotes, so an item that holds a quote carries the escape itself."""
+    return '{"permissions": {"%s": [%s],}}' % (key, ", ".join('"%s"' % item for item in items))
+
+
+add("local-allow: an Edit to an absent settings.local.json adding non-allow lists of rule-shaped strings does not ask",
+    "allow", tool="Edit", cwd=NOGIT, file_path=LA_LOCAL, old_string="",
+    new_string='{"permissions":{"additionalDirectories":["Documents"]},"enabledMcpjsonServers":["Github"]}',
+    lacks=NOT_RULE)
+add("local-allow: a write that does not parse, with a rule-shaped string under a non-allow list, does not ask",
+    "allow", tool="Write", cwd=NOGIT, file_path=LA_LOCAL,
+    content=broken_allow(["Documents"], key="additionalDirectories"), lacks=NOT_RULE)
+# Controls for the two false alarms: the same name under text that parses, and a rule-shaped string at the top.
+add("local-allow: a valid JSON write naming Documents under additionalDirectories does not ask", "allow",
+    tool="Write", cwd=NOGIT, file_path=LA_LOCAL,
+    content=json.dumps({"permissions": {"additionalDirectories": ["Documents"]}}, indent=2), lacks=NOT_RULE)
+add("local-allow: a rule-shaped string at the top of a fragment still asks", "ask", "local-allow-global",
+    tool="Write", cwd=NOGIT, file_path=LA_LOCAL, content='"' + RULE_NEW + '",  // the shared file\n',
+    carries=ASK_CARRIES + (RULE_NEW,), lacks=NO_OVERRIDE)
+
+# FRAGMENT SCANNER. A text that does not parse is read by `_local_allow_fragment`, so each write below holds a
+# trailing comma and the JSON parser never reads it. Each case pins one arm no case above reaches: // and # inside
+# an allow string, a lone quote in a comment line, an escaped quote, a rule over 80 characters with a count of the
+# rest, and an Edit whose old_string already holds the rule it restates.
+RULE_QUOTED = 'Bash(echo "hi")'
+LONG_RULES = ["Bash(step-%d %s)" % (index, "p" * 80) for index in range(1, 6)]  # five rules, each over 80 characters
+add("local-allow: a write that does not parse, with an allow rule holding //, /* and #, asks", "ask",
+    "local-allow-global", tool="Write", cwd=NOGIT, file_path=LA_LOCAL, content=broken_allow([RULE_SCAN]),
+    carries=ASK_CARRIES + (RULE_SCAN,), lacks=NO_OVERRIDE)
+add("local-allow: a lone quote in a comment line ahead of an allow rule asks for the rule", "ask",
+    "local-allow-global", tool="Write", cwd=NOGIT, file_path=LA_LOCAL,
+    content='// the "shared file, see below\n{\n  "permissions": {\n    "allow": [\n      "' + RULE_NEW
+            + '"\n    ]\n  }\n}\n',
+    carries=ASK_CARRIES + (RULE_NEW,), lacks=NO_OVERRIDE)
+add("local-allow: an escaped quote inside an allow rule of a write that does not parse asks with the rule whole",
+    "ask", "local-allow-global", tool="Write", cwd=NOGIT, file_path=LA_LOCAL,
+    content=broken_allow([RULE_QUOTED.replace('"', '\\"')]), carries=ASK_CARRIES + (RULE_QUOTED,),
+    lacks=NO_OVERRIDE)
+add("local-allow: five long rules in a write that does not parse show three, each cut at 80 characters, and a count",
+    "ask", "local-allow-global", tool="Write", cwd=NOGIT, file_path=LA_LOCAL, content=broken_allow(LONG_RULES),
+    carries=ASK_CARRIES + (" and 2 more", LONG_RULES[0][:80] + " [cut]"),
+    lacks=NO_OVERRIDE + (LONG_RULES[0], "Bash(step-4", "Bash(step-5"))
+add("local-allow: an Edit restating the rule its old_string already holds does not ask", "allow",
+    tool="Edit", cwd=NOGIT, file_path=LA_LOCAL, old_string='"' + RULE_NEW + '"',
+    new_string='"' + RULE_NEW + '"', lacks=NOT_RULE)
+
+# A SYMLINK ALIAS. The link's own name is not settings.local.json, so the rule reads the file the link resolves to.
+LA_ALIAS = slash(os.path.join(LA_DIR, "alias", "shared-rules.json"))  # a symlink to the empty file LA_EMPTY
+
+
+def build_alias():
+    write_fixture(LA_EMPTY, "{}\n")   # not build_empty: the harness rebinds that name to another signature
+    os.makedirs(os.path.dirname(LA_ALIAS), exist_ok=True)
+    os.symlink(LA_EMPTY, LA_ALIAS)
+
+
+ALIAS_CASE = "local-allow: an Edit to a symlink named otherwise, pointing at an empty settings.local.json, asks"
+if LINKS_MADE:
+    lazy_fixture([LA_ALIAS], build_alias)
+    add(ALIAS_CASE, "ask", "local-allow-global", tool="Edit", cwd=NOGIT, file_path=LA_ALIAS, old_string="{}",
+        new_string=local_json(allow=[RULE_NEW]), carries=ASK_CARRIES + (RULE_NEW,), lacks=NO_OVERRIDE)
+else:
+    skip_case(ALIAS_CASE, NO_LINK_HERE)
+
 
 def local_allow_remedy_case():
     """The ask for an allow rule in settings.local.json names the shared settings.json as its first
@@ -192,3 +260,45 @@ def local_allow_remedy_case():
 
 LOG_CHECKS_EXTRA.append(("local-allow: the ask names the shared settings.json first, names settings.local.json "
                          "only in its File line, and prints no override line", local_allow_remedy_case))
+
+
+# A FORCED RAISE. Rule 8a's read fails open: a guard defect inside it adds no rule and allows the write. The control
+# run asks for the same write unforced, so the write is shown to reach the read. The raise replaces the read in a
+# child process that loads the guard under test, as the crash case in s27664 replaces `judge`.
+LA_FAIL_OPEN = os.path.join(LA_DIR, "fail-open")  # the config folder the forced runs read
+
+
+def loaded_guard_run(payload, forced):
+    """One guard run on a payload, in a child that loads GUARD. `forced` replaces the 8a read before `main`."""
+    patch = "g.local_allow_added = lambda *args, **kwargs: 1 / 0\n" if forced else ""
+    code = ("import io, sys, importlib.util as u\n"
+            "spec = u.spec_from_file_location('g', %r)\n"
+            "g = u.module_from_spec(spec); spec.loader.exec_module(g)\n"
+            "%s"
+            "sys.stdin = io.StringIO(%r)\n"
+            "g.main()\n" % (GUARD, patch, payload))
+    env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
+    env["CLAUDE_CONFIG_DIR"] = LA_FAIL_OPEN
+    return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=60)
+
+
+def local_allow_fail_open_case():
+    """A raise in the 8a read allows the write silently. The same write, unforced, asks for its rule."""
+    os.makedirs(LA_FAIL_OPEN, exist_ok=True)
+    payload = json.dumps({"tool_name": "Write", "cwd": NOGIT,
+                          "tool_input": {"file_path": LA_LOCAL, "content": local_json(allow=[RULE_NEW])}})
+    control = loaded_guard_run(payload, forced=False)
+    got, reason = read_decision(control.stdout)
+    if got != "ask":
+        return False, "the unforced control write did not ask, so it never reaches the read: %s" % got
+    forced = loaded_guard_run(payload, forced=True)
+    if forced.returncode != 0:
+        return False, "the forced raise exited %d, not 0: %s" % (forced.returncode, forced.stderr.strip()[:90])
+    if forced.stdout.strip():
+        return False, "the forced raise printed a decision, not a silent allow: %s" % forced.stdout.strip()[:90]
+    return True, "the forced raise allows silently; the unforced write asks"
+
+
+LOG_CHECKS_EXTRA.append(("local-allow: a forced raise in the settings.local.json read still allows, and the same "
+                         "write asks unforced", local_allow_fail_open_case))
