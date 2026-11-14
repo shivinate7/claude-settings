@@ -13,7 +13,7 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 
 from guard_core import (
-    SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
+    SHELL_COMMAND_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
     dir_before_segment, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
@@ -1996,7 +1996,7 @@ def _written_texts(tool: str, tool_input: dict, cwd: str = ""):
                         yield found.group(0), found.group(0)
         return
     command = tool_input.get("command")
-    if tool in SHELL_TOOLS and isinstance(command, str) and "updatedAt" in command:
+    if tool in SHELL_COMMAND_TOOLS and isinstance(command, str) and "updatedAt" in command:
         # Only the last literal is judged: the new value comes last in `s/old/new/`, `.replace(old, new)` and an
         # assignment, so a repair that rewrites an ahead value to the right time passes.
         last = None

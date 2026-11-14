@@ -925,7 +925,7 @@ MUTATIONS = [
     ("live-stream: never refuse a live stream",
      '    for segment in split_segments(stripped):\n'
      '        matched = live_stream_hit(segment)\n'
-     '        if matched:\n'
+     '        if matched and stream_family:\n'
      '            refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)',
      '    for segment in split_segments(stripped):\n'
      '        matched = live_stream_hit(segment)\n'
@@ -933,7 +933,7 @@ MUTATIONS = [
      '            refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)', "guard", 'stream: tail -f never ends'),
     ("waiter: never refuse a waiter loop (Rule 9)",
      '    matched = waiter_verdict(split_segments(stripped), background)\n'
-     '    if matched:\n'
+     '    if matched and stream_family:\n'
      '        if poller:',
      '    matched = waiter_verdict(split_segments(stripped), background)\n'
      '    if False:\n'
@@ -3178,14 +3178,15 @@ MUTATIONS = [
      'refuse(tool, "deny", "simulator-boot-lease",',
      'refuse(tool, "ask", "simulator-boot-lease",', "guard",
      "lease: one booted, an MCP launch of a shut-down device with no lock is refused by the lease"),
+    # A booted device is judged by the device rule, not by the boot-lease rule: the refusal names simulator-device-lease.
     ("simulator-boot-lease: a booted device is judged by the lease too",
      '        hits = [d for d in hits if d["state"] != "Booted"]',
      '        hits = list(hits)', "guard",
-     "lease: an MCP launch of a booted device with no lock is allowed"),
+     "lease: an MCP launch of a booted device with no lock is refused: this session holds no lease for it"),
     # The name arm compares exactly: a name without the case or outer-space fold matches no device. The UDID arm stays.
     ("simulator-boot-lease: a device name compares exactly, without the case and outer-space fold",
-     '        hits = [d for d in devices if key == d["udid"].casefold() or key == d["name"].strip().casefold()]',
-     '        hits = [d for d in devices if key == d["udid"].casefold() or name == d["name"]]', "guard",
+     '    hits = [d for d in devices if key == d["udid"].casefold() or key == d["name"].strip().casefold()]',
+     '    hits = [d for d in devices if key == d["udid"].casefold() or name == d["name"]]', "guard",
      "lease: an MCP launch naming the shut-down device in lowercase is refused by the lease"),
     # The lease allow (ruling 5): one mutant per arm of guard.sim_lease_holds and of bin/sim-lease's read.
     ("simulator-boot-lease: the lease's session is not compared",
@@ -3193,12 +3194,12 @@ MUTATIONS = [
      '                if e.get("slot") in lease.SLOT_UDID}', "guard",
      "lease: another session's live slot 1 lease on Duo 1 does not allow this session", "posix"),
     ("simulator-boot-lease: an empty session may match an empty lease session",
-     '    if not session or not udids:\n        return False',
-     '    if not udids:\n        return False', "guard",
+     '    lease = _sim_lease_module() if session else None',
+     '    lease = _sim_lease_module()', "guard",
      "lease: a lease with an empty session does not match a payload with no session", "posix"),
     ("simulator-boot-lease: every slot maps to Duo 1",
-     'held = {lease.SLOT_UDID[e["slot"]].casefold()',
-     'held = {lease.SLOT_UDID["1"].casefold()', "guard",
+     'return {lease.SLOT_UDID[e["slot"]].casefold()',
+     'return {lease.SLOT_UDID["1"].casefold()', "guard",
      "lease allow: this session's live slot 2 lease", "posix"),
     ("simulator-boot-lease: any held device allows a launch of any device",
      '    return all(u.casefold() in held for u in udids)',
@@ -3208,9 +3209,10 @@ MUTATIONS = [
      '    return all(u.casefold() in held for u in udids)',
      '    return any(u.casefold() in held for u in udids)', "guard",
      "lease: a shared name, this session's slot 1 lease alone is refused", "posix"),
+    # An unreadable lease reads as every device held: the set claims every UDID, so the lease test passes.
     ("simulator-boot-lease: a lease that cannot be read allows",
-     '    except Exception:\n        return False\n    finally:\n        sys.dont_write_bytecode = keep',
-     '    except Exception:\n        return True\n    finally:\n        sys.dont_write_bytecode = keep', "guard",
+     '    except Exception:\n        return set()\n\n\ndef sim_lease_holds',
+     '    except Exception:\n        return {u.casefold() for u in lease.SLOT_UDID.values()}\n\n\ndef sim_lease_holds', "guard",
      "lease: a lease file that is not JSON keeps the refusal", "posix"),
     ("sim-lease: a pid that is alive counts as live whatever its start time",
      '    return bool(entry.get("start")) and isinstance(pid, int) and start_time(pid) == entry["start"]',
@@ -3233,6 +3235,15 @@ MUTATIONS = [
      '"pro": "86F9268A-A905-4B82-9BC0-D7EBB682D341",',
      '"pro": "86F9268A-A905-4B82-9BC0-D7EBB682D342",', "simlease",
      "lease allow: this session's live pro lease", "posix"),
+    # RULE simulator-device-lease (decision sim-test-is-the-one-boot-path, ruling 5). Each mutant breaks one arm.
+    ("simulator-device-lease: the refusal is never raised",
+     '    refuse(tool, "deny", "simulator-device-lease",',
+     '    return\n    refuse(tool, "deny", "simulator-device-lease",', "guard",
+     "device-lease: a tap of a booted device this session holds no lease for is refused", "posix"),
+    ("simulator-device-lease: a name no simulator holds passes",
+     '        if not hits and not launch:',
+     '        if False:', "guard",
+     "device-lease: a tap naming a device no simulator holds is refused, lease or not", "posix"),
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
     ("handoff-unread: the refusal is never printed",
@@ -3255,6 +3266,41 @@ MUTATIONS = [
      '        return handoff if os.path.isfile(handoff) else ""',
      '        return handoff',
      "guard", "handoff-unread: a call is allowed when the flag is set and the handoff is missing"),
+    # ---- Monitor (decision agents-wait-with-monitor): its command is judged like a Bash command, minus the stream family.
+    ("monitor: the stream family refuses a Monitor call, so a followed log is denied",
+     '    stream_family = tool != MONITOR_TOOL\n',
+     '    stream_family = True\n',
+     "guard", "Monitor: a followed log piped to grep is allowed"),
+    ("monitor: a Monitor call is never judged as a shell command",
+     '    if tool in SHELL_TOOLS or tool == MONITOR_TOOL:\n        command = tool_input.get("command", "") or ""\n',
+     '    if tool in SHELL_TOOLS:\n        command = tool_input.get("command", "") or ""\n',
+     "guard", "Monitor: reset throws the tree away, as in Bash"),
+    # ---- Monitor in the three gates that judge a shell command: the built code names SHELL_COMMAND_TOOLS (Bash,
+    # PowerShell, Monitor). Each anchor is that built line, so each is STALE until the change lands.
+    ("scratchpad-owner: the run form skips a Monitor call, so agent B's Monitor run of agent A's script is allowed",
+     '    command = str(tool_input.get("command", "") or "") if tool in SHELL_COMMAND_TOOLS else ""\n',
+     '    command = str(tool_input.get("command", "") or "") if tool in SHELL_TOOLS else ""\n',
+     "guard", "scratchpad-owner: monitor 1 agent B's Monitor run of agent A's script"),
+    ("scratchpad-owner: the write form skips a Monitor call, so agent B's Monitor redirect is allowed",
+     '        elif tool in SHELL_COMMAND_TOOLS:\n            command = str(tool_input.get("command", "") or "")\n'
+     '            if SCRATCHPAD_WORD not in command and',
+     '        elif tool in SHELL_TOOLS:\n            command = str(tool_input.get("command", "") or "")\n'
+     '            if SCRATCHPAD_WORD not in command and',
+     "guard", "scratchpad-owner: monitor 2 agent B's Monitor redirect over agent A's file"),
+    ("message-time-matches-clock: the written-value gate skips a Monitor call, so a literal 14:30 at -06:00 is allowed",
+     '    if tool in SHELL_COMMAND_TOOLS and isinstance(command, str) and "updatedAt" in command:\n',
+     '    if tool in SHELL_TOOLS and isinstance(command, str) and "updatedAt" in command:\n',
+     "guard", "message-time-matches-clock: a Monitor call with updatedAt 14:30 at -06:00 is refused"),
+    # ---- Monitor's watch gate: waiter_verdict's watch_only path decides a Monitor call's `gh run watch` (refused)
+    # and its `gh pr checks --watch` (allowed). Each required case is in tests/guard/s06590-stream.py.
+    ("monitor: the watch-only gate returns any watcher, so a Monitor gh pr checks --watch is refused",
+     '    if watch_only:\n        return run_watch\n',
+     '    if watch_only:\n        return watcher\n',
+     "guard", "ci-wait: Monitor runs gh pr checks 1 --watch, allowed as a background watch is"),
+    ("monitor: the watch-only gate returns nothing, so a Monitor gh run watch is let through",
+     '    if watch_only:\n        return run_watch\n',
+     '    if watch_only:\n        return ""\n',
+     "guard", "ci-wait: Monitor runs gh run watch 123, refused as its Bash twin is"),
     ("mockup-home: the refuse arm is dropped, so a design whose file sits under the machine home is allowed",
      "            if unhomed:",
      "            if False:",

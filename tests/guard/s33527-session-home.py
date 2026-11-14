@@ -834,6 +834,13 @@ LOG_CHECKS_EXTRA.append(("session-home: an owner override lifts the refusal, whi
 LOG_CHECKS_EXTRA.append(("session-home: the record and the refusal add no git spawn to the same call "
                          "with no session", session_home_spawn_cost_case))
 
+# A lost session's write into the primary checkout is refused for a Monitor call as for its Bash twin. The
+# record _build_gitmain seeded names MON_LOST, which is gone, so the one call is the whole case.
+monitor("Monitor: a lost session's write into the primary checkout is refused as session-home",
+        "echo x > f.txt", "deny", "session-home", cwd=GITMAIN, session=MON_SESSION)
+sh("Bash twin of the Monitor case: a lost session's write into the primary checkout is refused as session-home",
+   "echo x > f.txt", "deny", "session-home", cwd=GITMAIN, session=MON_SESSION)
+
 
 # =========================================================================== scratchpad-owner
 # Rule scratchpad-owner (decision an-agent-outside-its-home-tree-must-stop, the own-scratchpad

@@ -505,14 +505,15 @@ def clock_loop(token_rows) -> bool:
     return words[heads[0] + 1:heads[0] + 2] == ["do"] and clock_test(token_rows[heads[0]])
 
 
-def waiter_verdict(segments, background: bool) -> str:
+def waiter_verdict(segments, background: bool, watch_only: bool = False) -> str:
     """Return the matched text when a command waits by looping, else ''.
 
     Refused: a loop around a sleep, two or more sleeps, one sleep of SLEEP_LIMIT seconds or
     more, `timeout /t`, `gh run watch` (foreground or background), and a foreground
     `gh pr checks --watch`. Allowed: one short sleep, `gh pr checks --watch` with
     run_in_background, and, with run_in_background, one sleep of any length followed by a command
-    and a `clock_loop`: a `+%s` read ordered against an epoch, or an ISO read ordered against an ISO time."""
+    and a `clock_loop`: a `+%s` read ordered against an epoch, or an ISO read ordered against an ISO time.
+    With `watch_only`, only `gh run watch` is judged, foreground or background, and any pause is not."""
     sleeps, loop, watcher, run_watch, followed = [], False, "", "", False
     token_rows = []
     for segment in segments:
@@ -538,8 +539,10 @@ def waiter_verdict(segments, background: bool) -> str:
             watcher = watcher or found
             if gh_watches(tokens[index + 1:]) == "run":
                 run_watch = run_watch or found
-        elif waiter_hit(segment):
+        elif waiter_hit(segment) and not watch_only:
             return waiter_hit(segment)
+    if watch_only:
+        return run_watch
     if background and clock_loop(token_rows):
         # A `+%s` read ordered against an epoch, or an ISO read ordered against an ISO time, ends the loop at
         # that time, so only its pauses are judged.

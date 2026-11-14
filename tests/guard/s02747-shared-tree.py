@@ -85,6 +85,9 @@ sh("stash: branch consumes the entry it builds from", VCS + " stash branch lane"
 sh("reset: throws the tree away", VCS + " reset --hard origin/main", "deny", "shared-tree",
    cwd=NOGIT)
 sh("reset: --hard with no argument", VCS + " reset --hard", "deny", "shared-tree", cwd=NOGIT)
+# The Monitor tool's command gets the Bash verdict (see monitor() in the fixtures section).
+monitor("Monitor: reset throws the tree away, as in Bash", VCS + " reset --hard origin/main",
+        "deny", "shared-tree")
 # A bare reset, `--soft` and `--mixed` leave the working tree alone, and `--hard` rewrites it.
 # `--merge` rewrites it too: it reverts a staged edit and deletes a staged new file. `--keep` and
 # `--merge` both move the branch at another commit, so they take `--hard`'s verdict.

@@ -34,6 +34,12 @@ def spo_run(fx, agent, command):
     return spo_call(fx, "Bash", agent, command=command)
 
 
+def spo_monitor(fx, agent, command):
+    """One Monitor call from `agent`, by its command text. The Monitor tool's command is a shell command, so the
+    same run or write must get the verdict the Bash call of `spo_run` gets."""
+    return spo_call(fx, "Monitor", agent, command=command, **MON_FIELDS)
+
+
 def spo_scope(fx, name, path):
     """Scope before subject: `path` lies inside this case's session scratchpad, by its real path."""
     if os.path.realpath(path).startswith(os.path.realpath(fx["scratch"]) + os.sep):
@@ -293,6 +299,33 @@ spo_register("scratchpad-owner: extra, a run on the second line of a double-quot
              spo_extra_multiline)
 
 
+# Rule scratchpad-owner, the Monitor tool: a run in a Monitor call gets the verdict of the same run in Bash. Each
+# Monitor case has its Bash twin beside it.
+def spo_monitor_run_1():
+    """Agent A writes probe2.py with Write; agent B runs it in a Monitor call: refused."""
+    fx = spo_fixture("m1")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, "m1", probe)] + spo_wrote(fx, "m1", SPO_WRITER, probe, PY_TEXT)
+    got, reason = spo_monitor(fx, SPO_OTHER, "python3 %s" % probe)
+    problems.append(spo_refused("m1", got, reason, (fx["scratch"], "probe2.py")))
+    return spo_result(problems, "agent B's Monitor run of agent A's script is refused")
+
+
+def spo_monitor_run_1_twin():
+    """The Bash twin of spo_monitor_run_1: agent B runs the same script in a Bash call, and it is refused."""
+    fx = spo_fixture("m1t")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, "m1t", probe)] + spo_wrote(fx, "m1t", SPO_WRITER, probe, PY_TEXT)
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % probe)
+    problems.append(spo_refused("m1t", got, reason, (fx["scratch"], "probe2.py")))
+    return spo_result(problems, "agent B's Bash run of agent A's script is refused")
+
+
+spo_register("scratchpad-owner: monitor 1 agent B's Monitor run of agent A's script: refused", spo_monitor_run_1)
+spo_register("scratchpad-owner: monitor 1 twin, agent B's Bash run of agent A's script: refused",
+             spo_monitor_run_1_twin)
+
+
 # Rule scratchpad-owner, the overwrite form: an agent with a valid agent_id that writes over a file under
 # this session's scratchpad whose record names a different agent is refused. The writes are the ones the
 # record covers: Write, and a shell write target (a redirect, a heredoc `cat > f`, or an append). The
@@ -381,6 +414,34 @@ spo_register("scratchpad-owner: overwrite 5 agent B's first write of a file nobo
 spo_register("scratchpad-owner: overwrite 6 a top-level call overwrites agent A's file: allowed",
              ovw_case_6)
 spo_register("scratchpad-owner: overwrite 7 agent B's append to agent A's file: refused", ovw_case_7)
+
+
+# Rule scratchpad-owner, the Monitor tool, the overwrite form: a shell write over another agent's file in a Monitor
+# call is refused as the same write in Bash is.
+def spo_monitor_ovw_2():
+    """Agent A writes msg.txt with Write; agent B redirects echo over it in a Monitor call: refused."""
+    fx = spo_fixture("mo2")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "mo2", msg)] + spo_wrote(fx, "mo2", SPO_WRITER, msg, "from A\n")
+    got, reason = spo_monitor(fx, SPO_OTHER, "echo x > %s" % msg)
+    problems.append(spo_refused("mo2", got, reason, (fx["scratch"], "msg.txt")))
+    return spo_result(problems, "agent B's Monitor redirect over agent A's file is refused")
+
+
+def spo_monitor_ovw_2_twin():
+    """The Bash twin of spo_monitor_ovw_2: agent B's Bash redirect over agent A's file is refused."""
+    fx = spo_fixture("mo2t")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "mo2t", msg)] + spo_wrote(fx, "mo2t", SPO_WRITER, msg, "from A\n")
+    got, reason = spo_run(fx, SPO_OTHER, "echo x > %s" % msg)
+    problems.append(spo_refused("mo2t", got, reason, (fx["scratch"], "msg.txt")))
+    return spo_result(problems, "agent B's Bash redirect over agent A's file is refused")
+
+
+spo_register("scratchpad-owner: monitor 2 agent B's Monitor redirect over agent A's file: refused",
+             spo_monitor_ovw_2)
+spo_register("scratchpad-owner: monitor 2 twin, agent B's Bash redirect over agent A's file: refused",
+             spo_monitor_ovw_2_twin)
 
 
 # Rule scratchpad-owner, more cases. Each case's label says refused, allowed or passes,

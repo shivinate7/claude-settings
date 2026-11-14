@@ -48,6 +48,15 @@ AGENTWT = os.path.join(GITMAIN, ".claude", "worktrees", "agent-x")
 FARWT = os.path.join(ROOT, "worktrees", "stray")
 SYMWT = os.path.join(GITMAIN, ".claude", "worktrees", "linked-agent")
 DECOYMAIN = os.path.join(ROOT, "decoyhost", ".claude", "worktrees", "decoy")
+# The records the Monitor cases of worktree-home and session-home read. _build_gitmain seeds both, so a
+# case needs no first call of an agent or a session to write them. MON_HOME is the recorded home of
+# MON_AGENT, and GITMAIN is outside it. MON_LOST is the worktree MON_SESSION recorded, which is gone.
+MON_AGENT = "monhome1"
+MON_HOME = os.path.join(GITMAIN, ".claude", "worktrees", "agent-" + MON_AGENT)
+MON_SESSION = "monlost-session-1"
+MON_LOST = os.path.join(GITMAIN, ".claude", "worktrees", "lost-monitor")
+# The fields the Monitor tool sends beside its command. One home, so no case builds that payload by hand.
+MON_FIELDS = {"description": "wait on the stream", "timeout_ms": 300000}
 CONFLICT = os.path.join(ROOT, "conflict")  # a real checkout with an unresolved merge conflict
 SUBJCLEAN = os.path.join(ROOT, "subjclean")  # a real checkout with a clean tree and no stash
 SUBJCLEANWT = os.path.join(ROOT, "subjcleanlane")  # a real, clean linked worktree of that one
@@ -512,6 +521,13 @@ def write(path, text):
 
 def run_vcs(cwd, *args):
     return subprocess.run([VCS, *args], cwd=cwd, capture_output=True, text=True)
+
+
+def monitor(name, command, expected, rule=None, **kw):
+    """One case: `command` in a Monitor call. The Monitor tool's command is judged by the shell rules,
+    minus the stream family, which never refuses it (decision agents-wait-with-monitor)."""
+    kw.setdefault("cwd", NOGIT)
+    add(name, expected, rule=rule, tool="Monitor", command=command, **MON_FIELDS, **kw)
 
 
 def _require_conflict(where, path):
@@ -1446,6 +1462,8 @@ def _build_gitmain():
     # path's PREFIX, not just test for the substring.
     run_vcs(GITMAIN, "worktree", "add", "-q", AGENTWT, "-b", "agent-x-branch")
     run_vcs(GITMAIN, "worktree", "add", "-q", FARWT, "-b", "stray-branch")
+    write(os.path.join(GITMAIN, ".git", "agent-homes", MON_AGENT), MON_HOME + "\n")
+    write(os.path.join(GITMAIN, ".git", "session-homes", MON_SESSION), MON_LOST + "\n")
     for _tree in (GITMAIN, GITWT, AGENTWT, FARWT):
         write(os.path.join(_tree, "docs", "DEBTS.md"), "uncommitted\n")
         write(os.path.join(_tree, "f.txt"), "uncommitted\n")

@@ -87,6 +87,19 @@ sh("other-checkout: a pushd into a separate clone is refused",
    "pushd " + slash(XCL_SEP), "deny", "other-checkout", cwd=XCL_PRIMARY)
 sh("other-checkout: an absolute shell redirect into a separate clone, with no cd, is refused",
    "echo x > " + slash(os.path.join(XCL_SEP, "note.txt")), "deny", "other-checkout", cwd=XCL_PRIMARY)
+# The Monitor tool's command takes the Bash verdict. AGENTWT is a linked worktree of GITMAIN, so `../../..`
+# climbs from it into the primary checkout, and the write after the cd lands there.
+MON_CD_OUT = "cd ../../.. ; echo x > zz-probe.txt"
+monitor("Monitor: a cd from a worktree into the primary checkout, then a write, is refused as other-checkout",
+        MON_CD_OUT, "deny", "other-checkout", cwd=AGENTWT)
+sh("Bash twin of the Monitor case: a cd from a worktree into the primary checkout, then a write, is refused",
+   MON_CD_OUT, "deny", "other-checkout", cwd=AGENTWT)
+# An agent's call outside its recorded home is refused. The record _build_gitmain seeded names MON_HOME,
+# so the one call is the whole case.
+monitor("Monitor: an agent's command from outside its recorded home is refused as worktree-home",
+        "echo hi", "deny", "worktree-home", cwd=GITMAIN, agent_id=MON_AGENT)
+sh("Bash twin of the Monitor case: an agent's command from outside its recorded home is refused as worktree-home",
+   "echo hi", "deny", "worktree-home", cwd=GITMAIN, agent_id=MON_AGENT)
 add("other-checkout: a Write into a separate clone of the same repo is refused",
     "deny", "other-checkout", tool="Write", cwd=XCL_LANE,
     file_path=os.path.join(XCL_SEP, "note.txt"), content="x")

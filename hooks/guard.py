@@ -33,7 +33,9 @@ set_override_veto and session_home_keep):
                        `agent_id` passes. An override lifts it. A failed import allows.
                        (precompact-handoff, item 9)
 
-Shell tools (Bash, PowerShell), in judge_shell order:
+Shell tools (Bash, PowerShell, and Monitor's `command`), in judge_shell order. A Monitor call gets every
+rule below except the stream family: live-stream, waiter, narrated-tail and background-end never refuse
+it (agents-wait-with-monitor):
   builder-diff         deny. A builder commit or push whose diff holds a test path, judged
                        against the commits the builder made and its working tree. The reason gives
                        the undo route and names no path. No override lifts it. SubagentStop
@@ -270,7 +272,7 @@ Other tools, in `judge` order:
                        `agent_id` and a valid session id. Unreadable git passes. The shell form
                        reads the targets frozen-path reads, after a leading `cd`. An override
                        lifts it.
-                       A Bash or PowerShell `cd`, `pushd` or `Set-Location` into another
+                       A Bash, PowerShell or Monitor `cd`, `pushd` or `Set-Location` into another
                        checkout is refused too, bare or chained; the cd target in the caller's
                        recorded home, a session's recorded home, or the caller's own
                        `agent-<id>-<suffix>` red-run folder passes that act. A write strictly
@@ -405,8 +407,20 @@ Other tools, in `judge` order:
   simulator-boot-lease
                        deny. A simulator MCP `launch` of a shut-down device, lock or no lock: no session
                        holds a lease for it. The remedy is `sim-test`. Judged after the cap and twin
-                       rules. A launch of a booted device passes. An override lifts it.
-                       (sim-test-is-the-one-boot-path)
+                       rules. A launch of a booted device is judged by the rule below. An override
+                       lifts it. (sim-test-is-the-one-boot-path)
+  simulator-device-lease
+                       deny. Every simulator MCP call (launch, tap, screenshot, appearance, swipe,
+                       type) unless the payload's session holds a live `sim-lease` for each device in
+                       `device` and `udid`. A name matches the simulator list without case or outer
+                       spaces. A call with no device (absent, empty or not a string) needs a live
+                       lease of the session for every booted device. A non-launch call that
+                       names a device no simulator holds is refused; a launch of one stays allowed. A launch meets the cap, twin and boot-lease rules first.
+                       Fails open where the device list cannot be read. A call that names no
+                       single leased device, from a session that holds a lease, is told to name
+                       the device by the UDID it leases. Otherwise the remedy is
+                       `sim-test --device pro --hold` for a device in slot pro, else
+                       `sim-test --hold`. An override lifts it. (sim-test-is-the-one-boot-path)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
   readonly-shell-write
@@ -546,6 +560,7 @@ while True:
         import guard_core
         from guard_core import (
             AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
+            MONITOR_TOOL, SHELL_COMMAND_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
@@ -4188,7 +4203,7 @@ def load_hit(tool: str, tool_input) -> tuple:
 # stops even while its orchestrator waits on the owner. Busy lets it run. The orchestrator's own calls read nothing,
 # so the session that frees the disk is never braked by the full disk. A lane session (a session whose own record
 # carries the lane tag, lane_session_hit) is braked the same way on its own calls, since it is a lane too.
-RUNNING_AGENT_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
+RUNNING_AGENT_TOOLS = SHELL_COMMAND_TOOLS + WRITE_TOOLS
 LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this agent now: end your turn and report the reading to "
                          "your orchestrator, which frees space or waits for the load to drop. " + LOAD_LANE_CITE)
 
@@ -4659,19 +4674,27 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 3. A live stream that never ends, or a waiter loop (Rule 9). A waiter loop whose own
     # condition polls a pattern gets the more specific reason: the pattern can match the loop's
     # own command line and never go false.
+    # A Monitor call is a stream by design (decision agents-wait-with-monitor), so the stream family
+    # (live-stream, waiter, narrated tail, background-end) never refuses it. Every other rule still judges it.
+    stream_family = tool != MONITOR_TOOL
     poller = ""
     for segment in split_segments(stripped):
         matched = live_stream_hit(segment)
-        if matched:
+        if matched and stream_family:
             refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)
         poller = loop_condition_polls_a_pattern(segment) or poller
     matched = waiter_verdict(split_segments(stripped), background)
-    if matched:
+    if matched and stream_family:
         if poller:
             refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)
         refuse(tool, "deny", "waiter", WAITER_REASON, matched)
-    matched = narrated_tail_hit(stripped)
+    # No program runs `gh run watch`, so the Monitor exemption stops there (decision ci-wait-reads-run-status).
+    # A Monitor `gh pr checks --watch` is a background watch, which decision agents-wait-with-monitor allows.
+    matched = waiter_verdict(split_segments(stripped), background, watch_only=True) if not stream_family else ""
     if matched:
+        refuse(tool, "deny", "waiter", WAITER_REASON, matched)
+    matched = narrated_tail_hit(stripped)
+    if matched and stream_family:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
     matched = verdict_pipe_hit(stripped)
     if matched:
@@ -4680,7 +4703,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "check-tail", CHECK_TAIL_REASON, matched)
     matched = background_end_hit(split_segments(stripped), background, description)
-    if matched:
+    if matched and stream_family:
         refuse(tool, "deny", "background-end", BACKGROUND_END_REASON, matched)
 
     # 3c. A command that sets the Playwright browser cache location (incident 2026-10-10).
@@ -5419,13 +5442,10 @@ def _sim_route_remedy(rest: list) -> str:
     return "Use `-destination 'generic/platform=iOS Simulator'` instead, and boot nothing."
 
 
-def sim_lease_holds(session: str, udids: list) -> bool:
-    """True when SESSION holds a live sim-lease whose slot maps to every UDID in UDIDS (decision
-    sim-test-is-the-one-boot-path, ruling 5). The slot map, the liveness test and the read live in bin/sim-lease,
-    loaded by path as it has no .py name. An empty session or UDIDS, or any failure to load or read, is False:
-    the refusal stands. The read takes no lock and writes nothing, and no bytecode file is written for the load."""
-    if not session or not udids:
-        return False
+def _sim_lease_module():
+    """bin/sim-lease loaded by path (it has no .py name), or None on any failure. No bytecode file is written. The
+    slot map, the liveness test and the read live there: it is the one home (decision sim-test-is-the-one-boot-path,
+    ruling 5)."""
     keep = sys.dont_write_bytecode
     try:
         sys.dont_write_bytecode = True
@@ -5434,38 +5454,85 @@ def sim_lease_holds(session: str, udids: list) -> bool:
         spec = importlib.util.spec_from_loader("sim_lease", loader)
         lease = importlib.util.module_from_spec(spec)
         loader.exec_module(lease)
-        held = {lease.SLOT_UDID[e["slot"]].casefold() for e in lease.live_leases()
-                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID}
+        return lease
     except Exception:
-        return False
+        return None
     finally:
         sys.dont_write_bytecode = keep
+
+
+def sim_held_udids(session: str) -> set:
+    """The lowercased UDIDs of the devices SESSION holds a live sim-lease for. An empty session, or any failure to load
+    or read, is the empty set: the refusal stands. The read takes no lock and writes nothing."""
+    lease = _sim_lease_module() if session else None
+    if lease is None:
+        return set()
+    try:
+        return {lease.SLOT_UDID[e["slot"]].casefold() for e in lease.live_leases()
+                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID}
+    except Exception:
+        return set()
+
+
+def sim_lease_holds(session: str, udids: list) -> bool:
+    """True when SESSION holds a live sim-lease whose slot maps to every UDID in UDIDS. An empty UDIDS is False."""
+    if not udids:
+        return False
+    held = sim_held_udids(session)
     return all(u.casefold() in held for u in udids)
 
 
-def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str = "") -> None:
-    """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted. After those two
-    rules, an `xcodebuild -destination` boot (REMEDIES maps a name to its remedy) is refused as
-    simulator-boot-route, and an MCP launch as simulator-boot-lease, unless SESSION holds a live sim-lease whose
-    slot is the launched device (sim_lease_holds)."""
+def _sim_listing():
+    """(sweep module, device list) for the simulator rules, or None to fail open: no janitor beside this file
+    (a cloud copy), no `xcrun`, or an unreadable list."""
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "janitor"))
         import sweep
     except Exception:
-        return  # fail open: no janitor beside this file (a cloud copy)
+        return None
     if not sweep.sim_available():
-        return
+        return None
     devices = sweep.sim_read_devices()
-    if devices is None:
-        return
+    return None if devices is None else (sweep, devices)
+
+
+def _sim_rows(listing):
+    """LISTING as (sweep module, device rows) when it has that shape, else None: the same unreadable list that
+    `_sim_listing` returns, so a caller fails open on it. A row needs the keys the simulator rules read."""
+    if not (isinstance(listing, (tuple, list)) and len(listing) == 2 and isinstance(listing[1], list)):
+        return None
+    if not all(isinstance(d, dict) and all(isinstance(d.get(k), str) for k in ("udid", "name", "state", "runtime"))
+               for d in listing[1]):
+        return None
+    return listing
+
+
+def _sim_name_hits(devices: list, name: str, os_: str = "") -> list:
+    """The devices in DEVICES that NAME (a device name or a UDID) names, without case or outer spaces. OS_, a
+    destination's `OS=`, picks a runtime when one matches. The one name match of the simulator rules."""
+    key = name.strip().casefold()  # a name compares without case or outer spaces; a UDID has no case
+    hits = [d for d in devices if key == d["udid"].casefold() or key == d["name"].strip().casefold()]
+    if os_:  # not importable from sim_boot_record: its version() is nested in by_name_ok
+        hits = [d for d in hits if (v := d["runtime"].split("SimRuntime.")[-1].split("-", 1)[-1].replace("-", ".")) == os_
+                or v.startswith(os_ + ".")] or hits  # no runtime matches: judge them all
+    return hits
+
+
+def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str = "", listing=None) -> set:
+    """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted. After those two
+    rules, an `xcodebuild -destination` boot (REMEDIES maps a name to its remedy) is refused as
+    simulator-boot-route, and an MCP launch as simulator-boot-lease, unless SESSION holds a live sim-lease whose
+    slot is the launched device (sim_lease_holds). LISTING is `_sim_listing()` when the caller has it. Returns the
+    UDIDs a launch lease covered, so the device rule does not read the lease again."""
+    proven = set()
+    listing = _sim_rows(listing or _sim_listing())
+    if listing is None:
+        return proven
+    sweep, devices = listing
     shut_down = []
     for name in names:
         name, os_ = name if isinstance(name, tuple) else (name, "")  # a destination's OS= picks a runtime
-        key = name.strip().casefold()  # a name compares without case or outer spaces; a UDID has no case
-        hits = [d for d in devices if key == d["udid"].casefold() or key == d["name"].strip().casefold()]
-        if os_:  # not importable from sim_boot_record: its version() is nested in by_name_ok
-            hits = [d for d in hits if (v := d["runtime"].split("SimRuntime.")[-1].split("-", 1)[-1].replace("-", ".")) == os_
-                    or v.startswith(os_ + ".")] or hits  # no runtime matches: judge them all
+        hits = _sim_name_hits(devices, name, os_)
         hits = [d for d in hits if d["state"] != "Booted"]
         if not hits:
             continue  # unknown device, or every match already up: not a boot
@@ -5488,6 +5555,7 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
     for name, udids in shut_down:
         if tool == SIM_MCP:
             if sim_lease_holds(session, udids):
+                proven.update(u.casefold() for u in udids)
                 continue  # this session's live lease is for this very device: the boot is under the lease
             refuse(tool, "deny", "simulator-boot-lease",
                    "A launch of the shut-down simulator %s boots it outside the one lock: the Mac "
@@ -5498,6 +5566,67 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
             refuse(tool, "deny", "simulator-boot-route",
                    "`xcodebuild -destination` boots %s outside the `sim-test` lock. %s "
                    "(decision sim-test-is-the-one-boot-path)" % (name, remedies[name]), name)
+    return proven
+
+
+def _sim_hold_remedy(missing: list) -> str:
+    """The `sim-test` command that gets a lease for the devices in MISSING (UDIDs): a device in slot pro needs
+    `--device pro`, any other the default. SLOT_UDID in bin/sim-lease is the one home of the slot map."""
+    lease = _sim_lease_module()
+    pro = (lease.SLOT_UDID.get("pro") or "").casefold() if lease else ""
+    wants_pro = any(u == pro for u in missing) if pro else False
+    wants_other = not missing or any(u != pro for u in missing)
+    cmds = (["`sim-test --device pro --hold`"] if wants_pro else []) + (["`sim-test --hold`"] if wants_other else [])
+    return " or ".join(cmds)
+
+
+def sim_device_lease_refusal(tool: str, names: list, session: str, listing, launch: bool, proven=frozenset()) -> None:
+    """Rule simulator-device-lease: refuse a simulator MCP call unless SESSION holds a live sim-lease for each device
+    in NAMES, or, when NAMES is empty, for every booted device (and at least one device). A name no simulator holds is
+    refused, except for a LAUNCH, which stays allowed. PROVEN holds the UDIDs a launch lease already covered. One lease
+    read per call. A call that names no single leased device (no name, or a name that matches a leased and an unleased
+    device) is told to name a leased device by UDID; a remedy never names an unleased device. With no lease held, the
+    remedy names the role of each device missing a lease (_sim_hold_remedy)."""
+    listing = _sim_rows(listing)
+    if listing is None:
+        return  # fail open, as for an unreadable list
+    proven = proven if isinstance(proven, (set, frozenset)) else frozenset()
+    devices, need, unknown, hit_sets = listing[1], [], [], []
+    for name in names:
+        hits = _sim_name_hits(devices, name)
+        hit_sets.append({d["udid"].casefold() for d in hits})
+        need.extend(d["udid"].casefold() for d in hits)
+        if not hits and not launch:
+            unknown.append(name)
+    need = [u for u in dict.fromkeys(need) if u not in proven]
+    detail = ", ".join(names) or "no device"
+    missing, held, no_single = [], set(), False
+    if unknown:
+        reason = "No simulator is listed as %s, so no lease can cover it." % ", ".join(unknown)
+    else:
+        if names and not need:
+            return
+        held = sim_held_udids(session)
+        if names:
+            missing = [u for u in need if u not in held]
+        else:  # no device named: the call may act on any booted device
+            booted = [d["udid"].casefold() for d in devices if d["state"] == "Booted"]
+            missing = [u for u in dict.fromkeys(booted) if u not in held]
+            if held and not missing:
+                return
+        if names and not missing:
+            return
+        no_single = not names or any(s & held and s & set(missing) for s in hit_sets)
+        reason = ("This call names no single device this session leases." if no_single
+                  else "This session holds no live simulator lease for %s." % detail)
+    if no_single and held:
+        remedy = "Name the device by its UDID in `device` (this session leases %s), then call again." % ", ".join(
+            sorted(u.upper() for u in held))
+    else:
+        remedy = "Run %s to get a lease, then call again." % _sim_hold_remedy(missing)
+    refuse(tool, "deny", "simulator-device-lease",
+           "%s A simulator MCP call acts on a device only while this session holds a lease for it: the Mac shares "
+           "one simulator across repos. %s (decision sim-test-is-the-one-boot-path)" % (reason, remedy), detail)
 
 
 def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
@@ -5515,7 +5644,7 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     home_status, home, home_primary = agent_worktree_home(payload, home_cwd)
     if home_status != "home":
         return ""
-    if tool in SHELL_TOOLS:
+    if tool in SHELL_COMMAND_TOOLS:
         # The one allowed call is a lone `cd` back into the home (a recovery step).
         if (path_is_inside(home_cwd, home) is False
                 and not is_move_into(tool, str(tool_input.get("command", "")), home_cwd, home)):
@@ -5788,7 +5917,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     if tool in WRITE_TOOLS:
         targets = write_targets(tool_input)
         writes = bool(targets)
-    elif tool in SHELL_TOOLS:
+    elif tool in SHELL_COMMAND_TOOLS:
         targets = None
         raw = str(tool_input.get("command", "") or "")
         command = strip_heredoc_bodies(raw)
@@ -6024,7 +6153,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
         return ""
     if tool in WRITE_TOOLS:
         targets = write_targets(tool_input)
-    elif tool in SHELL_TOOLS:
+    elif tool in SHELL_COMMAND_TOOLS:
         targets = None
         command = strip_heredoc_bodies(str(tool_input.get("command", "") or ""))
         writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))
@@ -6181,7 +6310,7 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
                 full = target if os.path.isabs(target) else os.path.join(cwd, target)
                 if SCRATCHPAD_WORD in full and under_session_scratchpad(full, session):
                     files.append(full)
-        elif tool in SHELL_TOOLS:
+        elif tool in SHELL_COMMAND_TOOLS:
             command = str(tool_input.get("command", "") or "")
             if SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd:
                 return agent, session, files, removed, moved
@@ -6487,7 +6616,7 @@ def scratchpad_owner_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     heredoc-stripped command with its variables read as `_shell_write_hit` reads them (`_resolve_vars`), and
     `scratchpad_run_files` lists the runs in it."""
     agent, session = scratchpad_agent(payload), session_id_of(payload)
-    command = str(tool_input.get("command", "") or "") if tool in SHELL_TOOLS else ""
+    command = str(tool_input.get("command", "") or "") if tool in SHELL_COMMAND_TOOLS else ""
     if not agent or not session or (SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd):
         return ""
     for full in scratchpad_run_files(_resolve_vars(strip_heredoc_bodies(command)), cwd):
@@ -6717,7 +6846,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
             or role_model_check(tool, tool_input)[1].startswith(ROLE_NO_MODEL_MATCH)
             or worktree_home_hit(payload, tool, tool_input, cwd)):
         return True
-    if tool in SHELL_TOOLS:
+    if tool in SHELL_COMMAND_TOOLS:
         raw = tool_input.get("command", "") or ""
         stripped = strip_heredoc_bodies(raw)
         return bool(git_env_command_hit(raw, stripped) or shell_write_hit(raw, cwd, is_frozen, _holds_frozen)
@@ -7040,14 +7169,14 @@ def judge(payload) -> None:
             refuse(tool, "deny", "page-stale", behind[0], behind[1])
         return
 
-    if tool in SHELL_TOOLS:
+    if tool in SHELL_TOOLS or tool == MONITOR_TOOL:
         command = tool_input.get("command", "") or ""
         if isinstance(command, str) and command.strip():
             transcript = payload.get("transcript_path") if isinstance(payload, dict) else ""
             judge_shell(tool, command, cwd, session_id_of(payload), agent_role(payload),
                         transcript if isinstance(transcript, str) else "",
                         bool(payload.get("agent_id") or payload.get("agent_type")),
-                        tool_input.get("run_in_background") is True,
+                        tool_input.get("run_in_background") is True or tool == MONITOR_TOOL,
                         tool_input.get("description") or "", payload)
             segments = split_segments(strip_heredoc_bodies(command))
             matched = next((hit for seg in segments if (hit := sim_bypass_hit(seg))), "")
@@ -7070,9 +7199,14 @@ def judge(payload) -> None:
         # `udid` is an alias of `device`: judge each non-empty name, so one field hides no other.
         names = list(dict.fromkeys(v for v in map(tool_input.get, ("device", "udid"))
                                    if isinstance(v, str) and v))
-        if tool_input.get("action") == "launch" and names:
-            sid = payload.get("session_id") if isinstance(payload, dict) else ""
-            sim_boot_refusal(tool, names, None, sid if isinstance(sid, str) else "")
+        sid = payload.get("session_id") if isinstance(payload, dict) else ""
+        sid = sid if isinstance(sid, str) else ""
+        launch = tool_input.get("action") == "launch"
+        listing = _sim_listing()
+        if listing is None:
+            return  # fail open: with no device list there is no proof of a lease either way
+        proven = sim_boot_refusal(tool, names, None, sid, listing) if launch and names else set()
+        sim_device_lease_refusal(tool, names, sid, listing, launch, proven)
         return
 
     if tool not in WRITE_TOOLS:
