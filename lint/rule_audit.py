@@ -104,7 +104,7 @@ CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 # JUDGMENT_EXPECTED moves the same way for a rule only judgment can apply.
 RULE_FLOOR = 98
 UNMECHANIZED_EXPECTED = 62
-JUDGMENT_EXPECTED = 26
+JUDGMENT_EXPECTED = 27
 REASON_MIN_WORDS = 8
 
 KINDS = {"guard", "check", "ci", "unmechanized", "judgment"}
