@@ -461,6 +461,34 @@ cmk_allow("two commits, the first adding a triplet and the second removing it, t
           VCS + " push", R2_NET)
 
 
+# 9. An unread git read: a read that timed out or did not start answers None, so the guard cannot see the tree.
+# That is unknown, not clear: the guard asks, with the remedy to retry once git answers. A read that ran and
+# exited non-zero (no repository) stays no hit. The rows here run the guard as a subprocess on a PATH with no
+# git, so every read is unread. The rows that blank one read at a time are in s21305-conflict-markers-unread.py.
+CMK_DT = os.path.join(CMKPUSH, "detached")     # a clean commit, unpushed, with HEAD detached: no branch to push
+os.makedirs(NOGIT_PATH, exist_ok=True)         # an empty folder on PATH: no git runs at all
+
+
+def _build_conflict_markers_detached():
+    _cmk_pushed(CMK_DT, {"a.txt": "base\n"})
+    _cmk_commit(CMK_DT, "b.txt", "clean\n", "clean change, unpushed")
+    _cmk_run(CMK_DT, "checkout", "-q", "--detach")
+
+
+lazy_fixture([CMK_DT], _build_conflict_markers_detached)
+
+sh("conflict-markers: a commit of a clean change with git unable to start is asked, not allowed",
+   VCS + " commit -m x", "ask", CMK_RULE, cwd=CMK_CLEAN, env_path=NOGIT_PATH)
+sh("conflict-markers: a push of a clean unpushed commit with git unable to start is asked, not allowed",
+   VCS + " push", "ask", CMK_RULE, cwd=CMK_CL, env_path=NOGIT_PATH)
+cmk_allow("add -A and commit of a clean change, every git read answering", VCS + " add -A && " + VCS + " commit -m x",
+          CMK_CLEAN)
+cmk_allow("a commit in a folder that is no repository, its read ran and exited non-zero", VCS + " commit -m x", NOGIT)
+cmk_allow("a bare push with HEAD detached on a clean unpushed commit: no branch to push", VCS + " push", CMK_DT)
+sh("conflict-markers: a commit with --no-verify and git unable to start: hook-bypass denies, the unread ask does not mask it",
+   VCS + " commit --no-verify -m x", "deny", HOOK_BYPASS, cwd=CMK_CLEAN, env_path=NOGIT_PATH)
+
+
 # =========================================================================== 5e. octopus-push
 #
 # `octopus-push`. A `git push` is refused when a commit it would send is a merge with more than two parents
