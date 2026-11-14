@@ -599,18 +599,36 @@ CREATE_SESSION = "mcp__claude-code-remote__create_session"
 ROLE_NEW = "session_ROLENEW01"  # the id a create_session call starts, and a send_message names
 
 
-def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False, key="id"):
+def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False, key="id", body=None):
     """One paired create_session call that starts `session` with `tags`. Its result names the new id: as
-    JSON {`key`: ...} when `plain` is False, else as plain text. Each shape has its own fixture."""
-    body = "Created session " + session + "." if plain else json.dumps({key: session})
+    JSON {`key`: ...} when `plain` is False, else as plain text. Each shape has its own fixture. `body`, when given,
+    is the result text as it stands, for a shape the other options do not build."""
+    if body is None:
+        body = "Created session " + session + "." if plain else json.dumps({key: session})
     return [role_use(tool_id, CREATE_SESSION, {"title": "a lane session", "tags": list(tags)}),
             role_result(tool_id, body)]
+
+
+def stepdup_row(sid, status, tags):
+    """One list_sessions row: the keys the tool returns for a session, with `tags` as a list."""
+    return {"id": sid, "title": "a lane session", "session_status": status, "tags": list(tags)}
+
+
+def stepdup_list(tool_id, rows, more=False, args=None, cut=False):
+    """One list_sessions call and its result: `rows` in one wrapped record. `more` sets has_more, a read that is not the
+    last page. `args` is the call's input: an after_id cursor makes the read a page of a chain. `cut` drops the end of
+    the result, so the text is not a whole record."""
+    body = role_wrapped(json.dumps({"ccr": {"data": list(rows), "has_more": more}}))
+    return [role_use(tool_id, LIST_SESSIONS, dict(args or {})), role_result(tool_id, body[:-40] if cut else body)]
 
 
 # lane-one-topic: a lane on topic icons, and an older lane with two steps and no topic.
 STEP_TOPIC_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-topic:icons", "cs-repo:o/r"]
 STEP_OLD_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-step:icon-b", "cs-repo:o/r"]
 STEP_COLORS_TAGS = ["cs-build:lane", "cs-step:colors-a", "cs-topic:colors", "cs-repo:o/r"]
+# A whole list_sessions read with one live lane on another step, icon-a. It carries no session on the steps the
+# lane-step-dup briefs below name (icon-b, colors-a, lane-start-settings), so the read finds no carrier.
+LIST_NO_CARRIER = stepdup_list("l1", [stepdup_row("session_ROLELIST01", "SESSION_STATUS_RUNNING", STEP_TOPIC_TAGS)])
 
 
 # lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
@@ -729,6 +747,17 @@ ROLE_LINES = {
     "step-old-lane-retagged": role_target_call("t1", STEP_OLD_TAGS) + role_tag_call("t2", session=ROLE_OTHER),
     # A create_session result that names the new id as {"session_id": ...}, not {"id": ...}.
     "step-create-session-id": role_create_call("c1", STEP_TOPIC_TAGS, key="session_id"),
+    # The lane-step-dup shapes: a brief that names a step needs a whole list read first (section 42900). Each is a
+    # lane-one-topic shape above with LIST_NO_CARRIER after its lines.
+    "step-topic-lane-listed": role_target_call("t1", STEP_TOPIC_TAGS) + LIST_NO_CARRIER,
+    "step-create-json-listed": role_create_call("c1", STEP_TOPIC_TAGS) + LIST_NO_CARRIER,
+    "step-create-text-listed": role_create_call("c1", STEP_TOPIC_TAGS, plain=True) + LIST_NO_CARRIER,
+    "step-triage-listed": role_target_call("t1", TRIAGE_TAGS) + LIST_NO_CARRIER,
+    "step-lane-then-triage-listed": role_target_call("t1", STEP_TOPIC_TAGS) + role_target_call("t2", TRIAGE_TAGS)
+                                    + LIST_NO_CARRIER,
+    "step-create-session-id-listed": role_create_call("c1", STEP_TOPIC_TAGS, key="session_id") + LIST_NO_CARRIER,
+    # A create_session for a lane that names a step, with the whole list read and no session on the step.
+    "lane-start-listed": LIST_NO_CARRIER,
     # A lane on topic colors: the marker variants below are judged against it.
     "step-colors-lane": role_target_call("t1", STEP_COLORS_TAGS),
     # A lane's record read as another session's untrusted text: wrapped, so the reader must find the JSON inside it.
