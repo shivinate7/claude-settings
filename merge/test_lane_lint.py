@@ -2590,6 +2590,10 @@ class LintTreeFileMain(LaneFixture):
 DECLARED_READY = ["STE lint", "Windows split guard", "Cost line pins"]  # the checks-job steps the pre-ready run runs by name
 SCAFFOLD_READY = "checks-rest:project-ops skill scaffold suite"  # the scaffold suite as a qualified ready check: its job checks-rest, its step below
 SCAFFOLD_STEP = "project-ops skill scaffold suite"  # the same step's bare name, as checks.yml names it
+# The workflow on main names every step the ready checks below declare, in the job each runs in: a declared step the workflow lacks reads
+# unknown before ci-job runs (merge.pre_ready_rows). "no such step" is left out on purpose: that case declares a step no job has.
+READY_STEPS_WORKFLOW = tm.workflow_text("checks", "checks", "checks-rest",
+                                        steps={"checks": ["check invariants", *DECLARED_READY], "checks-rest": [SCAFFOLD_STEP]})
 
 
 def steps_for(failing=()):
@@ -2722,6 +2726,7 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
             super().setUp()
         self.use_fake_records()
         self.init_stub()
+        tm.push_base(self, {WORKFLOW_PATH: READY_STEPS_WORKFLOW})  # main's workflow, merged into the PR branch as a lane does (head_takes_base)
 
     def declare(self, names, stamp_kinds=False):
         """Put the base's stamp on main with merge.readyChecks `names` (None: no key). Stamp kinds stay off, so no claim,
