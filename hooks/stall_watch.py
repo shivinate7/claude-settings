@@ -1087,59 +1087,6 @@ def open_call(path, size):
     return bool(pending)
 
 
-def stale_rows(call):
-    """One row for each stale job in the call's transcript."""
-    now = float(os.environ.get("STALL_WATCH_NOW") or time.time())
-    quiet = float(os.environ.get("STALL_WATCH_QUIET") or DEFAULT_QUIET)
-    base = os.environ.get("STALL_WATCH_OUTPUT_BASE")
-    rows, quiet_shells = [], {}  # quiet_shells: row index -> the output file of that shell job
-    open_jobs, prev_stop = scan_jobs(call["transcript_path"])
-    for job, (path, note, (named, cwd, unresolved), began, agent) in open_jobs.items():
-        until = " | until: " + note if note else ""
-        real = path
-        if path and base:
-            real = os.path.join(base, re.split(r"[\\/]", path)[-1])
-        st = None
-        for real in (agent_transcripts(call["transcript_path"], job, real) if agent else [real]):
-            try:
-                st = os.stat(real)
-                break
-            except (OSError, TypeError, ValueError):  # TypeError: no path recorded; ValueError: NUL in path
-                continue
-        if st is None:
-            if prev_stop is not None and began is not None and began <= prev_stop:
-                continue  # started before the previous Stop, which listed it
-            what = "transcript" if agent else "output file"
-            rows.append("%s: unknown, %s not found: %s%s%s" % (
-                job, what, path or "(path not recorded)", until, " " + AGENT_REMEDY if agent else ""))
-            continue
-        idle = now - st.st_mtime
-        if agent:  # a transcript has no named logs; one long tool call is not a stall
-            if idle >= quiet and not (prev_stop is not None and now - idle + quiet <= prev_stop):
-                try:
-                    busy = open_call(real, st.st_size)
-                except OSError:
-                    busy = False
-                if not busy:
-                    rows.append("%s: background agent, no activity for %ds: %s%s %s" % (
-                        job, idle, real, until, AGENT_REMEDY))
-            continue
-        watched = [p for p in named if os.path.isabs(p) or cwd]
-        unwatched = list(unresolved) + [p for p in named if p not in watched]
-        for mark in log_marks(watched, cwd).values():
-            if mark:  # a named log the job still writes keeps it off the list
-                idle = min(idle, now - mark[1])
-        if idle >= quiet:
-            if prev_stop is not None and now - idle + quiet <= prev_stop:
-                continue  # its stall crossed before the previous Stop, which listed it
-            miss = " (named log not watched, its directory is unknown: %s)" % ", ".join(unwatched) if unwatched else ""
-            quiet_shells[len(rows)] = real
-            rows.append("%s: no output for %ds: %s%s%s" % (job, idle, path, until, miss))
-    busy = busy_outputs(list(quiet_shells.values()))  # a job whose process tree burns CPU is not quiet
-    rows = [r for i, r in enumerate(rows) if quiet_shells.get(i) not in busy]
-    return rows
-
-
 def stop():
     try:
         call = json.load(sys.stdin)
@@ -1147,12 +1094,7 @@ def stop():
             return 0
     except Exception:  # guard-hooks-fail-closed: a failed check prints nothing and does not block
         return 0
-    rows, out = [], {}
-    if TASK_NOTIFICATION_TAG:  # without the tag every finished job would look open: list none
-        try:
-            rows = stale_rows(call)
-        except Exception:
-            pass
+    out = {}
     try:
         pr = open_ci_wait(call["transcript_path"])
         if pr is not None:
@@ -1160,11 +1102,64 @@ def stop():
             out["reason"] = "PR %s is marked ready and no check-in is set (decision ci-wait-reads-run-status). %s" % (pr or "(this branch)", CI_REMEDY)
     except Exception:
         pass
-    if rows:
-        head = "Background jobs still running and quiet: stop it or tell the owner."
-        if "| until: " in "".join(rows):
-            head += " Say whether each until condition is met."
-        out["systemMessage"] = "\n".join([head] + rows)
+    try:
+        if not TASK_NOTIFICATION_TAG:  # every finished job would look open: list none
+            raise ValueError("no task-notification tag")
+        now = float(os.environ.get("STALL_WATCH_NOW") or time.time())
+        quiet = float(os.environ.get("STALL_WATCH_QUIET") or DEFAULT_QUIET)
+        base = os.environ.get("STALL_WATCH_OUTPUT_BASE")
+        rows, quiet_shells = [], {}  # quiet_shells: row index -> the output file of that shell job
+        open_jobs, prev_stop = scan_jobs(call["transcript_path"])
+        for job, (path, note, (named, cwd, unresolved), began, agent) in open_jobs.items():
+            until = " | until: " + note if note else ""
+            real = path
+            if path and base:
+                real = os.path.join(base, re.split(r"[\\/]", path)[-1])
+            st = None
+            for real in (agent_transcripts(call["transcript_path"], job, real) if agent else [real]):
+                try:
+                    st = os.stat(real)
+                    break
+                except (OSError, TypeError, ValueError):  # TypeError: no path recorded; ValueError: NUL in path
+                    continue
+            if st is None:
+                if prev_stop is not None and began is not None and began <= prev_stop:
+                    continue  # started before the previous Stop, which listed it
+                what = "transcript" if agent else "output file"
+                rows.append("%s: unknown, %s not found: %s%s%s" % (
+                    job, what, path or "(path not recorded)", until, " " + AGENT_REMEDY if agent else ""))
+                continue
+            idle = now - st.st_mtime
+            if agent:  # a transcript has no named logs; one long tool call is not a stall
+                if idle >= quiet and not (prev_stop is not None and now - idle + quiet <= prev_stop):
+                    try:
+                        busy = open_call(real, st.st_size)
+                    except OSError:
+                        busy = False
+                    if not busy:
+                        rows.append("%s: background agent, no activity for %ds: %s%s %s" % (
+                            job, idle, real, until, AGENT_REMEDY))
+                continue
+            watched = [p for p in named if os.path.isabs(p) or cwd]
+            unwatched = list(unresolved) + [p for p in named if p not in watched]
+            for mark in log_marks(watched, cwd).values():
+                if mark:  # a named log the job still writes keeps it off the list
+                    idle = min(idle, now - mark[1])
+            if idle >= quiet:
+                if prev_stop is not None and now - idle + quiet <= prev_stop:
+                    continue  # its stall crossed before the previous Stop, which listed it
+                miss = " (named log not watched, its directory is unknown: %s)" % ", ".join(unwatched) if unwatched else ""
+                quiet_shells[len(rows)] = real
+                rows.append("%s: no output for %ds: %s%s%s" % (job, idle, path, until, miss))
+        busy = busy_outputs(list(quiet_shells.values()))  # a job whose process tree burns CPU is not quiet
+        rows = [r for i, r in enumerate(rows) if quiet_shells.get(i) not in busy]
+        if rows:
+            head = "Background jobs still running and quiet: stop it or tell the owner."
+            if "| until: " in "".join(rows):
+                head += " Say whether each until condition is met."
+            out["systemMessage"] = "\n".join([head] + rows)
+    except Exception:  # guard-hooks-fail-closed: a failed check prints nothing and does not block
+        pass
     if out:
         print(json.dumps(out))
     return 0
