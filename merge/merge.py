@@ -123,6 +123,25 @@
                           Before any step: a lint worktree that lacks lint/check_python_floor.py or .github/workflows/checks.yml, which the head's
                           own tree holds, reads UNKNOWN (exit 1, as every lane-lint refusal) and names the file; no step runs and --lint-unknown-ok never lifts it. Cost:
                           one `git ls-tree` of the head.
+  merge --priority-rows FILE|-
+                          one line per `priority: <slug> | pr: <owner>/<repo>#<N>` or `priority: <slug> | branch: <name> [| repo: <owner>/<repo>]` row
+                          (FILE, or `-` for stdin), then a summary: `ok`, `waiting` (a run still going), `done` (merged into main), `flag` or `unknown`.
+                          A flag: the row names no pr or branch (no read), the PR is closed and not on main, merged into another base, a draft, dirty
+                          (conflicts), behind its base, or a newest run per name is red. A blocked head reads its runs: red is a flag, pending is waiting,
+                          all green is a flag (blocked), none is unknown. A branch with no open PR is judged by its newest closed PR (merged into main:
+                          done, unless the local origin/<branch> ref names a sha other than that PR's head: flag, branch reused after merge; merged
+                          elsewhere or closed: flag; none: flag). Unknown, never ok: a read failed, the row names another repo (no read, a branch row's
+                          `repo:` too), this checkout's repo cannot be named (no read), the row names an empty `branch:` or `repo:` value (no read),
+                          GitHub has not computed the merge state, a ready clean or blocked head shows no run, two open PRs have the branch, or the row
+                          names more than one pr or branch (no read). A draft that is also
+                          dirty prints both. No rows, or a file that is missing or empty, exits 1 with `no rows`, never clear. Exit 0 only when every row is ok,
+                          waiting or done. Reads the PR and runs the way --reviewed does (Host.pr, Host.runs, Host.judge_runs). Stands alone (-C and --config
+                          allowed); takes no lock and no merge role, merges and posts nothing, writes no file; any session may run it, the batch runner
+                          at each wake. Cost per call: at most two reads per `pr:` row (the pull request; the runs on its head only when the verdict needs
+                          them: a row that is merged, closed, a draft, dirty, behind or unknown reads the pull request alone). Branch rows: one shared
+                          read of the open pull list per call (one call per 100 PRs), then two reads per row with an open match, or one closed read
+                          (`pulls?state=closed&head=<owner>:<branch>&per_page=1`) for a row with none, plus one local `git rev-parse` of origin/<branch>
+                          when that PR merged into main. No timer, process or file.
   merge --idle-lanes --live FILE
                           lane lines (a lane the roadmap's live file shows done and safe to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step's status is set to todo or done), then a summary line. A lane that waits (a step not done, an open pull, an open item) prints no line, except a lane only stale drafts hold: that prints one `joint (close #N ...; archive archive/<branch> ...; archive lane <id>)` line, counted among the lanes to archive. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -3547,6 +3566,24 @@ def review_round_model(n):
     rounds = hook_guard.role_round_table(hook_guard.pointer_checkout())
     return hook_guard.role_round_model(rounds, REVIEW_ROLES[0], str(min(n, REVIEW_LAST_ROUND)) if isinstance(n, int) else n)
 
+def review_restart_remedy(earlier, earlier_top, head):
+    """-> the routes a refused restart can take, from the parsed `earlier` records (oldest first, None for a comment that did not parse) and the
+    live `head`. A fix verifier over the newest earlier record's Head is a route when that record holds no Fix check line or a PASS one and its
+    Head is not the live head (a fix check whose reviewed head is --head is refused). A FAIL Fix check line, or a newest comment that did not
+    parse, leaves the fresh full review in its place. A top round past REVIEW_LAST_ROUND is a granted last round: its route is rounds 1 to
+    that top again with --grant, which needs no fix check, and no record can post a round above it."""
+    last = earlier[-1] if earlier else None
+    fix_open = bool(last) and not (last["fix"] and last["fix"][3] == "FAIL")
+    if earlier_top > REVIEW_LAST_ROUND:
+        return f" The route is to post rounds 1 to {earlier_top} again with --grant, the owner's grant of round {earlier_top}."
+    routes = []
+    if fix_open and last["head"] != head:
+        routes.append(f"post rounds 1 to {earlier_top} again with --fix-check {last['head']}:reviewer:{review_round_model(REVIEW_FIX_ROW)}:VERDICT, the fix verifier's verdict over this head ({last['head'][:9]} is the Head of the newest earlier review log)")
+    elif not fix_open:
+        routes.append(f"order a fresh full review (the builder's brief line 1 `Round {REVIEW_LAST_ROUND} of {REVIEW_LAST_ROUND}`) and post rounds 1 to {REVIEW_LAST_ROUND} with no Fix check line")
+    routes.append(f"post a record whose top round is above {earlier_top}" + (" (a round past 3 takes the owner's --grant)" if earlier_top >= REVIEW_LAST_ROUND else ""))
+    return " Either " + ", or ".join(routes) + "."
+
 def __getattr__(name):
     """REVIEW_FIX_GUARD_MODEL, the model every fix verifier runs (owner item 444 a; decision pr-review-record): the round row's fallback in the
     guard, read on use so this file holds no copy and does not load the guard at import. The checks read review_round_model, which also reads the record's row."""
@@ -4353,6 +4390,163 @@ def idle_lanes(live, repo_dir=None):
     say(*entries)
     return 1 if unread else 0
 
+PRIORITY_PR = re.compile(r"([\w.-]+/[\w.-]+)#(\d+)")
+PRIORITY_REPO = re.compile(r"[\w.-]+/[\w.-]+")
+# The owner's rulings name main as where work must land; a repo whose default branch is another name would read its own work as not landed.
+PRIORITY_LANDS_ON = "main"
+# Merge states whose verdict the newest run per name decides. GitHub reads BLOCKED while a required run is still going, so BLOCKED reads the runs
+# too; only a BLOCKED head whose runs are all green is a flag, since then something other than the runs refuses the merge.
+# A state outside this list and outside the earlier branches is unknown, never ok.
+PRIORITY_RUN_STATES = ("CLEAN", "UNSTABLE", "HAS_HOOKS", "BLOCKED")
+
+def priority_row(line):
+    """-> (slug, targets, repo) of one `priority: <slug> | key: value | ...` row. `targets` is the value of every `pr` and `branch` key, in order (a
+    row names one); `repo` is the first `repo` value or None. A key matches exactly, so an outbox row's `PRs: #3302 draft` names no pull request."""
+    head, *rest = line.split("|")
+    slug = head.split(":", 1)[1].strip()
+    targets, repo = [], None
+    for part in rest:
+        key, _, value = part.partition(":")
+        key, value = key.strip(), value.strip()
+        if key in ("pr", "branch"):
+            targets.append((key, value))
+        elif key == "repo" and repo is None:
+            repo = value
+    return slug, targets, repo
+
+def priority_landed(base, why):
+    """-> the verdict of a pull request that merged into `base`: done on main, else a flag, since the work is not on main."""
+    return ("done", why) if base == PRIORITY_LANDS_ON else ("flag", f"merged into {base}, not on {PRIORITY_LANDS_ON}")
+
+def priority_verdict(h, number):
+    """-> (verdict, why) of pull request `number`, read once for its state and once for the runs on its head, the runs only when the verdict needs them.
+    A draft and a dirty head are both named. A read that fails raises; the caller reports it as unknown."""
+    info = h.pr(number)
+    if info["state"] == "MERGED":
+        return priority_landed(info["base"], "merged")
+    if info["state"] != "OPEN":
+        return "flag", "closed, not on main"
+    why = (["draft"] if info["draft"] else []) + (["dirty, conflicts with base"] if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY" else [])
+    if why:
+        return "flag", "; ".join(why)
+    if "UNKNOWN" in (info["mergeable"], info["merge_state"]):
+        return "unknown", "GitHub has not computed the merge state yet"
+    if info["merge_state"] == "BEHIND":
+        return "flag", "behind base"
+    if info["merge_state"] not in PRIORITY_RUN_STATES:
+        return "unknown", f"merge state {info['merge_state'].lower()} is not one this read judges"
+    runs = h.runs(info["head"])
+    if not runs:
+        return "unknown", "no workflow run on the head"
+    red, pending = h.judge_runs(runs)
+    if red:
+        return "flag", "; ".join(red)
+    if pending:
+        return "waiting", ", ".join(pending)
+    if info["merge_state"] == "BLOCKED":
+        return "flag", "blocked: GitHub refuses the merge though the runs are green"
+    return "ok", "ready, clean, runs green"
+
+def priority_closed_branch(h, here, branch, repo_dir=None):
+    """-> (verdict, why) of a branch with no open pull request: one read of the newest closed pull request with that head. Merged into main is done,
+    unless the local `origin/<branch>` ref names a sha other than that pull request's head: the branch was pushed again after the merge, so that
+    work is not on main. Merged elsewhere or closed is a flag, none is a flag. A failed read raises."""
+    c, out = h.api("pulls", fields={"state": "closed", "head": f"{here.split('/')[0]}:{branch}", "per_page": 1})
+    try:
+        if c:
+            raise ValueError(out)
+        found = json.loads(out)
+        if not isinstance(found, list):
+            raise TypeError(f"expected a list, got {type(found).__name__}")
+    except (ValueError, TypeError) as e:
+        raise Stop(f"reading the closed pull requests of {branch} failed: {e} " + UNKNOWN_CITE)
+    if not found:
+        return "flag", f"no pull request has the head {branch}"
+    if not found[0].get("merged_at"):
+        return "flag", "closed, not on main"
+    verdict, why = priority_landed(found[0]["base"]["ref"], "merged")
+    if verdict == "done":
+        # A local read only: a missing ref and a failed git read both mean the branch was deleted after its merge, the usual case.
+        try:
+            c, out = sh(["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}^{{commit}}"], cwd=repo_dir)
+        except (OSError, subprocess.SubprocessError):
+            c, out = 1, ""
+        sha = out.split()[0] if out.split() else ""  # stdout comes first; a stderr warning after it never reads as the sha
+        if not c and sha and sha != (found[0].get("head") or {}).get("sha"):
+            return "flag", "branch reused after merge, no open PR"
+    return verdict, why
+
+def priority_rows(source, repo_dir=None, host=None):
+    """merge --priority-rows: one verdict line per `priority:` row of the file SOURCE (`-` is stdin), then a summary. Verdicts: ok, waiting, done, flag, unknown.
+    Exit 0 only when every row is ok, waiting or done. No rows, or a file that is missing or empty, exits 1: never clear.
+    Cost: the reads priority_verdict makes per pull request row; for branch rows one shared open-pull list read per call, then one closed read for a row
+    that no open pull request matches, and one local `git rev-parse` when that closed read finds it merged into main. It writes nothing and takes no lock."""
+    try:
+        text = sys.stdin.read() if source == "-" else pathlib.Path(source).read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        text = ""
+        print(f"merge: --priority-rows could not read {source}: {e.strerror or e}", file=sys.stderr)
+    rows = [x for x in (line.strip() for line in text.splitlines()) if x and not x.startswith("#")]
+    if not rows:
+        print("merge: --priority-rows: no rows. Nothing was checked; this is not clear.", file=sys.stderr)
+        return 1
+    import layout  # lint/layout.py: repo_name, the one reader of the origin
+    c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=repo_dir)
+    h = host or Host(cwd=repo_dir)
+    here = (h.repo or ("" if c else layout.repo_name(root.strip())) or "").lower()
+    opened = []  # the open pull list, read once per call: [rows] or [the exception that stopped the read]
+
+    def by_branch(branch):
+        if not opened:
+            try:
+                opened.append(h.open_prs())
+            except Exception as e:  # a Stop, a missing gh, malformed JSON: every branch row is unknown
+                opened.append(e)
+        if isinstance(opened[0], Exception):
+            raise opened[0]
+        hits = [n for n, info in opened[0] if info["branch"] == branch]
+        if len(hits) > 1:
+            return None, ("unknown", f"{len(hits)} open pull requests have the head {branch}")
+        return (hits[0], None) if hits else (None, priority_closed_branch(h, here, branch, repo_dir))
+
+    lines, counts = [], {k: 0 for k in ("ok", "waiting", "done", "flag", "unknown")}
+    for row in rows:
+        if not row.startswith("priority:"):
+            slug, verdict, why = row[:60], "unknown", "not a priority row"
+        else:
+            slug, targets, repo = priority_row(row)
+            try:
+                if any(k == "branch" and not v for k, v in targets) or repo == "":
+                    verdict, why = "unknown", "row names an empty value"
+                elif not targets:
+                    verdict, why = "flag", "row names no branch or pr"
+                elif len(targets) > 1:
+                    verdict, why = "unknown", "row names more than one target"
+                elif targets[0][0] == "pr":
+                    m = PRIORITY_PR.fullmatch(targets[0][1])
+                    if not m:
+                        verdict, why = "unknown", f"pr {targets[0][1]} is not owner/repo#N"
+                    elif m.group(1).lower() != here:
+                        verdict, why = "unknown", (f"{m.group(1)} is not this checkout's repo, so it is not read" if here else "this checkout's repo cannot be read, so the pull request is not read")
+                    else:
+                        verdict, why = priority_verdict(h, int(m.group(2)))
+                        slug += f" #{m.group(2)}"
+                elif not here:
+                    verdict, why = "unknown", "this checkout's repo cannot be read, so the branch is not read"
+                elif repo is not None and repo.lower() != here:
+                    verdict, why = "unknown", f"{repo} is not this checkout's repo, so it is not read"
+                else:
+                    number, early = by_branch(targets[0][1])
+                    verdict, why = early or priority_verdict(h, number)
+                    slug += f" #{number}" if number else ""
+            except Exception as e:  # a failed read is unknown, never clear
+                verdict, why = "unknown", "read failed: " + " ".join(str(e).split())
+        counts[verdict] += 1
+        lines.append(" ".join(f"{verdict} {slug}: {why}".split()))
+    lines.append("merge: " + ", ".join(f"{n} {k}" for k, n in counts.items()) + f" of {len(rows)} rows.")
+    say(*lines)
+    return 0 if not counts["flag"] and not counts["unknown"] else 1
+
 def build_parser():
     """The one home of merge's command line. The guard (hooks/guard_merge.py) parses a command with this, so its reading of -C and --repo-dir is the tool's own.
     allow_abbrev is off: a prefix such as `--repo` or `--confir` is an error, never the flag it starts."""
@@ -4375,6 +4569,7 @@ def build_parser():
     p.add_argument("--config", default=DEFAULT_CONFIG)
     p.add_argument("--idle-lanes", action="store_true", help="list the lanes to archive from the roadmap's live file; takes no lock, merges and posts nothing")
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
+    p.add_argument("--priority-rows", default=None, metavar="FILE", help="read the owner's priority rows (FILE, or - for stdin) and print one verdict line per row; takes no lock, merges and posts nothing, writes no file")
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
     p.add_argument("--root", action="append", default=[], metavar="DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; repeat it for each repo")
     p.add_argument("--release-check", nargs="+", action="extend", type=pr_arg, metavar="N", help="one line per pull request: PASS, or FAIL and the reasons (open, review record done at the live head and unedited, lint verdict, clean merge, stack); a missing line is a FAIL; takes no lock, merges nothing")
@@ -4426,6 +4621,8 @@ def main(argv, host=None, lock=None, hosts=None):
         p.error("--root goes with --reviewed")
     if a.root and a.repo_dir is not None:  # each --root names its own checkout, so a -C beside it would be read by nothing
         p.error("-C does not go with --root: each --root names its own checkout")
+    if a.priority_rows is not None and any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("priority_rows", "repo_dir", "config")):
+        p.error("--priority-rows stands alone (-C and --config may go with it)")
     if a.idle_lanes and (a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed
                          or a.review_record or a.lane_lint):
         p.error("--idle-lanes stands alone")
@@ -4440,7 +4637,7 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--lint-unknown-ok goes with --lane-lint")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
-    if a.idle_lanes or a.touches or a.release_check:
+    if a.idle_lanes or a.touches or a.release_check or a.priority_rows is not None:
         pass  # stands alone: checked above
     elif a.ready:  # a lane's one act on its own draft: no lock, no merge
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record or a.lane_lint:
@@ -4502,6 +4699,8 @@ def main(argv, host=None, lock=None, hosts=None):
                 print("merge: " + " ".join(unknown.split()), file=sys.stderr)
                 return 1
             return 0
+        if a.priority_rows is not None:
+            return priority_rows(a.priority_rows, a.repo_dir, host)  # before the role check and any lock: it reads, merges and posts nothing
         if a.idle_lanes:
             return idle_lanes(a.live, a.repo_dir)  # before the role check and any lock: it reads, merges and posts nothing
         if a.lane_lint:
@@ -4566,7 +4765,7 @@ def main(argv, host=None, lock=None, hosts=None):
             new_top = max((r[0] for r in a.round), default=0)
             # a new record may not lower the top round an earlier record holds, and below REVIEW_LAST_ROUND it may not repeat that top round without a fix verifier of its own (a head moved after the last round posts rounds 1..REVIEW_LAST_ROUND again, and a granted round past it is above)
             if earlier_top and (new_top < earlier_top or (new_top == earlier_top and new_top < REVIEW_LAST_ROUND and not a.fix_check)):
-                print(f"merge: this record restarts the review: it has the same or fewer rounds than an earlier record on this pull request, stops below round {REVIEW_LAST_ROUND}, and has no fix verifier. A new branch with a new PR is the only way out. " + REVIEW_CITE, file=sys.stderr)
+                print(f"merge: this record restarts the review: it has the same or fewer rounds than an earlier record on this pull request, stops below round {REVIEW_LAST_ROUND}, and has no fix verifier." + review_restart_remedy(earlier, earlier_top, a.head) + " " + REVIEW_CITE, file=sys.stderr)
                 return 2
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
                 last = earlier[-1] if earlier else None

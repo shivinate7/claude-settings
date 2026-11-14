@@ -77,6 +77,17 @@ def build(agent_type, form=None):
     return text
 
 
+def mark_office_start(agent_id):
+    """Record the Office processes running now against the starting agent (hooks/agent_procs.py, the Office
+    adapter). It returns before any read off Windows, so it costs nothing there. It never fails the hook."""
+    try:
+        import agent_procs
+        if isinstance(agent_id, str) and agent_procs.AGENT_FILE_ID.match(agent_id):
+            agent_procs.mark_office_start(agent_id)
+    except Exception:
+        pass
+
+
 def main():
     try:
         data = json.loads(sys.stdin.read())
@@ -87,6 +98,7 @@ def main():
             agent_type = agent_type.rsplit(":", 1)[-1]  # plugin prefix: my-plugin:builder
         cwd = data.get("cwd") if isinstance(data, dict) else None
         form = cite_form(cwd) if isinstance(cwd, str) and cwd else None
+        mark_office_start(data.get("agent_id") if isinstance(data, dict) else None)
         out = {"hookSpecificOutput": {"hookEventName": "SubagentStart",
                                       "additionalContext": build(agent_type, form)}}
         print(json.dumps(out))

@@ -1995,10 +1995,11 @@ class GuardModuleFamilyTests(unittest.TestCase):
     def test_tests_for_guard_kill_prints_its_family_lines_and_its_import_walk_suite(self):
         code, out, err = run_cli(["--tests-for", "hooks/guard_kill.py"])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        self.assertEqual(out.splitlines(), ["hooks/test_checks_never_raise.py", "hooks/test_guard.py::git-env",
-                                            "hooks/test_guard.py::kill"],
+        self.assertEqual(out.splitlines(), ["hooks/test_agent_procs.py", "hooks/test_checks_never_raise.py",
+                                            "hooks/test_guard.py::git-env", "hooks/test_guard.py::kill"],
                          "guard_kill.py's suites are the git-env and kill family lines, plus the import walk's "
-                         "test_checks_never_raise.py, which reaches the kill checks the families miss, sorted")
+                         "test_agent_procs.py and test_checks_never_raise.py, which reach the kill checks the "
+                         "families miss, sorted")
 
     def test_tests_for_guard_env_prints_its_family_lines_and_its_import_walk_suite(self):
         code, out, err = run_cli(["--tests-for", "hooks/guard_env.py"])

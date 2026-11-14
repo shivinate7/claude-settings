@@ -63,13 +63,15 @@ from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN  # noqa: E402  stdl
 # The widening words come from question_form.WIDENS_TEXT, the one home. If the import fails, the prompt
 # keeps its sentence without the quoted words, one stderr line says so, and the hook still runs.
 try:
-    from question_form import WIDENS_TEXT  # noqa: E402
+    from question_form import WIDENS_TEXT, WIDENING_CARVE_OUT  # noqa: E402
 except Exception as exc:
     WIDENS_TEXT = None
+    WIDENING_CARVE_OUT = None
     print("reply judge: cannot read WIDENS_TEXT (%s: %s); the prompt names the label without its words"
           % (type(exc).__name__, exc), file=sys.stderr)
 WIDENS_LABEL_SENTENCE = ("Also flag an option that widens a shared tool offered without the owner's widening label"
-                         + (", the words \"%s\". " % WIDENS_TEXT if WIDENS_TEXT else ". "))
+                         + (", the words \"%s\". " % WIDENS_TEXT if WIDENS_TEXT else ". ")
+                         + (WIDENING_CARVE_OUT + ". " if WIDENING_CARVE_OUT else ""))
 
 OK_SHAPE = {"ok": (True, False)}
 MODEL_TIMEOUT = 20  # the Stop entry allows 25
@@ -111,7 +113,7 @@ INSTRUCTIONS = (
     "ready to run as is, with one shell in the block. "
     "A button path needs no block; a command needs one, even a login command such as gh auth login. "
     + GH_SWITCH_SENTENCE +
-    "The block sits outside the report blockquote. "
+    "The block sits outside the report blockquote. "  # glossary-ok: the waiting-page names later in this string are on main; this lane edits only the widening words
     "A command the reply already ran is not a step left to the owner. "
     "A command named in a report line as done work, a line that says what ran, is not a step left to the owner. "
     "Each item under Input Needed names its reason (decision, login, or an act the safety rules keep for the owner) "
@@ -147,7 +149,7 @@ INSTRUCTIONS = (
     "\"verdict: clear\" or \"harness passes\", is a result, not narration; never flag it. "
     "Flag only a limit or rule named as a note on the session's own conduct. "
     "style-question-form: flag a reply whose recommended option widens what a shared tool accepts, "
-    "such as a second accepted form, an allow-list entry or a per-repo exception. "
+    "such as a second accepted form, an allow entry in settings.local.json or one that names a repo, or a per-repo exception. "
     + WIDENS_LABEL_SENTENCE +
     "Never flag an option where the repo changes to match the shared format. "
     "Judge only options the reply offers the owner to pick; never flag a reply that describes the rule itself. "

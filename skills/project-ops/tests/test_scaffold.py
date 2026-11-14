@@ -78,10 +78,15 @@ def tree(root):
     return found
 
 
+def section_of(text, title):
+    """The body of the `## <title>` section of a template, or None."""
+    m = re.search(r"(?m)^## " + re.escape(title) + r"\n(.*?)(?=\n## |\Z)", text, re.S)
+    return m.group(1) if m else None
+
+
 def pages_section(text):
     """The body of the `## Pages` section of a hand-off, or None."""
-    m = re.search(r"## Pages\n(.*?)(?=\n## |\Z)", text, re.S)
-    return m.group(1) if m else None
+    return section_of(text, "Pages")
 
 
 def rotation_rule(text):
@@ -295,6 +300,20 @@ class Scaffold(TempDest):
         self.assertIn("filters the tags itself", flat)
         coordinator = re.search(r"- \*\*Coordinator\.\*\*.*?(?=\n- \*\*)", tiers, re.S).group(0)
         self.assertIn("`cs-step:<step id>`", " ".join(coordinator.split()))
+
+    def test_batch_runner_reads_the_priority_rows_at_each_wake(self):
+        text = tree(SKILL)["templates/operating-model.md"]
+        bullet = re.search(r"- \*\*Batch runner\.\*\*.*?(?=\n- \*\*)", text, re.S)
+        self.assertIsNotNone(bullet, "no Batch runner bullet")
+        flat = " ".join(bullet.group(0).split())
+        self.assertIn("merge --priority-rows", flat, "the batch runner's wake must run the priority rows read")
+        self.assertRegex(flat, r"priority: <slug> \| (?:pr|branch): ", "the batch runner bullet must show the priority row form")
+
+    def test_handoff_template_has_a_priorities_section_with_the_row_form(self):
+        section = section_of(tree(SKILL)["templates/role-handoff.md"], "Priorities")
+        self.assertIsNotNone(section, "no ## Priorities section in the hand-off template")
+        flat = " ".join(section.split())
+        self.assertRegex(flat, r"priority: <slug> \| (?:pr|branch): ", "the Priorities section must show the row form")
 
     def test_brief_carries_repo_tag(self):
         flat = " ".join(tree(SKILL)["templates/brief.md"].split())
