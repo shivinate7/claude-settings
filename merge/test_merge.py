@@ -1154,12 +1154,14 @@ class ConfirmIdleLanes(Env):
         sh(o, "git", "commit", "-q", "-m", "feat: step %s done\n\nStep: %s" % (step, step))
         sh(o, "git", "push", "-q", "origin", "feat")
 
-    def stale_merge(self, files, sessions, body="", keep=None):
+    def stale_merge(self, files, sessions=(), body="", keep=None, text=None):
         """A landed merge of #7 on a live file read a minute before the merge: the owed path, where the merged step's record is the
-        second source. `files` is origin's roadmap branch, `body` the pull request's body. -> (rc, out, err)."""
+        second source. `files` is origin's roadmap branch, `body` the pull request's body. `text`, a function of the merge commit's
+        time, gives the live file's text in place of the readable file. -> (rc, out, err)."""
         self.host.body = body
         self.step_commit("c1")
-        return self.confirm(files=files, live_at=lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), *sessions, keep=keep))
+        live_at = text or (lambda at: live_json((at - _timedelta(seconds=60)).isoformat(), *sessions, keep=keep))
+        return self.confirm(files=files, live_at=live_at)
 
     def merge_at(self, when):
         """Make the merge commit's committer time `when`, offset included, for the merge call only. The host writes the merge
@@ -1463,6 +1465,63 @@ class ConfirmIdleLanes(Env):
         rc, out, err = self.stale_merge(roadmap_files(lane="session_a"), [IDLE_LANE])
         self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
         self.assertEqual(self.check_lines(out, err), [], "a lane with an open pull on its head got a check-this-lane line: %r" % (out + err))
+
+    def test_a_roadmap_ref_gone_as_the_pass_reads_it_keeps_the_merge_exit_0(self):
+        # The pass's fetch of origin/roadmap succeeds, then the ref is gone when the pass reads it. The live file cannot be read, so
+        # the owed line prints, and the merged step's record is read from the same ref, which no longer exists. That read must not
+        # raise: the merged line and exit code 0 stay as they were. The control is test_stale_live_file_prints_the_owed_line, with the
+        # ref in place.
+        real_fetch = merge.fetch_branch
+
+        def fetch_then_ref_gone(root, branch, cite=""):
+            sha = real_fetch(root, branch, cite)
+            if branch == "roadmap" and self.landed:  # the pass's own fetch, after the batch merge landed
+                sh(self.co, "git", "update-ref", "-d", "refs/remotes/origin/roadmap")
+            return sha
+        with unittest.mock.patch.object(merge, "fetch_branch", fetch_then_ref_gone):
+            rc, out, err = self.stale_merge(ROADMAP_BASE, [IDLE_LANE])  # a step commit with its Step trailer, so the record is read
+        owed = [line for line in out + err if OWED_WORD.search(line)]
+        self.assertEqual(len(owed), 1, "scope: the pass did not print its owed line once, so the step record was never read: %r" % (out + err))
+        self.assert_landed(rc, out, err)  # the merge landed and exits 0; the step record's read of the gone ref does not move either
+
+    def test_a_failed_merged_range_read_prints_unknown_not_silence(self):
+        # A shallow clone whose cut lies on the merge's first parent cannot read `commit^1..commit`. The fallback then reads the merge
+        # commit alone, which carries no Step trailer, so the pass printed nothing about the merged lane. The range read is forced to
+        # fail here; the fallback is the real git. The control is test_stale_live_file_falls_back_to_the_merged_steps_lane.
+        real_git, range_reads = merge.git, []
+
+        def git(cwd, *a, **k):
+            if a[:1] == ("log",) and a[-1:] and "^1.." in a[-1] and any("trailers:key=Step" in x for x in a):
+                range_reads.append(a[-1])
+                return 128, ""
+            return real_git(cwd, *a, **k)
+        with unittest.mock.patch.object(merge, "git", git):
+            rc, out, err = self.stale_merge(roadmap_files(lane="session_a"), [IDLE_LANE])
+        self.assertTrue(range_reads, "scope: the merged-range read never ran, so the fallback was never reached")
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path, so the step record is the next source
+        unknown = [line for line in out + err if line.startswith("unknown (")]
+        self.assertTrue(unknown, "the merged-range read failed and the fallback printed no unknown line, so the pass says nothing "
+                                 "about the merged lane: %r" % (out + err))
+
+    def test_an_unreadable_live_file_gives_a_kept_lane_an_unknown_or_hold_line_not_a_check_line(self):
+        # The live file is cut off mid-object, so its keepSessions cannot be read and the owner may keep this session. The lane gets
+        # an unknown or hold line that names it, never a check line. The control is test_stale_live_file_falls_back_to_the_merged_steps_lane:
+        # the same step with a readable file prints one check line.
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a"), text=lambda at: '{"readAt": "' + at.isoformat())
+        self.assert_owed_path(rc, out, err)  # scope: the file read as unread, so the owed path ran and the step record is the lane's source
+        self.assertEqual(self.check_lines(out, err), [], "a lane whose keep list cannot be read got a check-this-lane line: %r" % (out + err))
+        named = [line for line in out + err if line.startswith(("hold (", "unknown (")) and "session_a" in line]
+        self.assertTrue(named, "the lane got no hold or unknown line that names it: %r" % (out + err))
+
+    def test_a_malformed_keep_list_prints_no_unknown_line_for_a_lane_still_doing(self):
+        # The lane's own step is doing under it, so the lane is still working and needs no keep list. Its keepSessions is malformed,
+        # so the keep list reads unknown. The lane prints no unknown line for it and no check line. The control is
+        # test_no_check_line_while_a_step_is_still_doing_under_the_lane, with a readable keep list.
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a", status="doing"), [IDLE_LANE], keep="session_a")
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path, so the keep list was read there
+        unknown = [line for line in out + err if line.startswith("unknown (") and "session_a" in line]
+        self.assertEqual(unknown, [], "a lane still doing a step got an unknown line for its keep list: %r" % (out + err))
+        self.assertEqual(self.check_lines(out, err), [], "a lane still doing a step got a check-this-lane line: %r" % (out + err))
 
     def tree_files(self, root):
         """-> the files under `root`, except inside a git folder: a fetch writes refs and objects there, which the pass does not make as files."""
