@@ -1,5 +1,5 @@
 # section 43160
-# The lane kinds of decision agent-model-cap (owner ruling own-747-role-layout, 2026-11-13 13:51 CST). A lane's kind comes from
+# The lane kinds of decision agent-model-cap. A lane's kind comes from
 # the marker line in the block of non-blank lines that follows its Grant line: `Guard or check: yes` makes a guard-or-check lane,
 # `Docs only: yes` a docs lane, and no marker, or any other line, a product-code-or-design lane. The effort a lane starts at is the
 # effort of its kind's row in the record, read from the record and never copied (rule lane-effort-pin). Its model is the model of
@@ -142,13 +142,13 @@ lane_start("lane-effort-pin: the single-row record gives a product lane the fall
            None, SINGLE_ROW_CFG, None, LANE_FALLBACK["product"][1], lines=[TOPIC_BRIEF], tags=TOPIC_TAGS)
 
 
-# ---- The design reviewer runs Sonnet high and the designer stays Opus high (owner ruling own-756-design-reviewer-sonnet,
-# 2026-11-13 14:01 CST). The guard's Opus allowance for the design reviewer is the OPUS_STANDING_ROLES list, which must follow the
-# table: the three role lists agree with the table (role_list_drift), and an Opus spawn of the design reviewer passes only when its
-# row names opus. role_list_table and role_list_pointer (s40805) build the fixtures, so each case varies one row.
+# ---- The design reviewer runs Sonnet high and the designer stays Opus high. The guard's Opus allowance for the design reviewer
+# is the OPUS_STANDING_ROLES list, which must follow the table: the three role lists agree with the table (role_list_drift), and
+# an Opus spawn of the design reviewer passes only when its row names opus. role_list_table and role_list_pointer (s40805) build
+# the fixtures, so each case varies one row.
 DR_SONNET_POINTER = role_list_pointer("dr-sonnet", role_list_table(models={"design-reviewer": "sonnet"}))
 DR_SONNET_CFG = role_config("dr-sonnet", DR_SONNET_POINTER)
-# The design reviewer moved to a sonnet row (own-756), so the opus-row pointer names it explicitly: the drift case below reads it.
+# The design reviewer's row is sonnet in the real record, so the opus-row pointer names it explicitly: the drift case below reads it.
 DR_OPUS_POINTER = role_list_pointer("dr-opus", role_list_table(models={"design-reviewer": "opus"}))
 
 # An Opus spawn of the design reviewer is refused under agent-model-cap, the rule it really hits: its row names sonnet
@@ -172,10 +172,10 @@ def design_reviewer_opus_drift_check():
                                   "the design reviewer on an opus row")
 
 
-# ---- The builder row (owner ruling own-755-a-builder-by-kind, 2026-11-13 14:01 CST): model sonnet, effort follows the lane kind,
-# high in guard or check lanes and medium in product, design and docs lanes. Nothing in the guard reads the builder row's effort
-# today (the guard reads the model word of each row, and the round rows, and a spawn's effort is not judged), so the effort is
-# checked as the record's text. The model is checked through the guard's table reader.
+# ---- The builder row: model sonnet, effort follows the lane kind, high in guard or check lanes and medium in product, design
+# and docs lanes. Nothing in the guard reads the builder row's effort (the guard reads the model word of each row, and the
+# round rows, and a spawn's effort is not judged), so the effort is checked as the record's text. The model is checked through
+# the guard's table reader.
 BUILDER_EFFORT_WORDS = ("high", "medium", "guard or check", "product", "design", "docs")
 
 
@@ -243,16 +243,16 @@ for _label, _check in (
     LOG_CHECKS = LOG_CHECKS + ((_label, _check),)
 
 
-# ---- Reviewer round 3 runs Sonnet high, and Opus is never an option and never prompts (owner ruling own-r3-reviewer-sonnet-high,
-# 2026-11-13 14:05 CST). The round row is the record's `reviewer | 3` row. A reviewer spawn on Opus in round 3 is refused by the
-# agent-role-model rule with the remedy `use sonnet`, and that refusal names no override. The round marker is the brief's first line.
+# ---- The reviewer's third review runs Sonnet high, and Opus is never an option and never prompts. The round row is the record's
+# `reviewer | 3` row. A reviewer spawn on Opus in the third review is refused by the agent-role-model rule with the remedy
+# `use sonnet`, and that refusal names no override. The round marker is the brief's first line.
 R3_POINTER = role_table("r3-sonnet-high", ROLE_TABLE_RULES + "\n" + ROUND_TABLE_HEAD + "| reviewer | 3 | sonnet | high |\n")
 R3_CFG = role_config("r3-sonnet-high", R3_POINTER)
 R3_BRIEF = "Round 3 of 3\nReview the diff for the guard change."
 
 
 def r3_fixture_check():
-    """Scope before subject: the round fixture reads reviewer round 3 as sonnet, through the guard's round-table reader."""
+    """Scope before subject: the round fixture reads the reviewer's third review as sonnet, through the guard's round-table reader."""
     rounds = _load_guard_module().role_round_table(R3_POINTER)
     word = (rounds or {}).get(("reviewer", "3", "other"))
     return word == "sonnet", "the round fixture reads reviewer round 3 as %r, want 'sonnet'" % (word,)

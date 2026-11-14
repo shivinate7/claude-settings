@@ -56,11 +56,10 @@ for _tool in ("Agent",):
 # near the end of this file, hold the new expectation).
 
 # ---- Step-up (rule roles-third-round-steps-up, decision agent-model-cap). The brief's fixed form
-# "Round N of 3" steps a reviewer up: the second needs sonnet, the third sonnet, and Opus is never an option for it
-# (owner ruling own-r3-reviewer-sonnet-high, 2026-11-13 14:05 CST). A builder's marker steps nothing up: its third try
-# runs on its own row, Sonnet (owner ruling own-758-b, 2026-11-13 14:24 CST), so a builder on Opus is refused by the
+# "Round N of 3" steps a reviewer up: the second needs sonnet, the third sonnet, and Opus is never an option for it.
+# A builder's marker steps nothing up: its third try runs on its own row, Sonnet, so a builder on Opus is refused by the
 # Opus ceiling and no marker lifts that refusal.
-# A reviewer's round 3 on Opus is refused under agent-role-model with the remedy `use sonnet` and no override line. The
+# A reviewer's third review on Opus is refused under agent-role-model with the remedy `use sonnet` and no override line. The
 # middle step-up stays sonnet only.
 # A reviewer's round 1 runs on the role's table model. Prose that quotes a round without the
 # fixed form is never a signal. A missing model is not read from the env default by the floor,
@@ -108,7 +107,7 @@ add("floor step-up: reviewer Round 2 of 3 on line three on haiku is denied", "de
     model="haiku", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="sonnet", subagent_type="reviewer")
-# A reviewer's round 3 on Opus, with no record to read its row, meets the Opus ceiling: no marker grants it. Its refusal
+# A reviewer's third review on Opus, with no record to read its row, meets the Opus ceiling: no marker grants it. Its refusal
 # under the role row, with no override line, is pinned where the record is read (s40805, s36421).
 add("floor step-up: reviewer's last round on opus is denied by the Opus ceiling, with no record to read", "deny",
     "agent-model-cap", tool="Agent", prompt="Round 3 of 3. Re-check the diff.",
@@ -207,7 +206,7 @@ for _name, _verdict, _script in (
          _step_flow("'Round 2 of 3. Re-check the diff.'", "agentType: 'reviewer', model: 'sonnet'")),
         ("reviewer Round 3 on haiku", "deny",
          _step_flow("'Round 3 of 3. Re-check.'", "agentType: 'reviewer', model: 'haiku'")),
-        # A builder's marker steps nothing up: its third try runs on its own row, Sonnet (own-758-b). Its Opus
+        # A builder's marker steps nothing up: its third try runs on its own row, Sonnet. Its Opus
         # spawns are refused below, by the Opus ceiling.
         ("builder Try 3 on sonnet, its own row", "allow",
          _step_flow('"Try 3 of 3. Finish the fix."', 'agentType: "builder", model: "sonnet"')),
@@ -273,7 +272,7 @@ for _name, _verdict, _script in (
          "// agent('Round 2 of 3.', {agentType: 'reviewer'})\nawait agent('x', {model: 'sonnet'})")):
     add("floor step-up: Workflow %s is %s" % (_name, "denied" if _verdict == "deny" else "allowed"),
         _verdict, *((STEP_UP,) if _verdict == "deny" else ()), tool="Workflow", script=_script)
-# A builder on Opus has no standing grant on a Workflow agent() call either, so the Opus ceiling refuses it (own-758-b).
+# A builder on Opus has no standing grant on a Workflow agent() call either, so the Opus ceiling refuses it.
 for _name, _script in (
         ("builder Try 3 on opus", _step_flow('"Try 3 of 3. Finish the fix."', 'agentType: "builder", model: "opus"')),
         ("builder Round 3 on opus", _step_flow('"Round 3 of 3. Finish the fix."', 'agentType: "builder", model: "opus"')),
@@ -282,7 +281,7 @@ for _name, _script in (
     add("floor step-up: Workflow %s is denied under agent-model-cap" % _name, "deny", "agent-model-cap",
         tool="Workflow", script=_script)
 # A reviewer's last step-up is a per-spawn word, so the Opus ceiling refuses it on a Workflow agent() call as on an
-# Agent spawn (decision agent-model-cap). Its refusal is the never-lifted round 3 refusal (own-r3-reviewer-sonnet-high).
+# Agent spawn (decision agent-model-cap). Its refusal is the never-lifted third-review refusal.
 add("floor step-up: Workflow reviewer's last round on opus is denied by the Opus ceiling, with no record to read", "deny",
     "agent-model-cap", tool="Workflow",
     script=_step_flow("'Round 3 of 3. Re-check.'", "agentType: 'reviewer', model: 'opus'"))
@@ -306,7 +305,7 @@ add("floor step-up: Workflow reviewer with a fix verifier and a spread is allowe
 
 # ---- Rule 9, the Opus ceiling (decision agent-model-cap). An Agent or Task spawn that sets model opus is
 # refused under `agent-model-cap`, unless a standing grant covers it: Plan, the designer, and an Explore whose brief
-# carries the Audit: marker. The design reviewer runs Sonnet high (own-756) and a builder's marker grants nothing (own-758-b).
+# carries the Audit: marker. The design reviewer runs Sonnet high, and a builder's marker grants nothing.
 # An owner override
 # lifts the refusal. A reviewer's last step-up is a per-spawn word, so it is refused too. The floor and the step-up
 # deny first, so the middle step-up on opus above stays a deny. The deny cases stay in the floor and step-up blocks,
@@ -330,7 +329,7 @@ add("ceiling: Agent Plan with model opus is allowed (standing grant)", "allow",
 add("ceiling: Task Plan with model claude-opus-5-5 is allowed (standing grant)", "allow",
     tool="Task", prompt="Design the plan.", model="claude-opus-5-5", subagent_type="Plan")
 # The designer runs Opus by the owner's standing grant (decision design-agents). The design reviewer does not: its row
-# is Sonnet high (own-756-design-reviewer-sonnet, 2026-11-13 14:01 CST). A near-miss role name earns no grant.
+# is Sonnet high. A near-miss role name earns no grant.
 for _tool, _model in (("Agent", "opus"), ("Task", "claude-opus-5-5")):
     add("ceiling: %s designer on %s is allowed (standing grant)" % (_tool, _model), "allow",
         tool=_tool, prompt="Draw the mockup.", model=_model, subagent_type="designer")
@@ -347,7 +346,7 @@ add("ceiling: Agent builder Round 3 of 3 on the full opus id is denied (no stand
     tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="claude-opus-5-5",
     subagent_type="builder")
 # The marker is a line of its own, as step_up_hit reads it. A lone quote and comment openers in the
-# lines above it hide nothing: the reviewer's round 2 marker on line two is still read and stepped up.
+# lines above it hide nothing: the reviewer's second-review marker on line two is still read and stepped up.
 add("ceiling: Agent reviewer Round 2 of 3 on line two after a lone quote and comment openers, with no model, is denied",
     "deny", STEP_UP, tool="Agent", prompt="Don't skip /* the // check # now.\nRound 2 of 3. Re-check the diff.",
     subagent_type="reviewer")
@@ -371,9 +370,9 @@ for _role, _brief in (
 # because a word or markup sits before the marker), a false allow (a middle-step marker, a near-miss
 # like "of 30", or the marker in later prose earns the grant; a reviewer behind a role word dodges
 # its step-up).
-# The first-line marker is read on a reviewer's round 2, where the step-up acts on it: a role word, blank lines, markup,
-# or a marker on line two each leave the marker read. A round 1 control, with the same shapes, is allowed. A builder's
-# marker steps nothing up (own-758-b), so a builder on Sonnet is allowed whatever its first line says.
+# The first-line marker is read on a reviewer's second review, where the step-up acts on it: a role word, blank lines,
+# markup, or a marker on line two each leave the marker read. A first-review control, with the same shapes, is allowed. A
+# builder's marker steps nothing up, so a builder on Sonnet is allowed whatever its first line says.
 FIRST_LINE_BRIEF = "Reviewer, Round 2 of 3. Lane c204 re-check the diff.\nFiles: hooks/guard.py."
 add("first-line marker: reviewer with no model and a role word before Round 2 of 3 on line one is denied",
     "deny", STEP_UP, tool="Agent", prompt=FIRST_LINE_BRIEF, subagent_type="reviewer")

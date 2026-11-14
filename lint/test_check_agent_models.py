@@ -9,7 +9,7 @@ One case reads the real agents/plan.md: its "Premises first" paragraph cites the
 The three lane rows of docs/decisions/agent-model-cap.md (guard or check, product code or design, docs) must each start their
 effort cell with the effort of their kind (high, medium, low), and each failure names the row it flags.
 The session rows (coordinator, arbiter, consultant, triage, batch runner) hold the owner's model and effort, and the agent and
-round rows stay unchanged (owner ruling own-747-role-layout).
+round rows stay unchanged.
 A drift between the guard's role lists and the role table fails the check (the guard's role_list_drift).
 An agent file's `model:` pin must equal its role's row in the role table. The role is the frontmatter `name:`,
 as the guard keys it. A file with no pin, or a name with no row, is not flagged by that rule.
@@ -37,8 +37,8 @@ RUN_FOLDER = _test_temp.run_folder()
 
 ROLES = ("explore", "claude-code-guide", "test-author", "reviewer")
 MODELS = ("haiku", "claude-haiku-5-5", "Haiku")
-# The model table of docs/decisions/agent-model-cap.md, reduced to its three lane rows, one per lane kind (owner ruling
-# own-747-role-layout). Each effort cell takes a format argument, in the order guard or check, product code or design, docs.
+# The model table of docs/decisions/agent-model-cap.md, reduced to its three lane rows, one per lane kind. Each effort cell
+# takes a format argument, in the order guard or check, product code or design, docs.
 RECORD_RELPATH = os.path.join("docs", "decisions", "agent-model-cap.md")
 LANE_RECORD = ("| Point | Model | Effort |\n|---|---|---|\n"
                "| lane, guard or check | sonnet | %s |\n"
@@ -226,7 +226,7 @@ class LaneEffort(unittest.TestCase):
         self.assertIn("lane, docs", out, "the check does not name the docs row it flags: %r" % out)
 
     def test_a_record_with_one_lane_row_fails(self):
-        # The layout before the owner's ruling: one `lane` row. Each kind's row is missing, and the check names each one.
+        # One `lane` row in place of the three lane-kind rows. Each kind's row is missing, and the check names each one.
         text = ("| Point | Model | Effort |\n|---|---|---|\n"
                 "| lane session (decision `session-tiers`) | sonnet (temporary) | medium |\n")
         code, out = verdict(RECORD_RELPATH, text=text)
@@ -259,10 +259,9 @@ def real_record_rows():
 
 
 class SessionRows(unittest.TestCase):
-    # The real record holds one row per session kind, with the owner's model and effort (owner ruling own-747-role-layout,
-    # 2026-11-13 13:51 CST, and the coordinator's word on the coordinator row). A row is the first row whose first cell starts
-    # with the kind's label, lower-cased. Each subtest names the row it checks.
-    # The design-reviewer agent row is the one agent row the owner moved on 2026-11-13 (own-756): Sonnet high.
+    # The real record holds one row per session kind, with the owner's model and effort. A row is the first row whose first
+    # cell starts with the kind's label, lower-cased. Each subtest names the row it checks.
+    # The design-reviewer row is Sonnet high. It is the one agent row in this list.
     SESSION_ROWS = (("coordinator", "sonnet", "high"), ("arbiter", "opus", "medium"),
                     ("consultant", "opus", "medium"), ("triage", "sonnet", "high"),
                     ("batch runner", "sonnet", "medium"), ("lane, guard or check", "sonnet", "high"),
@@ -283,23 +282,23 @@ class SessionRows(unittest.TestCase):
                                  "the %r row does not name effort %r: %r" % (label, effort, found))
 
 
-# The agent and round rows that no ruling of 2026-11-13 touches. Each line is the record's line, byte for byte, so a change to any
-# of them fails here. The builder row (own-755) and the design-reviewer row (own-756) changed on that day, so they are not pinned
-# here: SESSION_ROWS and the guard section (s43160) check them.
+# The agent and round rows that the session and guard checks do not own. Each line is the record's line, byte for byte, so a
+# change to any of them fails here. The builder row and the design-reviewer row are not pinned here: SESSION_ROWS and the
+# guard section (s43160) check them.
 AGENT_ROWS = ("| Explore, claude-code-guide | haiku | xhigh |", "| test-author | haiku | xhigh |",
               "| reviewer | haiku | xhigh |", "| record-writer (`agents/record-writer.md`) | haiku | xhigh |",
               "| Plan (`agents/plan.md`) | opus | high |",
               "| designer (`agents/designer.md`) | opus, the owner's standing grant of 2026-10-26 | high |",
               "| refuter (`agents/refuter.md`) | opus, the owner's ruling of 2026-11-06 12:43 CST, waiting-page item 279, pick d (decision `plan-refuter`) | high |")
-# The reviewer's round 3 row is not here: own-r3-reviewer-sonnet-high moves it to Sonnet high, checked by ReviewerRoundThree.
-# The builder's round 3 row is not here either: own-758-b moves the builder's third try to its own row, Sonnet.
+# The reviewer's third-review row is not here: it is Sonnet high, checked by ReviewerRoundThree.
+# The builder's third-try row is not here either: that try has its own row, Sonnet.
 ROUND_ROWS = ("| reviewer | 1 guard | sonnet | xhigh |", "| reviewer | 1 other | haiku | xhigh |",
               "| reviewer | 2 | sonnet | high |",
               "| reviewer | fix verifier | sonnet | xhigh |")
 
 
 class ReviewerRoundThree(unittest.TestCase):
-    # The reviewer's round 3 row (owner ruling own-r3-reviewer-sonnet-high, 2026-11-13 14:05 CST): Sonnet high. Opus is not an option.
+    # The reviewer's third-review row is Sonnet high. Opus is not an option there.
     def test_reviewer_round_three_row_is_sonnet_high(self):
         rows = [cells for cells in real_record_rows() if len(cells) >= 4 and cells[0].lower() == "reviewer" and cells[1] == "3"]
         self.assertTrue(rows, "the real record has no reviewer round 3 row")
@@ -307,11 +306,10 @@ class ReviewerRoundThree(unittest.TestCase):
                          "the reviewer's round 3 row is not sonnet high: %r" % (rows[0],))
 
 
-# The prose must not say a reviewer can have round 3 on Opus (owner ruling own-r3-reviewer-sonnet-high, 2026-11-13 14:05 CST,
-# sharpened 14:07 CST). A match is `round 3`, then up to 80 characters with no period, then `opus`, in the agent, record, guidance
-# and skill folders. The sentence of a match decides it: a sentence that names the builder is the builder's third try, and is left
-# out. Owner ruling own-758-b (2026-11-13 14:24 CST) puts that try on Sonnet, so this exemption goes once the prose says so: the
-# record and CLAUDE.md still say Opus (reported under Input Needed). The filter is by sentence, because one line can hold both kinds.
+# The prose must not say a reviewer can have its third review on Opus. A match is ROUND_THREE_OPUS: the third-review phrase,
+# then up to 80 characters with no period, then `opus`, in the agent, record, guidance and skill folders. The sentence of a
+# match decides it: a sentence that names the builder is left out, since the builder's third try has its own row (Sonnet).
+# The filter is by sentence, because one line can hold both kinds.
 ROUND_THREE_OPUS = re.compile(r"round 3[^.]{0,80}opus", re.IGNORECASE)
 ROUND_THREE_PATHS = ("agents", "docs/decisions", "CLAUDE.md", "skills")
 
@@ -325,7 +323,7 @@ def sentence_around(text, start, end):
 
 
 def round_three_opus_hits(lines):
-    """(path, line number, sentence) of each reviewer sentence that names round 3 on Opus, from `git grep -n` output lines."""
+    """(path, line number, sentence) of each reviewer sentence that names a third review on Opus, from `git grep -n` output lines."""
     hits = []
     for line in lines:
         path, number, text = line.split(":", 2)
@@ -337,7 +335,7 @@ def round_three_opus_hits(lines):
 
 
 def git_grep_round_three():
-    """The `git grep -n` lines for a round 3 and Opus span in the folders of ROUND_THREE_PATHS, in this repository. A git error
+    """The `git grep -n` lines that match ROUND_THREE_OPUS in the folders of ROUND_THREE_PATHS, in this repository. A git error
     raises, so the case errors and never passes unread (verification-report-unknown-reads)."""
     result = subprocess.run(["git", "grep", "-niE", ROUND_THREE_OPUS.pattern, "--", *ROUND_THREE_PATHS],
                             cwd=ROOT, capture_output=True, text=True)
@@ -347,7 +345,7 @@ def git_grep_round_three():
 
 
 def git_grep_round_three_any():
-    """The `git grep -n` lines for `round 3`, whatever follows it, in the folders of ROUND_THREE_PATHS: the scope the Opus search reads.
+    """The `git grep -n` lines for the bare phrase git searches for below, whatever follows it, in the folders of ROUND_THREE_PATHS: the scope the Opus search reads.
     A git error raises, so the case errors and never passes unread (verification-report-unknown-reads)."""
     result = subprocess.run(["git", "grep", "-niE", "round 3", "--", *ROUND_THREE_PATHS], cwd=ROOT, capture_output=True, text=True)
     if result.returncode not in (0, 1):  # 1 is no match; anything else is a failed read
@@ -357,8 +355,8 @@ def git_grep_round_three_any():
 
 class ReviewerRoundThreeOpus(unittest.TestCase):
     def test_the_search_reads_the_round_three_lines(self):
-        # Scope before verdict: the folders hold round 3 lines at all, so an empty Opus verdict below means no reviewer
-        # sentence on Opus, not a search that reads nothing. It does not depend on any one line that the ruling changed.
+        # Scope before verdict: the prose folders hold lines with the phrase at all, so an empty Opus verdict below means
+        # no reviewer sentence on Opus, not a search that reads nothing.
         self.assertTrue(git_grep_round_three_any(), "git grep finds no `round 3` line in the prose folders, so the verdict below proves nothing")
 
     def test_no_reviewer_sentence_names_round_three_on_opus(self):
@@ -366,7 +364,7 @@ class ReviewerRoundThreeOpus(unittest.TestCase):
         self.assertEqual(hits, [], "a reviewer sentence still names round 3 on Opus: %r" % (hits,))
 
     def test_the_filter_leaves_out_the_builder_and_keeps_the_reviewer(self):
-        # The filter's own fixtures: the builder's third try is left out (own-758-b puts it on Sonnet; see the comment above), and a reviewer's round 3 on Opus is kept.
+        # The filter's own fixtures: the builder's third try is left out (its row is Sonnet), and a reviewer's third review on Opus is kept.
         builder = "x.y/z.md:1:The builder's third try runs on Round 3 of 3 on opus."
         reviewer = "x.y/z.md:2:Round 3 on Opus: the reviewer is refused."
         self.assertEqual(round_three_opus_hits([builder]), [], "the builder's third-try sentence is not left out")
@@ -374,8 +372,7 @@ class ReviewerRoundThreeOpus(unittest.TestCase):
 
 
 class UnchangedRows(unittest.TestCase):
-    # A green control: the agent rows and the round rows of the real record stay as they are (owner ruling own-747-role-layout,
-    # the coordinator's word of 2026-11-13: the layout covers session rows only).
+    # A green control: the agent rows and the round rows of the real record stay as they are.
     def test_agent_rows_are_unchanged(self):
         lines = real_record_lines()
         missing = [row for row in AGENT_ROWS if row not in lines]
@@ -388,8 +385,8 @@ class UnchangedRows(unittest.TestCase):
 
 
 class DesignReviewerPin(unittest.TestCase):
-    # A green control, and the check that follows the owner's move (own-756): the design reviewer's agent file pins the model
-    # its row names (pin_row_problem). It holds on main, and it fails until the agent file's pin follows the Sonnet row.
+    # A green control: the design reviewer's agent file pins the model its row names (pin_row_problem), so the file and the
+    # record agree.
     def test_design_reviewer_pin_equals_its_row(self):
         with open(os.path.join(ROOT, "agents", "design-reviewer.md"), encoding="utf-8") as handle:
             text = handle.read()

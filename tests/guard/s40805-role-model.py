@@ -243,13 +243,12 @@ role_opus_refuse("role-model: test-author on opus is denied under agent-model-ca
 # A role with no row has no grant, so the Opus ceiling refuses it, and says so rather than asking (item 127 pick a).
 role_opus_refuse("role-model: a role with no row on opus is denied under agent-model-cap, not asked (item 127)",
                "scout", "opus", "Look around.")
-# A reviewer's round 3 on Opus is never lifted and names no override: its row is Sonnet high (owner ruling
-# own-r3-reviewer-sonnet-high, 2026-11-13 14:05 CST). The remedy names sonnet.
+# A reviewer's third review on Opus is never lifted and names no override: its row is Sonnet high. The remedy names sonnet.
 add("role-model: reviewer on opus with Round 3 of 3 is denied under agent-role-model, with no override line", "deny",
     ROLE_RULE, tool="Agent", config=ROLE_REAL_CFG, carries=("use sonnet",), lacks=("override",),
     **role_input("reviewer", "opus", "Round 3 of 3. Re-check the diff."))
-# Standing grants stay allowed on Opus (rule 9d): Plan and the refuter. The design reviewer's row is Sonnet high
-# (own-756-design-reviewer-sonnet), and a builder's third try runs on its own row (own-758-b), so neither has a grant.
+# Standing grants stay allowed on Opus (rule 9d): Plan and the refuter. The design reviewer's row is Sonnet high,
+# and a builder's third try runs on its own row, so neither has a grant.
 role_model_allow("role-model: Plan on opus is allowed (standing grant)", "Plan", "opus", "Plan the change.")
 role_opus_refuse("role-model: design-reviewer on opus is denied under agent-model-cap, its row is sonnet (own-756)",
                  "design-reviewer", "opus", "Review the mockup.")
