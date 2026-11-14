@@ -247,6 +247,16 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        could not judge, when that commit covers a triplet already in the tree or the chain
                        runs merge, pull, rebase, cherry-pick, stash pop or apply, or am.
                        (commit-refuses-conflict-markers)
+  red-run              deny. A `git push` whose range (the one conflict-markers reads, less the commits the
+                       default base holds) has a non-merge commit that adds lines to a test path and has no
+                       valid `Red-run:` trailer, judged by `judge` in lint/check_red_run.py, the one home. A
+                       commit in the same call before the push counts, read from its `-m` text (an `--amend`
+                       with none keeps the commit's own); a message the guard cannot read, a failed read and a
+                       default base it cannot read are no hit. The refusal for a flagged tip names only
+                       commit and push; for a flagged commit below the tip (under a merge at the tip too) it
+                       names commit, rebase and push; for a branch rewritten since its push it names no
+                       command. Cost: one `git log` per push, more only when a commit is a gap.
+                       (red-run-trailer-on-test-commits)
   octopus-push         deny. A `git push` whose range (the pushed ref, else HEAD, less every ref of the pushed
                        remote, else origin) adds a merge commit of more than two parents; a merge that a
                        ref of the pushed remote already holds passes. A dry run and a destination named main or master are
@@ -555,7 +565,7 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
+            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, own_heredoc_bodies, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
@@ -596,7 +606,7 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
-            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
+            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit, self_role_child_hit, self_role_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
@@ -1803,27 +1813,6 @@ def heredoc_offsets(segments, ends, bodies_kept=True):
             queue += [d for d in found if not any(line.strip() == d for line in segment.split("\n")[1:])]
             reading = bodies_kept and bool(queue) and end == "\n"
     return offsets
-
-
-def own_heredoc_bodies(segment: str, raw: str, before: int):
-    """Return the bodies of the heredocs whose headers sit inside this segment, in order. A heredoc
-    of another command (`cat <<A && git commit -F - <<B`) is not the message.
-
-    `before` is the count of headers in the segments ahead of this one. Raw is walked as the
-    shell reads it (_split_heredocs): each header outside quotes and comments takes the next body
-    in turn, and a body line is never read for headers. This segment takes the bodies `before`
-    onward, one per header it holds, so two commits with the same text each take their own body.
-    Raw is walked twice, bash's reading and the contraction reading, as split_segments does, and
-    the bodies of both are judged: a lone `'` can hide a header from one reading, never both.
-    """
-    count = len(heredoc_heads(segment)[0])
-    if not count:
-        return []
-    texts = []
-    for contractions_are_text in (False, True):   # bash's reading, then the contraction reading
-        found = [body for _, body, _ in _split_heredocs(raw, contractions_are_text)[1]]
-        texts.extend(found[before:before + count])
-    return list(dict.fromkeys(texts))   # the readings often agree: judge each body once
 
 
 def message_texts(segment: str, raw: str, where: str, before: int, titles: bool = False):
@@ -4856,8 +4845,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 6c2. A commit or push that would carry all three conflict markers in one file (rule conflict-markers).
     # Cost: per judged commit, one `git rev-parse --show-toplevel --verify -q HEAD` (one more for an add in
     # another folder) and one `git diff --check`; none for an add alone, or a command with no commit or push.
-    kind, matched = conflict_markers_hit(stripped, cwd)
-    if matched:
+    # A push of a test commit with no Red-run trailer is refused here too (rule red-run): it shares the push's
+    # range, and adds one `git log` per push. A commit in the same call, before the push, is read from its
+    # `-m` text; guard_merge states the cost.
+    kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel, raw)
+    if kind == "red-run":
+        red_reason, red_shown = red_run_reason(matched)
+        refuse(tool, "deny", "red-run", red_reason, red_shown)
+    elif matched:
         markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else
                           CONFLICT_MARKERS_PUSH_REASON if kind == "push" else CONFLICT_MARKERS_REASON)
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)

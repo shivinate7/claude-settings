@@ -99,7 +99,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       *) on="$on $ALL " ;;
     esac
     # shoot also covers the files the waiting page export suite (skills/waiting-page/test_export_page.py) imports, lazy
-    # imports included: page_check.py reaches the guard family (guard_merge.py imports ci_wake.py), question_form.py, _nowindow.py, report_guard.py and its lint/_clause.py;
+    # imports included: page_check.py reaches the guard family (guard_merge.py imports ci_wake.py and lint/check_red_run.py), question_form.py, _nowindow.py, report_guard.py and its lint/_clause.py;
     # the suite's run folder is lint/_test_temp.py; layout.artifacts reads lint/layout.json at run time; SKILL.md and every file in reference/ hold the steps it and the page suite read. This is a second case, so the
     # flags each path sets above stay as they are, and guard_test_* (not imported) stays out. Chosen over one arm
     # (hooks/*.py, lint/*.py): that would start the browser job on every hook and lint edit, 88 + 94 files, most of
@@ -109,7 +109,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
     # runs beside the others on its own runner, so it adds billed minutes and no wall time.
     case "$f" in
       hooks/guard_test_*) ;;
-      hooks/guard.py|hooks/guard_*.py|hooks/git_reads.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/shared_names.py|hooks/question_form.py|hooks/_nowindow.py|lint/report_guard.py|lint/_clause.py|lint/layout.py|lint/layout.json|lint/_test_temp.py|skills/waiting-page/SKILL.md|skills/waiting-page/reference/*|skills/waiting-page/export_page.py|hooks/call_judge.py|hooks/ci_wake.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/override.py|hooks/proc_env.py|hooks/session_role.py|hooks/reply_judge.py|hooks/reread_check.py|hooks/route_match.py|hooks/ruling_home.py|janitor/sweep.py|janitor/temp_sweep.py|lint/_transcript.py|lint/guard_log_report.py|lint/rule_audit.py|lint/ruled_store.py|hooks/mail.py|hooks/agent_brief.py|hooks/stall_watch.py) on="$on shoot " ;;
+      hooks/guard.py|hooks/guard_*.py|hooks/git_reads.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/shared_names.py|hooks/question_form.py|hooks/_nowindow.py|lint/report_guard.py|lint/_clause.py|lint/check_red_run.py|lint/layout.py|lint/layout.json|lint/_test_temp.py|skills/waiting-page/SKILL.md|skills/waiting-page/reference/*|skills/waiting-page/export_page.py|hooks/call_judge.py|hooks/ci_wake.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/override.py|hooks/proc_env.py|hooks/session_role.py|hooks/reply_judge.py|hooks/reread_check.py|hooks/route_match.py|hooks/ruling_home.py|janitor/sweep.py|janitor/temp_sweep.py|lint/_transcript.py|lint/guard_log_report.py|lint/rule_audit.py|lint/ruled_store.py|hooks/mail.py|hooks/agent_brief.py|hooks/stall_watch.py) on="$on shoot " ;;
     esac
     # The four pull-request lint steps of the `checks` job. This is a third case, so the flags each path sets above stay as
     # they are. A path the table above does not name has set every flag already (the `*)` arm).
