@@ -1,0 +1,14 @@
+{
+ "id": "handed-in-push-needs-record",
+ "title": "A push to a handed-in branch is refused until the last round's record is posted",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Incident (coordinator 16:37 CST Nov 14, from lane page-grant's 16:36 report; n=1 lane, twice; triage read no code): the lane pushed to a handed-in branch twice before the last round's record was posted. A push moves the head and stales a record for the old head (kin: step records-page-before-ready). Guard (the lane's note; coordinator: \"your call\", so queued here): a push to a handed-in branch is refused until the record for the last round exists. Kin: step fix-push-needs-fail-record (ready: refuses a lane push on a PR whose FAIL round has no posted record); this step is wider (any round, a handed-in branch). First act of a lane: read that step and guard.py, say whether a widening of it covers this (one home per capability, rule building-one-home-per-capability) before building a second check; name the false alarms (a fix commit after a FAIL, a records-page push by the merge tool). Rule: building-mistake-names-its-guard.",
+ "source": "coordinator 16:37 CST Nov 14 (lane page-grant's 16:36 report)",
+ "note": "Filed 16:40 CST Nov 14 by triage. Tracker: the coordinator. Queued, not started. Kin: fix-push-needs-fail-record.",
+ "updatedAt": "2026-11-14T16:40:00-06:00"
+}
