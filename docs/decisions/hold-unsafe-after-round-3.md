@@ -9,13 +9,13 @@ Owner, 2026-10-15 12:00 CDT. The owner's words:
 
 `roles-review-cap-three` (a change gets three review rounds, CLAUDE.md) holds the short rule. This record is the home of the round rules and holds what that rule lacks:
 
-- Owner, 2026-11-13 18:35 CST, through the consultant, relayed by the coordinator 18:36 CST. Words: `that's correct`. Ruling: every change, a guard or check change included, is done at the first round or fix verifier that passes. A later fix (lint-only or a finding fix) gets one fix verifier, and its PASS ends review. Round 3 runs only after a round 2 FAIL.
+- Owner, 2026-11-13 18:35 CST, through the consultant, relayed by the coordinator 18:36 CST. Words: `that's correct`, to the coordinator's statement of the reading below (the coordinator's wording, not the owner's). Reading: every change, a guard or check change included, is done at the first round or fix verifier that passes. A later fix (lint-only or a finding fix) gets one fix verifier, and its PASS ends review. Round 3 runs only after a round 2 FAIL.
 - The rounds, in one place (owner, 2026-11-10 15:44 CST, relayed by the retrospective session, corrected 16:07 CST, item 471 a). Words: `yeah i never wanted round 3 if it passed earlier and was so confused to see that it was occuring`; `agreed A -- can look into the sonnet noise thing later`.
   - A round that passes ends review. A guard or check change that passes round 1 or 2 is done and takes no round 3.
-  - A round 2 FAIL, guard or check change or not, is open: it gets round 3.
+  - A round 2 FAIL, guard or check change or not, is open until a fix verifier passes the fix or round 3 is done.
   - A fix verifier PASS ends review, a guard or check change included. Rounds run in order: round 3 runs only after a round 2 FAIL.
   - The net-value test runs only for an unclear case that cannot finish: a guard or check change that reaches round 3.
-  - The merge tool reads this way after lane `merge-tool-r9-no-round-3` merges (`review_state` in `merge/merge.py`). Decision `pr-review-record` holds the form, the done rules and the owner's round 4 grant, and its changed-head route is unchanged.
+  - The merge tool does not read this way yet: `review_state` in `merge/merge.py` still holds a guard or check change open after a fix verifier PASS, until lane `merge-tool-r9-no-round-3` merges. Decision `pr-review-record` holds the form, the done rules and the owner's round 4 grant, and its changed-head route is unchanged.
   - Not decided: whether round 1 runs Sonnet for every logic change. Deferred, as the owner said.
 - The judgment is semantic.
 - The owner's grant can allow work on a held change. A merge still needs zero or positive net value.
