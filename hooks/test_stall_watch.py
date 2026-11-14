@@ -282,13 +282,12 @@ def job_files(cmd):
     return flag_value("--log"), flag_value("--beat")
 
 
-def stall_problems(rc, text, secs, sleep_args=None):
+def stall_problems(rc, text, sleep_args=None):
     """Checks shared by the stall cases. Return a list of problems."""
     problems = expect(rc == 3, f"exit {rc}, want 3")
     lines = text.splitlines()
     stall_at = next((i for i, line in enumerate(lines) if line.startswith("STALL:")), None)
     problems += expect(stall_at is not None, "no line starts with STALL:")
-    problems += expect(secs <= 5.0, f"rewritten command ran {secs:.1f}s, want about 4s")
     m = PID_RE.search(text)
     if not m:
         return problems + ["report names no pid="]
@@ -384,11 +383,11 @@ def zsh_glob_fails_as_zsh_does():
 
 @posix_case
 def quiet_sleep_stalls_and_exits_3():
-    """3a. quiet sleep 30: STALL with a pid within about 4 s, exit 3, sleep still alive"""
+    """3a. quiet sleep 30: STALL with a pid, exit 3, sleep still alive"""
     problems = []
     for shell in shells():
         rc, text, secs, _cmd = run_rewritten("sleep 30", shell=shell)
-        problems += [f"{shell}: {p}" for p in stall_problems(rc, text, secs, sleep_args="sleep 30")]
+        problems += [f"{shell}: {p}" for p in stall_problems(rc, text, sleep_args="sleep 30")]
         reap()
     return problems
 
@@ -439,22 +438,63 @@ def heredoc_survives():
 
 
 @case
-def dead_pid_missing_log_returns_fast():
-    """9. --watch-pid on a dead pid with no log file returns within about 2 s"""
+def dead_pid_missing_log_returns():
+    """9. --watch-pid on a dead pid with no log file returns, with no stall report: a real run inside the
+    10 s hang guard, and the same return on a fake clock by fake time 0.5 s"""
     module_or_fail()
     gone = subprocess.Popen([PY, "-c", "pass"])
     gone.wait()
     log = os.path.join(new_dir(), "never-created.log")
-    start = time.monotonic()
     try:
         proc = subprocess.run([PY, MODULE, "--watch-pid", str(gone.pid), "--log", log, "--quiet", "2"],
                               stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
     except subprocess.TimeoutExpired:
         return ["watcher hung past 10 s on a dead pid with no log file"]
-    secs = time.monotonic() - start
     text = proc.stdout.decode("utf-8", "replace")
-    problems = expect(secs <= 3.0, f"returned after {secs:.1f}s, want about 2s")
-    problems += expect("STALL:" not in text, "a dead pid reported a stall")
+    problems = expect("STALL:" not in text, "a dead pid reported a stall")
+    # The no-log branch on the fake clock: the real run above is bounded only by the 10 s hang guard.
+    absent, stalled, ended = [], [], []
+    rc = simulated_watch(0, 0, 0, writes=1, job_secs=0.0, stall_at=stalled, ended_at=ended,
+                         log_exists=False, absent_at=absent)
+    if not absent:  # scope first: the log check must have seen the log missing, or no-log branch did not run
+        return problems + ["fake no-log: the log check never found the log missing, so the no-log branch did not run"]
+    problems += expect(rc == 0, f"fake no-log: exit {rc}, want 0")
+    problems += expect(not stalled, f"fake no-log: a stall report at fake times {stalled}, want none")
+    problems += expect(len(ended) == 1 and ended[0] <= 0.5,
+                       f"fake no-log: returned at fake times {ended}, want one return by 0.5 s")
+    return problems
+
+
+@case
+def stall_cases_pass_on_slow_runner():
+    """9b. stall_cases_pass_on_slow_runner: the quiet-stall and dead-pid cases pass when each clock read jumps 100 s"""
+    if os.name != "posix":
+        raise Skip("posix only: the hook is silent on os.name %r" % os.name)
+    global time
+    real_time = time
+    clock = [0.0]
+
+    class SlowClock:
+        """Stands in for the time module here: each monotonic() read jumps 100 s, and other names are the real module's."""
+
+        def monotonic(self):
+            clock[0] += 100.0
+            return clock[0]
+
+        def __getattr__(self, name):
+            return getattr(real_time, name)
+
+    time = SlowClock()
+    try:
+        # Scope before subject: the stub must be live before the bodies read it.
+        first = time.monotonic()
+        gap = time.monotonic() - first
+        if gap != 100.0:
+            return [f"clock stub is not live: two reads differ by {gap}, want 100.0"]
+        problems = [f"quiet_sleep_stalls_and_exits_3: {p}" for p in quiet_sleep_stalls_and_exits_3()]
+        problems += [f"dead_pid_missing_log_returns: {p}" for p in dead_pid_missing_log_returns()]
+    finally:
+        time = real_time
     return problems
 
 
@@ -642,7 +682,7 @@ def job_problems(shell, template, pidfiles=()):
     never = os.path.join(new_dir(), mark + ".b")
     orig = template.replace("@MARK@", mark).replace("@NEVER@", never)
     rc, text, secs, _cmd = run_rewritten(orig, shell=shell, timeout=10, mark=mark)
-    problems = stall_problems(rc, text, secs)
+    problems = stall_problems(rc, text)
     problems += expect("Traceback" not in text, "the watcher crashed: " + (crash_line(text) or "traceback"))
     listed = stall_pids(text)
     args_of = {pid: args for pid, _ppid, args in process_table()}
@@ -911,10 +951,15 @@ def named_log_relative_tee_and_flag_forms_are_read():
     return problems
 
 
-def simulated_watch(phase, ps_secs, tick_extra, quiet=2.0, period=1.7, writes=6):
+def simulated_watch(phase, ps_secs, tick_extra, quiet=2.0, period=1.7, writes=6, job_secs=None,
+                    stall_at=None, ended_at=None, log_exists=True, absent_at=None):
     """Run stall_watch.watch on a fake clock. The job writes a named log every `period` seconds from
     `phase`, then ends 1 s after its last write. Each ps takes `ps_secs`, each sleep overshoots by
-    `tick_extra`, as on a loaded runner. Return watch's exit code."""
+    `tick_extra`, as on a loaded runner. `job_secs` sets when the job ends on the fake clock, in place of
+    1 s after its last write. A `stall_at` list gets the fake time of each stall report, and an `ended_at`
+    list the fake time watch returns. With `log_exists` False the watched log is absent until fake time
+    30 s, and an `absent_at` list gets the fake time of each existence check that finds it absent.
+    Return watch's exit code."""
     import builtins
     import importlib.util
     spec = importlib.util.spec_from_file_location("stall_watch_sim", MODULE)
@@ -922,7 +967,7 @@ def simulated_watch(phase, ps_secs, tick_extra, quiet=2.0, period=1.7, writes=6)
     spec.loader.exec_module(sw)
     clock = [0.0]
     stamps = [phase + period * i for i in range(writes)]
-    end = stamps[-1] + 1.0
+    end = stamps[-1] + 1.0 if job_secs is None else job_secs
 
     def job_state(_pid):
         clock[0] += ps_secs
@@ -941,16 +986,45 @@ def simulated_watch(phase, ps_secs, tick_extra, quiet=2.0, period=1.7, writes=6)
     sw.time = type("Clock", (), {
         "monotonic": staticmethod(lambda: clock[0]),
         "sleep": staticmethod(lambda secs: clock.__setitem__(0, clock[0] + secs + tick_extra))})
-    sw.os = type("Os", (), {"path": type("Path", (), {"exists": staticmethod(lambda _p: True)})})
+
+    def exists(_p):
+        if log_exists or clock[0] >= 30.0:
+            return True
+        if absent_at is not None:
+            absent_at.append(clock[0])
+        return False
+
+    sw.os = type("Os", (), {"path": type("Path", (), {"exists": staticmethod(exists)})})
     sw.job_state = job_state
     sw.log_marks = lambda paths, base=None: {p: (sum(1 for w in stamps if w <= clock[0]), 0) for p in paths}
-    sw.report = lambda *_a: None
+    sw.report = lambda *_a: stall_at.append(clock[0]) if stall_at is not None else None
     real_open = builtins.open
     builtins.open = lambda *_a, **_k: Empty()
     try:
-        return sw.watch(1, "log", quiet, ["named.log"])
+        rc = sw.watch(1, "log", quiet, ["named.log"])
     finally:
         builtins.open = real_open
+    if ended_at is not None:
+        ended_at.append(clock[0])
+    return rc
+
+
+@posix_case
+def stall_and_exit_latency_on_a_fake_clock():
+    """23b1. on a fake clock, a quiet live job gives exit 3 and one stall report by fake time 4.0 s, and a
+    job that already ended gives exit 0, no report, and a return by fake time 1.2 s. The fake clock keeps
+    a slow runner from moving either bound."""
+    stalled = []
+    rc = simulated_watch(0, 0, 0, writes=1, job_secs=30.0, stall_at=stalled)
+    problems = expect(rc == 3, f"quiet live job: exit {rc}, want 3")
+    problems += expect(len(stalled) == 1 and stalled[0] <= 2.0 + 2.0,
+                       f"stall reported at fake times {stalled}, want one report by 4.0 s")
+    ended, back = [], []
+    rc = simulated_watch(0, 0, 0, writes=1, job_secs=0.0, stall_at=ended, ended_at=back)
+    problems += expect(rc == 0 and not ended, f"ended job: exit {rc}, reports {ended}, want exit 0, none")
+    problems += expect(len(back) == 1 and back[0] <= 0.2 + 1.0,
+                       f"ended job returned at fake times {back}, want one return by 1.2 s")
+    return problems
 
 
 @posix_case
@@ -964,10 +1038,10 @@ def named_log_written_slower_than_the_check_is_no_stall():
 
 @posix_case
 def named_log_that_stops_growing_stalls():
-    """23c. the same job whose log stops growing: STALL within about 4 s, exit 3, the job alive"""
+    """23c. the same job whose log stops growing: STALL, exit 3, the job alive"""
     log = shlex.quote(os.path.join(new_dir(), "merge.log"))
     rc, text, secs, _cmd = run_rewritten("echo once >> %s; sleep 30 >> %s 2>&1" % (log, log))
-    problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    problems = stall_problems(rc, text, sleep_args="sleep 30")
     reap()
     return problems
 
@@ -985,7 +1059,7 @@ def log_named_only_in_a_string_or_comment_still_stalls():
     finally:
         writer.kill()
         writer.wait()
-    problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    problems = stall_problems(rc, text, sleep_args="sleep 30")
     reap()
     return problems
 
@@ -994,7 +1068,7 @@ def log_named_only_in_a_string_or_comment_still_stalls():
 def quiet_job_with_no_named_log_stalls():
     """23e. a quiet job whose only redirection is to the null device, with no other log: STALL"""
     rc, text, secs, _cmd = run_rewritten("sleep 30 >%s 2>&1" % os.devnull)
-    problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    problems = stall_problems(rc, text, sleep_args="sleep 30")
     reap()
     return problems
 
