@@ -11229,15 +11229,17 @@ def live_nightly():
 class MainRunsHost(FakeHost, merge.Host):
     """FakeHost for the flow; the real Host.base_state over scripted REST. `main_runs`: main's push runs, newest first. `jobs`: run id -> jobs.
     `runs_fail` / `jobs_fail`: that read fails with this text. `jobs_fail_of`: run id -> the text its jobs read fails with.
-    `texts`: head sha -> the workflow file's text on that head (a head not in it reads as NO_IF_WORKFLOW). `text_fail`: every file read fails with this text."""
+    `texts`: head sha -> the workflow file's text on that head (a head not in it reads as NO_IF_WORKFLOW). `text_fail`: every file read fails with this text.
+    `pulls`: {number: REST row} of the pull requests the page holds (None: the own one only). `heads`: head sha -> the checks state head_state reads for it."""
     base_state = getattr(merge.Host, "base_state", None)
 
-    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None, texts=None, text_fail=None):
+    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None, texts=None, text_fail=None, pulls=None, heads=None):
         FakeHost.__init__(self, root, other)
         self.ignore, self.cwd, self.warned = {}, root, set()
         self.main_runs, self.jobs, self.runs_fail, self.jobs_fail, self.reads = main_runs, jobs, runs_fail, jobs_fail, []
         self.jobs_fail_of = jobs_fail_of or {}
         self.texts, self.text_fail = texts or {}, text_fail
+        self.pulls, self.head_states = pulls, heads or {}
 
     def file_at_head(self, rel, extra, fields):
         """`contents/<path>` read at a head: the ref is a field or a query. Raw when the Accept header asks for raw, else the JSON reply with base64 content."""
@@ -11268,6 +11270,15 @@ class MainRunsHost(FakeHost, merge.Host):
         if fail:
             raise merge.Stop(f"reading {rel} from GitHub failed: {fail}")
         return self.jobs[int(m.group(1))]
+
+    def head_state(self, n, sha=None):
+        """The checks state a case scripts for a head (`heads`), else the FakeHost default. A case with `pulls` has no other pull request: a number
+        not on that page is no pull request, so its checks read unknown."""
+        if sha in self.head_states:
+            return self.head_states[sha]
+        if self.pulls is not None and n != self.own_number and n not in self.pulls:
+            return f"unknown (pull request #{n} is not on the page)"
+        return FakeHost.head_state(self, n, sha)
 
 
 class RedMainBrake(Env):
@@ -12317,6 +12328,214 @@ class RedMainBrake(Env):
         """Main's head, as the other clone reads it after a fetch: the commit the PR head reverts."""
         sh(self.other, "git", "fetch", "-q", "origin")
         return sh(self.other, "git", "rev-parse", "origin/main")
+
+    # The revert lift (brief revert-merge-lifts-red-main; decision no-merge-onto-red-main). Main is red at the breaking merge B, pull request #2650,
+    # red again on its re-run. A revert of B lands as pull request #2651: main's head M is a merge commit whose second parent R is the revert, so the
+    # tree of M is the tree of R. The commits are real git; the runs and the pull requests are the fake's, keyed by those commits.
+    def land_breaking_merge(self, pr=2650):
+        """Lane pull request #pr lands on main as a merge commit that breaks the checks. -> its sha, B."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", f"lane-{pr}", "origin/main")
+        put(os.path.join(o, f"lane-{pr}.txt"), f"lane {pr}\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", f"Lane {pr}"); sh(o, "git", "push", "-q", "origin", f"lane-{pr}")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        sh(o, "git", "merge", "-q", "--no-ff", "-m", f"Merge pull request #{pr} from o/lane-{pr}", f"lane-{pr}")
+        sh(o, "git", "push", "-q", "origin", "main")
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def land_revert(self, pr, reverted, extra=None):
+        """The revert of commit `reverted` lands on main as pull request #pr, as a merge commit. `extra` names a file the merge adds of its own, so the
+        merge's tree is not the revert's tree. The feat branch takes the new main, as a lane does. -> (R, M): the revert, which is the pull request's
+        head, and main's new head."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", f"revert-{pr}", "origin/main")
+        mainline = ["-m", "1"] if len(sh(o, "git", "rev-list", "--parents", "-n", "1", reverted).split()) > 2 else []
+        sh(o, "git", "revert", "--no-edit", *mainline, reverted)
+        revert = sh(o, "git", "rev-parse", "HEAD")
+        sh(o, "git", "push", "-q", "origin", f"revert-{pr}")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        sh(o, "git", "merge", "-q", "--no-ff", "--no-commit", revert)
+        if extra:
+            put(os.path.join(o, extra), "added by the merge\n")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", f"Merge pull request #{pr} from o/revert-{pr}")
+        sh(o, "git", "push", "-q", "origin", "main")
+        main = sh(o, "git", "rev-parse", "HEAD")  # read before feat is checked out below
+        head_takes_base(self)
+        return revert, main
+
+    def commit_on_feat(self, subject, name):
+        """One commit on feat, its own file, pushed: the lane's work under test."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        put(os.path.join(o, name), f"{subject}\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", subject); sh(o, "git", "push", "-q", "origin", "feat")
+
+    def assert_revert_on_main(self, breaking, revert, head):
+        """Scope first: the fixture is what each case says before its subject runs. Main's head is the revert's merge, and the revert names `breaking`."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", "origin/main"), head, "the fixture's main head is not the merge of the revert")
+        self.assertEqual(sh(self.co, "git", "rev-parse", "origin/main^2"), revert, "the fixture's main head does not merge the revert as its second parent")
+        self.assertIn(f"This reverts commit {breaking}", sh(self.co, "git", "log", "-1", "--format=%B", revert), "the fixture's revert does not name the breaking merge")
+
+    def revert_pull(self, pr, head):
+        """Pull request #pr as the pulls read gives it once its revert has merged: closed, with the revert as its head."""
+        return REST.pull(pr, head, f"revert-{pr}", "main", state="closed", merged=True)
+
+    def merge_run_of(self, id_, sha, pr):
+        """Main's push run `id_` on the merge commit of pull request #pr, empty as a push run is once the revert's tree is proven: no suite ran."""
+        return (main_run(id_, "success", sha=sha, message=f"Merge pull request #{pr} from o/revert-{pr}"), self.EMPTY_PUSH)
+
+    def breaking_page(self, breaking, green, top=(), attempt=2):
+        """Main's runs, newest first: `top`, (run, jobs) pairs on the head, then the breaking run 903 at `breaking`, red, and red again on its re-run
+        when `attempt` is 2, and the green run 902 beneath it at `green`. -> (runs, jobs) as `go` takes them."""
+        runs = [run for run, _ in top] + [main_run(903, "failure", sha=breaking, run_attempt=attempt, message="Merge pull request #2650 from o/lane-2650"),
+                                          main_run(902, "success", sha=green, message="base files")]
+        jobs = {**{run["id"]: j for run, j in top}, 903: [main_job("scope", "success"), main_job("checks", "failure", 20)], 902: self.RAN_PUSH}
+        return runs, jobs
+
+    def refused_by_red_main(self, rc, out, before):
+        """A refusal by the red-main check itself: a pin that refused for another reason would pass with no proof of the red-main stop."""
+        RedMainBrake.refused(self, rc, out, before)
+        self.assertIn("No batch merges onto a red main", out, "the merge is refused, but not by the red-main check")
+
+    def test_a_revert_merged_with_its_tree_proven_lifts_a_red_main(self):
+        # class 1: the revert of the breaking merge is on main, its tree is the revert's and its checks are green: the red main lifts, with no flag
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        rc, out, _ = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.merged(rc, out)
+
+    def test_a_merge_titled_as_a_revert_onto_a_red_main_is_refused_when_it_reverts_nothing(self):
+        # class 2: the lane's own commit has a revert's title, but main's breaking merge is not reverted by anything: a title proves nothing
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        head_takes_base(self)
+        self.commit_on_feat("Revert the flaky lane change", "flaky-note.txt")
+        runs, jobs = self.breaking_page(B, A)
+        rc, out, before = self.go(runs, jobs)
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_revert_whose_merge_tree_differs_from_the_revert_is_not_proven_and_refuses(self):
+        # class 3, tree: main's merge adds a file of its own, so main's tree is not the revert's tree, though the revert names the breaking merge
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B, extra="stray.txt")
+        self.assert_revert_on_main(B, R, M)
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_revert_whose_check_is_not_green_is_not_proven_and_refuses(self):
+        # class 3, check: the revert's own head has a check still pending, so its tree is not proven green
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)}, heads={R: "pending: checks"})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_revert_with_no_pull_request_on_the_page_is_not_proven_and_refuses(self):
+        # class 3, pull request: the merge names #2651, which the pull request read cannot find, so the revert's head is never read
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_first_red_names_no_breaking_merge_so_its_revert_proves_nothing(self):
+        # class 3, no blame: the breaking run is red once, so no merge is named, and a revert of it cannot be told to be the one that fixes it
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)], attempt=1)
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_revert_proven_on_main_is_unknown_and_refuses_when_the_runs_read_fails(self):
+        # class 4, the page: the runs read fails, so main is unknown, never clear, though the revert on main would prove it
+        B = self.land_breaking_merge()
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        rc, out, before = self.go([], {}, pulls={2651: self.revert_pull(2651, R)}, runs_fail="gh: HTTP 500: Server Error")
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("UNKNOWN", out, "a failed runs read is not called red or clear: it is unknown")
+
+    def test_a_revert_whose_check_read_is_unknown_is_not_proven_and_refuses(self):
+        # class 4, the proof: the revert's checks cannot be read, which is unknown, and an unknown check proves nothing
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)}, heads={R: "unknown (HTTP 500: Internal Server Error)"})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_revert_of_the_revert_refuses_even_with_its_tree_proven(self):
+        # class 5: main's head reverts the first revert, not the breaking merge. Its tree and its checks are proven, so only the named commit refuses it
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        R2, M2 = self.land_revert(2652, R)
+        self.assert_revert_on_main(R, R2, M2)
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(906, M2, 2652), self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R), 2652: self.revert_pull(2652, R2)})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_red_schedule_run_beside_the_revert_still_refuses(self):
+        # class 6, red: a red run of another group on main beside the breaking run, though the revert is proven
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        sched = main_run(905, "failure", sha=M, event="schedule")
+        runs, jobs = self.breaking_page(B, A, top=[(sched, [main_job("checks", "failure", 20), main_job("scope", "success")]), self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 905", out)
+        self.assertIn("run 903", out)
+
+    def test_a_cancelled_run_beside_the_revert_still_refuses(self):
+        # class 6, cancelled: a cancelled run with no red job on main beside the breaking run is unknown, so it refuses with the revert proven
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        sched = main_run(905, "cancelled", sha=M, event="schedule")
+        runs, jobs = self.breaking_page(B, A, top=[(sched, [main_job("scope", "success"), main_job("checks", "cancelled", 2)]), self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 905", out)
+        self.assertIn("run 903", out)
+
+    def test_a_re_run_in_flight_beside_the_revert_still_refuses(self):
+        # class 6, in flight: a re-run of a schedule run still going is unknown, and it refuses beside the breaking run with the revert proven
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        sched = main_run(905, None, status="in_progress", sha=M, event="schedule", run_attempt=2)
+        runs, jobs = self.breaking_page(B, A, top=[(sched, []), self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
 
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
