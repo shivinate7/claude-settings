@@ -3642,8 +3642,19 @@ def parse_review(text):
         return None
     return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix, "grant": grant}
 
-def review_state(rec, head):
+def last_design_line(recs):
+    """-> (round, verdict) of the last design-reviewer line, by position, in the newest of the parsed records `recs` (oldest first, None skipped) that holds
+    one, else None. The one home of the walk back through records with no design reviewer line, for review_state's reader and the --review-record refusal."""
+    for r in reversed([r for r in recs if r]):
+        line = next(((i, v) for i, role, _, v in reversed(r["rounds"]) if role == REVIEW_ROLES[1]), None)
+        if line:
+            return line
+    return None
+
+def review_state(rec, head, earlier=()):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
+    `earlier` is this pull request's earlier parsed records, oldest first. A record with no round line carries the last design-reviewer line of the
+    newest earlier record that holds one (last_design_line), so a fix verifier alone cannot read done over a design reviewer FAIL or PARTIAL.
     The done rules follow roles-review-cap-three and the decision pr-review-record: a passing round, or a passing sonnet fix verifier, ends
     the review for every change, Guard or check yes or no, with no net value owed. The last round is all PASS, or a fix verifier PASS counts as
     that round passing (every fix verifier runs on sonnet), and the last design-reviewer line (by position, across all rounds) is PASS
@@ -3663,7 +3674,7 @@ def review_state(rec, head):
         return "held", "net value is negative"
     rounds = rec["rounds"]
     top = max((i for i, *_ in rounds), default=0)
-    design = next(((i, v) for i, role, _, v in reversed(rounds) if role == REVIEW_ROLES[1]), None)  # the last design-reviewer line, by position
+    design = last_design_line([*earlier, rec] if not rounds else [rec])  # the last design-reviewer line, by position; a record with no round line walks back
     bad = design if design and design[1] != "PASS" else None
     note = f"; the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}" if bad else ""
     fix = rec.get("fix")
@@ -3817,14 +3828,14 @@ def clean_merges_after(h, head, live, base=None, claims=None):
 
 REVIEW_SURVIVAL_UNKNOWN = "whether only clean merges of main follow the reviewed head is unknown"  # the why of a stale record whose clean-merge read could not run
 
-def live_review_state(h, rec, live, main, claims=None):
+def live_review_state(h, rec, live, main, claims=None, earlier=()):
     """-> (state, why) of the parsed record `rec` for the live head `live`: the one home of that read, for `merge --reviewed` (reviewed_read) and the
     lane Stop hook (lint/report_guard.py). It is review_state, except that a stale record whose live head is its Head plus clean merges of main
     (clean_merges_after) reads as it does at its Head (decision pr-review-record). A clean-merge read that cannot run keeps the state stale, and
     the why says REVIEW_SURVIVAL_UNKNOWN and why. Cost: clean_merges_after's, only for a stale record. `main` is the repo's default branch, never the pull request's own base
     (a merge of a stacked pull request's base is no merge of main): the caller names it, because Host.pr rewrites the host's base on every read. The record survives a clean merge of main only,
     and with `claims` (the stamp config path, clean_merges_after's) a claim commit too."""
-    state, why = review_state(rec, live)
+    state, why = review_state(rec, live, earlier)
     if state != "stale":
         return state, why
     try:
@@ -3832,7 +3843,7 @@ def live_review_state(h, rec, live, main, claims=None):
             return state, why
     except (Stop, subprocess.TimeoutExpired, OSError) as e:
         return state, f"{why}; {REVIEW_SURVIVAL_UNKNOWN} ({' '.join(str(e).split())[:300]})"
-    state, why = review_state(rec, rec["head"])
+    state, why = review_state(rec, rec["head"], earlier)
     return state, why + "; the head is the reviewed head plus clean merges of main"
 
 def rollup_green(h, n, head):
@@ -3891,6 +3902,10 @@ def lint_check(h, n, info, root, cfgrel):
     if lint != "pass":
         raise Stop(f"#{n} at {info['head'][:9]} is not ready to join: {LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`, then join again. {LANE_LINT_CITE}")
 
+def own_records(n, bodies):
+    """-> the parsed records among `bodies` that name pull request `n`, in order: the earlier records review_state walks back through."""
+    return [e for e in (parse_review(b) for b in bodies) if e and e["n"] == n]
+
 def reviewed_read(h, cfgrel=None):
     """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
@@ -3913,7 +3928,7 @@ def reviewed_read(h, cfgrel=None):
             continue
         rec = parse_review(bodies[-1])
         rec = rec if rec and rec["n"] == n else None
-        state, why = live_review_state(h, rec, sha, main, cfgrel)
+        state, why = live_review_state(h, rec, sha, main, cfgrel, own_records(n, bodies[:-1]))
         if state == "done":
             lint = lint_state(lints.get(n, []), sha)
             if lint == "none" and lint_carried(root, cfgrel, d["base"]["ref"], n, lint_passed(lints.get(n, [])), sha):
@@ -4149,7 +4164,8 @@ def release_check(root, h, numbers, lints, root_why=None, cfgrel=None):
                 body, created, updated = rows[-1]  # only the newest record counts
                 rec = parse_review(body)
                 rec = rec if rec and rec["n"] == n else None
-                state, why = live_review_state(h, rec, i["head"], default, cfgrel) if default else review_state(rec, i["head"])  # no default branch read: no walk, the why of that read follows below
+                before = own_records(n, [r[0] for r in rows[:-1]])
+                state, why = live_review_state(h, rec, i["head"], default, cfgrel, before) if default else review_state(rec, i["head"], before)  # no default branch read: no walk, the why of that read follows below
                 if state != "done":
                     out.append(why)
                 if created is None or updated is None:
@@ -4632,6 +4648,10 @@ def main(argv, host=None, lock=None, hosts=None):
             why = round_three_refusal(a, earlier)
             if why:
                 print(f"merge: {why} " + REVIEW_CITE, file=sys.stderr)
+                return 2
+            held = last_design_line(earlier) if a.fix_check and not a.round else None
+            if held and held[1] != "PASS":
+                print(f"merge: a record with no round line cannot clear the design reviewer's {held[1]} in round {held[0]} of an earlier record. Post a full record whose design reviewer PASSes. " + REVIEW_CITE, file=sys.stderr)
                 return 2
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
                 last = earlier[-1] if earlier else None
