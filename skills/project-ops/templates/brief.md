@@ -33,11 +33,13 @@ step note. If a claim no longer holds, it stops and reports.
 Its report gives each re-run as "Checked <Mon D> on main <commit>: <result>", for triage to copy into the note.
 
 Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane hands off, run
-`~/.claude/bin/merge --lane-lint <pr>` once and report its verdict. It runs
-`bin/ci-job checks --lint` at the PR head: the fast lint steps of the checks job, the STE lint
-among them, and no full suite. A red lane does not hand off.
-Order at the end of a lane: open the draft PR early; wait for `--lane-lint <pr> --touched-tests`; post the review record; then hand in to the batch runner. Run the four-point check (work landed or handed off, no unpushed branch, no owner question waiting, handoff written), commit the handoff to the record branch at `roadmap/outbox/<slug>-handoff.md`, and tag the lane archive-ready (ruling R46). The owner never reads a lane: send each owner act and question to the parent with the exact line. Mark each part that is ruled but not built "ruled, not built".
-Run `merge --lane-lint` from the main checkout, never from a session or agent isolated in a worktree: Claude Code's worktree check can refuse it there.
+`~/.claude/bin/merge <pr> --review-record ...` once and report its verdict. It runs the lane lint on the reviewed head
+and prints the review log only on a PASS. A review log with at least one round, every line FAIL, prints with no lint. The lint runs `bin/ci-job checks --lint` at the PR head: the fast lint steps
+of the checks job, the STE lint among them, and no full suite. A red lane hands off nothing. It prints a review log only when every line is FAIL.
+Run it as a background command: the lint can run for minutes.
+`~/.claude/bin/merge --lane-lint <pr>` is the same lint as an early check; report its verdict when you run it.
+Order at the end of a lane: open the draft PR early; wait for `--lane-lint <pr> --touched-tests`; post the review log; then hand in to the batch runner. Run the four-point check (work landed or handed off, no unpushed branch, no owner question waiting, handoff written). Commit the handoff to the record branch at `roadmap/outbox/<slug>-handoff.md`, and tag the lane archive-ready (ruling R46). The owner never reads a lane: send each owner act and question to the parent with the exact line. Mark each part that is ruled but not built "ruled, not built".
+Run `merge --review-record` and `merge --lane-lint` from the main checkout, never from a session or agent isolated in a worktree: Claude Code's worktree check can refuse it there.
 
 A fix round is a fresh isolated spawn from the branch head (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees).
 

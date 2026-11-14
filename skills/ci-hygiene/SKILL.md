@@ -140,10 +140,11 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
       took one side whole, and `git diff origin/main...<merge head>` holds the lane's whole diff.
    3. Print the log with `merge <pr> --review-record --head <merge head> --kind K --guard G`, then the
       earlier `--round` lines, and `--net-value` and `--grant` when the earlier log has them, copied in,
-      then `--fix-check <reviewed head>:reviewer:sonnet:<PASS|FAIL>`. The tool posts nothing: post the
-      printed text as a PR comment. The tool refuses a chain it cannot prove (record
+      then `--fix-check <reviewed head>:reviewer:sonnet:<PASS|FAIL>`. The tool lints the merge head first
+      (the lane lint, run as a background command) and prints the log only on a PASS: post the printed
+      text as a PR comment. A log with at least one round, all FAIL, prints with no lint. The tool refuses a chain it cannot prove (record
       `pr-review-record`, the fix verifier order).
-   4. Run `merge --lane-lint <pr>` at the merge head. Then hand in again.
+   4. After a fix-check log (step 3), the print already ran the lane lint at the merge head and posted its PASS comment. For a clean merge of main there is no new log, so the lane runs `merge --lane-lint <pr>` itself on the new head, as a background command. Then hand in again.
    A passing round, or a PASS fix check after any round, ends review for every change, with no net value owed.
    A negative net value still holds the change (record `pr-review-record`). A PR that merges clean needs no fix verifier and no new log: the log
    stays valid (record `pr-review-record`, clean merge survival). It still needs item 4 of this list, because the
