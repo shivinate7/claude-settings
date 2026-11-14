@@ -1636,13 +1636,14 @@ def is_local_settings_file(path: str, cwd: str = "") -> bool:
 
 
 def _json_allow(text):
-    """The allow rules (strings) of a settings text that parses as a JSON object, or None when it does not."""
+    """The allow rules (strings) of a settings text that parses as JSON, or None when it does not parse. A
+    parsed value that is not an object holds no allow rule."""
     try:
         data = json.loads(text)
     except Exception:
         return None
     if not isinstance(data, dict):
-        return None
+        return []
     permissions = data.get("permissions")
     allow = permissions.get("allow") if isinstance(permissions, dict) else None
     return [item for item in allow if isinstance(item, str)] if isinstance(allow, list) else []
@@ -1685,8 +1686,9 @@ def _fragment_strings(text):
 
 def _local_allow_fragment(text):
     """Allow rules a JSON-like fragment holds: a string element of an `"allow": [...]` list, or, in a list of
-    unknown key or at the top of a fragment, a string shaped like a permission rule. An element under any
-    other named key (`deny`, `ask`, `additionalDirectories`, ...) is never one."""
+    unknown key or at the top of a fragment, a string shaped like a permission rule. A list inside a list
+    keeps the outer list's key. An element under any other named key (`deny`, `ask`,
+    `additionalDirectories`, ...) is never one."""
     tokens = _fragment_strings(text)
     found, stack = [], []   # stack: the key of each open `[`, "" for a list of unknown key, None for `{`
     for index, (kind, value) in enumerate(tokens):
@@ -1694,7 +1696,10 @@ def _local_allow_fragment(text):
         after = tokens[index + 1] if index + 1 < len(tokens) else ("p", ",")
         if kind == "p":
             if value == "[":
-                key = tokens[index - 2][1] if before == ("p", ":") and index > 1 and tokens[index - 2][0] == "s" else ""
+                if before == ("p", ":"):
+                    key = tokens[index - 2][1] if index > 1 and tokens[index - 2][0] == "s" else ""
+                else:
+                    key = stack[-1] if stack and stack[-1] is not None else ""
                 stack.append(key)
             elif value == "{":
                 stack.append(None)
@@ -1706,8 +1711,6 @@ def _local_allow_fragment(text):
         if stack and stack[-1] is None:
             continue   # a string inside an object that is not a key or a value
         key = stack[-1] if stack else ""
-        if key in ("deny", "ask"):
-            continue
         if key == "allow" or (key == "" and LOCAL_ALLOW_RULE_SHAPE.fullmatch(value)):
             found.append(value)
     return found
