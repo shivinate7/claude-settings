@@ -2,7 +2,7 @@
 
 ## The ruling
 
-The guard rule in `hooks/guard.py` that shares this record's file name refuses a remote branch delete that follows an archive push of the same branch in one command. It runs only when `&&` joins every step from the push to the delete. The delete is `git push --delete origin <b>` or `git push origin :<b>`. The archive push is a refspec whose destination is `archive/<name>`.
+The guard rule in `hooks/guard.py` for a delete after an archive push (its pinned id is the roadmap step's slug, kept in code and tests) refuses a remote branch delete that follows an archive push of the same branch in one command. It runs only when `&&` joins every step from the push to the delete. The delete is `git push --delete origin <b>` or `git push origin :<b>`. The archive push is a refspec whose destination is `archive/<name>`.
 
 1. The mistake: in the Degen repo, a loop ran `git push origin "origin/$b:refs/heads/archive/$b" 2>&1 | tail -1; git push origin --delete $b` under zsh, where `$b:r` also expands as a modifier. The `| tail` hid each failed archive push and the `;` ran the delete anyway. Six branches were deleted with no archive copy. They were restored from a local clone, by luck.
 2. The harm stopped: a branch deleted on the remote after its archive push failed, which loses it with no copy (rule `shared-trees-archive-then-delete`).
