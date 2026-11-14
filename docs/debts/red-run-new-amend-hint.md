@@ -1,0 +1,6 @@
+# A new test commit refused in one call prints an amend that reaches the old HEAD
+
+- **What.** A test commit made in the same call as the refused push is flagged `new`. `red_run_reason` then prints the amend line too: "The last commit: reword it with `git commit --amend`". The refused call never ran, so that amend reaches the previous HEAD, which may be a different commit. Frequency unmeasured. The round 3 review judged it likely in normal work.
+- **Where.** `hooks/guard_merge.py`: `red_run_reason` (the `fix` line). The first line of `REMEDY` in `lint/check_red_run.py` is the trailer form, which is right for a `new` commit.
+- **Decision.** `red-run-trailer-on-test-commits` (red-run trailer on test commits), item 9 (push time), its refusal text.
+- **Retire.** A new case in `hooks/test_guard.py`, red before the fix and green after. A call that makes a test commit with no Red-run trailer, then pushes, prints the trailer line and no `git commit --amend` line.
