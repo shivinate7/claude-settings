@@ -1,0 +1,276 @@
+# section 42900
+FAMILY = "lane-step-dup"
+#
+# Rule lane-step-dup, part one: a live session carries the step. A create_session whose tags hold cs-step:<slug>, or a
+# send_message whose first non-blank line is `Lane brief: <slug>. Topic: <topic>.`, is refused when another live session
+# in the same cs-repo carries <slug> as a cs-step tag. The refusal names that session's id. The guard reads this
+# session's transcript: the list_sessions reads, their cursors, the create_session calls with their results, the
+# archive_session calls, and the target's get_session record. A list that is not whole (one read with no cursor, or a
+# chain of reads whose cursor is the last row of the page before, ending with has_more false), or that cannot be
+# parsed, is refused. Archived sessions, other steps and other repos hold no step. A session that an earlier
+# create_session in the transcript started is live until an archive_session call names it; a create whose result names
+# no session started none.
+# Part two (open pull requests) is in the lane-step-dup-pr section, so the two can be held apart.
+STEPDUP_RULE = "lane-step-dup"
+STEPDUP_LIVE = "SESSION_STATUS_RUNNING"
+STEPDUP_ARCHIVED = "SESSION_STATUS_ARCHIVED"
+STEPDUP_CARRIER = "session_STEPDUPCARRIER01"  # a live lane on the topic that carries dup-step-a
+STEPDUP_NEW = "session_STEPDUPNEW01"          # a live lane on the same topic that carries no step of the brief
+STEPDUP_CARRIER_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:dup-step-a", "cs-repo:o/r"]
+STEPDUP_NEW_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-repo:o/r"]
+STEPDUP_NEAR_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:dup-step-ab", "cs-repo:o/r"]
+STEPDUP_OTHER_REPO_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:dup-step-a", "cs-repo:other/repo"]
+STEPDUP_UPPER_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:DUP-STEP-A", "cs-repo:o/r"]
+STEPDUP_BRIEF = "Lane brief: dup-step-a. Topic: dup-topic.\n\nDo the step."
+STEP_CREATE_TAGS = ["cs-build:lane", "cs-step:dup-step-a", "cs-repo:o/r"]
+# The id a create_session call for dup-step-a starts in the chain cases: a session this transcript made, not one a list read showed.
+STEPDUP_MADE = "session_STEPDUPMADE01"
+# A stand-in pull request tool whose only pull request on a slug is closed, so no slug in these cases is held by an open one.
+STEPDUP_NO_OPEN_PR = fake_gh_path(ARCHCLOSED)
+
+
+# stepdup_row and stepdup_list, the list_sessions read, are in section 13406 with the other transcript helpers.
+def stepdup_fill(count):
+    """`count` live lanes on other steps: the rows a full page holds before its last row."""
+    return [stepdup_row("session_STEPDUPFILL%03d" % n, STEPDUP_LIVE,
+                        ["cs-build:lane", "cs-step:stepdup-filler-%03d" % n, "cs-repo:o/r"]) for n in range(count)]
+
+
+def stepdup_noise():
+    """One unrelated Bash call and its result: a transcript with no list_sessions read in it."""
+    return [role_use("b1", "Bash", {"command": "git status"}), role_result("b1", "ok")]
+
+
+def stepdup_failed_create(tool_id, tags, body="Error: the session could not be created.", is_error=False):
+    """One create_session call whose result is `body`: the call started no session, and its result names none. With
+    `is_error`, the result carries is_error true, as a tool error does."""
+    result = (role_result_block(tool_id, content=[{"type": "text", "text": body}], is_error=True) if is_error
+              else role_result(tool_id, body))
+    return [role_use(tool_id, CREATE_SESSION, {"title": "a lane session", "tags": list(tags)}), result]
+
+
+STEPDUP_CARRIER_ROW = stepdup_row(STEPDUP_CARRIER, STEPDUP_LIVE, STEPDUP_CARRIER_TAGS)
+STEPDUP_PAGE_A = stepdup_row("session_STEPDUPPAGEA", STEPDUP_LIVE, ["cs-build:lane", "cs-step:dup-step-b", "cs-repo:o/r"])
+STEPDUP_PAGE_B = stepdup_row("session_STEPDUPPAGEB", STEPDUP_LIVE, ["cs-build:lane", "cs-step:dup-step-c", "cs-repo:o/r"])
+
+# Each fixture is one session's transcript: the reads the rule judges, in the order they were made.
+STEPDUP_LINES = {
+    # One whole read of one page.
+    "stepdup-create-carrier": stepdup_list("l1", [STEPDUP_CARRIER_ROW]),
+    "stepdup-create-carrier-upper": stepdup_list("l1", [stepdup_row(STEPDUP_CARRIER, STEPDUP_LIVE, STEPDUP_UPPER_TAGS)]),
+    "stepdup-create-archived": stepdup_list("l1", [stepdup_row(STEPDUP_CARRIER, STEPDUP_ARCHIVED, STEPDUP_CARRIER_TAGS)]),
+    "stepdup-create-near": stepdup_list("l1", [stepdup_row(STEPDUP_CARRIER, STEPDUP_LIVE, STEPDUP_NEAR_TAGS)]),
+    "stepdup-create-other-repo": stepdup_list("l1", [stepdup_row(STEPDUP_CARRIER, STEPDUP_LIVE, STEPDUP_OTHER_REPO_TAGS)]),
+    "stepdup-create-empty": stepdup_list("l1", []),
+    "stepdup-create-full": stepdup_list("l1", stepdup_fill(39) + [STEPDUP_CARRIER_ROW]),
+    "stepdup-create-cut": stepdup_list("l1", [STEPDUP_CARRIER_ROW], cut=True),
+    "stepdup-create-no-read": stepdup_noise(),
+    # A chain of two reads: the second names the last row of the first by after_id.
+    "stepdup-create-chain-empty": stepdup_list("l1", [STEPDUP_PAGE_A, STEPDUP_PAGE_B], more=True)
+                                  + stepdup_list("l2", [], args={"after_id": STEPDUP_PAGE_B["id"]}),
+    "stepdup-create-chain-carrier-first": stepdup_list("l1", [STEPDUP_CARRIER_ROW, STEPDUP_PAGE_B], more=True)
+                                          + stepdup_list("l2", [], args={"after_id": STEPDUP_PAGE_B["id"]}),
+    "stepdup-create-chain-carrier-second": stepdup_list("l1", [STEPDUP_PAGE_A, STEPDUP_PAGE_B], more=True)
+                                           + stepdup_list("l2", [STEPDUP_CARRIER_ROW], args={"after_id": STEPDUP_PAGE_B["id"]}),
+    "stepdup-create-chain-wrong-cursor": stepdup_list("l1", [STEPDUP_PAGE_A, STEPDUP_PAGE_B], more=True)
+                                         + stepdup_list("l2", [], args={"after_id": STEPDUP_PAGE_A["id"]}),
+    "stepdup-create-chain-incomplete": stepdup_list("l1", [STEPDUP_CARRIER_ROW], more=True),
+    # A brief: the target is a lane on the brief's topic, read with get_session, then the list read.
+    "stepdup-send-carrier": role_target_call("t0", STEPDUP_NEW_TAGS, target=STEPDUP_NEW, wrapped=True)
+                            + stepdup_list("l1", [STEPDUP_CARRIER_ROW]),
+    "stepdup-send-self": role_target_call("t0", STEPDUP_CARRIER_TAGS, target=STEPDUP_CARRIER, wrapped=True)
+                         + stepdup_list("l1", [STEPDUP_CARRIER_ROW]),
+    "stepdup-send-empty": role_target_call("t0", STEPDUP_NEW_TAGS, target=STEPDUP_NEW, wrapped=True)
+                          + stepdup_list("l1", []),
+    "stepdup-send-no-read": role_target_call("t0", STEPDUP_NEW_TAGS, target=STEPDUP_NEW, wrapped=True),
+    "stepdup-send-target-only": role_target_call("t0", STEPDUP_CARRIER_TAGS, target=STEPDUP_CARRIER, wrapped=True),
+    # A create_session chain. Each starts from one whole read of a full page of forty live lanes on other steps, with no
+    # carrier of dup-step-a. The first create's result names STEPDUP_MADE, a session the list read never showed.
+    "stepdup-chain-first": stepdup_list("l1", stepdup_fill(40)),
+    "stepdup-chain-made": stepdup_list("l1", stepdup_fill(40)) + role_create_call("c1", STEP_CREATE_TAGS, session=STEPDUP_MADE),
+    "stepdup-chain-made-send": stepdup_list("l1", stepdup_fill(40))
+                               + role_create_call("c1", STEP_CREATE_TAGS, session=STEPDUP_MADE)
+                               + role_target_call("t2", STEPDUP_NEW_TAGS, target=STEPDUP_NEW, wrapped=True),
+    "stepdup-chain-failed": stepdup_list("l1", stepdup_fill(40)) + stepdup_failed_create("c1", STEP_CREATE_TAGS),
+    "stepdup-chain-archived": stepdup_list("l1", stepdup_fill(40)) + role_create_call("c1", STEP_CREATE_TAGS, session=STEPDUP_MADE)
+                              + [role_use("a1", ARCHIVE_TOOL, {"session_id": STEPDUP_MADE}), role_result("a1", "ok")],
+    # An errored create whose text holds a session_ word, or a null session_id. The call started no session.
+    "stepdup-error-session-limit": stepdup_list("l1", stepdup_fill(40))
+                                   + stepdup_failed_create("c1", STEP_CREATE_TAGS, body="Error: session_limit reached", is_error=True),
+    "stepdup-error-bad-parent": stepdup_list("l1", stepdup_fill(40))
+                                + stepdup_failed_create("c1", STEP_CREATE_TAGS,
+                                                        body="Error: invalid parent_session_id session_PARENT01", is_error=True),
+    "stepdup-error-null-id": stepdup_list("l1", stepdup_fill(40))
+                             + stepdup_failed_create("c1", STEP_CREATE_TAGS, body='{"error":"boom","session_id":null}', is_error=True),
+    # A successful create whose result names its session in one shape: an id key, a created-session line, a session_id key.
+    "stepdup-ok-id": stepdup_list("l1", stepdup_fill(40)) + role_create_call("c1", STEP_CREATE_TAGS, session="session_OK01"),
+    "stepdup-ok-plain": stepdup_list("l1", stepdup_fill(40))
+                        + role_create_call("c1", STEP_CREATE_TAGS, session="session_OK02", plain=True),
+    "stepdup-ok-session-id": stepdup_list("l1", stepdup_fill(40))
+                             + role_create_call("c1", STEP_CREATE_TAGS, session="session_OK03", key="session_id"),
+    # A successful create whose result nests its id under `ccr`, the wrapper a get_session record comes back in.
+    "stepdup-nest-id": stepdup_list("l1", stepdup_fill(40))
+                       + role_create_call("c1", STEP_CREATE_TAGS, body=json.dumps({"ccr": {"id": "session_NEST01", "title": "x"}})),
+    "stepdup-nest-session-id": stepdup_list("l1", stepdup_fill(40))
+                               + role_create_call("c1", STEP_CREATE_TAGS, body=json.dumps({"ccr": {"session_id": "session_NEST02"}})),
+    "stepdup-nest-send": stepdup_list("l1", stepdup_fill(40))
+                         + role_create_call("c1", STEP_CREATE_TAGS, body=json.dumps({"ccr": {"id": "session_NEST01", "title": "x"}}))
+                         + role_target_call("t2", STEPDUP_NEW_TAGS, target=STEPDUP_NEW, wrapped=True),
+    "stepdup-nest-null": stepdup_list("l1", stepdup_fill(40))
+                         + role_create_call("c1", STEP_CREATE_TAGS, body=json.dumps({"ccr": {"id": None}})),
+    # An errored create whose result nests an id, and one whose result is an object with an id. Each started no session.
+    "stepdup-nest-error": stepdup_list("l1", stepdup_fill(40))
+                          + stepdup_failed_create("c1", STEP_CREATE_TAGS,
+                                                  body=json.dumps({"ccr": {"id": "session_NEST03", "title": "x"}}), is_error=True),
+    "stepdup-error-flat-id": stepdup_list("l1", stepdup_fill(40))
+                             + stepdup_failed_create("c1", STEP_CREATE_TAGS, body='{"id":"session_ERR01"}', is_error=True),
+}
+
+
+def write_stepdup_transcripts():
+    """Write each fixture as JSONL under this run's role folder."""
+    os.makedirs(ROLE_DIR, exist_ok=True)
+    for name, lines in STEPDUP_LINES.items():
+        with open(role_path(name), "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+
+
+lazy_fixture([role_path(name) for name in STEPDUP_LINES], write_stepdup_transcripts)
+
+
+def stepdup_create(name, expected, transcript, tags, prompt=LANE_PROMPT, carries=(), lacks=(), env_path=STEPDUP_NO_OPEN_PR):
+    """A create_session the rule judges. The call is a lane start that passes the lane rules (its Grant line, effort,
+    model and source), so only lane-step-dup decides it. An allow must print nothing."""
+    add("lane-step-dup: " + name, expected, rule=None if expected == "allow" else STEPDUP_RULE, tool=CREATE_SESSION,
+        cwd=NOGIT, transcript=transcript, env=ROLE_ENV, silent=expected == "allow", carries=carries, lacks=lacks,
+        env_path=env_path, title="a lane session", tags=list(tags), prompt=prompt, effort=LANE_EFFORT_FIELD,
+        model="sonnet", source_url=LANE_SOURCE_URL)
+
+
+def stepdup_send(name, expected, transcript, message, target=STEPDUP_NEW, carries=(), lacks=(), env_path=STEPDUP_NO_OPEN_PR):
+    """A send_message the rule judges. The target's own record is in the transcript, so lane-one-topic passes the brief
+    and only lane-step-dup decides it. An allow must print nothing."""
+    add("lane-step-dup: " + name, expected, rule=None if expected == "allow" else STEPDUP_RULE, tool=SEND_MESSAGE,
+        cwd=NOGIT, transcript=transcript, env=ROLE_ENV, silent=expected == "allow", carries=carries, lacks=lacks,
+        env_path=env_path, session_id=target, message=message)
+
+
+# Refused: a live session carries the step. The refusal names that session.
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused while a live session in the cs-repo carries it, and names that session",
+               "deny", role_path("stepdup-create-carrier"), STEP_CREATE_TAGS, carries=STEPDUP_CARRIER)
+stepdup_send("a brief for dup-step-a to a new lane is refused while a live session carries the step, and names that session",
+             "deny", role_path("stepdup-send-carrier"), STEPDUP_BRIEF, carries=STEPDUP_CARRIER)
+# Refused: the carrier is read from a chain's second page, so the chain is read to its end.
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused when the live carrier is on the second page of a whole chain",
+               "deny", role_path("stepdup-create-chain-carrier-second"), STEP_CREATE_TAGS, carries=STEPDUP_CARRIER)
+# Refused: the carrier is on the first page, and the second page holds no carrier. A reader that keeps only the last page
+# of a chain misses it.
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused when the live carrier is on the first page of a whole chain",
+               "deny", role_path("stepdup-create-chain-carrier-first"), STEP_CREATE_TAGS, carries=STEPDUP_CARRIER)
+# Refused: the carrier is on a page that says more pages follow, and no later page was read.
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused when the live carrier is on an incomplete first page",
+               "deny", role_path("stepdup-create-chain-incomplete"), STEP_CREATE_TAGS, carries=STEPDUP_CARRIER)
+# Refused: a page of forty rows, the carrier as its last row. A reader that stops before a page's last row misses it.
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused when the carrier is the last row of a full page of forty",
+               "deny", role_path("stepdup-create-full"), STEP_CREATE_TAGS, carries=STEPDUP_CARRIER)
+# Refused: a step tag in capitals is the same step as the carrier's lower-case tag.
+stepdup_create("a create_session tagged cs-step:DUP-STEP-A is refused by a live carrier of dup-step-a, and names it",
+               "deny", role_path("stepdup-create-carrier"), ["cs-build:lane", "cs-step:DUP-STEP-A", "cs-repo:o/r"],
+               carries=STEPDUP_CARRIER)
+# Refused: the carrier's tag is in capitals, and the create's tag is lower case.
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused by a live carrier whose step tag is in capitals, and names it",
+               "deny", role_path("stepdup-create-carrier-upper"), STEP_CREATE_TAGS, carries=STEPDUP_CARRIER)
+# Refused: without a whole list read, the guard cannot tell whether a live session carries the step.
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused when this session has no list_sessions read",
+               "deny", role_path("stepdup-create-no-read"), STEP_CREATE_TAGS)
+stepdup_send("a brief for dup-step-a is refused when this session has no list_sessions read",
+             "deny", role_path("stepdup-send-no-read"), STEPDUP_BRIEF)
+# Refused: the list read's text is cut, so its rows are text and not a read.
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused when the list_sessions read is cut short",
+               "deny", role_path("stepdup-create-cut"), STEP_CREATE_TAGS)
+# Refused: the second read's cursor is not the last row of the first page, so the two reads are not one list. The second
+# page is empty, so a reader that joined the pages without checking the cursor would allow the create.
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused when the second read's cursor is not the first page's last row",
+               "deny", role_path("stepdup-create-chain-wrong-cursor"), STEP_CREATE_TAGS)
+
+# Allowed: each shape changes one fact of a refused case. These keep the rule narrow.
+stepdup_send("a brief to the live carrier itself is allowed: the target already carries the step",
+             "allow", role_path("stepdup-send-self"), STEPDUP_BRIEF, target=STEPDUP_CARRIER)
+# Allowed: the target's own record carries the step, and the transcript holds no list read. The brief goes to the carrier.
+stepdup_send("a brief to a target that carries the step is allowed with no list_sessions read in the transcript",
+             "allow", role_path("stepdup-send-target-only"), STEPDUP_BRIEF, target=STEPDUP_CARRIER)
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when the carrier is archived",
+               "allow", role_path("stepdup-create-archived"), STEP_CREATE_TAGS)
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when a whole read finds no live session on it",
+               "allow", role_path("stepdup-create-empty"), STEP_CREATE_TAGS)
+stepdup_create("a create_session tagged cs-step:dup-step-c is allowed when the live carrier holds only dup-step-a",
+               "allow", role_path("stepdup-create-carrier"), ["cs-build:lane", "cs-step:dup-step-c", "cs-repo:o/r"])
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when the live carrier holds only dup-step-ab: a step id is exact",
+               "allow", role_path("stepdup-create-near"), STEP_CREATE_TAGS)
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when the live carrier is in another cs-repo",
+               "allow", role_path("stepdup-create-other-repo"), STEP_CREATE_TAGS)
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when a two-page chain holds no live session on it",
+               "allow", role_path("stepdup-create-chain-empty"), STEP_CREATE_TAGS)
+
+# Refused: an earlier create_session for the step started STEPDUP_MADE, which no list read shows. The whole read before it
+# holds no carrier, so only the create's own result makes the session live. The refusal names it.
+stepdup_create("a second create_session tagged cs-step:dup-step-a is refused while the session an earlier create started carries the step, and names it",
+               "deny", role_path("stepdup-chain-made"), STEP_CREATE_TAGS, carries=STEPDUP_MADE)
+# Refused: the same carrier holds the step against a lane brief sent to another lane on the topic.
+stepdup_send("a lane brief for dup-step-a is refused while the session an earlier create started carries the step, and names it",
+             "deny", role_path("stepdup-chain-made-send"), STEPDUP_BRIEF, carries=STEPDUP_MADE)
+
+# Allowed: the first create of a chain, after a full page with no carrier. No create precedes it.
+stepdup_create("the first create_session tagged cs-step:dup-step-a is allowed after a full page of forty with no carrier",
+               "allow", role_path("stepdup-chain-first"), STEP_CREATE_TAGS)
+# Allowed: the earlier create named no session, because its result is an error. It started no live session.
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when the earlier create for the step failed and named no session",
+               "allow", role_path("stepdup-chain-failed"), STEP_CREATE_TAGS)
+# Allowed: the session the earlier create started was archived afterwards, so it is no live carrier.
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when the session an earlier create started was archived",
+               "allow", role_path("stepdup-chain-archived"), STEP_CREATE_TAGS)
+# Allowed: the session the earlier create started carries dup-step-a, not dup-step-c, so a create for dup-step-c is not held.
+stepdup_create("a create_session tagged cs-step:dup-step-c is allowed when the session an earlier create started carries only dup-step-a",
+               "allow", role_path("stepdup-chain-made"), ["cs-build:lane", "cs-step:dup-step-c", "cs-repo:o/r"])
+
+# Allowed: an errored create names no session, even when its text holds a session_ word, so a retry of the step is not
+# held by a session that was never started.
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when an earlier create failed with session_limit and named no session",
+               "allow", role_path("stepdup-error-session-limit"), STEP_CREATE_TAGS)
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when an earlier create failed with an invalid parent_session_id and named no session",
+               "allow", role_path("stepdup-error-bad-parent"), STEP_CREATE_TAGS)
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when an earlier create failed with a null session_id and named no session",
+               "allow", role_path("stepdup-error-null-id"), STEP_CREATE_TAGS)
+# Refused: a successful create names its session in each shape its result takes, and the retry names that session.
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused when an earlier create returned an id, and names that session",
+               "deny", role_path("stepdup-ok-id"), STEP_CREATE_TAGS, carries="session_OK01")
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused when an earlier create returned a created-session line, and names that session",
+               "deny", role_path("stepdup-ok-plain"), STEP_CREATE_TAGS, carries="session_OK02")
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused when an earlier create returned a session_id, and names that session",
+               "deny", role_path("stepdup-ok-session-id"), STEP_CREATE_TAGS, carries="session_OK03")
+# Refused: a successful create whose result nests its id under ccr, and the retry names that session. The id is read
+# from the ccr object under either key, as a get_session record holds it.
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused when an earlier create's result nests its id under ccr, and names that session",
+               "deny", role_path("stepdup-nest-id"), STEP_CREATE_TAGS, carries="session_NEST01")
+stepdup_create("a create_session tagged cs-step:dup-step-a is refused when an earlier create's result nests its session_id under ccr, and names that session",
+               "deny", role_path("stepdup-nest-session-id"), STEP_CREATE_TAGS, carries="session_NEST02")
+stepdup_send("a lane brief for dup-step-a is refused when an earlier create's result nests its id under ccr, and names that session",
+             "deny", role_path("stepdup-nest-send"), STEPDUP_BRIEF, carries="session_NEST01")
+# Allowed: a nested id that is null names no session, so the retry of the step is not held.
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when an earlier create's result nests a null id under ccr",
+               "allow", role_path("stepdup-nest-null"), STEP_CREATE_TAGS)
+# Allowed: an errored create names no session, nested or not.
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when an earlier create failed and its result nests an id under ccr",
+               "allow", role_path("stepdup-nest-error"), STEP_CREATE_TAGS)
+# Allowed: an errored create whose result is an object with a flat id names no session, so the retry of the step passes.
+# The guard reads no id from an errored result, whatever its shape.
+stepdup_create("a create_session tagged cs-step:dup-step-a is allowed when an earlier create failed and its result is an object with an id",
+               "allow", role_path("stepdup-error-flat-id"), STEP_CREATE_TAGS)
+
+# Refused, pinned as it is now: a brief to a triage target with no whole list read is refused as unproved. The target is
+# no lane, so lane-one-topic passes the brief, and this rule alone judges it.
+stepdup_send("a lane brief for dup-step-a to a cs-build:triage target is refused with no whole list_sessions read, as unproved",
+             "deny", role_path("step-triage"), STEPDUP_BRIEF, target=ROLE_OTHER, carries="does not prove")
+# Allowed, pinned as it is now: the same brief to the same triage target passes once a whole read shows no carrier.
+stepdup_send("a lane brief for dup-step-a to a cs-build:triage target is allowed with a whole list_sessions read that shows no carrier",
+             "allow", role_path("step-triage-listed"), STEPDUP_BRIEF, target=ROLE_OTHER)
