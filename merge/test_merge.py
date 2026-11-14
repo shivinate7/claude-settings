@@ -18728,6 +18728,89 @@ class TouchesRead(Env):
         for kind in ("pull list", "pulls/N/files", "jobs read", "log read"):
             self.assertIn(kind, entry, f"the `merge --touches` entry of merge.py's docstring does not name the {kind} read")
 
+
+LOCAL_SID = "local-tier-check-session"  # what a local Bash call carries in CLAUDE_CODE_SESSION_ID
+LOCAL_OTHER = "local-tier-other-session"
+
+
+class LocalSessionTierCheck(CloudSession):
+    """A local session's `merge <pr> --confirm` reads the role the launcher wrote for it: <config dir>/state/session-roles/<session id>.json,
+    {"session", "role", "repo"}. The id is the one a local Bash call carries in CLAUDE_CODE_SESSION_ID, and the cloud remote id is unset.
+    The gate passes only a batch-runner file whose session and that id are both present and equal (lane local-tier-file). run_main is
+    overridden to run as a local session, so the CloudSession assertions (no host read, no lock, no push on a refusal) apply unchanged.
+    The red cases refuse on the old code too: the old local confirm reads the host whatever file is present, so no refusal assert is a control."""
+
+    def run_main(self, *argv, **env):
+        """-> (rc, stdout, stderr) of merge.main in a local session: the cloud variables unset, CLAUDE_CODE_SESSION_ID as this case names
+        (default LOCAL_SID; None unsets it), and this case's config dir."""
+        values = {"CLAUDE_CODE_REMOTE": None, "CLAUDE_CODE_REMOTE_SESSION_ID": None, "CLAUDE_CODE_SESSION_ID": LOCAL_SID,
+                  "CLAUDE_CONFIG_DIR": self.cfg, **env}
+        out, err = io.StringIO(), io.StringIO()
+        with unittest.mock.patch.dict(os.environ):
+            for name, value in values.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+            try:
+                rc = self.run_merge(*argv, stdout=out, stderr=err)[0]
+            except SystemExit as e:
+                rc = e.code
+        return rc, out.getvalue(), err.getvalue()
+
+    def put_local_role(self, role, session=LOCAL_SID, name=LOCAL_SID):
+        """The launcher's role file for this session: `session` is the id inside, `name` the id the file is named for."""
+        put(os.path.join(self.cfg, "state", "session-roles", name + ".json"),
+            json.dumps({"session": session, "role": role, "repo": "o/r"}))
+
+    # The refusal and reach assertions have one home, MergeRoleCheck. They call run_main, which this class overrides.
+    assert_refused = MergeRoleCheck.assert_refused
+    assert_reaches_host = MergeRoleCheck.assert_reaches_host
+
+    # RED: the old local confirm reads no role file, so a triage file does not refuse it.
+    def test_a_triage_file_refuses_a_local_confirm(self):
+        self.put_local_role("triage")
+        self.assert_refused()
+
+    # RED: the old local confirm reads no role file, so a coordinator file does not refuse it.
+    def test_a_coordinator_file_refuses_a_local_confirm(self):
+        self.put_local_role("coordinator")
+        self.assert_refused()
+
+    # RED: the old local confirm reads no role file, so a file for another session does not refuse it.
+    def test_a_file_that_names_another_session_refuses_a_local_confirm(self):
+        self.put_local_role("batch-runner", session=LOCAL_OTHER)
+        self.assert_refused()
+
+    # RED: the old local confirm reads no role file, so unequal ids do not refuse a batch-runner file.
+    def test_unequal_ids_refuse_a_local_confirm_with_a_batch_runner_file(self):
+        self.put_local_role("batch-runner")
+        self.assert_refused(CLAUDE_CODE_SESSION_ID=LOCAL_OTHER)
+
+    # RED: the old local confirm reads no role file, so an absent id does not refuse a batch-runner file.
+    def test_an_absent_id_refuses_a_local_confirm_with_a_batch_runner_file(self):
+        self.put_local_role("batch-runner")
+        self.assert_refused(CLAUDE_CODE_SESSION_ID=None)
+
+    # RED: the old local confirm reads no role file, so a malformed file does not refuse it.
+    def test_a_malformed_file_refuses_a_local_confirm(self):
+        put(os.path.join(self.cfg, "state", "session-roles", LOCAL_SID + ".json"), '{"session": ')
+        self.assert_refused()
+
+    # CONTROL, green on the old code: a batch-runner file with both ids present and equal passes the gate and reads the host.
+    def test_a_batch_runner_file_with_equal_ids_passes_the_gate(self):
+        self.put_local_role("batch-runner")
+        self.assert_reaches_host("7", "--confirm", "--head", self.head())
+
+    # CONTROL, green on the old code: with no file, a local confirm keeps today's behaviour and reads the host.
+    def test_no_file_keeps_the_local_confirm_as_it_is(self):
+        self.assert_reaches_host("7", "--confirm", "--head", self.head())
+
+    # CONTROL, green on the old code: no file and no id keeps today's local confirm as it is.
+    def test_no_file_and_no_id_keeps_the_local_confirm_as_it_is(self):
+        self.assert_reaches_host("7", "--confirm", CLAUDE_CODE_SESSION_ID=None)
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
         # A run that holds the lock in its merge call for a minute, for a signal to reach. It prints READY once it holds the lock.
