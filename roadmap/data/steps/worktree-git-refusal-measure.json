@@ -1,0 +1,14 @@
+{
+ "id": "worktree-git-refusal-measure",
+ "title": "Measure the worktree git-complexity refusal against real catches and narrow it if it cries wolf",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane reinstall-from-stable-allow (session_013NEJL3YNCiqjptXwDXqVrt), relayed by the coordinator 22:21 CST Nov 13; unchecked by triage.",
+ "source": "Consultant 22:23 CST Nov 13 (picks from the reinstall lane's nine points, relayed by the coordinator 22:21; the lane's counts are its own and unmeasured).",
+ "note": "Triage 22:24 CST Nov 13: The \"too complex to verify\" refusal hit every compound git line (&&, ;, heredoc): about 4 refusals and 10 split calls on one lane, a possible false alarm (rule verification-cry-wolf-guard-is-spent). Count refusals vs real catches; narrow, or make the remedy say one git command per call, message via a file. Related steps, unchecked: worktree-guard-bg-false-alarm (done), worktree-add-refused-false-alarm (folded). Needs a past-ruling and guard-record read before any build.",
+ "updatedAt": "2026-11-13T22:24:18-06:00"
+}

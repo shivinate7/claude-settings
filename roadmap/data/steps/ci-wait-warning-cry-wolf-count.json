@@ -1,0 +1,16 @@
+{
+ "id": "ci-wait-warning-cry-wolf-count",
+ "title": "Count how often the CI-wait warning fires when no one waits, after it ships",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "ci-wait-subscribes-first"
+ ],
+ "why": "Owner waived the pre-ship count at 22:24 CST Nov 13 (ruling own-cry-wolf-gate-waived); the count was the step's own ship gate.",
+ "source": "Ruling own-cry-wolf-gate-waived; lane ci-wait-subscribes-first, PR #3346.",
+ "note": "Triage 22:25 CST Nov 13: after #3346 merges, count ready marks that warned versus ready marks in sessions that merge without waiting, and test whether a PreToolUse warning reaches the model. Cost: one read of a few sessions' transcripts, once. Done check: the counts and the reach test written into decision ci-wait-subscribes-first. Not started; the coordinator assigns it after the merge.",
+ "updatedAt": "2026-11-13T22:25:52-06:00"
+}

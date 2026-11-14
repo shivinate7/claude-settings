@@ -1,0 +1,10 @@
+{
+  "id": "own-800-stylisms-two-keeps",
+  "at": "2026-11-13T22:25:52-06:00",
+  "title": "Reply-style rules table: two verdicts overturned, the rest read as signed",
+  "ruling": "Owner, saved on the waiting page 22:24 CST Nov 13, item 800, \"none of these\" with a note. (1) Keep style-offer-screen-takeover, not drop: \"i always prefer claude to do everything that it can for me, for me, i wanna always be lazy\". (2) Disagrees with moving style-press-has-link to the waiting-page skill: \"the guard stays too, i prefer links/images in line where possible\"; read as: it stays in the style file with its guard. He named no objection to the other six changes (style-plain-words, style-question-form, style-question-inside-box, style-hand-off-cleanup, style-hand-off-one-shell, style-command-in-item). Triage reading, unchecked and not an owner word: those six are signed. The file would go from 29 to 25 rules (two merges, one fold, one move out, none dropped). The lane applies them as a draft edit he can read; he can reverse any on PR #3340 or in a new note.",
+  "quote": "dont drop that - i always prefer claude to do everything that it can for me , for me, i wanna always be lazy | i disagree on: CHANGE style-press-has-link: move to the waiting-page skill; the guard stays too, i prefer links/images in line where possible",
+  "source": "Owner page answer 22:24 CST Nov 13, read by triage in the answers store; filed by triage.",
+  "status": "open",
+  "step": "stylisms-rules-table"
+}

@@ -1,0 +1,14 @@
+{
+ "id": "role-model-remedy-says-it-sets-model",
+ "title": "The agent-role-model remedy says plainly that `Guard or check: yes` sets the round 1 reviewer model",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane reinstall-from-stable-allow (session_013NEJL3YNCiqjptXwDXqVrt), relayed by the coordinator 22:21 CST Nov 13; unchecked by triage.",
+ "source": "Consultant 22:23 CST Nov 13 (picks from the reinstall lane's nine points, relayed by the coordinator 22:21; the lane's counts are its own and unmeasured).",
+ "note": "Triage 22:24 CST Nov 13: The guard refused a round 1 reviewer on Sonnet; the remedy marker does not say it also sets the model. Fix: one plain sentence in the remedy. Stops: a refusal the session cannot read. Needs a past-ruling and guard-record read before any build.",
+ "updatedAt": "2026-11-13T22:24:18-06:00"
+}

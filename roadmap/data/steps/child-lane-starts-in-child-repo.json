@@ -1,0 +1,14 @@
+{
+ "id": "child-lane-starts-in-child-repo",
+ "title": "A lane for a child repo starts inside that repo",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane reinstall-from-stable-allow (session_013NEJL3YNCiqjptXwDXqVrt), relayed by the coordinator 22:21 CST Nov 13; unchecked by triage.",
+ "source": "Consultant 22:23 CST Nov 13 (picks from the reinstall lane's nine points, relayed by the coordinator 22:21; the lane's counts are its own and unmeasured).",
+ "note": "Triage 22:24 CST Nov 13: The worktree-home guard blocks a claude-settings session's subagents from working in q_max, so lane child-ci-q-max started a build session inside q_max (session_013NEJL3rPfu39idPdvdNpao). Fix: decision session-tiers or the brief template says to start a child-repo lane in that repo. Stops: a lane that cannot reach its repo. Needs a past-ruling and guard-record read before any build.",
+ "updatedAt": "2026-11-13T22:24:18-06:00"
+}

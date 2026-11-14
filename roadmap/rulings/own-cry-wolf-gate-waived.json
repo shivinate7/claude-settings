@@ -1,0 +1,10 @@
+{
+  "id": "own-cry-wolf-gate-waived",
+  "at": "2026-11-13T22:25:52-06:00",
+  "title": "The CI-wait warning ships now; its cry-wolf count follows",
+  "ruling": "Owner, saved on the waiting page 22:24 CST Nov 13, item 804, pick a: ship the CI-wait warning (PR #3346, step ci-wait-subscribes-first) now and measure its false-alarm rate after. This waives the step's own ship gate (the cry-wolf count before shipping) for this PR only; a grant covers the act it names. The measurement still happens: step ci-wait-warning-cry-wolf-count. Whether a PreToolUse warning reaches the model at all is unmeasured too.",
+  "quote": "A: Ship now, measure the false-alarm rate after (recommended by the lane)",
+  "source": "Owner page answer 22:24 CST Nov 13, read by triage in the answers store; filed by triage.",
+  "status": "open",
+  "step": "ci-wait-subscribes-first"
+}
