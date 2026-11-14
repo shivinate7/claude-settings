@@ -8546,6 +8546,38 @@ class RecordsEnv(Env):
         with open(self.calls) as f:
             return sum(1 for _ in f)
 
+    def tool_page(self, parent, changes=None, hand="", rebuild=True):
+        """-> the sha of the commit the merge tool writes for a records-page rebuild on `parent`. The tool's own rebuild and commit run in a worktree
+        of this run's folder. `changes` are written before the rebuild, so they join the commit. `hand` is text added to the page after the rebuild.
+        `rebuild=False` makes a page the tool did not write: the page is `hand` alone, or removed when `hand` is None."""
+        wt = os.path.join(self.t, "page-wt")
+        sh(self.co, "git", "worktree", "add", "-q", "--detach", wt, parent)
+        try:
+            page_path = os.path.join(wt, *merge.RECORDS_PAGE.split("/"))
+            for path, text in (changes or {}).items():
+                put_lf(os.path.join(wt, *path.split("/")), text)
+            if rebuild:
+                merge.rebuild_records(wt)
+                if hand:
+                    with open(page_path, "a", newline="\n") as f:
+                        f.write(hand)
+            elif hand is None:
+                os.remove(page_path)
+            else:
+                put_lf(page_path, hand)
+            return merge.commit_claim(wt, None)
+        finally:
+            sh(self.co, "git", "worktree", "remove", "--force", wt)
+
+    def assert_page_scope(self, sha, parent, files=None):
+        """Scope before subject (P7): the walk from `parent` to `sha` is `sha` alone, `sha` has one parent, its subject is PAGE_SUBJECT, and the
+        files it changes are `files` (the records page by default)."""
+        self.assertEqual(sh(self.co, "git", "rev-list", f"{parent}..{sha}").split(), [sha], "fixture: the walk from the parent to the page commit is not that commit alone")
+        self.assertEqual(sh(self.co, "git", "rev-list", "--parents", "-n", "1", sha).split()[1:], [parent], "fixture: the page commit does not have one parent")
+        self.assertEqual(sh(self.co, "git", "log", "-1", "--format=%s", sha), merge.PAGE_SUBJECT, "fixture: the page commit's subject is not PAGE_SUBJECT")
+        changed = sh(self.co, "git", "diff-tree", "--no-commit-id", "--name-only", "-r", sha).split()
+        self.assertEqual(sorted(changed), sorted(files or [merge.RECORDS_PAGE]), "fixture: the page commit changes other files than it should")
+
     def kinds_off(self):
         """The base holds claude-settings' own config: no stamp kinds, so no claim."""
         self.on("main", {".github/stamp.json": json.dumps(dict(CONFIG, kinds=[]))}, "no stamp kinds")
@@ -16817,11 +16849,12 @@ PR_TEMPLATE, PR_TEMPLATE_FORM = ".github/pull_request_template.md", ".github/PUL
 # (decision agent-model-cap). Built from the layout and the guard's file name, so a moved record changes this path, never a copy of it.
 MODEL_RECORD = "/".join((layout.path(os.path.dirname(HERE), "decisions"), hook_guard.ROLE_TABLE_FILE))
 
-class ClaimOnlyReviewed(ReviewEnv):
+class ClaimOnlyReviewed(ReviewEnv, RecordsEnv):
     """`merge --reviewed` reads a one-parent claim commit as the head it stacks on: the record done at the reviewed head survives the claim, and the
     lane-lint PASS on the reviewed head carries to the claim head (claim_only, the rule lint_check already uses). A claim-shaped commit that
     writes a code file carries neither, so the control reads not done. A records-page commit (page_only: one parent, the subject PAGE_SUBJECT,
-    the records page alone) carries both the same way; a commit that breaks one of those rules carries neither."""
+    the records page alone) carries both the same way when the generator wrote its page. A hand-written page carries neither, on the claims route
+    or off it; a commit that breaks one of those rules carries neither."""
 
     def claim_host(self, fx, claim, record_head, lint_head):
         """The host of `merge --reviewed` for pull request 7 at `claim`: its one record for `record_head`, and a lane-lint PASS on `lint_head`."""
@@ -16878,8 +16911,10 @@ class ClaimOnlyReviewed(ReviewEnv):
         # Catches: the clean-merge walk refusing a records-page commit, so the record done at the reviewed head reads stale on the page head.
         fx = self.real_commits()
         self.base_tip(fx.main2)
-        page = self.page_over(fx.fixed)
+        self.use_fake_records()
+        page = self.tool_page(fx.fixed)
         self.facts(fx, [page])
+        self.assert_page_scope(page, fx.fixed)
         self.reviewed_line(self.claim_host(fx, page, record_head=fx.fixed, lint_head=page), page, "done",
                            "a records-page head reads stale for a record done at the reviewed head")
 
@@ -16887,18 +16922,26 @@ class ClaimOnlyReviewed(ReviewEnv):
         # Catches: lint_check's carry (claim_only) refusing a records-page commit, so the PASS on the reviewed head reads as no lint at the page head.
         fx = self.real_commits()
         self.base_tip(fx.main2)
-        page = self.page_over(fx.fixed)
+        self.use_fake_records()
+        page = self.tool_page(fx.fixed)
         self.facts(fx, [page])
+        self.assert_page_scope(page, fx.fixed)
         self.reviewed_line(self.claim_host(fx, page, record_head=page, lint_head=fx.fixed), page, "done",
                            "a lint PASS on the reviewed head does not carry to a records-page head")
 
     def test_o_two_records_page_commits_stacked_carry_the_record_and_the_lint_of_the_reviewed_head(self):
         # Catches: the walk and the carry stopping at the first records-page commit, so the second one breaks a chain the first one kept.
+        # Two page commits cannot sit side by side with different pages: a page commit changes the page alone, and the page is what the generator
+        # writes for the tree. So a claim that leaves the page stale sits between them, as a claim does when the page goes stale.
         fx = self.real_commits()
         self.base_tip(fx.main2)
-        first = self.page_over(fx.fixed)
-        second = self.page_over(first, {merge.RECORDS_PAGE: "records page, rebuilt again\n"})
-        self.facts(fx, [first, second])
+        self.use_fake_records()
+        first = self.tool_page(fx.fixed)
+        stale = self.claim_over(first, {merge.RECORDS_PAGE: "records page, stale\n", "docs/decisions/second.md": record("D-002", "second")})
+        second = self.tool_page(stale)
+        self.facts(fx, [first, stale, second])
+        self.assert_page_scope(first, fx.fixed)
+        self.assert_page_scope(second, stale)
         self.reviewed_line(self.claim_host(fx, second, record_head=fx.fixed, lint_head=fx.fixed), second, "done",
                            "two records-page commits on the reviewed head break the record or the lint carry")
 
@@ -16906,9 +16949,11 @@ class ClaimOnlyReviewed(ReviewEnv):
         # Catches: a records-page commit after a claim commit breaking the chain the claim alone keeps (test_j, test_k), or the page's walk stopping there.
         fx = self.real_commits()
         self.base_tip(fx.main2)
+        self.use_fake_records()
         claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
-        page = self.page_over(claim)
+        page = self.tool_page(claim)
         self.facts(fx, [claim, page])
+        self.assert_page_scope(page, claim)
         self.reviewed_line(self.claim_host(fx, page, record_head=fx.fixed, lint_head=fx.fixed), page, "done",
                            "a records-page commit after a claim commit breaks the record or the lint carry")
 
@@ -16944,6 +16989,17 @@ class ClaimOnlyReviewed(ReviewEnv):
         self.facts(fx, [page])
         self.assert_page_not_carried(fx, page, "a records-page commit on a parent that is not the reviewed head's chain")
 
+    def test_u_a_hand_written_records_page_reached_through_the_claims_route_carries_neither_the_record_nor_the_lint(self):
+        # Catches: claim_only accepting any records-page commit, so a page the generator did not write carries the record and the lint of the reviewed
+        # head on the claims route (clean_merges_after and lint_carried both call claim_only before the generator proof).
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        self.use_fake_records()
+        page = self.page_over(fx.fixed)
+        self.facts(fx, [page])
+        self.assert_page_scope(page, fx.fixed)
+        self.assert_page_not_carried(fx, page, "a hand-written records page reached through the claims route")
+
 class PageOnlyRecordCarry(ReviewEnv, RecordsEnv):
     """A records-page commit the merge tool wrote carries a review record the way a claim commit does. The tool's page commit has one parent, the
     subject PAGE_SUBJECT, and the records page alone changed, and its page is what the generator writes for its tree. The generator is FAKE_RECORDS
@@ -16953,29 +17009,6 @@ class PageOnlyRecordCarry(ReviewEnv, RecordsEnv):
     def setUp(self):
         super().setUp()
         self.use_fake_records()
-
-    def tool_page(self, parent, changes=None, hand="", rebuild=True):
-        """-> the sha of the commit the merge tool writes for a records-page rebuild on `parent`. The tool's own rebuild and commit run in a worktree
-        of this run's folder. `changes` are written before the rebuild, so they join the commit. `hand` is text added to the page after the rebuild.
-        `rebuild=False` makes a page the tool did not write: the page is `hand` alone, or removed when `hand` is None."""
-        wt = os.path.join(self.t, "page-wt")
-        sh(self.co, "git", "worktree", "add", "-q", "--detach", wt, parent)
-        try:
-            page_path = os.path.join(wt, *merge.RECORDS_PAGE.split("/"))
-            for path, text in (changes or {}).items():
-                put_lf(os.path.join(wt, *path.split("/")), text)
-            if rebuild:
-                merge.rebuild_records(wt)
-                if hand:
-                    with open(page_path, "a", newline="\n") as f:
-                        f.write(hand)
-            elif hand is None:
-                os.remove(page_path)
-            else:
-                put_lf(page_path, hand)
-            return merge.commit_claim(wt, None)
-        finally:
-            sh(self.co, "git", "worktree", "remove", "--force", wt)
 
     def debts(self, n):
         """-> {path: text} for n debt files. The fake generator lists each one by its name, so the page lists n lines in order."""
@@ -16991,15 +17024,6 @@ class PageOnlyRecordCarry(ReviewEnv, RecordsEnv):
         m = re.match(r"#7 \S+ \S+ (\w+): ", line)
         self.assertIsNotNone(m, "not a state line: " + line)
         return m.group(1)
-
-    def assert_page_scope(self, sha, parent, files=None):
-        """Scope before subject (P7): the walk from `parent` to `sha` is `sha` alone, `sha` has one parent, its subject is PAGE_SUBJECT, and the
-        files it changes are `files` (the records page by default)."""
-        self.assertEqual(sh(self.co, "git", "rev-list", f"{parent}..{sha}").split(), [sha], "fixture: the walk from the parent to the page commit is not that commit alone")
-        self.assertEqual(sh(self.co, "git", "rev-list", "--parents", "-n", "1", sha).split()[1:], [parent], "fixture: the page commit does not have one parent")
-        self.assertEqual(sh(self.co, "git", "log", "-1", "--format=%s", sha), merge.PAGE_SUBJECT, "fixture: the page commit's subject is not PAGE_SUBJECT")
-        changed = sh(self.co, "git", "diff-tree", "--no-commit-id", "--name-only", "-r", sha).split()
-        self.assertEqual(sorted(changed), sorted(files or [merge.RECORDS_PAGE]), "fixture: the page commit changes other files than it should")
 
     def test_a_generated_page_on_the_reviewed_head_carries_the_record(self):
         fx = self.real_commits()
