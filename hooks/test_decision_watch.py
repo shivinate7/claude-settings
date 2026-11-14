@@ -12,26 +12,29 @@ case spawns a real `claude` subprocess; one case asserts it is never even called
 """
 import contextlib
 import importlib.util
+import atexit
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
 MODULE_PATH = os.environ.get("DECISION_WATCH_UNDER_TEST") or os.path.join(HERE, "decision_watch.py")
 
 _spec = importlib.util.spec_from_file_location("decision_watch_under_test", MODULE_PATH)
 dw = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(dw)
 
-ROOT = tempfile.mkdtemp(prefix="decision_watch_cases_")
+ROOT = _test_temp.run_folder()  # one run folder per test run, under the one temp root
+atexit.register(shutil.rmtree, ROOT, True)  # test-temp-standard: teardown removes the run folder
 FAILED = []
 SKIPPED = []  # cases that cannot run on this platform: printed as SKIP, counted, never a PASS
 
@@ -1398,14 +1401,15 @@ def run_case(case):
         check("%s: raised" % case.__name__, False, "%s: %s" % (type(exc).__name__, exc))
 
 
-def _judged_hook(name):
+def _judged_hook(name, session_id=None):
     """A protected CLAUDE.md edit with no approval in chat, so run() reaches the model call."""
     repo = make_repo(name)
     write(os.path.join(repo, "CLAUDE.md"), "# Rules\n\nAlways X.\n")
     commit_all(repo)
     write(os.path.join(repo, "CLAUDE.md"), "# Rules\n\nAlways Y.\n")
     records = [human_record("edit claude.md", T0), assistant_record(text="Done.")]
-    return {"transcript_path": write_transcript(repo, records), "cwd": repo, "session_id": "sess-" + name}
+    return {"transcript_path": write_transcript(repo, records), "cwd": repo,
+            "session_id": session_id or "sess-" + name}
 
 
 def _main_in_process(hook, argv):
@@ -1976,6 +1980,260 @@ def case_unread_zone_less_line_reads_as_local_under_cst():
                           local_turn="2026-11-01T12:00:00-06:00")
 
 
+# --------------------------------------------------------------------------- fallback
+# When the transcript path the hook is given is missing or does not exist, decision watch finds
+# the transcript by session id (decision decision-watch-finds-transcript). Each red case gives a
+# path that fails on this host, files the real transcript where the app names it, and asserts the
+# turn is still judged: the model is asked and its FLAG shows. The control case gives the real
+# path and passes on old code. Old code reads a failed path as UNKNOWN and never looks, so each
+# red case fails on the missing judgment, never on a crash.
+
+FALLBACK_VERDICT = {"verdict": "FLAG", "why": "reversed silently"}
+STAND_IN_FILED_FOLDER = "app-folder-after-truncation"  # stands in for the app's name for a long cwd
+
+
+def _app_folder(cwd):
+    """A project folder name for a cwd, folded per code point: each character outside A-Za-z0-9 becomes "-".
+    The repo does not record the app's rule. For a character outside the Basic Multilingual Plane the mod
+    folds per UTF-16 unit instead, and find_transcript (_cwd_folders) accepts either fold."""
+    return re.sub(r"[^A-Za-z0-9]", "-", cwd)
+
+
+def _app_transcript(cfg, hook, folder=None):
+    """Where the app names a session's transcript: <cfg>/projects/<folder>/<session id>.jsonl."""
+    return os.path.join(cfg, "projects", folder or _app_folder(hook["cwd"]), hook["session_id"] + ".jsonl")
+
+
+@contextlib.contextmanager
+def _env(**values):
+    """Set environment values for one block. A None value unsets its key. The prior values come back."""
+    prior = {key: os.environ.get(key) for key in values}
+    try:
+        for key, value in values.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        yield
+    finally:
+        for key, value in prior.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _one_config(cfg):
+    return {"CLAUDE_CONFIG_DIR": cfg, "DW_REAL_CONFIG_DIR": None}
+
+
+def _filed_hook(key, repo_name=None, folder=None, session_id=None):
+    """A protected edit with no approval, and its real transcript copied to where the app names it,
+    under <ROOT>/cfgs/<key>. Returns (hook, cfg, filed)."""
+    hook = _judged_hook(repo_name or key, session_id=session_id)
+    cfg = os.path.join(ROOT, "cfgs", key)
+    filed = _app_transcript(cfg, hook, folder)
+    os.makedirs(os.path.dirname(filed), exist_ok=True)
+    shutil.copyfile(hook["transcript_path"], filed)
+    check("%s: the real transcript is filed under its session id" % key, os.path.exists(filed), filed)
+    return hook, cfg, filed
+
+
+def _judge_given(key, hook, given, env):
+    """Run the hook once with `given` as its transcript path, under `env`. Returns (message, spy).
+    The given path must fail on this host first, or the case tests nothing."""
+    check("%s: the given path fails on this host" % key, not os.path.exists(given), given)
+    spy = stub(FALLBACK_VERDICT)
+    with _env(**env):
+        message = dw.run(dict(hook, transcript_path=given), model_call=spy)
+    return message, spy
+
+
+def _check_judged(key, message, spy):
+    check("%s: the turn is judged, the model is asked and its FLAG shows" % key,
+          spy.calls == 1 and message.startswith(dw.FLAG_PREFIX),
+          "model calls %d, message %r" % (spy.calls, message))
+
+
+def case_fallback_backslash_path():
+    key = "fallback_backslash"
+    hook, cfg, filed = _filed_hook(key)
+    message, spy = _judge_given(key, hook, filed.replace("/", "\\"), _one_config(cfg))
+    _check_judged(key, message, spy)
+
+
+def case_fallback_drive_letter_path():
+    key = "fallback_drive_letter"
+    hook, cfg, filed = _filed_hook(key)
+    message, spy = _judge_given(key, hook, "C:" + filed, _one_config(cfg))
+    _check_judged(key, message, spy)
+
+
+def case_fallback_tilde_path():
+    key = "fallback_tilde"
+    hook, cfg, filed = _filed_hook(key)
+    given = "~/.claude/" + os.path.relpath(filed, cfg).replace(os.sep, "/")
+    message, spy = _judge_given(key, hook, given, _one_config(cfg))
+    _check_judged(key, message, spy)
+
+
+def case_fallback_git_bash_path():
+    key = "fallback_git_bash"
+    hook, cfg, filed = _filed_hook(key)
+    message, spy = _judge_given(key, hook, "/c" + filed, _one_config(cfg))
+    _check_judged(key, message, spy)
+
+
+def case_fallback_second_config_dir():
+    key = "fallback_second_config"
+    hook, real_cfg, filed = _filed_hook(key)
+    first_cfg = os.path.join(ROOT, "cfgs", key + "-first")
+    os.makedirs(first_cfg, exist_ok=True)  # empty: the config dir the hook runs under holds no transcript
+    env = {"CLAUDE_CONFIG_DIR": first_cfg, "DW_REAL_CONFIG_DIR": real_cfg}
+    message, spy = _judge_given(key, hook, _app_transcript(first_cfg, hook), env)
+    _check_judged(key, message, spy)
+
+
+def case_fallback_long_folder_name():
+    key = "fallback_long_folder"
+    hook, cfg, filed = _filed_hook(key, repo_name="fallback_long_" + "f" * 240,
+                                   folder=STAND_IN_FILED_FOLDER, session_id="long-session-1")
+    folder = _app_folder(hook["cwd"])
+    check("%s: the app's folder name for this cwd is over 255 bytes" % key,
+          len(os.fsencode(folder)) > 255, folder)
+    message, spy = _judge_given(key, hook, _app_transcript(cfg, hook), _one_config(cfg))
+    _check_judged(key, message, spy)
+
+
+def case_fallback_control_real_path_is_judged():
+    # Control: the real path exists, so no fallback runs. Passes on old code; it shows the
+    # fixture reaches the model when a path is found, so the red cases fail on the lookup alone.
+    key = "fallback_control"
+    hook, cfg, filed = _filed_hook(key)
+    spy = stub(FALLBACK_VERDICT)
+    with _env(**_one_config(cfg)):
+        message = dw.run(dict(hook, transcript_path=filed), model_call=spy)
+    _check_judged(key, message, spy)
+
+
+# --------------------------------------------------------------------------- fallback: the failed-path UNKNOWN
+# When no transcript is found after the session-id fallback, the UNKNOWN names the path it tried, and it shows once
+# per session (decision decision-watch-finds-transcript). Each case fails the given path and files no transcript under
+# the session id. Old code reads the failed path as an UNKNOWN that names no path, and never marks it.
+
+def _unfound_hook(key):
+    """A protected edit whose given path is missing, under the config dir <ROOT>/cfgs/<key>. The session id has no
+    transcript filed under that config dir. Returns (hook, cfg, given)."""
+    hook = _judged_hook(key)
+    cfg = os.path.join(ROOT, "cfgs", key)
+    given = os.path.join(cfg, "elsewhere", "transcript.jsonl")
+    return hook, cfg, given
+
+
+def case_fallback_unknown_names_the_path_tried():
+    key = "fallback_unknown_names_path"
+    hook, cfg, given = _unfound_hook(key)
+    filed = _app_transcript(cfg, hook)
+    check("%s: no transcript is filed under this session id" % key, not os.path.exists(filed), filed)
+    # A near miss in the same folder: another session's transcript. The fallback must not judge it.
+    decoy = _app_transcript(cfg, dict(hook, session_id="other-session"))
+    os.makedirs(os.path.dirname(decoy), exist_ok=True)
+    shutil.copyfile(hook["transcript_path"], decoy)
+    message, spy = _judge_given(key, hook, given, _one_config(cfg))
+    check("%s: another session's transcript is not judged" % key, spy.calls == 0,
+          "model calls %d, message %r" % (spy.calls, message))
+    check("%s: the UNKNOWN reads as UNKNOWN" % key, message.startswith(dw.UNKNOWN_PREFIX), message)
+    check("%s: the UNKNOWN names the path it tried" % key, given in message, message)
+
+
+def case_fallback_unknown_shows_once_per_session():
+    key = "fallback_unknown_once"
+    hook, cfg, given = _unfound_hook(key)
+    with _env(**_one_config(cfg)):
+        marks_before = dw._load_seen(hook["session_id"])
+    check("%s: the session has no seen mark before its first turn" % key, not marks_before, sorted(marks_before))
+    first, _ = _judge_given(key, hook, given, _one_config(cfg))
+    second, _ = _judge_given(key, hook, given, _one_config(cfg))
+    check("%s: the first turn shows the UNKNOWN" % key, first.startswith(dw.UNKNOWN_PREFIX), first)
+    check("%s: the second turn of the same session shows nothing" % key, second == "", second)
+    # Control: another session with the same failure is still told once.
+    other, _ = _judge_given(key + "-other-session", dict(hook, session_id="other-session"), given, _one_config(cfg))
+    check("%s: control: another session with the same failure shows the UNKNOWN" % key,
+          other.startswith(dw.UNKNOWN_PREFIX), other)
+
+
+def case_fallback_unknown_without_session_id_shows_every_time():
+    # Control: a session with no id has no seen store (_seen_store_path returns None), so the UNKNOWN is said on every
+    # turn. Passes on the unchanged build. The mod's own mark for an empty id is the red case in decision-watch.test.mjs.
+    key = "fallback_unknown_no_session_id"
+    hook, cfg, given = _unfound_hook(key)
+    hook = dict(hook)
+    hook.pop("session_id")
+    first, _ = _judge_given(key, hook, given, _one_config(cfg))
+    second, _ = _judge_given(key, hook, given, _one_config(cfg))
+    check("%s: the first turn shows the UNKNOWN" % key, first.startswith(dw.UNKNOWN_PREFIX), first)
+    check("%s: the second turn, with no session id, shows the UNKNOWN again" % key,
+          second.startswith(dw.UNKNOWN_PREFIX), second)
+
+
+# --------------------------------------------------------------------------- fallback: the explicit /dw
+# A /dw the owner asked for shows the failed-path UNKNOWN on every miss. The once-per-session mark exists for the
+# background judge, which runs unasked on every turn and would repeat the same line. The seam is the env var below:
+# the mod's /dw sets it to "1" on each script spawn, and run() reads it. The cases here need the marker; the control
+# does not.
+
+EXPLICIT_ENV = "DW_EXPLICIT"
+
+
+def _explicit_env(cfg):
+    return dict(_one_config(cfg), **{EXPLICIT_ENV: "1"})
+
+
+def case_explicit_dw_unknown_on_every_miss():
+    key = "explicit_every_miss"
+    hook, cfg, given = _unfound_hook(key)
+    first, _ = _judge_given(key, hook, given, _explicit_env(cfg))
+    second, _ = _judge_given(key, hook, given, _explicit_env(cfg))
+    check("%s: the first /dw shows the UNKNOWN" % key, first.startswith(dw.UNKNOWN_PREFIX), first)
+    check("%s: the first /dw names the path it tried" % key, given in first, first)
+    check("%s: the second /dw of the same session shows the UNKNOWN" % key,
+          second.startswith(dw.UNKNOWN_PREFIX), second)
+    check("%s: the second /dw names the path it tried" % key, given in second, second)
+
+
+def case_explicit_dw_after_background_unknown_still_shows():
+    key = "explicit_after_background"
+    hook, cfg, given = _unfound_hook(key)
+    background, _ = _judge_given(key, hook, given, _one_config(cfg))
+    check("%s: the background judge shows its UNKNOWN first" % key,
+          background.startswith(dw.UNKNOWN_PREFIX), background)
+    explicit, _ = _judge_given(key, hook, given, _explicit_env(cfg))
+    check("%s: the /dw after the background UNKNOWN still shows the UNKNOWN" % key,
+          explicit.startswith(dw.UNKNOWN_PREFIX), explicit)
+
+
+def case_explicit_dw_leaves_the_background_mark_alone():
+    key = "explicit_keeps_background_mark"
+    hook, cfg, given = _unfound_hook(key)
+    explicit, _ = _judge_given(key, hook, given, _explicit_env(cfg))
+    check("%s: the /dw shows the UNKNOWN" % key, explicit.startswith(dw.UNKNOWN_PREFIX), explicit)
+    background, _ = _judge_given(key, hook, given, _one_config(cfg))
+    check("%s: the background judge after the /dw still shows its UNKNOWN" % key,
+          background.startswith(dw.UNKNOWN_PREFIX), background)
+    again, _ = _judge_given(key, hook, given, _one_config(cfg))
+    check("%s: the next background turn is silent, once per session" % key, again == "", again)
+
+
+def case_explicit_dw_on_a_found_transcript_is_judged():
+    # Control: a transcript that is found is judged as today, with the explicit marker set. Passes on old code.
+    key = "explicit_found_control"
+    hook, cfg, filed = _filed_hook(key)
+    spy = stub(FALLBACK_VERDICT)
+    with _env(**_explicit_env(cfg)):
+        message = dw.run(dict(hook, transcript_path=filed), model_call=spy)
+    _check_judged(key, message, spy)
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -2048,6 +2306,20 @@ def main():
         case_unread_fallback_dst_forward_line_is_collected_under_utc,
         case_unread_fallback_dst_reverse_line_stays_out_under_utc,
         case_unread_zone_less_line_reads_as_local_under_cst,
+        case_fallback_backslash_path,
+        case_fallback_drive_letter_path,
+        case_fallback_tilde_path,
+        case_fallback_git_bash_path,
+        case_fallback_second_config_dir,
+        case_fallback_long_folder_name,
+        case_fallback_control_real_path_is_judged,
+        case_fallback_unknown_names_the_path_tried,
+        case_fallback_unknown_shows_once_per_session,
+        case_fallback_unknown_without_session_id_shows_every_time,
+        case_explicit_dw_unknown_on_every_miss,
+        case_explicit_dw_after_background_unknown_still_shows,
+        case_explicit_dw_leaves_the_background_mark_alone,
+        case_explicit_dw_on_a_found_transcript_is_judged,
     ):
         run_case(case)
 
