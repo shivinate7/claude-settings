@@ -87,9 +87,10 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
    the new run is the re-run. A lone lane is its own integration PR. A lane PR closes as replaced when
-   the integration PR that replaces it opens: its branch stays, and it reopens if the integration PR is
-   dropped. The merge tool closes it, at `--ready` and at the integration PR's hand-in, from a
-   `Replaces #N` or `Carries #N` line in the body or the batch-freeze member list.
+   the integration PR that replaces it opens, and its branch stays. The merge tool closes it, at
+   `--ready` and at the integration PR's hand-in, from a `Replaces #N` or `Carries #N` line in the
+   body or the batch-freeze member list. The tool reopens each lane it closed that is marked Dropped
+   at the next lint pass.
    When the integration run is red, read the failing job. Find the lane whose files it touches.
    Search one lane merge commit at a time: for each lane merge commit `M` on the integration branch,
    run `git diff --name-only M^1 M` or `git log -1 -m -S<text> M` as its own command, and print the
