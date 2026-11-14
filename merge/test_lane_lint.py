@@ -3438,5 +3438,58 @@ class LintCheckRollup(unittest.TestCase):
         self.assertIn("merge --lane-lint 7", str(cm.exception), "a green rollup on an older head cleared the live head's lane lint: %s" % cm.exception)
 
 
+class ReplacedAtHandIn(LaneFixture):
+    """The lane lint's two replaced-pull-request acts, on the real Host through the gh shim (step close-replaced-at-open; decision session-tiers).
+    A hand-in whose body names an open pull request that it replaces is refused, with the plain refusal and no override line. An integration PR's
+    freeze block names its lanes: each open lane closes at the hand-in, with a pointer comment to the integration PR. Subclasses LaneFixture, not
+    LaneLint or LintPostsPassComment, so no case of either runs twice; the lane helper is LintPostsPassComment.lane, called unbound."""
+
+    def setUp(self):
+        super().setUp()
+        tm.install_gh_shim(self)
+        tm.GhHalf.set(self, checks_seq=[[("touched", "pass", "")]])  # the draft's touched job passed: the lint's read of the head's draft run
+
+    def lane(self, *argv):
+        return LintPostsPassComment.lane(self, *argv, host=merge.Host())
+
+    def push_branch(self, name):
+        """origin gets `name` at the feat head, so the integration PR's head ref exists there: fetch_pr_head fetches it."""
+        tm.sh(self.other, "git", "fetch", "-q", "origin")
+        tm.sh(self.other, "git", "push", "-q", "origin", f"{self.head('feat')}:refs/heads/{name}")
+
+    def test_a_hand_in_that_names_an_open_pull_request_it_replaces_is_refused(self):
+        tm.GhHalf.set(self, body="Replaces #1636", open_prs=[["old-lane", self.head("main"), "main", 1636]])
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint passed a hand-in whose body names #1636 as replaced, and #1636 is open:\n" + out)
+        self.assertIn("#1636", out, "the refusal does not name #1636:\n" + out)
+        self.assertIn("No override lifts this refusal", out, "the refusal offers an override line, and it is a plain refusal:\n" + out)
+        rc, out = self.lane("--lane-lint", "7", "--lint-unknown-ok", "a reason to lift it")
+        self.assertEqual(rc, 1, "--lint-unknown-ok lifted the refusal that names #1636:\n" + out)
+
+    def test_a_hand_in_that_names_a_pull_request_already_closed_passes(self):  # control: green on the old code
+        tm.GhHalf.set(self, body="Replaces #1636", open_prs=[["old-lane", self.head("main"), "main", 1636]], pr_extra={"1636": {"state": "closed"}})
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lane("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+
+    def test_an_integration_hand_in_closes_each_open_lane_its_freeze_block_names(self):
+        lanes = {3301: "a" * 40, 3302: "b" * 40}
+        self.push_branch(merge.integration_branch("x"))
+        body = "\n".join(merge.freeze_lines("x", lanes))
+        self.assertTrue(merge.is_integration_pr({"body": body, "branch": merge.integration_branch("x")}), "precondition: the case reads as a lane PR, so it probes no integration hand-in")
+        tm.GhHalf.set(self, head_ref=merge.integration_branch("x"), body=body,
+                      open_prs=[[f"lane-{n}", self.head("main"), "main", n] for n in lanes])
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lane("--lane-lint", "7")
+        calls = tm.GhHalf.calls(self).splitlines()
+        for n in lanes:
+            with self.subTest(n=n):
+                self.assertIn(f"PATCH pulls/{n} state=closed", calls, f"the integration hand-in did not close lane #{n}:\n{out}")
+                posted = [p["body"] for p in tm.GhHalf.gh_state(self, "posted") or [] if p["n"] == n]
+                self.assertEqual(len(posted), 1, f"lane #{n} did not get one pointer comment:\n{out}")
+                self.assertIn("#7", posted[0], f"the pointer on lane #{n} does not name the integration PR #7:\n{posted[0]}")
+
+
 if __name__ == "__main__":
     unittest.main()
