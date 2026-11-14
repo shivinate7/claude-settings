@@ -333,6 +333,9 @@ jobs:
       - name: Stop-hook triage hold suite
         run: python3 lint/test_report_guard_stalled.py
 
+      - name: Stop-hook closed-item cite suite
+        run: python3 lint/test_report_guard_closed_item.py
+
       - name: Stop-hook question route suite
         run: python3 lint/test_report_guard_route.py
 

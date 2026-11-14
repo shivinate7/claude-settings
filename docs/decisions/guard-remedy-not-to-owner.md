@@ -172,6 +172,25 @@ Text: inline, in the main check.
 
 - A record id appears with no short gloss after it. Write the id, then a few plain words that say what it is, like "D12, short titles for records".
 
+### Closed-item guard (any reply whose Input Needed cites a page item)
+
+Text: `closed_item_problem`, rule `input-needed-closed-item` (roadmap step `input-needed-reads-page-status`).
+
+Text: facts only. It names the cited page items and says each closed one reads closed in the waiting copy at origin/<record branch>, as of the last fetch. It gives no step.
+
+- A closed item is not asked of the owner again. The refusal names each closed item, so the session sees which ones to drop.
+- A cite is a number after the word "item", "items" or "item(s)", on the same line. The number right after the word cites, unless a date follows it: "item 1 of 3" cites 1. These also cite: "page-item 214", "item-214", "page-item-214", "item **214**", "Items: 214" and "**Items:** 214".
+- A list cites each bare number after a separator. The separators are a comma, "and", "or", "&", "/", ";" and "+": "214, 381 and 383", "214/381".
+- A range cites both ends, joined by "-", "–", "to" or "through": "214-216", "214 to 216".
+- A line that starts "Items ...:" (a dash may come first) opens a list, and so does "items:" or "**Items:**" at a line end.
+- A bullet that starts with a cited number, such as "- 214 pick", is the item's own text: its nested lines cite nothing. In a list, a bullet that starts with no cited number, such as "- waiting", is a label whose nested bullets cite.
+- The number after a list marker cites, not the marker: "1. 214" cites 214.
+- A bare number, "Cockpit #214", a PR number or a date cites nothing. A bullet under "item 214" is no cite.
+- Not cited: a sub-bullet indented 4 or more spaces; the sub-bullets of "1. Items waiting on you:"; the middle of a range; the word "plus"; "item number 214".
+- After a list separator or a marker, a number is a cite only when it is bare. A count or unit word after it ("5 others", "2 of which", "3 options", "3 more"), a glued suffix or "%" ("3rd", "24h", "5%"), a clock time ("10:30") and a fraction ("11/10") make it no cite.
+- A read of collection `items` on the page in the turn after the last incoming message (a peer's too) that shows the item open clears it. A read before that message does not.
+- A copy that cannot be read passes with a "not checked" note and no refusal. The note also rides on a block for another reason.
+
 ## Shared tails
 
 - Every refusal, except a notes fix (R14; not built; step `notes-fix-no-owner-line`), opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold alone has no tail.

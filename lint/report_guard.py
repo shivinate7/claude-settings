@@ -74,6 +74,22 @@ unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, 
 refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too. Risk
 kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
 
+The closed-item check (rule `input-needed-closed-item`, roadmap step input-needed-reads-page-status; incident: a
+coordinator listed items 214, 381, 383 and 222 to the owner as open, and all four were closed): on any turn, landed or
+not, it refuses an Input Needed item that cites a waiting-page item whose status is closed. A cite is "item N", "page
+item N", "page-item N", "Cockpit item N", "item(s) N", "item **N**" or "item N a", and every number of a list after
+the word ("items N, M and K", "N or M", "N/M", "N, M, or K", "N (closed), M", "Items: N, M", an "items:" bullet list)
+and both ends of a range ("N-M"; the middle is not read), outside backticks and quotes; a PR number, "#N" alone, a
+date that opens with a year ("item" before a year-month-day), a bare number and Done or Next text are no cite. The status comes from the waiting copy on
+origin/<record branch>, read through hooks/feedback_guard.py (Homes.item_statuses, the one reader, one `git grep`
+per Stop). An ArtifactData read of collection `items` in the turn after the last incoming message
+(feedback_guard.read_back_statuses) wins for its item: open skips the copy for that item, closed refuses; a read
+before that message does not count. The refusal holds facts only: it names each closed item and says the waiting copy
+(or the page read this turn) shows it closed. A repo with no waiting page runs no check. An unreadable copy (no record
+branch ref, no items folder, an item file that is not a JSON object, a git error) never blocks on its own: a
+systemMessage says the check was not checked, and it rides on a block for any other reason too. Cost: a regex over
+the Input Needed text; only on a cite, the feedback_guard import and its one git grep. No file written.
+
 After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
 may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
 precompact-handoff, item 'Recovered line after compaction'). A label counts only where it starts an item: at line start, after a
@@ -3109,6 +3125,137 @@ def triage_hold(hook, records, active):
         return ""
 
 
+# The closed-item check's cite matcher. A cite is the word "item", "items" or "item(s)" (not glued to a word on its
+# left, so "page-item 214" counts; bold may wrap it and its colon, "**Items:**") and the numbers after it on its line:
+# a list joined by comma, "and", "or", "&", "/" or a range dash ("214-216": both ends count, the middle does not), a
+# "(closed)" note after a number, "**214**" and "#214"; the dashes are "-" and the en dash, the words "to" and
+# "through" also join a range, and ";" and "+" also join a list; "item-214" is a cite. "items:" at a line end, or a line that opens with "Items"
+# and ends in a label's colon ("Items waiting on you:", also behind a bullet dash), opens a bullet or numbered list:
+# the number after each marker is a cite, the marker is not, and text may follow the number. Markers nested under a
+# bullet with no number ("- waiting") are that list too; under a numbered bullet they are its own text. A list never crosses a line break, so a
+# bullet under "item 214" is no cite. A number that opens a date (a year first) is no cite. A number after a
+# separator or a marker is a cite only when it is bare: no glued letter or "%" ("3rd", "24h", "5%"), no time or
+# decimal ("10:30"), no small fraction ("11/10"), no count or unit word after it (ITEM_COUNT_WORDS). The number
+# right after the word is not held to that, so "item 1 of 3" cites 1. A second matcher beside
+# skills/roadmap/build.py's is justified only by lists: that one cites the number right after "item".
+ITEM_HEAD_RE = re.compile(r"(?<![A-Za-z0-9_])item(?:s|\(s\))?(?![A-Za-z0-9_])(?:\*\*)?(:)?(?:\*\*)?", re.I)
+ITEM_GAP_RE = re.compile(r"[ \t]*")
+ITEM_HEAD_GAP_RE = re.compile(r"-(?=\d)|[ \t]*")
+ITEM_LIST_EOL_RE = re.compile(r"[ \t]*\n")
+ITEM_LABEL_RE = re.compile(r"[ \t]+[^\n\d:]{1,60}?(?:\*\*)?:(?:\*\*)?[ \t]*\n")
+ITEM_LINE_START_RE = re.compile(r"(?:\A|\n)[ \t]*(?:[-*+][ \t]+)?(?:\*\*)?\Z")
+ITEM_NUM_RE = re.compile(r"\**#?(\d+)\**")
+ITEM_DATE_TAIL_RE = re.compile(r"(?:-\d{1,2}-\d{1,2}|/\d{1,2}/\d{1,4})(?!\d)")
+ITEM_PAREN_RE = re.compile(r"[ \t]*\([^()\n]*\)")
+ITEM_SEP_RE = re.compile(r"[ \t]*,[ \t]*(?:(?:and|or)[ \t]+|&[ \t]*)?|[ \t]*/[ \t]*|[ \t]*[-\u2013][ \t]*"
+                         r"|[ \t]+(?:and|or|to|through)[ \t]+|[ \t]*[&;+][ \t]*", re.I)
+ITEM_COUNT_WORDS = (r"of|more|others?|options?|times|percent|ms|secs?|seconds?|mins?|minutes?|hrs?|hours?|days?|wks?|"
+                    r"weeks?|months?|yrs?|years?|am|pm|a\.m\.|p\.m\.|utc|gmt|[cemp][sd]t|jan(?:uary)?|feb(?:ruary)?|"
+                    r"mar(?:ch)?|apr(?:il)?|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|"
+                    r"dec(?:ember)?|tests?|cases?|files?|lines?|prs?|commits?|lanes?|steps?|runs?|jobs?|rounds?|tries|"
+                    r"agents?|sessions?|mutants?|findings?")
+ITEM_NOT_ITEM_RE = re.compile(r"[A-Za-z%]|-[A-Za-z]|[.:]\d|[ \t]*%|[ \t]+(?:" + ITEM_COUNT_WORDS + r")(?![A-Za-z])", re.I)
+ITEM_FRACTION_RE = re.compile(r"/\d{1,2}(?!\d)")
+CLOSED_ITEM_CHECK = "Closed-item guard (rule input-needed-closed-item)"
+
+
+def _cite_list(body, pos, seen, checked):
+    """Adds to `seen` the numbers of one list that starts at `pos`. `checked`: the first number must be bare too, as
+    a list marker's number must. A small number a non-slash separator reaches, then "/" and a small number, is a
+    fraction ("214 and 11/10"); after a slash ("214/381/383") it is a list. Returns how many numbers it read."""
+    via_slash, found = False, 0
+    while True:
+        num = ITEM_NUM_RE.match(body, pos)
+        if num is None or ITEM_DATE_TAIL_RE.match(body, num.end()):
+            return found
+        if checked and (ITEM_NOT_ITEM_RE.match(body, num.end()) or not via_slash and len(num.group(1)) <= 2
+                        and ITEM_FRACTION_RE.match(body, num.end())):
+            return found
+        found += 1
+        if str(int(num.group(1))) not in seen:
+            seen.append(str(int(num.group(1))))
+        paren = ITEM_PAREN_RE.match(body, num.end())
+        sep = ITEM_SEP_RE.match(body, paren.end() if paren else num.end())
+        if sep is None:
+            return found
+        pos, checked, via_slash = sep.end(), True, "/" in sep.group()
+
+
+def _cite_bullets(body, pos, seen):
+    """Adds to `seen` the numbers of the bullet or numbered list whose first line starts at `pos`. A marker line at the
+    first marker's depth is a list item, and the number after its marker opens a list. A deeper line is the item's
+    own text, except under a list item that holds no number (a label such as "- waiting"): its deeper markers, all at
+    the first one's depth, are the list. A blank line or any other line ends the list."""
+    depth = sub = None
+    label = False
+    for line in body[pos:].split("\n"):
+        mark = LIST_ITEM.match(line)
+        indent = len(line) - len(line.lstrip(" \t"))
+        if mark and indent == (indent if depth is None else depth):
+            depth, sub = indent, None
+            label = not _cite_list(line, ITEM_GAP_RE.match(line, mark.end()).end(), seen, True)
+        elif mark and label and indent > depth and indent == (indent if sub is None else sub):
+            sub = indent
+            _cite_list(line, ITEM_GAP_RE.match(line, mark.end()).end(), seen, True)
+        elif depth is None or indent <= depth or not line.strip():
+            return
+
+
+def cited_items(text):
+    """The page item numbers (digit strings, first cite first, each once) that the Input Needed item cites, with
+    backtick and quote spans left out. Done, Next and the prose above the report are not read."""
+    body = QUOTED_RE.sub(" ", input_needed_section(text))
+    seen = []
+    for head in ITEM_HEAD_RE.finditer(body):
+        if head.group(1):
+            label = ITEM_LIST_EOL_RE.match(body, head.end())
+        elif ITEM_LINE_START_RE.search(body[:head.start()]):
+            label = ITEM_LABEL_RE.match(body, head.end())
+        else:
+            label = None
+        if label:
+            _cite_bullets(body, label.end(), seen)
+        else:
+            _cite_list(body, ITEM_HEAD_GAP_RE.match(body, head.end()).end(), seen, False)
+    return seen
+
+
+def closed_item_problem(hook, turn, text):
+    """(refusal, note) for an Input Needed item that cites a page item the waiting page or its copy shows closed
+    (rule `input-needed-closed-item`). A read of collection `items` in `turn` decides its item; the copy decides the
+    rest, read once through feedback_guard (Homes.item_statuses). A repo with no waiting page gives ('', ''); an
+    unreadable copy gives no refusal and a note that says not checked."""
+    cites = cited_items(text)
+    if not cites:
+        return "", ""
+    _hooks_on_path()
+    import feedback_guard
+    homes = feedback_guard.Homes(hook.get("cwd"))
+    read = {n: s for n, s in feedback_guard.read_back_statuses(turn, homes).items() if n in cites}
+    closed = {n: "the waiting page, read this turn," for n, s in read.items() if s == "closed"}
+    rest = [n for n in cites if n not in read]
+    note = ""
+    if rest:
+        statuses, branch, _folder = homes.item_statuses()
+        if statuses is None:
+            if homes.skip_filing:
+                note = "Closed-item guard: not checked (%s)." % homes.skip_filing
+        else:
+            where = "the waiting copy at origin/%s, as of the last fetch" % branch
+            closed.update({n: where for n in rest if statuses.get(n) == "closed"})
+    if not closed:
+        return "", note
+    nums = sorted(closed, key=int)
+    by_source = {}
+    for n in nums:
+        by_source.setdefault(closed[n], []).append(n)
+    shows = "; ".join("%s shows %s closed" % (src, ("item " if len(ns) == 1 else "items ") + ", ".join(ns))
+                      for src, ns in by_source.items())
+    return owner_line(
+        CLOSED_ITEM_CHECK,
+        "Input Needed cites %s, and %s" % (("item " if len(nums) == 1 else "items ") + ", ".join(nums), shows)), note
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -3212,12 +3359,21 @@ def main():
         pick_reason, note = question_problem(records, turn, text, hook)
     except Exception:
         pass
+    closed_item, closed_note = "", ""
+    try:
+        closed_item, closed_note = closed_item_problem(hook, turn, text)
+    except Exception as err:  # a check that could not run is not checked, never silence and never a block
+        closed_note = "Closed-item guard: not checked (%s)." % type(err).__name__
     review, review_note = "", ""
     try:
         review, review_note = review_record_problem(hook, text)
     except Exception as err:  # a check that could not run is UNKNOWN, never silence and never a block
         review_note = "Review-record guard: UNKNOWN, the check did not run (%s)." % type(err).__name__
-    note = " ".join(filter(None, [note, hand_note, review_note]))
+    note = " ".join(filter(None, [note, hand_note, review_note, closed_note]))
+
+    # The closed-item "not checked" note rides on a block for another reason too, so the owner sees the check did not run.
+    block_note = {"systemMessage": closed_note} if closed_note else {}
+
     relay = []
     if last_human_idx is not None:  # a transcript with no human message never ran the relay and answered checks
         relay = relay_reasons(after, text, hook.get("cwd"))
@@ -3249,6 +3405,7 @@ def main():
         pick.append(hand_off)
         pick.append(cannot)
         pick.append(review)
+        pick.append(closed_item)
         try:
             if report_shape_ok(text):
                 pick.append(recovered_problem(records, text))
@@ -3259,7 +3416,7 @@ def main():
             pick = [r for r in pick if r]
             if pick:
                 reason = " ".join(pick) + " (rule reports-order-of-labels)"
-                finish({"decision": "block", "reason": reason})
+                finish({"decision": "block", "reason": reason, **block_note})
             else:
                 finish({"systemMessage": note} if note else None)
         except Exception:
@@ -3302,6 +3459,8 @@ def main():
         reasons.append(cannot)
     if review:
         reasons.append(review)
+    if closed_item:
+        reasons.append(closed_item)
     try:
         rewrite = rewrite_stamp_problem(text, records[last_human_idx].get("timestamp"), hook.get("cwd"))
         if rewrite:
@@ -3324,7 +3483,7 @@ def main():
         reason = " ".join(reasons) + " (rule reports-order-of-labels)"
         if not shape_ok:
             write_marker(hook, last_human_idx)
-        finish({"decision": "block", "reason": reason})
+        finish({"decision": "block", "reason": reason, **block_note})
     else:
         finish({"systemMessage": note} if note else None)
 
