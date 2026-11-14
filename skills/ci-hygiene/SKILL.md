@@ -85,7 +85,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    the running batch may merge (decision `no-merge-during-batch-ci`, the contains rule). A drop
    changes the running batch's head, so the brake refuses that merge until the next batch is built
    on the new head.
-   Each lane merges alone: `merge <pr> --confirm` takes one PR, with no batch to build, freeze, blame or stack.
+   Each lane merges alone: `merge <pr> --confirm --priority-rows <rows file>` takes one PR, with no batch to build, freeze, blame or stack.
+   When the handoff has priority rows, add `--priority-rows`. With no priority rows, leave it off, because an empty rows file refuses.
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
    the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,

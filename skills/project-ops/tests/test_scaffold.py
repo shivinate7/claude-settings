@@ -78,10 +78,15 @@ def tree(root):
     return found
 
 
+def section_of(text, title):
+    """The body of the `## <title>` section of a template, or None."""
+    m = re.search(r"(?m)^## " + re.escape(title) + r"\n(.*?)(?=\n## |\Z)", text, re.S)
+    return m.group(1) if m else None
+
+
 def pages_section(text):
     """The body of the `## Pages` section of a hand-off, or None."""
-    m = re.search(r"## Pages\n(.*?)(?=\n## |\Z)", text, re.S)
-    return m.group(1) if m else None
+    return section_of(text, "Pages")
 
 
 def rotation_rule(text):
@@ -116,6 +121,30 @@ def sentences(text):
 def has_sentence(sents, *patterns):
     """True when one sentence matches every pattern. No sentence at all is False, never an error."""
     return any(all(re.search(p, s, re.I) for p in patterns) for s in sents)
+
+
+# A sentence that tells a runner to run a merging `--confirm`: a `merge` command with `--confirm`, or `to merge` or `merging` with it.
+MERGE_CONFIRM = re.compile(r"\bmerge\s+(?:-C\s+\S+\s+)?\S+\s+--confirm|\bto merge\b|\bmerging\b")
+FLAG_TEXT = re.compile(r"`?--priority-rows`?")  # the flag and its code ticks: the letters of `rows` in the flag are not the word
+EMPTY_WITHOUT_FLAG = re.compile(r"\bwithout `?--priority-rows`?")
+
+
+def merge_confirm_sentences(text):
+    """The sentences of `text` that name a merging `--confirm`. A draft's step is the records step and never a merge, so it is left out.
+    The one home of this selection: the batch runner's bullet and the ci-hygiene skill both read it through here."""
+    return [s for s in sentences(text) if "--confirm" in s and "draft" not in s and MERGE_CONFIRM.search(s)]
+
+
+def says_empty_runs_without_flag(sentence):
+    """True when the sentence says that with no priority rows the merge runs without --priority-rows: the flag, and the word rows or
+    priorities outside the flag's own text."""
+    return (EMPTY_WITHOUT_FLAG.search(sentence) is not None
+            and re.search(r"\b(?:rows|priorities)\b", FLAG_TEXT.sub("", sentence)) is not None)
+
+
+def leaves_flag_off_without_rows(sentence):
+    """True when the sentence says to leave the flag off when there are no priority rows, in any word order."""
+    return all(re.search(p, sentence) for p in (r"\bleave\b", r"\boff\b", r"\bno (?:priority )?(?:rows|priorities)\b"))
 
 
 def denies_sharing(sentence):
@@ -169,6 +198,47 @@ class Scaffold(TempDest):
         self.assertIn("--block", flat)
         self.assertIn("--live", flat)
         self.assertNotRegex(flat, r"(?i)roadmap page", "the roadmap is no page of its own: triage builds a block, the page writer publishes it")
+
+    def test_runner_merge_confirm_carries_the_priority_rows(self):
+        """The runner's merge goes through the priority gate, so each merging `--confirm` sentence carries `--priority-rows`, the `-C`
+        checkout form included. A draft step's confirm is left out: the gate never merges a draft."""
+        text = tree(SKILL)["templates/operating-model.md"]
+        bullet = re.search(r"- \*\*Batch runner\.\*\*.*?(?=\n- \*\*)", text, re.S).group(0)
+        merges = merge_confirm_sentences(bullet)  # sentences() flattens a line wrap, so it cannot split a phrase
+        self.assertTrue(merges, "the batch runner's bullet names no merging --confirm")
+        self.assertTrue(any("-C <checkout>" in s for s in merges),
+                        "the -C checkout merge --confirm is not among the merging sentences of the batch runner's bullet")
+        for s in merges:
+            with self.subTest(sentence=s[:80]):
+                self.assertIn("--priority-rows", s, "the runner's merge --confirm lets a lower PR go past a ready row: " + s)
+
+    def test_operating_model_says_empty_priorities_merge_without_the_flag(self):
+        bullet = re.search(r"- \*\*Batch runner\.\*\*.*?(?=\n- \*\*)", tree(SKILL)["templates/operating-model.md"], re.S).group(0)
+        self.assertTrue(any(says_empty_runs_without_flag(s) for s in sentences(bullet)),
+                        "the batch runner's bullet does not say that with no priority rows the merge runs without --priority-rows")
+
+    def test_role_handoff_says_empty_priorities_merge_without_the_flag(self):
+        section = section_of(tree(SKILL)["templates/role-handoff.md"], "Priorities")
+        self.assertIsNotNone(section, "no Priorities section")
+        self.assertTrue(any(says_empty_runs_without_flag(s) for s in sentences(section)),
+                        "the Priorities section does not say that with no priority rows the merge runs without --priority-rows")
+
+    def test_ci_hygiene_lane_merge_names_the_priority_rows_or_leaves_them_off(self):
+        with open(os.path.join(SKILL, "..", "ci-hygiene", "SKILL.md"), encoding="utf-8") as f:
+            merges = merge_confirm_sentences(f.read())
+        self.assertTrue(any("merge <pr> --confirm" in s for s in merges),
+                        "the ci-hygiene skill's lane merge --confirm example is not among the merging sentences")
+        for s in merges:
+            with self.subTest(sentence=s[:80]):
+                self.assertTrue("--priority-rows" in s or leaves_flag_off_without_rows(s),
+                                "a merge --confirm names neither --priority-rows nor the leave-off line for no priority rows: " + s)
+
+    def test_handoff_priorities_names_the_check_form(self):
+        section = section_of(tree(SKILL)["templates/role-handoff.md"], "Priorities")
+        self.assertIsNotNone(section, "no Priorities section")
+        spans = re.findall(r"`([^`]*)`", " ".join(section.split()))
+        self.assertTrue(any("--confirm" in s and "--priority-rows" in s for s in spans),
+                        "the Priorities guidance names no `merge ... --confirm --priority-rows FILE` form, so the rows only list")
 
     def assertInOrder(self, flat, clauses):
         at = [flat.find(x) for x in clauses]
@@ -295,6 +365,20 @@ class Scaffold(TempDest):
         self.assertIn("filters the tags itself", flat)
         coordinator = re.search(r"- \*\*Coordinator\.\*\*.*?(?=\n- \*\*)", tiers, re.S).group(0)
         self.assertIn("`cs-step:<step id>`", " ".join(coordinator.split()))
+
+    def test_batch_runner_reads_the_priority_rows_at_each_wake(self):
+        text = tree(SKILL)["templates/operating-model.md"]
+        bullet = re.search(r"- \*\*Batch runner\.\*\*.*?(?=\n- \*\*)", text, re.S)
+        self.assertIsNotNone(bullet, "no Batch runner bullet")
+        flat = " ".join(bullet.group(0).split())
+        self.assertIn("merge --priority-rows", flat, "the batch runner's wake must run the priority rows read")
+        self.assertRegex(flat, r"priority: <slug> \| (?:pr|branch): ", "the batch runner bullet must show the priority row form")
+
+    def test_handoff_template_has_a_priorities_section_with_the_row_form(self):
+        section = section_of(tree(SKILL)["templates/role-handoff.md"], "Priorities")
+        self.assertIsNotNone(section, "no ## Priorities section in the hand-off template")
+        flat = " ".join(section.split())
+        self.assertRegex(flat, r"priority: <slug> \| (?:pr|branch): ", "the Priorities section must show the row form")
 
     def test_brief_carries_repo_tag(self):
         flat = " ".join(tree(SKILL)["templates/brief.md"].split())
