@@ -138,13 +138,16 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: never the system temp dir
         self.addCleanup(self.tmp.cleanup)
 
-    def repo(self, artifacts=None, extras=True):
-        """A repo root with its extras file. `artifacts` replaces the default registry; extras=False leaves the file out."""
+    def repo(self, artifacts=None, extras=True, extra=None):
+        """A repo root with its extras file. `artifacts` replaces the default registry; extras=False leaves the file out;
+        `extra` merges more keys into the file (a "rolled-out" mark, say)."""
         root = tempfile.mkdtemp(prefix="repo-", dir=self.tmp.name)
         if extras:
             registry_list = registry() if artifacts is None else artifacts
             # lint/layout.py refuses an extras file with no "kinds" object, so the fixture carries an empty one.
-            write_text(os.path.join(root, EXTRAS), json.dumps({"kinds": {}, "artifacts": registry_list}))
+            data = {"kinds": {}, "artifacts": registry_list}
+            data.update(extra or {})
+            write_text(os.path.join(root, EXTRAS), json.dumps(data))
         return root
 
     def new_fetch(self):
@@ -216,6 +219,17 @@ class Counted(Base):
     def test_replay_item_231_counted(self):
         r = self.check(self.repo(), self.pair(), pick="a")
         self.assertCounted(r, 'counted item=review-fix-check-go n=231 choice=a at=2026-11-04T13:56:29.078Z label="Option A"')
+
+    def test_a_bad_mark_does_not_make_a_saved_grant_unknown(self):
+        """A "rolled-out" that is not JSON true or false, with a waiting-page entry that has no export key: judge() reads the
+        page's id only, so the saved grant is counted, not unknown (page_grant.py:210). The valid mark is the control."""
+        for mark in (True, "yes"):
+            with self.subTest(mark=mark):
+                root = self.repo(extra={"rolled-out": mark})
+                with open(os.path.join(root, EXTRAS), encoding="utf-8") as handle:
+                    held = json.load(handle)
+                self.assertEqual(json.dumps(held.get("rolled-out", "absent")), json.dumps(mark), "the fixture does not hold the mark")  # the scope first
+                self.assertCounted(self.check(root, self.pair()), verdict("a"))
 
     def test_code_artifact_form_of_the_page_counted(self):
         r = self.check(self.repo(), self.pair(), page=PAGE_CODE_URL, pick="a")

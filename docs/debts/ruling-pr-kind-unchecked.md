@@ -1,6 +1,6 @@
 # A record that files an owner ruling is not checked for its Kind
 
-- **What.** The merge tool takes the lane's Kind claim. A PR that adds or edits a record that files an owner ruling, posted as `Kind: docs-only` with zero rounds, reads done with no review round. Lanes pick docs-only for prose PRs under the 2026-09-26 ruling. How often a ruling PR gets that kind is unmeasured.
-- **Where.** The Kind field of the review record, read by `merge/merge.py` (`review_state`). No check reads the diff's paths against Kind.
+- **What.** The merge tool takes the lane's Kind claim. A PR that adds or edits a record that files an owner ruling, posted as `Kind: docs-only` with zero rounds, reads done with no review round. Lanes pick docs-only for prose PRs under the 2026-09-26 ruling. How often a ruling PR gets that kind is unmeasured. `merge --review-record` now refuses that Kind for a diff that files a record in the decisions folder, legacy or layout (merge/merge.py `decision_paths`; merge/test_merge.py class ReviewDecisionKind). Still a gap: a `Kind: docs-only` review record posted by hand, which `merge --reviewed` trusts, and a ruling filed outside the decisions folder.
+- **Where.** The Kind field of the review record, read by `merge/merge.py` (`review_state`). Only `merge --review-record` reads the diff's paths against Kind (`kind_misfits`, `decision_paths`).
 - **Decision.** `docs-only-prs-skip-review` (docs-only PRs skip the reviewer, except a record that files an owner ruling).
-- **Retire.** A check that fails a `Kind: docs-only` review record when the diff files a record that files an owner ruling. Its test shows the case red on the current merge tool, then green.
+- **Retire.** A check that fails a hand-posted `Kind: docs-only` review record over a decision record, and one that fails `Kind: docs-only` over a ruling filed outside the decisions folder. Each test shows its case red on the current merge tool, then green.

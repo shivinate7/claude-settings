@@ -73,8 +73,8 @@ One line per group, in the order of step 2, then Layout, Design, Copies, iOS, Wo
 
 Each finding cites a file or a command result. A group with mixed probes takes its worst
 known score, and lists each unknown probe after it. Layout, Design, iOS, Words and Supersede list each item under the
-group line, with its own grade, so one score never hides a finding. A child with no extras file, or one without `"rolled-out": true`,
-scores Layout `not rolled out`, not `out`, and its preview lines feed the roll-out lane. Under the group lines, name each parent rule
+group line, with its own grade, so one score never hides a finding. A child with no extras file, or one whose `"rolled-out"` mark is absent or `false`,
+scores Layout `not rolled out`, not `out`, and its preview lines feed the roll-out lane. A mark present and not JSON `true` or `false` raises, and the group reads unknown; the keys that do not depend on the mark (the waiting page) still read. Under the group lines, name each parent rule
 that no probe and no mechanism covers.
 
 Write the scorecard to one file, the layout's `scorecard` kind (`docs/health/compliance.md`) in the checked repo. Pipe the group

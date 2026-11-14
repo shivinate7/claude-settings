@@ -18796,6 +18796,100 @@ class TouchesRead(Env):
         for kind in ("pull list", "pulls/N/files", "jobs read", "log read"):
             self.assertIn(kind, entry, f"the `merge --touches` entry of merge.py's docstring does not name the {kind} read")
 
+class DecisionLayout:
+    """The one home of the decisions folder for a case: use_layout(rolled) writes the extras file of the checkout (rolled out: docs/decisions) or
+    removes it (legacy: decisions), and asserts the folder layout.path gives before the case reads it."""
+
+    def use_layout(self, rolled):
+        extras = os.path.join(self.co, ".claude", "layout-extras.json")
+        if rolled:
+            put(extras, json.dumps({"kinds": {}, "rolled-out": True}))
+        elif os.path.exists(extras):
+            os.remove(extras)
+        folder = "docs/decisions" if rolled else "decisions"
+        self.assertEqual(layout.path(self.co, "decisions"), folder, "the fixture did not set the decisions folder")
+
+class ReviewDecisionKind(DecisionLayout, ReviewGuardEnv):
+    """A docs-only record over a decision record is refused on Kind: a decision record is a ruling, so its change takes Kind normal with one round
+    (decision docs-only-prs-skip-review). A decision record counts when the diff adds, modifies or renames it under the decisions folder; a removed
+    path does not. A layout that cannot be read stops the record, and is never a pass. Each refusal has a control beside it."""
+
+    def test_docs_only_over_a_decision_record_refuses(self):
+        self.use_layout(True)
+        self.host.changed = [("docs/decisions/x.md", "modified", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "docs/decisions/x.md", holds="decision record")
+
+    def test_docs_only_over_a_legacy_decision_record_refuses(self):
+        self.use_layout(False)
+        self.host.changed = [("decisions/x.md", "added", 0)]
+        # A legacy record is not a doc, so kind_misfits refuses it before the decision check runs: the reason is the misfit.
+        self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "decisions/x.md", holds="breaks --kind docs-only")
+
+    def test_docs_only_over_a_renamed_decision_record_refuses(self):
+        self.use_layout(True)
+        self.host.changed = [("docs/decisions/y.md", "renamed", 0), ("docs/x.md", "removed", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "docs/decisions/y.md", holds="decision record")
+
+    def test_docs_only_with_an_unreadable_layout_refuses(self):
+        extras = os.path.join(self.co, ".claude", "layout-extras.json")
+        self.host.changed = [("docs/debts/a.md", "added", 0)]
+        for text in ("{", json.dumps({"rolled-out": True}), json.dumps({"kinds": {}, "rolled-out": "true"})):  # not JSON, JSON with no kinds object, and a string mark
+            with self.subTest(extras=text):
+                put(extras, text)
+                with self.assertRaises(layout.LayoutError):  # the fixture: the layout really cannot be read
+                    layout.path(self.co, "decisions")
+                rc, out, err = self.run_args(*self.review_argv("docs-only"))
+                self.assertEqual(rc, 1, "a docs-only record passed over an unreadable layout:\n" + out + err)
+                self.assertEqual(out, "", "a record was printed over an unreadable layout")
+                self.assertIn("layout-extras.json", err)
+
+    def test_normal_over_a_decision_record_is_accepted(self):
+        for rolled, path in ((True, "docs/decisions/x.md"), (False, "decisions/x.md")):
+            with self.subTest(rolled=rolled):
+                self.use_layout(rolled)
+                self.host.changed = [(path, "modified", 0)]
+                rc, out, err = self.run_args(*self.review_argv("normal"))
+                self.assertEqual(rc, 0, out + err)
+                self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "normal")
+
+    def test_a_decision_record_shown_as_removed_or_renamed_out_is_accepted(self):
+        self.use_layout(True)
+        for changed in ([("docs/decisions/x.md", "removed", 0)], [("docs/moved.md", "renamed", 0), ("docs/decisions/x.md", "removed", 0)]):
+            with self.subTest(changed=changed):
+                self.host.changed = changed
+                rc, out, err = self.run_args(*self.review_argv("docs-only"))
+                self.assertEqual(rc, 0, out + err)
+                self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only")
+
+    def test_docs_only_over_a_debt_is_accepted(self):
+        self.use_layout(True)
+        self.host.changed = [("docs/debts/a.md", "added", 0)]
+        rc, out, err = self.run_args(*self.review_argv("docs-only"))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only")
+
+class ReviewDecisionPaths(DecisionLayout, Env):
+    """merge.decision_paths(root, files): the sorted paths of the markdown records that a diff adds, modifies, renames or copies under the decisions
+    folder of `root` (layout.path). A removed path is skipped; any other status counts, so a status the diff reads as new cannot slip past. An
+    empty diff names nothing."""
+
+    def test_an_empty_diff_names_no_record(self):
+        self.use_layout(True)
+        self.assertEqual(review_fn(self, "decision_paths")(self.co, []), [])
+
+    def test_names_each_added_modified_renamed_or_copied_record_sorted_and_skips_removed(self):
+        self.use_layout(True)
+        files = [("docs/decisions/b.md", "modified"), ("docs/decisions/a.md", "added"), ("docs/decisions/old.md", "removed"),
+                 ("docs/decisions/moved.md", "renamed"), ("docs/decisions/copy.md", "copied"), ("docs/decisions/sub/c.md", "added"),
+                 ("docs/decisions/note.txt", "added"), ("docs/debts/d.md", "added"), ("decisions/x.md", "added")]
+        self.assertEqual(review_fn(self, "decision_paths")(self.co, files),
+                         ["docs/decisions/a.md", "docs/decisions/b.md", "docs/decisions/copy.md", "docs/decisions/moved.md", "docs/decisions/sub/c.md"])
+
+    def test_a_legacy_checkout_counts_the_decisions_folder_it_has(self):
+        self.use_layout(False)
+        files = [("decisions/x.md", "added"), ("docs/decisions/y.md", "added")]
+        self.assertEqual(review_fn(self, "decision_paths")(self.co, files), ["decisions/x.md"])
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
         # A run that holds the lock in its merge call for a minute, for a signal to reach. It prints READY once it holds the lock.
