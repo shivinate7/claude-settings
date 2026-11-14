@@ -124,7 +124,8 @@ after(async () => { if (browser) await browser.close(); });
 
 // clock: a fixed browser time (an ISO string), so a case reads the page's clock without the real one. keepStorage: each storage key is set
 // only when absent, so a reload keeps what the page wrote on the earlier load (a reload that resets storage would undo it).
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, holdAsks = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false, keepItems = false } = {}) {
+// timers: the page's timers run on a fake clock, installed before load, so a case moves time on with clock.runFor and never waits on it.
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, holdAsks = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false, keepItems = false, timers = false } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   // hasTouch: a touch device, so the page's pointer: coarse rules apply.
@@ -144,6 +145,7 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
   if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
   if (clock) await page.clock.setFixedTime(new Date(clock));
+  if (timers) await page.clock.install();
   await page.goto(ORIGIN);
   // With no store there are no items to wait for: the page is loaded once its empty state is drawn.
   if (noStore) { await page.waitForFunction("state.loaded"); return page; }
@@ -197,6 +199,81 @@ test("a rule question starts blank, my pick is starred in its card, and a tap on
   assert.deepEqual([a.item, a.n, a.choice, a.note], [DECISION.id, 27, "a", ""]);
 });
 
+// Two options with ids, as the page holds them when the owner picks: Red (a) and Blue (b). The one home of this list.
+const IDED = [
+  { key: "a", id: "red", label: "Red", how: "h", gain: "g", lose: "l" },
+  { key: "b", id: "blue", label: "Blue", how: "h", gain: "g", lose: "l" },
+];
+// The saved answer names the option picked by its id as well as by its letter (ruling R60): a stored pick records the id,
+// so a later move of the letters cannot change which option the owner meant.
+test("a pick saves the id of the option picked, beside its letter", async (t) => {
+  const WITH_IDS = mk("ids-decision", 40, { pick: "a", options: IDED });
+  const page = await open(t, { items: [WITH_IDS] }); if (!page) return;
+  await takePick(page, WITH_IDS);
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], WITH_IDS.id);
+  const a = (await answers(page))[WITH_IDS.id];
+  assert.equal(a.optionId, "red", "the saved answer does not carry the id of the option picked");
+});
+
+// The item as triage leaves it after a reorder: letters follow position, so Blue takes a and Red takes b. Each key stays a
+// letter, so the page's letter checks read the item as valid.
+const LETTERS_MOVED = [{ ...IDED[1], key: "a" }, { ...IDED[0], key: "b" }];
+
+// A pick keeps the id and the label the option had when the owner picked it. The item re-snapshots with the letters moved
+// after the pick, and Send still saves the option picked: Red, with id red and label "A: Red" as it read at pick time.
+test("a pick keeps the id and label it had when picked, after the letters move", async (t) => {
+  const it = mk("moved-pick", 41, { pick: "a", options: IDED });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await choose(page, it, "a");
+  await page.evaluate((moved) => window.__putItem(moved), { ...it, options: LETTERS_MOVED });
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], it.id);
+  const a = (await answers(page))[it.id];
+  assert.equal(a.choice, "a", "the answer does not hold the letter the owner picked");
+  assert.equal(a.optionId, "red", "the saved id is not the id of the option picked, Red");
+  assert.equal(a.label, "A: Red", "the saved label is not the label the option had when it was picked");
+});
+
+// The same for a multi item: the ids of the options ticked, from before the letters moved, in the order ticked.
+test("a multi pick keeps the ids it had when ticked, after the letters move", async (t) => {
+  const it = mk("moved-multi", 42, { multi: true, pick: [], options: IDED });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await choose(page, it, "a");
+  await choose(page, it, "b");
+  await page.evaluate((moved) => window.__putItem(moved), { ...it, options: LETTERS_MOVED });
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], it.id);
+  const a = (await answers(page))[it.id];
+  assert.deepEqual(a.choice, ["a", "b"], "the answer does not hold the letters the owner ticked");
+  assert.deepEqual(a.optionId, ["red", "blue"], "the saved ids are not the ids of the options ticked, from before the move");
+});
+
+// Control, green on the current head: a decision whose options carry no id saves no optionId.
+test("a decision whose options carry no id saves no optionId", async (t) => {
+  const page = await open(t); if (!page) return;
+  await takePick(page, DECISION);
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id);
+  const a = (await answers(page))[DECISION.id];
+  assert.equal(a.choice, "a", "the answer does not hold the pick the owner made");
+  assert.equal("optionId" in a, false, "a saved answer names an optionId for an option with no id");
+});
+
+// Control, green on the current head: an option's note is drawn on its card, in that option's label.
+test("an option's note is drawn on its card", async (t) => {
+  const it = mk("noted-option", 43, { options: [
+    { key: "a", label: "Red", how: "h", gain: "g", lose: "l", note: "Now means the red that shipped." },
+    { key: "b", label: "Blue", how: "h", gain: "g", lose: "l" },
+  ] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await card(page, it).locator(`label[for="o-${it.id}-a"]`).count(), 1, "option a is not drawn on the card");
+  const noted = card(page, it).locator(`label[for="o-${it.id}-a"] .optnote`);
+  assert.equal(await noted.count(), 1, "the option's note is not drawn on its card");
+  assert.equal((await noted.textContent()).trim(), "Now means the red that shipped.", "the card draws another note than the option's");
+  assert.equal(await card(page, it).locator(`label[for="o-${it.id}-b"] .optnote`).count(), 0, "a note is drawn on an option with none");
+});
+
 test("the list has three tiers read from holds and by, then Pick stands last", async (t) => {
   const items = [
     mk("calm-dec", 1), { ...TASK, id: "calm-task", n: 2 },
@@ -207,7 +284,7 @@ test("the list has three tiers read from holds and by, then Pick stands last", a
   const page = await open(t, { items }); if (!page) return;
   const order = await page.evaluate(() => [...document.querySelectorAll("section.tier")].map((s) => [s.id, s.querySelector("h2").textContent.replace(/\d+$/, ""), [...s.querySelectorAll("article.card")].map((c) => c.id.slice(5))]));
   assert.deepEqual(order, [
-    ["tier-holds", "Blocking", ["hold-old", "hold-new"]],
+    ["tier-holds", "Blocking", ["hold-new", "hold-old"]],
     ["tier-due", "Upcoming", ["due-soon", "due-late"]],
     ["tier-calm", "Whenever", ["calm-dec", "calm-task"]],
     ["tier-stands", "Pick stands", ["stands-1"]],
@@ -329,8 +406,8 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
       mk("first", 1, { context: LONG, holds: "A lane waits.", options: [opt("a", "Red", withDesigns ? "s1" : undefined), opt("b", "Blue with a long label that cannot fit on one line of the ready note at 390 wide", withDesigns ? "s2" : undefined)] }), mk("second", 2, { context: LONG, stands: true }),
       { ...TASK, id: "a-task", n: 3 }, mk("third", 4, { context: LONG, by: "2030-01-01T00:00:00Z" }),
       mk("fourth", 5, { context: LONG, options: [...DECISION.options, { key: "c", label: "Green", how: "h", gain: "g", lose: "l" }] }),
-      // The oldest blocking item sorts first, so a card above the first receipt gives the page room to scroll up.
-      mk("lead", 6, { context: LONG, holds: "A lane waits.", added: "2026-10-01T00:00:00Z" }),
+      // The newest blocking item sorts first, so a card above the first receipt gives the page room to scroll up.
+      mk("lead", 6, { context: LONG, holds: "A lane waits.", added: "2026-10-27T00:00:00Z" }),
     ];
     const page = await open(t, { items, viewport, designData: withDesigns ? DESIGNS : null, pageHtml: withSentMove("stay") }); if (!page) return;
     await noAnchor(page);
@@ -521,6 +598,10 @@ const markState = (page) => page.evaluate(() => {
   return { icon: m.classList.contains("icon"), img: img ? img.getAttribute("src") : null, alt: img ? img.getAttribute("alt") : null, text: m.textContent, hidden: m.hidden, tile: m.style.getPropertyValue("--tile"), aria: m.getAttribute("aria-hidden") };
 });
 const named = (page, name) => page.waitForFunction((n) => document.getElementById("repoName").textContent === n, name);
+// n requestAnimationFrame callbacks: a layout that a resize or a repaint starts has run when this resolves.
+const frameWait = (page, n) => page.evaluate((k) => new Promise((resolve) => { const step = (i) => (i ? requestAnimationFrame(() => step(i - 1)) : resolve()); step(k); }), n);
+// A picture's fit arrives by postMessage once its frame loads, so a layout read waits for one fit per design, then three frames.
+const fitAll = (page, slugs) => page.waitForFunction((ks) => ks.every((k) => Object.keys(FIT).some((x) => x.startsWith(k + "|"))), slugs).then(() => frameWait(page, 3));
 
 test("a dark icon shows on a white tile in place of the letter, alt empty and aria-hidden kept", async (t) => {
   const icon = svgIcon("#11151b");
@@ -544,7 +625,8 @@ test("an icon that is not an inline svg or png data URI, or is too long, leaves 
   for (const icon of ["data:image/png;base64,AAAA", "https://example.com/icon.svg", long, "data:image/jpeg;base64,/9j/4AAQ", 42]) {
     const page = await open(t, { meta: { identity: { name: "Compass", icon } } }); if (!page) return;
     await named(page, "Compass");
-    await page.waitForTimeout(150);
+    await page.waitForFunction(() => +document.getElementById("mark").dataset.iconRuns >= 1).catch(() => {}); // a dropped icon's pass still counts, and the assert below names a miss
+    assert.ok(+(await page.getAttribute("#mark", "data-icon-runs")) >= 1, "the mark never counted its finished icon pass");
     const m = await markState(page);
     assert.deepEqual([m.icon, m.img, m.text, m.hidden], [false, null, "C", false], String(icon).slice(0, 40));
     await page.close();
@@ -578,7 +660,7 @@ test("a meta write with the same icon keeps it shown, with no flash of the lette
     const m = document.getElementById("mark"); let lost = false;
     new MutationObserver(() => { if (!m.classList.contains("icon") || !m.querySelector("img")) lost = true; }).observe(m, { attributes: true, childList: true });
     state.meta = { identity: { name: "Compass", brand: "#f47820", icon } }; applyIdentity();
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); // the observer delivers a lost icon before the next frame
     return lost;
   }, icon);
   assert.equal(flashed, false);
@@ -589,15 +671,22 @@ test("a decode that finishes after a newer identity is ignored", async (t) => {
   const page = await open(t, { meta: { identity: { name: "Compass" } } }); if (!page) return;
   await named(page, "Compass");
   const slow = svgIcon("#11151b", "<!--slow-->");
-  await page.evaluate((slow) => {
+  const base = await page.evaluate((slow) => {
     const decode = HTMLImageElement.prototype.decode;
-    HTMLImageElement.prototype.decode = function () { const wait = this.src === slow; return decode.call(this).then(() => wait && new Promise((r) => setTimeout(r, 400))); };
+    // The slow decode holds on a latch the test opens, so it finishes after the newer identity's pass.
+    window.__slowGo = new Promise((r) => { window.__slowRelease = r; });
+    HTMLImageElement.prototype.decode = function () { const wait = this.src === slow; return decode.call(this).then(() => wait && window.__slowGo); };
+    const base = +document.getElementById("mark").dataset.iconRuns;
     state.meta = { identity: { name: "Compass", icon: slow } }; applyIdentity();
     state.meta = { identity: { name: "Compass" } }; applyIdentity();
+    window.__slowRelease();
+    return base;
   }, slow);
-  await page.waitForTimeout(700);
+  assert.ok(Number.isInteger(base), "the mark never counted its finished icon pass");
+  await page.waitForFunction((b) => +document.getElementById("mark").dataset.iconRuns === b + 2, base).catch(() => {}); // the stale pass counts after the release
+  assert.equal(+(await page.getAttribute("#mark", "data-icon-runs")), base + 2, "the stale pass did not count");
   const m = await markState(page);
-  assert.deepEqual([m.icon, m.img, m.text, m.tile], [false, null, "C", ""]);
+  assert.deepEqual([m.icon, m.img, m.text, m.tile], [false, null, "C", ""], "a stale decode drew its icon over the newer identity");
 });
 
 // ---------------------------------------------------------------- designs
@@ -918,10 +1007,10 @@ test("a resize or a repaint keeps the owner's scroll, the same box, and the scro
   await page.locator(boxSel(it.id)).evaluate((w) => { window.__w = w; w.scrollTop = 150; });
   assert.equal((await measure(page, it.id)).st, 150, "the owner's scroll did not take");
   await page.setViewportSize({ width: 1300, height: 900 });
-  await page.waitForTimeout(300);
+  await frameWait(page, 2); // the resize fits the pictures in the frames after it
   assert.equal((await measure(page, it.id)).st, 150, "a resize moved the scroll");
   await choose(page, it, "b");
-  await page.waitForTimeout(300);
+  await frameWait(page, 2); // the pick repaints in the frames after it
   const after = await page.locator(boxSel(it.id)).evaluate((w) => ({ same: w === window.__w, st: w.scrollTop }));
   assert.deepEqual(after, { same: true, st: 150 }, "a repaint replaced the box or moved its scroll");
   const label = await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`).getAttribute("aria-label");
@@ -956,17 +1045,17 @@ test("a touch drag scrolls the picture and opens nothing, and a tap opens View, 
   await page.locator(boxSel(it.id)).scrollIntoViewIfNeeded();
   const r = await page.locator(boxSel(it.id)).boundingBox();
   const x = r.x + 40, y = r.y + 380;
+  await page.locator(boxSel(it.id)).evaluate((w) => { window.__ended = false; w.addEventListener("scrollend", () => { window.__ended = true; }, { once: true }); }); // registered before the drag
   await touch("touchStart", [{ x, y }]);
-  for (let i = 1; i <= 6; i++) { await touch("touchMove", [{ x, y: y - i * 40 }]); await page.waitForTimeout(16); }
+  for (let i = 1; i <= 6; i++) { await touch("touchMove", [{ x, y: y - i * 40 }]); await frameWait(page, 1); }
   await touch("touchEnd", []);
-  await page.waitForTimeout(500);
+  await page.waitForFunction(() => window.__ended).catch(() => {}); // the drag's scroll end; a drag that never scrolls leaves the assert below to name it
   assert.ok((await measure(page, it.id)).st > 0, "the touch drag did not scroll the picture");
   assert.equal(await page.locator("#dsheet").isVisible(), false, "the touch drag opened View");
-  await page.waitForTimeout(300);
   const r2 = await page.locator(boxSel(it.id)).boundingBox();
   await touch("touchStart", [{ x: r2.x + 40, y: r2.y + 200 }]);
   await touch("touchEnd", []);
-  await page.waitForTimeout(400);
+  await page.locator("#dsheet").waitFor({ state: "visible" }).catch(() => {}); // a tap opens View at once; the assert below names a miss
   assert.equal(await page.locator("#dsheet").isVisible(), true, "the tap did not open View");
 });
 
@@ -1507,7 +1596,7 @@ test("a tap on each star on two cards and one Send gives exactly one notice for 
   await send(page);
   await page.waitForFunction(() => window.__sent.length >= 1);
   await page.waitForFunction(() => Object.keys(window.__answers()).length === 2);
-  await page.evaluate(() => new Promise((r) => setTimeout(r, 300))); // a second send would land in this window
+  await page.waitForFunction(() => !state.sending); // a second send can only land while this batch is in flight
   const s = await sent(page);
   assert.equal(s.length, 1, "one notice per batch");
   assert.match(s[0].text, /27 a/);
@@ -1674,7 +1763,7 @@ test("pressing Send again while a batch is in flight does nothing", async (t) =>
   await takePick(page, DECISION);
   await send(page);
   await page.evaluate(() => { for (let i = 0; i < 3; i++) document.getElementById("send").click(); });
-  await page.evaluate(() => new Promise((r) => setTimeout(r, 1500)));
+  await page.waitForFunction(() => window.__sent.length >= 1 && !state.sending); // the notice is out, and sendAll has cleared sending last
   assert.equal((await sent(page)).length, 1, "a second notice went out");
   assert.equal((await page.evaluate(() => window.__log)).filter((l) => l[0] === "set").length, 1, "the batch saved twice");
 });
@@ -1722,7 +1811,7 @@ test("Undo refuses a delete once 8 seconds from the send have passed", async (t)
   await takePick(page, DECISION); await send(page);
   await page.locator("#undoBtn").waitFor();
   await page.evaluate(() => { const real = Date.now, b = document.getElementById("undoBtn"); Date.now = () => real() + 9000; b.click(); });
-  await page.evaluate(() => new Promise((r) => setTimeout(r, 400)));
+  await frameWait(page, 2); // the stub store settles in microtasks, so a late delete lands before the next frame
   assert.equal((await page.evaluate(() => window.__log)).filter((l) => l[0] === "delete").length, 0, "a delete ran after the window");
   assert.ok((await answers(page))[DECISION.id]);
 });
@@ -1893,7 +1982,31 @@ test("inside a tier, rank overrides age, and an item with no rank sorts after th
     mk("old-none", 3, { added: at(2) }), mk("new-none", 4, { added: at(6) }),
   ];
   const page = await open(t, { items }); if (!page) return;
-  assert.deepEqual((await order(page)).find((x) => x[0] === "tier-calm")[1], ["new-rank1", "old-rank2", "old-none", "new-none"]);
+  assert.deepEqual((await order(page)).find((x) => x[0] === "tier-calm")[1], ["new-rank1", "old-rank2", "new-none", "old-none"]);
+});
+
+// Inside a tier the newest ask comes first, so the freshest asks are the ones answered first.
+test("inside a tier, the newest item comes first, and rank still leads", async (t) => {
+  const items = [
+    mk("calm-old", 1, { added: at(1) }), mk("calm-new", 2, { added: at(9) }), mk("calm-mid", 3, { added: at(5) }),
+    mk("hold-old", 4, { added: at(1), holds: "A lane waits." }), mk("hold-new", 5, { added: at(9), holds: "A lane waits." }),
+    mk("rank-old", 6, { added: at(2), rank: 0, stands: true }), mk("rank-new", 7, { added: at(8), rank: 1, stands: true }),
+  ];
+  const page = await open(t, { items }); if (!page) return;
+  const by = Object.fromEntries(await order(page));
+  assert.deepEqual(by["tier-calm"], ["calm-new", "calm-mid", "calm-old"]);
+  assert.deepEqual(by["tier-holds"], ["hold-new", "hold-old"]);
+  assert.deepEqual(by["tier-stands"], ["rank-old", "rank-new"], "rank must still lead age");
+});
+
+// A group sits at its newest member's time, as the Answered section does; an item with no valid date comes last among the new items.
+test("inside a tier, a group sits at its newest member, and an undated item comes last among the new items", async (t) => {
+  const items = [
+    mk("solo-mid", 1, { added: at(5) }), mk("solo-old", 2, { added: at(1) }), mk("undated", 3, { added: "garbage" }),
+    mk("grp-old", 4, { added: at(2), group: "g" }), mk("grp-new", 5, { added: at(9), group: "g" }),
+  ];
+  const page = await open(t, { items }); if (!page) return;
+  assert.deepEqual((await order(page)).find((x) => x[0] === "tier-calm")[1], ["grp-new", "grp-old", "solo-mid", "solo-old", "undated"]);
 });
 
 test("a group stays together at its best member's rank", async (t) => {
@@ -1950,18 +2063,19 @@ test("the skill answers a comment by rewriting the item, never in a comment thre
 // below the new items and folds until the owner unfolds it. lastSend here is a closed item's last answer.
 const SENT_AT = at(10);
 const sentItem = () => mk("sent-closed", 90, { status: "closed", lastAnswer: { choice: "a", at: SENT_AT, note: "" } });
-const tierIds = async (page, k) => (await order(page)).find((x) => x[0] === "tier-" + k)[1];
+const idsInSection = async (page, k) => (await order(page)).find((x) => x[0] === "tier-" + k)[1];
 const seenOf = (page, it) => card(page, it).getAttribute("data-seen");
 const optsShown = (page, it) => card(page, it).locator(".opts").isVisible();
 
 // An item the owner still owes never folds: only an answered card folds. Its options show with no fold control.
+// The new item is a task: a seen decision would lead a task on kind alone, so only the seen sink puts it last.
 test("a seen, owed decision sinks under a new one in Whenever, and its options show with no fold press", async (t) => {
-  const seen = mk("seen-old", 1, { added: at(5) }), fresh = mk("fresh-new", 2, { added: at(20) });
+  const seen = mk("seen-old", 1, { added: at(5) }), fresh = { ...TASK, id: "fresh-new", n: 2, added: at(20) };
   const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
-  assert.deepEqual(await tierIds(page, "calm"), ["fresh-new", "seen-old"]);
   assert.equal(await seenOf(page, seen), "true", "the seen item is not marked seen");
   assert.notEqual(await seenOf(page, fresh), "true", "the new item is marked seen");
-  assert.equal(await optsShown(page, fresh), true, "a new item's options are hidden");
+  assert.deepEqual(await idsInSection(page, "calm"), ["fresh-new", "seen-old"], "the seen decision leads the new task in Whenever");
+  assert.equal(await card(page, fresh).locator("ol.steps").isVisible(), true, "a new task's steps are hidden");
   assert.equal(await card(page, seen).locator("button.unfold").count(), 0, "a seen, owed decision has a fold control");
   assert.equal(await optsShown(page, seen), true, "a seen, owed decision's options are hidden until a fold press");
 });
@@ -2084,31 +2198,33 @@ test("a sunk task with no steps and no command, taken to Change, labels its fold
 test("a seen item sinks below a new one even when the seen item holds the higher rank", async (t) => {
   const seen = mk("seen-ranked", 1, { added: at(5), rank: 1 }), fresh = mk("fresh-ranked", 2, { added: at(20), rank: 2 });
   const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
-  assert.deepEqual(await tierIds(page, "calm"), ["fresh-ranked", "seen-ranked"]);
+  assert.deepEqual(await idsInSection(page, "calm"), ["fresh-ranked", "seen-ranked"]);
   assert.equal(await seenOf(page, seen), "true", "the seen item is not marked seen");
 });
 
+// The new item is a task: a seen decision would lead a task on kind alone, so only the seen sink puts it last.
 test("a seen item with a draft keeps its options open and still sinks", async (t) => {
-  const seen = mk("draft-seen", 1, { added: at(5) }), fresh = mk("draft-fresh", 2, { added: at(20) });
+  const seen = mk("draft-seen", 1, { added: at(5) }), fresh = { ...TASK, id: "draft-fresh", n: 2, added: at(20) };
   const storage = { "waiting.draft": JSON.stringify({ [seen.id]: { choice: "b" } }) };
   const page = await open(t, { items: [seen, fresh, sentItem()], storage }); if (!page) return;
-  assert.deepEqual(await tierIds(page, "calm"), ["draft-fresh", "draft-seen"]);
   assert.equal(await seenOf(page, seen), "true", "the seen item is not marked seen");
+  assert.deepEqual(await idsInSection(page, "calm"), ["draft-fresh", "draft-seen"], "the seen decision leads the new task in Whenever");
   assert.equal(await optsShown(page, seen), true, "a seen item with a draft is folded");
 });
 
 test("a seen stood pick sinks under a new one in Pick stands, and its options stay open", async (t) => {
-  const seen = mk("stand-seen", 1, { added: at(5), stands: true }), fresh = mk("stand-fresh", 2, { added: at(20), stands: true });
+  // The seen pick holds the better rank, so only the seen sink puts it last.
+  const seen = mk("stand-seen", 1, { added: at(5), stands: true, rank: 1 }), fresh = mk("stand-fresh", 2, { added: at(20), stands: true, rank: 2 });
   const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
-  assert.deepEqual(await tierIds(page, "stands"), ["stand-fresh", "stand-seen"]);
   assert.equal(await seenOf(page, seen), "true", "the seen stood pick is not marked seen");
+  assert.deepEqual(await idsInSection(page, "stands"), ["stand-fresh", "stand-seen"], "the seen stood pick leads the new one in Pick stands");
   assert.equal(await optsShown(page, seen), true, "a seen stood pick is folded");
 });
 
-test("with no answer anywhere, nothing is seen and Whenever stays oldest first", async (t) => {
+test("with no answer anywhere, nothing is seen and Whenever stays newest first", async (t) => {
   const older = mk("no-send-old", 1, { added: at(5) }), newer = mk("no-send-new", 2, { added: at(20) });
   const page = await open(t, { items: [older, newer] }); if (!page) return;
-  assert.deepEqual(await tierIds(page, "calm"), ["no-send-old", "no-send-new"]);
+  assert.deepEqual(await idsInSection(page, "calm"), ["no-send-new", "no-send-old"]);
   for (const it of [older, newer]) {
     assert.notEqual(await seenOf(page, it), "true", `${it.id} is marked seen with no lastSend`);
     assert.equal(await optsShown(page, it), true, `${it.id} folds with no lastSend`);
@@ -2116,13 +2232,14 @@ test("with no answer anywhere, nothing is seen and Whenever stays oldest first",
 });
 
 test("a group with one new member is new as a whole, so a seen item in its tier sinks under it", async (t) => {
-  const solo = mk("g-solo", 1, { added: at(3) });
-  const older = mk("g-old", 2, { added: at(5), group: "pair" }), newer = mk("g-new", 3, { added: at(20), group: "pair" });
+  // The seen solo holds the better rank, and the group holds rank 2, so only the seen sink puts the solo under the group.
+  const solo = mk("g-solo", 1, { added: at(8), rank: 1 });
+  const older = mk("g-old", 2, { added: at(5), group: "pair", rank: 2 }), newer = mk("g-new", 3, { added: at(20), group: "pair", rank: 2 });
   const page = await open(t, { items: [solo, older, newer, sentItem()] }); if (!page) return;
-  assert.deepEqual(await tierIds(page, "calm"), ["g-old", "g-new", "g-solo"]);
   assert.equal(await seenOf(page, solo), "true", "the seen item is not marked seen");
   assert.notEqual(await seenOf(page, older), "true", "a group with a new member is marked seen");
   assert.notEqual(await seenOf(page, newer), "true", "the new member is marked seen");
+  assert.deepEqual(await idsInSection(page, "calm"), ["g-new", "g-old", "g-solo"], "the seen solo sits above the group in Whenever");
 });
 
 // ---------------------------------------------------------------- a reply or a step since the last visit
@@ -2365,7 +2482,8 @@ for (const value of ["stay", "sink"]) {
 
 // Case 2, sink: a card sent on this visit moves to the Answered section, folded. The next open card takes its slot in the tier.
 test("answered-sink: a card sent on this visit moves to the Answered section, folded, and the open cards keep their order (SENT_MOVE sink)", async (t) => {
-  const sent = mk("send-sink", 1, { added: at(1) }), o1 = mk("send-open-1", 2, { added: at(2) }), o2 = mk("send-open-2", 3, { added: at(3) });
+  // The sent card is the newest, so it heads its tier; the next open card takes its slot. Newest first puts o1 above o2.
+  const sent = mk("send-sink", 1, { added: at(3) }), o1 = mk("send-open-1", 2, { added: at(2) }), o2 = mk("send-open-2", 3, { added: at(1) });
   const page = await open(t, { items: [sent, o1, o2], pageHtml: withSentMove("sink") }); if (!page) return;
   // A note gives the sunk card a fold with something in it; a fold with nothing to hide would say something false.
   await choose(page, sent, "a");
@@ -2502,7 +2620,7 @@ test("an open card answered on the page stays in its tier until reload, and a fr
   await send(page);
   await page.waitForFunction((id) => !!window.__answers()[id], it.id);
   await card(page, it).locator(".receipt").waitFor();
-  assert.deepEqual(await cardsIn(page, "#tier-calm"), [it.id, other.id], "the card answered on the open page left its tier before reload");
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), [other.id, it.id], "the card answered on the open page left its tier before reload");
   const again = await open(t, { items: [it, other], answers: await answers(page) }); if (!again) return;
   assert.equal(await sectionOf(again, it), "tier-answered", `No. ${it.n} is not in the Answered section after a reload`);
   assert.deepEqual(await cardsIn(again, "#tier-calm"), [other.id], "after a reload the open item is not alone in its tier");
@@ -2534,7 +2652,7 @@ test("in the Answered section, a group sinks only when every member is answered;
   const half = [mk("half-ans", 1, { group: "half", added: at(5) }), mk("half-open", 2, { group: "half", added: NEW_ADDED })];
   const all = [mk("all-a", 3, { group: "all", added: at(6) }), mk("all-b", 4, { group: "all", added: at(7) })];
   const page = await open(t, { items: [...half, ...all], answers: { ...answerOf(half[0]), ...answerOf(all[0]), ...answerOf(all[1]) } }); if (!page) return;
-  assert.deepEqual(await cardsIn(page, "#tier-calm #group-half"), half.map((x) => x.id), "the half-answered group is not whole in its tier");
+  assert.deepEqual(await cardsIn(page, "#tier-calm #group-half"), [half[1].id, half[0].id], "the half-answered group is not whole in its tier");
   assert.equal(await page.locator(`#tier-answered #item-${half[0].id}`).count(), 0, "the answered member of a half-answered group sank");
   assert.equal(await sectionOf(page, all[0]), "tier-answered", "the fully answered group is not in the Answered section");
   assert.deepEqual(await cardsIn(page, "#tier-answered #group-all"), all.map((x) => x.id), "the fully answered group did not sink whole, as one frame");
@@ -2658,7 +2776,7 @@ test("Answered section: a Send made before the first receipts snapshot keeps its
   await page.evaluate(() => window.__releaseReceipts());
   await page.waitForFunction(() => feed.receipts === true);
   assert.equal(await sectionOf(page, it), "tier-calm", `No. ${it.n}, answered before the receipts came, left its tier when they arrived`);
-  assert.deepEqual(await cardsIn(page, "#tier-calm"), [it.id, other.id], "the open page re-sorted when the receipts arrived");
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), [other.id, it.id], "the open page re-sorted when the receipts arrived");
 });
 
 test("Answered section: a fully answered group's bundle head reads Answered together, not Answer these together", async (t) => {
@@ -5099,7 +5217,7 @@ test("an item stored with no id field shows no warning, sorts by n, and is answe
   const page = await open(t, { items: [], rawItems }); if (!page) return;
   assert.equal(await card(page, { id: "k29" }).count(), 1, "no card for the item");
   assert.equal(await warn(page, "k29").count(), 0, "a warning shows for an item with no id field");
-  assert.deepEqual(await cardsIn(page, "#tier-calm"), ["low", "k29", "high"], "the card is not sorted by n among its items");
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), ["high", "k29", "low"], "the card is not sorted by n among its items");
   await choose(page, { id: "k29" }, "b");
   await send(page);
   await written(page);
@@ -5115,7 +5233,7 @@ test("an item whose id field differs from its key shows no warning, sorts by n, 
   const page = await open(t, { items: [], rawItems }); if (!page) return;
   assert.equal(await card(page, { id: "k30" }).count(), 1, "no card for the item");
   assert.equal(await warn(page, "k30").count(), 0, "a warning shows for an id field that differs from the key");
-  assert.deepEqual(await cardsIn(page, "#tier-calm"), ["low", "k30", "high"], "the card is not sorted by n among its items");
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), ["high", "k30", "low"], "the card is not sorted by n among its items");
   await choose(page, { id: "k30" }, "a");
   await send(page);
   await written(page);
@@ -5481,8 +5599,7 @@ const FILLER = Array.from({ length: 6 }, (_, i) => mk("fill-" + i, 10 + i, { con
 // On a Send, the anchor is the first card whose bottom is below the band's top, skipping a sent card whose top is above it. The anchor keeps its top,
 // and the cards below it rise by what the sent cards drop.
 const LEADS = [1, 2, 3].map((n) => mk("lead-" + n, n, { context: LONG }));
-const HOLDS = [1, 2, 3].map((n) => mk("hold-" + n, n, { context: LONG, holds: "A lane waits.", added: `2026-10-0${n}T00:00:00Z` }));
-const frameWait = (page, n) => page.evaluate((k) => new Promise((resolve) => { const step = (i) => (i ? requestAnimationFrame(() => step(i - 1)) : resolve()); step(k); }), n);
+const HOLDS = [1, 2, 3].map((n) => mk("hold-" + n, n, { context: LONG, holds: "A lane waits." }));
 // Scrolls so the card's top or bottom edge sits `offset` px below the band's top edge. A negative offset puts it above the band.
 const placeRel = (page, it, edge, offset) => page.evaluate(([id, e, o]) => {
   const bt = document.querySelector(".hdr").getBoundingClientRect().bottom;
@@ -5504,10 +5621,12 @@ const anchorOf = (page, sent) => page.evaluate((ids) => {
   }
   return null;
 }, sent.map((it) => "item-" + it.id));
+// The page lists a tier newest first, so a case whose cards sit in array order stamps each item's added day from its place: the first item is the newest.
+const inArrayOrder = (items) => items.map((it, i) => ({ ...it, added: at(28 - i) }));
 // Scroll anchoring stays off unless the case asks for it.
 // sentMove names the SENT_MOVE value a case pins (see withSentMove); none keeps the page's own value.
-const openSend = async (t, { items, width, height, scheme, anchored, sentMove }) => {
-  const page = await open(t, { items, scheme, viewport: { width, height }, pageHtml: sentMove ? withSentMove(sentMove) : undefined });
+const openSend = async (t, { items, width, height, scheme, anchored, sentMove, timers }) => {
+  const page = await open(t, { items: inArrayOrder(items), scheme, timers, viewport: { width, height }, pageHtml: sentMove ? withSentMove(sentMove) : undefined });
   if (page && !anchored) await noAnchor(page);
   return page;
 };
@@ -5744,7 +5863,7 @@ const watchLoads = (page) => page.evaluate(() => {
 // Focus on a radio of a card below the sent card (or above it, as a control), then a Send that sinks the sent card. Returns what the reader sees.
 async function sinkWithFocusBelow(t, { focusOn }) {
   const sent = mk("rec-sent", 4), radio = mk("rec-radio", 5), frame = mk("rec-frame", 6, { designs: [{ slug: "s1", label: "Option a" }] });
-  const page = await open(t, { items: [...LEADS, sent, radio, frame, ...FILLER], designData: { s1: "<p>one</p>" }, viewport: { width: 1280, height: 800 }, pageHtml: withSentMove("sink") }); if (!page) return null;
+  const page = await open(t, { items: inArrayOrder([...LEADS, sent, radio, frame, ...FILLER]), designData: { s1: "<p>one</p>" }, viewport: { width: 1280, height: 800 }, pageHtml: withSentMove("sink") }); if (!page) return null;
   await choose(page, sent, "a");
   await settleAt(page, sent, "top", 60);
   const target = focusOn === "above" ? LEADS[0] : radio, radioId = "o-" + target.id + "-a";
@@ -5828,7 +5947,7 @@ test("answered-sink: control: Undo of a Send from a card in view returns it to i
 // An answer that arrives without a Send, on a card in view: the card keeps its height while in view, and drops once wholly off the screen.
 async function answerWithoutSend(t, { width, scheme }) {
   const inView = mk("in-view", 4, { context: LONG }), below = mk("below", 5);
-  const page = await openSend(t, { items: [...LEADS, inView, below, ...FILLER], width, height: 800, scheme, anchored: false }); if (!page) return;
+  const page = await openSend(t, { items: [...LEADS, inView, below, ...FILLER], width, height: 800, scheme, anchored: false, timers: true }); if (!page) return;
   await settleAt(page, inView, "top", 40);
   const pre = await cardMap(page);
   const I = "item-in-view", B = "item-below";
@@ -5838,8 +5957,7 @@ async function answerWithoutSend(t, { width, scheme }) {
   assert.equal(await page.evaluate(() => window.__log.filter((l) => l[0] === "set").length), 1, "the page wrote an answer of its own");
   const atOnce = await cardMap(page);
   assert.ok(atOnce[I].h >= pre[I].h - 1, `an answer without a Send dropped its height at once: ${pre[I].h}px to ${atOnce[I].h}px`);
-  await frameWait(page, 2);
-  await page.waitForTimeout(600);
+  await page.clock.runFor(700); // a card in view is never dropped on a timer: the fake clock runs past any drop timer, with no wait
   const held = await cardMap(page);
   assert.ok(Math.abs(held[I].h - pre[I].h) <= 1, `an answer without a Send changed the card's height while in view: ${pre[I].h}px to ${held[I].h}px`);
   assert.ok(Math.abs(held[B].top - pre[B].top) <= 1, `an answer without a Send moved the card below: ${pre[B].top} to ${held[B].top}`);
@@ -5916,7 +6034,7 @@ for (const scheme of ["light", "dark"]) for (const width of SIZES) {
     const designData = Object.fromEntries(LOOK_OPTS.map((o) => [o.design, phone(o.design)]));
     const page = await open(t, { items: [it], designData, scheme, viewport: { width, height: 900 } }); if (!page) return;
     await card(page, it).locator("label.opt .dfitwrap").first().scrollIntoViewIfNeeded();
-    await page.waitForTimeout(300);
+    await fitAll(page, LOOK_OPTS.map((o) => o.design));
     const m = await page.evaluate((id) => [...document.querySelectorAll(`#item-${id} label.opt`)].map((o) => {
       const b = o.getBoundingClientRect(), pw = o.querySelector(".dfitwrap"), w = pw.getBoundingClientRect();
       const text = [...o.querySelectorAll(".how, .lab, .tr, .pick, .nopick, .dwarn")].map((x) => x.getBoundingClientRect()).filter((x) => x.height > 0);
@@ -5932,13 +6050,14 @@ for (const scheme of ["light", "dark"]) for (const width of SIZES) {
 
 test("a rail jump after Send lands on its card", async (t) => {
   const items = Array.from({ length: 14 }, (_, i) => mk("q" + i, i + 1, { context: LONG }));
-  const page = await open(t, { items, viewport: { width: 1280, height: 800 } }); if (!page) return;
+  const page = await open(t, { items: inArrayOrder(items), viewport: { width: 1280, height: 800 } }); if (!page) return;
   await noAnchor(page);
   await choose(page, items[0], "a"); await choose(page, items[1], "a");
   await send(page);
   await page.locator("#item-q0 .receipt").waitFor();
+  await page.evaluate(() => { window.__ended = false; window.addEventListener("scrollend", () => { window.__ended = true; }, { once: true }); }); // registered before the jump
   await page.click("#c-q9");
-  await page.waitForTimeout(2500);
+  await page.waitForFunction(() => window.__ended).catch(() => {}); // the jump's scroll end; a jump that never scrolls leaves the band assert to name it
   // The card lands inside the band, just under the header's bottom edge.
   const band = await bandOf(page);
   const top = await card(page, items[9]).evaluate((e) => Math.round(e.getBoundingClientRect().top));
@@ -5952,10 +6071,11 @@ test("a receipt wholly below the screen drops its height without moving the page
   await choose(page, items[0], "a");
   await page.evaluate(() => window.scrollTo(0, 60));
   const railTop = () => page.evaluate(() => Math.round(document.querySelector(".ov-prog").getBoundingClientRect().top));
-  const at = await railTop();
+  const at = await railTop(), h0 = await card(page, items[0]).evaluate((e) => e.getBoundingClientRect().height);
   await send(page);
   await page.locator("#item-q0 .receipt").waitFor();
-  await page.waitForTimeout(600);
+  await page.waitForFunction((h) => document.getElementById("item-q0").getBoundingClientRect().height < h - 1, h0).catch(() => {}); // the card drops once its receipt is off screen, after a short timer
+  assert.ok((await card(page, items[0]).evaluate((e) => e.getBoundingClientRect().height)) < h0 - 1, "the card did not drop its height once its receipt was off screen");
   assert.ok(Math.abs((await railTop()) - at) <= 1, "the page moved when an off-screen receipt shrank");
 });
 
@@ -5965,7 +6085,7 @@ for (const width of SIZES) test(`an option's picture is at most 480px high and c
   const designData = Object.fromEntries(LOOK_OPTS.map((o) => [o.design, '<body style="margin:0"><div style="width:390px;height:844px;background:#eee"></div></body>']));
   const page = await open(t, { items: [it], designData, viewport: { width, height: 900 } }); if (!page) return;
   await card(page, it).locator("label.opt .dfitwrap").first().scrollIntoViewIfNeeded();
-  await page.waitForTimeout(300);
+  await fitAll(page, LOOK_OPTS.map((o) => o.design));
   const m = await page.evaluate((id) => [...document.querySelectorAll(`#item-${id} label.opt .opic`)].map((o) => { const w = o.querySelector(".dfitwrap").getBoundingClientRect(), b = o.getBoundingClientRect(); return { h: w.height, w: w.width, off: Math.abs((w.left + w.right) / 2 - (b.left + b.right) / 2), room: b.width }; }), it.id);
   for (const o of m) {
     assert.ok(o.h <= 481, "the picture is taller than 480px: " + o.h);
@@ -6037,9 +6157,11 @@ function sweepPage() {
 test("containment sweep: nothing crosses its card, the rail or the Sent bar, nothing is cut without an ellipsis, no sideways scroll", async (t) => {
   const failures = [];
   for (const scheme of ["light", "dark"]) for (const width of SWEEP_WIDTHS) for (const [state, make, act] of STATES) {
-    const page = await open(t, { ...make(), scheme, viewport: { width, height: 900 } }); if (!page) return;
+    const spec = make();
+    const page = await open(t, { ...spec, scheme, viewport: { width, height: 900 } }); if (!page) return;
     if (act) await act(page);
-    await page.waitForTimeout(150);
+    if (spec.designData) await fitAll(page, Object.keys(spec.designData)); // a picture's layout is final only after its frame posts its fit
+    await frameWait(page, 3); // the state's layout settles in its frames
     for (const b of await page.evaluate(sweepPage)) failures.push(`${state} @${width} ${scheme}: ${b}`);
     await page.close();
   }
@@ -6053,27 +6175,30 @@ const picBox = (page) => page.evaluate(() => [...document.querySelectorAll("#ite
 
 test("a capped picture grows back when its card widens and stays inside when it narrows", async (t) => {
   const page = await open(t, { items: [growItem()], designData: growData(844), viewport: { width: 1070, height: 900 } }); if (!page) return;
-  await page.waitForTimeout(300);
+  await fitAll(page, LOOK_OPTS.map((o) => o.design));
   const narrow = (await picBox(page))[0].w;
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.waitForTimeout(400);
+  await frameWait(page, 3); // the card's width changes, and the picture follows it in the frames after
   const wide = await picBox(page);
   assert.ok(wide[0].w > narrow + 10, `the picture did not grow back: ${narrow} then ${wide[0].w}`);
   await page.setViewportSize({ width: 1066, height: 900 });
-  await page.waitForTimeout(400);
+  await frameWait(page, 3); // the card's width changes, and the picture follows it in the frames after
   for (const b of await picBox(page)) assert.ok(b.over <= 1, "the picture runs past its card after narrowing: " + b.over);
 });
 
 test("a very tall mockup with no focus is never a thin strip", async (t) => {
   const page = await open(t, { items: [growItem()], designData: growData(3000), viewport: { width: 1280, height: 900 } }); if (!page) return;
-  await page.waitForTimeout(400);
+  await fitAll(page, LOOK_OPTS.map((o) => o.design));
   for (const b of await picBox(page)) assert.ok(b.w >= 120, "the picture is a strip, " + b.w + "px wide");
 });
 
 test("the SENT stamp is the same element, not rebuilt, as the Undo count ticks", async (t) => {
   const page = await sentPage(t, false); if (!page) return;
   await page.evaluate(() => { window.__stamp = document.querySelector("#sent .stamp"); });
-  await page.waitForTimeout(2300);
+  const undoCount = () => page.locator("#undoBtn").textContent().then((s) => { const m = /\((\d+)\)/.exec(s); return m ? +m[1] : NaN; });
+  const start = await undoCount();
+  await page.waitForFunction((s) => { const m = /\((\d+)\)/.exec(document.getElementById("undoBtn").textContent); return !!m && +m[1] <= s - 2; }, start).catch(() => {}); // two ticks of the count pass, and the stamp must survive them
+  assert.ok(start - (await undoCount()) >= 2, "the Undo count did not tick twice");
   assert.equal(await page.evaluate(() => window.__stamp.isConnected && window.__stamp === document.querySelector("#sent .stamp")), true, "the stamp was rebuilt, so it settles again each second");
   assert.match(await page.locator("#undoBtn").textContent(), /Undo send \(\d\)/);
 });
@@ -6126,7 +6251,7 @@ test("option pictures of different heights keep the View bars at 44px", async (t
   const data = Object.fromEntries(LOOK_OPTS.map((o, i) => [o.design, `<body style="margin:0"><div style="width:390px;height:${[844, 300, 560][i]}px;background:#eee"></div></body>`]));
   const it2 = { ...it, designs: it.designs.map((d, i) => ({ ...d, size: { w: 390, h: [844, 300, 560][i] } })) };
   const page = await open(t, { items: [it2], designData: data, viewport: { width: 1280, height: 900 } }); if (!page) return;
-  await page.waitForTimeout(400);
+  await fitAll(page, LOOK_OPTS.map((o) => o.design));
   const hs = await page.evaluate(() => [...document.querySelectorAll("#item-grow-pics .opic .view")].map((v) => Math.round(v.getBoundingClientRect().height)));
   assert.deepEqual(hs, [44, 44, 44]);
 });
@@ -6384,7 +6509,7 @@ test("an option whose links is a string, not a list, renders with no page error 
   });
   const page = await open(t, { items: [it], errors }).catch((e) => { errors.push("open: " + e.message.split("\n")[0]); return null; });
   if (!page) { assert.deepEqual(errors, [], "the page threw on a string links value"); return; }
-  await page.waitForTimeout(200); // a page error can land a tick after the card appears
+  await frameWait(page, 2); // a page error can land a tick after the card appears
   assert.deepEqual(errors, [], "the page threw on a string links value");
   assert.equal(await card(page, it).locator(".opt").count(), 2, "the option cards did not render");
   assert.equal(await card(page, it).locator(".links").count(), 0, "a string links value shows a links row");
@@ -6419,7 +6544,7 @@ async function openStatus(page) {
   assert.equal(await panel.isHidden(), true, "the Status panel shows before its tab is pressed");
   await tab.click();
   await panel.waitFor({ state: "visible" });
-  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 50)))); // a late read would land here
+  await frameWait(page, 3); // a late read would land here
   return panel;
 }
 // Whether any visible or hidden text of the page matches (a yes or no, so a red run does not print the page).
@@ -8960,7 +9085,7 @@ test("a sent Park shows the receipt Parked. with Change, and Change then a pick 
   await send(page);
   await page.waitForFunction((k) => !!window.__answers()[k] && window.__answers()[k].choice === "a", DECISION.id);
   const rec = (await answers(page))[DECISION.id];
-  assert.deepEqual(Object.keys(rec).sort(), ["at", "choice", "item", "n", "note"], "the changed answer is not a normal choice record: " + Object.keys(rec).join(", "));
+  assert.deepEqual(Object.keys(rec).sort(), ["at", "choice", "item", "label", "n", "note"], "the changed answer is not a normal choice record: " + Object.keys(rec).join(", "));
   assert.equal(rec.choice, "a", "the changed answer lost the picked option");
 });
 
@@ -9636,3 +9761,78 @@ for (const width of [390, 1280]) {
     assert.deepEqual([...bad, ...fineBad], []);
   });
 }
+
+// ---------------------------------------------------------------- the recommended option, and the answer's label
+// `recommended` is a key, or a list of keys on a multi item, that the page stars. The star falls back to `pick` for an
+// old item. The star and the stood line say "Recommended". Each saved decision answer carries `label` beside `choice`:
+// "A: <option label>" for a pick, a list of those for a multi item, "none of these" for none. `choice` stays the key.
+
+test("the star sits on the recommended option, not on the pick", async (t) => {
+  const it = mk("rec-star", 40, { recommended: "b", pick: "a" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await page.locator(`label[for="o-${it.id}-b"] .pick`).count(), 1, "the star is not on the recommended option b");
+  assert.equal(await page.locator(`label[for="o-${it.id}-a"] .pick`).count(), 0, "the star still sits on the pick a");
+});
+
+test("an old item with no recommended stars its pick", async (t) => {
+  const it = mk("old-pick", 41, { pick: "b" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await page.locator(`label[for="o-${it.id}-b"] .pick`).count(), 1, "the star is not on the pick b of an old item");
+  assert.equal(await page.locator(`label[for="o-${it.id}-a"] .pick`).count(), 0, "the star sits on a with no recommended");
+});
+
+test("the star is named Recommended in its label and its tooltip", async (t) => {
+  const page = await open(t); if (!page) return;
+  const star = page.locator(`label[for="o-${DECISION.id}-a"] .pick .spark`);
+  assert.equal(await star.getAttribute("aria-label"), "Recommended", "the star's label is not Recommended");
+  assert.equal(await star.getAttribute("title"), "Recommended", "the star's tooltip is not Recommended");
+});
+
+test("a stood pick says The recommended option goes with your next Send.", async (t) => {
+  const it = mk("stood-rec", 42, { stands: true });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await card(page, it).locator(".ready").textContent(), "The recommended option goes with your next Send.");
+});
+
+test("an item that names recommended draws no field warning", async (t) => {
+  const it = mk("rec-field", 43, { recommended: "b" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal((await card(page, it).textContent()).includes("Which field"), false, "the card warns a field the page does not draw");
+});
+
+test("a pick-one answer carries its label, A: Red, beside its choice", async (t) => {
+  const page = await open(t); if (!page) return;
+  await takePick(page, DECISION);
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id);
+  const a = (await answers(page))[DECISION.id];
+  assert.equal(a.choice, "a", "the choice is no longer the key");
+  assert.ok(typeof a.label === "string", "the answer has no label: " + JSON.stringify(a));
+  assert.match(a.label, /^a: Red$/i);
+});
+
+test("a none answer carries the label none of these, and its choice stays none", async (t) => {
+  const page = await open(t); if (!page) return;
+  await addNote(page, DECISION, "Green please");
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id);
+  const a = (await answers(page))[DECISION.id];
+  assert.equal(a.choice, "none");
+  assert.ok(typeof a.label === "string", "the none answer has no label: " + JSON.stringify(a));
+  assert.match(a.label, /^none of these$/i);
+});
+
+test("a multi answer carries a list of labels, one per tick, beside its list of keys", async (t) => {
+  const it = multi("label-multi", 44);
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 3);
+  await takePick(page, it);
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], it.id);
+  const a = (await answers(page))[it.id];
+  assert.deepEqual(a.choice, ["a", "c"], "the multi choice is no longer the list of keys");
+  assert.ok(Array.isArray(a.label), "the multi answer has no list of labels: " + JSON.stringify(a));
+  assert.equal(a.label.length, 2);
+  assert.match(a.label[0], /^a: Red$/i);
+  assert.match(a.label[1], /^c: Green$/i);
+});

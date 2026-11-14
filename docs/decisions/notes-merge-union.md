@@ -3,7 +3,7 @@
 ## Ruling
 
 `.gitattributes` gives `docs/debts/notes.md` git's built-in `merge=union` driver. A local `git merge`
-keeps both sides' lines with no conflict. The batch runner builds the integration branch with a local
+keeps both sides' lines with no conflict. Until the cutover, the batch runner builds the integration branch with a local
 `git merge`, so it gets this.
 
 `docs/records.md` and `docs/catalog.md` keep the default merge. They are generated tables with
@@ -24,7 +24,7 @@ as a copy. An octopus merge no longer hides a revival: the check keeps its findi
 Scope: this repo only. Another repo with its own notes file adds the same line to its own
 `.gitattributes`.
 
-Unverified: GitHub's own server-side merge. The integration branch is built locally, so it does not
+Unverified: GitHub's own server-side merge. Until the cutover, the integration branch is built locally, so it does not
 depend on GitHub's merge.
 
 Why: lanes append one-line findings to `docs/debts/notes.md`, so lanes clash there. On Oct 29 batch 21
