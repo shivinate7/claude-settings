@@ -4158,7 +4158,7 @@ test("ask-phase-out: Mark read on a closed item's line moves focus to its Marked
 });
 
 test("ask-phase-out: a read item sits under Show read items, and Mark unread on it writes dismissed null with update", async (t) => {
-  const page = await open(t, { items: [AP_OPEN, AP_READ] }); if (!page) return;
+  const page = await open(t, { items: [AP_OPEN, AP_READ], clock: AP_NOW }); if (!page) return;
   const fold = page.getByRole("button", { name: /Show \d+ read items?/ });
   assert.equal(await fold.count(), 1, `no Show read items fold: No. ${AP_READ.n}, a read item, is not behind one button`);
   await fold.click();
@@ -4299,7 +4299,7 @@ test("ask-phase-out: a read item that a session gives waits is counted in the An
 
 // ---------------------------------------------------------------- ask-phase-out: the line head, the read list's Mark unread, the rail's order
 test("ask-phase-out: Mark unread in the read asks list is quiet, as it is in the read items list", async (t) => {
-  const page = await open(t, { items: [AP_OPEN, AP_READ], dbExtra: { asks: { [DIS_KEEP.id]: DIS_KEEP, [DIS_HIDDEN.id]: DIS_HIDDEN } }, storage: RPL_NEW }); if (!page) return;
+  const page = await open(t, { items: [AP_OPEN, AP_READ], dbExtra: { asks: { [DIS_KEEP.id]: DIS_KEEP, [DIS_HIDDEN.id]: DIS_HIDDEN } }, storage: RPL_NEW, clock: AP_NOW }); if (!page) return;
   await shownBox(page, DIS_KEEP.text, DIS_SHOWN);
   await mustHave(page, "#askDismissed", "Show read asks unfold");
   await page.click("#askDismissed");
@@ -4479,6 +4479,40 @@ test("answered-lines-age-out: a line a minute under the age draws in Answered, a
   await mustHave(page, "#readItems", "the Show read items fold, which holds the line a minute over the age");
   await page.click("#readItems");
   await mustHave(page, `#readItemList #line-${OVER.n}`, `the line of No. ${OVER.n} in the read items list`);
+});
+
+test("answered-lines-age-out: a line Mark unread wrote (dismissed null) is the owner's mark, never aged out: it draws in Answered at the next load, with Mark read", async (t) => {
+  const page = await open(t, { items: [AP_OPEN, AGE_AGED], keepItems: true, clock: AP_NOW }); if (!page) return;
+  await mustHave(page, "#readItems", "Show read items fold, which holds the aged line before Mark unread");
+  await page.click("#readItems");
+  const unread = await needButton(page.locator("#readItemList"), new RegExp(`^Mark unread: No\\. ${AGE_AGED.n},`), `Mark unread on the aged line of No. ${AGE_AGED.n}`);
+  const before = (await apWrites(page, "items")).length;
+  await unread.click();
+  await apWaitUpdates(page, "items", before + 1);
+  const ups = (await apWrites(page, "items")).slice(before);
+  assert.equal(ups.length, 1, `Mark unread made ${ups.length} update writes on items, not one, so the reload below would not hold the mark`);
+  assert.deepEqual(ups[0].body, { dismissed: null }, `Mark unread wrote ${JSON.stringify(ups[0].body)}, not dismissed: null`);
+  await page.reload();
+  await page.waitForFunction("state.items.length > 0");
+  await mustHave(page, `#item-${AP_OPEN.id}`, `the open task ${AP_OPEN.id} after the reload`);
+  await mustHave(page, "#tier-answered", "the Answered section after the reload");
+  await mustHave(page, `#tier-answered #line-${AGE_AGED.n}`, `line of No. ${AGE_AGED.n}, marked unread, in Answered after the reload`);
+  await needButton(page.locator(`#tier-answered #line-${AGE_AGED.n}`), new RegExp(`^Mark read: No\\. ${AGE_AGED.n},`), `Mark read on the line of No. ${AGE_AGED.n}`);
+});
+
+test("answered-lines-age-out: the read items list is newest first by max(read, closed), so an aged line sorts by when it closed", async (t) => {
+  // OLDER has the higher No., so a sort by No. alone puts it first and gets it wrong. DISMISSED was read 30 days before the load, after it closed.
+  const OLDER = agedLine("age-order-old", 85, { closed: agoIso(31 * DAY_MS) });
+  const NEWER = agedLine("age-order-new", 86, { closed: agoIso(29 * DAY_MS) });
+  const DISMISSED = mk("age-order-read", 87, { status: "closed", closed: agoIso(31 * DAY_MS), dismissed: agoIso(30 * DAY_MS), home: "step:answered-lines-age-out", reply: "Read by the owner." });
+  const page = await open(t, { items: [AP_OPEN, OLDER, NEWER, DISMISSED], clock: AP_NOW }); if (!page) return;
+  await mustHave(page, "#readItems", "Show read items fold, which holds the three read lines");
+  await page.click("#readItems");
+  await mustHave(page, "#readItemList", "read items list");
+  const label = await page.getAttribute("#readItemList", "aria-label");
+  assert.match(label || "", /newest first/, `the read items list is labelled ${JSON.stringify(label)}, not newest first`);
+  const order = await page.locator('#readItemList article[id^="line-"]').evaluateAll((els) => els.map((e) => e.id));
+  assert.deepEqual(order, [`line-${NEWER.n}`, `line-${DISMISSED.n}`, `line-${OLDER.n}`], `the read items list is ${JSON.stringify(order)}, not newest by max(read, closed)`);
 });
 
 // ---------------------------------------------------------------- the ask stack: Add to list, one Send, one Undo for the batch
