@@ -175,6 +175,24 @@ class Scaffold(TempDest):
         self.assertIn("--live", flat)
         self.assertNotRegex(flat, r"(?i)roadmap page", "the roadmap is no page of its own: triage builds a block, the page writer publishes it")
 
+    def test_runner_merge_confirm_carries_the_priority_rows(self):
+        """The runner's merge goes through the priority gate, so its `--confirm` sentence carries `--priority-rows`. A draft step's
+        confirm is left out: the gate never merges a draft."""
+        text = tree(SKILL)["templates/operating-model.md"]
+        bullet = re.search(r"- \*\*Batch runner\.\*\*.*?(?=\n- \*\*)", text, re.S).group(0)
+        sentences = re.split(r"(?<=\.)\s+", " ".join(bullet.split()))  # a line wrap must not split a phrase
+        merges = [s for s in sentences if "--confirm" in s and "to merge" in s]
+        self.assertTrue(merges, "the batch runner's bullet names no merging --confirm")
+        for s in merges:
+            self.assertIn("--priority-rows", s, "the runner's merge --confirm lets a lower PR go past a ready row: " + s)
+
+    def test_handoff_priorities_names_the_gate_form(self):
+        section = section_of(tree(SKILL)["templates/role-handoff.md"], "Priorities")
+        self.assertIsNotNone(section, "no Priorities section")
+        spans = re.findall(r"`([^`]*)`", " ".join(section.split()))
+        self.assertTrue(any("--confirm" in s and "--priority-rows" in s for s in spans),
+                        "the Priorities guidance names no `merge ... --confirm --priority-rows FILE` form, so the rows only list")
+
     def assertInOrder(self, flat, clauses):
         at = [flat.find(x) for x in clauses]
         for clause, pos in zip(clauses, at):
