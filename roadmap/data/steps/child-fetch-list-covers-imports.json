@@ -1,0 +1,14 @@
+{
+ "id": "child-fetch-list-covers-imports",
+ "title": "A claude-settings check proves every module a raw-fetched shared script imports is in the child repos' documented fetch list",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Sighting (coordinator 08:01 CST Nov 14, from runner 11; cause read from runner 11's message and log line, not read by the coordinator in the run; triage read nothing): child repos fetch check_shared_resources.py, layout.py and layout.json as raw URLs at a pin. layout.py at stable (fccff95) imports git_reads, which that fetch list lacks, so degen #704 went red on its first ready run (run 43602367466, step \"shared resources\": ModuleNotFoundError git_reads). Mistake: a change to a fetched script's imports shipped with no check that the child fetch lists cover them. Guard that would have stopped it: a claude-settings check that every module a raw-fetched script imports is in the documented fetch list. Red first: add an import of a module outside the list to one fetched script and the check fails; remove it and it passes. Scan the imports with Python's own parser (ast), not by matching strings. A check change in claude-settings, so round 3 applies. The coordinator's pick on #704: option A, revert the three pins to 635b37b (labelled the coordinator's own).",
+ "source": "coordinator 08:01 CST Nov 14, relaying runner 11",
+ "note": "Filed 08:03 CST Nov 14 by triage. Tracker: the coordinator. No lane yet. The guard the coordinator named: slug child-fetch-list-covers-imports.",
+ "updatedAt": "2026-11-14T08:03:00-06:00"
+}
