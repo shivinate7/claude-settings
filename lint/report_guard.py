@@ -74,6 +74,15 @@ unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, 
 refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too. Risk
 kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
 
+The progress-claim check (rule `progress-claims-cite-live-read`): on any turn, landed or not, it refuses each line of the
+last reply that holds a progress phrase ("in progress", "nearly done", "waiting on" CI or a PR but not on the owner, "stalled" and the like, read outside
+code spans) in a sentence whose subject (a step, lane, batch, `PR #n`, a bare `#n` or a step id in a code span) sits in
+that sentence or an earlier one of its block (a table keeps its header's subject), unless the claim's block cites a named read: get_session, list_events,
+pull_request_read, list_pull_requests, "REST API" or "REST read", a PR URL, or "unmeasured", "not read",
+"unknown". A stamp alone is no read. A state word ("merged", "done") is no phrase. Fences are skipped. One refusal per
+turn lists the lines and joins any other reason. It checks that a block cites a read, not that the read happened.
+Decision: progress-claims-cite-live-read. Cost: regex over the reply, no file, no process.
+
 After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
 may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
 precompact-handoff, item 'Recovered line after compaction'). A label counts only where it starts an item: at line start, after a
@@ -729,6 +738,86 @@ def answered_problem(text):
             continue
         bad.append(body)
     return ANSWERED_REASON + "".join("\n- " + b for b in bad) if bad else ""
+
+
+# progress-claims-cite-live-read: a reply sentence that says how far a step, lane, batch or PR has got cites a named
+# live read made this turn. A claim is a sentence with a progress phrase and a subject (step, lane, batch, `PR #n`, a bare
+# `#n`, or a kebab-case step id in a code span), the subject in the sentence or in an earlier one of its block. The
+# phrase is read outside code spans, the subject and the cite inside them too. A state word ("merged", "done") is no phrase:
+# the step asks how far, not what state. A paragraph is judged as a whole: soft-wrapped lines join, and a table row, list
+# item, heading or bold-labelled line starts its own block. The cite counts when it sits in the claim's block.
+# A bare time, `PR #n`, `#n`, a repo path or a commit hash is no read, so DONE_REF_RE is not reused here.
+PROGRESS_SUBJECT_RE = re.compile(
+    r"\b(?:steps?|lanes?|batch(?:es)?)\b|\bPRs?\s*#?\d+|(?<![\w/&])#\d+\b|`[a-z0-9]+(?:-[a-z0-9]+)+`", re.I)
+PROGRESS_PHRASE_RE = re.compile(
+    r"\b(?:(?<!work\s)in\s+progress|still\s+(?:going|running)|(?:nearly|almost|close\s+to)\s+(?:%s)"
+    r"|waiting\s+(?:on|for)\s+(?!(?:%s)\b)|in\s+flight|stalled|(?:hasn['\u2019]t|has\s+not)\s+finished)\b"
+    r"|\b\d{1,3}\s*%%\s*(?:done|complete)" % (
+        "|".join(_clause.PROGRESS_END_WORDS), "|".join(_clause.form_pattern(w) for w in _clause.OWNER_WAIT_WORDS)), re.I)
+PROGRESS_READ_RE = re.compile(
+    r"\b(?:get_session|list_events|pull_request_read|list_pull_requests|unmeasured|unknown)\b|\bnot\s+read\b"
+    r"|(?<![\w-])(?-i:REST)\s+(?:API|reads?)\b|https?://\S*/pull/\d+", re.I)
+PROGRESS_UNKNOWN = "Progress-claim guard: UNKNOWN, the check did not run (%s)."
+PROGRESS_BLOCK_START = re.compile(r"^(?:\||#{1,6}\s|[-*+]\s|\d+[.)]\s|\*\*)")
+PROGRESS_REASON = owner_line(
+    "Progress-claim guard (rule progress-claims-cite-live-read)",
+    "each line below says how far a step, lane, batch or PR has got and cites no named live read made this turn; a live "
+    "read is get_session on a lane (a step's lane too), list_events, pull_request_read on a PR (a batch's PR too), "
+    "list_pull_requests or a PR URL, and `unmeasured` stands in place of one; a stamp or a PR number alone is no read; "
+    "a mention of a phrase in an inline code span is no claim") + " Lines: "
+
+
+def _progress_blocks(paragraph):
+    """The paragraph's line indexes in blocks: a line that starts a table row, list item, heading or bold label starts a
+    block, and a table row ends one. Other lines are soft wraps of the line before."""
+    blocks = []
+    for i, body in enumerate(paragraph):
+        if blocks and not PROGRESS_BLOCK_START.match(body) and not paragraph[i - 1].startswith("|"):
+            blocks[-1].append(i)
+        else:
+            blocks.append([i])
+    return blocks
+
+
+def _progress_claim_lines(paragraph):
+    """The lines of one paragraph (a list of bodies) that hold a progress claim with no named live read in its block."""
+    text = "\n".join(paragraph)
+    plain = PROGRESS_SPAN.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
+    plain_lines, text_lines = plain.split("\n"), text.split("\n")
+    seen, bad, was_row = False, [], False
+    for block in _progress_blocks(paragraph):
+        row = paragraph[block[0]].startswith("|")
+        if not (row and was_row):  # a table keeps its header's subject; any other block starts without one
+            seen = False
+        was_row = row
+        shown, masked = "\n".join(text_lines[i] for i in block), "\n".join(plain_lines[i] for i in block)
+        cited = PROGRESS_READ_RE.search(shown)
+        start = 0
+        for end in [m.end() for m in re.finditer(r"(?<=[.!?])\s+", masked)] + [len(masked) + 1]:
+            sentence, shown_sentence = masked[start:end], shown[start:end]
+            seen = seen or bool(PROGRESS_SUBJECT_RE.search(shown_sentence))
+            phrase = PROGRESS_PHRASE_RE.search(sentence)
+            if phrase and seen and not cited and not sentence.rstrip("*_)\"' \n").endswith("?"):
+                shown_line = paragraph[block[masked.count("\n", 0, start + phrase.start())]]
+                if shown_line not in bad:
+                    bad.append(shown_line)
+            start = end
+    return bad
+
+
+def progress_claim_problem(text):
+    """The refusal for reply lines that say how far a step, lane, batch or PR has got with no named live read in the
+    claim's block, else ''."""
+    if not PROGRESS_PHRASE_RE.search(text):
+        return ""
+    bad, paragraph = [], []
+    for body in list(_prose_lines(text, questions=True)) + [""]:
+        if body:
+            paragraph.append(body)
+        elif paragraph:
+            bad += _progress_claim_lines(paragraph)
+            paragraph = []
+    return PROGRESS_REASON + "".join("\n- " + b for b in bad) if bad else ""
 
 
 # reports-done-names-models: a Done item that agents built or reviewed names each one's role
@@ -2754,11 +2843,12 @@ def _marker_path(hook):
     return local_time.report_marker_path(hook.get("session_id"))
 
 
-def rewrite_problems(hook):
+def rewrite_problems(hook, notes=None):
     """Reasons for the rewrite that follows a missing-report block, or []. The marker is
     consumed before any check, so a second rewrite finds none and stays quiet. It holds the
     index of the turn's human record, so the spawns are read from the same turn whether or not
-    the hook's feedback record counts as human. Fails open on any error."""
+    the hook's feedback record counts as human. Fails open on any error. A progress check that
+    could not run adds an UNKNOWN line to `notes`, a list the caller shows in a system message."""
     try:
         marker = _marker_path(hook)
         if marker is None:
@@ -2791,6 +2881,13 @@ def rewrite_problems(hook):
         answered = answered_problem(text)
         if answered:
             reasons.append(answered)
+        try:
+            progress = progress_claim_problem(text)
+            if progress:
+                reasons.append(progress)
+        except Exception as err:  # a check that could not run is UNKNOWN, never silence
+            if notes is not None:
+                notes.append(PROGRESS_UNKNOWN % type(err).__name__)
         recovered = recovered_problem(records, text) if report_shape_ok(text) else ""
         if recovered:
             reasons.append(recovered)
@@ -2827,6 +2924,7 @@ ASK_TEXT_MAX = 6000
 SENTENCE_QUESTION = re.compile(r"\?[*_)\"']*(?:\s|$)")
 # A code span: a run of backticks, its text, and a closing run of the same length (CommonMark).
 CODE_SPAN = re.compile(r"(`+)(?!`)(.+?)(?<!`)\1(?!`)")
+PROGRESS_SPAN = re.compile(CODE_SPAN.pattern, re.S)  # the progress-claim check's span, which may break across lines
 QUOTE_PREFIX = re.compile(r"^[ ]{0,3}(?:>[ ]?)*")
 INDENTED_CODE = re.compile(r"^(?: {4}|\t)")
 UNVETTED_AFTER_SENTENCE = re.compile(r"([.?!][*_)\"']*)[ \t]+(?=Unvetted:[ \t]*\S)", re.I)
@@ -3133,15 +3231,19 @@ def main():
             pass
     if active:
         pending_refusals(hook, last_reply(hook))  # clears what the rewrite names; never blocks on a refusal
-        reasons = rewrite_problems(hook)
+        notes = []
+        reasons = rewrite_problems(hook, notes)
         reasons += rewrite_relay(hook)
+        say = {"systemMessage": " ".join(notes)} if notes else {}
         if hold and not reasons:
-            print(json.dumps({"decision": "block", "reason": hold_reason(hold)}))
+            print(json.dumps({"decision": "block", "reason": hold_reason(hold), **say}))
             return
         if hold:
             reasons.insert(0, hold_reason(hold))
         if reasons:
-            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)"}))
+            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)", **say}))
+        elif say:
+            print(json.dumps(say))
         return
     # A marker left by a rewrite that never ran must not reach a later turn: only the Stop
     # straight after a missing-report block may consume one.
@@ -3225,6 +3327,10 @@ def main():
             relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
         except Exception:
             pass
+        try:
+            relay.append(progress_claim_problem(text))  # joined the same way
+        except Exception as err:  # a check that could not run is UNKNOWN, never silence
+            note = " ".join(filter(None, [note, PROGRESS_UNKNOWN % type(err).__name__]))
     cannot = ""
     if last_human_idx is not None and cannot_refused is not None:
         try:
