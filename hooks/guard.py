@@ -3829,10 +3829,23 @@ def role_round_drift(pointer_root):
             for _, _, _, word, text in role_round_rows(pointer_root) or () if word not in ROLE_MODEL_RANK]
 
 
+def frontmatter_scalar(raw):
+    """A frontmatter value without its quotes or a trailing ` # comment`, "" when nothing is left. A value that is only
+    a comment (`# sonnet`) or an unquoted YAML null (`~`, `null`) holds no value. The one reader of a scalar's text."""
+    raw = str(raw).strip()
+    if raw[:1] in ("'", '"'):
+        close = raw.find(raw[0], 1)
+        return raw[1:close] if close > 0 else raw[1:]
+    value = re.split(r"(?:^|\s)#", raw, maxsplit=1)[0].strip()
+    return "" if value.lower() in ("~", "null") else value
+
+
 def role_model_rank(model):
     """The index in ROLE_MODEL_RANK of the family a model name holds (`claude-opus-5-5`, `Haiku`), the highest family
-    when a name holds more than one, or None when it holds none. The one normaliser of a model name to its family."""
-    return next((rank for rank, word in reversed(list(enumerate(ROLE_MODEL_RANK))) if word in str(model).lower()), None)
+    when a name holds more than one, or None when it holds none. The value is read without a trailing comment
+    (frontmatter_scalar), so a family word in a comment never counts. The one normaliser of a model name to its family."""
+    value = frontmatter_scalar(model).lower()
+    return next((rank for rank, word in reversed(list(enumerate(ROLE_MODEL_RANK))) if word in value), None)
 
 
 def frontmatter_keys(lines):
@@ -3872,7 +3885,7 @@ def role_has_model_pin(pointer_root, role):
     frontmatter, False when none does, None when the folder cannot be read."""
     try:
         for keys in role_agent_keys(pointer_root):
-            if keys.get("name", "").lower() == role.lower() and keys.get("model"):
+            if keys.get("name", "").lower() == role.lower() and frontmatter_scalar(keys.get("model", "")):
                 return True
     except OSError:
         return None
