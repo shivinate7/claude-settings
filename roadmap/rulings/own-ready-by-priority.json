@@ -1,0 +1,10 @@
+{
+  "id": "own-ready-by-priority",
+  "at": "2026-11-14T01:52:00-06:00",
+  "title": "Marking a PR ready is not instant: priority decides, because a ready PR can hog CI from lanes that need it first",
+  "ruling": "Owner 01:52 CST Nov 14 (typed in the consultant chat, relayed 01:53 CST): marking a PR ready instantly needs thought, because by priority it can hog CI from lanes that need it first. What the owner said: do not mark instantly; think about priority. The consultant's reading, NOT the owner's words: a batch runner marks handed-in PRs ready in priority order and only while CI has free slots (macOS is the scarce one); the three runners share one priority order across repos because one account's runner pool serves them all. Whether \"only while CI has free slots\" and the shared order are the owner's intent is unconfirmed. Home as the consultant gives it: the session-tiers batch-runner bullet and the rolling-train lane (step batch-runner-rolling-train). Neighbour: step priority-vs-merge-order and ruling own-817-a-priority-rows (the owner's priority rows). It qualifies, and does not undo, the standing grant \"Lane draft PR\" (a lane never marks ready; only the batch runner does): the runner marks ready, by priority, not at once. It also corrects triage's 01:50 CST line \"runners mark each handed-in PR ready at once\", which the owner's word overrides.",
+  "quote": "marking a pr ready isntantly needs some thought behind it though because depending on the priority it can hog the CI from lanes that need it first",
+  "source": "Owner, typed in the consultant chat 01:52 CST Nov 14, relayed by the consultant 01:53 CST (verbatim as relayed; triage did not read the chat)",
+  "status": "open",
+  "step": "batch-runner-rolling-train"
+}

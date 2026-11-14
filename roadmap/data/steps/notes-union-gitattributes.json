@@ -1,14 +1,14 @@
 {
  "id": "notes-union-gitattributes",
  "title": "docs/debts/notes.md gets a merge=union line in .gitattributes, and the child-repo scaffold carries it; the union driver's revival incident is weighed first",
- "status": "ready",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
  "owner": "triage",
  "blockedBy": [],
- "why": "Coordinator 01:44 CST Nov 14 (relayed; Degen coordinator and batch-runner feedback pasted by the owner and relayed by the consultant; the feedback text itself is unread by triage and by the coordinator; the coordinator's code reads are on main 8e9f2b15, unchecked by triage): main's .gitattributes has no merge=union line for docs/debts/notes.md (the coordinator's read). Degen asks for one so concurrent notes appends do not conflict. Correction 01:52 CST Nov 14 (triage read of /root/claude-settings-main, branch stable): the line `docs/debts/notes.md merge=union` IS in claude-settings' .gitattributes there, under decision notes-merge-union, with lint/test_notes_union_merge.py. The coordinator's read (\"main has no such line\") is unreconciled with that; this step is the scaffold side for child repos only. Degen's own line is step degen-notes-union-line.",
+ "why": "Coordinator 01:44 CST Nov 14 (relayed; Degen coordinator and batch-runner feedback pasted by the owner and relayed by the consultant; the feedback text itself is unread by triage and by the coordinator; the coordinator's code reads are on main 8e9f2b15, unchecked by triage): main's .gitattributes has no merge=union line for docs/debts/notes.md (the coordinator's read). Degen asks for one so concurrent notes appends do not conflict. Correction 01:52 CST Nov 14 (triage read of /root/claude-settings-main, branch stable): the line `docs/debts/notes.md merge=union` IS in claude-settings' .gitattributes there, under decision notes-merge-union, with lint/test_notes_union_merge.py. The coordinator's read (\"main has no such line\") is unreconciled with that; this step is the scaffold side for child repos only. Degen's own line is step degen-notes-union-line. DONE 01:55 CST Nov 14 (coordinator 01:52, relayed): claude-settings main already has the line: `git show origin/main:.gitattributes` (origin/main 8e9f2b15) lines 6-7 are the comment and `docs/debts/notes.md merge=union` (decision notes-merge-union); the coordinator's 01:42 read was cut at 5 lines. No lane. Not covered: the scaffold for other child repos (unread); degen's own line is step degen-notes-union-line (the lane reads degen's file first and reports).",
  "source": "Caution on the record: step notes-union-batch-revival (ready) records sightings (13:39 CST Nov 8, lane push-head-upstream-name) that a union driver brought deleted rows back into #1852 and #2199; so a union line trades append conflicts for revived deleted rows. Neighbours: notes-slug-unique (ready: refuses duplicate slugs).",
  "note": "Triage 01:50 CST Nov 14: lane merge-tool-audit-fixes or its own lane, ALONE (coordinator). Done check: .gitattributes has the line on main and the scaffold for child repos carries it, a test pins both, and the lane states whether notes-slug-unique catches a revived row (the revival case), red first. Not started; behind CI speed.",
- "updatedAt": "2026-11-14T01:52:00-06:00"
+ "updatedAt": "2026-11-14T01:55:00-06:00"
 }
