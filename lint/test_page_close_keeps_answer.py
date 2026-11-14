@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Prose contract for the page's close: skills/waiting-page/SKILL.md, "Route and close" and "Read the answers".
 
-    python3 -m unittest skills/waiting-page/test_skill_close_keeps_answer.py
+    python3 -m unittest lint/test_page_close_keeps_answer.py
 
 A close keeps the owner's answer. Only a reword (step 3 or 4) or an overturn deletes the answer, and a lane reopen keeps it.
 Reads prose only and runs none of the skill's code. Each case pins one claim:
@@ -38,7 +38,7 @@ import re
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SKILL = os.path.join(HERE, "SKILL.md")
+SKILL = os.path.join(HERE, "..", "skills", "waiting-page", "SKILL.md")
 
 ROUTE_HEADING = "## Route and close"
 READ_HEADING = "## Read the answers"
