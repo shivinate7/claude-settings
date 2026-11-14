@@ -1,0 +1,10 @@
+{
+  "id": "own-degen-home-switch-now",
+  "at": "2026-11-13T22:13:32-06:00",
+  "title": "Degen and home switch to the per-lane flow now, ahead of the drain",
+  "ruling": "Owner 22:13 CST Nov 13, relayed by the consultant at 22:13 (triage did not see it), answering the coordinator's 22:09 degen question (option b, degen alone to per-lane merge) and widening it to home: \"ya switch degen now (and home repo too)\". The consultant's reading: degen and home switch to the per-lane flow on stable now, ahead of the drain; an exception to decision all-repos-switch-together and to ruling own-act6-draft-prs-when-green for these two repos. Triage reading, unchecked: degen #703 then #704, and home #728, are marked ready and merged one run each by runner 11; the pin branch (option a) is not needed. Page item 801 closed on this ruling. What the switch changes in each repo's settings is for the lane that builds it (step merge-flow-after-anthropic).",
+  "quote": "ya switch degen now (and home repo too)",
+  "source": "Consultant 22:13 CST Nov 13 (quoting the owner); filed by triage.",
+  "status": "open",
+  "step": "merge-flow-after-anthropic"
+}
