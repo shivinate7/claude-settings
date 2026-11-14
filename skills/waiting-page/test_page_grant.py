@@ -76,6 +76,15 @@ def answer(**fields):
     return merged({"at": AT, "choice": "a", "item": ITEM_ID, "n": ITEM_N, "note": ""}, fields)
 
 
+def routed(**fields):
+    """Item 231 as a routed close holds it: closed, with `home` and `lane` set and `lastAnswer` at this answer's `at`. A case
+    gives one field to change it, or ABSENT to leave it out, so each refusal is for that one condition alone."""
+    doc = {"status": "closed", "home": "answered-leaves-page", "lane": "owner-word-relay",
+           "lastAnswer": {"choice": "a", "note": "", "at": AT}}
+    doc.update(fields)
+    return doc
+
+
 def label_of(choice):
     """The label the counted line prints for a choice: the option's label, a list of them for several, null for overturn.
     options() names each label, so the key fixes it."""
@@ -237,9 +246,21 @@ class Counted(Base):
 
     def test_open_item_with_lane_and_last_answer_and_answer_kept_counted(self):
         """The answer is kept until the receiver reports done: the item is open with `lane` and `lastAnswer` set, and
-        answers/<id> is still there. Counted on the relayed pick: the checker never reads `lane` or `lastAnswer`."""
+        answers/<id> is still there. Counted on the relayed pick: for an open item the checker never reads `lane` or `lastAnswer`."""
         last = {"choice": "a", "note": "", "at": AT}
         r = self.check(self.repo(), self.pair(item_fields={"lane": "owner-word-relay", "lastAnswer": last}), pick="a")
+        self.assertCounted(r, verdict("a"))
+
+    def test_routed_item_closed_with_home_and_matching_last_answer_counted(self):
+        """The busy-lane path closes the item at routing with `home` set, and keeps `lane`, `lastAnswer` and answers/<id>
+        until the receiver's done report. The relayed pick counts while `lastAnswer.at` is the answer's `at`. Red on the old
+        checker, which refuses every closed item but an arbiter overturn."""
+        r = self.check(self.repo(), self.pair(item_fields=routed()), pick="a")
+        self.assertCounted(r, verdict("a"))
+
+    def test_routed_item_with_no_arbiter_field_counted(self):
+        """`arbiter` not true is the rule: an absent `arbiter` is not true, so a routed item without the field counts. Red on the old checker."""
+        r = self.check(self.repo(), self.pair(item_fields=routed(arbiter=ABSENT)), pick="a")
         self.assertCounted(r, verdict("a"))
 
     def test_item_with_no_status_field_counted(self):
@@ -422,6 +443,64 @@ class NotCounted(Base):
     def test_closed_arbiter_ruling_answer_not_overturn_not_counted(self):
         r = self.check(self.repo(), self.pair(item_fields={"status": "closed", "arbiter": True}))
         self.assertNotCounted(r, "closed arbiter ruling answered with a pick: only overturn passes", reason="status")
+
+    # A closed item counts only as a routed close (`routed()`): each case below knocks out one condition, and is refused for it.
+    # `reason` pins only a word the current refusal and the routed refusal both print: "closed", or "arbiter", or "status".
+    def test_routed_item_with_no_home_not_counted(self):
+        r = self.check(self.repo(), self.pair(item_fields=routed(home=ABSENT)))
+        self.assertNotCounted(r, "closed item with no home", reason="closed")
+
+    def test_routed_item_with_a_home_that_is_not_a_non_empty_string_not_counted(self):
+        for home in ("", None, 7):
+            with self.subTest(home=home):
+                r = self.check(self.repo(), self.pair(item_fields=routed(home=home)))
+                self.assertNotCounted(r, "closed item with home %s" % json.dumps(home), reason="closed")
+
+    def test_routed_item_with_a_blank_home_not_counted(self):
+        r = self.check(self.repo(), self.pair(item_fields=routed(home="   ")))
+        self.assertNotCounted(r, "closed item with a blank home", reason="closed")
+
+    def test_routed_item_with_no_lane_not_counted(self):
+        """A normal close sets `home` and keeps its `lastAnswer`, with no `lane`. Only a routed close, one with `lane` set, counts."""
+        r = self.check(self.repo(), self.pair(item_fields=routed(lane=ABSENT)))
+        self.assertNotCounted(r, "closed item with home and lastAnswer and no lane", reason="closed")
+
+    def test_routed_item_with_a_lane_that_is_not_a_non_empty_string_not_counted(self):
+        for lane in ("", "   ", None, 7):
+            with self.subTest(lane=lane):
+                r = self.check(self.repo(), self.pair(item_fields=routed(lane=lane)))
+                self.assertNotCounted(r, "closed item with lane %s" % json.dumps(lane), reason="closed")
+
+    def test_routed_item_whose_last_answer_at_is_another_answers_at_not_counted(self):
+        """The routed answer is the one on the item: a lastAnswer from an earlier answer does not vouch for this one."""
+        earlier = {"choice": "a", "note": "", "at": "2026-11-04T13:00:00.000Z"}
+        r = self.check(self.repo(), self.pair(item_fields=routed(lastAnswer=earlier)))
+        self.assertNotCounted(r, "closed item whose lastAnswer.at is another answer's at", reason="closed")
+
+    def test_routed_item_with_no_last_answer_not_counted(self):
+        r = self.check(self.repo(), self.pair(item_fields=routed(lastAnswer=ABSENT)))
+        self.assertNotCounted(r, "closed item with home and lane and no lastAnswer", reason="closed")
+
+    def test_routed_item_with_a_last_answer_that_is_not_an_object_or_has_no_at_not_counted(self):
+        """The checker reads `at` only from an object: a string, or an object with no `at`, is refused, never a crash."""
+        for last in ("a", {"choice": "a", "note": ""}):
+            with self.subTest(lastAnswer=last):
+                r = self.check(self.repo(), self.pair(item_fields=routed(lastAnswer=last)))
+                self.assertNotCounted(r, "closed item with lastAnswer %s" % json.dumps(last), reason="closed")
+
+    def test_routed_arbiter_ruling_answered_with_a_pick_not_counted(self):
+        """An arbiter ruling counts only as an overturn. A pick on a routed arbiter ruling is not counted."""
+        r = self.check(self.repo(), self.pair(item_fields=routed(arbiter=True)))
+        self.assertNotCounted(r, "closed arbiter ruling with lane and home answered with a pick", reason="arbiter")
+
+    def test_routed_item_with_a_status_other_than_closed_not_counted(self):
+        """Only a status of exactly "closed" is a routed close. A parked, capitalised, blank, null or done item with lane,
+        home and a lastAnswer at this answer's at is not counted."""
+        for status in ("parked", "Closed", "", None, "done"):
+            with self.subTest(status=status):
+                r = self.check(self.repo(), self.pair(item_fields=routed(status=status)))
+                self.assertNotCounted(r, "item with status %s, lane, home and a matching lastAnswer" % json.dumps(status),
+                                      reason="status")
 
     def test_answer_at_zone_less_not_counted(self):
         r = self.check(self.repo(), self.pair(answer_fields={"at": "2026-11-04T13:56:29.078"}))
