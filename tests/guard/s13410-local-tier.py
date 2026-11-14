@@ -58,7 +58,8 @@ add("local-tier: a triage file for this session and repo lets a local push to ro
 # CONTROLS, green on the old code: the file is not read unless both ids are present and equal. Absent ids and unequal ids are
 # both refused, so the file of this session is never used on a guess about who is asking.
 add("local-tier: a triage file is not read when neither the hook id nor the env id is set", "deny", rule=RECORD_RULE,
-    tool="Bash", command=LT_PUSH, cwd=PUSHSSH, config=LT_TRIAGE, env={"CLAUDE_CODE_SESSION_ID": None}, lacks=LT_LACKS)
+    tool="Bash", command=LT_PUSH, cwd=PUSHSSH, config=LT_TRIAGE, env={"CLAUDE_CODE_SESSION_ID": None}, lacks=LT_LACKS,
+    windows=True)
 add("local-tier: a triage file is refused when the hook id and the env id differ", "deny", rule=RECORD_RULE,
     tool="Bash", command=LT_PUSH, cwd=PUSHSSH, session=LT_SID, env={"CLAUDE_CODE_SESSION_ID": LT_OTHER},
     config=LT_TRIAGE, lacks=LT_LACKS)
