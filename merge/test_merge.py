@@ -18837,7 +18837,11 @@ class LocalSessionRoleCheck(CloudSession):
         import session_role  # on sys.path: merge.py puts hooks/ there
         with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": LOCAL_SID}), \
                 unittest.mock.patch.object(session_role, "own_role", side_effect=RuntimeError("injected")):
-            self.assertIsNone(merge.read_merge_role(), "a role reader that raised gave a role")
+            try:
+                role = merge.read_merge_role()
+            except Exception as e:  # a crash in the fallback is a failed assert here, not an error
+                self.fail("a role reader that raised crashed the role read: %r" % (e,))
+        self.assertIsNone(role, "a role reader that raised gave a role")
 
 
 if __name__ == "__main__":
