@@ -15,6 +15,7 @@ def main(argv):
         return 127
     env = dict(os.environ, CS_SESSION_ROLE=argv[0])
     if os.name == "nt":  # no exec that keeps the console and the exit code on Windows
+        # nowindow: claude is an interactive session on the owner's terminal; the wrapper's no-window flag and empty stdin would break it
         return subprocess.run([exe, *argv[1:]], env=env).returncode
     os.execve(exe, [exe, *argv[1:]], env)
 if __name__ == "__main__":
