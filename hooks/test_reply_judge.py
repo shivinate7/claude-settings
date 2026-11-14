@@ -1397,14 +1397,17 @@ def case_prompt_scopes_widening_to_one_repos_sake():
           tcj.in_text(tcj.REPLY_DEFINITION, run.prompt()), "the prompt lacks the definition sentence")
 
 
-def case_prompt_says_an_unmarked_allow_list_option_is_widening():
-    # An unmarked option that adds to a shared allow-list or a second accepted form is widening, unless it says it
-    # applies to every repo. Pinned whole in the prompt, so dropping the exemption clause fails.
+def case_prompt_no_longer_says_an_unmarked_allow_list_option_is_widening():
+    # The prompt is read first: an empty prompt would pass the absence check. A restore of the sentence goes red.
     run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
-    check("prompt: a sentence says an unmarked allow-list or second-form option is widening unless it says it applies "
-          "to every repo",
-          tcj.in_text(tcj.UNMARKED_OPTION_IS_WIDENING, run.prompt()),
-          "the prompt lacks the owner's sentence on unmarked options")
+    prompt = run.prompt()
+    read = len(run.calls) == 1 and WIDENS_ASK in prompt
+    check("prompt: one model call, and the judge's prompt holds the reply", read, prompt[:120])
+    if not read:
+        return
+    check("prompt: no sentence says an unmarked allow-list or second-form option is widening",
+          not tcj.in_text(tcj.UNMARKED_OPTION_IS_WIDENING, prompt),
+          "the prompt still holds the sentence on unmarked options")
 
 
 ALLOW_LIST_ASK = ("Done: read banchi's record titles.\n"
@@ -1412,16 +1415,18 @@ ALLOW_LIST_ASK = ("Done: read banchi's record titles.\n"
                   "B: rename banchi's titles to the shared form.\n")
 
 
-def case_prompt_judges_a_recommended_unmarked_allow_list_option():
+def case_prompt_does_not_tell_the_judge_an_unmarked_allow_list_option_is_widening():
     # The reply offers a Recommended option with no mark that adds to a shared allow-list. The judge is called once,
-    # sees the option's words, and is told the owner's sentence on unmarked options.
+    # sees the option's words, and its prompt holds no sentence on unmarked options.
     run = run_hook(ALLOW_LIST_ASK, answer=OK_ANSWER)
     prompt = run.prompt()
-    check("prompt: one model call, and the judge sees the Recommended allow-list option",
-          len(run.calls) == 1 and ALLOW_LIST_ASK in prompt, prompt[:300])
-    check("prompt: the judge is told an unmarked allow-list option is widening",
-          tcj.in_text(tcj.UNMARKED_OPTION_IS_WIDENING, prompt),
-          "the prompt lacks the owner's sentence on unmarked options")
+    read = len(run.calls) == 1 and ALLOW_LIST_ASK in prompt
+    check("prompt: one model call, and the judge sees the Recommended allow-list option", read, prompt[:300])
+    if not read:
+        return
+    check("prompt: the judge is not told an unmarked allow-list option is widening",
+          not tcj.in_text(tcj.UNMARKED_OPTION_IS_WIDENING, prompt),
+          "the prompt still holds the sentence on unmarked options")
 
 
 # Roadmap c135, item 31's shape: options that can all be done together, asked as pick-one. The prompt
@@ -2235,8 +2240,8 @@ CASES = (
     case_prompt_says_a_same_change_for_every_repo_is_not_widening,
     case_prompt_names_a_per_repo_exception_as_widening,
     case_prompt_scopes_widening_to_one_repos_sake,
-    case_prompt_says_an_unmarked_allow_list_option_is_widening,
-    case_prompt_judges_a_recommended_unmarked_allow_list_option,
+    case_prompt_no_longer_says_an_unmarked_allow_list_option_is_widening,
+    case_prompt_does_not_tell_the_judge_an_unmarked_allow_list_option_is_widening,
     case_widens_finding_logs_its_rule,
     case_prompt_flags_a_pick_one_question_whose_options_could_combine,
     case_route_cite_carries_cited_same_act_and_alternate_rows,

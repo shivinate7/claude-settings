@@ -1221,9 +1221,9 @@ WIDENING_FLAG = '{"ok": false, "reason": "option `b` widens a shared tool; mark 
 
 # The widening sentences, pinned whole. This file is their one home, and hooks/test_reply_judge.py reads them from here.
 # A case passes only when the whole sentence is in the text, with case and any run of spaces ignored, so a dropped clause
-# fails it, and no keyword list can stand in for it.
-# An option with no mark that adds to a shared allow-list or a second accepted form is widening, unless it says it
-# applies to every repo. The scope may not turn on a stated motive alone, since an option that names no repo would then pass.
+# fails it, and no keyword list can stand in for it. An absence case passes only when the whole sentence is not in the text.
+# The sentence on unmarked options that the judges no longer carry. The cases pin it absent, so a restore goes red.
+# The name is kept: hooks/test_reply_judge.py reads it from here.
 UNMARKED_OPTION_IS_WIDENING = ("an unmarked option that adds to a shared allow-list or a second accepted form counts "
                                "as widening unless it says it applies to every repo")
 # Current wording of the exemption, pinned whole: its motive clause is part of the sentence.
@@ -1439,23 +1439,25 @@ def case_widening_rule_scopes_widening_to_one_repos_sake():
           "WIDENING_RULE is not defined in call_judge.py" if not rule else "WIDENING_RULE lacks the definition sentence")
 
 
-def case_widening_rule_says_an_unmarked_option_is_widening():
-    # An unmarked option that adds to a shared allow-list or a second accepted form is widening, unless it says it
-    # applies to every repo. Pinned whole, so dropping the exemption clause fails.
+def case_widening_rule_no_longer_says_an_unmarked_option_is_widening():
+    # The rule is read first: a blank rule would pass the absence check, so the definition sentence must be in it.
     rule = widening_rule()
-    check("widening unmarked: WIDENING_RULE says an unmarked allow-list or second-form option is widening unless it "
-          "says it applies to every repo",
-          in_text(UNMARKED_OPTION_IS_WIDENING, rule),
-          "WIDENING_RULE is not defined in call_judge.py" if not rule
-          else "WIDENING_RULE lacks the owner's sentence on unmarked options")
+    defined = bool(rule) and in_text(CALL_DEFINITION, rule)
+    check("widening unmarked: WIDENING_RULE is read and holds the definition sentence", defined,
+          "WIDENING_RULE is not defined in call_judge.py" if not rule else "WIDENING_RULE lacks the definition sentence")
+    if not defined:
+        return
+    check("widening unmarked: WIDENING_RULE does not say an unmarked allow-list or second-form option is widening",
+          not in_text(UNMARKED_OPTION_IS_WIDENING, rule),
+          "WIDENING_RULE still holds the sentence on unmarked options")
 
 
 ALLOW_LIST_LABEL = "Add the record-title format to the shared allow-list (Recommended)"
 
 
-def case_recommended_unmarked_allow_list_option_is_judged_widening():
+def case_recommended_unmarked_allow_list_option_is_not_told_widening():
     # A Recommended option with no mark, that adds to a shared allow-list. The item passes the form first, so a refusal
-    # can only come from the judge. The judge sees the option's words, and the widening slot tells it the rule.
+    # can only come from the judge. The judge sees the option's words, and its widening slot holds no sentence on unmarked options.
     import question_form  # the one form check (hooks/question_form.py)
     item = good_page_item(PAGE_MARK)
     item["options"][1]["label"] = ALLOW_LIST_LABEL
@@ -1468,10 +1470,13 @@ def case_recommended_unmarked_allow_list_option_is_judged_widening():
     check("recommended allow-list: one model call, the judge sees the option's words, and no deny",
           len(r.calls) == 1 and r.code == 0 and r.out == "" and ALLOW_LIST_LABEL in prompt, detail(r))
     region = widening_region(prompt, "PAGE_PROMPT")
-    cause = ("the judge's prompt is not the question-format prompt" if region is None
-             else "the widening slot lacks the owner's sentence on unmarked options")
-    check("recommended allow-list: the judge is told an unmarked allow-list option is widening",
-          region is not None and in_text(UNMARKED_OPTION_IS_WIDENING, region), cause)
+    slot = region is not None and bool(region.strip())
+    check("recommended allow-list: the judge's widening slot is read",
+          slot, "the judge's prompt is not the question-format prompt" if region is None else "the widening slot is blank")
+    if not slot:
+        return
+    check("recommended allow-list: the judge is not told an unmarked allow-list option is widening",
+          not in_text(UNMARKED_OPTION_IS_WIDENING, region), "the widening slot still holds the sentence on unmarked options")
 
 
 def case_fail_open():
@@ -1824,8 +1829,8 @@ def main():
                  case_widening_rule_says_a_same_change_for_every_repo_is_not_widening,
                  case_widening_rule_still_names_a_per_repo_exception_as_widening,
                  case_widening_rule_scopes_widening_to_one_repos_sake,
-                 case_widening_rule_says_an_unmarked_option_is_widening,
-                 case_recommended_unmarked_allow_list_option_is_judged_widening,
+                 case_widening_rule_no_longer_says_an_unmarked_option_is_widening,
+                 case_recommended_unmarked_allow_list_option_is_not_told_widening,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
