@@ -12344,15 +12344,26 @@ class RedMainBrake(Env):
         sh(o, "git", "push", "-q", "origin", "main")
         return sh(o, "git", "rev-parse", "HEAD")
 
-    def land_revert(self, pr, reverted, extra=None):
+    def land_revert(self, pr, reverted, extra=None, catch_up=False, titled=None):
         """The revert of commit `reverted` lands on main as pull request #pr, as a merge commit. `extra` names a file the merge adds of its own, so the
-        merge's tree is not the revert's tree. The feat branch takes the new main, as a lane does. -> (R, M): the revert, which is the pull request's
-        head, and main's new head."""
+        merge's tree is not the revert's tree. The feat branch takes the new main, as a lane does. `catch_up` makes the pull request's head a merge of a
+        catch-up commit of main over the revert, so the revert sits one parent below that head. `titled` makes the head a commit with that title that
+        reverts nothing. -> (the pull request's head, which is the revert unless a flag says otherwise, and main's new head)."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
+        if catch_up:
+            sh(o, "git", "checkout", "-q", "-B", f"catch-up-{pr}", "origin/main")
+            put(os.path.join(o, f"catch-up-{pr}.txt"), "catch-up\n")
+            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", f"Catch up for #{pr}"); sh(o, "git", "push", "-q", "origin", f"catch-up-{pr}")
         sh(o, "git", "checkout", "-q", "-B", f"revert-{pr}", "origin/main")
-        mainline = ["-m", "1"] if len(sh(o, "git", "rev-list", "--parents", "-n", "1", reverted).split()) > 2 else []
-        sh(o, "git", "revert", "--no-edit", *mainline, reverted)
+        if titled:
+            put(os.path.join(o, f"titled-{pr}.txt"), "not a revert\n")
+            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", titled)
+        else:
+            mainline = ["-m", "1"] if len(sh(o, "git", "rev-list", "--parents", "-n", "1", reverted).split()) > 2 else []
+            sh(o, "git", "revert", "--no-edit", *mainline, reverted)
+        if catch_up:
+            sh(o, "git", "merge", "-q", "--no-ff", "-m", f"Merge branch 'catch-up-{pr}' into revert-{pr}", f"catch-up-{pr}")
         revert = sh(o, "git", "rev-parse", "HEAD")
         sh(o, "git", "push", "-q", "origin", f"revert-{pr}")
         sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
@@ -12380,6 +12391,17 @@ class RedMainBrake(Env):
         self.assertEqual(sh(self.co, "git", "rev-parse", "origin/main"), head, "the fixture's main head is not the merge of the revert")
         self.assertEqual(sh(self.co, "git", "rev-parse", "origin/main^2"), revert, "the fixture's main head does not merge the revert as its second parent")
         self.assertIn(f"This reverts commit {breaking}", sh(self.co, "git", "log", "-1", "--format=%B", revert), "the fixture's revert does not name the breaking merge")
+
+    def assert_revert_one_parent_deeper(self, breaking, head, main):
+        """Scope first: main's second parent is the pull request's head, and that head's first parent is the revert of `breaking`. Neither main nor the
+        head says the revert, so the revert's depth is the only thing that refuses the lift."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", "origin/main"), main, "the fixture's main head is not the merge of the pull request")
+        self.assertEqual(sh(self.co, "git", "rev-parse", "origin/main^2"), head, "the fixture's main head does not merge the pull request's head as its second parent")
+        revert = sh(self.co, "git", "rev-parse", "origin/main^2^1")
+        self.assertIn(f"This reverts commit {breaking}", sh(self.co, "git", "log", "-1", "--format=%B", revert), "the fixture's revert, one parent below the head, does not name the breaking merge")
+        for c in (main, head):
+            self.assertNotIn("This reverts commit", sh(self.co, "git", "log", "-1", "--format=%B", c), "the fixture puts the revert line on a commit the lift reads")
 
     def revert_pull(self, pr, head):
         """Pull request #pr as the pulls read gives it once its revert has merged: closed, with the revert as its head."""
@@ -12534,6 +12556,65 @@ class RedMainBrake(Env):
         sched = main_run(905, None, status="in_progress", sha=M, event="schedule", run_attempt=2)
         runs, jobs = self.breaking_page(B, A, top=[(sched, []), self.merge_run_of(904, M, 2651)])
         rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_revert_whose_own_main_run_failed_does_not_lift_a_red_main(self):
+        # the revert's tree is proven, but its own run on main, on the revert's merge, failed its suite: the lift must not read that red run as clear
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        red_top = (main_run(904, "failure", sha=M, message="Merge pull request #2651 from o/revert-2651"),
+                   [main_job("scope", "success"), main_job("checks", "failure", 20)])
+        runs, jobs = self.breaking_page(B, A, top=[red_top])
+        self.assertEqual((runs[0]["id"], runs[0]["head_sha"], runs[0]["conclusion"]), (904, M, "failure"),
+                         "the fixture's newest run is not the failed run on the revert's merge")
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.assertIn("actions/runs/904/jobs", self.host.reads, "the revert's own red run was not judged, so the refusal could not name it")
+        self.assertNotEqual(rc, 0, "the revert's own failed run on main lifted the red main: the merge went through")
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 904", out, "the refusal does not name the revert's own red run 904")
+        self.assertIn("checks: fail", out)
+
+    def test_a_revert_whose_own_first_run_is_still_going_lifts_a_red_main(self):
+        # the route both rulings name (own-745-b, own-823-b): a revert whose tree is proven lifts the red main while its own first run is still going
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        going = (main_run(904, None, status="in_progress", sha=M, message="Merge pull request #2651 from o/revert-2651"), [])
+        runs, jobs = self.breaking_page(B, A, top=[going])
+        self.assertEqual((runs[0]["id"], runs[0]["status"], runs[0]["run_attempt"]), (904, "in_progress", 1),
+                         "the fixture's newest run is not a first attempt still going")
+        rc, out, _ = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.assertNotIn("actions/runs/904/jobs", self.host.reads, "a run still going is not judged, so it is not read")
+        self.assertEqual(rc, 0, "the revert with its own first run still going is refused by the red main, though its tree is proven\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+
+    def test_a_revert_whose_head_merged_main_after_it_stays_refused_with_its_tree_proven(self):
+        # pin, fail closed: the head merges a catch-up of main over the revert, so the revert line sits one parent below main's second parent, where
+        # the lift reads. The tree and the checks would pass, so only the revert line's depth refuses.
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        H, M = self.land_revert(2651, B, catch_up=True)
+        self.assert_revert_one_parent_deeper(B, H, M)
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, H)})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_merge_whose_head_is_titled_as_a_revert_with_no_revert_line_stays_refused(self):
+        # pin, fail closed: main's second parent is titled as a revert and the tree and checks would pass, but no commit names the breaking merge
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        X, M = self.land_revert(2651, B, titled='Revert "Lane 2650"')
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", "origin/main^2"), X, "the fixture's main head does not merge the titled head as its second parent")
+        self.assertTrue(sh(self.co, "git", "log", "-1", "--format=%s", X).startswith("Revert"), "the fixture's second parent is not titled as a revert")
+        self.assertNotIn("This reverts commit", sh(self.co, "git", "log", "-1", "--format=%B", X), "the fixture's titled head names a revert")
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, X)})
         self.refused_by_red_main(rc, out, before)
         self.assertIn("run 903", out)
 
