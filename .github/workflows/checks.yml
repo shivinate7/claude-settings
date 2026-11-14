@@ -584,6 +584,9 @@ jobs:
       - name: Roadmap builder fixture suite
         run: python3 skills/roadmap/test_build.py
 
+      - name: Roadmap derived status fixture suite
+        run: python3 skills/roadmap/test_derived_status.py
+
       - name: Layout readers hold no record path
         run: python3 lint/check_layout.py
 
