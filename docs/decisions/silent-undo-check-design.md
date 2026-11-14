@@ -71,7 +71,11 @@ changed lines are a new edit, so the reversal dial stays at one line until a mea
 - A rename git pairs (`-M`, 50% similar or more): the new file is judged on its edits, as if made in place. Below that it stays a delete and an add.
 - A re-wrapped prose line. A short line never passes as a re-wrap.
 - A rewrite by the resolver, when a line of the same hunk reads very much like the lost line. Adding
-  tokens to a line (a new argument) is a rewrite when it adds no negation.
+  tokens to a line (a new argument) is a rewrite when the new line starts with the line's first token, keeps
+  every token of the line in order, and the line's last word still ends a whole word (no letter, digit or
+  `_` right after it, nor an apostrophe then a letter). An added negation voids it only up to that word, or
+  in a tail with no letter or digit besides negation words and whole contractions. A line with no letter or
+  digit voids on any added negation.
 - A stale value put back is a reversal, never a rewrite. A similar line excuses a drop only when it
   differs from both the lost line and the base line, and its operators and negation match the lost line.
   Numbers may differ only when both sides changed the base line (a third value).
