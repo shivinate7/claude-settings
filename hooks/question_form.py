@@ -326,10 +326,11 @@ CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool acce
                       "where the repo changes to match the shared format, and give the widening option no "
                       "(Recommended) label.")
 # The label and the `widens` mark fit only a repo that bends a shared tool to itself. One global allow entry in
-# claude-settings' own shared settings.json is the shared tool itself, so it is no widening. call_judge.WIDENING_RULE,
-# reply_judge's prompt, the shiv-stylisms rule and the waiting-page skill carry this text.
-WIDENING_CARVE_OUT = ("One global allow entry in claude-settings' own shared settings.json is not widening: never flag "
-                      "it or block it, and it may be recommended. A per-repo exception, a second accepted form, "
+# claude-settings' own shared settings.json is the shared tool itself, so it is no widening. call_judge.WIDENING_RULE
+# and reply_judge's prompt carry this text; the shiv-stylisms rule and the waiting-page skill hold a paraphrase.
+WIDENING_CARVE_OUT = ("One global allow entry that names no repo, in claude-settings' own shared settings.json, is not "
+                      "widening: never flag it or block it, and it may be recommended. A per-repo exception (an entry "
+                      "that names one repo's path stays one), a second accepted form, "
                       "an allow entry in settings.local.json and a widening in another repo are still widening")
 # Older sessions still write these words in chat; the mark keeps refusing them. No card, rule text or
 # reason carries them.

@@ -195,8 +195,8 @@ NONE_DIRECTION_RULE = (
 # NONE_DIRECTION_RULE, only for such a call. The mark's key comes from question_form, the one home, so the text is built
 # where it is used: the light-import exit paths never import question_form for it.
 WIDENING_TEMPLATE = (
-    "This call sets options. An option that widens what a shared tool accepts (a second accepted form, an allow-list "
-    "entry, a per-repo exception) must carry `%s: true`, the JSON boolean true, not the string \"true\". Block an unmarked widening option, and name its option key in "
+    "This call sets options. An option that widens what a shared tool accepts (a second accepted form, an allow entry in "
+    "settings.local.json or one that names a repo, a per-repo exception) must carry `%s: true`, the JSON boolean true, not the string \"true\". Block an unmarked widening option, and name its option key in "
     "the reason. %s. An option that only names a repo, or changes a repo to fit the shared tool, is not widening; one "
     "that adds an exception for a repo is. A marked option passes this rule. When unsure, allow."
 )
