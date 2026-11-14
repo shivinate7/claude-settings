@@ -1,0 +1,14 @@
+{
+ "id": "merge-reads-newest-check-run",
+ "title": "The merge tool judges the newest check run per name, not every red run on the head",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "degen #702 was refused on two old red runs of the same head while its newest Mac suite run is green; three degen PRs wait.",
+ "source": "Runner 11 via the coordinator 19:38 CST Nov 13; the refusal text is runner 11's; triage read merge/merge.py wait_checks in a local checkout that may be behind main. Whether a newer green run clears an older red one is unread.",
+ "note": "Filed 19:39 CST Nov 13. Facts (runner 11): degen #702 head 4a40bb586 refused by git-never-merge-failing-ci \"a check is red: milestone-proof (suite): fail\", naming old runs 43472967936 (hang on the self-hosted Mac) and 43401362635; run 43534814910 (Mac suite leg, GitHub runner xcode-27, 34 minutes) is green on that head. Docstring of wait_checks: \"Any red check or run, required or not, ends the wait.\" Fix wanted: the check judges the newest run per check name on the head, with a test: old red run then newer green run of the same name must pass; a newer red must refuse. Duplicate check: no step found (similar: ci-mac-once-per-batch, red-gate-reads-suite-run). A merge-check change: test-author red case first, then builder, reviewer. Owner asked on page item 792 (a wait for the fix, b merge #702 himself). Runner 11 holds #702, #703, #704. Past rulings not checked beyond own-770-a.",
+ "updatedAt": "2026-11-13T19:39:24-06:00"
+}
