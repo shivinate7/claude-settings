@@ -181,6 +181,93 @@ class CheckLandedDirsTests(unittest.TestCase):
                          "a file in hooks/.notes/, a dot-folder that is no cache, passed the check: %s" % result.stdout)
         self.assertIn("probe.txt", result.stderr)
 
+    def test_a_helper_in_a_subfolder_is_refused_and_named(self):
+        # Why: a subfolder of a landed folder stays refused, and the refusal names the file. The wording of the
+        # message is not pinned here: the helper home is the testing/ folder, which the record names.
+        result = run_in_copy(add_file("hooks/test_support/x.py", "case\n"))
+        self.assertEqual(result.returncode, 1,
+                         "a helper in hooks/test_support/, a subfolder of landed hooks/, passed the check: %s" % result.stdout)
+        self.assertIn("hooks/test_support/x.py", result.stderr,
+                      "the refusal does not name the refused helper: %s" % result.stderr)
+
+    def test_a_file_at_the_testing_folder_is_not_reported(self):
+        # Why: testing/ holds the shared test helpers (tracked_tree.py), and landed-dirs.txt does not list it,
+        # so the check never reports a file there.
+        result = run_in_copy(add_file("testing/x.py", "case\n"))
+        self.assertIn("check_landed_dirs: ok", result.stdout,
+                      "the check did not reach its ok line: %s" % result.stderr)
+        self.assertEqual(result.returncode, 0, "a file at testing/x.py was reported: %s" % result.stderr)
+
+    def test_a_file_in_a_testing_subfolder_is_not_reported(self):
+        # Why: the testing/ folder is not landed, so a subfolder there is no landing concern either.
+        result = run_in_copy(add_file("testing/sub/y.py", "case\n"))
+        self.assertIn("check_landed_dirs: ok", result.stdout,
+                      "the check did not reach its ok line: %s" % result.stderr)
+        self.assertEqual(result.returncode, 0, "a file at testing/sub/y.py was reported: %s" % result.stderr)
+
+    def test_a_helper_in_a_test_support_subfolder_still_fails_the_check(self):
+        # Why: the verdict must not widen. A helper in a subfolder of a landed folder stays refused.
+        result = run_in_copy(add_file("hooks/test_support/cost_probe.py", "case\n"))
+        self.assertEqual(result.returncode, 1,
+                         "a helper in hooks/test_support/ passed the check, so the verdict widened: %s" % result.stdout)
+        self.assertIn("cost_probe.py", result.stderr, "the refusal does not name the helper: %s" % result.stderr)
+
+
+RECORD_PATH = os.path.join(ROOT, "docs", "decisions", "builders-cannot-edit-tests.md")
+HELPER_HOME_HEADING = "## Where a test-support helper lives"
+
+
+def record_section(text, heading):
+    """The lines under `heading`, up to the next `## ` heading. None when the record has no such heading."""
+    lines = text.split("\n")
+    starts = [i for i, line in enumerate(lines) if line.rstrip() == heading]
+    if not starts:
+        return None
+    start = starts[0] + 1
+    end = next((i for i in range(start, len(lines)) if lines[i].startswith("## ")), len(lines))
+    return "\n".join(lines[start:end])
+
+
+def first_paragraph(section):
+    """The lines of `section` before its first bullet. The home sentence is this paragraph."""
+    lines = []
+    for line in section.split("\n"):
+        if line.startswith("- "):
+            break
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
+class HelperHomeRecordTests(unittest.TestCase):
+
+    def home_section(self):
+        # Why: a builder reads the record for where a helper goes. Each test reads that one section only,
+        # so no other line of the record can satisfy it.
+        with open(RECORD_PATH, encoding="utf-8") as f:
+            section = record_section(f.read(), HELPER_HOME_HEADING)
+        self.assertIsNotNone(section, "the decision record has no '%s' section" % HELPER_HOME_HEADING)
+        return section
+
+    def test_the_home_sentence_names_the_testing_folder_and_the_author(self):
+        # Why: the home sentence is the paragraph before the first bullet. A testing/ mention in a bullet is no home.
+        home = first_paragraph(self.home_section())
+        self.assertIn("testing/", home, "the home sentence does not name the testing/ folder")
+        self.assertIn("test-author writes it", home, "the home sentence does not say a test-author writes the helper")
+        self.assertIn("private to one test", home,
+                      "the home sentence does not say a helper private to one test is one")
+        self.assertIn("stays inside that test file", home,
+                      "the home sentence does not say a private helper stays inside that test file")
+
+    def test_a_bullet_says_testing_is_not_installed(self):
+        # Why: testing/ is not landed, so ~/.claude has no testing/ and a helper there is no install concern.
+        bullets = [line for line in self.home_section().split("\n") if line.startswith("- ")]
+        self.assertTrue(any("not installed" in line for line in bullets),
+                        "no bullet in the section says testing/ is not installed")
+
+    def test_the_section_names_no_underscore_home(self):
+        # Why: the underscore _test_<name>.py home was dropped, so the section must not name it anywhere.
+        self.assertNotIn("_test_", self.home_section(), "the section still names the underscore _test_ home")
+
 
 if __name__ == "__main__":
     unittest.main()

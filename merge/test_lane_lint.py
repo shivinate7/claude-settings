@@ -45,6 +45,7 @@ STUB = '''import json, os, subprocess, sys, time
 LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG__, __SLEEP__, os.getppid()
 DETAILS = __DETAILS__  # step name -> the text after its verdict word; a step not named here reads `stub step`
 WATCH = __WATCH__  # paths, relative to the cwd (the lint tree), whose text this run logs; a path the tree lacks logs null
+FILE_FAILS = __FILE_FAILS__  # step name -> a path: the step FAILs when the path exists in the tree the run reads (its cwd)
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
 def watched(path):
@@ -62,6 +63,9 @@ if "--plan" in sys.argv:
     for state, name in STEPS:
         print("would run " + name)
     sys.exit(0)
+FIRED = [name for name, path in FILE_FAILS.items() if os.path.exists(path)]  # a path the run's tree holds: its step FAILs
+STEPS = [("FAIL" if name in FIRED else state, name) for state, name in STEPS]
+RC = 1 if FIRED else RC
 end = time.time() + SLEEP  # a lint that runs long: it ends after SLEEP s, or at once when the run that started it is gone
 while time.time() < end and os.getppid() == PARENT:
     time.sleep(0.05)
@@ -134,15 +138,18 @@ def rollup_by_run(runs):
 
 
 class NoLock:
-    """The lane run takes no merge lock: a lock call fails the case."""
+    """The run named by `mode` takes no merge lock: a lock call fails the case, and its message names the mode."""
+    def __init__(self, mode="merge --lane-lint"):
+        self.mode = mode
+
     def acquire(self, *args, **kwargs):
-        raise AssertionError("merge --lane-lint took the merge lock")
+        raise AssertionError("%s took the merge lock" % self.mode)
 
     def release(self, *args, **kwargs):
-        raise AssertionError("merge --lane-lint released a merge lock")
+        raise AssertionError("%s released a merge lock" % self.mode)
 
     def unlock(self, *args, **kwargs):
-        raise AssertionError("merge --lane-lint unlocked a merge lock")
+        raise AssertionError("%s unlocked a merge lock" % self.mode)
 
 
 
@@ -156,18 +163,23 @@ class CiJobStub:
         self.stub = os.path.join(self.t, "ci-job-stub.py")
         self.step_log = os.path.join(self.t, "ci-job-step.log")
 
-    def write_stub(self, steps, rc, sleep=0, details=None, watch=()):
-        """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set.
-        `details` maps a step name to the text its line prints after the verdict word (default `stub step`). `watch` names paths, relative
-        to the lint tree the stub runs in; each call's log line carries their text under "files", null for a path the tree lacks."""
+    def stub_text(self, steps, rc, sleep=0, details=None, file_fails=None, watch=()):
+        """The stub ci-job's source, filled from STUB for the arguments write_stub takes. The one fill of STUB: write_stub and progress_run use it."""
         text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
-        tm.put(self.stub, text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep))
-               .replace("__DETAILS__", repr(details or {})).replace("__WATCH__", repr(list(watch))))
+        return (text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep))
+                .replace("__DETAILS__", repr(details or {})).replace("__FILE_FAILS__", repr(file_fails or {})).replace("__WATCH__", repr(list(watch))))
+
+    def write_stub(self, steps, rc, sleep=0, details=None, file_fails=None, watch=()):
+        """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set.
+        `details` maps a step name to the text its line prints after the verdict word (default `stub step`). `file_fails` maps a step
+        name to a path: that step FAILs (and the run exits 1) when the path exists in the stub's cwd, the tree the run reads. `watch` names paths,
+        relative to the lint tree the stub runs in; each call's log line carries their text under "files", null for a path the tree lacks."""
+        tm.put(self.stub, self.stub_text(steps, rc, sleep, details, file_fails, watch))
         return self.stub
 
-    def use_ci_job(self, steps, rc, details=None, watch=()):
+    def use_ci_job(self, steps, rc, details=None, file_fails=None, watch=()):
         """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`. `watch`: see write_stub."""
-        self.write_stub(steps, rc, details=details, watch=watch)
+        self.write_stub(steps, rc, details=details, file_fails=file_fails, watch=watch)
         patch = unittest.mock.patch.object(merge, "CI_JOB", self.stub)
         patch.start()
         self.addCleanup(patch.stop)
@@ -300,8 +312,7 @@ class LaneLint(LaneFixture):
         stderr is read live: the case creates the GO file at the first `start:` line, so a stderr that merge captures
         instead of passing on reads to the end only after the stub's bound."""
         go = os.path.join(self.t, "go")
-        text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
-        text = text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(0)).replace("__DETAILS__", "{}").replace("__WATCH__", "[]")
+        text = self.stub_text(steps, rc)
         tm.put(self.stub, text.replace("lines = [", PROGRESS.replace("__GO__", repr(go)) + "lines = [", 1))
         harness = os.path.join(self.t, "lane_lint_progress.py")
         tm.put(harness, HARNESS.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(self.stub)))
@@ -2569,12 +2580,116 @@ class LintTreeFileMain(LaneFixture):
         self.assertEqual(len(self.lint_calls()), 1, "the lint did not run once on the control head: " + text)
 
 
+DECLARED_READY = ["STE lint", "Windows split guard", "Cost line pins"]  # the checks-job steps the pre-ready run runs by name
+
+
+def steps_for(failing=()):
+    """The stub's steps for DECLARED_READY: each PASS, or FAIL when its name is in `failing`."""
+    return [("FAIL" if name in failing else "PASS", name) for name in DECLARED_READY]
+
+
+def verdict_line(out, verdict, name):
+    """True when a line of `out` opens with the lowercase `verdict` word, then `name`: `fail open-PR clash ...` for the pre-ready run's
+    verdict line. Case-sensitive, so ci-job's own `FAIL` line never reads as the pre-ready verdict."""
+    return re.search(r"^%s %s\b" % (re.escape(verdict), re.escape(name)), out, re.M) is not None
+
+
+SCAFFOLD_LINE_TEXT = "unknown scaffold: not run (lives in checks-rest, ci-job --step reads one job)"  # the pre-ready run's coverage note: not a check, so no exit code moves with it
+
+
+def verdict_lines(out):
+    """Every verdict line of a pre-ready run (a line that opens with `pass`, `fail` or `unknown`), except the coverage note. The one-line-per-check count reads these."""
+    return [line for line in out.splitlines() if re.match(r"(?:pass|fail|unknown) ", line) and line != SCAFFOLD_LINE_TEXT]
+
+
+def scaffold_lines(out):
+    """The coverage note lines of a pre-ready run's output: each one exactly SCAFFOLD_LINE_TEXT."""
+    return [line for line in out.splitlines() if line == SCAFFOLD_LINE_TEXT]
+
+
+class StepVerdictRows(unittest.TestCase):
+    """merge.step_verdicts: one verdict per declared ready check, read from the ci-job stdout lines of the pre-ready run. Pure: no repo, no stub."""
+
+    def test_a_pass_line_beside_a_fail_line_in_a_failing_run_reads_pass(self):  # F3
+        rows = merge.step_verdicts(["FAIL STE lint: x", "PASS Cost line pins: ok"], ["STE lint", "Cost line pins"], "fail")
+        self.assertEqual([(v, n) for v, n, _ in rows], [("fail", "STE lint"), ("pass", "Cost line pins")],
+                         "a PASS line in a failing run did not read pass for its own check: %s" % rows)
+
+    def test_a_declared_step_with_no_ci_job_line_reads_unknown_when_ci_job_exits_zero(self):  # F4
+        rows = merge.step_verdicts(["PASS STE lint: ok"], ["STE lint", "Windows split guard"], "pass")
+        self.assertEqual([(v, n) for v, n, _ in rows], [("pass", "STE lint"), ("unknown", "Windows split guard")],
+                         "a declared step that ci-job never printed read as a pass on exit 0: %s" % rows)
+
+    def test_control_every_declared_step_with_a_pass_line_in_a_passing_run_reads_pass(self):  # the green control of F3 and F4
+        rows = merge.step_verdicts(["PASS STE lint: ok", "PASS Cost line pins: ok"], ["STE lint", "Cost line pins"], "pass")
+        self.assertEqual([(v, n) for v, n, _ in rows], [("pass", "STE lint"), ("pass", "Cost line pins")], "a passing run with a PASS line per step did not read pass: %s" % rows)
+
+
 class ReadyChecks(CiJobStub, tm.RecordsEnv):
     """The ready check of the draft step (merge.draft_step): before a draft goes ready, the repo's declared merge.readyChecks
     run through ci-job as `checks --step NAME ... --base origin/<base>`, on the tree that would be pushed. A FAIL or an
     unknown stops the draft: nothing pushed, no ready mark, and no unknown-ok flag. The stub logs each run. Each red case
     asserts that run first, so a missing check fails there by name. On main a declared key is refused as an unknown field
-    before the draft step runs, so the red cases never reach the draft step on main."""
+    before the draft step runs, so the red cases never reach the draft step on main.
+
+    The pre-ready run (`merge <pr> --ready` on a draft) also runs the open-PR clash check (CrossMeasure's pair read, against every
+    open PR) and the debt retire check (DebtRetire's closed debt), both on the merge of the head with its base. The cases of that run
+    use the names below. Each red case asserts `--ready` through its refusal (no ready mark, no push, a named verdict line) and
+    the controls assert the same run on a clean draft, which the old code also passes."""
+
+    clash = CrossMeasure.clash  # the pair read, run in the second clone: one home, CrossMeasure's
+    commit_on = CrossMeasure.commit_on
+    own_writes = CrossMeasure.own_writes
+    pr_writes = CrossMeasure.pr_writes
+    listing = CrossMeasure.listing
+    contains = LaneLint.contains
+    pr_on_debt = tm.DebtRetire.pr_on_debt  # the closed debt and its failing Retire test: one home, test_merge.py's DebtRetire
+
+    def pre_ready_lane(self, declared=DECLARED_READY):
+        """The base declares the pre-ready steps, and PR 7 (feat, this session's own) is a draft. Open PRs of other sessions come from each case."""
+        self.declare(list(declared))
+        self.host.body = lane_body(OWN)
+        self.host.pulls = {}
+        self.host.draft = True
+
+    def clashing_pair(self, n=8, draft=False):
+        """feat (PR 7) and open PR n of another session both change shared.txt. Each merges clean with main, and the two conflict. draft: PR n is a
+        draft. -> (head, PR n's head)."""
+        self.own_writes({"shared.txt": "lane 7\n"})
+        other = self.pr_writes(n, {"shared.txt": "lane %d\n" % n}, lane_body(OTHER), draft=draft)
+        head = self.head("feat")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the lane head does not merge clean with main")
+        self.assertEqual(self.clash(other, "origin/main"), "clean", "precondition: PR %d does not merge clean with main, so the clash is not the pair the case names" % n)
+        self.assertEqual(self.clash(head, other), "conflict", "precondition: the lane head and PR %d do not clash, so the case probes nothing" % n)
+        return head, other
+
+    def pre_ready(self):
+        """`merge 7 --ready` on the draft. -> (rc, stdout and stderr together). Nothing else is run."""
+        rc, out, err = self.run_args("7", "--ready")
+        return rc, out + err
+
+    def fault_merge_read(self, sha):
+        """Every git merge-tree that names commit `sha` exits 128, a read git cannot answer (merge_tree reads that as unknown). Every other git call runs for real."""
+        real_sh = merge.sh
+
+        def faulted(args, *rest, **kwargs):
+            if "merge-tree" in args and sha in args:
+                return 128, "fatal: injected read failure"
+            return real_sh(args, *rest, **kwargs)
+        patch = unittest.mock.patch.object(merge, "sh", faulted)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def assert_step_refused_by_name(self, name):
+        """A stub step `name` FAILs. The pre-ready run prints its `fail <name>` verdict line, refuses the ready mark and pushes nothing."""
+        self.pre_ready_lane()
+        self.use_ci_job(steps_for([name]), 1)
+        refs_before = self.refs()
+        rc, out = self.pre_ready()
+        self.assertTrue(verdict_line(out, "fail", name), "the pre-ready run printed no `fail %s` line for a failing %s step: %s" % (name, name, out))
+        self.assertEqual(rc, 1, "a failing %s step did not refuse the pre-ready run: %s" % (name, out))
+        self.assertEqual(self.host.readies, [], "a failing %s step marked the draft ready: %s" % (name, out))
+        self.assertEqual(self.refs(), refs_before, "the pre-ready run pushed beside a failing %s step: %s" % (name, out))
 
     def setUp(self):
         with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER):  # Env.setUp makes its repos in the temp dir: keep them in this run's folder
@@ -2666,13 +2781,16 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
 
     def test_a_declared_step_that_fails_on_a_non_default_base_still_stops_the_draft(self):
         self.base_stamp("integ", ["check invariants"])
+        self.assertFalse(self.contains(self.head("feat"), self.head("integ")), "precondition: the head holds the base's tip, so the merge is the head and the case probes nothing")
         self.use_ci_job([("FAIL", "check invariants")], 1)
         rc, out = self.draft_confirm()
         runs = self.lint_calls()
         self.assertEqual(len(runs), 1, "the ready check did not run on a non-default base: " + out)
         self.assertIn("--base", runs[0]["argv"], out)
         self.assertEqual(runs[0]["argv"][runs[0]["argv"].index("--base") + 1], "origin/integ", out)
-        self.assertEqual(runs[0]["head"], self.head("feat"), "the ready check ran on a tree other than the PR head")
+        parents = tm.sh(self.co, "git", "rev-list", "--parents", "-n", "1", runs[0]["head"]).split()[1:]
+        self.assertEqual(parents, [self.head("feat"), self.head("integ")],
+                         "the ready check ran on %s, not on the dry merge of the PR head with integ: %s" % (runs[0]["head"][:9], out))
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.host.readies, [], out)
 
@@ -2717,6 +2835,319 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         notes = [line for line in out.splitlines() if "declares no ready checks" in line.lower()]
         self.assertEqual(len(notes), 1, out)
         self.assertEqual(rc, 0, out)
+
+
+    def test_pre_ready_refuses_a_draft_that_clashes_with_an_open_pr_of_another_session(self):  # the open-PR clash scope is every open PR, not the lane
+        self.pre_ready_lane()
+        head, other = self.clashing_pair()
+        self.assertFalse(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is in this lane, so the case probes no all-PR scope")
+        self.assertFalse(self.host.pulls[8]["draft"], "precondition: PR 8 is a draft, so the case probes no clash with a ready PR")
+        self.use_ci_job(steps_for(), 0)
+        refs_before = self.refs()
+        rc, out = self.pre_ready()
+        self.assertTrue(verdict_line(out, "fail", "open-PR clash"), "the pre-ready run printed no `fail open-PR clash` line for open PR #8: " + out)
+        self.assertEqual(rc, 1, "a clash with open PR #8 did not refuse the pre-ready run: " + out)
+        self.assertTrue(names_pr(out, 8), "the clash line does not name PR #8: " + out)
+        self.assertIn("shared.txt", out, "the clash line does not name the clashing file: " + out)
+        self.assertEqual(self.host.readies, [], "a draft that clashes with PR #8 was marked ready: " + out)
+        self.assertEqual(self.refs(), refs_before, "the pre-ready run pushed beside a clash: " + out)
+
+    def test_pre_ready_runs_the_clash_check_before_the_records_push_on_a_stale_page(self):  # the wiring: the clash refuses before any push
+        self.pre_ready_lane()
+        self.stale_feat()  # feat's records page is stale, so a run that does not refuse first pushes it
+        self.clashing_pair()
+        self.use_ci_job(steps_for(), 0)
+        refs_before = self.refs()
+        rc, out = self.pre_ready()
+        self.assertTrue(verdict_line(out, "fail", "open-PR clash"), "the pre-ready run printed no `fail open-PR clash` line before its records push: " + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "the pre-ready run pushed the records page before the clash check refused: " + out)
+        self.assertEqual(self.host.readies, [], out)
+
+    def test_pre_ready_names_a_windows_split_guard_break_as_fail(self):
+        self.assert_step_refused_by_name("Windows split guard")
+
+    def test_pre_ready_names_an_ste_lint_break_as_fail(self):
+        self.assert_step_refused_by_name("STE lint")
+
+    def test_pre_ready_names_a_cost_line_pin_break_as_fail(self):
+        self.assert_step_refused_by_name("Cost line pins")
+
+    def test_pre_ready_refuses_a_draft_that_closes_a_debt_whose_retire_check_is_red(self):
+        self.pre_ready_lane()
+        self.pr_on_debt(1)  # feat deletes docs/debts/retire-target.md, and its Retire test exits 1
+        self.use_ci_job(steps_for(), 0)
+        refs_before = self.refs()
+        rc, out = self.pre_ready()
+        self.assertTrue(verdict_line(out, "fail", "debt retire"), "the pre-ready run printed no `fail debt retire` line for a closed debt with a red Retire check: " + out)
+        self.assertEqual(rc, 1, "a closed debt with a red Retire check did not refuse the pre-ready run: " + out)
+        self.assertEqual(self.host.readies, [], "a draft that closes a red-retire debt was marked ready: " + out)
+        self.assertEqual(self.refs(), refs_before, "the pre-ready run pushed beside a red Retire check: " + out)
+
+    def test_pre_ready_runs_the_checks_on_the_merge_of_a_behind_head(self):  # on a non-default base: the default base refuses a behind head before any check
+        self.base_stamp("integ", DECLARED_READY)  # the PR's base declares the steps; host.base is integ
+        self.commit_on("integ", {"break-by-base.txt": "a line the base added\n"}, "origin/integ")
+        self.host.draft = True
+        self.assertFalse(self.contains(self.head("feat"), self.head("integ")), "precondition: the head holds the base's tip, so it is not behind and the case probes nothing")
+        self.assertNotIn("break-by-base.txt", self.tree_names("origin/feat"), "precondition: the head already holds the base's break, so the case probes nothing")
+        self.use_ci_job(steps_for(), 0, file_fails={"STE lint": "break-by-base.txt"})  # the step FAILs only on a tree that holds the base's file
+        refs_before = self.refs()
+        rc, out = self.pre_ready()
+        self.assertEqual(len(self.lint_calls()), 1, "the pre-ready run ran ci-job %d times, want once: %s" % (len(self.lint_calls()), out))
+        self.assertTrue(verdict_line(out, "fail", "STE lint"), "the pre-ready run checked the head, not its merge with integ: no `fail STE lint` line: " + out)
+        self.assertEqual(rc, 1, "a break that only the merge with integ shows did not refuse the pre-ready run: " + out)
+        self.assertEqual(self.host.readies, [], out)
+        self.assertEqual(self.refs(), refs_before, out)
+
+    def test_pre_ready_control_a_clean_draft_is_marked_ready_once_with_no_failure_line(self):  # the control: an open PR that clashes with nothing
+        self.pre_ready_lane()
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.pr_writes(8, {"elsewhere.txt": "lane 8\n"}, lane_body(OTHER))
+        self.use_ci_job(steps_for(), 0)
+        rc, out = self.pre_ready()
+        self.assertEqual(rc, 0, "a clean draft with a disjoint open PR was refused: " + out)
+        self.assertEqual(self.host.readies, [7], "a clean draft was not marked ready once: " + out)
+        self.assertFalse(self.host.draft, "a clean draft is still a draft: " + out)
+        self.assertEqual([line for line in verdict_lines(out) if not line.startswith("pass ")], [], "a clean draft printed a fail or unknown line: " + out)
+
+    def test_pre_ready_control_with_no_other_open_pr_marks_a_clean_draft_ready(self):  # the control: the empty state, no open PR but the lane's own
+        self.pre_ready_lane()
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.use_ci_job(steps_for(), 0)
+        rc, out = self.pre_ready()
+        self.assertEqual(rc, 0, "a clean draft with no other open PR was refused: " + out)
+        self.assertEqual(self.host.readies, [7], "a clean draft with no other open PR was not marked ready once: " + out)
+
+    def test_pre_ready_names_an_unreadable_clash_read_as_unknown_and_never_passes_it(self):
+        self.pre_ready_lane()
+        head, other = self.clashing_pair()
+        self.fault_merge_read(other)  # the pair read of PR 8 cannot run: a read git cannot answer
+        self.use_ci_job(steps_for(), 0)
+        refs_before = self.refs()
+        rc, out = self.pre_ready()
+        self.assertTrue(verdict_line(out, "unknown", "open-PR clash"), "the pre-ready run printed no `unknown open-PR clash` line for an unreadable pair read: " + out)
+        self.assertFalse(verdict_line(out, "pass", "open-PR clash"), "an unreadable pair read printed a pass line: " + out)
+        self.assertNotEqual(rc, 0, "an unreadable pair read passed the pre-ready run: " + out)
+        self.assertEqual(self.host.readies, [], "an unreadable pair read marked the draft ready: " + out)
+        self.assertEqual(self.refs(), refs_before, "the pre-ready run pushed beside an unreadable pair read: " + out)
+
+
+    def unpushed_pr(self, n, files, body):
+        """PR n as a draft whose head commit is never pushed: the second clone holds it, origin does not, so the lane's clone cannot read
+        its changed files. -> its head sha."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", branch_of(n), "origin/main")  # a local branch only: nothing is pushed
+        for path, text in files.items():
+            tm.put(os.path.join(o, path), text)
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-q", "-m", "unpushed %d" % n)
+        head = tm.sh(o, "git", "rev-parse", "HEAD")
+        self.listing(n, head, body, draft=True)
+        return head
+
+    def lane_holds(self, sha):
+        """True when the lane's own clone holds commit `sha`."""
+        return subprocess.run(["git", "-C", self.co, "cat-file", "-e", sha + "^{commit}"], capture_output=True).returncode == 0
+
+    def test_fast_checks_a_draft_whose_changed_files_cannot_be_read_is_unknown_for_the_clash_and_never_a_pass(self):  # F5
+        self.pre_ready_lane()
+        lane = self.own_writes({"shared.txt": "lane 7\n"})
+        other = self.unpushed_pr(8, {"shared.txt": "lane 8\n"}, lane_body(OTHER))
+        self.assertTrue(self.host.pulls[8]["draft"], "precondition: PR 8 is not a draft, so the case probes no draft scope")
+        self.assertFalse(self.lane_holds(other), "precondition: the lane's clone holds PR 8's head, so its files can be read and the case probes nothing")
+        self.assertEqual(self.clash(lane, other), "conflict", "precondition: the lane head and PR 8 do not clash, so the case probes nothing")
+        self.use_ci_job(steps_for(), 0)
+        self.lock = NoLock("merge --fast-checks")
+        refs_before = self.refs()
+        rc, out = self.fast_checks_run()
+        self.assertFalse(verdict_line(out, "pass", "open-PR clash"), "a draft whose changed files cannot be read printed `pass open-PR clash`: " + out)
+        self.assertTrue(verdict_line(out, "unknown", "open-PR clash"), "a draft whose changed files cannot be read printed no `unknown open-PR clash` line: " + out)
+        self.assertNotEqual(rc, 0, "a draft whose changed files cannot be read passed --fast-checks: " + out)
+        self.assert_fast_checks_changed_nothing(out, refs_before)
+
+    def test_pre_ready_a_head_that_conflicts_with_main_never_passes_the_open_pr_clash_on_the_claim_path(self):  # F6, the claim head's pre-ready run
+        self.pre_ready_lane()
+        self.declare(list(DECLARED_READY), stamp_kinds=True)  # the config first: a merge after the claim would hide its trailer
+        self.own_writes({"shared.txt": "lane 7\n"})
+        self.claim_head()  # the claim commit goes on top of the lane's edit: the head holds Record-claim D-002
+        self.commit_on("main", {"shared.txt": "main\n"}, "origin/main")  # main moves the file the head also changed
+        other = self.pr_writes(8, {"shared.txt": "lane 8\n"}, lane_body(OTHER))
+        head = self.head("feat")
+        self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", "origin/feat").strip(), "D-002", "precondition: the head holds no Record-claim, so the claim path is not probed")
+        self.assertEqual(self.clash(head, "origin/main"), "conflict", "precondition: the head merges clean with main, so the case probes nothing")
+        self.assertEqual(self.clash(head, other), "conflict", "precondition: the head and PR 8 do not clash, so the case probes nothing")
+        self.use_ci_job(steps_for(), 0)
+        refs_before = self.refs()
+        rc, out = self.pre_ready()
+        self.assertFalse(verdict_line(out, "pass", "open-PR clash"), "a head that conflicts with main printed `pass open-PR clash` on the claim path: " + out)
+        self.assertTrue(verdict_line(out, "unknown", "open-PR clash") or "fail merge with main" in out,
+                        "a head that conflicts with main neither read the clash unknown nor stopped at `fail merge with main`: " + out)
+        self.assertNotEqual(rc, 0, "a head that conflicts with main passed the pre-ready run: " + out)
+        self.assertEqual(self.host.readies, [], "a head that conflicts with main was marked ready: " + out)
+        self.assertEqual(self.refs(), refs_before, "the pre-ready run pushed beside a head that conflicts with main: " + out)
+
+    def test_fast_checks_on_a_head_that_conflicts_with_main_stops_at_the_merge_and_never_passes_the_clash(self):  # F6, the read-only run: the green control
+        self.pre_ready_lane()
+        self.commit_on("main", {"shared.txt": "main\n"}, "origin/main")
+        lane = self.own_writes({"shared.txt": "lane 7\n"})
+        other = self.pr_writes(8, {"shared.txt": "lane 8\n"}, lane_body(OTHER))
+        self.assertEqual(self.clash(lane, "origin/main"), "conflict", "precondition: the head merges clean with main, so the case probes nothing")
+        self.assertEqual(self.clash(lane, other), "conflict", "precondition: the head and PR 8 do not clash, so the case probes nothing")
+        self.use_ci_job(steps_for(), 0)
+        self.lock = NoLock("merge --fast-checks")
+        refs_before = self.refs()
+        rc, out = self.fast_checks_run()
+        self.assertFalse(verdict_line(out, "pass", "open-PR clash"), "--fast-checks printed `pass open-PR clash` for a head that conflicts with main: " + out)
+        self.assertTrue("fail merge with main" in out or verdict_line(out, "unknown", "open-PR clash"),
+                        "--fast-checks neither stopped at `fail merge with main` nor read the clash unknown: " + out)
+        self.assertNotEqual(rc, 0, "--fast-checks passed a head that conflicts with main: " + out)
+        self.assert_fast_checks_changed_nothing(out, refs_before)
+
+    def test_fast_checks_with_no_declared_ready_checks_exits_nonzero_with_one_unknown_pre_ready_line(self):  # F7
+        self.pre_ready_lane()
+        self.declare(None)  # the base's config declares no merge.readyChecks
+        self.lock = NoLock("merge --fast-checks")
+        refs_before = self.refs()
+        rc, out = self.fast_checks_run()
+        self.assertEqual(verdict_lines(out), ["unknown pre-ready: no merge.readyChecks declared"],
+                         "--fast-checks with no merge.readyChecks did not print exactly one `unknown pre-ready` line: " + out)
+        self.assertNotEqual(rc, 0, "--fast-checks with no merge.readyChecks exited 0, so it passed nothing it ran: " + out)
+        self.assert_fast_checks_changed_nothing(out, refs_before)
+
+    def test_fast_checks_a_declared_step_that_ci_job_never_printed_is_unknown_and_never_a_pass(self):  # F4, the wiring
+        self.pre_ready_lane()
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.use_ci_job([("PASS", "STE lint")], 0)  # Windows split guard and Cost line pins are declared, and ci-job prints no line for them
+        self.lock = NoLock("merge --fast-checks")
+        refs_before = self.refs()
+        rc, out = self.fast_checks_run()
+        self.assertFalse(verdict_line(out, "pass", "Windows split guard"), "a declared step with no ci-job line printed `pass Windows split guard`: " + out)
+        self.assertTrue(verdict_line(out, "unknown", "Windows split guard"), "a declared step with no ci-job line printed no `unknown Windows split guard` line: " + out)
+        self.assertNotEqual(rc, 0, "a declared step with no ci-job line passed --fast-checks: " + out)
+        self.assert_fast_checks_changed_nothing(out, refs_before)
+
+    def test_fast_checks_on_a_clean_pr_prints_the_scaffold_coverage_note_once_and_still_exits_zero(self):  # F9, with the green control: the exit stays 0
+        self.pre_ready_lane()
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.pr_writes(8, {"elsewhere.txt": "lane 8\n"}, lane_body(OTHER))
+        self.use_ci_job(steps_for(), 0)
+        self.lock = NoLock("merge --fast-checks")
+        refs_before = self.refs()
+        rc, out = self.fast_checks_run()
+        self.assertEqual(len(scaffold_lines(out)), 1, "--fast-checks on a clean PR did not print the scaffold coverage note once: " + out)
+        self.assertEqual(rc, 0, "the scaffold coverage note moved the exit of a clean PR: " + out)
+        self.assert_fast_checks_changed_nothing(out, refs_before)
+
+    def test_fast_checks_on_a_failing_check_still_prints_the_scaffold_coverage_note(self):  # F9, the failing run: the note is printed every time
+        self.pre_ready_lane()
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.use_ci_job(steps_for(["STE lint"]), 1)
+        self.lock = NoLock("merge --fast-checks")
+        refs_before = self.refs()
+        rc, out = self.fast_checks_run()
+        self.assertEqual(len(scaffold_lines(out)), 1, "--fast-checks on a failing check did not print the scaffold coverage note once: " + out)
+        self.assertNotEqual(rc, 0, "a failing STE lint step exited 0 under --fast-checks: " + out)
+        self.assert_fast_checks_changed_nothing(out, refs_before)
+
+    def test_pre_ready_on_a_clean_draft_prints_the_scaffold_coverage_note_and_still_marks_it_ready(self):  # F9, the ready step
+        self.pre_ready_lane()
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.pr_writes(8, {"elsewhere.txt": "lane 8\n"}, lane_body(OTHER))
+        self.use_ci_job(steps_for(), 0)
+        rc, out = self.pre_ready()
+        self.assertEqual(len(scaffold_lines(out)), 1, "the ready step on a clean draft did not print the scaffold coverage note once: " + out)
+        self.assertEqual(rc, 0, "the scaffold coverage note moved the exit of a clean draft's ready step: " + out)
+        self.assertEqual(self.host.readies, [7], "a clean draft's ready step did not mark it ready once: " + out)
+
+    def fast_checks_run(self):
+        """`merge 7 --fast-checks` on the draft. -> (rc, stdout and stderr together). Nothing else is run."""
+        rc, out, err = self.run_args("7", "--fast-checks")
+        return rc, out + err
+
+    def assert_fast_checks_changed_nothing(self, out, refs_before):
+        """The read-only run pushed nothing, marked nothing ready, kept the draft and posted no comment. Its lock is the case's NoLock."""
+        self.assertEqual(self.refs(), refs_before, "--fast-checks pushed a ref: " + out)
+        self.assertEqual(self.host.readies, [], "--fast-checks marked the draft ready: " + out)
+        self.assertTrue(self.host.draft, "--fast-checks cleared the draft flag: " + out)
+        self.assertEqual(self.host.posted, [], "--fast-checks posted a comment: " + out)
+
+    def test_fast_checks_on_a_clean_pr_prints_one_pass_line_per_check_and_changes_nothing(self):
+        self.pre_ready_lane()
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.pr_writes(8, {"elsewhere.txt": "lane 8\n"}, lane_body(OTHER))
+        self.use_ci_job(steps_for(), 0)
+        self.lock = NoLock("merge --fast-checks")
+        refs_before = self.refs()
+        rc, out = self.fast_checks_run()
+        checks = DECLARED_READY + ["debt retire", "open-PR clash"]
+        self.assertEqual(rc, 0, "a clean PR refused --fast-checks: " + out)
+        self.assertEqual(len(verdict_lines(out)), len(checks), "--fast-checks did not print one verdict line per check: " + out)
+        for name in checks:
+            self.assertTrue(verdict_line(out, "pass", name), "--fast-checks printed no `pass %s` line: %s" % (name, out))
+        self.assertEqual(len(self.lint_calls()), 1, "--fast-checks ran the declared steps %d times, want once: %s" % (len(self.lint_calls()), out))
+        self.assert_fast_checks_changed_nothing(out, refs_before)
+
+    def test_fast_checks_on_a_failing_check_prints_its_fail_line_exits_nonzero_and_changes_nothing(self):
+        self.pre_ready_lane()
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.use_ci_job(steps_for(["STE lint"]), 1)
+        self.lock = NoLock("merge --fast-checks")
+        refs_before = self.refs()
+        rc, out = self.fast_checks_run()
+        self.assertTrue(verdict_line(out, "fail", "STE lint"), "--fast-checks printed no `fail STE lint` line for a failing STE lint step: " + out)
+        self.assertNotEqual(rc, 0, "a failing STE lint step exited 0 under --fast-checks: " + out)
+        self.assertEqual(len(verdict_lines(out)), len(DECLARED_READY) + 2, "--fast-checks did not print one verdict line per check: " + out)
+        self.assert_fast_checks_changed_nothing(out, refs_before)
+
+
+    def log_merge_trees_naming(self, sha):
+        """Log each git merge-tree call that names commit `sha`; every call still runs for real. -> the list the logged calls are appended to."""
+        real_sh = merge.sh
+        calls = []
+
+        def logged(args, *rest, **kwargs):
+            if "merge-tree" in args and sha in args:
+                calls.append(list(args))
+            return real_sh(args, *rest, **kwargs)
+        patch = unittest.mock.patch.object(merge, "sh", logged)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return calls
+
+    def test_pre_ready_reports_a_clash_with_a_draft_pr_and_does_not_fail_on_it(self):  # a ready PR counts; a draft PR is a report line
+        self.pre_ready_lane()
+        _head, other = self.clashing_pair(n=9, draft=True)
+        self.assertTrue(self.host.pulls[9]["draft"], "precondition: PR 9 is not a draft, so the case probes no draft scope")
+        self.use_ci_job(steps_for(), 0)
+        merge_trees = self.log_merge_trees_naming(other)
+        rc, out = self.pre_ready()
+        self.assertFalse(verdict_line(out, "fail", "open-PR clash"), "a clash with draft PR #9 printed a `fail open-PR clash` line: " + out)
+        self.assertEqual(rc, 0, "a clash with draft PR #9 refused the pre-ready run: " + out)
+        report = [line for line in out.splitlines() if "shared.txt" in line and names_pr(line, 9)]
+        self.assertTrue(report, "no report line names draft PR #9 and its shared file shared.txt: " + out)
+        self.assertIn("shares files", report[0], "the draft's report line does not say `shares files`: " + out)
+        self.assertNotIn("conflict", report[0], "the draft's report line says conflict, where it reports shared files: " + out)
+        self.assertEqual(merge_trees, [], "git merge-tree ran on draft PR #9's head, so the draft was not read from shared paths alone: %s" % merge_trees)
+        self.assertEqual(self.host.readies, [7], "a clash with draft PR #9 kept the draft from going ready: " + out)
+
+
+class PreReadyDeclared(unittest.TestCase):
+    """The repo's own pre-ready list: merge.readyChecks in .github/stamp.json names the checks-job steps the pre-ready run runs, and
+    bin/ci-job reads each one as a step of its checks job (`checks --plan --step NAME`). Reads the repo's files; runs no lint."""
+
+    def test_pre_ready_the_declared_list_names_the_checks_steps_ci_job_reads(self):
+        root = os.path.dirname(HERE)
+        with open(os.path.join(root, ".github", "stamp.json"), encoding="utf-8") as f:
+            declared = json.load(f).get("merge", {}).get("readyChecks") or []
+        self.assertTrue(declared, "the repo's .github/stamp.json declares no merge.readyChecks, so the pre-ready run has no declared steps")
+        for name in DECLARED_READY:
+            self.assertIn(name, declared, "merge.readyChecks does not name the checks step %r" % name)
+        for name in declared:
+            plan = subprocess.run([sys.executable, os.path.join(root, "bin", "ci-job"), "checks", "--plan", "--base", "origin/main", "--step", name],
+                                  cwd=root, capture_output=True, text=True)
+            self.assertRegex(plan.stdout, r"(?m)^would run\s+%s$" % re.escape(name),
+                             "ci-job does not read %r as a step of its checks job: %s" % (name, plan.stdout + plan.stderr))
 
 
 class RunFolderSweep(unittest.TestCase):
