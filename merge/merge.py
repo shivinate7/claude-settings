@@ -147,7 +147,7 @@ A list read asks for each page by number (`Host.pages`), so no `gh` flag beyond 
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, contextlib, datetime, fnmatch, functools, importlib.util, io, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, concurrent.futures, contextlib, datetime, fnmatch, functools, importlib.util, io, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -2509,6 +2509,8 @@ def is_unknown_reason(reason):
     """True when a merge_reason answer says unknown (unknown_reason wrote it), not a conflict."""
     return reason.startswith("unknown (")
 
+PROBE_WORKERS = 8  # parallel `git diff` starts of the open-PR clash's path read (cross_measure, scope "all"); each is one short git process
+
 def changed_paths(root, base, head):
     """-> the set of paths the branch `head` changes against origin/<base> (`git diff --name-only --no-renames`, three dots: from the merge base),
     or None when git could not say. One git start. A rename reads as its delete and its add, so each path a rename touches is named."""
@@ -2524,8 +2526,8 @@ def paths_meet(a, b):
 
 def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean, integration=False, scope="lane"):
     """Check `head` of PR `n` against each other open PR of its lane (a body with the same session URL) and each PR in `with_prs`, with
-    `git merge-tree --write-tree`. One PR-list read; for each PR compared, one merge-tree of that PR's head into origin/<base> (merge_reason) and one of
-    the two heads. A PR in a stack with this head (one head holds the other) is skipped before any merge-tree: its own base is not the question.
+    `git merge-tree --write-tree`. One PR-list read; for each PR compared, one merge-tree of the two heads, and for a clash one of that PR's head into
+    origin/<base> (merge_reason). A PR in a stack with this head (one head holds the other) is skipped before any merge-tree: its own base is not the question.
     `head_clean` is true when the caller's merge_reason found this head clean with the base (it has already stopped on an unknown).
     -> (fails, reports, stop). fails: one text block for the clashes that count. reports: one line per clash that does not count. stop: "" or the text
     of an unknown (a read git cannot answer, a head origin does not hold); the caller raises it, with the fails above it, never as a pass.
@@ -2538,7 +2540,7 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     A failed list read is a Stop, which the pre-ready run reads as unknown, never a pass. In scope "all" a PR whose changed paths (changed_paths) meet none of
     this head's (paths_meet) is skipped before any merge-tree: with hundreds open, only an overlap can clash. A diff git cannot read does not skip.
     Cost of scope "all": one list read (a REST page per 100 PRs), one fetch of every branch head, then per other open PR on the base one `git diff`
-    start, and for an overlap the merge-tree starts above. No file or process is kept."""
+    start (PROBE_WORKERS at once), and for an overlap one merge-tree of the two heads (PROBE_WORKERS at once) and, for a clash only, merge_reason's. No file or process is kept."""
     lane = set(LANE_SESSION.findall(body or ""))
     rows = {d["number"]: d for d in host.open_pulls() if d["number"] != n}
     for m in with_prs:
@@ -2554,16 +2556,18 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     if c:
         raise Stop(f"the cross-measure of {head[:9]} is unknown: git fetch origin failed: {out} {LANE_LINT_CITE}")
     conflicts, reports, unknown, unfetched = [], [], [], []
-    mine = changed_paths(root, base, head) if scope == "all" else None
+    mine, theirs = (changed_paths(root, base, head) if scope == "all" else None), {}
+    if mine is not None:  # a diff that succeeds proves the head is in the clone; one that fails (None) falls through to the checks below
+        with concurrent.futures.ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:
+            theirs = dict(zip(picked, pool.map(lambda m: changed_paths(root, base, rows[m]["head"]["sha"]), picked)))
+    todo = []  # the PRs whose pair is read by merge-tree
     for m in picked:
         other = rows[m]["head"]["sha"]
+        if mine is not None and m not in with_prs and theirs[m] is not None and not paths_meet(mine, theirs[m]):
+            continue  # no shared path: nothing to clash
         if git(root, "rev-parse", "--verify", "-q", f"{other}^{{commit}}")[0]:  # a fork's head is not on origin, so no fetch brings it
             unfetched.append(f"  #{m}: its head {other[:9]} could not be fetched from origin (a fork's head), so it cannot be compared")
             continue
-        if mine is not None and m not in with_prs:
-            theirs = changed_paths(root, base, other)
-            if theirs is not None and not paths_meet(mine, theirs):
-                continue  # no shared path: nothing to clash
         held = head_holds(root, other, head)
         if held is False:
             held = head_holds(root, head, other)
@@ -2572,8 +2576,21 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
             continue
         if held:
             continue  # a stack pair
-        why = merge_reason(root, m, base, other, fetched)  # for a clean pair too: the cost is two merge-trees for each PR compared
-        state, files = conflicting_files(root, head, other)
+        todo.append(m)
+    if scope == "all" and todo and base not in fetched:
+        merge_reason(root, n, base, head, fetched)  # the base is fetched once, before the workers below read `fetched`
+
+    def read_pair(m):
+        """-> ((state, files), why) for PR `m`. why: merge_reason of #m's head, which the lint reads for a clean pair too; scope "all" reads it only for a clash,
+        since whether #m's own head conflicts with the base decides if the clash counts."""
+        sha = rows[m]["head"]["sha"]
+        pair = conflicting_files(root, head, sha)
+        return pair, merge_reason(root, m, base, sha, fetched) if scope != "all" or pair[0] == "conflict" else None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:  # each merge-tree is its own git process, and writes only objects
+        read = dict(zip(todo, pool.map(read_pair, todo)))
+    for m in todo:
+        (state, files), why = read[m]
         if state == "unknown":
             unknown.append(f"  #{m}: {files[0]}")
             continue
@@ -3181,13 +3198,16 @@ STEP_LINE = re.compile(r"^(PASS|FAIL|SKIP|skipped|unknown|not run)\s+(.*)$")
 def step_verdicts(raw, checks, state):
     """-> one (verdict, name, detail) per declared check, read from ci-job's stdout lines `raw`: `pass` for a PASS line (or a SKIP line, whose reason
     is the detail: ci-job's scope turned the step off), `fail` for a FAIL line, `unknown` for any other line and for a check with no line at all.
-    A check that has no line is unknown even when ci-job exited 0, never a pass. `state` is ci-job's own verdict: a run that is not "pass" never turns a line into a pass."""
+    A check with no line reads as ci-job's own exit: a pass when it exited 0 (ci-job names an unknown `--step` and exits 2), else unknown.
+    `state` is ci-job's own verdict: a run that is not "pass" never turns a line into a pass."""
     rows = []
     for name in checks:
         hit = next((m for m in (STEP_LINE.match(l.rstrip()) for l in raw) if m and (m.group(2) == name or m.group(2).startswith(name + ":"))), None)
         word = hit.group(1) if hit else None
         detail = hit.group(2)[len(name):].lstrip(": ") if hit else "ci-job printed no line for this check"
-        if word == "PASS" and state == "pass":
+        if word is None and state == "pass":
+            rows.append(("pass", name, "ci-job exited 0"))
+        elif word == "PASS" and state == "pass":
             rows.append(("pass", name, detail))
         elif word in ("SKIP", "skipped") and state == "pass":
             rows.append(("pass", name, "ci-job skipped it: " + detail))
