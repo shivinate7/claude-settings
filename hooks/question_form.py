@@ -25,7 +25,7 @@ chat `Gain:` and `Lose:` in the option's description. Only a line at a line star
 
 THE OLDER RULES keep their ids and run first, in this order, then the form:
 `item-field-rendered` (a field the page draws), `port-question`, `uniform-pick`, `press-link`, `command-in-item`,
-`gh-login-switch`, `task-names-check`, `task-why-cited` (page items), then the form. A missing Goal, Problem or Based on line, a
+`task-options`, `gh-login-switch`, `task-names-check`, `task-why-cited` (page items), then the form. A missing Goal, Problem or Based on line, a
 Based on count outside 1-3, a kind outside
 PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`, and so does a Goal, Problem or
 Based on line whose text is only an angle-bracket placeholder (the template copied; `<Button>` inside real
@@ -382,6 +382,27 @@ COMMAND_REASON = ("A step never sends the owner to a file for a command, and nev
                   "command in the item's `command` field as {powershell, mac}: a PowerShell 5.1-safe "
                   "string (no &&, ||, <<, <<<, /dev/null or export) and a bash or zsh string for the Mac, both non-empty. "
                   "Say \"paste the command below\" in the step.")
+# docs/decisions/question-form.md, rule `task-options`: the page draws `options` only for a decision
+# (skills/waiting-page/page.html, the item render's decision branch), so a task's options never reach the owner.
+TASK_OPTIONS_REASON = ("The page draws `options` only for a decision, so a task's options (and the `how` and `links` "
+                       "inside them) never reach the owner. Make the item kind `decision`, or keep it a task and put "
+                       "the prompt in the item's `command` field as {powershell, mac}, with the steps and links on the "
+                       "task itself. (decision question-form, rule task-options)")
+
+
+def task_options_hit(op, data) -> str:
+    """A non-empty `options` list on an open item written with an explicit `kind: task`. A set or an update with
+    no kind key is never refused: the guard cannot see the stored kind, which may be a decision whose options
+    the page draws (as decision_form_hit and _open_decision read it). A closed item passes. A non-list
+    `options` is not this rule's."""
+    if not isinstance(data, dict) or data.get("kind") != "task" or data.get("status") == "closed":
+        return ""
+    options = data.get("options")
+    if isinstance(options, list) and options:
+        return "task carries options"
+    return ""
+
+
 # A press: press, click, tap in any form; an imperative approve, merge, hit, turn on at the start of
 # a clause, `you` allowed before it (a command to the owner, so "the PR merged" and "to merge"
 # pass); mark ... ready with a PR or #N as its object, or with "on <ref>" after ready. "press on"
@@ -1026,6 +1047,9 @@ def item_hit(op, entry, cwd="", session_id=None):
     hit = command_in_item_hit(data)
     if hit:
         return "command-in-item", hit
+    hit = task_options_hit(op, data)
+    if hit:
+        return "task-options", hit
     hit = gh_login_hit(data)
     if hit:
         return "gh-login-switch", hit
@@ -1811,7 +1835,7 @@ def cross_repo_hit(op, data, page_repo, session_id=None):
 # ------------------------------------------------------------------ the reasons, one table per surface
 
 PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "press-link": PRESS_LINK_REASON,
-                "command-in-item": COMMAND_REASON, "gh-login-switch": GH_LOGIN_REASON,
+                "command-in-item": COMMAND_REASON, "task-options": TASK_OPTIONS_REASON, "gh-login-switch": GH_LOGIN_REASON,
                 "task-names-check": TASK_REASON, WHY_RULE: WHY_CITED_REASON, CROSS_REPO_RULE: CROSS_REPO_REASON,
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
                 "item-field-page-only": PAGE_ONLY_REASON,
