@@ -595,6 +595,9 @@ sh("detached-launch: $r = (& ci-job checks), a call operator on a roster command
 # A PowerShell call operator is no job, with or without an assignment before it. The control has no assignment.
 sh("check-tail: $r = & ci-job checks --lint piped to Select-String FAIL, a call operator after =, is allowed",
    "$r = & ci-job checks --lint | Select-String FAIL", "allow", tool="PowerShell", cwd=NOGIT)
+# A PowerShell call operator after an assignment, in a && list's last piece, is no background job.
+sh("check-tail: ci-job checks | tail -3 && $r = & ci-job x, a call operator after = in a && list, is allowed",
+   "ci-job checks | tail -3 && $r = & ci-job x", "allow", tool="PowerShell", cwd=NOGIT)
 sh("check-tail: & ci-job checks --lint piped to Select-String FAIL, a call operator alone, is allowed (control)",
    "& ci-job checks --lint | Select-String FAIL", "allow", tool="PowerShell", cwd=NOGIT)
 sh("detached-launch: echo $((5&3)), a bitwise & in arithmetic expansion, is allowed",
