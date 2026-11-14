@@ -40,8 +40,11 @@
 # Cost per alarm: two fixed reads (runs, workflows list), one jobs read for each failed and each cancelled run of the 100-run window (at
 # most 100), one per earlier attempt of a failed, cancelled or succeeded re-run, one contents read of a run's workflow file when a job of
 # it was cancelled. A clear candidate N adds one jobs read, and one contents read of N's workflow file at N's head (headSha) unless N
-# leaves a red job of R unpassed (a certain red), and two clear_rule.py starts at most. Each green run of the push group, newest first, down
-# to the first that is not empty, adds one jobs read (the empty-run test). Each woken attempt adds one pulls read, one
+# leaves a red job of R unpassed (a certain red), and two clear_rule.py starts at most. Each alarm that reaches the walk of the push
+# group's runs adds one python3 start (clear_rule.py --rule-events). Each green run of the push group walked, newest first, down to the
+# first that is not empty, adds one jobs read and one python3 start (clear_rule.py --empty-run, the empty-run test). Measured with one
+# walked run (cost pins in actions/ci-alarm/test_action.sh); with two or more walked runs: (unmeasured). The window holds up to 100 runs,
+# so the bound is 100 jobs reads and 100 starts per alarm, a bound and no measure. Each woken attempt adds one pulls read, one
 # comments read of its pull request (one per 100 comments) and at most one comment write (wake.sh). No long-lived process starts: short jq (unmeasured),
 # awk (unmeasured), gh and python3 processes run. The files written are temp cache files in a folder this script removes on exit, and a failed wake
 # appends one message to GITHUB_STEP_SUMMARY.
