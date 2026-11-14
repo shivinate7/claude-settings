@@ -12,7 +12,8 @@ The "waiting-page" key holds the URL of the repo's waiting page (`waiting_page()
 the registry entry whose role is "waiting-page";
 "waiting-page-colour" (#rrggbb) and "waiting-page-icon" (an .svg or .png path in the repo) are its
 branding (`waiting_page_colour()`, `waiting_page_icon()`, read by lint/repo_colour.py). "page-writer" is the session id
-of the page's writer (`page_writer_key()`, read by the pick guard in lint/report_guard.py). The "record-branch" key
+of a page writer (`page_writer_key()`). It goes stale when triage gets a new session, so no guard reads it: the pick
+guard and the owner-feedback check name the writer by its triage tag (`_transcript.page_writer`). The "record-branch" key
 names the branch of the record in a fork worktree (`record_branch()`); with no key it is "roadmap".
 `set_waiting_page()` writes the "waiting-page" key once, for triage; it never writes "rolled-out".
 
