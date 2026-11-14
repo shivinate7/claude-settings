@@ -1,14 +1,14 @@
 {
  "id": "force-advice-needs-real-run",
  "title": "Never advise the owner to force-merge a PR whose own run never ran its suites",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJKzpmMN5jTqpjYqSBQo",
  "owner": "triage",
  "blockedBy": [],
  "why": "Forcing a PR on a run where every job skipped proves nothing, and here it let a defect onto main that skipped every later run.",
  "source": "Consultant 18:05 CST Nov 13, from its own error (session_013NEJKz5AWFJhGvmCUoi6wQ); the cause is measured in PR #3292's body, unchecked by triage.",
- "note": "Filed 18:05 CST Nov 13. The consultant advised forcing #3278 at 15:57 CST while its draft run was all skipped. #3278 made `scope` need `nightly-skip`, which skips off schedule, so every PR and push run since skipped all jobs (step all-jobs-passed-docs-only-red). Rule: no advice to force-merge, bypass or use `--base-red-ok` for a PR whose own run never ran its suites. Home of the check: a line in the consultant role prose, plus a merge-tool print of \"own run ran N suites\" on any `--base-red-ok` or bypass advice. Note: the owner had said at 15:03 CST he planned to force it through (relayed by retro); this step is about the advice behind that, not his word. A check change for the merge-tool print: test-author red case first, builder, reviewer; the prose line is a record edit. Guard that would have stopped the error: this step. Past rulings not checked. Not started.",
- "updatedAt": "2026-11-13T18:05:43-06:00"
+ "note": "Filed 18:05 CST Nov 13. The consultant advised forcing #3278 at 15:57 CST while its draft run was all skipped. #3278 made `scope` need `nightly-skip`, which skips off schedule, so every PR and push run since skipped all jobs (step all-jobs-passed-docs-only-red). Rule: no advice to force-merge, bypass or use `--base-red-ok` for a PR whose own run never ran its suites. Home of the check: a line in the consultant role prose, plus a merge-tool print of \"own run ran N suites\" on any `--base-red-ok` or bypass advice. Note: the owner had said at 15:03 CST he planned to force it through (relayed by retro); this step is about the advice behind that, not his word. A check change for the merge-tool print: test-author red case first, builder, reviewer; the prose line is a record edit. Guard that would have stopped the error: this step. Past rulings not checked. Not started. Coordinator 19:54 CST Nov 13 (19:53, owner asked it to start the lanes): lane started, session_013NEJKzpmMN5jTqpjYqSBQo (Sonnet, medium; searches for duplicates first).",
+ "updatedAt": "2026-11-13T19:54:01-06:00"
 }

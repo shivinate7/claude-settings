@@ -1,14 +1,14 @@
 {
  "id": "round-one-model-prose-matches-table",
  "title": "agents/reviewer.md, the merge help text and the brief template say the round-1 model the table gives",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1waup9BzyWDv3eDJs",
  "owner": "triage",
  "blockedBy": [],
  "why": "A lane reads \"round 1 on haiku\" or \"MODEL must be sonnet on every record\", runs the wrong model on a guard change, and its record line is refused.",
  "source": "Owner 14:57 CST Nov 13 (\"might be a prose gap\"), via the coordinator; measured by the coordinator on main f94f73637: decision agent-model-cap round rows.",
- "note": "Filed 14:59 CST Nov 13. Table: reviewer round 1 is Sonnet when the brief has `Guard or check: yes` at a line start, Haiku otherwise; round 2, round 3 and the fix verifier are Sonnet. agents/reviewer.md line 74 says \"round 1 on haiku\" with no guard row; merge/merge.py help line 30 says \"MODEL must be sonnet on every record\" while the table says Haiku for `1 other`. Docs lane: fix both and make the brief template (lane brief-from-step) carry the guard marker line. Related: review-policy-as-data (rows as data), reviewer-mechanical-checks. Lane receipt-close-express ran round 1 on Haiku because its brief lacked the marker. Docs only; the merge help text is code, so that part needs a builder and a reviewer. Past rulings not checked; the lines are the coordinator's reading.",
- "updatedAt": "2026-11-13T14:59:16-06:00"
+ "note": "Filed 14:59 CST Nov 13. Table: reviewer round 1 is Sonnet when the brief has `Guard or check: yes` at a line start, Haiku otherwise; round 2, round 3 and the fix verifier are Sonnet. agents/reviewer.md line 74 says \"round 1 on haiku\" with no guard row; merge/merge.py help line 30 says \"MODEL must be sonnet on every record\" while the table says Haiku for `1 other`. Docs lane: fix both and make the brief template (lane brief-from-step) carry the guard marker line. Related: review-policy-as-data (rows as data), reviewer-mechanical-checks. Lane receipt-close-express ran round 1 on Haiku because its brief lacked the marker. Docs only; the merge help text is code, so that part needs a builder and a reviewer. Past rulings not checked; the lines are the coordinator's reading. Coordinator 19:54 CST Nov 13 (19:53, owner asked it to start the lanes): lane started, session_013NEJL1waup9BzyWDv3eDJs (Sonnet, medium; searches for duplicates first). Docs only; branch slug round-one-prose-matches-table (the step id is over 32 characters).",
+ "updatedAt": "2026-11-13T19:54:01-06:00"
 }

@@ -1,14 +1,14 @@
 {
  "id": "close-keeps-grant-answer",
  "title": "Closing a waiting-page item refuses to delete its answer while the item's home names a grant or settings entry that a lane has not yet fetched",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJKykhzvt2ff8mPo4Bg7",
  "owner": "triage",
  "blockedBy": [],
  "why": "Triage deleted the saved answers of items 759 and 753, and their lanes found nothing to fetch.",
  "source": "Lane batch-label-setter 18:31 CST Nov 13 and triage's own repeat of an earlier miss; the lane's account, unchecked by triage.",
- "note": "Filed 18:45 CST Nov 13. Guard wanted: the close pattern (skill waiting-page, close step) keeps an answer doc while the lane named in the item's home has not fetched it, or marks the answer fetched first. Harm stopped: a lane that cannot act on an owner grant. Rule building-mistake-names-its-guard. A guard change: test-author red case first. Not started.",
- "updatedAt": "2026-11-13T18:45:03-06:00"
+ "note": "Filed 18:45 CST Nov 13. Guard wanted: the close pattern (skill waiting-page, close step) keeps an answer doc while the lane named in the item's home has not fetched it, or marks the answer fetched first. Harm stopped: a lane that cannot act on an owner grant. Rule building-mistake-names-its-guard. A guard change: test-author red case first. Not started. Coordinator 19:54 CST Nov 13 (19:53, owner asked it to start the lanes): lane started, session_013NEJKykhzvt2ff8mPo4Bg7 (Sonnet, medium; searches for duplicates first).",
+ "updatedAt": "2026-11-13T19:54:01-06:00"
 }

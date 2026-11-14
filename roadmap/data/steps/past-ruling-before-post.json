@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Two owner items (784, 787) were posted for questions that decisions notes-merge-union and claude-md-change-is-flagged already rule.",
  "source": "Triage's own misses 18:40 and 19:15 CST Nov 13, found by the consultant and the red-main lane.",
- "note": "Filed 18:45 CST Nov 13. Guard wanted: the question-form check (hooks/question_form.py) or the page-write path refuses a new item whose home names no decision or ruling, or whose named decision file was not read by the posting session in the same turn. Harm stopped: a question to the owner that a past ruling settles. Rules outcomes-stale-decision-protocol and building-mistake-names-its-guard. A guard change: test-author red case first. Not started.",
- "updatedAt": "2026-11-13T18:45:03-06:00"
+ "note": "Filed 18:45 CST Nov 13. Guard wanted: the question-form check (hooks/question_form.py) or the page-write path refuses a new item whose home names no decision or ruling, or whose named decision file was not read by the posting session in the same turn. Harm stopped: a question to the owner that a past ruling settles. Rules outcomes-stale-decision-protocol and building-mistake-names-its-guard. A guard change: test-author red case first. Not started. Coordinator 19:54 CST Nov 13 (19:53): not started. Open PR #3206 and lane past-ruling-on-send (session_013NEJL1s4J4rQVVz1kBBJfh) work the same question; triage has not compared them. Unchecked: whether this step differs.",
+ "updatedAt": "2026-11-13T19:54:01-06:00"
 }

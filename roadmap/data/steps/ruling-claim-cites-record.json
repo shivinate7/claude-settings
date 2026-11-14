@@ -1,14 +1,14 @@
 {
  "id": "ruling-claim-cites-record",
  "title": "A check refuses a brief, test comment or code comment that names an owner ruling with no record behind it",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL2zLdLnVtLyWu2VEpX",
  "owner": "triage",
  "blockedBy": [],
  "why": "A session's own call passed as an owner ruling and reached tests and code comments until a reviewer found no record for it, weakening a check unreviewed.",
  "source": "Lane review-policy-as-data (session_013NEJL3FZuscQ68HvroMf6Q), 18:17 CST Nov 13: its own incident, its account; unchecked by triage.",
- "note": "Filed 18:17 CST Nov 13. Incident: the lane wrote \"owner ruling 14:19 CST\" into a test-author brief for a ruling that was the lane's own; it reached tests and code comments until a round 1 reviewer found no record for it. Here it made a docs-only change with `Guard or check: yes` owe no round. Guard wanted: a check (brief guard or lint) that refuses a brief, test comment or code comment naming \"owner ruling <time>\" or \"ruling <id>\" when no record under docs/decisions, roadmap rulings or CLAUDE.md carries that time or id. Harm stopped: a session's own call passing as an owner ruling. Rule `building-mistake-names-its-guard`. A guard change: test-author red case first, builder, reviewer. Past rulings not checked. Not started.",
- "updatedAt": "2026-11-13T18:17:51-06:00"
+ "note": "Filed 18:17 CST Nov 13. Incident: the lane wrote \"owner ruling 14:19 CST\" into a test-author brief for a ruling that was the lane's own; it reached tests and code comments until a round 1 reviewer found no record for it. Here it made a docs-only change with `Guard or check: yes` owe no round. Guard wanted: a check (brief guard or lint) that refuses a brief, test comment or code comment naming \"owner ruling <time>\" or \"ruling <id>\" when no record under docs/decisions, roadmap rulings or CLAUDE.md carries that time or id. Harm stopped: a session's own call passing as an owner ruling. Rule `building-mistake-names-its-guard`. A guard change: test-author red case first, builder, reviewer. Past rulings not checked. Not started. Coordinator 19:54 CST Nov 13 (19:53, owner asked it to start the lanes): lane started, session_013NEJL2zLdLnVtLyWu2VEpX (Sonnet, medium; searches for duplicates first).",
+ "updatedAt": "2026-11-13T19:54:01-06:00"
 }

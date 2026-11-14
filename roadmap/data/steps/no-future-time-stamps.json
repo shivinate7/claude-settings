@@ -1,14 +1,14 @@
 {
  "id": "no-future-time-stamps",
  "title": "A check refuses a message, record or page item that carries a time later than now-central",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1w4AV1poSihovMy1o",
  "owner": "triage",
  "blockedBy": [],
  "why": "Triage wrote guessed times in messages and page items; the clock read 18:5x while they said 19:0x, 19:1x and 19:2x.",
  "source": "Triage's own miss, caught by the coordinator at 18:51 CST Nov 13 (\"Your stamp read 19:2x; the clock is 18:51\").",
- "note": "Filed 18:53 CST Nov 13. Guard wanted: a check (the page-write path and the record filer fs_lib.new/upd) refuses a stamp later than ~/.claude/bin/now-central, and refuses a \"<hh>:<m>x\" placeholder time. Harm stopped: a record or owner item with a wrong time. Rules style-time-central-24h and building-mistake-names-its-guard. A guard change: test-author red case first. Not started.",
- "updatedAt": "2026-11-13T18:53:05-06:00"
+ "note": "Filed 18:53 CST Nov 13. Guard wanted: a check (the page-write path and the record filer fs_lib.new/upd) refuses a stamp later than ~/.claude/bin/now-central, and refuses a \"<hh>:<m>x\" placeholder time. Harm stopped: a record or owner item with a wrong time. Rules style-time-central-24h and building-mistake-names-its-guard. A guard change: test-author red case first. Not started. Coordinator 19:54 CST Nov 13 (19:53, owner asked it to start the lanes): lane started, session_013NEJL1w4AV1poSihovMy1o (Sonnet, medium; searches for duplicates first).",
+ "updatedAt": "2026-11-13T19:54:01-06:00"
 }

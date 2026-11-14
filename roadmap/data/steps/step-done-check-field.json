@@ -1,14 +1,14 @@
 {
  "id": "step-done-check-field",
  "title": "Steps carry no files or done-check field; add optional done_check and ci_only",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1bHGk79VLSp3tcLEi",
  "owner": "triage",
  "blockedBy": [],
  "why": "The brief-from-step tool reads optional done_check and ci_only, but no step has them, so briefs built from steps lack the proof check.",
  "source": "Coordinator 17:04 CST Nov 13, from lane brief-from-step (session_013NEJL3zemFrPdTzdnwhpVi; PRs #3261, #3262); the lane's measures, unchecked by the coordinator and by triage.",
- "note": "Filed 17:05 CST Nov 13. Add optional `done_check` and `ci_only` to the step record, taken from the lane's template, and to build.py's checks. A record-form change on the roadmap branch; triage can do it, or a lane builds the reader side (step brief-from-step). Past rulings not checked. Not started.",
- "updatedAt": "2026-11-13T17:05:15-06:00"
+ "note": "Filed 17:05 CST Nov 13. Add optional `done_check` and `ci_only` to the step record, taken from the lane's template, and to build.py's checks. A record-form change on the roadmap branch; triage can do it, or a lane builds the reader side (step brief-from-step). Past rulings not checked. Not started. Coordinator 19:54 CST Nov 13 (19:53, owner asked it to start the lanes): lane started, session_013NEJL1bHGk79VLSp3tcLEi (Sonnet, medium; searches for duplicates first).",
+ "updatedAt": "2026-11-13T19:54:01-06:00"
 }
