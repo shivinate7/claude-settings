@@ -6,6 +6,8 @@
 // A request is { file, symbol } for a value. Internal callers add `op`: 'defines' (is the symbol bound at module level)
 // 'uses' (does `file` import the tracked file `target`, and refer to `symbol`) or 'loads' (the tracked files that `file` loads at runtime, as
 // { imports, named }: the files it imports without a type-only import, and the files a string in its code equals, from its folder or the root).
+// An import resolves through the `paths` of the host's root tsconfig.json. A shell file is read for `loads` through its quoted strings alone. In a
+// file under a `tests/` folder, the literal arguments of a `join` call also make one string: `path.join('src', 'x.ts')` names `src/x.ts`.
 // A result is { file, symbol, ok: true, value } or { file, symbol, ok: false, reason, gone? }. `gone: true` means the file was
 // read and the symbol is not in it. A failure without `gone` is unknown: the caller must never read it as a pass.
 import { spawnSync } from 'node:child_process';
@@ -13,8 +15,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from './lazy-typescript.mjs';
-import { importTargets, resolveSpecifier } from './import-reader.mjs';
-import { blankCommentsAndStrings, blankShell } from './source-text.mjs';
+import { importTargets, readPathAliases, resolveSpecifier } from './import-reader.mjs';
+import { blankCommentsAndStrings, blankShell, shellStrings } from './source-text.mjs';
 
 const PY_FACTS = fileURLToPath(new URL('./py-facts.py', import.meta.url));
 const TS_EXT = /\.(?:ts|tsx|mts|cts|mjs|cjs|js|jsx)$/;
@@ -22,6 +24,9 @@ const TS_EXT = /\.(?:ts|tsx|mts|cts|mjs|cjs|js|jsx)$/;
 // stated limit. A shell file goes to blankShell instead.
 const HASH_COMMENT_EXT = /\.(?:ps1|rb|toml|ya?ml|conf|mk)$/;
 const SHELL_EXT = /\.(?:sh|bash|zsh)$/;
+// A joined path is read only in a test under a `tests/` folder (py-facts.py holds the same rule).
+const TESTS_FOLDER = /(?:^|\/)tests\//;
+const JOIN_CALLEE = /^(?:path\.(?:posix\.)?)?join$/;
 
 const fail = (req, reason, gone = false) => ({ file: req.file, symbol: req.symbol, ok: false, reason, ...(gone && { gone: true }) });
 const good = (req, value) => ({ file: req.file, symbol: req.symbol, ok: true, value });
@@ -90,9 +95,9 @@ const moduleBindings = (sf) => {
 // The local names that hold the whole module of `target`: `import * as ns`, a default `import lib`, `import m = require(...)`,
 // `const m = require(...)` and `const m = await import(...)`. Each specifier goes through the import reader's resolver, so an
 // alias of any other module is no alias of `target`.
-const targetAliases = (sf, file, target, tracked) => {
+const targetAliases = (sf, file, target, tracked, pathAliases) => {
   const aliases = new Set();
-  const namesTarget = (spec) => ts.isStringLiteralLike(spec) && resolveSpecifier(file, spec.text, tracked) === target;
+  const namesTarget = (spec) => ts.isStringLiteralLike(spec) && resolveSpecifier(file, spec.text, tracked, pathAliases) === target;
   const visit = (n) => {
     if (ts.isImportDeclaration(n) && n.importClause && namesTarget(n.moduleSpecifier)) {
       const { name, namedBindings } = n.importClause;
@@ -143,19 +148,28 @@ const identifiers = (sf, aliases) => {
   return names;
 };
 
+// A literal string of a call's arguments, or null.
+const stringOf = (x) => (ts.isStringLiteral(x) || ts.isNoSubstitutionTemplateLiteral(x) ? x.text : null);
+
 // The tracked files that a string in the code equals, from the file's folder or the repository root. A module specifier of an import or
 // an export is no code string, and neither is a type: `import type x from './a.ts'` names a file and loads none.
 const namedFiles = (sf, file, files) => {
   const folder = path.posix.dirname(file);
   const out = new Set();
+  const take = (s) => {
+    if (s && !s.includes('\n') && !s.startsWith('/'))
+      for (const c of [path.posix.normalize(path.posix.join(folder, s)), path.posix.normalize(s)]) if (c !== file && files.has(c)) out.add(c);
+  };
+  const joins = TESTS_FOLDER.test(file);
   const visit = (n) => {
     if (ts.isLiteralTypeNode(n) || ts.isImportTypeNode(n)) return;
     if ((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier) return;
     if (ts.isExternalModuleReference(n)) return;
-    if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
-      const s = n.text;
-      if (s && !s.includes('\n') && !s.startsWith('/'))
-        for (const c of [path.posix.normalize(path.posix.join(folder, s)), path.posix.normalize(s)]) if (c !== file && files.has(c)) out.add(c);
+    if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) take(n.text);
+    // A join of literals only: one piece that is no literal makes no path.
+    if (joins && ts.isCallExpression(n) && JOIN_CALLEE.test(n.expression.getText()) && n.arguments.length > 1) {
+      const pieces = n.arguments.map(stringOf);
+      if (pieces.every((p) => p !== null)) take(path.posix.join(...pieces));
     }
     ts.forEachChild(n, visit);
   };
@@ -163,13 +177,23 @@ const namedFiles = (sf, file, files) => {
   return [...out].sort();
 };
 
-const readTs = (req, text, files) => {
+// A shell file loads the tracked files that its quoted strings name. A bare word names none: it is no string literal.
+const readShellLoads = (req, text, files) => {
+  const folder = path.posix.dirname(req.file);
+  const out = new Set();
+  for (const s of shellStrings(text))
+    if (s && !s.startsWith('/'))
+      for (const c of [path.posix.normalize(path.posix.join(folder, s)), path.posix.normalize(s)]) if (c !== req.file && files.has(c)) out.add(c);
+  return good(req, { imports: [], named: [...out].sort() });
+};
+
+const readTs = (req, text, files, pathAliases) => {
   let sf;
   try { sf = ts.createSourceFile(req.file, text, ts.ScriptTarget.Latest, true); } catch (e) { return fail(req, `${req.file} cannot be parsed: ${e.message}`); }
-  if (req.op === 'loads') return good(req, { imports: importTargets(req.file, text, files, { types: false }).filter((f) => f !== req.file), named: namedFiles(sf, req.file, files) });
+  if (req.op === 'loads') return good(req, { imports: importTargets(req.file, text, files, { types: false, aliases: pathAliases }).filter((f) => f !== req.file), named: namedFiles(sf, req.file, files) });
   if (req.op === 'uses') {
-    const imports = importTargets(req.file, text, files).includes(req.target);
-    const uses = req.symbol == null ? null : identifiers(sf, targetAliases(sf, req.file, req.target, files)).has(req.symbol);
+    const imports = importTargets(req.file, text, files, { aliases: pathAliases }).includes(req.target);
+    const uses = req.symbol == null ? null : identifiers(sf, targetAliases(sf, req.file, req.target, files, pathAliases)).has(req.symbol);
     return good(req, { imports, uses });
   }
   const bindings = moduleBindings(sf);
@@ -187,8 +211,9 @@ const readTs = (req, text, files) => {
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const readRegex = (req, text) => {
-  if (req.op === 'uses' || req.op === 'loads') return fail(req, `a ${req.op} fact is read for Python and JavaScript files, and ${req.file} is neither`);
+const readRegex = (req, text, files) => {
+  if (req.op === 'loads' && SHELL_EXT.test(req.file)) return readShellLoads(req, text, files);
+  if (req.op === 'uses' || req.op === 'loads') return fail(req, `a ${req.op} fact is read for Python and JavaScript files (and a shell file, for loads), and ${req.file} is none of them`);
   // The blanked text keeps every offset, so a match there names the same span of the original, where a string value is still text.
   // A shell file has its own scanner (blankShell): a string may span lines, `#` opens a comment only at the start of a word, and a heredoc body is text.
   // Another `#` file blanks each full-line `#` comment first: the C-style scanner would read a lone quote in it as a string that hides real code.
@@ -227,13 +252,14 @@ const readPython = (reqs, root, tracked) => {
 export const readFacts = (requests, root, { tracked = [] } = {}) => {
   const results = new Array(requests.length);
   const files = new Set(tracked);
+  let pathAliases = null; // read at the first TypeScript or JavaScript request
   const py = [];
   requests.forEach((req, i) => {
     if (req.file.endsWith('.py')) { py.push(i); return; }
     let text;
     try { text = readFileSync(path.join(root, req.file), 'utf8'); } catch (e) { results[i] = fail(req, `${req.file} cannot be read: ${e.code ?? e.message}`); return; }
     try {
-      results[i] = req.file.endsWith('.json') ? readJson(req, text) : TS_EXT.test(req.file) ? readTs(req, text, files) : readRegex(req, text);
+      results[i] = req.file.endsWith('.json') ? readJson(req, text) : TS_EXT.test(req.file) ? readTs(req, text, files, (pathAliases ??= readPathAliases(root, files))) : readRegex(req, text, files);
     } catch (e) {
       results[i] = fail(req, `${req.file} could not be read: ${e.message}`);
     }

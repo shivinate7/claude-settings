@@ -395,7 +395,10 @@ class StepSelect(Job):
 
 
 class SteAction(Job):
-    """The checks STE step is a `uses:` action. ci-job runs bin/ste-changed in its place (one home: run.sh)."""
+    """The checks STE step is a `uses:` action. ci-job runs bin/ste-changed in its place (one home: run.sh).
+    The lint refuses no sentence for its length, so the fail path's fixture is a double negative (STE013)."""
+
+    NEGATIVE = "This step is not unsafe."
 
     def branch_with(self, text):
         def git(*a):
@@ -410,8 +413,8 @@ class SteAction(Job):
             f.write("# T\n\n" + text + "\n")
         git("commit", "-qam", "change")
 
-    def test_an_over_long_sentence_in_a_changed_md_fails_the_lint_run(self):
-        self.branch_with(" ".join(["word"] * 40) + " end.")
+    def test_a_double_negative_in_a_changed_md_fails_the_lint_run(self):
+        self.branch_with(self.NEGATIVE)
         rc, lines, out = self.run_job(step("STE lint", uses="$/actions/ste-lint"),
                                       args=("--lint", "--base", "origin/main"))
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
@@ -423,7 +426,7 @@ class SteAction(Job):
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
 
     def test_with_no_base_the_ste_step_runs_against_origin_main(self):
-        self.branch_with(" ".join(["word"] * 40) + " end.")
+        self.branch_with(self.NEGATIVE)
         rc, lines, out = self.run_job(step("STE lint", uses="$/actions/ste-lint"), args=("--lint",))
         self.assertEqual((rc, self.verdicts(lines)), (1, ["base:", "FAIL"]), out)
 

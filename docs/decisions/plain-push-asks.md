@@ -25,8 +25,11 @@ Sources:
   (https, http, ssh, git, or `host:path`). A remote with no URL, or a local path or `file://`
   URL, is silent: git refuses the first, and the second is a test fixture, not GitHub. A remote
   the shell has not yet expanded, such as `"$REMOTE"` or `$(...)`, counts as a network remote. A double-quoted one with a space inside is blanked
-  first, so it stays silent (note push-main-quoted-substitution). Source:
-  page item 410 pick a, relayed by the coordinator 2026-11-08 10:03 CST, after a push-main ask on a fixture repo.
+  first, so it stays silent (note push-main-quoted-substitution). Source: unverified.
+  A roadmap note, step `push-main-remote-check` (commit 98b97d0d98), dates the relay to 10:03 CST Nov 8,
+  after a push-main ask on a fixture repo, and labels it item 410 a. Item 410 is hold-which-fixes-start
+  (branch `lane-inflow-hold-carry`), a different question. The waiting page is not readable from this
+  session. Checked 2026-11-12 08:53 CST.
 - Item 206 a, `push-stray-branch`: `git push origin HEAD` writes the local branch's name, not its
   upstream. Measured 2026-11-03: local `mylocal` tracking `origin/lane/x` made a new remote branch
   `mylocal`.

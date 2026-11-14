@@ -7,17 +7,15 @@ read with `list_events`. Its scratch files were not carried over. Each quote nam
 
 - fb-1456-1 (14:56 CST, event 99e95903-7fe1-4efb-9848-cfed57e54fe5), verbatim:
 
-  <!-- ste-disable-next-line STE001: verbatim owner and coordinator words -->
   > "yeah in general i mean artifacts will be torn down and spun up independently as i switch accounts thats why i was telling u about all the artifact export rules i need and that actually goes for design work too. so many mockups/artifacts are made on one account and then not visible in another, there needs to be an easy way for them to be cross-refernecable and if that means commiting them on github so be it im fine with htat."
 
 - fb-1458-1, fb-1458-2 (14:58 CST, event 760534fd-d5f4-4aca-8777-970a479f2647), verbatim, then "A":
 
-  <!-- ste-disable-next-line STE001, STE008: verbatim owner and coordinator words -->
+  <!-- ste-disable-next-line STE008: verbatim owner and coordinator words -->
   > "i've found countless examples of design mockups made by the designer agent not going into my repos' design folders. so that's prboably another gap u need to go look into"
 
   The "A" picks option a of event e7ccdec6-0eed-4233-a037-c02582c324ef, verbatim:
 
-  <!-- ste-disable-next-line STE001: verbatim owner and coordinator words -->
   > "Git is each artifact's home, and the claude.ai link is just one account's view of it. An artifact is published only from a file in a repo, and listed in that repo's registry. The export saves the page HTML, its supporting files and its database. A cite names the artifact's id and its repo path... That also settles 14 roadmap step links: under (a) they become `artifact:<id>` cites"
 - fb-1509-1 (15:09 CST, event a1426829-348d-4fcf-be1d-27b6e68a2f22): degen PR #324 (merged as 5de5c55d) built its own
   export, `tools/waiting_export.py`. Coordinator reply (event e67a56c5-94e4-4b8c-99bf-5f633d3fd37f): a second home for

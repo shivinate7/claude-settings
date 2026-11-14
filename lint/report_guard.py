@@ -166,7 +166,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender,
+    ARTIFACT_DATA, EXIT_FAIL_RE, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 import _clause  # noqa: E402
@@ -1987,7 +1987,7 @@ CANNOT_TARGET_FIELDS = ("pullNumber", "pull_number", "branch", "head")
 # A failed try: the result's error flag or an exit code above zero as the shell result reports it. An HTTP 4xx or 5xx
 # in an ok result is output text, not a failure; only a relayed agent result, which has no exit of its own, reads it.
 # A loose word such as refused in a successful call's output is none of these.
-CANNOT_FAIL_RE = re.compile(r"^Exit code [1-9]")
+CANNOT_FAIL_RE = EXIT_FAIL_RE  # the pattern has one home, lint/_transcript.py
 CANNOT_RELAY_FAIL_RE = re.compile(r"\bHTTP(?:/[\d.]+)?\s+[45]\d\d\b")
 CANNOT_PULLS_RE = re.compile(r"(?:^|/)pulls(/\d+)?(/merge)?/?(?:\?\S*)?$")
 CANNOT_TEXT_ROUTE_RE = re.compile(r"\bgh pr (create|merge|close|comment|ready|edit)\b|\bgit (push)\b")

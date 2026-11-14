@@ -10,6 +10,7 @@ transcript and its `content` blocks. last_reply returns the text of the last ass
 import json
 import os
 import re
+import shlex
 
 SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
@@ -368,6 +369,126 @@ def send_targets(use):
     if use.get("name") not in SEND_TOOLS or not isinstance(inp, dict):
         return set()
     return {v for v in (inp.get("session_id"), inp.get("to")) if isinstance(v, str)}
+
+
+MAIL_COMMANDS = ("mail", "mail.cmd")
+INTERPRETER = re.compile(r"python[\d.]*")  # `python3 bin/mail send` runs the mail script
+SEGMENT_CHARS = frozenset(";&|()\n")  # shlex joins a run of these into one token, such as "|\n" or "&&"
+STDOUT_REDIRECTS = (">", ">>", ">&", "&>", "&>>")
+# Outside quotes, a redirect of fd 2 to 9 (`2>&1`, `2>/dev/null`) leaves stdout alone, so it is cut before the words
+# are read; a quoted string is matched first and kept.
+FD_REDIRECT = re.compile(r"""("(?:\\.|[^"\\])*"|'[^']*')|(?<![\w])[2-9]>(?:&\d+|>?\s*[^\s|;&<>()]+)""")
+# A shell result that reports a nonzero exit; report_guard reads a failed try the same way (CANNOT_FAIL_RE).
+EXIT_FAIL_RE = re.compile(r"^Exit code [1-9]")
+
+
+def exit_failed_tool_use_ids(records):
+    """The tool_use ids whose result text reports a nonzero shell exit (`Exit code 1`), which sets no is_error."""
+    return {b["tool_use_id"] for r in records if r.get("type") == "user" for b in tool_results(r)
+            if isinstance(b.get("tool_use_id"), str) and EXIT_FAIL_RE.search(result_text(b))}
+
+
+def _tokens(chunk):
+    """The shell words and separators of one chunk of command text; ValueError when a quote is left open."""
+    lex = shlex.shlex(FD_REDIRECT.sub(lambda m: m.group(1) or "", chunk), posix=True, punctuation_chars=";&|<>()\n")
+    lex.whitespace = " \t\r"
+    lex.whitespace_split = True
+    return list(lex)
+
+
+def _segments(command):
+    """The command's simple commands as dicts: words, piped (stdin comes from the command before), here (the heredoc
+    and here-string bodies fed to it) and to_file (stdout goes to a file). A word inside quotes stays one word, so
+    an echo or grep that only mentions `mail send` or `<<EOF` has no command word or heredoc. A line whose quote is
+    open joins the next line. Empty when the quoting never closes."""
+    lines, segments, i = re.sub(r"\\\r?\n", " ", command).split("\n"), [], 0
+    new = lambda piped: {"words": [], "piped": piped, "here": [], "to_file": False}  # noqa: E731
+    cur = new(False)
+    while i < len(lines):
+        chunk, i = lines[i], i + 1
+        while True:
+            try:
+                tokens = _tokens(chunk)
+                break
+            except ValueError:
+                if i >= len(lines):
+                    return []
+                chunk, i = chunk + "\n" + lines[i], i + 1
+        j = 0
+        while j < len(tokens):
+            tok = tokens[j]
+            if set(tok) <= SEGMENT_CHARS:
+                if cur["words"] or cur["here"]:
+                    segments.append(cur)
+                cur = new(tok.strip("\n") == "|")
+            elif tok == "<<" and j + 1 < len(tokens):
+                body = []
+                while i < len(lines) and lines[i].strip() != tokens[j + 1].lstrip("-"):
+                    body.append(lines[i])
+                    i += 1
+                i += 1
+                cur["here"].append("\n".join(body))
+                j += 1
+            elif tok == "<<<" and j + 1 < len(tokens):
+                cur["here"].append(tokens[j + 1])
+                j += 1
+            elif tok in STDOUT_REDIRECTS + ("<", "<&") and j + 1 < len(tokens):
+                cur["to_file"] = cur["to_file"] or tok in STDOUT_REDIRECTS
+                j += 1
+            else:
+                cur["words"].append(tok)
+            j += 1
+        if cur["words"] or cur["here"]:
+            segments.append(cur)
+            cur = new(False)
+    return segments
+
+
+def _is_mail_send(words):
+    """True when the words run the mail script's send, past any env assignments or a python interpreter."""
+    while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0]):
+        words = words[1:]
+    if words and INTERPRETER.fullmatch(os.path.basename(words[0])):
+        words = [w for w in words[1:] if not w.startswith("-")]
+    return (len(words) >= 2 and os.path.basename(words[0].replace("\\", "/")) in MAIL_COMMANDS
+            and words[1] == "send")
+
+
+def _mail_send_bodies(command):
+    """The body text of each `mail send` the command runs, and nothing else of its line. The body is a heredoc or
+    here-string on the send, or what a piped echo, printf or heredoc before it writes to the pipe. The `--to`
+    address and the other options are never part of it."""
+    segments, bodies = _segments(command), []
+    for n, seg in enumerate(segments):
+        if not _is_mail_send(seg["words"]):
+            continue
+        body = list(seg["here"])
+        before = segments[n - 1] if n and seg["piped"] else None
+        if not body and before and not before["to_file"]:
+            if before["here"]:
+                body = before["here"]
+            elif before["words"] and os.path.basename(before["words"][0]) in ("echo", "printf"):
+                body = [" ".join(w for w in before["words"][1:] if not re.fullmatch(r"-[neE]+", w))]
+        bodies.extend(body)
+    return bodies
+
+
+def sent_message(use):
+    """The message text of a send tool_use, else "". For send_message / SendMessage it is input.message. For a Bash
+    tool_use that runs `mail send` (bin/mail, mail, mail.cmd) it is the body only: never the `--to` address or the
+    rest of the command line, so an address that names an item or repo proves nothing. A Bash call that only quotes
+    `mail send` (an echo, a grep) is no send. Whether the send succeeded is read from its tool_result, not here."""
+    inp = use.get("input")
+    if not isinstance(inp, dict):
+        return ""
+    name = use.get("name")
+    if name in SEND_TOOLS:
+        msg = inp.get("message")
+        return msg if isinstance(msg, str) else ""
+    command = inp.get("command")
+    if name == "Bash" and isinstance(command, str) and "send" in command:
+        return "\n".join(_mail_send_bodies(command))
+    return ""
 
 
 def result_text(block):

@@ -80,6 +80,7 @@ OVERRIDE = os.path.join(HERE, "override.py")
 CALL_JUDGE = os.path.join(HERE, "call_judge.py")
 CALL_JUDGE_SUITE = os.path.join(HERE, "test_call_judge.py")
 SIM_LEASE = os.path.join(HERE, "..", "bin", "sim-lease")
+MERGE_TOOL = os.path.join(HERE, "..", "merge", "merge.py")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
@@ -92,6 +93,8 @@ TARGETS = {
     "calljudge": (CALL_JUDGE, CALL_JUDGE_SUITE, "CALL_JUDGE_UNDER_TEST", "call_judge"),
     # bin/sim-lease, which the guard loads by path (hooks/guard.py sim_lease_holds). The suite is the guard's.
     "simlease": (SIM_LEASE, SUITE, "GUARD_UNDER_TEST", "sim_lease"),
+    # merge/merge.py, the clean-merge walk the fix-branch refusal reads (guard_merge loads it beside hooks/). The suite is the guard's.
+    "merge": (MERGE_TOOL, SUITE, "GUARD_UNDER_TEST", "merge"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -398,6 +401,77 @@ MUTATIONS = [
      '        return merge.removeprefix("refs/heads/") if merge else None\n    return None',
      '        return merge.removeprefix("refs/heads/") if merge else None\n    return current', "guard",
      'push.default matching'),
+    # The review-record rule: each mutant removes one link of the chain, and one named case must go red.
+    ("push-needs-review-record: the guard.py call is dropped",
+     'review_log_hit(transcript, lambda: push_destinations(args, where, overrides), where,\n'
+     '                                                         lambda: push_sources(args, where, overrides))',
+     '(False, "")', "guard", 'the incident: a reviewer FAIL in the foreground result'),
+    ("push-needs-review-record: a posted record never clears its report",
+     'pending = [report for report in pending if report not in held]',
+     'pending = list(pending)', "guard", 'a FAIL round 1, then a FAIL record posted'),
+    ("push-needs-review-record: a round report is cleared by any posted fix check line",
+     '            if head is None:\n                return False',
+     '            if head is None:\n                return bool(self.fix)', "guard",
+     'a FAIL round 1 unrecorded beside a Fix check record line'),
+    ("push-needs-review-record: a fix check PASS no longer denies its head branch",
+     'if heads[number] in destinations() and',
+     'if False and', "guard", 'a fix check PASS for PR 1464 posted, then a push to its head branch'),
+    # The clean-merge allow (`_only_clean_merges`, then the walk in merge/merge.py), one link per row.
+    ("push-needs-review-record: the clean-merge verdict is always true, so an evil merge is allowed",
+     '        return branch in sources and bool(bases) and merge.clean_merges_pushed(where, sources[branch], head, bases)',
+     '        return True', "guard", 'an evil merge of main with an edit beyond git'),
+    ("push-needs-review-record: a clean-merge read that raises is allowed, not refused",
+     '        return branch in sources and bool(bases) and merge.clean_merges_pushed(where, sources[branch], head, bases)\n'
+     '    except Exception:\n        return False',
+     '        return branch in sources and bool(bases) and merge.clean_merges_pushed(where, sources[branch], head, bases)\n'
+     '    except Exception:\n        return True', "guard", 'a refspec source with a NUL byte'),
+    # The default base is origin/HEAD's target when it is set (`_push_main_refs`): a base of origin/main alone refuses a trunk merge.
+    ("push-needs-review-record: the default base is origin/main even when origin/HEAD names trunk",
+     '    return ["refs/remotes/" + (head or remote + "/main")]',
+     '    return ["refs/remotes/" + remote + "/main"]', "guard", 'a clean merge of trunk is allowed'),
+    ("push-needs-review-record: a merge whose second parent is off main is read as clean",
+     'if len(parents) != 2 or not tree or not any(ancestor(root, parents[1], base) is True for base in bases):',
+     'if len(parents) != 2 or not tree:', "merge",
+     'a clean merge whose second parent is a side branch off the root'),
+    ("push-needs-review-record: a merge that differs from git's clean merge is read as clean",
+     'if state != "clean" or merged != tree:', 'if state != "clean":', "merge",
+     'an evil merge of main with an edit beyond git'),
+    ("push-needs-review-record: the walk does not stop at the record's Head",
+     '        if sha == head:\n            return True\n        c, text = git(root, "cat-file", "commit", sha)',
+     '        c, text = git(root, "cat-file", "commit", sha)', "merge",
+     'one clean merge of main onto the record'),
+    ("push-needs-review-record: a verdict on the Done label line is not read",
+     '                if loose and marker:\n                    return loose.group(), "round" if marker.group(1) else "fix", int(marker.group(1)) if marker.group(1) else None',
+     '                if loose and marker:\n                    return None', "guard",
+     'a reviewer FAIL round 1 on the Done label line, no record, then the push'),
+    ("push-needs-review-record: a held report is never counted",
+     '    return counted',
+     '    return []', "guard",
+     'a FAIL naming diff base A then head B'),
+    ("push-needs-review-record: a commit on main counts for a held report",
+     '    if on_main is not False:',
+     '    if False:', "guard",
+     'a FAIL naming only diff base A'),
+    ("push-needs-review-record: a report no PR counts is dropped, not kept for the next PR",
+     'early = [report for report in early if report[:-1] not in counted]   # held for a later PR',
+     'early = []', "guard",
+     'a FAIL naming head B, then a PR for another branch'),
+    ("push-needs-review-record: the Done label round marker ignores case",
+     '", re.I)\n_LABEL_WORD',
+     '")\n_LABEL_WORD', "guard",
+     'a Done label line reading Round 1 with a capital R'),
+    ("push-needs-review-record: the Done label verdict is the first all-caps word",
+     ' if word.group() in verdicts',
+     '', "guard",
+     'a Done label line whose first all-capitals word is HEAD'),
+    ("push-needs-review-record: a Base head line names the reviewed head",
+     'if not _BASE_BEFORE.search(', 'if True or not _BASE_BEFORE.search(', "guard",
+     'reads Base main head B, reviewed A, with its record at B only'),
+    # A transcript line that is valid JSON but not an object: the reader steps over it before any record read.
+    ("push-needs-review-record: a transcript line that is valid JSON but not an object is read as a record",
+     '            if not isinstance(record, dict):\n                continue\n            content = record["message"]',
+     '            if False:\n                continue\n            content = record["message"]', "guard",
+     'a transcript line that is a JSON list, then the push'),
     ("force-push: quoted text is read as a push",
      'return PUSH_QUOTED.sub(" ", segment)', 'return segment', "guard",
      'false alarm: --force quoted in a commit message'),
@@ -1645,10 +1719,10 @@ MUTATIONS = [
     ("root-scope: _git drops -C, so it reads whichever tree the guard process happens to stand "
      "in, not the tree it was asked about",
      '        return _nowindow.run(\n'
-     '            ["git", "-C", where, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=10\n'
+     '            ["git", "-C", where, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=10, **extra\n'
      '        )',
      '        return _nowindow.run(\n'
-     '            ["git", *args], capture_output=True, encoding="utf-8", errors="replace", timeout=10\n'
+     '            ["git", *args], capture_output=True, encoding="utf-8", errors="replace", timeout=10, **extra\n'
      '        )',
      "guard", 'pointer: checkout of a branch in another checkout is allowed'),
 
@@ -2871,15 +2945,23 @@ MUTATIONS = [
      '    if False:\n        return ("To allow this act',
      "override", 'override: a refusal an override lifts ends with the agent override line'),
     # THE CALL JUDGE (step c85, hooks/call_judge.py). Its refusal goes through refuse(); an Explore spawn
-    # on a model that is neither Sonnet nor Opus is a model guard that no override lifts.
+    # with no model, a blank model or a haiku model is a model guard that no override lifts.
     ("call judge: the veto is dropped, so an override lifts the Explore model guard",
      'guard_core.set_override_veto(lambda: vetoed)',
      'guard_core.set_override_veto(lambda: False)',
      "calljudge", 'explore: a flagged spawn on haiku stays denied under a timed override'),
     ("call judge: an Opus Explore spawn is vetoed too",
-     'return "sonnet" not in model and "opus" not in model',
-     'return "sonnet" not in model',
+     'return not model or "haiku" in model',
+     'return not model or "haiku" in model or "opus" in model',
      "calljudge", 'explore: an Explore spawn on opus is not vetoed'),
+    ("call judge: the model is not stripped, so a blank model spawn is not vetoed",
+     'model = str(args.get("model") or "").strip().lower()',
+     'model = str(args.get("model") or "").lower()',
+     "calljudge", 'explore: a flagged spawn on a blank model stays denied under a timed override'),
+    ("call judge: an unranked model (fable) is vetoed again, so an override cannot lift it",
+     'return not model or "haiku" in model',
+     'return not model or "haiku" in model or ("sonnet" not in model and "opus" not in model)',
+     "calljudge", 'explore: a flagged Explore spawn on fable is lifted by a timed override'),
     ("call judge: the agent id is not passed, so a one-act override lifts an agent's call",
      'guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"))',
      'guard_core.set_override_context(payload.get("session_id"), None)',
@@ -3056,22 +3138,22 @@ MUTATIONS = [
      'LANE_TITLE_EXAMPLE_OPENING = _FORM_HEAD + "N20" + _FORM_TAIL',
      "guard", "lane-title-slug: a lane start with a free title is denied"),
     # RULE roadmap-one-writer. A push to the record branch needs the triage tag in the own record, with no
-    # set_session_tags call after it.
+    # set_session_tags call after it (_own_proved_tags, read by record_writer_hit).
     ("roadmap-one-writer: the triage tag is not checked, so any own record is a proof",
-     '            return tags is not None and not tagged_after and ROLE_TAG_PREFIX + tier in tags',
-     '            return tags is not None and not tagged_after', "guard",
+     '            if tags is not None and ROLE_TAG_PREFIX + RECORD_WRITER_TIER in tags:',
+     '            if tags is not None:', "guard",
      "a lane's push that names roadmap is refused"),
     ("roadmap-one-writer: a set_session_tags call after the record is ignored",
-     '            return tags is not None and not tagged_after and ROLE_TAG_PREFIX + tier in tags',
-     '            return tags is not None and ROLE_TAG_PREFIX + tier in tags', "guard",
+     '            if tags is not None and not tagged_after:',
+     '            if tags is not None:', "guard",
      "a triage record with a set_session_tags call after it is refused a push to roadmap"),
     ("roadmap-one-writer: a push never counts as reaching the record branch",
-     '            if {record, DEFAULT_RECORD_BRANCH} & set(push_destinations(args, where, overrides)) and (',
-     '            if set() & set(push_destinations(args, where, overrides)) and (', "guard",
+     '            if not {record, DEFAULT_RECORD_BRANCH} & set(destinations):',
+     '            if not set() & set(destinations):', "guard",
      "a lane's push that names roadmap is refused"),
     ("roadmap-one-writer: the default name roadmap is no record branch in a fork",
-     '            if {record, DEFAULT_RECORD_BRANCH} & set(push_destinations(args, where, overrides)) and (',
-     '            if {record} & set(push_destinations(args, where, overrides)) and (', "guard",
+     '            if not {record, DEFAULT_RECORD_BRANCH} & set(destinations):',
+     '            if not {record} & set(destinations):', "guard",
      "a lane's push to roadmap in the fork is refused"),
     ("roadmap-one-writer: a dry run is judged like a push",
      '            if read_verb("push", args):\n                continue',
@@ -3127,6 +3209,39 @@ MUTATIONS = [
      '        return layout.record_branch(root)',
      '        return DEFAULT_RECORD_BRANCH', "guard",
      "a lane's push of roadmap-fork is refused in the fork that names it its record branch"),
+    # RULE roadmap-one-writer, the lane's own handoff (_lane_handoff_holds and the push_is_plain it reads).
+    ("roadmap-one-writer handoff: only the last commit of the range is read, so an earlier commit's path is hidden",
+     'stdin="\\n".join(commits) + "\\n")',
+     'stdin=commits[0] + "\\n")', "guard",
+     "roadmap-one-writer handoff: an earlier commit that adds then removes a file outside the handoff is refused"),
+    ("roadmap-one-writer handoff: a --tags push counts as plain, so the handoff check allows it",
+     '(len(name) >= 4 and "--tags".startswith(name)) or',
+     '(False) or', "guard",
+     "roadmap-one-writer handoff: --tags on the own handoff push is refused"),
+    ("roadmap-one-writer handoff: a lease counts as plain, so the handoff check allows a lease",
+     'if force or leased or includes or any(spec.startswith("+") for spec in plain):',
+     'if force or includes or any(spec.startswith("+") for spec in plain):', "guard",
+     "roadmap-one-writer handoff: a sha-pinned lease on the own handoff push is refused"),
+    ("roadmap-one-writer handoff: the one-parent test is skipped, so a merge or a root commit is read as the handoff",
+     '        if len(fields) != 2:',
+     '        if len(fields) < 1:', "guard",
+     "roadmap-one-writer handoff: a lane that merged a newer record tip into its branch is refused"),
+    ("roadmap-one-writer handoff: a merge commit passes the one-parent test",
+     '        if len(fields) != 2:',
+     '        if len(fields) < 2:', "guard",
+     "roadmap-one-writer handoff: a lane that merged a newer record tip into its branch is refused"),
+    ("roadmap-one-writer handoff: a root commit passes the one-parent test",
+     '        if len(fields) != 2:',
+     '        if len(fields) > 2:', "guard",
+     "roadmap-one-writer handoff: a lane whose range starts at a root commit is refused"),
+    ("roadmap-one-writer handoff: the range is read against a local record branch, not origin's tip",
+     '    walk = _git(root, "rev-list", "--parents", "refs/remotes/" + remote + "/" + destination + ".." + source, "--")',
+     '    walk = _git(root, "rev-list", "--parents", destination + ".." + source, "--")', "guard",
+     "roadmap-one-writer handoff: a lane cut from an unpushed local roadmap is refused"),
+    ("roadmap-one-writer handoff: the lane tag is not checked, so a coordinator's push may hand off a lane's slug",
+     '            if (tags is not None and LANE_TAG in tags and len(destinations) == 1 and root',
+     '            if (tags is not None and len(destinations) == 1 and root', "guard",
+     "roadmap-one-writer handoff: a coordinator's push of a handoff is refused"),
     # RULE simulator-boot-bypass (decision sim-test-is-the-one-boot-path, ruling 4). Each mutant breaks one arm.
     ("simulator-boot-bypass: a raw simctl boot is never read",
      '        if _simctl_boot_args(word, rest) is not None:\n            return',
@@ -4510,12 +4625,18 @@ def lint_suites_main(argv) -> int:
     return 0
 
 
+SUITE_TIMEOUT = 3600  # interim stopgap, owner 12:11 CST Nov 10, decision ci-job-caps, ends with step time-pinned-tests-go
+
+
 def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=None):
     """Run one fixture suite against one mutated copy. Return (exit code, FAIL lines, case lines,
     ERROR lines from `mutate_shared.diagnostic_lines`).
 
     The case lines are one per case run, passed or failed: `mutate_shared.staged_suite` reads them
-    to know whether stage 1 ran the required case."""
+    to know whether stage 1 ran the required case.
+
+    A suite that outlives SUITE_TIMEOUT is killed, and the return is (None, [], [], ["CRASHED: suite timed
+    out after <N>s"]). A timeout is a crash: not a kill, and not a survivor."""
     env = dict(os.environ)
     env.pop("GUARD_UNDER_TEST", None)
     env.pop("WATCH_UNDER_TEST", None)
@@ -4531,12 +4652,16 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     # stderr goes to a temp file, not a pipe: test_guard.py leaves a `sleep 300` that holds the suite's
     # stderr (spawn_live_parent), and run() waits for a pipe's EOF. Measured: every mutant took 306 s.
     # A file has no EOF to wait for. It is read after the run, only for unittest's ERROR blocks.
+    timeout = SUITE_TIMEOUT  # read at call time, so a test can patch the module constant
     with tempfile.TemporaryFile() as errors:
-        result = _nowindow.run(
-            # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
-            [sys.executable, suite], stdout=subprocess.PIPE, stderr=errors, text=True,
-            env=env, timeout=3600,  # interim stopgap, owner 12:11 CST Nov 10, decision ci-job-caps, ends with step time-pinned-tests-go
-        )
+        try:
+            result = _nowindow.run(
+                # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
+                [sys.executable, suite], stdout=subprocess.PIPE, stderr=errors, text=True,
+                env=env, timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return None, [], [], ["CRASHED: suite timed out after %ss" % timeout]
         errors.seek(0)
         error_text = errors.read().decode("utf-8", "replace")
     lines = result.stdout.splitlines()
@@ -4597,15 +4722,18 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
     A mutant and its clean-layout control both go through here, so they differ only in the text:
     `old == new` is the control, the same layout with nothing mutated (see `run_controls`)."""
     stem = TARGETS[target][3]
-    if target in ("guard", "simlease"):
+    if target in ("guard", "simlease", "merge"):
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
         # module that holds it. The suite loads the copied guard.py, which finds its siblings.
         root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
         tree = os.path.join(root, "hooks")
         mutate_shared.guard_tree(tree)
-        lay_out_guard_reads(root)  # takes the original bin/sim-lease; a simlease mutant overwrites it below
+        lay_out_guard_reads(root)  # takes the original bin/sim-lease and merge/merge.py; a mutant of either overwrites it below
         if target == "simlease":
             with open(os.path.join(root, "bin", "sim-lease"), "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(sources[target].replace(old, new, 1))
+        elif target == "merge":
+            with open(os.path.join(root, "merge", "merge.py"), "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(sources[target].replace(old, new, 1))
         elif old != new:  # old == new is the clean-layout control: no anchor to find
             mutate_shared.apply_mutant(tree, old, new)
@@ -4647,7 +4775,7 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
         copy_path = os.path.join(tree, "call_judge.py")
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
-    elif target not in ("guard", "simlease"):
+    elif target not in ("guard", "simlease", "merge"):
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
     return copy_path
@@ -4712,6 +4840,10 @@ def run_mutant(sources, work: str, entry):
     when not None, is why this mutant did not run on this platform at all: the caller reports it
     and counts it as neither killed, survived, nor wrong cause. This verdict is not yet trusted: `run_mutants`
     judges it against its target's clean-layout control (`run_controls`).
+
+    A suite that timed out (`run_suite` returns code None) is run once only: stage 2 reads that result
+    and does not run the hung suite again. The result then carries a seventh field, "crashed: suite timed
+    out", which `run_mutants` reads as the UNKNOWN reason. A crash is neither a kill nor a survivor.
     """
     label, old, new, target, required, only_on = mutation_parts(entry)
     if required is None:
@@ -4723,8 +4855,19 @@ def run_mutant(sources, work: str, entry):
     copy_path = lay_out(sources, work, target, label, old, new)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))
     os.makedirs(config_dir, exist_ok=True)
-    code, red, seen = mutate_shared.staged_suite_seen(
-        lambda only: run_suite(suite, variable, copy_path, config_dir, only), required)
+    timed_out = []  # the timed-out result, once a run has hung: later calls return it, never run the suite again
+
+    def run_once(only):
+        if timed_out:
+            return timed_out[0]
+        result = run_suite(suite, variable, copy_path, config_dir, only)
+        if result[0] is None:
+            timed_out.append(result)
+        return result
+
+    code, red, seen = mutate_shared.staged_suite_seen(run_once, required)
+    if code is None:
+        return label, code, red, required, None, seen, "crashed: suite timed out"
     return label, code, red, required, None, seen
 
 

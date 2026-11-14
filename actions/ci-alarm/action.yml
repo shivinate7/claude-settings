@@ -8,6 +8,13 @@ description: >
   top-level `&&` conjunct `github.event_name == 'X'` for another event than the green run's (`all-jobs-passed` and `ci-done` run on
   pull_request only), so a newer green push run clears a red nightly. Cost: per clear candidate one read of the workflow file at the green
   run's head (contents API, once), besides the jobs reads; the step needs python3 and runs `clear_rule.py` from the action path.
+  A failed run that no run clears is also lifted by a live revert on the branch (`revert_rule.py`, the one home of the rule, which
+  merge.py reads too): a commit reachable from the branch, other than the run's head, with `This reverts commit <head sha>` (40 hex)
+  in its message, not net-reverted (a revert of a revert undoes it, so an odd chain lifts). Each failed run needs its own revert. It never
+  clears a cancelled run, a re-run in flight or a failed read (unknown). Cost per alarm, API calls: per failed run with no clearing run
+  one `search/commits` read and one `compare` read per revert link (a revert chain adds one search and one compare per link); none when
+  every run is green. Commit search reads the default branch only, so a `branch` that is not the default finds no revert: it alarms and
+  never clears.
   Runs of other events, and of deleted workflows, are not judged. A failed read or write is "unknown", never red. Call it from a scheduled
   workflow with `permissions: {actions: read, contents: read, issues: write}` (contents: the clear reads the workflow file); it needs no checkout. A merge-triggered failure shows on no PR, so main can sit red unnoticed.
 

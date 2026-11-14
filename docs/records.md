@@ -227,6 +227,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `owner-judge-test` | A session asks the owner a decision only when he can judge it from what he already knows. | [`docs/decisions/owner-judge-test.md`](../docs/decisions/owner-judge-test.md) |
 | `page-check-at-export` | Owner ruling, item 298 (14:17 CST Nov 6 2026): build both the check at export and the `--check` mode. | [`docs/decisions/page-check-at-export.md`](../docs/decisions/page-check-at-export.md) |
 | `page-item-design` | An item write whose picture the page would refuse, or would draw as a thin strip, is refused at write, with the page's own sentence. | [`docs/decisions/page-item-design.md`](../docs/decisions/page-item-design.md) |
+| `page-one-store` | Git is the page's home. | [`docs/decisions/page-one-store.md`](../docs/decisions/page-one-store.md) |
 | `page-stale-publish` | Every republish of a waiting page is main's `skills/waiting-page/page.html` with the live `designData` and roadmap blocks kept, never the live page's own code (decision `questions-go-to-owner`, skill `waiting-page`, "Keep the page on main's code"). | [`docs/decisions/page-stale-publish.md`](../docs/decisions/page-stale-publish.md) |
 | `plain-prose-lint` | The STE lint is a plain-prose lint. | [`docs/decisions/plain-prose-lint.md`](../docs/decisions/plain-prose-lint.md) |
 | `plain-push-asks` | Two kinds of push that are not forced ask. | [`docs/decisions/plain-push-asks.md`](../docs/decisions/plain-push-asks.md) |
@@ -407,10 +408,9 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `lock-ttl-sized-for-gone-waits` | `confirm` takes the merge lock for `(WAITS * deadlineMinutes + 10) * 60` seconds. | [`docs/debts/lock-ttl-sized-for-gone-waits.md`](../docs/debts/lock-ttl-sized-for-gone-waits.md) |
 | `long-lived-head-lost-in-batch` | `cut_branch` deletes the merged pull request's own origin branch. | [`docs/debts/long-lived-head-lost-in-batch.md`](../docs/debts/long-lived-head-lost-in-batch.md) |
 | `mail-windows-timeout-hang` | On Windows, `subprocess.run` calls `communicate()` after a timeout, which waits for any helper child that still holds the pipe. | [`docs/debts/mail-windows-timeout-hang.md`](../docs/debts/mail-windows-timeout-hang.md) |
-| `map-import-alias-unread` | The import reader skips a specifier that does not start with `.`. | [`docs/debts/map-import-alias-unread.md`](../docs/debts/map-import-alias-unread.md) |
 | `map-py-base-name-match` | `py-facts.py` resolves an import by the module's last name. | [`docs/debts/map-py-base-name-match.md`](../docs/debts/map-py-base-name-match.md) |
-| `map-tested-by-no-shell` | MAP11 has no reader for a shell test. | [`docs/debts/map-tested-by-no-shell.md`](../docs/debts/map-tested-by-no-shell.md) |
-| `map-tested-by-path-pieces` | MAP11 counts only a whole path string. | [`docs/debts/map-tested-by-path-pieces.md`](../docs/debts/map-tested-by-path-pieces.md) |
+| `map-tested-by-no-shell` | MAP11 reads a shell test through its quoted strings. | [`docs/debts/map-tested-by-no-shell.md`](../docs/debts/map-tested-by-no-shell.md) |
+| `map-tested-by-path-pieces` | In a test under a `tests/` folder, MAP11 reads a `join` only when every piece is a string literal. | [`docs/debts/map-tested-by-path-pieces.md`](../docs/debts/map-tested-by-path-pieces.md) |
 | `mcp-merge-no-repo-tag` | `mcp__github__merge_pull_request` has one merge test, the `MERGE_TOOLS` clause in `judge` (read `hooks/guard.py` `judge`). | [`docs/debts/mcp-merge-no-repo-tag.md`](../docs/debts/mcp-merge-no-repo-tag.md) |
 | `measured-time-table` | `bin/verdict` logs no kind, seconds and exit per run, and no table keeps measured times. | [`docs/debts/measured-time-table.md`](../docs/debts/measured-time-table.md) |
 | `merge-commit-skips-review` | While it resolved a merge of main into a lane branch, a builder pushed a logic change to `lint/report_guard.py`. | [`docs/debts/merge-commit-skips-review.md`](../docs/debts/merge-commit-skips-review.md) |

@@ -71,7 +71,8 @@ LIVE_STREAM_REASON = (
     "and the agent that started it. "
     "Remedy: run the command in the foreground with a timeout, or in the background and "
     "wait for its completion notice. To wait on a pid, use `bin/wait-pid PID [--timeout SECS]`. "
-    "To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`."
+    "To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`. "
+    "To follow a log or stream, use the Monitor tool (its own call, not a command inside a shell call)."
 )
 
 
@@ -558,7 +559,8 @@ WAITER_REASON = (
     "To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`, with TIME an ISO-8601 instant "
     "that has a zone. To wait on one pid, use `bin/wait-pid PID [--timeout SECS]`. "
     "To wait for another condition, run the long command in the background and wait for its completion "
-    "notice. In the background, one pause of any length followed by a command is allowed, and so is a "
+    "notice. To wait for a file, a port or another condition, use the Monitor tool once. "
+    "In the background, one pause of any length followed by a command is allowed, and so is a "
     "loop whose test orders the date output against a literal time of the same kind: date +%s against an "
     "epoch with -gt or -ge, or an ISO date-time read against an ISO time with \\>. "
     "A single pause under 25 seconds is allowed in the foreground. Avoid gh pr checks --watch in the "

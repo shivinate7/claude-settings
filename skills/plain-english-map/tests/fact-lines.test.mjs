@@ -763,6 +763,19 @@ test('R1f. uses in Python, control: retry.RETRY_WAIT_S beside a second import is
   assert.equal(verdicts(r.out), expected(), `every check must pass\n${out1500(r)}`);
 });
 
+test("V2a. uses through a tsconfig path alias: a file that imports notes.ts as '@/src/notes' and uses notes passes MAP9", () => {
+  needFile('scripts/map-check.mjs');
+  const dir = scratchRepo();
+  write(dir, 'tsconfig.json', '{"compilerOptions": {"paths": {"@/*": ["./*"]}}}\n');
+  gitIn(dir, 'add', '-N', 'tsconfig.json');
+  addCode(dir, 'src/alias_user.ts', "import { notes } from '@/src/notes';\nexport const noteCount = () => notes.length;\n", ['It counts the saved notes. — `uses src/notes.ts:notes`']);
+  // The scope first: the file imports notes.ts by the alias alone, and the tsconfig maps the alias.
+  assert.match(read(dir, 'src/alias_user.ts'), /^import \{ notes \} from '@\/src\/notes';$/m, 'src/alias_user.ts must import notes by the alias');
+  assert.match(read(dir, 'tsconfig.json'), /"@\/\*"/, 'tsconfig.json must map @/*');
+  const r = check(dir);
+  assert.equal(verdicts(r.out), expected(), `every check must pass\n${out1500(r)}`);
+});
+
 test('R2a. the regex reader on a shell file: a lone quote in a heredoc body is text, so the X=30 after the heredoc reads 30 (the quote opens a string today and hides it)', async () => {
   const { readValues } = await readersModule();
   const dir = scratchFiles({ 'scripts/run.sh': "cat <<EOF\ndon't\nEOF\nX=30\nB='z'\n" });

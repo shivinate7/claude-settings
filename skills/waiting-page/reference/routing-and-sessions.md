@@ -35,6 +35,10 @@ ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the wr
 An ask with `re` is a reply to an answer. The writer routes it to the `owner` of `asks/<re>`, the session that gave that answer.
 If that session has ended, the writer takes it. The reply ask is answered like any ask, with steps 1 and 2.
 
+An ask with `item` is a reply on an item's reply. The writer routes it to the `owner` of `items/<item>`, the session that asked the item.
+If that session has ended, or the item is gone, the writer takes it. It is answered like any ask, with steps 1 and 2. The answer is the ask's own
+`reply`, never a write to the item's `reply`. The page shows it in the item's card as "Reply from <owner>".
+
 The owner may Mark read a routed ask: its root has a `home` and a `reply`, and no record in the thread waits. That sets `dismissed` on its
 root ask. The page draws Mark read only on a routed ask. An ask with no `home` stays a full card. The writer never rewrites `dismissed`, and a record with it is routed and answered as any other, with `update`.
 
@@ -48,7 +52,7 @@ Decision `session-messages` (messages between sessions) sets this.
 - Cloud to cloud: `send_message` to the `session_id` of the `list_sessions` row that holds all of the target's tags: `cs-repo:<owner>/<name>`, `cs-build:<tier>` or `cs-step:<step id>` (forms in `skills/project-ops/templates/operating-model.md`). Never match on `cs-repo` alone.
 - Local: `SendMessage` to the name `ListAgents` gives.
 - To or from the owner's computer, use the git mailbox. Cloud `send_message` to the owner's computer is refused.
-- The mailbox commands: `mail send --to <addr> --kind request|inform|reply [--re <id>] --body-file <file|->`, `mail read [--addr <addr>] [<id>]`, `mail take [--addr <addr>] <id>`. They need `MAILBOX_REPO` in the session's env. `settings.json` `env` sets the default (owner page item 556 a).
+- The mailbox commands: `mail send --to <addr> --kind request|inform|reply [--re <id>] --body-file <file|->`, `mail read [--addr <addr>] [<id>]`, `mail take [--addr <addr>] <id>`, `mail status <id>` (open, taken or unknown). They need `MAILBOX_REPO` in the session's env. `settings.json` `env` sets the default (owner page item 556 a).
 - Addresses: a cloud session is `cloud/session_<id>`. Its env holds `cse_<id>`, the same id. A local session has its own folder `pc/<host-slug>/<owner>-<repo>/<session id>` and the repo folder `pc/<host-slug>/<owner>-<repo>`. A turn-start line gives the `--addr` to read or take a message with.
 - A message starts with this line: `Msg <id> from <addr> to <addr> kind request|inform|reply re <id or -> try <n>`. The next line is `Reply-to: <addr>`, then a blank line and the body. `<id>` is 12 lowercase hex characters. `re` names the message it answers, or `-`.
 - At turn start, each open message gets one `mail:` line with its `mail read` and `mail take` commands. Act on a message only after `mail take` exits 0. `mail unknown: <reason>` means the check failed (for example `timeout` or `auth`). It never means no mail.

@@ -139,6 +139,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (`main HEAD:agent-<hex>`, `main agent-<hex>`), from any checkout. It also holds
                        for `--all` or `--branches` from an agent checkout, to a network remote, because
                        that push sends the agent branch too. A delete, a mirror and a dry run pass.
+  push-needs-review-record  ask. A `git push` (not a dry run) while the session's own transcript shows a PR and a reviewer or
+                       design-reviewer report with no later posted review log holding that role, verdict and round (and Head,
+                       when the report names its reviewed head). It denies a push to the head branch of a PR whose posted
+                       review log already holds a `Fix check:` line.
   env-file             deny. Any read or write of an environment file.
   process-args         deny. A command that prints other processes' full arguments, which can hold a
                        secret: `ps` with an args column (`aux`, `-ef`, `-f`, `-o args|command|cmd`),
@@ -582,6 +586,7 @@ while True:
             cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_verdict,
             rm_delete_hit, SUBST_OPEN, _in_group,
         )
+        from guard_push_delete import REVIEW_LOG_FIX_REASON, push_destinations, push_sources, review_log_hit
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
@@ -1031,6 +1036,11 @@ def _segment_with_vars(segments, number: int) -> str:
     return _resolve_vars(mark.join(segments[:number + 1])).split(mark)[-1]
 
 
+class HandMadeHit(str):
+    """The refused target, which also carries the primary checkout the refusal judged against."""
+    primary = ""
+
+
 def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=None) -> str:
     """The new-tree path when `segments[number]` is a real worktree add whose tree lands
     outside `<primary>/.claude/worktrees/`, else "". The primary is the one of the repo the call
@@ -1065,6 +1075,8 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=Non
     primary = primary_checkout(where)
     if not primary:
         return ""
+    target = HandMadeHit(target)   # every refusal below returns it, so the reason can name the primary
+    target.primary = primary
     import tempfile   # lazy: only a real worktree add reaches here
     if path_is_inside(primary, tempfile.gettempdir()):
         return ""
@@ -1101,6 +1113,21 @@ WORKTREE_HAND_MADE_REASON = (
     "message. A guard refusal starts \"Rule (\" and names its rule. Any other refusal is the "
     "harness's."
 )
+
+
+def hand_made_worktree_reason(payload, primary: str = "") -> str:
+    """The one reason for a hand-made worktree. A call with a valid `agent_id` also learns the one tree it
+    may make by hand: its own red-run checkout, named by its absolute path under `primary`, since
+    EnterWorktree may be refused for an agent and a relative path would nest inside the agent's home.
+    Any other call, or one with no primary, gets `WORKTREE_HAND_MADE_REASON` unchanged. The reason never
+    names a sibling's id or a refused tree."""
+    agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
+    if not primary or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
+        return WORKTREE_HAND_MADE_REASON
+    own = os.path.join(primary, ".claude", "worktrees", "agent-" + agent_id + "-red").replace("\\", "/")
+    return (WORKTREE_HAND_MADE_REASON + " One exception to that stop: EnterWorktree may be refused for an agent, "
+            "and your own red-run checkout is the one tree you make by hand. Make it with "
+            "`git worktree add --detach <path> <sha>`, where <path> is written out in full as `" + own + "`.")
 
 
 SILENT_WRITE_REDIRECT_REASON = (
@@ -4584,7 +4611,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if segment.strip():
             matched = hand_made_worktree_hit(segments, number, cwd, ends, payload)
             if matched:
-                refuse(tool, "deny", "hand-made-worktree", WORKTREE_HAND_MADE_REASON, matched)
+                refuse(tool, "deny", "hand-made-worktree", hand_made_worktree_reason(payload, getattr(matched, "primary", "")), matched)
 
     # 1e. The impeccable skill's build and settings-writer commands (design-skills record).
     matched = impeccable_command_hit(raw)
@@ -4741,6 +4768,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
             elif not read_verb("push", args):
+                record_hit, record_reason = review_log_hit(transcript, lambda: push_destinations(args, where, overrides), where,
+                                                         lambda: push_sources(args, where, overrides))
+                if record_hit and record_reason == REVIEW_LOG_FIX_REASON:
+                    refuse(tool, "deny", "push-needs-review-record", record_reason, record_hit)  # glossary-ok: the rule id, a literal
+                elif record_hit:
+                    ask_command("push-needs-review-record", record_reason, record_hit, "push before its review log")  # glossary-ok: the rule id, a literal
                 # A non-forced push of every branch that may update main or master, or sends a local agent-named
                 # branch (rule push-all-main, refuses), one
                 # that writes main or master by name (rule push-main, asks), an agent-worktree
@@ -4807,9 +4840,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "merge-confirm-repo", REPO_REASON, matched)
 
-    # 6a2. A push to the record branch from a session its own record does not prove triage (rule
-    # roadmap-one-writer). Cost: one `git rev-parse` and one small file read per push, and one
-    # transcript read only when the push reaches the record branch.
+    # 6a2. A push to the record branch from a session its own record does not prove triage, or a lane
+    # pushing its own handoff (rule roadmap-one-writer). Cost: one `git rev-parse` and one small file read
+    # per push, and one transcript read only when the push reaches the record branch. A lane's push that
+    # reaches it adds two git processes, one `git rev-list --parents` and one `git diff-tree --stdin` that reads
+    # every pushed commit's paths (and one `git symbolic-ref` when no cs-step tag names the slug); a triage push, any other session's push and a push to another branch read no diff.
     matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb)
     if matched:
         refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)

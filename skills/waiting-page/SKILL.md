@@ -198,15 +198,21 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   "Answered, filing pending" and the save time; with `filed`, "Answered, filed in <home>" (the item's `home`) and the
   filed time. In the Answered section, the same two read "Filing pending, sent" and "Filed in <home>". With only
   `read`, the card also says "Read by <owner>" and the time.
-- `asks/<id>`: one per ask typed in the page's Ask box, and one per reply the owner writes under an answer, never an item. The owner stacks asks with Add to list (nothing is
+- `asks/<id>`: one per ask typed in the page's Ask box, one per reply the owner writes under an answer, and one per reply he writes on an item's reply. The owner stacks asks with Add to list (nothing is
   written), then one Send writes every stacked ask and the typed box. The page writes `id` (the key,
   `ask-<base36 ms><2 chars>`), `text` (4000 characters or fewer, line breaks kept) and `at` (ISO time) once, at Send. A reply
-  also gets `re`, the id of the answered ask it follows, written once at Send. No session writes `re`. The page writes one more
+  also gets `re`, the id of the answered ask it follows, written once at Send. No session writes `re`. A reply on an item gets `item`
+  instead, the id of that item, written once at Send. It never has `re` as well. No session writes `item`. The page writes one more
   field later, at the owner's press: `dismissed` (ISO time), on a thread's root ask only, with `update` (Mark read). Mark unread writes
   `dismissed: null` (the runtime has no field delete). It never deletes or replaces the owner's `text` or a `reply`. No session writes
   `dismissed`. A session answering a dismissed record uses `update`, which keeps it (see "Route an ask"). A reply goes through the same
   Send, Undo and wake comment as an ask. Its comment reads "Replied on the waiting page. Writer: <writer>. Ask <id> re <re id>,
-  answered by <owner of the ask `re` names>: <text>." The asks
+  answered by <owner of the ask `re` names>: <text>." An item reply's comment reads "Replied on the waiting page. Writer: <writer>.
+  Ask <id> on item No. <n>, owned by <owner of the item>: <text>." While the item or its line is on the page, the page shows an item reply in its
+  item's card, or in its line when the item is one (a closed item, or an answered and filed one). While it is there, the reply never shows in the Asks list
+  or its count. While a reply waits, the line's Mark read is off, and an answer to a reply later than the Mark read brings the line back.
+  Once the item is no longer on the page, the reply is its own Asks row, "Re: an item no longer on this page",
+  and it counts while it has no `reply`. The asks
   of one Send share one `at`, and their ids rise in the order the owner typed them, so the id breaks the tie: the highest
   id is the last typed. One Undo (8 seconds) deletes every ask of that Send; it checks the 8 seconds before each delete, and a Send waits until the Undo ends. One wake comment tells of the whole Send: "N asks:
   <id>: <text>; …", or "Ask <id>: <text>" for one. A session writes only `owner` (the session that has the ask), `read` (ISO time),
@@ -289,7 +295,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
     session then files the answer to `home`, as "Route and close" step 1 says. Either way, every
     question and answer ends in the page's record.
 - A lane has no chat with the owner. Its question goes in its report, and a lane also sends it
-  to its parent with `send_message` in the same turn. The Stop report guard blocks a lane reply whose
+  to its parent with `mail send --to <addr> --kind request --body-file -` in the same turn. The Stop report guard blocks a lane reply whose
   Input Needed asks a pick or a yes/no unless the same turn sent it to its parent or the writer. A box,
   a page link or a promise does not pass.
 
@@ -361,7 +367,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   items also rewrites each item's `owner` to itself: `owner` is the session that reads the answer.
   It stops watching (`ArtifactComments` action `watch` with `on: false` and the page URL) when it
   has no open item and is not the writer, and at step 1 of a project-ops rotation.
-- At a comment wake, never at turn start, the writer saves `ArtifactData list receipts`, `answers` and `items`, and `meta/page`, to a folder. It lists `answers`, `items` and `receipts` in full: `query.limit` 1000, follow `next_cursor` until it is empty, as the export flow does. A cut list gives wrong lines. It runs `python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>`. For each `answer-unread` line it sends the session in the item's `owner` a `send_message` with the page URL, the item id and the act, never the answer text.
+- At a comment wake, never at turn start, the writer saves `ArtifactData list receipts`, `answers` and `items`, and `meta/page`, to a folder. It lists `answers`, `items` and `receipts` in full: `query.limit` 1000, follow `next_cursor` until it is empty, as the export flow does. A cut list gives wrong lines. It runs `python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>`. For each `answer-unread` line it sends the session in the item's `owner` a `mail send --to <addr> --kind inform --body-file -` with the page URL, the item id and the act, never the answer text.
   At the end of that wake it writes `woke`. It uses `ArtifactData update meta/page` with only `woke`, never `set`: `set` drops `parked`, `identity` and `checked`. The value is the time now, ISO UTC with a trailing `Z`. On exit 2 it does not write `woke`.
   The check reads only the receipt field `read`. It does not use `filed`. It adds no store.
 - The owner can Undo a Send for 8 seconds, and Undo deletes the answers. Wait 10 seconds after an
@@ -430,7 +436,8 @@ exception: on an item with `lane`, the writer tells the receiver the act is with
 report (see the park branch below). A `none` answer on this path gets no new options.
 
 - Already routed. The owning session reads `answers/` at each turn start, so a kept answer looks new. An answer whose item
-  already has `lane` and a `lastAnswer` with the same `at` is routed. Skip it until the done report.
+  already has `lane` and a `lastAnswer` with the same `at` is routed. Skip it until the done report. A held close (step 2) is routed too:
+  its item is open with a `lastAnswer` of the same `at`. Skip it until the close.
 - Changed. A kept answer with no `act: "park"` and a new `at` is a new answer: the owner changed it. Route it again, relay it with the new `at`,
   and rewrite `lastAnswer`.
 - Withdrawn. If a kept answer is gone from an open item at the owning session's re-read, the owner withdrew it. The session drops `lane`
@@ -472,7 +479,13 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
 2. Close the item: `ArtifactData update items/<id> {"status": "closed", "closed": "<now, ISO UTC with a trailing Z>"}`, pinned to the version
    you read (`if_version`). If the close conflicts, the owner marked the item read in the meantime: read it again and retry the close. Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
    in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page shows a closed
-   item as one line, with its home and its reply, until the owner marks it read. The page shows `lastAnswer` as the answer on the opened line, and on an item left open (steps 3, 4 and a busy lane).
+   item as one line, with its home and its reply, until the owner marks it read. The page shows `lastAnswer` as the answer on the opened line, and on an item left open (steps 3, 4, a busy lane and a held close).
+   The session that closes the item holds this close while a record in `asks/` with `item` set to this item has no `reply`. The hold only delays the close (effect unmeasured),
+   because the page keeps the reply on the closed line. While the close waits, the session writes `lastAnswer` at once and keeps `answers/<id>`, so the
+   page still shows the item as answered. Only `status: "closed"`, `closed` and the delete of `answers/<id>` wait. A later turn start skips the kept answer (see "Already routed"), so nothing is filed twice.
+   The same session reads the `at` of each such record at each of its turn starts: no timer and no new process. It closes the item once no record has a missing `reply`, or 7 days after the oldest `at`.
+   A chat answer's close is not held, because it has no `answers/<id>` to keep. The session closes the item at once, and the waiting reply stays on the closed line.
+   Before a late close, read `answers/<id>` again. If it is gone or has a new `at`, the owner withdrew or changed it: do not close (see "Withdrawn" and "Changed").
 3. If the answer is `none` with no clear direction, and you can write new `options`, `recommended` and `why` from the
    note in this same turn, act in this order. A `multi` item's new `recommended` is a list. First ask the chat
    question again with the new options, citing `Page item: <id>` and writing one `a) <label>` line per new option.
@@ -509,7 +522,7 @@ The writer finds the entry by its `ref`, or by its `id` when the word names it. 
   With no entry of that `id`, delete the answer and say so in the terminal. The page never writes `meta/page`.
 
 A park answer (`answers/<item id>` with `act: "park"`): the same wait and re-read. The writer reads the item first. When the item has `lane`,
-the writer finds the receiver by the lookup in "Never-ending wait", before any update. It sends it by `send_message` only the page URL,
+the writer finds the receiver by the lookup in "Never-ending wait", before any update. It sends it by `mail send --to <addr> --kind inform --body-file -` only the page URL,
 the item id and that the act is withdrawn. If that lookup finds no session or cannot run (status `unknown`), the close still goes
 ahead and the writer names the miss in its report. `page_grant.py` already refuses a closed item. An item with no `lane` gets no tell.
 The writer adds `{id, ref, note}` to

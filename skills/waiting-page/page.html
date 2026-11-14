@@ -850,8 +850,8 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .rrow .meta .newmark { font-size: 12.5px; line-height: 19px; min-height: 0; }
 .prail .nm .newmark, .fold .newmark { min-height: 0; }
 .prail .nmr { display: inline-flex; align-items: center; gap: 6px; }
-.askc .thread .lhead { margin: 0; font-size: 14px; color: var(--muted); }
-.askc .thread .reply { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.thread .lhead { margin: 0; font-size: 14px; color: var(--muted); }
+.thread .reply { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
 .askc .thread .filed { margin: 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
 /* A folded answer is one button: the whole row unfolds it. */
 .askc.folded { padding: 0; }
@@ -868,10 +868,10 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 }
 .older { justify-self: start; width: auto; }
 /* The owner's reply sits inside the thread it follows, on the surface ground of "You asked", so his words and a session's differ by ground. */
-.askc .thread .myreply { display: grid; gap: 4px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); min-width: 0; }
-.askc .thread .myreply .lhead { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
-.askc .thread .myreply .reply { font-size: 16px; }
-.askc .thread .myreply + .lhead, .askc .thread .reply + .myreply { margin-top: 4px; }
+.thread .myreply { display: grid; gap: 4px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); min-width: 0; }
+.thread .myreply .lhead { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.thread .myreply .reply { font-size: 16px; }
+.thread .myreply + .lhead, .thread .reply + .myreply { margin-top: 4px; }
 /* The thread's end: the line that answers Send reply and Undo, then Reply or the reply box. */
 .replyend { display: grid; gap: 8px; min-width: 0; }
 .replyend > .btn.replybtn { justify-self: start; min-height: 44px; }
@@ -880,11 +880,14 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .replyform .askrow .btn.rx { grid-column: 3; min-height: 48px; }
 @media (max-width: 520px) { .replyform .askrow .btn.rx { grid-column: 1; grid-row: 2; justify-self: start; } }
 /* A folded thread with a reply that waits or a new answer to one: the row stays one button; the reply shows under it, outside the fold. */
-.askc.folded .fwait { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 2px 12px; margin: 0; padding: 8px 16px 12px; border-top: 1px solid var(--line); }
-.askc.folded .fwait > .g { margin-top: 5px; }
-.askc.folded .fwait .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.askc.folded .fwait .astate { grid-column: 2; }
-@media (max-width: 520px) { .askc.folded .fwait .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
+/* The same waiting reply under a folded sunk item card (.card > .fwait): the card pads its own edge, so it adds only a small inset. */
+.askc.folded .fwait, .card > .fwait { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 2px 12px; margin: 0; min-width: 0; }
+.askc.folded .fwait { padding: 8px 16px 12px; border-top: 1px solid var(--line); }
+.card > .fwait { padding: 0 4px; }
+.askc.folded .fwait > .g, .card > .fwait > .g { margin-top: 5px; }
+.askc.folded .fwait .ftext, .card > .fwait .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.askc.folded .fwait .astate, .card > .fwait .astate { grid-column: 2; }
+@media (max-width: 520px) { .askc.folded .fwait .ftext, .card > .fwait .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
 /* Mark read: it shares the thread's end with Reply, Reply first. It is the quieter act, kept 44 px. Off while a reply waits: a dashed edge, with the reason beside it. */
 .replyend .endrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
 .replyend .endrow > .btn { min-height: 44px; }
@@ -1201,7 +1204,9 @@ const VISIT = readStamp("waiting.visit");
 writeStamp("waiting.visit");
 // A reply is new when the writer's `replied` time is later than the last Send (state.sendAt, kept by freezeSeen) and than the last visit. It reads no set, so a reply
 // that arrives on the open page is new too, and a Send moves no mark.
-const newReply = (it) => state.sendAt !== null && !isRuling(it) && Date.parse(it.replied) > Math.max(state.sendAt, VISIT ?? -Infinity);
+// The answer of a session to one of the owner's replies on the item (an asks record with `item`) is a new reply too, against the same baseline.
+const newBase = () => Math.max(state.sendAt, VISIT ?? -Infinity);
+const newReply = (it) => state.sendAt !== null && !isRuling(it) && [Date.parse(it.replied), ...itemReps(it).map((a) => Date.parse(a.answered))].some((t) => t > newBase());
 // A folded card of a new reply opens in place; a press on its fold wins for the rest of the visit.
 const foldOpen = (it) => (it.id in state.unfold ? !!state.unfold[it.id] : newReply(it));
 // Seen, worked out once (freezeSeen) and kept: an open item with no saved answer that was added before the owner's last Send. A later item is new,
@@ -1625,14 +1630,31 @@ function lastAnswerEl(it) {
     typeof la.note === "string" && la.note && la.note !== "accepted pick" ? h("p", { class: "rnote" }, "Note: " + la.note) : null);
 }
 // noLast: the card already draws the last answer as its answer line (answered by its wait), so the thread holds the reply only.
+// The thread: the last answer, the item's reply, then the owner's replies on the item with the session's answer to each, oldest first.
 function threadEl(it, noLast) {
-  const la = noLast ? null : lastOf(it), rp = replyOf(it);
-  if (!la && !rp) return null;
+  const la = noLast ? null : lastOf(it), rp = replyOf(it), reps = itemReps(it);
+  if (!la && !rp && !reps.length) return null;
   const long = rp.length > 220, open = !!state.moreReply[it.id];
-  return h("section", { class: "thread", id: "thread-" + it.id, "aria-label": la && rp ? "Your last answer and the reply" : la ? "Your last answer" : "The reply" },
+  return h("section", { class: "thread", id: "thread-" + it.id, "aria-label": reps.length ? "The thread" : la && rp ? "Your last answer and the reply" : la ? "Your last answer" : "The reply" },
     la ? lastAnswerEl(it) : null,
     rp ? h("p", { class: "ctx reply" + (long && !open ? " clamp" : ""), id: "rp-" + it.id }, "Reply: " + rp) : null,
-    long ? h("button", { class: "morebtn", id: "b-morerp-" + it.id, type: "button", "aria-expanded": String(open), "aria-controls": "rp-" + it.id, onclick: () => { state.moreReply[it.id] = !open; repaint(it); } }, open ? "Less" : "More of the reply") : null);
+    long ? h("button", { class: "morebtn", id: "b-morerp-" + it.id, type: "button", "aria-expanded": String(open), "aria-controls": "rp-" + it.id, onclick: () => { state.moreReply[it.id] = !open; repaint(it); } }, open ? "Less" : "More of the reply") : null,
+    ...reps.flatMap((r) => askMine(r, "Reply from ")));
+}
+// The end of an item's thread: Reply, or the reply box, with the line of Send reply and Undo above it. Only an item with a reply has one. It is the ask's thread end (askReplyEnd).
+function itemReplyEnd(it) {
+  if (!replyOf(it)) return null;
+  const k = itemKey(it);
+  return h("div", { class: "replyend", "data-end": k }, repOf(k).open ? replyForm(k) : h("div", { class: "endrow" }, replyBtn(k, "No. " + it.n)));
+}
+// A reply of the owner that a session has not answered, or whose answer is new, shows under the folded sunk card, outside its fold.
+function itemFolded(it, words) {
+  return itemReps(it).map((r) => {
+    const answered = askReply(r);
+    if (answered && !(Date.parse(r.answered) > newBase())) return null;
+    return h("p", { class: "fwait" }, glyph(answered ? "done" : "wait"), h("span", { class: "ftext" }, "Your reply: " + r.text),
+      h("span", { class: "astate" }, ...(answered ? ["Reply from " + askOwner(r) + (fmt(r.answered) ? ", " + fmt(r.answered) : "") + ". " + words.show + " to read it."] : askWaitWords(r))));
+  }).filter(Boolean);
 }
 // The one list of top-level item fields is the itemFields block (the guard reads the same one). A missing, bad or empty block reads as unknown: no warning.
 const PAGE_ADDED = ["optionsBad"]; // set by the page when it reads an item, never stored
@@ -1776,15 +1798,17 @@ function buildCard(it) {
     // The fold holds the parts below the answer line, named by the parts that are present. With none, there is no control.
     const sv = savedOf(it) || lastOf(it), noteOk = typeof sv.note === "string" && sv.note && sv.note !== "accepted pick";
     // Answered by its wait, the answer line is lastAnswer, so the fold does not show it again.
-    const parts = [noteOk ? "your note" : null, !byWait && lastOf(it) ? "your last answer" : null, replyOf(it) ? "the reply" : null].filter(Boolean);
+    const reps = itemReps(it), parts = [noteOk ? "your note" : null, !byWait && lastOf(it) ? "your last answer" : null, replyOf(it) ? (reps.some((r) => askReply(r)) ? "the replies" : "the reply") : null, reps.length ? "your reply" : null].filter(Boolean);
     card.append(receipt(it, true));
     if (parts.length) {
-      const list = parts.length < 2 ? parts[0] : parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1];
-      card.append(...foldEls(it, [parts[0] === "your note" ? h("p", { class: "rnote" }, "Note: " + sv.note) : null, threadEl(it, byWait)], 0, { show: "Show " + list, hide: "Hide " + list }));
+      const list = parts.length < 2 ? parts[0] : parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1], words = { show: "Show " + list, hide: "Hide " + list };
+      const els = foldEls(it, [parts[0] === "your note" ? h("p", { class: "rnote" }, "Note: " + sv.note) : null, threadEl(it, byWait), itemReplyEnd(it)], 0, words);
+      if (els[1].hidden) els.splice(1, 0, ...itemFolded(it, words));
+      card.append(...els);
     }
     return card;
   }
-  if (saved) { card.append(receipt(it)); const th = threadEl(it, byWait); if (th) card.append(th); return card; }
+  if (saved) { card.append(receipt(it)); const th = threadEl(it, byWait); if (th) card.append(th, itemReplyEnd(it)); return card; }
   if (looseDesigns(it).length) card.append(designPreview(it));
   if (it.holds) card.append(h("p", { class: "stake holds" }, glyph("holds"), h("span", {}, it.holds)));
   if (it.by && validT(it.by)) {
@@ -1792,7 +1816,7 @@ function buildCard(it) {
     card.append(h("p", { class: "stake due" }, glyph("due"), h("span", {}, left >= 0 ? "Answer by " + fmt(it.by) + ", " + span(left) + " from now." : "Answer was due " + fmt(it.by) + ", " + span(left) + " ago.")));
   }
   const thread = threadEl(it);
-  if (thread) card.append(thread);
+  if (thread) card.append(thread, itemReplyEnd(it));
   const more = !!state.more[it.id], ctxText = it.context || "";
   card.append(h("p", { class: "ctx" + (more || ctxText.length <= 220 ? "" : " clamp"), id: "ctx-" + it.id }, ctxText));
   if (ctxText.length > 220) card.append(h("button", { class: "morebtn", id: "b-more-" + it.id, type: "button", "aria-expanded": String(more), "aria-controls": "ctx-" + it.id, onclick: () => { state.more[it.id] = !more; repaint(it); } }, more ? "Less" : "More context"));
@@ -1919,7 +1943,7 @@ function holdView(ids, back) {
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
   const d = eff(it) || {};
-  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.act, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), isSunk(it), state.unfold[it.id], replyFirst(it), state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
+  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.act, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), isSunk(it), state.unfold[it.id], replyFirst(it), state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), itemReps(it), (askState.rep[itemKey(it)] || {}).open, hourBucket()]);
 }
 const copyAttrs = (to, from) => { [...to.attributes].forEach((a) => to.removeAttribute(a.name)); [...from.attributes].forEach((a) => to.setAttribute(a.name, a.value)); };
 // Replace old's children with nu's but leave each kept node ([old node, nu stand-in, optional sync]) in place: moving an iframe reloads it.
@@ -1942,6 +1966,7 @@ function syncOpts(old, nu) {
 }
 function patch(old, nu) {
   const active = document.activeElement, focusId = active && old.contains(active) ? active.id : "";
+  const caret = focusId && active.tagName === "TEXTAREA" ? [active.selectionStart, active.selectionEnd] : null;
   const keeps = [];
   for (const [sel, sync, same] of [[":scope > .dprev"], [":scope > .opts[data-d]", syncOpts, (a, b) => a.dataset.d === b.dataset.d]]) {
     const k = old.querySelector(sel), n = nu.querySelector(sel);
@@ -1955,7 +1980,7 @@ function patch(old, nu) {
   if (keeps.length) graft(old, keeps, nu); else old.replaceChildren(...nu.childNodes);
   old.style.minHeight = minH;
   if (minH && !wasReceipt) heldWatch.observe(old);
-  if (focusId) { const f = $(focusId); if (f && !f.disabled) f.focus({ preventScroll: true }); }
+  if (focusId) { const f = $(focusId); if (f && !f.disabled) { f.focus({ preventScroll: true }); if (caret && f.tagName === "TEXTAREA") f.setSelectionRange(caret[0], caret[1]); } }
 }
 function cardFor(it) {
   const sig = signature(it), rec = cards[it.id];
@@ -2040,8 +2065,9 @@ const closedAt = (it) => { const t = typeof it.closed === "string" ? Date.parse(
 // A closed item stays on the page as one line while it carries a `closed` time and has not been marked read. One with no `closed` time was closed before lines shipped, and counts as read.
 const isClosedLine = (it) => it.status === "closed" && !isRuling(it) && closedAt(it) !== null;
 const readAt = (it) => { const t = typeof it.dismissed === "string" ? Date.parse(it.dismissed) : NaN; return isNaN(t) ? null : t; };
-// Read: the owner marked it, and the writer has not replied since. A later reply brings the line back.
-const isRead = (it) => { const d = readAt(it); return d !== null && !(Date.parse(it.replied) > d); };
+// Read: the owner marked it, and nothing has come since: no later `replied`, no reply of his that waits, and no answer to a reply of his later than the mark. A later word brings the line back.
+const itemWaits = (it) => itemReps(it).some((r) => !askReply(r));
+const isRead = (it) => { const d = readAt(it); return d !== null && !(Date.parse(it.replied) > d) && !itemReps(it).some((r) => !askReply(r) || Date.parse(r.answered) > d); };
 // An open answered item is routed once it is filed. One that waits on a run or a PR, sits on a lane, or has no filing yet keeps its card.
 const routedOpen = (it) => !isRuling(it) && isSunk(it) && isSaved(it) && !waitsOf(it) && !laneOf(it) && !!rcOf(it).filed;
 const isLine = (it) => (it.status === "closed" ? isClosedLine(it) : routedOpen(it));
@@ -2050,12 +2076,23 @@ const itemAway = (it) => isLine(it) && !!state.hidItems && state.hidItems.has(it
 // Out of the Answered count and the rail: a line drawn as "Marked read." A read item drawn as a card (taken to Change, on a lane, or with waits) counts where it is drawn.
 const itemDropped = (it) => isLine(it) && markView(state.mark[it.id], isRead(it), false).dropped;
 const itemName = (it) => "No. " + it.n + ", " + shortOf(it);
-const markItem = (it, to) => writeRead("items", it.id, to, state.mark, { read: (x) => "idis-" + x, undo: (x) => "ires-" + x, row: () => "line-" + it.n }, () => {}, render);
+const markItem = (it, to) => (to && itemWaits(it)) ? undefined : writeRead("items", it.id, to, state.mark, { read: (x) => "idis-" + x, undo: (x) => "ires-" + x, row: () => "line-" + it.n }, () => {}, render);
 const itemPress = (it, undo, quiet) => {
   const g = state.mark[it.id], busy = !!g && g.state === "busy" && g.kind === (undo ? "restore" : "dismiss");
   return undo ? markPress(quiet ? "quiet restore" : "alt restore", "ires-" + it.id, itemName(it), "Mark unread", busy, "Unmarking…", () => markItem(it, null))
     : markPress("quiet dismiss", "idis-" + it.id, itemName(it), "Mark read", busy, "Marking…", () => markItem(it, new Date().toISOString()));
 };
+// The line's Mark read, or Mark unread in the read list. While a reply of his waits, Mark read is off with its reason beside it: a read line would hide the waiting reply.
+// folded: the folded row has no Mark read then, only the waiting reply under the row (itemFolded).
+function lineSide(it, dl, folded) {
+  if (dl && isRead(it)) return [itemPress(it, true, true)];
+  const b = itemPress(it, false);
+  if (!itemWaits(it)) return [b];
+  if (folded) return [];
+  const k = itemKey(it);
+  b.setAttribute("aria-disabled", "true"); b.setAttribute("aria-describedby", "dw-" + k);
+  return [b, h("span", { class: "dwhy", id: "dw-" + k }, ASK_DIS_OFF)];
+}
 // The words of the line's second row: the short reply, else where it went.
 function lineReply(it) {
   const rp = replyOf(it), rc = it.status === "closed" ? {} : rcOf(it);
@@ -2075,21 +2112,27 @@ function lineEl(it, dl) {
   const k = it.id, n = it.n, g = state.mark[k], mv = markView(g, isRead(it), dl);
   if (mv.dropped) return h("article", { class: "askc dropped", id: "line-" + n, tabindex: "-1" },
     h("p", { class: "sline", role: "status" }, glyph("done"), h("span", {}, h("b", {}, "Marked read."), " ", h("span", { class: "dt" }, itemName(it))), itemPress(it, true)), markRowLine(g));
-  const open = state.lineOpen[k] === true, side = dl && isRead(it) ? itemPress(it, true, true) : itemPress(it, false), mark = newReply(it) ? h("span", { class: "newmark" }, "New reply") : null;
+  const open = state.lineOpen[k] === true, mark = newReply(it) ? h("span", { class: "newmark" }, "New reply") : null;
   const toggle = () => { state.lineOpen[k] = !open; render(); const f = $("lrow-" + k) || $("lfold-" + k); if (f) f.focus({ preventScroll: true }); };
-  if (!open) return h("article", { class: "askc folded withd rline", id: "line-" + n, "aria-labelledby": "lt-" + n },
+  const side = lineSide(it, dl, true);
+  if (!open) return h("article", { class: "askc folded rline" + (side.length ? " withd" : ""), id: "line-" + n, "aria-labelledby": "lt-" + n },
     h("button", { class: "frow", type: "button", id: "lrow-" + k, "aria-expanded": "false", onclick: toggle }, glyph("done"),
       h("span", { class: "fhead" }, h("span", { class: "fno" }, "No. " + n), h("span", { class: "ftext", id: "lt-" + n }, shortOf(it)), mark, homeTag(it.home)),
       h("span", { class: "freply" }, lineReply(it)), h("span", { class: "fgo" }, "Show answer", h("span", { class: "sr" }, " for No. " + n))),
-    side, markRowLine(g));
+    ...side, ...itemFolded(it, { show: "Show answer" }), markRowLine(g));
   // Opened in place, as an open ask: the answer, the reply and where it went. An open item keeps Change on its answer line.
   const rp = replyOf(it), answer = it.status === "closed" ? (lastOf(it) ? lastAnswerEl(it) : null) : receipt(it, false);
   return h("article", { class: "askc rline ropen", id: "line-" + n, "aria-labelledby": "lt-" + n },
     h("div", { class: "ahead" }, glyph("done"), h("span", { class: "fno" }, "No. " + n), homeTag(it.home), mark,
       h("button", { class: "morebtn", type: "button", id: "lfold-" + k, "aria-expanded": "true", onclick: toggle }, "Fold")),
     h("h3", { class: "rtitle", id: "lt-" + n }, it.title),
-    h("div", { class: "thread" }, answer, rp ? h("p", { class: "lhead" }, "Reply from " + it.owner) : null, rp ? h("p", { class: "reply" }, rp) : null, h("p", { class: "filed" }, lineWhere(it))),
-    h("div", { class: "replyend" }, h("div", { class: "endrow" }, side)), markRowLine(g));
+    h("div", { class: "thread" }, answer, rp ? h("p", { class: "lhead" }, "Reply from " + it.owner) : null, rp ? h("p", { class: "reply" }, rp) : null, ...itemReps(it).flatMap((r) => askMine(r, "Reply from ")), h("p", { class: "filed" }, lineWhere(it))),
+    lineEnd(it, dl), markRowLine(g));
+}
+// The end of an opened line's thread: Reply, then Mark read, or the reply box (itemReplyEnd, askReplyEnd). Only a line with a reply has Reply.
+function lineEnd(it, dl) {
+  const k = itemKey(it), canReply = !!replyOf(it);
+  return h("div", { class: "replyend", "data-end": k }, canReply && repOf(k).open ? replyForm(k) : h("div", { class: "endrow" }, canReply ? replyBtn(k, "No. " + it.n) : null, ...lineSide(it, dl, false)));
 }
 // An open answered item draws as its line when routed, else as its card. A closed line draws as its line.
 const entryFor = (it) => (isLine(it) ? lineEl(it, false) : cardFor(it));
@@ -2477,8 +2520,14 @@ const askOwner = (a) => (typeof a.owner === "string" && a.owner.trim() ? a.owner
 const askTime = (a) => { const t = Date.parse(a.at); return isNaN(t) ? -Infinity : t; };
 // An ask reads as unknown, never as none, while the store has not answered.
 const askKnown = () => state.db !== false && state.db !== null && !askState.bad && askState.map !== null;
-const askAll = () => Object.entries(askState.map || {}).filter(([, a]) => a && typeof a.text === "string").map(([k, a]) => ({ ...a, id: k }))
+const askRaw = () => Object.entries(askState.map || {}).filter(([, a]) => a && typeof a.text === "string").map(([k, a]) => ({ ...a, id: k }))
   .sort((a, b) => askTime(b) - askTime(a) || (a.id < b.id ? 1 : -1));
+// An item's reply record (`item`, never `re`) shows in its item's thread while the item is on the page, and nowhere in the Asks list or its count. Before the items load, it counts as on the page.
+// Once the item is gone it is an Asks row of its own, so a reply never goes unseen.
+const itemHere = (id) => !state.loaded || state.items.some((i) => i.id === id) || state.lines.some((i) => i.id === id);
+const askAll = () => askRaw().filter((a) => !(typeof a.item === "string" && itemHere(a.item)));
+const itemKey = (it) => "item." + it.id;
+function itemReps(it) { return askRaw().filter((a) => a.item === it.id).reverse(); }
 // A record with `re` joins the thread of the record it follows, oldest first. A record whose `re` is not in the map, or loops back to it, is a thread of its own.
 function askThreads() {
   const all = askAll(), byId = new Map(all.map((a) => [a.id, a]));
@@ -2486,7 +2535,7 @@ function askThreads() {
     const seen = new Set([a.id]);
     for (let x = a; ;) { const p = typeof x.re === "string" ? byId.get(x.re) : null; if (!p) return x; if (seen.has(p.id)) return a; seen.add(p.id); x = p; }
   };
-  const th = new Map(all.map((a) => [a.id, { ...a, reps: [], orphan: typeof a.re === "string" && !byId.has(a.re) }]));
+  const th = new Map(all.map((a) => [a.id, { ...a, reps: [], orphan: typeof a.re === "string" && !byId.has(a.re), itemGone: typeof a.item === "string" }]));
   all.forEach((a) => { const r = rootOf(a); if (r !== a) th.get(r.id).reps.push(a); });
   th.forEach((t) => t.reps.reverse());
   return all.filter((a) => rootOf(a) === a).map((a) => th.get(a.id));
@@ -2568,6 +2617,11 @@ const repOf = (k) => {
 };
 const saveReplyDraft = (k) => { try { const v = repOf(k).text; if (v) localStorage.setItem(replyDraftKey(k), v); else localStorage.removeItem(replyDraftKey(k)); } catch (e) {} };
 const threadOf = (k) => askThreads().find((t) => t.id === k) || null;
+// An item's reply box is keyed "item.<id>": its ids, its draft and its line derive from the key as an ask's do. An ask id starts "ask-", and an item id holds no dot.
+const itemOfKey = (k) => (k.startsWith("item.") ? byId(k.slice(5)) || state.lines.find((i) => i.id === k.slice(5)) || null : null);
+// A box on an item card repaints the cards; a box on an ask repaints the Asks list.
+const redrawReply = (k) => (k.startsWith("item.") ? render() : renderAskList());
+const replyBtn = (k, what) => h("button", { class: "btn alt replybtn", type: "button", id: "reply-" + k, "aria-expanded": "false", "aria-controls": "rf-" + k, "data-ask": k, onclick: () => openReply(k) }, "Reply", what ? h("span", { class: "sr" }, " on " + what) : null);
 // Its hint says why Send reply is off, or where the reply goes. A refused save keeps the words and offers Copy reply.
 function syncReplyForm(form) {
   const k = form.id.slice(3), rp = repOf(k), typed = rp.text.trim(), over = typed.length > ASK_MAX, { counting, holding } = askHold(), hint = $("rh-" + k), slot = form.querySelector(".slot");
@@ -2577,7 +2631,12 @@ function syncReplyForm(form) {
   else if (rp.err) { cls += " bad"; kids = ["Not saved (" + rp.err + "). Your reply is still in the box: copy it and paste it in chat."]; }
   else if (over) { cls += " bad"; kids = ["Your reply is " + typed.length + " characters. The limit is " + ASK_MAX + ". Shorten it, then send. Nothing was cut."]; }
   else if (holding) kids = words("Send reply turns on " + (counting ? "when the Undo count ends." : "when Undo is done."));
-  else kids = words((typed ? "" : "Send reply turns on once you type. ") + "Your reply goes to " + askWriter() + ", which passes it to the session that answered, or answers here.");
+  else {
+    const it = itemOfKey(k);
+    // On an item the session that asked is its owner, not the one that answered. An owed item stays open: only its answer closes it.
+    kids = words((typed ? "" : "Send reply turns on once you type. ") + "Your reply goes to " + askWriter() + ", which passes it to the session that " + (it ? "asked No. " + it.n : "answered") + ", or answers here."
+      + (it && it.status !== "closed" && !isAnswered(it) ? " No. " + it.n + " stays open" + (it.kind === "task" ? ": Mark done below answers it." : ".") : ""));
+  }
   const sig = cls + "|" + kids.map((x) => (x && x.nodeType ? x.textContent : x)).join("");
   if (hint.dataset.sig !== sig) { hint.dataset.sig = sig; hint.className = cls; hint.replaceChildren(...kids); }
   const copy = rp.err ? [$("rc-" + k) || h("button", { class: "btn alt", type: "button", id: "rc-" + k, onclick: () => copyReply(k) }, "Copy reply")] : [];
@@ -2599,17 +2658,17 @@ function openReply(k) {
   const s = askState, a = s.sent, rp = repOf(k);
   if (!(a && (undoLeft(a) > 0 || a.busy))) { if (a && a.where !== "box") s.sent = null; if (s.line && s.line.where !== "box") s.line = null; }
   rp.open = true; rp.err = ""; rp.note = "";
-  renderAskList();
+  redrawReply(k);
   const ta = $("rt-" + k); if (ta) ta.focus({ preventScroll: true });
 }
 // Close keeps the words as a draft.
 function closeReply(k) {
-  repOf(k).open = false; saveReplyDraft(k); renderAskList();
+  repOf(k).open = false; saveReplyDraft(k); redrawReply(k);
   const b = $("reply-" + k); if (b) b.focus({ preventScroll: true });
 }
 // The words with the ask they follow, for a person to paste in chat when the store refused them. A refused clipboard leaves them selected in the box.
 async function copyReply(k) {
-  const rp = repOf(k), t = threadOf(k), re = t && askLatest(t), words = (re ? "re " + re.id + ": " : "") + rp.text.trim();
+  const rp = repOf(k), it = itemOfKey(k), t = threadOf(k), re = it ? { id: "No. " + it.n } : t && askLatest(t), words = (re ? "re " + re.id + ": " : "") + rp.text.trim();
   if (await copyText(words)) rp.note = "Copied. Paste it in chat."; else rp.note = "Select and copy the text in the box" + (re ? ", and start it with “re " + re.id + ":”." : ".");
   syncReplyForms();
   const ta = $("rt-" + k); if (ta && !(rp.note.startsWith("Copied"))) { ta.focus({ preventScroll: true }); ta.select(); }
@@ -2779,17 +2838,18 @@ const askWaitWords = (a) => (typeof a.owner === "string" && a.owner.trim() && va
   ? ["Read by " + askOwner(a) + " ", h("span", { class: "t" }, fmt(a.read, false)), ". Waiting for its answer."]
   : ["Waiting for " + askWriter() + " to read it."]);
 // A session's answer to a record: who, when, the words, and where it was filed.
-function askAnswer(a) {
+// word: "Answer from " in the Asks list; "Reply from " in an item's thread, where "answer" is the owner's own word for what he sent.
+function askAnswer(a, word = "Answer from ") {
   const when = fmt(a.answered) || "", fl = typeof a.home === "string" && a.home.trim() ? a.home.trim() : "";
-  return [h("p", { class: "lhead" }, "Answer from " + askOwner(a) + (when ? ", " + when : "")), h("p", { class: "reply" }, askReply(a)),
+  return [h("p", { class: "lhead" }, word + askOwner(a) + (when ? ", " + when : "")), h("p", { class: "reply" }, askReply(a)),
     fl ? h("p", { class: "filed" }, "Filed in ", homeLink(fl), fmt(a.filed) ? ", " + fmt(a.filed) : "") : null];
 }
 // The owner's reply, nested in its thread, with the answer to it after it.
-function askMine(r) {
+function askMine(r, word) {
   const answered = askReply(r);
   return [h("div", { class: "myreply", id: r.id },
     h("p", { class: "lhead" }, answered ? null : glyph("wait"), h("span", {}, "Your reply" + (fmt(r.at) ? ", " + fmt(r.at) : "")), answered || !validT(r.at) ? null : h("span", {}, waited(r.at))),
-    h("p", { class: "reply" }, r.text), answered ? null : h("p", { class: "astate" }, ...askWaitWords(r))), ...(answered ? askAnswer(r) : [])];
+    h("p", { class: "reply" }, r.text), answered ? null : h("p", { class: "astate" }, ...askWaitWords(r))), ...(answered ? askAnswer(r, word) : [])];
 }
 // A reply that waits, or has a new answer, shows under its folded thread, outside the fold.
 function askFoldedMine(r) {
@@ -2857,7 +2917,7 @@ const restoreAsk = (k) => writeDismissed(k, null);
 function askReplyEnd(t, dl) {
   const k = t.id;
   return h("div", { class: "replyend", "data-end": k }, askRowLine(t), repOf(k).open ? replyForm(k)
-    : h("div", { class: "endrow" }, h("button", { class: "btn alt replybtn", type: "button", id: "reply-" + k, "aria-expanded": "false", "aria-controls": "rf-" + k, "data-ask": k, onclick: () => openReply(k) }, "Reply"),
+    : h("div", { class: "endrow" }, replyBtn(k),
       ...(dl && askRead(t) ? [restoreBtn(t, true)] : dismissBtns(t))));
 }
 // dl: the row is drawn in the read list. It stays folded until pressed, and its side press is Mark unread.
@@ -2888,12 +2948,13 @@ function askItem(t, dl) {
     answered ? null : (validT(t.at) ? h("span", {}, waited(t.at)) : null),
     latest && askFresh(latest) ? h("span", { class: "newmark" }, "New answer") : null,
     answered ? h("button", { class: "morebtn", type: "button", "aria-expanded": "true", "data-ask": t.id, onclick: press }, "Fold") : null);
-  const body = [...(answered ? askAnswer(t) : []), ...t.reps.flatMap(askMine)];
+  const body = [...(answered ? askAnswer(t) : []), ...t.reps.flatMap((r) => askMine(r))];
   const fresh = latest && askFresh(latest);
-  return h("li", { class: "askc", id: "row-" + k, "data-new": fresh ? k + "@" + latest.answered : null }, head, t.orphan ? h("p", { class: "reline" }, "Re: an ask not on this page") : null, h("p", { class: "atext" }, t.text),
+  return h("li", { class: "askc", id: "row-" + k, "data-new": fresh ? k + "@" + latest.answered : null }, head, t.itemGone ? h("p", { class: "reline" }, "Re: an item no longer on this page") : t.orphan ? h("p", { class: "reline" }, "Re: an ask not on this page") : null, h("p", { class: "atext" }, t.text),
     answered ? null : h("p", { class: "astate" }, ...askWaitWords(t)), body.length ? h("div", { class: "thread" }, body) : null, latest ? askReplyEnd(t, dl) : null);
 }
-function renderAsks() { renderAskForm(); renderStack(); renderAskList(); renderRail(); }
+// An item's reply records show in its card, so the cards are drawn with the list (a card that did not change is kept).
+function renderAsks() { renderAskForm(); renderStack(); renderAskList(); render(); }
 
 // Typing, Add to list and Send clear the last result: a note, a result line that is not a count, a count that has ended, the words to select.
 // A reply's result line is not the Ask box's: it stays until Send ask or the next Reply press.
@@ -2920,9 +2981,9 @@ async function sendAsk(rk) {
   if (!state.db || s.busy || (s.sent && (undoLeft(s.sent) > 0 || s.sent.busy))) return;
   let batch;
   if (rp) {
-    const t = threadOf(rk), re = t && askLatest(t), text = rp.text.trim();
-    if (!re || !text || text.length > ASK_MAX) { syncReplyForms(); return; } // its hint says why; the words stay in the box
-    batch = [{ text, re: re.id, by: askOwner(re) }];
+    const it = itemOfKey(rk), t = it ? null : threadOf(rk), re = t && askLatest(t), text = rp.text.trim();
+    if (!(it || re) || !text || text.length > ASK_MAX) { syncReplyForms(); return; } // its hint says why; the words stay in the box
+    batch = [it ? { text, item: it.id, n: it.n, by: plain(it.owner) } : { text, re: re.id, by: askOwner(re) }];
   } else {
     commitEdits();
     const text = box.value.trim();
@@ -2942,10 +3003,11 @@ async function sendAsk(rk) {
   for (const r of batch) {
     const id = askId(), body = { id, text: r.text, at };
     if (r.re) body.re = r.re;
+    if (r.item) body.item = r.item;
     try { await state.db.collection("asks").doc(id).set(body); }
     catch (e) { delete r.state; r.err = (e && e.code) || "error"; renderStack(); continue; }
     (s.map = s.map || {})[id] = body;
-    r.state = "saved"; wrote.push({ id, text: r.text, re: r.re, by: r.by }); saveAskStack(); renderStack(); // kept at once, so a reload now does not write this ask again
+    r.state = "saved"; wrote.push({ id, text: r.text, re: r.re, item: r.item, n: r.n, by: r.by }); saveAskStack(); renderStack(); // kept at once, so a reload now does not write this ask again
   }
   s.stack = s.stack.filter((r) => r.state !== "saved");
   s.busy = false; s.busyN = 0; saveAskStack(); clearInterval(askTimer);
@@ -2963,7 +3025,7 @@ async function sendAsk(rk) {
   if (!sent) return;
   const cut = (t) => { const c = plain(t); return c.slice(0, ASK_NOTICE) + (c.length > ASK_NOTICE ? "…" : ""); };
   const w0 = wrote[0];
-  const note = rp ? "Replied on the waiting page. Writer: " + askWriter() + ". Ask " + w0.id + " re " + w0.re + ", answered by " + plain(w0.by) + ": " + cut(w0.text) + "."
+  const note = rp ? "Replied on the waiting page. Writer: " + askWriter() + ". Ask " + w0.id + (w0.item ? " on item No. " + w0.n + ", owned by " : " re " + w0.re + ", answered by ") + plain(w0.by) + ": " + cut(w0.text) + "."
     : "Asked on the waiting page. Writer: " + askWriter() + ". " + (wrote.length === 1 ? "Ask " + w0.id + ": " + cut(w0.text) + "." : wrote.length + " asks: " + wrote.map((w) => w.id + ": " + cut(w.text)).join("; ") + ".");
   const told = await notifyClaude(fitBytes(note), can);
   if (s.sent === sent) { sent.told = told === true ? TOLD : NOT_TOLD(told); renderLine(); }
@@ -3201,6 +3263,8 @@ function render() {
   $("dCount").textContent = nd || ""; $("tabD").hidden = !state.items.some((i) => designsOf(i).length);
   // The count box has a fixed width, so a count that grows moves no tab. It stays empty until the items load.
   $("qCount").textContent = state.loaded ? String(state.items.filter((i) => !isAnswered(i)).length) : "";
+  // A card built here may hold a reply box or a line of Send reply, which the Asks code sets.
+  syncReplyForms(); renderLine();
 }
 
 render(); renderAsks();
@@ -3218,6 +3282,7 @@ render(); renderAsks();
     // The lines read at load are worked out once, so a mark this visit leaves its line in place until the next load.
     if (state.hidItems === null) state.hidItems = new Set(all.filter(isRead).map((i) => i.id));
     feed.items = true; feed.all = all; freezeSeen(); freezeSunk(); render();
+    renderAskList(); // an item reply is hidden from the list while its item is on the page
   }, () => {});
   db.collection("answers").onSnapshot((s) => { state.answers = map(s); feed.answers = true; freezeSeen(); freezeSunk(); render(); }, () => {});
   db.collection("groups").onSnapshot((s) => { state.groups = map(s); render(); }, () => {});

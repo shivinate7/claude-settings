@@ -11,7 +11,7 @@ Owner pick A for R42 part 2 (per-lane merge). Rule M3, per lane: the head must a
 
 Why: branch protection on `main` has `strict` false, so GitHub reports BEHIND only when `strict` is on (`main-branch-protection`). The tool's own reads are the gate.
 
-Residual risk: a clean merge can still break a suite. Main's run after the merge finds it. A red main is then held under the red-main rule (`git-red-main-reverts`) until its revert's run is green.
+Residual risk: a clean merge can still break a suite. Main's run after the merge finds it. A red main is then held under the red-main rule (`git-red-main-reverts`) until its revert merges. Merges then resume, with the revert's own run still going.
 
 Kind: process
 Home: merge/merge.py

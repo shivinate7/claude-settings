@@ -164,6 +164,14 @@ from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the req
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 
+def revert_rule():
+    """The one home of the revert rule (actions/ci-alarm/revert_rule.py, beside events.json; the CI alarm reads it through the API): REVERT_LINE, revert_map and net_reverted.
+    Loaded when a read needs it, not at the top, as clear_rule is: a copy of this file alone still loads. A missing file raises ImportError, which base_state reads as unknown and refuse_dropped_lane as a refused read."""
+    if os.path.dirname(ALARM_EVENTS) not in sys.path:
+        sys.path.append(os.path.dirname(ALARM_EVENTS))
+    import revert_rule as rule
+    return rule
+
 class Stop(Exception):
     """A refusal. The message is the whole report."""
 
@@ -453,7 +461,7 @@ def lift_message(lifts):
 
 def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None):
     """The shared silent-undo lint (lint/check_silent_undo.py), run on the branch before anything is pushed.
-    A finding refuses. An unreadable history refuses too, unless the run has the reason flag
+    A finding refuses, except a lane undo line: it is report-only, printed and left out of the verdict. An unreadable history refuses too, unless the run has the reason flag
     --undo-check-unknown-ok "<reason>", which Claude may type with a reason: that is the way out when the check cannot run (octopus merge,
     git older than 2.38, shallow clone). A lift is logged and returns its reason, for record_lift; it does not excuse a finding.
     An Unknown that carries findings (an octopus merge the check could not read, beside a note it saw revived) refuses as Dropped,
@@ -492,15 +500,23 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_h
         res = UNDO_MEMO[key] = e
     if isinstance(res, Exception):  # an Unknown; the scanner is never asked for its class here
         e = res
-        if e.problems:  # an octopus merge the check could not read, and a finding it made anyway: the flag lifts only the first
+        fails = undo.failing(e.problems)  # a report-only line never forces a refusal
+        for p in e.problems:
+            if p not in fails:
+                say("merge: " + p)
+        if fails:  # an octopus merge the check could not read, and a finding it made anyway: the flag lifts only the first
             for n in e.notes:
                 say("merge: " + n)
-            raise Dropped("the branch silently undoes earlier work:\n  " + "\n  ".join(e.problems) + f"\nThe check also could not read the whole history: {e}\nPut the work back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message. {UNDO_FLAG} does not lift a finding. {UNDO_CITE}")
+            raise Dropped("the branch silently undoes earlier work:\n  " + "\n  ".join(fails) + f"\nThe check also could not read the whole history: {e}\nPut the work back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message. {UNDO_FLAG} does not lift a finding. {UNDO_CITE}")
         if unknown_ok.strip():
             say(f"merge: silent-undo check UNKNOWN ({e}). {UNDO_FLAG}, reason: {unknown_ok.strip()}")
             return unknown_ok.strip()
         raise Liftable(f"silent-undo check could not read the history: {e}\nIf the cause is known, run again with the reason flag {UNDO_FLAG} \"<reason>\". {UNDO_CITE}")
     problems, notes = res
+    for p in problems:
+        if p.startswith(undo.REPORT_ONLY):
+            say("merge: " + p)
+    problems = undo.failing(problems)
     for n in notes:
         say("merge: " + n)
     if problems:
@@ -1426,8 +1442,10 @@ class Host:
 
     BASE_EVENTS = json.loads(pathlib.Path(ALARM_EVENTS).read_text())  # event -> group; the runs of the base's own commits, a dispatch being the tool's own remedy. The groups judge apart, except for the cross-group clears in base_state (a failed run, a cancelled run). The CI alarm reads the same file and the failed-run clear; a cancelled run never alarms
 
+    base_root = None  # the checkout whose origin/<base> the revert clear reads; base_verdict sets it, as `gh`'s cwd (self.cwd) may be none and base_state keeps the two-argument shape every host shares
+
     def base_state(self, base, flows):
-        """-> (verdict, detail) for the red-main check (decision no-merge-onto-red-main): green, red, or unknown.
+        """-> (verdict, detail) for the red-main check (decision no-merge-onto-red-main): green, red, or unknown. The detail of a green verdict names each red run a revert cleared (below), else it is empty.
         Judged: per workflow file in `flows` (the paths on the base) and per event group (BASE_EVENTS maps an event to its group; an event
         not in it is never judged), the newest completed run on `base`, or a re-run in flight (not completed, `run_attempt` above 1) when one is newer: it
         makes the verdict unknown, never green, since the older run under it is the one being re-run. A dispatch clears an older failed push (one group). A failed run R
@@ -1449,11 +1467,16 @@ class Host:
         unknown. Any other run that did not succeed is red (a broken workflow file runs no job).
         A cancelled run with no red job that nothing clears keeps its line, in the unknown detail and beside a red verdict. It is named with `gh run rerun <id>` only when its
         `head_sha` is the head_sha of the newest run on the page read (any status, any event in BASE_EVENTS, from the unfiltered list): runs on the base start at its head, and a re-run tests the run's own commit. Never named for a run with a red job or a re-run in flight.
+        The revert clear (the one home of the rule): a red run R, one the verdict would list as red, is cleared when a commit reachable from origin/<base> other than R's head_sha carries
+        `This reverts commit <R's head_sha>` (40 hex) in its message and is not net-reverted (revert_rule.net_reverted, the net-revert read of read_lanes). Each red run needs its own revert.
+        The revert's own run does not matter while it is absent, queued or in progress; a completed red run of it is a red run of its own. A cancelled run with no red job, a re-run in flight and a
+        failed read: those stay unknown. The revert read is one `git log` over the whole origin/<base> history (the ref base_workflows reads) per call, made only when a red run exists, so its cost grows with that history. Red runs that share one head_sha share one revert, since the revert names the head; a failed read is unknown.
         A red verdict's detail also holds breaking_line's segment for each red run judged (one per file and group), the head group's first: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).
         One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A failed read is unknown."""
         try:
             if os.path.dirname(ALARM_EVENTS) not in sys.path:
                 sys.path.insert(0, os.path.dirname(ALARM_EVENTS))
+            rule = revert_rule()  # loaded here, not at the top: a missing actions/ci-alarm/revert_rule.py is unknown (ImportError, caught below)
             import clear_rule  # actions/ci-alarm/clear_rule.py, beside events.json: the one home of the failed-run clear, which the CI alarm calls too. Loaded here, not at the top, as the records generator is not: a copy of this file alone still loads
             c, out = self.api("actions/runs", fields={"branch": base, "per_page": 50})
             if c:
@@ -1482,6 +1505,27 @@ class Host:
                         raise Stop(f"reading {key[0]} at {str(key[1])[:9]} from GitHub failed, so the clear is unknown (decision no-merge-onto-red-main): {out}")
                     texts[key] = out
                 return texts[key]
+
+            cleared_by_revert = []  # one line per red run a revert cleared, for the green verdict's detail
+            reverts = {}
+
+            def revert_of(r):  # the live revert of r's head on origin/<base>, or None. Every revert line of the base's history is read once, so a head git does not hold only finds none
+                if "recs" not in reverts:
+                    if not self.base_root:
+                        raise Stop("no checkout to read the reverts on the base with, so the revert clear is unknown (decision no-merge-onto-red-main)")
+                    try:
+                        reverts["recs"] = read_log(self.base_root, "-F", "--grep=This reverts commit", f"origin/{base}")
+                    except (ValueError, subprocess.TimeoutExpired, OSError) as e:
+                        raise Stop(f"reading the reverts on origin/{base} failed, so the revert clear is unknown (decision no-merge-onto-red-main): {e}")
+                    reverts["undone"] = rule.revert_map(reverts["recs"])
+                head = r.get("head_sha")
+                return next((h for h, _, body in reverts["recs"] if head and h != head and head in rule.REVERT_LINE.findall(body) and not rule.net_reverted(reverts["undone"], h)), None)
+
+            def reverted(r):  # True, with a line for the green detail, when a live revert of the red run r is on the base
+                rev = revert_of(r)
+                if rev:
+                    cleared_by_revert.append(f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} is cleared by its revert {rev[:9]} on {base}")
+                return bool(rev)
 
             def cleared(r, cancelled=False):
                 """True when a newer, newest-of-its-group, successful run of another group of r's file passed what r needs. Call it only for an r with a red job,
@@ -1517,7 +1561,7 @@ class Host:
                 jobs = [j for j in self.classify(steps, [], self.ignore)[0] if "no check ran" not in j]
                 where = f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})"
                 if jobs:
-                    if not cleared(r):
+                    if not cleared(r) and not reverted(r):
                         red.append(f"{where}: " + "; ".join(jobs))
                         red_runs.append(r)
                 elif any(b.startswith("timed out") for rows in got.values() for b, _ in rows):
@@ -1526,7 +1570,7 @@ class Host:
                     if not cleared(r, cancelled=True):
                         cancelled.append(f"{where} {CANCELLED_NO_RED}" + (f". `{RERUN_REMEDY} {r['id']}` re-runs that run's own commit, which is the base's head"
                                                                         if r.get("head_sha") and r["head_sha"] == base_head else ""))
-                else:
+                elif not reverted(r):
                     red.append(f"{where} ended {r['conclusion']} with no red job")
                     red_runs.append(r)
             # One walk per red group (red_runs holds one run per file and group): a red nightly or a red run of another file never hides the
@@ -1537,7 +1581,7 @@ class Host:
             return "unknown", " ".join(str(e).split())
         if red:
             return "red", " | ".join(red + blame + cancelled)
-        return ("unknown", " | ".join(unknown + cancelled)) if unknown or cancelled else ("green", "")
+        return ("unknown", " | ".join(unknown + cancelled)) if unknown or cancelled else ("green", " | ".join(cleared_by_revert))
 
     def breaking_line(self, judged, newest_red):
         """The breaking merge of a red base (decision no-merge-onto-red-main, the revert route), read from the page base_state already read: -> a detail
@@ -2103,30 +2147,25 @@ def cut_local(root, branch, merged):
         c, out = git(root, "branch", "-D", branch)
         say(f"merge: {branch} here: " + ("deleted." if not c else "not deleted: " + out))
 
+def read_log(wt, *args):
+    """-> [(sha, parents, body)] from `git log <args>`, newest first. A read that fails raises ValueError."""
+    c, out = git(wt, "log", "--format=%H%x01%P%x01%B%x00", *args)
+    if c:
+        raise ValueError("git log failed: " + (out.splitlines() or ["?"])[-1])
+    recs = (rec.strip().split("\x01", 2) for rec in out.split("\0"))
+    return [tuple(parts) for parts in recs if len(parts) == 3]
+
 def read_lanes(wt, base_ref, sha):
     """-> (tips, dropped). tips: parents 2+ of each merge commit in base_ref..sha, less any already on base_ref
     (a merge of the base into the branch has a base commit as its second parent). dropped: the tips whose every such
-    merge is net-reverted on the batch: a "This reverts commit <sha>." message names it, and a revert of that revert
-    undoes it, so an odd chain is a revert. A read that fails raises."""
-    c, out = git(wt, "log", "--format=%H%x01%P%x01%B%x00", f"{base_ref}..{sha}")
-    if c:
-        raise ValueError("git log failed: " + (out.splitlines() or ["?"])[-1])
-    undone, took = {}, {}  # commit -> the commit that reverts it; tip -> the merges that took it in
-    for rec in out.split("\0"):
-        parts = rec.strip().split("\x01", 2)
-        if len(parts) != 3:
-            continue
-        h, parents, body = parts
-        for r in re.findall(r"This reverts commit ([0-9a-f]{40})", body):
-            undone[r] = h
+    merge is net-reverted on the batch (net_reverted). A read that fails raises."""
+    rule = revert_rule()
+    recs = read_log(wt, f"{base_ref}..{sha}")
+    undone = rule.revert_map(recs)
+    took = {}  # tip -> the merges that took it in
+    for h, parents, _ in recs:
         for t in parents.split()[1:]:
             took.setdefault(t, []).append(h)
-    def reverted(h):
-        n, seen = 0, set()
-        while h in undone and h not in seen:
-            seen.add(h)
-            h, n = undone[h], n + 1
-        return n % 2 == 1
     tips = []
     for t in took:
         c = ancestor(wt, t, base_ref)
@@ -2135,7 +2174,7 @@ def read_lanes(wt, base_ref, sha):
                              "`git fetch --unshallow`)")
         if not c:
             tips.append(t)
-    return tips, {t for t in tips if all(reverted(h) for h in took[t])}
+    return tips, {t for t in tips if all(rule.net_reverted(undone, h) for h in took[t])}
 
 def refuse_dropped_lane(wt, base_ref, sha, unknown_ok=""):
     """A lane dropped by a revert of its merge puts a removal commit on the base. When that lane later merges the base,
@@ -2951,11 +2990,12 @@ def ignore_checks(cfg):
     return out
 
 def base_verdict(root, host, base):
-    """host.base_state over the workflow files on origin/<base>. A failed read of them is unknown."""
+    """host.base_state over the workflow files on origin/<base>. A failed read of them is unknown. It sets host.base_root to `root` first, because base_state's revert clear runs git on origin/<base> and the host's own cwd may be none."""
     try:
         flows = base_workflows(root, f"origin/{base}")
     except (Stop, subprocess.TimeoutExpired, OSError) as e:
         return "unknown", " ".join(str(e).split())
+    host.base_root = root
     return host.base_state(base, flows)
 
 def red_base(root, host, base, red_ok=""):
@@ -2963,6 +3003,8 @@ def red_base(root, host, base, red_ok=""):
     --base-red-ok "<reason>" is a reason flag, as --undo-check-unknown-ok is, and Claude may type it with a reason: the way out for the batch that carries the fix (a revert PR of the breaking merge among them), or for an unknown read whose cause the reason names. A lift is logged and returns its reason, for record_lift."""
     verdict, detail = base_verdict(root, host, base)
     if verdict == "green":
+        if detail:
+            say(f"merge: {base} has a red run that a revert cleared: {detail}. {RED_CITE}")
         return
     rerun = verdict == "unknown" and RERUN_IN_FLIGHT in detail
     cancelled = verdict == "unknown" and not rerun and CANCELLED_NO_RED in detail
@@ -2977,7 +3019,7 @@ def red_base(root, host, base, red_ok=""):
     carries = f"if this batch carries the fix, or the unknown read has a known cause, run again with the reason flag {RED_FLAG} \"<reason>\"."
     if broke:  # the revert PR is the batch that carries the fix: its own Drops-lines trailer covers each file the silent-undo check names, and the reason flag lifts no silent-undo finding
         way = (f"Open a revert PR for the breaking merge named above (`git revert -m 1 <commit>` for a merge commit) and merge it with the reason flag {RED_FLAG} \"<reason>\". "
-               f"Merges resume once the revert's run on main is green: until then its run is pending and the breaking red stays the newest. "
+               f"Merges resume once the revert merges: once it is on main it clears the breaking run, whatever its own run is doing. A completed red run of the revert needs its own revert. "
                f"The revert PR needs a Drops-lines trailer for each file the silent-undo check names (a revert of a merge that edits and adds files is flagged \"whole file restored\" and \"file deleted\"), "
                f"and so does a re-land that reverts the revert; the reason flag {RED_FLAG} does not lift that check. "
                f"Or, {carries}")
@@ -3095,7 +3137,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     say(f"merge: PREVIEW for #{n} ({info['branch']} at {info['head'][:9]}). Nothing was pressed.",
         "  lock:   " + (holder_text(base, held, lock.now()) if held and held[1] > lock.now() else "free"),
         f"  head checks: {host.head_state(n)}",
-        f"  {base} run: {verdict}" + (f": {detail}. --confirm refuses it unless --base-red-ok \"<reason>\" is given." if verdict != "green" else ""),
+        f"  {base} run: {verdict}" + (f": {detail}. --confirm refuses it unless --base-red-ok \"<reason>\" is given." if verdict != "green" else f": {detail}" if detail else ""),
         "  base:   " + (current or f"holds {base}'s tip"),
         "  claim:  " + (f"already claimed ({resumed}); " + ((f"run `merge {n} --confirm` on the draft first: it runs the ready checks (" + ", ".join(m["readyChecks"]) + "), then refuses this head, so mark it ready by hand after they pass (route pr-ready-mcp-cloud in cloud)"
                          if m.get("readyChecks") else "--confirm on the draft refuses this head, so mark it ready by hand (route pr-ready-mcp-cloud in cloud)") if info["draft"] else "a run resumes at the wait")
@@ -3733,6 +3775,40 @@ def clean_merges_after(h, head, live, base=None, claims=None):
         sha = parents[0]
     return sha == head  # the head after the last commit the walk may read: REVIEW_MERGE_WALK commits reach it, one more does not
 
+def clean_merges_pushed(root, source, head, bases):
+    """True when the commits a push of `source` adds above the record's `head` are only clean merges of main, read from the local checkout `root`
+    (the push hook's walk; clean_merges_after is the same walk on the host's API reads). `source` is the pushed revision, `bases` the full refs that
+    stand for main (such as refs/remotes/origin/main; a short name could be shadowed by a local branch). The walk follows first parents from `source` and must reach `head` within REVIEW_MERGE_WALK commits.
+    Each commit walked has exactly two parents, a second parent that is an ancestor of one of `bases`, and git's clean merge of its parents
+    (merge_tree) as its tree. A `source` that is `head` walks no commit and is True. A one-parent commit, a merge of three, a merge of a branch
+    main lacks, an edited or conflicted merge, a longer walk, a head never reached, and every read that cannot answer (a commit or ref the
+    checkout lacks, a shallow cut, a git that will not run) are False, never True: the caller refuses on False. Cost: one `git rev-parse`; per
+    commit walked one `git cat-file` read, one `git merge-base --is-ancestor` per base tried (the push hook passes one), one merge_tree. The
+    caller starts none of it unless the fix-branch refusal would fire."""
+    c, sha = git(root, "rev-parse", "--verify", "-q", f"{source}^{{commit}}")
+    if c or not head:
+        return False
+    for _ in range(REVIEW_MERGE_WALK):
+        if sha == head:
+            return True
+        c, text = git(root, "cat-file", "commit", sha)
+        if c:
+            return False
+        parents, tree = [], None
+        for line in text.split("\n\n", 1)[0].split("\n"):  # the header lines, before the message
+            key, _, value = line.partition(" ")
+            if key == "parent":
+                parents.append(value)
+            elif key == "tree":
+                tree = value
+        if len(parents) != 2 or not tree or not any(ancestor(root, parents[1], base) is True for base in bases):
+            return False
+        state, merged, _files = merge_tree(root, *parents)
+        if state != "clean" or merged != tree:
+            return False
+        sha = parents[0]
+    return sha == head  # as in clean_merges_after: REVIEW_MERGE_WALK commits reach the head, one more does not
+
 REVIEW_SURVIVAL_UNKNOWN = "whether only clean merges of main follow the reviewed head is unknown"  # the why of a stale record whose clean-merge read could not run
 
 def live_review_state(h, rec, live, main, claims=None):
@@ -4361,7 +4437,7 @@ def build_parser():
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
-    p.add_argument("--fix-check", type=fix_verifier_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the `Fix check:` line, after the rounds; HEAD is the reviewed head the fix diff starts from; a fix after a merge of main also qualifies: the newest review log reads done with a PASS Fix check line, and the head is a merge of the base into that Head with no edit beyond git's own merge")
+    p.add_argument("--fix-check", type=fix_verifier_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the `Fix check:` line, after the rounds, which need --round; HEAD is the reviewed head the fix diff starts from; a fix after a merge of main also qualifies: the newest review log reads done with a PASS Fix check line, and the head is a merge of the base into that Head with no edit beyond git's own merge")
     p.add_argument("--grant", type=grant_arg, metavar="TEXT", help="with --review-record: the owner's grant of round 4, `#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT`, with PR the pull request's own number; the rounds must then reach round 4")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant)")
     p.add_argument("--touches", action="store_true", help="list the open pull requests that touch a failing case or a named file; takes no lock, merges and posts nothing")
@@ -4444,6 +4520,8 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--kind docs-only means no guard or check, so --guard must be no")
         if a.grant and grant_pr(a.grant)[0] != int(a.pr):
             p.error("--grant: the PR in the grant must be the pull request number")
+        if a.fix_check and not a.round:  # with no round the record reads open ("no round is recorded"), whatever the fix verifier says
+            p.error("--fix-check: give the rounds the fix verifier follows with --round, or the record reads open")
         if a.fix_check and a.fix_check[0] == a.head:
             p.error("--fix-check: the reviewed head must differ from --head, or the fix diff is empty")
         # The reviewer row (decision agent-model-cap): every fix check runs Sonnet (owner item 444 a), and a later-round reviewer runs Sonnet;

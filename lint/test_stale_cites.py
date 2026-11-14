@@ -455,7 +455,7 @@ class MoveTests(StaleCase):
     def test_disable_line_names_its_code_and_no_other(self):
         rows = [
             ("- refusal list in `hooks/lib.mjs` <!-- ste-disable-line STALE001 -->", False),
-            ("- refusal list in `hooks/lib.mjs` <!-- ste-disable-line STE001 -->", True),
+            ("- refusal list in `hooks/lib.mjs` <!-- ste-disable-line STE011 -->", True),
             ("- refusal list in `hooks/lib.mjs`", True),
         ]
         text, lines = rows_text(rows)
@@ -2880,6 +2880,37 @@ class CitedExcerptTests(unittest.TestCase):
         text = "# def target moved below\n\ndef target():\n    return 1\n"
         shown = self.stale.cited_excerpt("test lint/widget.py::target", text)
         self.assertEqual(shown.split("\n")[0], "3: def target():", "the excerpt starts at a comment that names the def, not at the def")
+
+    BIG = "".join("x%d = %d\n" % (n, n) for n in range(60)) + "\n\ndef deep():\n    return 1\n"
+
+    def test_a_read_cite_to_a_symbol_below_line_40_shows_that_symbol(self):
+        shown = self.stale.cited_excerpt("read lint/widget.py::deep", self.BIG)
+        self.assertEqual(shown.split("\n")[0], "63: def deep():", "a read path::name cite shows %r, want the def of its name" % shown.split("\n")[0])
+        self.assertEqual(shown.split("\n")[1], "64:     return 1", "a read path::name cite stops at the def line; the body is not shown")
+
+    def test_a_read_symbol_excerpt_is_capped_at_the_limit(self):
+        text = "def big():\n" + "".join("    v%d = 1\n" % n for n in range(80))
+        shown = self.stale.cited_excerpt("read lint/widget.py::big", text, limit=10)
+        self.assertEqual(len(shown.split("\n")), 10, "a read symbol excerpt is not the limit's %d rows" % 10)
+
+    def test_a_read_cite_names_the_symbol_on_its_own_path_word(self):
+        shown = self.stale.cited_excerpt("read lint/a.py, lint/b.py::deep", self.BIG)
+        self.assertEqual(shown.split("\n")[0], "1: x0 = 0", "a symbol on another path word was looked up in the first file")
+
+    def test_a_read_cite_to_a_class_member_shows_the_member(self):
+        text = "".join("y%d = 1\n" % n for n in range(50)) + "class K:\n    def go(self):\n        return 1\n"
+        shown = self.stale.cited_excerpt("read lint/widget.py::K::go", text)
+        self.assertEqual(shown.split("\n")[0], "52:     def go(self):", "a read cite of Class::name misses the member")
+        self.assertEqual(shown.split("\n")[1], "53:         return 1", "a read cite of Class::name stops at the def line")
+
+    def test_a_read_cite_to_a_symbol_not_found_reads_unknown_never_the_file_head(self):
+        shown = self.stale.cited_excerpt("read lint/widget.py::missing", self.BIG)
+        self.assertIn("unknown", shown, "a symbol that is not found must read unknown")
+        self.assertNotIn("x0 = 0", shown, "a symbol that is not found showed the file head")
+
+    def test_a_read_cite_with_a_line_range_still_gives_those_lines(self):
+        shown = self.stale.cited_excerpt("read lint/widget.py:3-4", self.BIG)
+        self.assertEqual(shown, "3: x2 = 2\n4: x3 = 3", "a line range moved when the symbol form was added")
 
     def test_a_cite_that_names_no_backing_path_gives_none(self):
         shown = self.stale.cited_excerpt("read the top of the file", self.TEXT)

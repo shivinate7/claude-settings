@@ -19,6 +19,9 @@ ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
 ARCHIVE_RULE = "lane-closes-after-records"
 ARCHIVE_NAMED = ("archive_session",)  # the refusal never names the tool, so it never invites the same act
 ARCHIVE_STEER = ("get_session", "alone", ("retry", "Retry"))  # the remedy: get_session on the target alone, then retry
+ARCHIVE_READ_PIN = ("could not be read",)  # the reason of every unreadable read
+ARCHIVE_RETRY_PIN = ("Retry once gh answers",)  # the remedy of an unreadable read that is no 403 or 404: retry, and name no act
+ARCHIVE_NO_ACT = ("add_repo",)  # a refusal that names no act to add a repo
 ARCHIVE_OWNER = "5c2e7d1a-0000-4000-8000-00000000a7c1"  # the calling session's payload id, which an override names
 AGENT_NO_REMOTE = "agent-no-remote-tools"  # the rule id the refusal names; the agent-remote-tools section reads it too
 
@@ -84,7 +87,8 @@ archive_refuse("an own lane record with no record of the target is refused, and 
 # A read that cannot run refuses: a broken gh, and a missing gh.
 archive_refuse("a lane whose open pull requests cannot be read is refused", role_path("archive-lane"),
                fake_gh_path(GHBROKEN))
-archive_refuse("a lane with no gh on the path is refused", role_path("archive-lane"), GHNONE_PATH)
+archive_refuse("a lane with no gh on the path is refused, and says retry: no act to add a repo",
+               role_path("archive-lane"), GHNONE_PATH, carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN, lacks=ARCHIVE_NO_ACT)
 # Every page of the open list is read: the slug's pull request sits on page two.
 archive_refuse("a lane whose slug pull request is on page two of the open list is refused",
                role_path("archive-lane"), fake_gh_path(ARCHPAGE))
@@ -98,7 +102,84 @@ archive_refuse("a payload with no transcript_path is refused", None, fake_gh_pat
 # The two refusal reasons are told apart by a fragment each: the open-pull-request reason says "still open", and the
 # read-failure reason says "could not be read". A case pins its own reason and not the other's.
 ARCHIVE_OPEN_PIN = ("still open",)
-ARCHIVE_READ_PIN = ("could not be read",)
+
+
+def add_repo_pin(repo):
+    """The fragment a 403 or 404 on the read of `repo` names: the act, then the retry. The reason keeps ARCHIVE_READ_PIN too."""
+    return "add_repo " + repo + " (read), then retry"
+
+
+# Only a 403 or 404 on a repo's read names add_repo for that repo. Every other failure (a 500, a timeout, a refused
+# connection, no gh, text that is not JSON, a shape the read does not know) says to retry, and names no act.
+archive_refuse("a lane whose open pull requests answer non-JSON names no add_repo, and says retry",
+               role_path("archive-lane"), fake_gh_path(GHBROKEN), carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN,
+               lacks=ARCHIVE_NO_ACT)
+# The branch arm: q_max's pull request list for the branch is a server error, and the refusal names no act.
+archive_refuse("a lane whose branch pull request list in q_max is a server error names no add_repo, and says retry",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_PULLS500),
+               carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN, lacks=ARCHIVE_NO_ACT)
+archive_refuse("a lane whose q_max default-branch read is a server error names no add_repo, and says retry",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_REPO500),
+               carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN, lacks=ARCHIVE_NO_ACT)
+# Two cs-repo tags, claude-settings first and q_max second. Each case fails one repo's open-list read with a 500.
+archive_refuse("a lane whose second cs-repo open pull request list is a server error names no add_repo, and says retry",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_OPENLIST_QMAX),
+               carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN, lacks=ARCHIVE_NO_ACT)
+archive_refuse("a lane whose first cs-repo open pull request list is a server error names no add_repo, and says retry",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_OPENLIST_SETTINGS),
+               carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN, lacks=ARCHIVE_NO_ACT)
+# A 403 or 404 on a repo's read names add_repo for that repo, and for that repo only. An unattached repo answers 403.
+archive_refuse("a lane whose second cs-repo open pull request list answers 403 names add_repo for q_max, not claude-settings",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_OPENLIST403_QMAX),
+               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,))
+# A rate limit answers 403 too, with gh's rate-limit text, and it is no answer about the repo: the refusal names no add_repo.
+# The control is the 403 above, the same repo and the same read; only the text differs, so add_repo is what the text decides.
+archive_refuse("a lane whose second cs-repo open pull request list answers a rate-limit 403 names no add_repo, and says retry",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_OPENLIST_RATELIMIT_QMAX),
+               carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN, lacks=ARCHIVE_NO_ACT)
+archive_refuse("a lane whose first cs-repo open pull request list answers 404 names add_repo for claude-settings, not q_max",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_OPENLIST404_SETTINGS),
+               carries=(add_repo_pin(ARCH_REPO_SETTINGS),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_QMAX,))
+archive_refuse("a lane whose q_max pull request list for its branch answers 403 names add_repo for q_max, not claude-settings",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_PULLS403),
+               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,))
+archive_refuse("a lane whose q_max pull request list for its branch answers 404 names add_repo for q_max, not claude-settings",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_PULLS404),
+               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,))
+archive_refuse("a lane whose q_max default-branch read answers 403 names add_repo for q_max, not claude-settings",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_REPO403),
+               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,))
+archive_refuse("a lane whose q_max compare of its branch answers 403 names add_repo for q_max, not claude-settings",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_COMPARE403),
+               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,))
+# The refusals that are not an unreadable read name no repo to add: an open pull request, no record, no cs-repo tag.
+archive_refuse("a lane with an open pull request names no add_repo", role_path("archive-lane"), fake_gh_path(ARCHOPEN),
+               carries=ARCHIVE_OPEN_PIN, lacks=("add_repo",))
+archive_refuse("a target with no record names no add_repo", role_path("archive-no-target"), fake_gh_path(ARCHCLOSED),
+               carries=ARCHIVE_STEER, lacks=("add_repo",))
+archive_refuse("a lane with no cs-repo tag names no add_repo: it has no repo to add", role_path("archive-lane-no-repo"),
+               fake_gh_path(ARCHOPEN), carries=("no cs-step tag or no cs-repo tag",), lacks=("add_repo",))
+# The merge tool does not load. The guard copy has no merge/ beside it, and its config directory has no rules file, so neither
+# place the tool is looked for holds it. This is the copy merge_tool_missing_case (s30130) builds. The lane has two cs-repo tags,
+# so a refusal that named every tag would show both: the refusal says retry, and names no act and no tag.
+ARCHIVE_NOTOOL_GUARD = os.path.join(ROOT, "archive-notool", "hooks", "guard.py")  # the copy the case runs in place of this repo's guard
+ARCHIVE_NOTOOL_CFG = os.path.join(ROOT, "archive-notool", "cfg")  # the config directory, with no rules file
+ARCHIVE_TAG_PINS = ("cs-repo:", "cs-step:", "cs-build:")  # the prefixes of the lane's tags, which a refusal must not spell out
+
+
+def build_archive_notool():
+    """The guard copy and its empty config directory, built the first time a case names the copy."""
+    os.makedirs(os.path.dirname(ARCHIVE_NOTOOL_GUARD), exist_ok=True)
+    os.makedirs(ARCHIVE_NOTOOL_CFG, exist_ok=True)
+    copy_guard_family(os.path.dirname(ARCHIVE_NOTOOL_GUARD))
+
+
+lazy_fixture([ARCHIVE_NOTOOL_GUARD], build_archive_notool)
+add("lane-closes-after-records: a lane whose merge tool does not load is refused as unreadable, says retry, and names no act or tag",
+    "deny", rule=ARCHIVE_RULE, tool=ARCHIVE_TOOL, cwd=NOGIT,
+    lacks=ARCHIVE_NAMED + ARCHIVE_NO_ACT + ARCHIVE_TAG_PINS + (ARCH_REPO_SETTINGS, ARCH_REPO_QMAX),
+    carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN, transcript=role_path("archive-inc"), env=ROLE_ENV,
+    env_path=fake_gh_path(ARCHOPEN), session_id=ROLE_OTHER, guard=ARCHIVE_NOTOOL_GUARD, config=ARCHIVE_NOTOOL_CFG)
 archive_allow("an open draft lane pull request whose head is behind main is allowed: its commits have landed",
               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_BEHIND))
 archive_allow("an open draft lane pull request whose head is identical to main is allowed: its commits have landed",
@@ -113,7 +194,8 @@ archive_refuse("an open draft lane pull request whose head diverged from main is
 archive_refuse("an open ready lane pull request whose head is behind main is refused: only a draft is released",
                role_path("archive-lane"), fake_gh_path(ARCHREADY_BEHIND), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
 archive_refuse("an open draft lane pull request whose containment read fails is refused, and the reason says the read failed",
-               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_READFAIL), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_OPEN_PIN)
+               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_READFAIL), carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN,
+               lacks=ARCHIVE_OPEN_PIN + ARCHIVE_NO_ACT)
 # A draft whose base is not the repo's default branch is not released, though its head is behind main. The default
 # branch is read from the row (base.repo.default_branch, main); the draft based on main above is the release case.
 # This refusal also holds on main, which refuses every open lane pull request. It pins the base check for the release.
@@ -166,14 +248,16 @@ archive_refuse("a lane whose branch has no pull request, while another branch of
 archive_refuse("a lane with two branches, the first on an open pull request and the second on none: refused for the second",
                role_path("archive-inc-two"), fake_gh_path(ARCHINC_OTHERPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
 archive_refuse("a lane whose branch compare in q_max is a server error: refused, and the reason says the branch read failed, not the open list",
-               role_path("archive-inc"), fake_gh_path(ARCHINC_COMPARE500), carries=ARCHIVE_READ_PIN,
-               lacks=ARCHIVE_READ_LACKS + ("open pull requests",))
+               role_path("archive-inc"), fake_gh_path(ARCHINC_COMPARE500), carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN,
+               lacks=ARCHIVE_READ_LACKS + ("open pull requests",) + ARCHIVE_NO_ACT)
 archive_refuse("a lane whose branch compare in q_max is a refused connection, not a 404: refused, and the reason says the read failed",
-               role_path("archive-inc"), fake_gh_path(ARCHINC_NETWORK), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
+               role_path("archive-inc"), fake_gh_path(ARCHINC_NETWORK), carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN,
+               lacks=ARCHIVE_READ_LACKS + ARCHIVE_NO_ACT)
 archive_refuse("a lane whose pull request list for its branch in q_max is a server error: refused, and the reason says the read failed",
                role_path("archive-inc"), fake_gh_path(ARCHINC_PULLS500), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
 archive_refuse("a lane whose pull request list for its branch in q_max is not JSON: refused, and the reason says the read failed",
-               role_path("archive-inc"), fake_gh_path(ARCHINC_PULLSJUNK), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
+               role_path("archive-inc"), fake_gh_path(ARCHINC_PULLSJUNK), carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN,
+               lacks=ARCHIVE_READ_LACKS + ARCHIVE_NO_ACT)
 archive_refuse("a lane whose q_max default branch cannot be read: refused, and the reason says the read failed",
                role_path("archive-inc"), fake_gh_path(ARCHINC_REPO500), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
 archive_refuse("a lane whose q_max default branch is trunk: its branch is judged against trunk, not main, and refused",
@@ -210,37 +294,46 @@ archive_refuse("a branch whose compare in q_max is diverged, on no pull request:
 # A source URL ending in .git names the same repo: its branch, ahead there on no pull request, refuses as it does without it.
 archive_refuse("a source URL ending in .git names its repo: a branch ahead there on no pull request is refused",
                role_path("archive-inc-source-git"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
-# A repo named only by a source whose own read answers 404 is unreadable, not skipped: the archive refuses as unreadable.
-archive_refuse("a sources-only repo whose own read answers 404 is refused, and the reason says the read failed",
-               role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_REPO404), carries=ARCHIVE_READ_PIN,
+# A repo named only by a source whose own read answers 404 is unreadable, not skipped: the archive refuses, and names add_repo
+# for that repo, since a 404 on the repo's read is one of the two answers that name the act.
+archive_refuse("a sources-only repo whose own read answers 404 is refused, and names add_repo for that repo",
+               role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_REPO404),
+               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN,
                lacks=ARCHIVE_READ_LACKS)
 # Shape drift fails closed: a current_branches that is not a map is a shape the read does not know, so it refuses as unreadable.
-archive_refuse("a current_branches that is a list, not a map, is refused, and the reason says the read failed",
-               role_path("archive-inc-list"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
-archive_refuse("a current_branches that is a string, not a map, is refused, and the reason says the read failed",
-               role_path("archive-inc-str"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
+# A shape error names no act and no repo: no add_repo, and no list of every cs-repo tag. Both repos are tagged here, so an
+# all-tags list would show two acts.
+archive_refuse("a current_branches that is a list, not a map, is refused, and says retry: no add_repo for either repo",
+               role_path("archive-inc-list"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN,
+               lacks=ARCHIVE_READ_LACKS + ARCHIVE_NO_ACT)
+archive_refuse("a current_branches that is a string, not a map, is refused, and says retry: no add_repo for either repo",
+               role_path("archive-inc-str"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN,
+               lacks=ARCHIVE_READ_LACKS + ARCHIVE_NO_ACT)
 # One read budget covers the branch reads (MERGE_READ_TIMEOUT, 25s). Each q_max compare sleeps 13s, under the budget alone;
 # the second outlasts what the first left, so the archive refuses as unreadable. A budget per call would let both through.
-archive_refuse("a lane whose two branch compares outlast one read budget, each under it alone, is refused as unreadable",
-               role_path("archive-inc-slow"), fake_gh_path(ARCHINC_SLOW), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
+# A timeout is no 403 or 404, so it names no act: the refusal says to retry.
+archive_refuse("a lane whose two branch compares outlast one read budget, each under it alone, is refused, and says retry",
+               role_path("archive-inc-slow"), fake_gh_path(ARCHINC_SLOW), carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN,
+               lacks=ARCHIVE_READ_LACKS + ARCHIVE_NO_ACT)
 # One read budget across the whole archive check, not one per read: the draft's containment read and the branch read sum
 # past MERGE_READ_TIMEOUT. The branch read runs out of the shared budget and refuses as unreadable. A budget per read lets
 # the branch read run its own 25s, and the lane is refused for its branch instead, with no read failing.
 ARCHIVE_BRANCH_READ_LACKS = ARCHIVE_READ_LACKS + ("open pull requests",)  # a branch-read refusal is neither the open-list one nor the no-pull-request one
-archive_refuse("a lane whose slug draft containment read and branch read sum past one read budget, each under it alone, is refused as unreadable",
-               role_path("archive-inc"), fake_gh_path(ARCHDRAFT_SLOW), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_BRANCH_READ_LACKS)
+archive_refuse("a lane whose slug draft containment read and branch read sum past one read budget, each under it alone, is refused, and says retry",
+               role_path("archive-inc"), fake_gh_path(ARCHDRAFT_SLOW), carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN,
+               lacks=ARCHIVE_BRANCH_READ_LACKS + ARCHIVE_NO_ACT)
 # Shape drift in the record's sources and branch values fails closed, with the branch read's reason. The branch is behind main
 # in q_max (or sits in its own tagged repo), so only the drift can refuse the archive.
-archive_refuse("a session_context.sources that is a string, not a list, is refused, and the reason says the read failed",
-               role_path("archive-inc-sources-str"), fake_gh_path(ARCHINC_BEHIND), carries=ARCHIVE_READ_PIN,
-               lacks=ARCHIVE_BRANCH_READ_LACKS)
+archive_refuse("a session_context.sources that is a string, not a list, is refused, and says retry: no add_repo",
+               role_path("archive-inc-sources-str"), fake_gh_path(ARCHINC_BEHIND), carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN,
+               lacks=ARCHIVE_BRANCH_READ_LACKS + ARCHIVE_NO_ACT)
 # A github.com source with a trailing path is read as the repo it names: q_max, whose branch is ahead on no pull request.
 archive_refuse("a github.com source with a trailing /tree/main path is read as its owner/repo: the branch ahead there is refused",
                role_path("archive-inc-source-tree"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
 # A github.com source that names no owner and repo is unreadable, not skipped.
-archive_refuse("a github.com source that names no owner and repo is refused, and the reason says the read failed",
-               role_path("archive-inc-source-bare"), fake_gh_path(ARCHINC_BEHIND), carries=ARCHIVE_READ_PIN,
-               lacks=ARCHIVE_BRANCH_READ_LACKS)
+archive_refuse("a github.com source that names no owner and repo is refused, and says retry: no add_repo",
+               role_path("archive-inc-source-bare"), fake_gh_path(ARCHINC_BEHIND), carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN,
+               lacks=ARCHIVE_BRANCH_READ_LACKS + ARCHIVE_NO_ACT)
 # current_branches [] names no branch: allowed, and the branch read makes no call (see the call case below).
 archive_allow("a current_branches that is an empty list names no branch: allowed",
               role_path("archive-inc-list-empty"), fake_gh_path(ARCHINC_NOPR))
@@ -300,12 +393,12 @@ archive_refuse("a lane branch ahead on no pull request, whose only copy is archi
 archive_refuse("a lane branch ahead on no pull request, whose only copy is archive/<branch>-r2 holding its tip, is refused as no pull request",
                role_path("archive-copy-lane"), fake_gh_path(ARCHCOPY_SUFFIX_R2), carries=ARCHIVE_NOPR_PIN,
                lacks=(ARCH_COPY_BRANCH, "could not be read"))
-archive_refuse("a current_branches value that is an int is refused, and the reason says the read failed",
-               role_path("archive-inc-branch-int"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN,
-               lacks=ARCHIVE_BRANCH_READ_LACKS)
-archive_refuse("a current_branches value that is a map is refused, and the reason says the read failed",
-               role_path("archive-inc-branch-map"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN,
-               lacks=ARCHIVE_BRANCH_READ_LACKS)
+archive_refuse("a current_branches value that is an int is refused, and says retry: no add_repo",
+               role_path("archive-inc-branch-int"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN,
+               lacks=ARCHIVE_BRANCH_READ_LACKS + ARCHIVE_NO_ACT)
+archive_refuse("a current_branches value that is a map is refused, and says retry: no add_repo",
+               role_path("archive-inc-branch-map"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN + ARCHIVE_RETRY_PIN,
+               lacks=ARCHIVE_BRANCH_READ_LACKS + ARCHIVE_NO_ACT)
 # Case-insensitive host match, with an optional www.: the source names q_max, and its branch, ahead there, is refused.
 archive_refuse("a source URL on www.github.com names its repo: a branch ahead there on no pull request is refused",
                role_path("archive-inc-source-www"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)

@@ -4,17 +4,20 @@ guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
 import bisect
+import json
 import os
 import re
 import stat
 
 import guard_core
+from guard_env import _substitutions
 from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
     _segment_git_c_target, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
-    _SHELLS, _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
-    is_powershell, norm, resolve_command, segment_tokens, split_segments,
+    _SHELLS, _strip_heredoc_bodies_unconditionally, strip_heredoc_bodies, bare_words, basename, command_indexes,
+    inner_commands, is_powershell, norm, resolve_command, segment_tokens, split_segments, PowerShellScript,
 )
+from shared_names import HAND_BACK_TAG, MACHINE_TAGS, TASK_NOTIFICATION_TAG
 
 
 # `-o` is read in the short-flag loop, where its value may be glued on.
@@ -632,6 +635,38 @@ def push_refspecs(args):
     return remote, plain
 
 
+def push_sources(args, cwd: str, overrides=None):
+    """-> ({destination: source}, base refs) of a push that names its refs, else ({}, []): the revision each refspec sends to
+    each branch (`HEAD:b` sends HEAD, `x:b` x, a bare `b` b, a bare push or `HEAD` the checkout's HEAD), and the ref that stands for
+    main on the pushed remote (`origin` when none is named). A deletion, `--all`, `--mirror` and a destination this cannot
+    resolve send no source, so a caller that reads none refuses. The base list holds one full ref (`_push_main_refs`). Cost: the reads `push_destinations` and `_push_main_refs` make."""
+    named = push_refspecs(args)
+    if named is None:
+        return {}, []
+    remote, specs = named
+    remote = remote or "origin"
+    sources = {}
+    for spec, dest in zip(specs or [""], push_destinations(args, cwd, overrides)):
+        source = spec.lstrip("+").partition(":")[0]
+        if dest and "*" not in dest and not source.startswith("-"):
+            sources[dest] = source or "HEAD"
+    return sources, _push_main_refs(cwd, remote)
+
+
+def _push_main_refs(cwd: str, remote: str):
+    """The one full ref that stands for main in the clean-merge walk, as a list, else [] when git cannot answer.
+
+    `<remote>/HEAD`'s target when set, even a stale one (`read_default_base` trusts it), else `<remote>/main` only. Full
+    refs, so a local branch named `<remote>/main` cannot shadow it. Scoped to this walk: `_push_default_branches`, which
+    protects main and master from a force push, is unchanged. Cost: `read_default_base`'s reads."""
+    if not cwd or not os.path.isdir(cwd):
+        return []
+    _base, head = guard_core.read_default_base(cwd, remote)
+    if head is None:
+        return []
+    return ["refs/remotes/" + (head or remote + "/main")]
+
+
 def push_verdict(args, cwd: str, overrides=None) -> str:
     """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`.
 
@@ -661,6 +696,21 @@ def push_verdict(args, cwd: str, overrides=None) -> str:
     if force or plus:
         return "deny"
     return "" if includes or not unpinned else "deny"
+
+
+def push_is_plain(args) -> bool:
+    """True when the push carries no force, no lease of any form, no `--force-if-includes`, no `+` refspec,
+    and no `--tags` or `--follow-tags` (or an unambiguous prefix of either): it moves only the branches
+    it names, forward. A `--no-force-with-lease` that cancels a lease counts as none."""
+    force, _mirror, _every, includes, _unpinned, leased, _delete, _upstream, _remote, plain = _push_parse(args)
+    if force or leased or includes or any(spec.startswith("+") for spec in plain):
+        return False
+    for arg in args:
+        name = arg.replace('"', "").replace("'", "").partition("=")[0]
+        if name.startswith("--") and (
+                (len(name) >= 4 and "--tags".startswith(name)) or (len(name) >= 5 and "--follow-tags".startswith(name))):
+            return False
+    return True
 
 
 def _push_tags_only(args) -> bool:
@@ -1536,7 +1586,9 @@ def cmd_exe_delete_hit(segment: str) -> str:
 
 PUSH_REASON = (
     "Rule (Git): a forced push can overwrite newer remote work with a stale copy. "
-    "Remedy: retry with --force-with-lease --force-if-includes."
+    "The sha is the tip your own last push left, so record it when you push; never one read after a "
+    "fetch, which accepts whatever the fetch brought in. "
+    "Remedy: retry with --force-with-lease=<branch>:<sha>."
 )
 PUSH_MAIN_REASON = (
     "Rule (Git): this push writes the default branch, main or master. Main moves only by pull request "
@@ -1567,6 +1619,464 @@ PUSH_ASK_REASON = (
     "Rule (Git): this forced push may rewrite the default branch, or its target is unreadable. "
     "The click in this prompt is the grant."
 )
+
+
+# ------------------------------------------------------------------ push-needs-review-record
+#
+# A shell `git push` asks while the session's own transcript shows a PR known to the session and a
+# reviewer or design-reviewer report with no later posted review log that holds a line with that report's role,
+# verdict and round, and Head when the report names its reviewed head (decision push-needs-review-log).
+# A push to the head branch of a PR whose posted review log holds a `Fix check:` line is refused, unless its new commits are only clean merges of
+# main (`_only_clean_merges`, which fails closed). Cost: one pass over the transcript per push, failing open on any error. A line is parsed only when it holds a mark below, or a tool_result for a call already seen
+# (one dict lookup per id). The merge module loads only when the scan finds a report with the Done-line shape,
+# or a posted comment with a `Fix check:` line.
+REVIEW_LOG_REASON = (
+    "push-needs-review-record: a reviewer report in this session has no posted review log at the head it "  # glossary-ok: the decision slug, a literal
+    "reviewed, and a push now moves that head. Order: review log first, then the push. Render the review log with "
+    "`merge <pr> --review-record --head <reviewed sha>` (it refuses once the head moves), post it with the "
+    "GitHub MCP comment tool, then push. (decision push-needs-review-log)"
+)
+REVIEW_LOG_FIX_REASON = (
+    "push-needs-review-record: the posted review log for this pull request already holds a "
+    "`Fix check:` line, "  # glossary-ok: the literal line text the merge tool writes
+    "and the merge tool takes one fix verifier per review log. Put the next fix on a new branch and open a new PR "
+    "for it, then push that branch. (decision push-needs-review-log)"
+)
+_CREATE_PR_TOOL = "mcp__github__create_pull_request"
+_COMMENT_TOOL = "mcp__github__add_issue_comment"
+_AGENT_TOOL = "Agent"
+_SHELL_TOOLS = ("Bash", "PowerShell")
+# Tool names sit in call lines, the notice and hand-back tags in message lines, a gh call in its command text.
+_REVIEW_LOG_MARKS = ('"Agent"', _CREATE_PR_TOOL, _COMMENT_TOOL, TASK_NOTIFICATION_TAG, HAND_BACK_TAG.lstrip("<"))
+# A gh call that opens or comments on a PR, or an api call, with a repo flag before the verb or after `pr`
+# (`gh -R o/r pr create`, `gh pr --repo o/r comment`): the verb sits after the flag, so the words are not adjacent.
+_GH_MARK = re.compile(r"gh(?:\.exe)?\s+(?:-R|--repo|api\b|pr\s+(?:create|comment|-R|--repo)\b)")
+_RESULT_IDS = re.compile(r'"tool_use_id":\s*"([^"]+)"')
+_GH_HEAD = re.compile(r"(?:--head|-H)[ =]+[\"']?([^\s\"']+)")
+# Same pattern as PR_NUM_URL in hooks/decision_watch.py. Not imported: that module loads guard.py and the lint
+# transcript reader at import, and this file is loaded by guard.py.
+_PR_URL = re.compile(r"/pull/(\d+)")
+# The Done line, markdown leads and indent allowed. The verdict word is checked against the merge tool's own
+# constants (REVIEW_VERDICTS), so none is named here.
+_DONE_LABEL = re.compile(r"[\s>*#_-]*Done\b[\s*_:]*")
+# A backtick may wrap the line, and `**` may wrap the verdict word or the whole line.
+_VERDICT_LINE = re.compile(r"[\s>*#_`-]*([A-Z]+)\**, (round \d+ of \d+|fix check), [\w.-]+[\s*_`]*")
+# A Done label line that holds its verdict in a word order the ruled line does not use: a round or fix verifier
+# marker in any case, and a verdict word among its all-capitals words, as in `Done: Round N reviewer haiku FAIL`.
+_LABEL_ROUND = re.compile(r"\bround (\d+)\b|\b(fix check)\b", re.I)
+_LABEL_WORD = re.compile(r"\b[A-Z]{4,}\b")
+# A held report's sha candidates: hex words above its agentId trailer, at most _HELD_SHA_CAP read per report.
+_SHA_WORD = re.compile(r"\b[0-9a-f]{7,40}\b")
+_HELD_SHA_CAP = 8
+_NOTICE = re.compile(r"<tool-use-id>\s*([^<\s]+)\s*</tool-use-id>.*?<result>(.*?)</result>", re.S)
+_HANDBACK = re.compile(r'<agent-message from="([^"]+)">(.*?)</agent-message>', re.S)
+_AGENT_ID = re.compile(r"agentId:\s*(\S+)")
+# The reviewed head a report names: the hex word after `head` or `reviewed` (`Reviewed at head <sha>`,
+# `Diff base A, head B`, `reviewed <sha>`). A `head` right after `main` or `Base:` names the base, not the reviewed
+# head (`Base: main head B, reviewed A`); _BASE_BEFORE reads the text before the match.
+_HEAD_WORD = re.compile(r"\b(?:reviewed(?:\s+at)?(?:\s+head)?|head)\b[\s:`*]*(?:at\s+)?([0-9a-f]{7,40})\b", re.I)
+_BASE_BEFORE = re.compile(r"\b(?:main|base)[\s:`*]*$", re.I)
+_HAND_FRAMES = tuple(tag for tag in MACHINE_TAGS if "<agent-message" in tag)
+
+
+def _is_pr_create(call) -> bool:
+    return call[:2] == ["pr", "create"]
+
+
+def _is_comment_post(call) -> bool:
+    """`gh pr comment`, or a `gh api` call that names a `/comments` endpoint."""
+    return call[:2] == ["pr", "comment"] or (call[:1] == ["api"] and any("/comments" in word for word in call[1:]))
+
+
+def _gh_segment(command: str, tool: str, wanted, depth: int = 0) -> str:
+    """The segment of `command` that runs a gh call `wanted` accepts, else ''. `wanted` gets the tokens after `gh`
+    that `gh_call_of` (hooks/guard_merge.py, the one reader of gh's three repo-flag spellings) returns. It reads the way the
+    push path does: `strip_heredoc_bodies` (hooks/guard_core.py, the one home) is read first: a call in the text it
+    returns counts, and one it removes does not. Each segment is tokenized (so a quoted mention and a `#` comment run
+    nothing), and the script a shell or runner gets is read again. A PowerShell call is read with PowerShell's rules."""
+    from guard_merge import gh_call_of   # here, not at the top: guard_merge imports this file
+    text = strip_heredoc_bodies(command)
+    if tool == "PowerShell":
+        text = PowerShellScript(text)
+    for segment in split_segments(text):
+        tokens = segment_tokens(segment)
+        if not tokens:
+            continue
+        call = gh_call_of(segment)
+        if call is not None and wanted(call):
+            return segment
+        if depth < 3:
+            for inner in inner_commands(tokens):
+                found = _gh_segment(inner, tool, wanted, depth + 1)
+                if found:
+                    return found
+            # `_substitutions` (hooks/guard_env.py, the one home) cuts each `$(...)`, backtick pair and
+            # process substitution met outside single quotes, so an assigned or double-quoted one is read as a
+            # command. A single-quoted one is text and is not cut. The last text is the segment itself.
+            for inner, _in_message in _substitutions(segment, powershell=tool == "PowerShell")[0][:-1]:
+                found = _gh_segment(inner, tool, wanted, depth + 1)
+                if found:
+                    return found
+    return ""
+
+
+def _blocks_text(content) -> str:
+    """The text of a tool_result's content: a string, or the text blocks of a list."""
+    if isinstance(content, list):
+        return "".join(b.get("text", "") for b in content if isinstance(b, dict))
+    return content if isinstance(content, str) else ""
+
+
+def _label_verdict(line: str):
+    """The first all-capitals word of a Done label line that is a review verdict (the merge tool's REVIEW_VERDICTS),
+    as a match, else None: `Done: HEAD round N FAIL` reads FAIL. Called only for a label line that holds a round
+    or fix verifier marker, so the merge module loads only then. An unloadable module reads no verdict."""
+    from guard_merge import merge_module   # here, not at the top: guard_merge imports this file
+    merge = merge_module()
+    verdicts = merge.REVIEW_VERDICTS if merge is not None else ()
+    return next((word for word in _LABEL_WORD.finditer(line) if word.group() in verdicts), None)
+
+
+def _done_verdict(text: str):
+    """(word, kind, round number or None) of the verdict on the Done line of `text`, kind `round` or `fix`, else None. The Done line is
+    the first line after a `Done` label, or the label's own line, where the verdict may sit in any word order.
+    A label line with other text and no verdict leaves the line under it as the Done line. A finding line
+    never counts, and nor does any line inside a ``` fence."""
+    after, fenced = False, False
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        label = _DONE_LABEL.match(line)
+        if label:
+            line = line[label.end():]
+            if not line.strip():
+                after = True
+                continue
+            if not _VERDICT_LINE.fullmatch(line):
+                marker = _LABEL_ROUND.search(line)
+                loose = _label_verdict(line) if marker else None
+                if loose and marker:
+                    return loose.group(), "round" if marker.group(1) else "fix", int(marker.group(1)) if marker.group(1) else None
+                after = True
+                continue
+        elif not after:
+            continue
+        found = _VERDICT_LINE.fullmatch(line)
+        if found:
+            number = re.search(r"\d+", found.group(2))
+            return found.group(1), "round" if number else "fix", int(number.group()) if number else None
+        if after and line.strip():
+            return None
+    return None
+
+
+def _sha_like(word: str) -> bool:
+    """True for a 40-character hex word, or a 7-39 character one with a digit and a letter in it."""
+    return len(word) == 40 or bool(re.search(r"\d", word) and re.search(r"[a-f]", word))
+
+
+def _named_sha(body: str):
+    """The commit sha candidates a report names, in order, at most _HELD_SHA_CAP: the distinct hex words of 7-40
+    characters in its text above its `agentId:` trailer. A word of 7-39 hex characters counts only with a digit
+    and a letter in it, so `defaced` and a seven-digit count do not; a full 40-character sha always counts."""
+    trailer = None
+    for trailer in _AGENT_ID.finditer(body):
+        pass
+    found = []
+    for word in _SHA_WORD.findall(body[:trailer.start()] if trailer else body):
+        if word not in found and _sha_like(word):
+            found.append(word)
+            if len(found) == _HELD_SHA_CAP:
+                break
+    return tuple(found)
+
+
+def _reviewed_heads(body: str):
+    """The shas a report names as its reviewed head, lower case, above its `agentId:` trailer; () when it names none."""
+    trailer = None
+    for trailer in _AGENT_ID.finditer(body):
+        pass
+    text = body[:trailer.start()] if trailer else body
+    found = [match.group(1) for match in _HEAD_WORD.finditer(text) if not _BASE_BEFORE.search(text[:match.start()])]
+    return tuple(dict.fromkeys(word.lower() for word in found if _sha_like(word.lower())))
+
+
+def _same_sha(one: str, other: str) -> bool:
+    """True when two hex shas of 7+ characters name the same commit: one is a prefix of the other."""
+    one, other = one.lower(), other.lower()
+    return len(one) >= 7 and len(other) >= 7 and (one.startswith(other) or other.startswith(one))
+
+
+class _RecordLines:
+    """The lines a posted review log holds, as a membership test for a pending report (role, word, kind, number,
+    heads). A round report is held by a Round line of its role, verdict and round, a fix verifier report by the
+    `Fix check:` line of its role and verdict. A round report that names reviewed heads is held only when the log's
+    Head is one of them. A fix verifier report is held when a named head is either the log's Head or the sha of its
+    `Fix check:` line: the merge tool records a fix verifier at the new head with the `Fix check:` line at the head
+    the fix diff starts from, and a report may name either."""
+
+    def __init__(self, record):
+        self.head = record["head"]
+        self.rounds = {(role, word, "round", number): self.head for number, role, _, word in record["rounds"]}
+        self.fix = record["fix"]
+
+    def __contains__(self, report):
+        role, word, kind, number, heads = report
+        if kind == "fix":
+            if not self.fix or (role, word) != (self.fix[1], self.fix[3]):
+                return False
+            shas = (self.fix[0], self.head)
+        else:
+            head = self.rounds.get((role, word, kind, number))
+            if head is None:
+                return False
+            shas = (head,)
+        return not heads or any(_same_sha(sha or "", named) for sha in shas for named in heads)
+
+
+def _commit_of(where, ref):
+    """The commit sha `ref` names in the checkout `where`; "" when git names no such commit (exit 1, an unknown
+    object); None on any other failure."""
+    answer = guard_core._git(where, "rev-parse", "--verify", "-q", ref + "^{commit}")
+    if answer is None or answer.returncode not in (0, 1):
+        return None
+    return answer.stdout.strip() if answer.returncode == 0 else ""
+
+
+def _ancestor(where, sha, tip):
+    """True when `sha` is `tip` or an ancestor of it, False when not, None when git fails."""
+    answer = guard_core._git(where, "merge-base", "--is-ancestor", sha, tip)
+    return None if answer is None or answer.returncode not in (0, 1) else answer.returncode == 0
+
+
+def _candidate_counts(where, word, tips, main):
+    """True when the hex `word` counts for a PR whose head commits are `tips` (empty: the head is unknown) and
+    whose default branch is `main` (None: none resolves). It counts when it resolves to a commit that is a tip
+    or an ancestor of one, and is not an ancestor of main. A word that names no commit is skipped. Any other git
+    failure counts it (fail toward refusing), and so does an unknown head."""
+    sha = _commit_of(where, word)
+    if sha is None:
+        return True
+    if not sha:
+        return False
+    on_main = _ancestor(where, sha, main) if main else False
+    if on_main is not False:
+        return on_main is None
+    if not tips:
+        return True
+    return any(_ancestor(where, sha, tip) is not False for tip in tips)
+
+
+def _held_counts(held, head, where):
+    """The held reports (tuples ending in their sha candidates) that count for a PR whose head branch is `head`
+    (None: unknown), read in the checkout `where`, as (role, word, kind, number). A report counts when one of its
+    candidates counts (`_candidate_counts`); the head is the local branch or `origin/<head>`, either may match.
+    With no checkout each report counts. Reads: none when nothing is held. Else two `rev-parse` for the head
+    (none when it is unknown), one default-branch read (`read_default_base`), and per distinct candidate one
+    `rev-parse` and up to three `merge-base --is-ancestor`, stopping at a report's first counting candidate."""
+    if not held:
+        return []
+    if not where:
+        return [report[:-1] for report in held]
+    tips = []
+    for ref in ("refs/heads/" + head, "refs/remotes/origin/" + head) if head else ():
+        tip = _commit_of(where, ref)
+        if tip and tip not in tips:
+            tips.append(tip)
+    main = guard_core.read_default_base(where, "origin")[0]
+    seen, counted = {}, []
+    for report in held:
+        for word in report[-1]:
+            if word not in seen:
+                seen[word] = _candidate_counts(where, word, tips, main)
+            if seen[word]:
+                counted.append(report[:-1])
+                break
+    return counted
+
+
+def _notice_reports(record, roles, agents):
+    """The (role, text) reports one transcript record carries outside a tool result: a task-notification (a
+    user message or a queued_command attachment) or a hand-back opening with its frame. `roles` maps an Agent
+    call id to its subagent_type, `agents` an agentId to the call id."""
+    text = None
+    if record.get("type") == "attachment":
+        attached = record.get("attachment")
+        if isinstance(attached, dict) and attached.get("type") == "queued_command":
+            text = attached.get("prompt")
+    elif isinstance(record.get("message"), dict):
+        text = record["message"].get("content")
+    if not isinstance(text, str):
+        return []
+    found = []
+    if TASK_NOTIFICATION_TAG in text:
+        found += [(roles.get(call), body) for call, body in _NOTICE.findall(text)]
+    if text.lstrip().startswith(_HAND_FRAMES):
+        found += [(roles.get(agents.get(agent)), body) for agent, body in _HANDBACK.findall(text)]
+    return found
+
+
+def _transcript_events(path: str):
+    """The ordered events of a transcript that the rule reads: ("pr", number, head) for a create_pull_request or
+    a Bash `gh pr create` that returned no error, ("post", body, from_shell) for a comment call that returned
+    none (a shell call's body is its command text), and ("report", role, word, kind, round, shas) for an Agent report
+    whose Done line has the verdict shape, with the report's sha candidates (`_named_sha`). Raises OSError when the
+    file cannot be read."""
+    events, calls, roles, agents, posts, pr_heads = [], {}, {}, {}, {}, {}
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if not any(mark in line for mark in _REVIEW_LOG_MARKS) and not _GH_MARK.search(line) and not (
+                    '"tool_result"' in line and any(call in calls for call in _RESULT_IDS.findall(line))):
+                continue
+            try:
+                record = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(record, dict):
+                continue
+            content = record["message"].get("content") if isinstance(record.get("message"), dict) else None
+            reports = []
+            for block in content if isinstance(content, list) else ():
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use":
+                    name, given = block.get("name"), block.get("input")
+                    given = given if isinstance(given, dict) else {}
+                    command = given.get("command") if isinstance(given.get("command"), str) else ""
+                    calls[block.get("id")] = name
+                    if name == _AGENT_TOOL:
+                        roles[block.get("id")] = given.get("subagent_type")
+                    elif name == _CREATE_PR_TOOL and isinstance(given.get("head"), str):
+                        pr_heads[block.get("id")] = given["head"].rpartition(":")[2]   # a fork's `owner:branch`
+                    elif name == _COMMENT_TOOL and isinstance(given.get("body"), str):
+                        posts[block.get("id")] = (given["body"], False)
+                    elif name in _SHELL_TOOLS and "create" in command and (
+                            created := _gh_segment(command, name, _is_pr_create)):
+                        head = _GH_HEAD.search(created)
+                        pr_heads[block.get("id")] = head.group(1).rpartition(":")[2] if head else None
+                        calls[block.get("id")] = _CREATE_PR_TOOL
+                    elif name in _SHELL_TOOLS and _gh_segment(command, name, _is_comment_post):
+                        posts[block.get("id")] = (command, True)
+                elif block.get("type") == "tool_result" and not block.get("is_error"):
+                    call, body = block.get("tool_use_id"), _blocks_text(block.get("content"))
+                    if calls.get(call) == _CREATE_PR_TOOL:
+                        url = _PR_URL.search(body)
+                        events.append(("pr", int(url.group(1)) if url else _pr_number(body), pr_heads.get(call)))
+                    elif call in posts:
+                        events.append(("post",) + posts[call])
+                    elif calls.get(call) == _AGENT_TOOL:
+                        for agent in _AGENT_ID.findall(body):
+                            agents[agent] = call
+                        reports.append((roles.get(call), body))
+            for role, body in reports + _notice_reports(record, roles, agents):
+                verdict = _done_verdict(body)
+                if verdict:
+                    events.append(("report", role) + verdict + (_named_sha(body), _reviewed_heads(body)))
+    return events
+
+
+def _pr_number(body: str):
+    """The pull request number a create_pull_request result names: the `number` of its JSON, else None."""
+    found = re.search(r'"number"\s*:\s*(\d+)', body)
+    return int(found.group(1)) if found else None
+
+
+def _record_of(merge, text: str, from_shell: bool):
+    """The record `text` holds, parsed by the merge tool's parse_review, else None. A comment tool's body is the
+    record itself. A shell call's text holds it between the marker line and the CI line, inside the command."""
+    if not from_shell:
+        return merge.parse_review(text)
+    start = text.find(merge.REVIEW_MARKER)
+    end = text.find(merge.REVIEW_CI_LINE, start) if start >= 0 else -1
+    return merge.parse_review(text[start:end + len(merge.REVIEW_CI_LINE)]) if end >= 0 else None
+
+
+def _only_clean_merges(merge, pushed, branch, head, where):
+    """True when every refspec that writes `branch` sends a source whose new commits above `head` are only clean merges of main
+    (merge.clean_merges_pushed). False for no such source, and for any exception: the fix-branch refusal fails closed."""
+    try:
+        sources, bases = pushed()
+        return branch in sources and bool(bases) and merge.clean_merges_pushed(where, sources[branch], head, bases)
+    except Exception:
+        return False
+
+
+def review_log_hit(transcript: str, destinations=lambda: [], where: str = "", pushed=lambda: ({}, [])):
+    """Return (label, reason) for the first refusal the transcript earns, else ("", ""). `destinations()` gives the
+    branch names the push writes; it runs only when a posted review log holds a `Fix check:` line. `where` is the
+    push's checkout, where a held report's sha is read against the PR's head. `pushed()` gives push_sources' answer, read only
+    when step 2 would refuse.
+    1. A PR known to the session and a reviewer report with no later posted review log holding a line with that
+       report's role, verdict and round (a fix verifier: the `Fix check:` line's role and verdict), and, when a report
+       read after the PR names its reviewed head, whose Head is that head (a fix verifier: that Head, or the
+       `Fix check:` line's sha),
+       compared by prefix of 7+ characters either way. A report before any
+       PR is known is held by its sha candidates, and counts when a PR becomes known for which one candidate
+       counts (`_held_counts`); a report that PR does not count stays held for a later PR, and a report naming
+       no candidate is dropped. A design-reviewer fix verifier is not read: a review log holds a `Fix check:` line for the
+       reviewer only.
+    2. A posted review log, accepted by parse_review, with a `Fix check:` line for PR n, and a push to n's head branch
+       (from a PR-opening call's `head` and its result's number). With n's head unknown, the push passes. A push whose new
+       commits, walked on first parents from the pushed source down to that record's Head, are only clean merges of main
+       passes (decision pr-review-record: a clean merge of main keeps the record; `merge.clean_merges_pushed`). Any other
+       push, and any read that fails, is refused: that walk fails closed, though the rest of this function passes on an exception.
+    An unreadable transcript, or an unloadable merge module, passes."""
+    if not transcript:
+        return "", ""
+    try:
+        events = _transcript_events(transcript)
+        if not any(event[0] == "report" or (event[0] == "post" and "Fix check:" in event[1]) for event in events):  # glossary-ok: the literal line text the merge tool writes
+            return "", ""
+        from guard_merge import merge_module   # here, not at the top: guard_merge imports this file
+        merge = merge_module()
+        if merge is None:
+            return "", ""
+        known, pending, fixed, heads = False, [], [], {}   # fixed: the PR numbers whose review log holds a `Fix check:` line
+        recorded = {}   # PR number -> the Head of its latest review log with a `Fix check:` line
+        early = []   # reports read before any PR was known, each ending in its sha candidates
+        for event in events:
+            if event[0] == "pr":
+                known = True
+                if event[1] is not None and event[2]:
+                    heads[event[1]] = event[2]
+                counted = _held_counts(early, event[2], where)
+                pending += [report + ((),) for report in counted]   # a held report names no head to match
+                early = [report for report in early if report[:-1] not in counted]   # held for a later PR
+            elif event[0] == "report":
+                _, role, word, kind, number, shas, named = event
+                verdicts = merge.REVIEW_FIX_VERDICTS if kind == "fix" else merge.REVIEW_VERDICTS
+                if (role in merge.REVIEW_ROLES and word in verdicts
+                        and (kind == "round" or role == merge.REVIEW_ROLES[0])):
+                    if known:
+                        pending.append((role, word, kind, number, named))
+                    elif shas:
+                        early.append((role, word, kind, number, shas))
+            else:
+                record = _record_of(merge, event[1], event[2])
+                if record is None:
+                    continue
+                known = True
+                counted = _held_counts(early, None, where)   # no head branch is known
+                pending += [report + ((),) for report in counted]
+                early = [report for report in early if report[:-1] not in counted]
+                held = _RecordLines(record)
+                if record["fix"]:
+                    fixed.append(record["n"])
+                    recorded[record["n"]] = record["head"]
+                pending = [report for report in pending if report not in held]
+        for number in fixed:   # before the pending ask: a denied push stays denied while a report waits
+            if number in heads:
+                if heads[number] in destinations() and not _only_clean_merges(merge, pushed, heads[number], recorded[number], where):
+                    return "push to the head branch of PR %d, fix verifier recorded" % number, REVIEW_LOG_FIX_REASON
+        if pending:
+            return "%s %s %s report, no posted review log" % pending[0][:3], REVIEW_LOG_REASON
+    except Exception:
+        pass
+    return "", ""
+
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
 # ids across the modules it loads. In the repo it stays a comment, which counts as a match.

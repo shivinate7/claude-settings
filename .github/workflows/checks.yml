@@ -686,6 +686,7 @@ jobs:
           bash actions/all-jobs-passed/test_action.sh
           bash actions/ci-alarm/test_action.sh
           python3 actions/ci-alarm/test_clear_rule.py
+          python3 actions/ci-alarm/test_revert_rule.py
           python3 actions/ci-done-comment/test_comment.py
           bash actions/ruling-kind/test_action.sh
           bash actions/zizmor/test_action.sh
