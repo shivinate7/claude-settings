@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner rulings, 2026-10-10, 2026-10-29 16:47 CDT, 2026-10-29 20:33 CDT, 2026-10-30 15:06 CDT, 2026-11-01 17:37 CST, 2026-11-01 19:23 CST, 2026-11-02 14:02 CST, 2026-11-02 15:14 CST and 2026-11-02 15:38 CST. The coordinator holds a standing merge grant in claude-settings and in every repo of the owner (`shivinate7`). It is not a fixed list of repos. The batch runner merges under the coordinator's grant, so it has the same scope.
+Owner rulings, 2026-10-10, 2026-10-29 16:47 CDT, 2026-10-29 20:33 CDT, 2026-10-30 15:06 CDT, 2026-11-01 17:37 CST, 2026-11-01 19:23 CST, 2026-11-02 14:02 CST, 2026-11-02 15:14 CST and 2026-11-02 15:38 CST. Owner rulings, 2026-11-13 13:12 CST, 2026-11-13 14:17 CST and 2026-11-13 23:40 CST. The coordinator holds a standing merge grant in claude-settings and in every repo of the owner (`shivinate7`). It is not a fixed list of repos. The batch runner merges under the coordinator's grant, so it has the same scope.
 
 Owner, 2026-11-01 21:34 CST: a batch runner runs every merge under the coordinator's grant. The coordinator never merges.
 
@@ -15,6 +15,8 @@ Owner, 2026-11-01 21:34 CST: a batch runner runs every merge under the coordinat
 - A lane the owner started merges its own lone lane under the same limits (owner, 2026-11-02 15:14 CST; decision `session-tiers`). A cloud confirm still fails without the batch-runner role.
 - A lane that a coordinator started never merges. Owner, 19:23 CST, on the option that lets such a lane merge its own PR: `option C absolutely not correct`.
 - The grant holds "for now", until the owner withdraws it.
+- Main merge into handed-in branches (owner, 2026-11-13 13:12 CST, answer "a" to the coordinator's standing-grant question; until withdrawn). Owner, 2026-11-13 23:40 CST, waiting-page item 806 d: no clock rule. The batch runner may push a plain merge of main into a PR that a lane has handed in, with no clock rule. A lane that pushes again to a handed-in branch says so first. No rebase, no force push. A conflict that changes behaviour goes back to the coordinator. Each new head gets a fix verifier and a fresh review log.
+- Overlaps (owner, 2026-11-13 14:17 CST, typed in runner 10's chat: `you have a standing grant to act on overlaps by me, owner`). So the batch runner may act on overlaps between lane branches. Runner 10 reads that as a plain merge of one lane's head into another lane's branch. The owner has not confirmed that reading. Runner 10's own practice, not the owner's words: no rebase and no force push. Runner 10 also gives each new head a fix verifier and a fresh review log, and sends a behaviour-changing conflict to the coordinator.
 
 This is the repo grant that `git-main-only-by-pr` (main moves only by pull request) names.
 
