@@ -9,9 +9,9 @@ import re
 import guard_core
 from guard_core import (
     HEREDOC_HEADER, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT, SCRIPT_HEADERS,
-    PowerShellScript, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
+    PowerShellScript, _RUNNER, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
     dir_before_segment, heredoc_delimiter, interpreter_bodies, is_powershell, nested_script, norm, resolve_command,
-    segment_tokens, split_segments, strip_heredoc_bodies,
+    _walk_wrappers, segment_tokens, split_segments, strip_heredoc_bodies,
 )
 from guard_env import _quoted_words, _substitutions, script_spots
 
@@ -1254,13 +1254,17 @@ def _plain_operands(raw, start, valued):
 
 def _non_target_words(raw) -> set:
     """The indexes of the words of one segment that name no written path (see `_INPUT_WORD`)."""
+    start, chain = _walk_wrappers(tuple(raw))
+    # xargs takes its operands from stdin, and a shell, an interpreter or a wrapper runs its stdin as a script
+    # (`_RUNNER`): the guard cannot read either, so every word stays judged
+    if any(wrapper == "xargs" for wrapper, _ in chain) or (start is not None and _RUNNER(_name(raw[start]))):
+        return set()
     skip = set()
     for index, word in enumerate(raw):
         if _INPUT_WORD.match(word) and raw[index + 1:index + 2] not in ([">"], [">>"]):   # `<>` is split in two words
             skip.add(index)
             if _INPUT_OPERATOR.fullmatch(word):
                 skip.add(index + 1)
-    start = resolve_command(tuple(raw))
     if start is None:
         return skip
     verb = _name(raw[start])
