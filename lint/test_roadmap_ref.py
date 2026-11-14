@@ -493,34 +493,180 @@ class FetchProcessTests(unittest.TestCase):
         self.assertTrue(note.startswith("read as of "), "the note is %r" % note)
 
 
-READERS = ("lint/ruled_store.py", "hooks/feedback_guard.py", "hooks/sendmessage_state.py", "hooks/override.py",
-           "hooks/question_form.py")
+# The readers of the roadmap ref in the product files (product_files). A reader is a function whose own code names the
+# ref: a string holding origin/roadmap or refs/remotes/origin/, or a name or attribute of REF_NAMES. Three lists pin the
+# exact set of "file::function" names, so a reader added to either side fails until its list names it:
+#   DIRECT_CALLERS    the functions that call roadmap_ref.fresh_ref.
+#   ROUTED_READERS    the readers that reach fresh_ref through a call to a function of their file.
+#   UNROUTED_READERS  the readers that read the ref with no fresh check. They are the known gap of the debt
+#                     roadmap-fetch-other-readers. Routing one moves it to ROUTED_READERS, and that edit names it.
+REF_NAMES = ("STORE_REF", "STORE_REFS", "STEP_REF")  # the ref constants of lint/ruled_store.py and hooks/
+REF_PREFIX = "refs/remotes/origin/"
+DIRECT_CALLERS = {
+    "hooks/feedback_guard.py::Homes.roadmap_note",
+    "hooks/feedback_guard.py::roadmap_candidates",
+    "hooks/override.py::_take_step",
+    "hooks/question_form.py::_fresh_note",
+    "hooks/sendmessage_state.py::read_rulings",
+    "lint/ruled_store.py::_fresh_note",
+}
+ROUTED_READERS = {
+    "hooks/feedback_guard.py::roadmap_candidates",
+    "hooks/override.py::_take_step",
+    "hooks/sendmessage_state.py::read_rulings",
+    "lint/ruled_store.py::_fresh_note",
+    "lint/ruled_store.py::_list",
+    "lint/ruled_store.py::session_lines",
+}
+UNROUTED_READERS = {
+    "hooks/feedback_guard.py::Homes.filed_numbers",
+    "hooks/feedback_guard.py::Homes.step_names_template",
+    "hooks/feedback_guard.py::export_check",
+    "hooks/question_form.py::_read_steps_of",
+    "lint/check_artifact_cites.py::step_files",
+    "lint/compliance_probes.py::waiting_copy",
+    "lint/ruled_store.py::check_store",
+}
 
 
-def calls_fresh_ref(source):
-    """True when `source` calls fresh_ref, as an attribute or a name. A mention in a string or a docstring is no call."""
-    for node in ast.walk(ast.parse(source)):
+def callee_names(nodes):
+    """The names a set of nodes calls: the function of each call, as a name or an attribute."""
+    names = set()
+    for node in nodes:
         if isinstance(node, ast.Call):
             func = node.func
-            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
-            if name == "fresh_ref":
-                return True
+            names.add(func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", ""))
+    return names
+
+
+def names_ref(node):
+    """True when one node names the roadmap ref. The caller has already dropped the docstrings."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return "origin/roadmap" in node.value or REF_PREFIX in node.value
+    if isinstance(node, ast.Name):
+        return node.id in REF_NAMES
+    if isinstance(node, ast.Attribute):
+        return node.attr in REF_NAMES
     return False
 
 
-class ReaderScanTests(unittest.TestCase):
-    def test_the_scan_sees_a_call_and_no_mention(self):
-        self.assertTrue(calls_fresh_ref("import roadmap_ref\nroadmap_ref.fresh_ref(repo)\n"), "a call was not seen")
-        self.assertFalse(calls_fresh_ref('"""fresh_ref is read here."""\nx = 1\n'), "a docstring mention counted")
+def own_nodes(func, docstrings):
+    """The nodes of a function's code, nested functions included, with the docstrings (by id) left out."""
+    stack, found = list(func.body), []
+    while stack:
+        node = stack.pop()
+        if id(node) in docstrings:
+            continue
+        found.append(node)
+        stack.extend(ast.iter_child_nodes(node))
+    return found
 
-    def test_each_reader_of_the_roadmap_calls_fresh_ref(self):
-        for rel in READERS:
-            with self.subTest(reader=rel):
-                self.assertTrue(os.path.exists(os.path.join(REPO, rel)), "scope: %s is not in the repo" % rel)
-                with open(os.path.join(REPO, rel), encoding="utf-8", errors="replace") as handle:
-                    source = handle.read()
-                self.assertTrue(calls_fresh_ref(source), "%s reads origin/roadmap without calling"
-                                " roadmap_ref.fresh_ref" % rel)
+
+def ref_scan(source):
+    """(direct, routed readers, unrouted readers) of one module's source, as sets of function names (Class.method for a
+    method). `direct` holds the functions that call fresh_ref. A reader is routed when it reaches a fresh_ref call through
+    calls to functions of this module. A nested function belongs to its parent. The scan reads the tree the parser built,
+    so a comment never counts, and a string counts only as the string it is."""
+    tree = ast.parse(source)
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                docstrings.add(id(first.value))
+    funcs = {}
+
+    def visit(parent, prefix):
+        for child in ast.iter_child_nodes(parent):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                funcs[prefix + child.name] = child
+            elif isinstance(child, ast.ClassDef):
+                visit(child, prefix + child.name + ".")
+
+    visit(tree, "")
+    own = {name: own_nodes(node, docstrings) for name, node in funcs.items()}
+    calls = {name: callee_names(nodes) for name, nodes in own.items()}
+    direct = {name for name in own if "fresh_ref" in calls[name]}
+    routed = set(direct)
+    changed = True
+    while changed:
+        changed = False
+        reached = {name.rsplit(".", 1)[-1] for name in routed}
+        for name in own:
+            if name not in routed and calls[name] & reached:
+                routed.add(name)
+                changed = True
+    readers = {name for name in own if any(names_ref(node) for node in own[name])}
+    return direct, readers & routed, readers - routed
+
+
+def product_scan():
+    """(direct, routed, unrouted) over the product files, as "file::function" names. The helper itself is left out: it
+    is the one fetch of the roadmap, and it names the ref to run that fetch."""
+    found = (set(), set(), set())
+    for rel in product_files():
+        if rel == "lint/roadmap_ref.py":
+            continue
+        with open(os.path.join(REPO, rel), encoding="utf-8", errors="replace") as handle:
+            for into, names in zip(found, ref_scan(handle.read())):
+                into.update("%s::%s" % (rel, name) for name in names)
+    return found
+
+
+class ReaderScanTests(unittest.TestCase):
+    def assertPinned(self, found, pinned, what):
+        extra, missing = sorted(found - pinned), sorted(pinned - found)
+        self.assertFalse(extra or missing, "%s: found but not listed %r; listed but not found %r"
+                         % (what, extra, missing))
+
+    def test_the_scan_sees_a_call_and_no_mention(self):
+        direct, _routed, _unrouted = ref_scan("def f(repo):\n    roadmap_ref.fresh_ref(repo)\n")
+        self.assertEqual(direct, {"f"}, "a call in a function was not seen")
+        direct, _routed, _unrouted = ref_scan('def g():\n    """fresh_ref is read here."""\n    return 1\n')
+        self.assertEqual(direct, set(), "a docstring mention counted as a call")
+
+    def test_the_scan_reads_past_a_hash_in_a_string(self):
+        source = ('def reads():\n    label, ref = "# a hash in a string, not a comment", STORE_REF\n'
+                  '    return git("cat-file", ref)\n')
+        _direct, routed, unrouted = ref_scan(source)
+        self.assertEqual(unrouted, {"reads"}, "a hash in a string hid the read: routed %r, unrouted %r"
+                         % (routed, unrouted))
+
+    def test_a_multi_line_docstring_that_names_the_ref_is_no_reader(self):
+        source = ('def describes():\n    """Reads origin/roadmap and refs/remotes/origin/roadmap.\n\n'
+                  '    STORE_REF is named here too, in a docstring that runs on.\n    """\n    return 1\n')
+        _direct, routed, unrouted = ref_scan(source)
+        self.assertEqual(routed | unrouted, set(), "a multi-line docstring that names the ref counted as a reader")
+
+    def test_a_lone_quote_in_text_does_not_hide_the_read(self):
+        source = ('def reads():\n    note, ref = "the owner\'s note, with a lone quote", STORE_REF\n'
+                  '    return git("cat-file", ref)\n')
+        _direct, routed, unrouted = ref_scan(source)
+        self.assertEqual(unrouted, {"reads"}, "a lone quote in text hid the read: routed %r, unrouted %r"
+                         % (routed, unrouted))
+
+    def test_a_reader_that_calls_a_routed_helper_of_its_file_is_routed(self):
+        source = ('def fresh(repo):\n    return roadmap_ref.fresh_ref(repo)\n\n'
+                  'def routed(repo):\n    fresh(repo)\n    return git("cat-file", STORE_REF)\n\n'
+                  'def alone(repo):\n    return git("cat-file", STORE_REF)\n')
+        _direct, routed, unrouted = ref_scan(source)
+        self.assertEqual((routed, unrouted), ({"routed"}, {"alone"}), "a reader's route was not followed through its "
+                         "file's helper: routed %r, unrouted %r" % (routed, unrouted))
+
+    def test_the_scan_reaches_the_named_files(self):
+        scanned = product_files()
+        for rel in ("lint/ruled_store.py", "hooks/feedback_guard.py", "hooks/sendmessage_state.py",
+                    "hooks/override.py", "hooks/question_form.py"):
+            self.assertIn(rel, scanned, "scope: the scan does not reach %s" % rel)
+
+    def test_the_fresh_ref_callers_are_pinned(self):
+        self.assertPinned(product_scan()[0], DIRECT_CALLERS, "callers of roadmap_ref.fresh_ref")
+
+    def test_the_routed_readers_are_pinned(self):
+        self.assertPinned(product_scan()[1], ROUTED_READERS, "readers that reach fresh_ref")
+
+    def test_the_unrouted_readers_are_pinned(self):
+        self.assertPinned(product_scan()[2], UNROUTED_READERS, "readers that read the ref with no fresh check")
 
 
 def tearDownModule():
