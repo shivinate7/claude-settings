@@ -1,11 +1,11 @@
 {
   "title": "janitor/mutate_sweep.py gets the clean-layout control through mutate_shared.control_verdict",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 60,
   "owner": "coordinator",
   "lane": "session_013NEJL26skM1Fivwuw5wXMq",
-  "why": "mutate_sweep runs without the clean-layout control that the guard mutation job reads from mutate_shared.control_verdict.",
+  "why": "mutate_sweep runs without the clean-layout control that the guard mutation job reads from mutate_shared.control_verdict. DONE 13:08 CST Nov 14 (coordinator 13:08, REST read 13:07; relayed; triage read no diff): #3411 (replaces #3226) merged 13:06:38 CST as 3840214401009b56504424852fa3858eae1e4610, alone on its green ready run 43625659390 (green 19:01:12Z). Marked done on the coordinator's word that the merged PR builds this step.",
   "note": "No overlap with step mutate-guard-split, which splits the CI job into shards (checked 18:33 CST). Filed from lane notes-fix-reverify-large ([ended:lane:-notes-fix-reverify-large]) via the coordinator, 18:31 CST Nov 7. The note on its PR names this step. Built as #1715, with runner 8, merging after #1597 (19:43 CST). After it merges, a session on the owner's computer deletes claude/mutate-sweep-control (235c00c94, the pre-rebase copy); the coordinator holds that on its list. 12:37 CST Nov 10: its Merge-after #1597 is met (batch 72); its own #1715 is still open. Lane cleared 08:59 CST Nov 12: its session (was \"Lane: mutate-sweep-control\") is archived (coordinator ask 08:57 CST Nov 12, sweep of ended session ids). Rebuild lane started (coordinator 11:32 CST Nov 13, from backlog-drain's START list): session_013NEJL26skM1Fivwuw5wXMq.",
-  "updatedAt": "2026-11-13T11:34:14-06:00"
+  "updatedAt": "2026-11-14T13:08:00"
 }
