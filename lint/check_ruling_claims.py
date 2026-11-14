@@ -17,7 +17,7 @@ refused, whatever the records hold, since no record can tell which day it means.
 
 Backing. A dated claim has a record when one record line holds both its date and its time. Each record line is read
 joined with its next line, within one file. A zone and a leading zero are ignored. The record lines are those of the
-decision records and CLAUDE.md. A ruling entry's `at` is read alone, as one line.
+decision records and CLAUDE.md. A ruling entry's `at` that holds both also backs it. It is read alone, as one line.
 
 Id claims. An id is a kebab slug of two or more words. It is read in backticks after `ruling`, after `ruling:`,
 after `owner ruling`, or after a capital `Ruling` or `RULING` that starts a line. A lowercase `ruling` followed by a
@@ -36,7 +36,7 @@ the folder roadmap/rulings on origin/roadmap of --root. A store that cannot be r
 Exit: 0 clear, 1 an unbacked claim, 2 an input that cannot be read (named).
 
 NAMED LIMITS.
-- Any record line that holds a date and a time backs a claim with that date and time. The line need not be a ruling.
+- Any record line or ruling entry `at` that holds a date and a time backs a claim with both. It need not be that ruling.
 - A dated claim inside a record backs itself. So does one in a record that the change adds in the same diff.
 - The check cannot tell whether the owner said it. It checks only that a record exists.
 - A house cite with no time passes. The page item it names has no record file to check.
