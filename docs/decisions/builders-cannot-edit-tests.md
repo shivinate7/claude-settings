@@ -68,7 +68,8 @@ A test-support helper lives in one place: a flat `_test_<name>.py` file beside t
 - `check_landed_dirs` accepts a flat file and refuses a subfolder of a landed folder, such as `test_support/`. It accepts no new path form.
 - Roles: the builder writes the helper. The test-author writes the test that imports it.
 - `hooks/test_refusal_note.py` and `hooks/test_mutate_js.py` are real suites with run steps in `checks.yml`, not helpers.
-- Run against `hooks/_test_cost_probe.py` (a scratch file, removed): `guard.py` `is_builder_test_rel` False and `author_path_ok` False; `TEST_FILE` and `TEST_PATTERNS` no match; `check_landed_dirs`, `check_layout`, `check_hook_stubs`, `check_hook_dup_names`, `check_glossary`, `check_record_slugs` all PASS.
+- Two hook checks still read a `_test_` helper under `hooks/` (their skip lists name only `test_`, `mutate_`, `prove_`): `lint/check_layout.py` (`NOT_READERS`, line 42) fails a repo path written as a literal in it, and `lint/check_hook_dup_names.py` (skip at line 87 is `test_` only) fails a top-level name that another `hooks/` file also binds. So a helper keeps no repo path literals and uses names no other hook file binds. Adding `_test_` to those skip lists would widen shared checks and needs the owner's ruling; none is taken here.
+- Run against an empty probe file, `hooks/_test_cost_probe.py` (a scratch file, removed): `guard.py` `is_builder_test_rel` False and `author_path_ok` False; `TEST_FILE` and `TEST_PATTERNS` no match; `check_landed_dirs`, `check_layout`, `check_hook_stubs`, `check_hook_dup_names`, `check_glossary`, `check_record_slugs` all PASS.
 
 ## The shell check
 
