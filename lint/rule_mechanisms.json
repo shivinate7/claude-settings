@@ -225,7 +225,8 @@
     "git-ci-wait-checks-in": {
       "mechanism": {
         "kind": "guard",
-        "ref": "ci-wait-cap"
+        "ref": "ci-wait-cap",
+        "reason": "The guard (ci-wait-cap, hooks/guard.py ci_wait_hit) sees only the limit: a send_later whose message reads as a CI wait and whose wait is over the cap is refused. It does not see that a session set a check-in at all, or that each check-in is spaced wider than the last (decision ci-wait-cap-guard, Known gaps)."
       },
       "test": "hooks/test_guard.py::ci-wait-cap: a CI check-in of 90 minutes is refused"
     },

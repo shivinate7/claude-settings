@@ -396,13 +396,15 @@ Other tools, in `judge` order:
                        short all-caps word, no args and empty args pass. A bare env var name as the whole value
                        is refused too; an override lifts it for a real one. (workflow-args-shape-check)
   ci-wait-cap
-                       deny. A claude-code-remote send_later whose message says it waits on CI (the whole word CI or
-                       checks, or PR run or workflow run, in any case, anywhere in the message) and whose wait is more
-                       than cap_minutes() in hooks/ci_wait_cap.py: delay_minutes over it, or an `at` (ISO-8601 with an
-                       offset) more than that many minutes after the clock (local_time.clock). The limit is inclusive.
-                       A call with no CI word, or with no delay or `at`, passes. An agent's call is refused first
-                       (agent-no-remote-tools). The reason names send_later, delay_minutes and the cap. A missing cap
-                       file crashes the rule, which fails open and logs. An override lifts it. (ci-wait-cap-guard)
+                       deny. A claude-code-remote send_later whose message says it waits on CI (the whole word CI,
+                       checks, pipeline, check run, PR run(s), workflow run(s) or GitHub Actions, in any case,
+                       anywhere in the message) and whose wait is more than cap_minutes() in hooks/ci_wait_cap.py:
+                       delay_minutes (a number or a string of digits) over it, or an `at` (ISO-8601; with no offset it
+                       reads in the clock's offset) more than that many minutes after the clock (local_time.clock).
+                       The limit is inclusive. A call with no CI word, or with no delay or `at`, passes. An agent's
+                       call is refused first (agent-no-remote-tools). The reason names send_later, delay_minutes and
+                       the cap. A missing cap file crashes the rule, which fails open and logs. An override lifts it.
+                       (ci-wait-cap-guard)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-bypass
@@ -6806,7 +6808,9 @@ def workflow_args_hit(tool: str, tool_input: dict) -> str:
 # is plain text, so comment openers and lone quotes in it carry no meaning to the scan. A missing cap file raises, and
 # main() logs the crash and lets the call through: a lost source is never turned into a made-up limit.
 CI_WAIT_TOOL = REMOTE_SERVER + "__send_later"
-CI_WAIT_WORDS = re.compile(r"(?<!\w)(?:ci|checks|pr\s+run|workflow\s+run)(?!\w)", re.IGNORECASE)
+CI_WAIT_WORDS = re.compile(
+    r"(?<!\w)(?:ci|checks|pr\s+runs?|workflow\s+runs?|check\s+run|pipeline|github\s+actions)(?!\w)", re.IGNORECASE)
+CI_WAIT_DIGITS = re.compile(r"\d+(?:\.\d+)?")
 CI_WAIT_REASON = ("A check-in that waits on CI may wait at most %d minutes, because under the 1-hour prompt cache a later "
                   "wake pays a full context rewrite. Set send_later with delay_minutes of %d or less, or an `at` no more "
                   "than %d minutes ahead, then set the next check-in when this one wakes. "
@@ -6815,10 +6819,13 @@ CI_WAIT_REASON = ("A check-in that waits on CI may wait at most %d minutes, beca
 
 def ci_wait_minutes(tool_input: dict):
     """The wait a send_later call asks for, in minutes: the larger of delay_minutes and the `at` time's distance from
-    the clock. None when neither reads: no field, a non-number, or an `at` with no offset."""
+    the clock. delay_minutes is a number or a string of digits. An `at` with no offset reads in the clock's own offset.
+    None when neither reads: no field, or a value that is not a number or an ISO-8601 time."""
     waits = []
     delay = tool_input.get("delay_minutes")
-    if isinstance(delay, (int, float)) and not isinstance(delay, bool):
+    if isinstance(delay, str) and CI_WAIT_DIGITS.fullmatch(delay.strip()):
+        waits.append(float(delay))
+    elif isinstance(delay, (int, float)) and not isinstance(delay, bool):
         waits.append(delay)
     at = tool_input.get("at")
     if isinstance(at, str):
@@ -6829,8 +6836,11 @@ def ci_wait_minutes(tool_input: dict):
             when = datetime.fromisoformat(text[:-1] + "+00:00" if text[-1:] in ("Z", "z") else text)
         except ValueError:
             when = None
-        if when is not None and when.tzinfo is not None:
-            waits.append((when - local_time.clock()).total_seconds() / 60)
+        if when is not None:
+            now = local_time.clock()
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=now.tzinfo)
+            waits.append((when - now).total_seconds() / 60)
     return max(waits) if waits else None
 
 
