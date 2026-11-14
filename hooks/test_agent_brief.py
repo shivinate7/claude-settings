@@ -80,6 +80,7 @@ WRITER_RULES = [
     "- Push only with: git push origin HEAD:<branch>.",
     "- Make no gh call unless your brief names it.",
     "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next.",
+    "- If your hand-back call is refused, never retry it. Your final text is not delivered: end with one line naming the refusal, and your caller will message you for the report.",
     "- End each commit message with: Co-Authored-By: <model> <noreply@anthropic.com>",
     "- Name no record path in a commit message. The only exception is the Drops-lines: trailer.",
     "- Before you end, stop each server you started, by the $! from the same call or through the harness.",
@@ -89,6 +90,7 @@ READER_RULES = [
     STASH_LINE,
     "- Make no gh call unless your brief names it.",
     "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next.",
+    "- If your hand-back call is refused, never retry it. Your final text is not delivered: end with one line naming the refusal, and your caller will message you for the report.",
 ]
 PUSH_KEY = "Push only with"
 TRAILER_KEY = "End each commit message with"
@@ -315,14 +317,14 @@ add("line set: a general (unknown) type gets the writer set", "context",
 add("line set: a missing agent type gets the writer set", "context", payload(),
     line_set_check(WRITER_RULES, staged=True))
 for _t in ["reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer"]:
-    add("line set: %s gets the five-line set" % _t, "context", payload(_t),
+    add("line set: %s gets the six-line set" % _t, "context", payload(_t),
         line_set_check(READER_RULES))
-# The refuter is read-only, so it gets the five-line set: no push, trailer, record-path or staged-diff line
+# The refuter is read-only, so it gets the six-line set: no push, trailer, record-path or staged-diff line
 # (decision plan-refuter). Failure class: a read-only role given the writer set.
-add("line set: refuter gets the five-line set", "context", payload(REFUTER), line_set_check(READER_RULES))
+add("line set: refuter gets the six-line set", "context", payload(REFUTER), line_set_check(READER_RULES))
 # Plugin-prefixed read-only types take the reader set too (the prefix split must reach them).
 for _t in ["my-plugin:reviewer", "ns:Explore"]:
-    add("line set: plugin-prefixed %s gets the five-line set" % _t, "context", payload(_t),
+    add("line set: plugin-prefixed %s gets the six-line set" % _t, "context", payload(_t),
         line_set_check(READER_RULES))
 
 
@@ -388,7 +390,7 @@ add("general: %d odd-input rows each get the general scope line" % len(GENERAL_C
 # Explore scope, so it gets none of the push, trailer and record-path lines.
 add("case: Builder gets the builder scope line", "context", payload("Builder"), scope_check("builder"))
 add("case: explore gets the Explore scope line", "context", payload("explore"), scope_check("Explore"))
-add("case: explore gets the five-line set", "context", payload("explore"), line_set_check(READER_RULES))
+add("case: explore gets the six-line set", "context", payload("explore"), line_set_check(READER_RULES))
 
 # The push, trailer and record-path lines are for the write-capable types and the general
 # case, and never for reviewer or Explore.
@@ -503,7 +505,7 @@ def guard_core_control_check():
     return line_set_check(READER_RULES)(text)
 
 
-add("control: with guard_core working, the refuter gets the five-line set through the same runner", "custom",
+add("control: with guard_core working, the refuter gets the six-line set through the same runner", "custom",
     fn=guard_core_control_check)
 
 # SILENT: junk or empty stdin gives no stdout, exit 0, and at most one stderr line that starts
