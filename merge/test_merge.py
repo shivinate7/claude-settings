@@ -14959,19 +14959,19 @@ class ReviewArgs(ReviewEnv):
                 self.assertNotIn("Traceback", err, out + err)
 
     def test_the_usage_text_no_longer_says_every_record_must_be_sonnet(self):
-        """The module docstring's --review-record usage no longer says MODEL must be sonnet on every record. Round 1 takes its row's model, so
+        """The module docstring's --review-record usage no longer says MODEL must be sonnet on every record. The first round takes its row's model, so
         only the fix check is held to sonnet on every record (decision agent-model-cap, the round rows)."""
         text = " ".join((merge.__doc__ or "").split())
         self.assertNotIn("must be sonnet on every record", text, "the usage text still says MODEL must be sonnet on every record")
 
-    def test_the_usage_text_names_the_fix_check_as_the_one_record_line_that_must_be_sonnet(self):
+    def test_the_usage_text_names_the_fix_verifier_as_the_one_record_line_that_must_be_sonnet(self):
         text = " ".join((merge.__doc__ or "").split())
         self.assertRegex(text, re.compile(r"fix check[^.;]*must be sonnet|must be sonnet[^.;]*fix check", re.IGNORECASE),
                          "the usage text does not name the fix check as the one record line that must be sonnet")
 
     def test_the_usage_text_says_round_one_takes_its_rows_model_or_unknown(self):
         sentences = re.split(r"(?<=\.)\s", " ".join((merge.__doc__ or "").split()))
-        self.assertTrue(any("round 1" in s and "row" in s and "unknown" in s for s in sentences),
+        self.assertTrue(any("first round" in s and "row" in s and "unknown" in s for s in sentences),
                         "the usage text does not say round 1 takes its row's model or unknown")
 
 class ReviewRecordWrite(ReviewEnv):
@@ -15689,11 +15689,11 @@ class ReviewRoundModel(ReviewEnv):
         return config
 
     def round_one_flags(self, guard, model, verdict="FAIL"):
-        """The review flags for a record whose only round is round 1 on `model`, with Guard or check `guard`, at the live head."""
+        """The review flags for a record whose only round is the first round on `model`, with Guard or check `guard`, at the live head."""
         return ("--kind", "normal", "--guard", guard, "--head", self.head(), "--round", f"1:reviewer:{model}:{verdict}")
 
     def round_one_flag_lines(self, err):
-        """The stderr lines that name round 1: the flag a round 1 model earns against its row (decision agent-model-cap, the round rows)."""
+        """The stderr lines that name the first round: the flag a first-round model earns against its row (decision agent-model-cap, the round rows)."""
         return [line for line in err.splitlines() if "round 1" in line.lower()]
 
     def test_a_round_one_on_haiku_with_guard_no_prints_unchanged_and_flags_nothing(self):
@@ -15727,7 +15727,7 @@ class ReviewRoundModel(ReviewEnv):
         self.assertEqual(self.round_one_flag_lines(err), [], "round 1 on sonnet with --guard yes was flagged, though sonnet is its row")
 
     def test_a_round_one_with_an_unknown_model_is_printed_as_unknown_and_never_filled_in(self):
-        # A model the lane does not know reads `unknown`: it is accepted for round 1 with either guard flag, and no row model replaces it.
+        # A model the lane does not know reads `unknown`: it is accepted for the first round with either guard flag, and no row model replaces it.
         config = self.round_row_config()
         with unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
             for guard in ("no", "yes"):
@@ -15744,7 +15744,7 @@ class ReviewRoundModel(ReviewEnv):
                          "parse_review does not read a round row whose model is unknown back as written")
 
     def test_a_round_two_on_unknown_is_refused_with_the_round_named(self):
-        # Control: round 1 on unknown, then round 2 on sonnet, prints a record. Round 2 on unknown is refused: rounds 2 and up equal their row.
+        # Control: the first round on unknown, then the second round on sonnet, prints a record. The second round on unknown is refused: rounds after the first equal their row.
         config = self.round_row_config()
         with unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
             rc, out, err = self.run_args("7", "--review-record", *self.round_flags("1:reviewer:unknown:FAIL", "2:reviewer:sonnet:PASS"))
@@ -15756,7 +15756,7 @@ class ReviewRoundModel(ReviewEnv):
         self.assertNotIn("Traceback", err)
 
     def test_rounds_that_start_at_two_are_refused_and_the_remedy_gives_round_one_its_real_model_or_unknown(self):
-        # Control: the same rounds, starting at round 1 on haiku, print a record. Round 2 alone is refused, and the refusal says what round 1 needs.
+        # Control: the same rounds, starting at the first round on haiku, print a record. The second round alone is refused, and the refusal says what the first round needs.
         config = self.round_row_config()
         with unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
             rc, out, err = self.run_args("7", "--review-record", *self.round_flags("1:reviewer:haiku:FAIL", "2:reviewer:sonnet:PASS"))
