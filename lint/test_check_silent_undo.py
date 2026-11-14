@@ -812,6 +812,30 @@ class Flips(unittest.TestCase):
         the negation. The tail rule in `extends` is the gate that flags it."""
         self.red("", "deploy now.", "deploy now, never.")
 
+    def test_a_contraction_split_stays_a_reversal(self):
+        """`can't` and `won't` split at `n't`: the head ends after `can` or `won`, and the leftover `t` is a word.
+        A tail whose only word is that leftover is a negation of the line, not an appended clause."""
+        for a_line, result in (("Run it if you can.", "Run it if you can't."), ("He won.", "He won't.")):
+            with self.subTest(result=result):
+                self.assertNotIn(a_line, result)  # the line is lost, never a substring of the merge
+                self.red("", a_line, result)
+
+    def test_a_contraction_stem_is_not_the_required_word(self):
+        """The stem of `don't` or `can't` is no word beside the negation: a tail whose only word is that stem is a
+        reversal, not an appended clause."""
+        for result in ("Merge now, don't.", "Merge now, can't."):
+            with self.subTest(result=result):
+                self.assertNotIn("Merge now.", result)  # the line is lost, never a substring of the merge
+                self.red("", "Merge now.", result)
+
+    def test_a_contraction_in_an_appended_clause_passes(self):
+        """Controls: an appended clause with a contraction and a word of its own, or with a negation and a word of its
+        own, is an appended clause and keeps the rewrite excuse."""
+        for result in ("Merge now, unless CI can't run.", "Merge now, never past 55 minutes."):
+            with self.subTest(result=result):
+                self.assertNotIn("Merge now.", result)  # the line is lost, never a substring of the merge
+                self.assertEqual(self.resolve("", "Merge now.", result), [])
+
 
 class MainLineDrop:
     """The one home of the fixture for a case that merges main into a feat branch and drops lines main added to
