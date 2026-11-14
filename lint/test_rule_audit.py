@@ -22,6 +22,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rule_audit  # noqa: E402
+import question_form  # noqa: E402  the one home of the widening sentence (hooks/question_form.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 
 # .mjs fixtures must be listable: form 1 names node:test, form 2 names LIST_TESTS (see rule_audit).
@@ -3411,6 +3412,52 @@ class RefusalCiteRatchetTests(unittest.TestCase):
         src = body_src('    raise Stop("not in a git checkout")\n')
         exempt = {"merge:go: not in a git checkout": "refusal-matches-rule"}
         self.assertTrue(any("needs a reason" in p for p in module_problems(src, exempt)))
+
+
+class ShivStylismsMarkTests(unittest.TestCase):
+    """The reply-style file after the owner's six changes (roadmap step stylisms-apply-six-changes).
+
+    These read the real style file, not a fixture: the claim is about that file. Each read checks the
+    file is the shiv-stylisms file before it counts, so a wrong file fails by name, never as zero marks.
+    """
+
+    STYLE = os.path.join(rule_audit.ROOT, "output-styles", "shiv-stylisms.md")
+    MARK = re.compile(r"rule:([a-z0-9-]+)")
+    REMOVED = ("style-question-inside-box", "style-hand-off-cleanup", "style-hand-off-one-shell",
+               "style-command-in-item")
+    KEPT = ("style-offer-screen-takeover", "style-press-has-link")
+
+    def style_marks(self):
+        with open(self.STYLE, encoding="utf-8") as f:
+            text = f.read()
+        self.assertTrue("\nname: shiv-stylisms\n" in text,
+                      "output-styles/shiv-stylisms.md has no `name: shiv-stylisms` line, so it is not the style file")
+        return text, self.MARK.findall(text)
+
+    def test_style_file_holds_exactly_25_marks(self):
+        _, marks = self.style_marks()
+        self.assertEqual(len(marks), 25,
+                         "the style file holds %d rule marks, not 25. Marks: %s"
+                         % (len(marks), ", ".join(sorted(marks))))
+
+    def test_removed_marks_are_absent(self):
+        _, marks = self.style_marks()
+        for mark in self.REMOVED:
+            with self.subTest(mark=mark):
+                self.assertTrue(mark not in marks, "rule:%s is still a mark in the style file" % mark)
+
+    def test_kept_marks_are_present(self):
+        _, marks = self.style_marks()
+        for mark in self.KEPT:
+            with self.subTest(mark=mark):
+                self.assertTrue(mark in marks, "rule:%s is missing from the style file" % mark)
+
+    def test_widening_sentence_is_present(self):
+        text, _ = self.style_marks()
+        widens = getattr(question_form, "WIDENS_TEXT", None)
+        self.assertIsNotNone(widens, "hooks/question_form.py has no WIDENS_TEXT")
+        collapsed = re.sub(r"\s+", " ", text)
+        self.assertTrue(widens in collapsed, "the style file lacks question_form.WIDENS_TEXT, the widening sentence")
 
 
 if __name__ == "__main__":
