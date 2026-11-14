@@ -18156,6 +18156,112 @@ class ProseJudge(Env):
         size = len(prompt.encode("utf-8"))
         self.assertLess(size, 12 * 1024, "the prompt is %d bytes for three named paths, want under 12 KB" % size)
 
+    # The where-else judge (merge.py prose_judge_plan, prose_judge_run, prose_judge_prompt). A merge that lands a ruling asks the model
+    # where else the same mistake class applies. The fixture ruling is the claim-at-merge rule; its other number-minting place is a guard
+    # section file (hooks/test_guard.py load_sections). The stub answers the where-else prompt, the one that names SECTION_PATH, and holds
+    # every prose line, so the prose judge's own call never reads as the where-else call.
+    def changed_paths(self):
+        """The paths the PR changes against main: the range's own diff, read after setup_range has taken main's base."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        return set(sh(self.other, "git", "diff", "--name-only", "origin/main...origin/feat").split())
+
+    def assert_where_else_unknown(self, answer, cause):
+        """One where-else UNKNOWN line naming `cause`, no candidate line, and the merge landed with exit status 0: the judge is report-only."""
+        self.setup_range(SECTIONS, {RULING_PATH: RULING_DOC})
+        before = self.head("main")
+        stub, rc, out = self.judge(route(answer))
+        lines = where_else_unknown_lines(out)
+        self.assertEqual(len(lines), 1, "where-else UNKNOWN lines: %d, want 1: one count line for the one call\n%s" % (len(lines), out))
+        self.assertIn(cause, lines[0], "the where-else UNKNOWN line does not name the cause %r: %r" % (cause, lines[0]))
+        self.assertEqual(where_else_candidates(out), [], "a failed call printed a candidate line\n" + out)
+        self.assertEqual(rc, 0, "the where-else failure changed the exit status to %s: the judge is report-only\n%s" % (rc, out))
+        self.assertNotEqual(self.head("main"), before, "origin main did not move: the merge did not land\n" + out)
+
+    def test_a_ruling_pr_sends_the_ruling_and_the_section_files_in_one_where_else_call(self):
+        self.setup_range(SECTIONS, {RULING_PATH: RULING_DOC})
+        self.assertEqual(self.changed_paths(), {RULING_PATH}, "scope: the PR must land the ruling and nothing else")
+        stub, rc, out = self.judge(route(no_places))
+        where = [p for p in stub.prompts if SECTION_PATH in p]
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1: one ruling PR makes one call\n%s" % (len(where), out))
+        self.assertIn("Claim the number at merge.", where[0], "the where-else prompt does not carry the ruling text")
+        self.assertIn("# section 442", where[0], "the where-else prompt does not carry the section file's first line, so the model cannot name its number")
+        self.assertRegex(where[0], r"(?i)other repo|another repo|cross-repo|other repositories",
+                         "the where-else prompt does not say that other repos are unread")
+
+    def test_a_where_else_reply_naming_a_section_prints_one_candidate_line(self):
+        self.setup_range(SECTIONS, {RULING_PATH: RULING_DOC})
+        stub, rc, out = self.judge(route(lambda prompt: (WHERE_ELSE_REPLY, None)))
+        candidates = where_else_candidates(out)
+        self.assertEqual(len(candidates), 1, "candidate lines: %d, want 1: one reply that names one place\n%s" % (len(candidates), out))
+        self.assertIn("442", candidates[0], "the candidate line does not name section 442: %r" % candidates[0])
+        self.assertIn("vary", candidates[0], "the candidate line does not say that model verdicts vary run to run: %r" % candidates[0])
+        self.assertEqual(rc, 0, "the candidate line changed the exit status to %s: the judge is report-only\n%s" % (rc, out))
+
+    def test_a_pr_that_lands_no_ruling_makes_no_model_call(self):
+        self.setup_range(SECTIONS, {BACKING: BACKING_TEXT})
+        self.assertEqual(self.changed_paths(), {BACKING}, "scope: the PR must land no ruling, rule or guard")
+        stub, rc, out = self.judge(route(lambda prompt: (WHERE_ELSE_REPLY, None)))
+        self.assertEqual(stub.prompts, [], "model calls: %d, want 0: no ruling landed\n%s" % (len(stub.prompts), out))
+        self.assertEqual(where_else_candidates(out), [], "a PR with no ruling printed a candidate line\n" + out)
+
+    def test_a_where_else_model_error_prints_one_unknown_line_and_the_merge_lands(self):
+        self.assert_where_else_unknown(raises(RuntimeError("model exited 1")), CAUSE_MODEL_ERROR)
+
+    def test_a_where_else_timeout_prints_one_unknown_line_and_the_merge_lands(self):
+        self.assert_where_else_unknown(lambda prompt: (None, decision_watch.MODEL_TIMEOUT_ERROR), CAUSE_TIMED_OUT)
+
+    def test_a_where_else_reply_with_no_verdict_text_prints_one_unknown_line_and_the_merge_lands(self):
+        self.assert_where_else_unknown(
+            lambda prompt: (None, decision_watch.REPLY_RESULT_ERROR + " carried no JSON verdict: a stray reply"), CAUSE_NO_VERDICT)
+
+    def test_a_where_else_reply_of_the_wrong_shape_prints_one_unknown_line_and_the_merge_lands(self):
+        self.assert_where_else_unknown(lambda prompt: ({"places": "several"}, None), CAUSE_NO_VERDICT)
+
+    def test_a_tree_with_sixty_section_files_names_every_one_in_the_where_else_prompt(self):
+        sections = {**SECTIONS, **{"tests/guard/s%05d-case-%d.py" % (n, n): "# section %d\n" % n for n in range(1, 60)}}
+        self.setup_range(sections, {RULING_PATH: RULING_DOC})
+        stub, rc, out = self.judge(route(no_places))
+        where = [p for p in stub.prompts if SECTION_PATH in p]
+        self.assertEqual(len(where), 1, "where-else calls: %d, want 1 for sixty section files\n%s" % (len(where), out))
+        missing = [path for path in sections if path not in where[0]]
+        self.assertEqual(missing, [], "the where-else prompt leaves out %d of %d section files" % (len(missing), len(sections)))
+
+
+# The where-else judge's fixtures. RULING_DOC is the claim-at-merge rule as CLAUDE.md states it, with its anchor line. SECTIONS is one
+# guard section file on main, the other number-minting place. WHERE_ELSE_REPLY is the reply shape the where-else judge reads: a `places` list.
+RULING_PATH = "CLAUDE.md"
+RULING_DOC = ("# Rules\n\nNever allocate a numbered record on a branch. Write a slug of 32 characters or fewer. "
+              "Claim the number at merge.<!-- rule:git-slug-then-claim-number --> Ids, not paths.\n")
+SECTION_PATH = "tests/guard/s00442-lane-title.py"
+SECTIONS = {SECTION_PATH: "# section 442\nFAMILY = \"lane-title\"\n"}
+WHERE_ELSE_REPLY = {"places": [{"path": SECTION_PATH, "section": 442,
+                                "why": "the guard suite numbers its sections the way the rule numbers records"}]}
+CAUSE_TIMED_OUT, CAUSE_MODEL_ERROR, CAUSE_NO_VERDICT = UNKNOWN_CAUSES[0], UNKNOWN_CAUSES[1], UNKNOWN_CAUSES[2]  # the buckets of UNKNOWN_CAUSES, by name
+
+
+def no_places(prompt):
+    return {"places": []}, None
+
+
+def route(where_else):
+    """A JudgeStub answer: the where-else prompt, the one that names SECTION_PATH, goes to `where_else`; every prose line is held."""
+    def answer(prompt):
+        if SECTION_PATH in prompt:
+            return where_else(prompt)
+        numbers = [int(n) for n in re.findall(r"^Line (\d+): ", prompt, re.M)]
+        return {"verdicts": [{"line": n, "verdict": "holds", "why": "w"} for n in numbers]}, None
+    return answer
+
+
+def where_else_unknown_lines(out):
+    """The merge's where-else UNKNOWN lines. The prose judge's own UNKNOWN lines do not name the where-else judge."""
+    return [line for line in out.splitlines() if "UNKNOWN" in line and re.search(r"where[ -]else", line, re.I)]
+
+
+def where_else_candidates(out):
+    """The merge's candidate lines from the where-else judge: each names a candidate and no UNKNOWN."""
+    return [line for line in out.splitlines() if "candidate" in line.lower() and "UNKNOWN" not in line]
+
 
 NAMED = "hooks/x.py"  # a tracked code path that a prose line names in backticks
 NAMED_DOC = "# Named notes\n\nThe runner is `hooks/x.py` `run_all` and returns 3.\n"  # the named line is line 3
