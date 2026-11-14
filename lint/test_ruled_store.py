@@ -135,14 +135,19 @@ FETCH_SPY = "fetch-spy.log"  # the file, in the run's folder, that names each gu
 def origin_url(repo):
     """The URL a fetch of origin reaches: the remote's URL with the longest matching url.<base>.insteadOf prefix replaced,
     as git does. A fixture may keep a GitHub URL in its config and send the fetch to a local bare repo. One `git config`
-    start reads the remote's URL and every insteadOf rule, and no network is reached. None when there is no origin URL."""
-    answer = _nowindow.run([VCS, "-C", repo, "config", "--get-regexp", r"^(remote\.origin\.url|url\..+\.insteadof)$"],
+    start reads the remote's URL and every insteadOf rule, and no network is reached. None when there is no origin URL.
+    The rules are read with -z: each record is key, newline, value, NUL. A line split at its first space would cut a key
+    whose subsection path holds a space, and that rule would be dropped."""
+    answer = _nowindow.run([VCS, "-C", repo, "config", "-z", "--get-regexp",
+                            r"^(remote\.origin\.url|url\..+\.insteadof)$"],
                            capture_output=True, text=True, env=ENV, timeout=60)
     if answer.returncode != 0:
         return None
     raw, rewrites = None, []
-    for line in answer.stdout.splitlines():
-        key, _, value = line.partition(" ")
+    for record in answer.stdout.split("\0"):
+        key, _, value = record.partition("\n")
+        if not key:
+            continue
         if key == "remote.origin.url":
             raw = value
         elif key.lower().endswith(".insteadof"):
@@ -245,12 +250,17 @@ def bare_origin(scratch, name, files):
     return path
 
 
-def clone_with_origin(root, name, origin, files):
-    """A repo whose origin/roadmap holds `files`, with `origin` as its origin remote when it is not None."""
+def clone_with_origin(root, name, origin, files, real_url=None):
+    """A repo whose origin/roadmap holds `files`, with `origin` as its origin remote when it is not None. With `real_url`,
+    the remote keeps that URL (a GitHub one, say) and an insteadOf rule sends its fetch to the local `origin`, as a
+    fixture does for a real repo. The rule's key takes the path with "/" for each separator, as the config file does."""
     repo = init_repo(os.path.join(root, name))
     point_ref(repo, STORE_REF, files, root)
-    if origin is not None:
+    if origin is not None and real_url is None:
         git(repo, "remote", "add", "origin", origin)
+    elif origin is not None:
+        git(repo, "remote", "add", "origin", real_url)
+        git(repo, "config", "url.%s.insteadOf" % origin.replace(os.sep, "/"), real_url)
     return repo
 
 
@@ -1026,6 +1036,42 @@ class ListNoteTests(RepoCase):
         self.assertIn("r-list", out, "control: list printed no entry for the open ruling: %r" % out)
         self.assertIn("read as of", out, "list did not say the store was read as of a time after a failed fetch: %r"
                       % out)
+
+
+REAL_ORIGIN_URL = "https://github.com/shivinate7/claude-settings.git"  # a real origin's URL: its rule sends the fetch local
+
+
+class OriginUrlTests(RepoCase):
+    """origin_url reads the remote's URL through its insteadOf rules, so a local origin behind a real URL is not called
+    real. The path in a rule's key may hold a space, which a line-split read cuts, and then the rule is lost."""
+
+    def rewritten_repo(self, folder):
+        """(repo, origin): a repo whose origin is REAL_ORIGIN_URL, rewritten by an insteadOf rule to a bare origin made
+        under `folder`, a folder of this case's own."""
+        scratch = os.path.join(self.root, folder)
+        os.makedirs(scratch)
+        origin = fixture.bare_origin(scratch, "origin", {"README": "origin\n"})
+        repo = fixture.clone_with_origin(self.root, "repo", origin, {"README": "repo\n"}, real_url=REAL_ORIGIN_URL)
+        return repo, origin
+
+    def test_a_rule_whose_path_has_a_space_still_rewrites_origin(self):
+        repo, origin = self.rewritten_repo("a dir with space")
+        key = "url.%s.insteadOf" % origin.replace(os.sep, "/")
+        configured = fixture.git(repo, "config", "--get", key)
+        self.assertEqual(configured, REAL_ORIGIN_URL, "scope: the repo's config holds no insteadOf rule for %r: %r"
+                         % (origin, configured))
+        got = fixture.origin_url(repo)
+        self.assertEqual(got, origin.replace(os.sep, "/"), "origin_url read %r, not the local origin: the insteadOf rule "
+                         "whose path has a space was dropped" % (got,))
+        self.assertFalse(fixture.real_origin(repo), "real_origin called the local origin of a repo real, so its fetch "
+                         "would be refused")
+
+    def test_a_rule_whose_path_has_no_space_rewrites_origin(self):
+        repo, origin = self.rewritten_repo("a-dir")
+        got = fixture.origin_url(repo)
+        self.assertEqual(got, origin.replace(os.sep, "/"), "control: origin_url read %r, not the local origin %r"
+                         % (got, origin))
+        self.assertFalse(fixture.real_origin(repo), "control: real_origin called the local origin real")
 
 
 def tearDownModule():
