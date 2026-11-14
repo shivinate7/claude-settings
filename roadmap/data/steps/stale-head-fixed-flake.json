@@ -1,0 +1,14 @@
+{
+ "id": "stale-head-fixed-flake",
+ "title": "A lane lint runs a PR head's own copy of a flaky test that main has already fixed, so an older branch can fail it at random",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Three cases in one night (coordinator 05:45 CST Nov 14, relayed; heads read by the coordinator by fetch; triage read #3349's file at both refs, 05:01): lane lint failed on ShardTests.test_no_shard_runs_all (old order-sensitive form) on #3343, #3349 and #3389 (head 482d6a2db958, log /tmp/ci-job-checks-1eq_ktjl.log line 10235, unread). Main fixed the test in bedbce7b5c80; each head predated it. A lane lint runs the PR head's own test files, so any PR branched before a flake fix can fail the lint at random until main is merged in. Not a gap in the fix (step mutate-shard-test-order-race stays done). Fix candidates, coordinator's, unbuilt: (a) the lane lint runs the tests of main's tip; (b) the PR merges main first. Cost per hit: a lint cycle, and for a PR already ready a new head (unmeasured; the coordinator names none). (a) changes which tests a lint trusts, so it is a guard or check change: round 3 applies; (b) is a process rule. The coordinator told the lane of #3389 to rerun once, alone.",
+ "source": "coordinator 05:45 CST Nov 14",
+ "note": "Filed 05:47 CST Nov 14 by triage. Tracker: the coordinator. Path ALONE. No lane yet. A step rather than a note: three incidents in one night.",
+ "updatedAt": "2026-11-14T05:47:00-06:00"
+}
