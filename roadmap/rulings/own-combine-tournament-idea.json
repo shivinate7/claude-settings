@@ -1,0 +1,10 @@
+{
+  "id": "own-combine-tournament-idea",
+  "at": "2026-11-13T21:45:00-06:00",
+  "title": "Owner idea: combine merge queues further and further, pairwise on dry trees, while a run is in CI",
+  "ruling": "Owner 21:45 CST Nov 13, in runner 10's chat, relayed by the consultant (triage did not see it): an idea, not a ruling on a rule. Send subagents to take two large batched PRs and run dry runs, then repeat: 4 subagents with 2 big batch PRs each means 8 combine to 4, then combine further, combining the merge queues further and further while a run is already in CI. Filed as step combine-tournament. It widens no grant: runner 10 already holds a Sonnet Workflow opt-in, and merges stay serial.",
+  "quote": "send subagents to take two large batched PRs and run dry runs, then repeat: 4 subagents with 2 big batch PRs each means 8 combine to 4, then combine further, combining our merge queues further and further while a run is already in CI",
+  "source": "Consultant 21:46 CST Nov 13 (quoting the owner via runner 10); filed by triage.",
+  "status": "open",
+  "step": "combine-tournament"
+}

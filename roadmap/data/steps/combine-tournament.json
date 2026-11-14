@@ -1,0 +1,14 @@
+{
+ "id": "combine-tournament",
+ "title": "A Workflow of Sonnet agents merges combined PRs pairwise on dry trees round by round while CI runs; the real PR is built once from the last round",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner idea 21:45 CST Nov 13, in runner 10's chat (relayed by the consultant): combine the merge queues further and further while a run is already in CI, instead of one big serial queue.",
+ "source": "Consultant 21:46 CST Nov 13, relaying runner 10 relaying the owner.",
+ "note": "Triage 21:46 CST Nov 13: under step batch-runner-scales. Shape per the consultant: a Workflow of Sonnet agents takes two large combined PRs each, merges them pairwise on dry trees (no push), round by round (8 combine to 4, then further) while CI runs; a clashing member leaves by name to its lane; the real PR is built from the last round on the newest main, linted once, one CI run. Runner 10 runs it (its Workflow grant, ruling own-runner-workflow-optin, covers Sonnet agents); the coordinator tracks. Merges stay serial. Nothing here is measured: the number of rounds, the clash rate (runner 10's dry runs found 46 of 62 members clean for combine-m2, 17 of 990 pairs clashing in set 1) and the time saved are unmeasured by triage.",
+ "updatedAt": "2026-11-13T21:46:34-06:00"
+}
