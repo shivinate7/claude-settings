@@ -200,6 +200,14 @@ def say(when, text="done"):
     return rec(when, "assistant", [{"type": "text", "text": text}])
 
 
+def queued(when, text):
+    """An owner message typed while the session runs: a queued_command attachment with a timestamp. Its text is
+    attachment.prompt, the field lint/_transcript.py owner_text reads. Built here because no helper in this file
+    makes the attachment shape."""
+    return {"type": "attachment", "isSidechain": False, "timestamp": iso(when),
+            "attachment": {"type": "queued_command", "prompt": text}}
+
+
 def call(when, tid, name, tool_input, sidechain=False):
     return rec(when, "assistant", [{"type": "tool_use", "id": tid, "name": name, "input": tool_input}],
                sidechain)
@@ -898,6 +906,32 @@ def case_w16_writer_key_naming_the_remote_session_blocks_a_wake():
     expect_block("W16", run_stop("w16", root, records, writer=None, extra_env=env), (SCRIPT,))
 
 
+def case_w17_meta_page_writer_is_not_overruled_by_the_key():
+    """W14 with the writer named the other way: the extras key names this session, and the transcript's meta/page
+    get names session_other, with a wake and no export run. meta/page decides alone, so this session is not the
+    writer and the wake passes. The control names this session in meta/page, and the same transcript blocks. The
+    subject passes on the old code as well, so it pins the current code and cannot be red."""
+    root = base_repo("w17", page_writer=SESSION)
+    records = [owner(at(18, 50)), owner(at(19), WAKE)]
+    check("W17 scope: the extras key names this session", key_writer(root) == SESSION, key_writer(root))
+    check("W17 scope: the wake names the waiting page", page_names(root, PAGE_URL), PAGE_URL)
+    check("W17 scope: the transcript holds no shell run of export_page.py", SCRIPT not in json.dumps(records))
+    expect_block("W17 control", run_stop("w17-named", root, records, writer=SESSION), (SCRIPT,))
+    expect_pass("W17", run_stop("w17", root, records, writer="session_other"))
+
+
+def case_w18_queued_wake_with_a_timestamp_blocks():
+    """A Send's wake that arrives as a queued_command attachment, typed while the session ran, with a timestamp. Its
+    text is attachment.prompt, which owner_text reads, so the wake counts as a page write at 19:00. The copy is at
+    17:00 and the writer is named, so the stop blocks. The scope reads owner_text on the record itself."""
+    import _transcript
+    root = base_repo("w18")
+    wake = queued(at(19), WAKE)
+    check("W18 scope: owner_text reads the queued record's prompt as the wake", _transcript.owner_text(wake) == WAKE,
+          _transcript.owner_text(wake))
+    expect_block("W18", run_stop("w18", root, [owner(at(18, 50)), wake]), (SCRIPT,))
+
+
 # --------------------------------------------------------------------------- unit cases
 
 def guard_module():
@@ -1005,6 +1039,8 @@ CASES.extend((
     case_w14_writer_key_naming_this_session_blocks_a_wake,
     case_w15_writer_key_naming_another_session_does_not_exempt_an_export_run,
     case_w16_writer_key_naming_the_remote_session_blocks_a_wake,
+    case_w17_meta_page_writer_is_not_overruled_by_the_key,
+    case_w18_queued_wake_with_a_timestamp_blocks,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
 ))
