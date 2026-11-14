@@ -2842,6 +2842,39 @@ def case_override_bare_number_with_words_is_not_the_fast_path():
           ends_after(got, "timed", timedelta(minutes=15)), "got %r; files %r" % (got, ov_pass_files(cfg)))
 
 
+# A bare number with words after it, and a length inside a pasted block or a code span. The bare-number branch of
+# _fast_length strips both before it looks for a second length, so no length is left: the plain ask judges the prompt,
+# with the block or the span in the text the judge sees, and the judge's no leaves a one-act override with the reason
+# logged. With the strip reverted the words hold a length, and the judge's no grants nothing. Only the judge's no tells
+# the two apart: the judge is asked the same text either way, and its yes grants the same 15 minutes.
+BARE_QUOTED_LENGTHS = (  # (name, prompt, the text the judge is asked, the reason the log holds)
+    ("`override 15 please` then a pasted block that holds `3 minutes`",
+     'override 15 please\n<pasted_content index="1">3 minutes</pasted_content>', "override 15 please\n[pasted text]",
+     "15 please"),
+    ("`override 15 please` then a backtick span that holds `3h`", "override 15 please `3h`",
+     "override 15 please `3h`", "15 please `3h`"),
+)
+
+
+def case_override_bare_number_quoted_length_is_not_a_second_length():
+    for name, prompt, judged, reason in BARE_QUOTED_LENGTHS:
+        cfg, judge, _, _, err = ask_type(prompt, answer=True)
+        check("override bare number quoted: %s: the judge is asked once, with the stripped ask" % name,
+              judge.texts == [judged], "judge texts %r; stderr %r" % (judge.texts, err.strip()[-120:]))
+        got = ov_pass(cfg)
+        check("override bare number quoted: %s: a judge yes grants a 15-minute timed override" % name,
+              ends_after(got, "timed", timedelta(minutes=15)), "got %r; files %r" % (got, ov_pass_files(cfg)))
+        ask_judge_not_true("override bare number quoted, judge no: %s" % name, prompt, ("once", OV_ONCE),
+                           reason=reason, answer=False)
+    # The contrast: the whole rest `override 15` times 15 minutes with no judge call, the fast path that the words lack.
+    cfg, judge, _, _, err = ask_type("override 15", answer=False)
+    check("override bare number quoted: `override 15`, the whole rest: no judge call",
+          not judge.texts, "judge texts %r; stderr %r" % (judge.texts, err.strip()[-120:]))
+    got = ov_pass(cfg)
+    check("override bare number quoted: `override 15`, the whole rest grants a 15-minute timed override",
+          ends_after(got, "timed", timedelta(minutes=15)), "got %r; files %r" % (got, ov_pass_files(cfg)))
+
+
 def queued_record(prompt, origin=None):
     """An attachment record of kind queued_command: an owner message typed while the session runs, its words in
     attachment.prompt and its own origin in attachment.origin (no origin key when None)."""
@@ -3651,6 +3684,7 @@ def main():
         case_override_lift_logs_the_guard_named()
         case_override_relayed_grants_nothing()
         case_override_bare_number_with_words_is_not_the_fast_path()
+        case_override_bare_number_quoted_length_is_not_a_second_length()
         case_override_queued_command_from_a_harness_or_peer_grants_nothing()
         case_override_queued_command_typed_still_grants()
         case_override_queued_plain_ask_grants_nothing()

@@ -30,7 +30,8 @@ writes, so a session cannot grant itself an override. It is valid only while now
       None: a one-act override. A judge yes for a first-word `override` with a reason and no length stays main's
       one-act override.
     - grant() defers (returns None) only for a first word `override` whose rest starts with no length and holds one
-      (`override that for 15 minutes please`). grant_override_ask then answers every outcome but a judge yes with
+      (`override that for 15 minutes please`), or starts with a bare number followed by words (`override 15 please`).
+      grant_override_ask then answers every outcome but a judge yes with
       grant()'s own result (a reason form: a one-act override, with the reason logged). A judge no or error never
       widens a one-act override to a timed one.
   The keyword route is the fast path, and it never asks a judge. `override <length>` with any words after the length
@@ -141,7 +142,6 @@ CLAIM_KEEP = 2 * ONCE_WINDOW.total_seconds()  # seconds; past it, a marker's ove
 PROMPT = re.compile(
     r"\s*override(?:(?=\s|$)\s*(?::|[,.!;\-\u2013\u2014](?=\s|$))?|:|[,.!;\-\u2013\u2014](?=\s|$))\s*(.*)",
     re.I | re.S)
-WORD = re.compile(r"(?:(off)|(\d+)([mh])?)", re.I)  # `off` or a length, as the whole rest
 OPUS_PROMPT = re.compile(r"\s*opus(?=\s|$)(.*)", re.I | re.S)  # the Opus word, then the rest
 OPUS_LENGTH = re.compile(r"(\d+)([mh])", re.I)  # an Opus override needs its unit
 # The plain ask (grant_opus_ask): the whole word, the blocks that are not the owner's words, a word that may name a
