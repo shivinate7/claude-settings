@@ -63,13 +63,15 @@ from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN  # noqa: E402  stdl
 # The widening words come from question_form.WIDENS_TEXT, the one home. If the import fails, the prompt
 # keeps its sentence without the quoted words, one stderr line says so, and the hook still runs.
 try:
-    from question_form import WIDENS_TEXT  # noqa: E402
+    from question_form import WIDENS_TEXT, WIDENING_CARVE_OUT  # noqa: E402
 except Exception as exc:
     WIDENS_TEXT = None
+    WIDENING_CARVE_OUT = None
     print("reply judge: cannot read WIDENS_TEXT (%s: %s); the prompt names the label without its words"
           % (type(exc).__name__, exc), file=sys.stderr)
 WIDENS_LABEL_SENTENCE = ("Also flag an option that widens a shared tool offered without the owner's widening label"
-                         + (", the words \"%s\". " % WIDENS_TEXT if WIDENS_TEXT else ". "))
+                         + (", the words \"%s\". " % WIDENS_TEXT if WIDENS_TEXT else ". ")
+                         + (WIDENING_CARVE_OUT + ". " if WIDENING_CARVE_OUT else ""))
 
 OK_SHAPE = {"ok": (True, False)}
 MODEL_TIMEOUT = 20  # the Stop entry allows 25
