@@ -6,7 +6,7 @@ Owner ruling Q1 a (the cutover), 2026-11-12 09:42 CST, relayed by the coordinato
 
 Owner ruling `own-degen-home-switch-now` (degen and home switch now), 2026-11-13 22:13 CST, is an exception to this decision. Degen and home switch to per-lane merge on the stable branch ahead of the drain. Every other child repo waits for the drain and switches together at the cutover.
 
-The exception overrides decision `uniform-over-variants` and ruling `own-act6-draft-prs-when-green` (child-repo draft PRs open once claude-settings main is green; the switch waits for the drain), for degen and home only.
+The exception overrides ruling `own-act6-draft-prs-when-green` (child-repo draft PRs open once claude-settings main is green; the switch waits for the drain), for degen and home only.
 
 State: target, not live, for every other child repo. Degen and home switch to per-lane merge on the stable branch now. The cutover lands with the removal act, act 4 of R42 part 2, which is a branch in progress.
 

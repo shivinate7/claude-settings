@@ -2,13 +2,13 @@
 
 ## The ruling
 
-Owner, 2026-10-10 and 2026-10-13: every PR opens as a draft, and CI skips draft PRs. Lane PRs stay drafts. In every repo but degen and home, only one integration PR per batch goes ready, and its run is the batch's only CI run (`git-integration-branch-merge`).
+Owner, 2026-10-10 and 2026-10-13: every PR opens as a draft, and CI skips draft PRs. Lane PRs stay drafts. Only one integration PR per batch goes ready, and its run is the batch's only CI run (`git-integration-branch-merge`).
 
 Owner ruling Q2 (when a lane PR goes ready), 2026-11-12 09:44 CST. The coordinator relayed it at 09:50 CST. A lane may move its PR from draft to ready once, after its last review and lane lint. Never per push. A PR that will not merge never goes ready.
 
 State: in every repo but degen and home, Q2 is target, not live. That is the lane's reading of timing, since the owner's words give no timing. Until the cutover to per-lane merges (decision `all-repos-switch-together`), in every repo but degen and home, a batch still makes its one integration PR ready. That run is the batch's only CI run (`git-integration-branch-merge`). The 2026-10-13 ruling on that point is superseded at the cutover.
 
-Until the cutover, every repo batches, except degen and home. Degen and home switch to per-lane merge on the stable branch now (ruling `own-degen-home-switch-now`, degen and home switch now), and the other child repos wait for the drain.
+Degen and home switch to per-lane merge on the stable branch now (ruling `own-degen-home-switch-now`, degen and home switch now), and the other child repos wait for the drain.
 
 One exception, owner, item 400 a, 2026-11-08 06:08 CST: "A draft-only job runs just the test files a lane touches, on Windows and macOS." Lane lint runs on Linux only, so a Windows-only red (T11b of the map skill, batch run 42449331095) first showed in a batch and dropped a lane.
 
