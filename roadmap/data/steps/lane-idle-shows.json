@@ -1,0 +1,14 @@
+{
+ "id": "lane-idle-shows",
+ "title": "The coordinator's wake reads each tracked lane's last push and acts on a lane that has pushed nothing for too long",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Consultant 10:35 CST Nov 14 (relayed; the counts are the consultant's, triage read none of them; owner priority fb-1556-6, an owner feedback item): seven CI-speed lanes (PRs #3158, #3180, #2839, #3063, #3226, #2970 and #2733) pushed nothing for about 10 h after the coordinator read them as alive at 00:17 CST, and the lane shared-savings-gap-read sat in review_ready for 9.5 h. Nobody noticed until the owner's consultant asked. Fix shape (consultant's, undone and unbuilt): at each wake the coordinator reads each tracked lane's last push; over 1 h idle means a nudge, over 2 h means replace the lane. The two thresholds are the consultant's picks, unmeasured. Kin, not the same: idle-lane-archive and merge-runs-idle-lanes list lanes whose work has merged, so they can be archived; this step finds a live lane that has stopped. Cost check (rule outcomes-mechanize-rules): the read is one on-demand git or REST read per tracked lane inside a wake the coordinator already runs, no new process, no new file; a test must prove that cost. First act of a lane: read how the coordinator's wake lists tracked lanes today and where a last-push read fits; reproduce, red then green: a lane with a last push over 2 h old is named replace and one over 1 h is named nudge. A lane that waits on the owner or on CI is not idle: the check needs a stated way to tell them apart.",
+ "source": "consultant 10:35 CST Nov 14, owner priority fb-1556-6",
+ "note": "Filed 10:38 CST Nov 14 by triage. Tracker: the coordinator. No lane yet.",
+ "updatedAt": "2026-11-14T10:38:00"
+}
