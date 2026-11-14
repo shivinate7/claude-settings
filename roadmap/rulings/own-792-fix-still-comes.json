@@ -1,0 +1,10 @@
+{
+  "id": "own-792-fix-still-comes",
+  "at": "2026-11-13T19:43:44-06:00",
+  "title": "Degen #702 was merged by the owner by hand; the merge-tool fix for old red runs still comes",
+  "ruling": "Owner 19:43 CST Nov 13, page item 792, \"none of these\": \"i merged it but the fix shd still come cuz this is a bug\". He merged degen PR #702 himself on GitHub (option b), and the merge tool must still be fixed to judge the newest run per check name (step merge-reads-newest-check-run, lane started 19:40). Option a (wait for the fix) is moot for #702.",
+  "quote": "i merged it but the fix shd still come cuz this is a bug",
+  "source": "Owner answer saved on the waiting page 19:43 CST Nov 13, thread c22fb4ec; filed by triage.",
+  "status": "open",
+  "step": "merge-reads-newest-check-run"
+}
