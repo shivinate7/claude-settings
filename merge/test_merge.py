@@ -16772,6 +16772,66 @@ class PageOnlyRecordCarry(ReviewEnv, RecordsEnv):
         self.assertEqual([c.args[1] for c in worktrees.call_args_list], [second, first],
                          "a records-page commit of the walk got a worktree more or less than once, or for another commit")
 
+    def test_r_a_removal_that_outlives_its_budget_keeps_the_verdict_and_leaves_no_tree(self):
+        """The tree's removal has its own budget, so a caller's spent deadline never reaches it. Two faults, both at the git seam on the removal's
+        unlock, remove and prune: (1) the removal's own calls outlive their budget and raise TimeoutExpired, as sh raises past its budget; (2) the
+        caller's deadline is spent when the generator run ends, and the removal must not run on that deadline. Under each fault the verdict is the
+        one it is without the fault (True for the generator's own page, False for a hand-written one, Stop when the generator fails), nothing
+        escapes page_is_generated, and no temporary tree is left behind."""
+        fx = self.real_commits()
+        full = self.git_commit(fx.fixed, self.debts(60))
+        cases = (
+            ("the empty page, the generator's own output", self.tool_page(fx.fixed), fx.fixed, "", True),
+            ("the full page of 60 debts, the generator's own output", self.tool_page(full), full, "", True),
+            ("a hand-written page the generator does not write", self.tool_page(fx.fixed, rebuild=False, hand="hand-written page\n"), fx.fixed, "", False),
+            ("the generator exits 1 on the empty page", self.tool_page(fx.fixed), fx.fixed, "fail", merge.Stop),
+        )
+        tmp_root = os.path.join(self.t, "tmp-root")
+        os.makedirs(tmp_root)
+        real_git, real_sh = merge.git, merge.sh
+        removal = {("worktree", "unlock"), ("worktree", "remove"), ("worktree", "prune")}
+
+        def spend_after_generator(args, *a, **k):
+            """Both versions run the generator as one sh call that carries --records-only. The caller's deadline is spent once that call returns."""
+            r = real_sh(args, *a, **k)
+            if "--records-only" in args:
+                merge._READ_DEADLINE = float("-inf")
+            return r
+
+        for own_budget in (True, False):
+            fault = "the removal's own calls outlive their budget" if own_budget else "the caller's deadline is spent during the generator run"
+            for name, page, parent, mode, want in cases:
+                with self.subTest(fault=fault, case=name):
+                    self.assert_page_scope(page, parent)
+                    reached, spent = [], []
+
+                    def removal_git(cwd, *a, input=None):
+                        if a[:2] not in removal:
+                            return real_git(cwd, *a, input=input)
+                        reached.append(a[:2])
+                        spent.append(merge._READ_DEADLINE == float("-inf"))
+                        if own_budget or spent[-1]:  # sh's floor: a call on a spent deadline runs out at once
+                            raise subprocess.TimeoutExpired(cmd=["git", *a], timeout=1)
+                        return real_git(cwd, *a, input=input)
+
+                    outer = contextlib.nullcontext() if own_budget else merge.shared_deadline(3600)
+                    generator = contextlib.nullcontext() if own_budget else unittest.mock.patch.object(merge, "sh", side_effect=spend_after_generator)
+                    with unittest.mock.patch.object(merge, "git", side_effect=removal_git), \
+                            unittest.mock.patch.object(tempfile, "tempdir", tmp_root), self.generator_mode(mode), outer, generator:
+                        try:
+                            got = merge.page_is_generated(self.co, page)
+                        except merge.Stop as stop:
+                            got = stop
+                        except subprocess.TimeoutExpired as e:
+                            self.fail(f"the removal's TimeoutExpired escaped page_is_generated: {e}")
+                    self.assertTrue(reached, "fixture: the removal's git calls were not reached, so the case tests nothing")
+                    self.assertNotIn(True, spent, "the removal ran on the caller's spent deadline, so it has no budget of its own")
+                    if want is merge.Stop:
+                        self.assertIsInstance(got, merge.Stop, f"the generator failed, but the call returned {got!r}, not a Stop")
+                    else:
+                        self.assertIs(got, want, f"the verdict changed when the removal timed out: got {got!r}, want {want!r}")
+                    self.assertEqual([n for n in os.listdir(tmp_root) if n.startswith("merge-wt-")], [], "the removal left a temporary tree behind")
+
 class ReplacementCarry(ReviewEnv):
     """`merge --reviewed` reads a replacement pull request (its body names `Replaces #6`) with the newest record on #6 and #6's lane-lint PASS,
     when the tree of #6's record head equals the tree of the replacement's live head (step review-carries-by-tree; decision pr-review-record).
