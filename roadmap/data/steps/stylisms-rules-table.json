@@ -1,14 +1,16 @@
 {
  "id": "stylisms-rules-table",
  "title": "A lane drafts a table of every rule in output-styles/shiv-stylisms.md: keep, change or drop, the evidence for it, and a recommendation",
- "status": "doing",
+ "status": "blocked",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKzpTWWUkv9Q1vxoghv",
  "owner": "triage",
- "blockedBy": [],
+ "blockedBy": [
+  "owner item 800"
+ ],
  "why": "The owner picked a on page item 795: have a lane draft the table first, then he signs it. The review of the rules (restart-plan R44 part 3) was folded into global-claude-md-scope-audit and never put to him until 20:25 CST Nov 13.",
  "source": "Owner 21:39 CST Nov 13, page item 795 a (read by triage on the page, saved 03:39Z).",
- "note": "Triage 21:40 CST Nov 13: ruling own-795-a-stylisms-table. Read-only table, no rule changes until the owner signs it. Per rule: keep, change or drop; the evidence (a sighting, a ruling, or \"unmeasured\"); a recommendation. The file has 29 rule marks today (triage count); the older step text says 23, so the table starts from the file on main. Prior audit the owner remembered: restart-plan R41 (owner 13:36 CST Nov 11, \"r41 yes on all\") read shiv-stylisms as in the right folder and earning its place; that was a placement check, not a rule-by-rule review. R44 part 3 left the content to this review. Tracker: coordinator; lane: none yet. Coordinator 21:41 CST Nov 13 (21:41): lane started, session_013NEJKzpTWWUkv9Q1vxoghv (Sonnet, medium): a new docs file with the table (rule mark, rule, keep/change/drop, evidence, recommendation), no rule changes, counts the marks itself; a draft PR the owner reads; hands in to runner 10 with a copy to the coordinator.",
- "updatedAt": "2026-11-13T21:41:25-06:00"
+ "note": "Triage 21:40 CST Nov 13: ruling own-795-a-stylisms-table. Read-only table, no rule changes until the owner signs it. Per rule: keep, change or drop; the evidence (a sighting, a ruling, or \"unmeasured\"); a recommendation. The file has 29 rule marks today (triage count); the older step text says 23, so the table starts from the file on main. Prior audit the owner remembered: restart-plan R41 (owner 13:36 CST Nov 11, \"r41 yes on all\") read shiv-stylisms as in the right folder and earning its place; that was a placement check, not a rule-by-rule review. R44 part 3 left the content to this review. Tracker: coordinator; lane: none yet. Coordinator 21:41 CST Nov 13 (21:41): lane started, session_013NEJKzpTWWUkv9Q1vxoghv (Sonnet, medium): a new docs file with the table (rule mark, rule, keep/change/drop, evidence, recommendation), no rule changes, counts the marks itself; a draft PR the owner reads; hands in to runner 10 with a copy to the coordinator. Lane done 21:44 CST Nov 13 (coordinator 21:44): draft PR #3340, head 15e4ccf41cd1, docs/plans/stylisms-rules-table.md, docs only, lane lint PASS. Counts (lane's; triage read the table, not its evidence): 29 marks, 21 keep, 7 change, 1 drop; 29 become 23 if all stand. Runner 10 holds #3340 until the owner signs. Owner item 800 posted for the signing.",
+ "updatedAt": "2026-11-13T21:44:46-06:00"
 }
