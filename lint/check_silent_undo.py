@@ -43,7 +43,7 @@ original word is a new clause beside the old (see `extends`).
 
 Blank lines and whitespace never count. The escape is a trailer in a commit message, one per
 path: `Drops-lines: <path> -- <reason>`. The PR body is read too: the same line in it
-excuses its path. A trailer or line with no reason excuses nothing. A deleted debt file is also excused by a
+excuses its path. Among commits the oldest reason for a path wins, and a later commit does not replace it. A PR-body line wins over the commits. A trailer or line with no reason excuses nothing. A deleted debt file is also excused by a
 `Retire-run: <slug> -- <run URL>` line in the PR body's last paragraph that the debt-close check
 (check_debt_retire.retired) accepts: a green run on the PR head or above, a Retire that holds. It needs a
 run reader (run_state); with none, or a read that fails, the finding stays. Only a whole delete is excused, not a rename out of
@@ -888,7 +888,9 @@ def remedy_text():
     copied whole."""
     return "\n".join([
         "put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message, in its last paragraph."
-        " The two marker lines are not part of the message: drop them when you copy it:" % TRAILER,
+        " The two marker lines are not part of the message: drop them when you copy it." % TRAILER,
+        "The scan keeps the oldest commit's reason for a path and prints it. A later commit does not replace it, so write"
+        " the reason right the first time. A PR-body line replaces it only where the merge tool reads the body:",
         REMEDY_BEGIN,
         "Drop lines from <path> on purpose",
         "",

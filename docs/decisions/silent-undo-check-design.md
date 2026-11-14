@@ -22,7 +22,7 @@
 
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses
-nothing. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
+nothing. Among commits the first reason for a path wins, and a later commit does not replace it. A PR-body line wins over the commits. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
 reason. No switch turns the check off.
 
 A refusal prints the whole remedy, so the author can copy it: a commit message between the lines
