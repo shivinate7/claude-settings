@@ -3119,10 +3119,12 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     return fails, reports, stop
 
 def commit_sessions(root, head, base):
-    """-> (sorted distinct Claude-Session ids on the commits of origin/<base>..head, "") or (None, why) when git cannot read the range.
+    """-> (sorted distinct Claude-Session ids on the first-parent commits of origin/<base>..head, "") or (None, why) when git cannot read the range.
+    First-parent only: a combined PR's member commits are second parents of the combiner's merge commits, so they drop out and the PR counts its own lane commits.
+    A named limit: a lane that merges another open PR's head also drops that head's commits.
     Only a real trailer counts, so a session id quoted in a message body is no commit session. A commit with no trailer names no session.
     A merge commit with no trailer stays uncounted (a known limit): a lane merges base into itself with an ordinary merge commit, which names no session of its own."""
-    c, out = git(root, "log", "--format=%(trailers:key=Claude-Session,valueonly,separator=%x0a)", f"origin/{base}..{head}")
+    c, out = git(root, "log", "--first-parent", "--format=%(trailers:key=Claude-Session,valueonly,separator=%x0a)", f"origin/{base}..{head}")
     if c:
         return None, f"git log origin/{base}..{head[:9]} failed: {' '.join(out.split())[:200]}"
     return sorted(set(SESSION_URL.findall(out))), ""
