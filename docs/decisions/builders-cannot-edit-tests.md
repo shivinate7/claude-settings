@@ -68,7 +68,7 @@ A test-support helper lives in the top-level `testing/` folder, such as `testing
 - A subfolder of a landed folder, such as `hooks/test_support/`, fails `check_landed_dirs`.
 - A helper named `test_<name>.py` needs a run step in `checks.yml` (`CiCoverage` and `TEST_FILE` in `lint/test_windows_split.py`) and runs as a script (`TEST_PATTERNS` in `.github/scripts/touched-tests.py`).
 - A helper a builder may write would let builder code decide what tests import. That works against "a green run must mean the code is right".
-- The lane of PR #3238 (asked and answered 04:22 CST) carried `hooks/test_support/` over from the older design (PR #1349) and never considered `testing/`. Nothing was tried there, so nothing broke.
+- `testing/` is not installed: it is not a landed folder, so `~/.claude` has no `testing/` and product code cannot import from it.
 - Unproven: a hooks test would import the helper with `sys.path.insert(0, os.path.join(HERE, "..", "testing"))`, the insert the lint tests use. No lane has run it.
 
 ## The shell check
