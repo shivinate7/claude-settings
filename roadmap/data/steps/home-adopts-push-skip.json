@@ -1,0 +1,14 @@
+{
+ "id": "home-adopts-push-skip",
+ "title": "The home repo runs the push skip, so a main push whose tree the PR already tested runs nothing",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Candidate (runner 11 via coordinator 12:20 CST Nov 14; triage read none of it, and the coordinator has not started a lane): in the last 8 main push runs of home there is no push-skip job (7-8 jobs each); all 8 merges had equal trees, so a skip could have applied to all 8. Cost is small (7 jobs per run), so low priority. Unknown to runner 11: why home's ios job shows success with all steps skipped, and what rule push-skip itself applies (the script lives in claude-settings, not read). Runs through runner 11. Kin: push-skip-proven-tree (owner ruling 12:18 CST Nov 13, item 729 a: skip the push re-run in every repo when the pushed tree equals the tree the PR tested), child-ci-actions-follow-stable, ready-push-merges-main. First act of a lane: read home's checks workflow beside degen's shared form; reproduce, red then green: a home main push whose tree equals the PR head tree runs the skip job and nothing else.",
+ "source": "runner 11 via coordinator 12:20 CST Nov 14",
+ "note": "Filed 12:24 CST Nov 14 by triage. Tracker: the coordinator. No lane yet. Repo: the home repo, not claude-settings.",
+ "updatedAt": "2026-11-14T12:24:00"
+}
