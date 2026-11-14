@@ -142,6 +142,11 @@
                           read of the open pull list per call (one call per 100 PRs), then two reads per row with an open match, or one closed read
                           (`pulls?state=closed&head=<owner>:<branch>&per_page=1`) for a row with none, plus one local `git rev-parse` of origin/<branch>
                           when that PR merged into main. No timer, process or file.
+  merge <pr> --confirm --priority-rows FILE|-
+                          before the lock: refuse merging <pr> when it is no row's pull request or branch and some row's PR reads ok; the refusal names
+                          the row's slug and PR, and no flag lifts it. A flag, waiting, done or unknown row never blocks; every row's line is printed. An
+                          empty or missing FILE refuses (not clear). Without --priority-rows, --confirm prints `priority: no rows given, not checked`.
+                          Cost: the reads above, none when <pr> is itself a row; no timer, process, lock or file.
   merge --idle-lanes --live FILE
                           lane lines (a lane the roadmap's live file shows done and safe to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step's status is set to todo or done), then a summary line. A lane that waits (a step not done, an open pull, an open item) prints no line, except a lane only stale drafts hold: that prints one `joint (close #N ...; archive archive/<branch> ...; archive lane <id>)` line, counted among the lanes to archive. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -4435,24 +4440,27 @@ def priority_closed_branch(h, here, branch, repo_dir=None):
             return "flag", "branch reused after merge, no open PR"
     return verdict, why
 
-def priority_rows(source, repo_dir=None, host=None):
-    """merge --priority-rows: one verdict line per `priority:` row of the file SOURCE (`-` is stdin), then a summary. Verdicts: ok, waiting, done, flag, unknown.
-    Exit 0 only when every row is ok, waiting or done. No rows, or a file that is missing or empty, exits 1: never clear.
-    Cost: the reads priority_verdict makes per pull request row; for branch rows one shared open-pull list read per call, then one closed read for a row
-    that no open pull request matches, and one local `git rev-parse` when that closed read finds it merged into main. It writes nothing and takes no lock."""
+def priority_text(source):
+    """-> (rows, why): the rows of the file SOURCE (`-` is stdin) with blank and `#` lines dropped; `why` is the read error, or "" when the read worked."""
     try:
         text = sys.stdin.read() if source == "-" else pathlib.Path(source).read_text(encoding="utf-8", errors="replace")
     except OSError as e:
-        text = ""
-        print(f"merge: --priority-rows could not read {source}: {e.strerror or e}", file=sys.stderr)
-    rows = [x for x in (line.strip() for line in text.splitlines()) if x and not x.startswith("#")]
-    if not rows:
-        print("merge: --priority-rows: no rows. Nothing was checked; this is not clear.", file=sys.stderr)
-        return 1
+        return [], e.strerror or str(e)
+    return [x for x in (line.strip() for line in text.splitlines()) if x and not x.startswith("#")], ""
+
+def priority_here(h, repo_dir=None):
+    """-> this checkout's repo as lowercase `owner/repo`, or "" when it cannot be named."""
     import layout  # lint/layout.py: repo_name, the one reader of the origin
     c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=repo_dir)
-    h = host or Host(cwd=repo_dir)
-    here = (h.repo or ("" if c else layout.repo_name(root.strip())) or "").lower()
+    return (h.repo or ("" if c else layout.repo_name(root.strip())) or "").lower()
+
+def priority_line(slug, verdict, why, number):
+    """-> the one printed line of a judged row."""
+    return " ".join(f"{verdict} {slug}{f' #{number}' if number else ''}: {why}".split())
+
+def priority_judge(rows, h, here, repo_dir=None):
+    """-> one (slug, verdict, why, number) per row, in order. The one reader of a priority row, for --priority-rows and the --confirm check.
+    `number` is the pull request whose verdict was read, or None when none was."""
     opened = []  # the open pull list, read once per call: [rows] or [the exception that stopped the read]
 
     def by_branch(branch):
@@ -4468,8 +4476,9 @@ def priority_rows(source, repo_dir=None, host=None):
             return None, ("unknown", f"{len(hits)} open pull requests have the head {branch}")
         return (hits[0], None) if hits else (None, priority_closed_branch(h, here, branch, repo_dir))
 
-    lines, counts = [], {k: 0 for k in ("ok", "waiting", "done", "flag", "unknown")}
+    judged = []
     for row in rows:
+        number = None
         if not row.startswith("priority:"):
             slug, verdict, why = row[:60], "unknown", "not a priority row"
         else:
@@ -4489,22 +4498,76 @@ def priority_rows(source, repo_dir=None, host=None):
                         verdict, why = "unknown", (f"{m.group(1)} is not this checkout's repo, so it is not read" if here else "this checkout's repo cannot be read, so the pull request is not read")
                     else:
                         verdict, why = priority_verdict(h, int(m.group(2)))
-                        slug += f" #{m.group(2)}"
+                        number = int(m.group(2))
                 elif not here:
                     verdict, why = "unknown", "this checkout's repo cannot be read, so the branch is not read"
                 elif repo is not None and repo.lower() != here:
                     verdict, why = "unknown", f"{repo} is not this checkout's repo, so it is not read"
                 else:
-                    number, early = by_branch(targets[0][1])
-                    verdict, why = early or priority_verdict(h, number)
-                    slug += f" #{number}" if number else ""
+                    found, early = by_branch(targets[0][1])
+                    verdict, why = early or priority_verdict(h, found)
+                    number = found
             except Exception as e:  # a failed read is unknown, never clear
-                verdict, why = "unknown", "read failed: " + " ".join(str(e).split())
-        counts[verdict] += 1
-        lines.append(" ".join(f"{verdict} {slug}: {why}".split()))
+                verdict, why, number = "unknown", "read failed: " + " ".join(str(e).split()), None
+        judged.append((slug, verdict, why, number))
+    return judged
+
+def priority_rows(source, repo_dir=None, host=None):
+    """merge --priority-rows: one verdict line per `priority:` row of the file SOURCE (`-` is stdin), then a summary. Verdicts: ok, waiting, done, flag, unknown.
+    Exit 0 only when every row is ok, waiting or done. No rows, or a file that is missing or empty, exits 1: never clear.
+    Cost: the reads priority_verdict makes per pull request row; for branch rows one shared open-pull list read per call, then one closed read for a row
+    that no open pull request matches, and one local `git rev-parse` when that closed read finds it merged into main. It writes nothing and takes no lock."""
+    rows, why = priority_text(source)
+    if why:
+        print(f"merge: --priority-rows could not read {source}: {why}", file=sys.stderr)
+    if not rows:
+        print("merge: --priority-rows: no rows. Nothing was checked; this is not clear.", file=sys.stderr)
+        return 1
+    h = host or Host(cwd=repo_dir)
+    counts = {k: 0 for k in ("ok", "waiting", "done", "flag", "unknown")}
+    lines = []
+    for j in priority_judge(rows, h, priority_here(h, repo_dir), repo_dir):
+        counts[j[1]] += 1
+        lines.append(priority_line(*j))
     lines.append("merge: " + ", ".join(f"{n} {k}" for k, n in counts.items()) + f" of {len(rows)} rows.")
     say(*lines)
     return 0 if not counts["flag"] and not counts["unknown"] else 1
+
+PRIORITY_NO_ROWS = "priority: no rows given, not checked"
+
+def priority_is_row(row, here, n, branch):
+    """True when `row` is the priority row of pull request `n` (head `branch`): its pr names `n` in this repo, or its branch is `branch`. No read."""
+    if not row.startswith("priority:"):
+        return False
+    _, targets, repo = priority_row(row)
+    for key, value in targets:
+        if key == "branch" and value == branch and (repo is None or repo.lower() == here):
+            return True
+        m = PRIORITY_PR.fullmatch(value) if key == "pr" else None
+        if m and m.group(1).lower() == here and int(m.group(2)) == n:
+            return True
+    return False
+
+def priority_gate(source, n, info, h, repo_dir=None):
+    """merge N --confirm --priority-rows FILE, before the lock: refuse merging pull request N while a priority row's own pull request reads ok and N is no
+    row's pull request or branch. A row that reads flag, waiting, done or unknown never blocks, and its line is printed so a lower pull request that
+    goes says why; an unread row is unknown, never clear. An empty or missing FILE refuses: the runner named a file it cannot supply, and a local fix
+    supplies it. Cost: the reads priority_judge makes, none when N is itself a row; no process, timer, lock or file write."""
+    rows, why = priority_text(source)
+    if not rows:
+        raise Stop(f"--priority-rows could not read {source}: {why}. Nothing was checked; this is not clear. Nothing was merged." if why
+                   else f"--priority-rows: no rows in {source}. Nothing was checked; this is not clear. Nothing was merged.")
+    here = priority_here(h, repo_dir)
+    own = next((r for r in rows if priority_is_row(r, here, n, info["branch"])), None)
+    if own:
+        say(f"priority: #{n} is the row {priority_row(own)[0]}, so it goes first. The other rows are not read.")
+        return
+    judged = priority_judge(rows, h, here, repo_dir)
+    say(*(priority_line(*j) for j in judged))
+    ready = [f"{slug} (#{number})" for slug, verdict, _, number in judged if verdict == "ok"]
+    if ready:
+        raise Stop(f"#{n} is not a priority row, and the priority row{'s' if len(ready) > 1 else ''} {', '.join(ready)} {'are' if len(ready) > 1 else 'is'} ready. "
+                   "Merge " + ("them" if len(ready) > 1 else "it") + " first. Nothing was merged.")
 
 def build_parser():
     """The one home of merge's command line. The guard (hooks/guard_merge.py) parses a command with this, so its reading of -C and --repo-dir is the tool's own.
@@ -4528,7 +4591,7 @@ def build_parser():
     p.add_argument("--config", default=DEFAULT_CONFIG)
     p.add_argument("--idle-lanes", action="store_true", help="list the lanes to archive from the roadmap's live file; takes no lock, merges and posts nothing")
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
-    p.add_argument("--priority-rows", default=None, metavar="FILE", help="read the owner's priority rows (FILE, or - for stdin) and print one verdict line per row; takes no lock, merges and posts nothing, writes no file")
+    p.add_argument("--priority-rows", default=None, metavar="FILE", help="read the owner's priority rows (FILE, or - for stdin) and print one verdict line per row; takes no lock, merges and posts nothing, writes no file. With a pull request number and --confirm: refuse that merge while a row's own PR is ready and the number is not a row's")
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
     p.add_argument("--root", action="append", default=[], metavar="DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; repeat it for each repo")
     p.add_argument("--release-check", nargs="+", action="extend", type=pr_arg, metavar="N", help="one line per pull request: PASS, or FAIL and the reasons (open, review record done at the live head and unedited, lint verdict, clean merge, stack); a missing line is a FAIL; takes no lock, merges nothing")
@@ -4580,8 +4643,9 @@ def main(argv, host=None, lock=None, hosts=None):
         p.error("--root goes with --reviewed")
     if a.root and a.repo_dir is not None:  # each --root names its own checkout, so a -C beside it would be read by nothing
         p.error("-C does not go with --root: each --root names its own checkout")
-    if a.priority_rows is not None and any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("priority_rows", "repo_dir", "config")):
-        p.error("--priority-rows stands alone (-C and --config may go with it)")
+    priority_gated = a.priority_rows is not None and a.confirm and a.pr is not None  # `merge N --confirm --priority-rows FILE`: the check before the merge, not the listing
+    if a.priority_rows is not None and not priority_gated and any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("priority_rows", "repo_dir", "config")):
+        p.error("--priority-rows stands alone (-C and --config may go with it), or goes with a pull request number and --confirm")
     if a.idle_lanes and (a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed
                          or a.review_record or a.lane_lint):
         p.error("--idle-lanes stands alone")
@@ -4596,7 +4660,7 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--lint-unknown-ok goes with --lane-lint")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
-    if a.idle_lanes or a.touches or a.release_check or a.priority_rows is not None:
+    if a.idle_lanes or a.touches or a.release_check or (a.priority_rows is not None and not priority_gated):
         pass  # stands alone: checked above
     elif a.ready:  # a lane's one act on its own draft: no lock, no merge
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record or a.lane_lint:
@@ -4658,7 +4722,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 print("merge: " + " ".join(unknown.split()), file=sys.stderr)
                 return 1
             return 0
-        if a.priority_rows is not None:
+        if a.priority_rows is not None and not priority_gated:
             return priority_rows(a.priority_rows, a.repo_dir, host)  # before the role check and any lock: it reads, merges and posts nothing
         if a.idle_lanes:
             return idle_lanes(a.live, a.repo_dir)  # before the role check and any lock: it reads, merges and posts nothing
@@ -4782,6 +4846,11 @@ def main(argv, host=None, lock=None, hosts=None):
                 say(f"merge: #{a.pr} is ready already. Nothing was changed.")
                 return 0
             return draft_step(root, cfg, a.pr, h, info)
+        if a.confirm and not info["draft"]:  # a draft's --confirm is the records step and never merges; before the lock, so a refusal lands nothing
+            if priority_gated:
+                priority_gate(a.priority_rows, a.pr, info, h, a.repo_dir)
+            else:
+                say(PRIORITY_NO_ROWS)
         checked = None  # the head the lane-lint PASS names; confirm refuses any other
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and isinstance(h, Host) and not info["draft"]:  # a scripted host that is no Host brings its own reads; a draft is the records step, never a join
             lint_check(h, a.pr, info, root, a.config)
