@@ -846,12 +846,18 @@ class Flips(unittest.TestCase):
                         "an in-place paste of the words into a // comment, without a semicolon, was not flagged")
 
     def test_a_line_with_no_words_keeps_the_old_rule(self):
-        """`}` becomes `} not reachable`. The line has no words to keep in order, so a negation added to it is still a flip."""
-        self.red("", "}", "} not reachable")
+        """`}` becomes `} not reachable`. A line with no words has no original words to keep in order, so extends() must
+        not read the added negation as a clause. Unit claim on extends(), the one home of that rule, with a control: a line
+        with words still passes when a clause follows its words."""
+        self.assertFalse(C.extends("}", "} not reachable"), "a line with no words passed extends(): the negated clause was read as an addition")
+        self.assertTrue(C.extends("run(a)", "run(a), never past 55 minutes"), "control: a clause after the words no longer passes extends()")
 
     def test_a_line_with_no_words_keeps_the_old_rule_in_place(self):
-        self.assertTrue(any("cfg.txt" in p for p in self.in_place("}", "} not reachable")),
-                        "an in-place change of a line with no words to a negated line was not flagged")
+        """The in-place path reaches the same decision: rewritten() takes extends() for a hunk, so a wordless line changed
+        to a negated line is no rewrite."""
+        self.assertFalse(C.extends("}", "} not reachable"), "a line with no words passed extends(): the negated clause was read as an addition")
+        self.assertFalse(C.rewritten("}", [(("}",), ("} not reachable",))]), "rewritten() took a wordless line's negated change as a rewrite")
+        self.assertTrue(C.extends("run(a)", "run(a), never past 55 minutes"), "control: a clause after the words no longer passes extends()")
 
 
 class MainLineDrop:
