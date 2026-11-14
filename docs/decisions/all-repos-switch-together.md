@@ -10,12 +10,12 @@ The exception overrides decision `uniform-over-variants` and ruling `own-act6-dr
 
 State: target, not live, for every other child repo. Degen and home switch to per-lane merge on the stable branch now. The cutover lands with the removal act, act 4 of R42 part 2, which is a branch in progress.
 
-- The merge tool is one shared script that every repo runs (`merge/merge.py`). A cutover in any repo except degen and home would give that tool two rule sets.
-- Decision `uniform-over-variants` forbids one rule set per repo. Q1 a applies it to the cutover, except for degen and home.
+- The merge tool is one shared script that every repo runs (`merge/merge.py`). A cutover in one repo gives that tool two rule sets. The exception accepts that for degen and home.
+- Decision `uniform-over-variants` forbids one rule set per repo. Q1 a applies it to the cutover. The exception above is the one departure.
 - Child repos read the stable branch (decision `stable-branch`) and fall back as decision `stable-fallback-warn` says. Both land before the cutover.
 - Until the cutover, every repo except degen and home keeps its batch path, and a red main keeps the brake of decision `no-merge-onto-red-main`.
 
-Why: act 4 changes the shared merge tool. Every child repo except degen and home would lose batching and get no stable branch or revert route if it cut over ahead of the drain. Refuter, 2026-11-11 22:58 CST, gap 3.
+Why: act 4 changes the shared merge tool. Child repos would lose batching and get no stable branch or revert route if the cutover came first in one repo. Refuter, 2026-11-11 22:58 CST, gap 3.
 
 Kind: process
 Home: docs/decisions/uniform-over-variants.md
