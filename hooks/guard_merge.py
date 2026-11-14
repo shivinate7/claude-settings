@@ -1190,18 +1190,55 @@ def _merge_target_repo(segments, number: int, cwd: str, ends, repo_dir):
     return git_reads.github_repo(where) if where and os.path.isdir(where) else None
 
 
-def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
+LOCAL_REPO_REASON = (
+    "merge-confirm-repo: the role file the launcher recorded for this session does not prove it may merge in the checkout "
+    "this command acts in. A local merge runs only from a batch runner started with `claude-role batch-runner` in that repo, "
+    "and a session the launcher did not start has no role file. A session of any other role hands the pull request to a "
+    "batch runner. "
+    "(decision merge-confirm-repo, a merge acts only in a repo its own record names)"
+)
+
+
+def local_session_id(session_id: str) -> str:
+    """The session id a local role file may be read for, else ''. The hook payload's id and the environment's CLAUDE_CODE_SESSION_ID must both
+    be present and equal; the reader then tests the id's shape. A guess about who is asking reads no file."""
+    env_id = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    return session_id if isinstance(session_id, str) and session_id and session_id == env_id else ""
+
+
+def _local_role_proves(session_id: str, tiers, repo) -> bool:
+    """True when the launcher's role file for this local session names one of `tiers` and the repo `repo`. Any failure is False."""
+    try:
+        import session_role
+        record = session_role.own_record(local_session_id(session_id))
+        return bool(record and record["role"] in tiers and repo and record.get("repo") == repo)
+    except Exception:
+        return False
+
+
+def repo_proof_hit(stripped: str, cwd: str, transcript: str, session_id: str = "") -> str:
     """Return a short label when a cloud session's `merge --confirm` or `merge --ready` acts in a checkout whose repo no cs-repo tag of the own newest
     get_session record names, else ''. Fails closed inside the clause, like role_proof_hit: an unparseable command, an unreadable
     checkout, no record and a set_session_tags after the record are each a refusal, because the guard-wide crash path fails open.
-    --lane-lint merges nothing and is not judged. Outside the cloud nothing is judged. Cost: none for a call that is no merge confirm;
+    --lane-lint merges nothing and is not judged. Cost: none for a call that is no merge confirm;
     else one parse, one read of the origin and one transcript read.
+
+    A local session is judged on `--confirm` only, and only once the launcher's role files are in use (session_role.roles_in_use): its role
+    file must name batch-runner and the repo the merge acts in (_local_role_proves). With no role file nothing is judged, as before.
 
     A redirection (`2>&1`, `> run.log`) belongs to the shell, not to the merge tool, so the parser reads the segment without them
     (strip_redirections, the quote-aware reader of their shape; a quoted `<` or `>` is text and stays). When the segment no longer
     tokenizes once they are gone (a quote left open), the merge is denied, never skipped."""
     if not is_cloud():
-        return ""
+        if "--confirm" not in stripped:   # the cheap filter: no listing of the role folder for a call that merges nothing
+            return ""
+        try:
+            import session_role
+            if not session_role.roles_in_use():
+                return ""
+        except Exception:
+            pass   # a reader that cannot run judges the call, so the clause fails closed
+        return "merge --confirm" if _unproved_confirm(stripped, cwd, transcript, 0, session_id) else ""
     return "merge --confirm or --ready" if _unproved_confirm(stripped, cwd, transcript, 0) else ""
 
 
@@ -1209,10 +1246,11 @@ MERGE_NEST_DEPTH = 4  # `bash -c` inside `bash -c` is followed this far; a deepe
 PROVED_FLAGS = ("--confirm", "--ready")  # each pushes to the pull request's branch from the checkout it acts in, so each takes the repo proof
 
 
-def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
+def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int, local_session: str = None) -> bool:
     """True when a `merge --confirm` or `merge --ready` (PROVED_FLAGS) in `text` acts in a checkout the own record does not prove. `text` is the command, or a script a
     segment hands on (`bash -c`, `sh -c`, `eval`: inner_commands, the one reader of those wrappers), which runs in the directory its own
-    segment is in. A `)` or `&` glued to the last word ends the merge's arguments (_command_words), so a merge closing a subshell is read."""
+    segment is in. A `)` or `&` glued to the last word ends the merge's arguments (_command_words), so a merge closing a subshell is read.
+    `local_session` is None for a cloud session. For a local session it is the hook payload's session id: only `--confirm` is judged, by its role file."""
     ends = []
     segments = split_segments(text, ends)
     for number, segment in enumerate(segments):
@@ -1226,7 +1264,7 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
                     return True
             else:
                 where = dir_before_segment(segments, number, cwd, ends) or ""
-                if any(_unproved_confirm(script, where, transcript, depth + 1) for script in scripts):
+                if any(_unproved_confirm(script, where, transcript, depth + 1, local_session) for script in scripts):
                     return True
         if merge_tool_args(segment) is None:
             continue
@@ -1242,6 +1280,10 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
             if flags.lane_lint or not (flags.confirm or flags.ready):
                 continue
             repo = _merge_target_repo(segments, number, cwd, ends, flags.repo_dir)
+            if local_session is not None:
+                if not flags.confirm or _local_role_proves(local_session, ROLE_TIERS, repo):
+                    continue
+                return True
             from override import remote_session_id
             from shared_names import repo_tag_names
             own_id = remote_session_id()
@@ -1266,13 +1308,17 @@ RECORD_REASON = (
 )
 
 
-def _own_tier_proved(transcript: str, tier: str) -> bool:
+def _own_tier_proved(transcript: str, tier: str, session_id: str = "", root=None) -> bool:
     """True when the own newest get_session record lists cs-build:<tier> and no set_session_tags call
-    follows it. Fails closed: no env id, no transcript or any read error is False."""
+    follows it. A session with no cloud id is local: it is proved when the launcher's role file for its own id (hook id equal to the
+    environment's, local_session_id) names `tier` and the repo of the checkout at `root`. Fails closed: no id, no transcript or any read error is False."""
     try:
         from override import remote_session_id
         own_id = remote_session_id()
-        if own_id and transcript:
+        if not own_id:
+            import git_reads
+            return _local_role_proves(session_id, (tier,), git_reads.github_repo(root) if root and os.path.isdir(root) else None)
+        if transcript:
             tags, tagged_after = _own_session_read(transcript, own_id)
             return tags is not None and not tagged_after and ROLE_TAG_PREFIX + tier in tags
     except Exception:
@@ -1343,12 +1389,12 @@ def _push_calls(segment: str, script: str, cwd: str):
                     yield from _push_calls(part, each, inner_cwd)
 
 
-def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb) -> str:
+def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb, session_id: str = "") -> str:
     """Return the matched push when a segment pushes to the checkout's record branch, or to the default
     name `roadmap`, and the own record does not prove the triage tier, else ''. `record_branch_of(root)`
     reads the checkout's branch (lint/layout.py); a read error means the default. `read_verb(subcommand,
     args)` is guard.py's own test for a dry run, which moves nothing. The proof is read only after a push
-    reaches the branch."""
+    reaches the branch. `session_id` is the hook payload's id, which a local session's role file is read for."""
     for segment in split_segments(stripped):
         for args, where, overrides in _push_calls(segment, stripped, cwd):
             if read_verb("push", args):
@@ -1360,7 +1406,7 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
             except Exception:
                 record = DEFAULT_RECORD_BRANCH
             if {record, DEFAULT_RECORD_BRANCH} & set(push_destinations(args, where, overrides)) and (
-                    not _own_tier_proved(transcript, RECORD_WRITER_TIER)):
+                    not _own_tier_proved(transcript, RECORD_WRITER_TIER, session_id, root)):
                 return "git push to the record branch"
     return ""
 

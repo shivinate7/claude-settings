@@ -585,7 +585,7 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
+            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
@@ -4803,14 +4803,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "merge-role-proof", ROLE_REASON, matched)
 
     # 6a1. A cloud `merge --confirm` in a checkout whose repo the own get_session record does not name (rule merge-confirm-repo).
-    matched = repo_proof_hit(stripped, cwd, transcript)
+    matched = repo_proof_hit(stripped, cwd, transcript, session_id)
     if matched:
-        refuse(tool, "deny", "merge-confirm-repo", REPO_REASON, matched)
+        refuse(tool, "deny", "merge-confirm-repo", REPO_REASON if is_cloud() else LOCAL_REPO_REASON, matched)
 
     # 6a2. A push to the record branch from a session its own record does not prove triage (rule
     # roadmap-one-writer). Cost: one `git rev-parse` and one small file read per push, and one
     # transcript read only when the push reaches the record branch.
-    matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb)
+    matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb, session_id)
     if matched:
         refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
 
