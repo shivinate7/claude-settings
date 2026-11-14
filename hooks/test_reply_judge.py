@@ -1372,6 +1372,105 @@ def case_prompt_flags_a_recommended_option_that_widens():
           has_pin(sentences, ("never flag",), ("describes the rule",)), sentences)
 
 
+# ------------------------------------------------------------------ the carve-out for claude-settings' shared file
+#
+# The same carve-out as hooks/test_call_judge.py: its words are question_form.WIDENING_CARVE_OUT, the one home, and this
+# prompt carries them. The output style's style-question-form rule says them too. The helpers repeat test_call_judge's
+# pin helpers: each judge test is its own CI step, and neither imports the other.
+CARVE_PINS = (("claude-settings",), ("settings.json",), ("allow",), ("never flag", "not widen"), ("recommend",))
+NEG_WORDS = ("never flag", "not widen")
+QF_PATH = os.path.join(HERE, "question_form.py")
+SHIV_PATH = os.path.join(REPO_ROOT, "output-styles", "shiv-stylisms.md")
+SHIV_RULE = "<!-- rule:style-question-form -->"
+
+
+def qf_text(name):
+    """A text constant of question_form.py, read at test time. "" when it is missing or blank."""
+    spec = importlib.util.spec_from_file_location("question_form_text_probe", QF_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    value = getattr(module, name, "")
+    return value if isinstance(value, str) and value.strip() else ""
+
+
+def norm(text):
+    """The text with each run of white space as one space, so a wrapped line reads as its words."""
+    return " ".join(text.split())
+
+
+def clauses(text):
+    """The lowercase clauses of a text. A clause ends at a period and a space, so settings.local.json stays whole."""
+    return [c for c in norm(text).lower().split(". ") if c.strip()]
+
+
+def still_widens(cl, where):
+    """(name, ok, cause) for each form the text must still name as widening: a per-repo exception and a second form
+    (green on the current text), an allow entry in settings.local.json and a widening in another repo."""
+    other = ("another repo", "other repo")
+    return [
+        ("widening still named: %s names a per-repo exception as widening" % where,
+         has_pin(cl, ("widen",), ("per-repo exception",)), "no clause calls a per-repo exception widening"),
+        ("widening still named: %s names a second accepted form as widening" % where,
+         has_pin(cl, ("widen",), ("second accepted form", "second form")), "no clause calls a second form widening"),
+        ("widening still named: %s names an allow entry in settings.local.json as widening" % where,
+         has_pin(cl, ("settings.local.json",), ("widen",)) and not has_pin(cl, ("settings.local.json",), NEG_WORDS),
+         "no clause names an allow entry in settings.local.json as widening, or one says it is not"),
+        ("widening still named: %s names a widening in another repo as widening" % where,
+         has_pin(cl, other, ("widen",)) and not has_pin(cl, other, NEG_WORDS),
+         "no clause names a widening in another repo as widening, or one says it is not"),
+    ]
+
+
+def case_prompt_carries_the_carve_out_from_one_home():
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    cl = clauses(run.prompt().split(WIDENS_ASK, 1)[0])
+    check("carve-out prompt scope: the prompt names style-question-form", has_pin(cl, ("style-question-form",)),
+          cl[:2])
+    carve = qf_text("WIDENING_CARVE_OUT")
+    check("carve-out home: question_form.py defines WIDENING_CARVE_OUT as non-blank text", bool(carve),
+          "WIDENING_CARVE_OUT is not defined in question_form.py")
+    check("carve-out clause: the prompt has a clause that says one allow entry in claude-settings' shared "
+          "settings.json is not widening and may be recommended",
+          has_pin(cl, *CARVE_PINS), "no clause of the prompt carries the carve-out")
+    if carve:
+        check("carve-out home: the prompt carries the text of question_form.WIDENING_CARVE_OUT",
+              norm(carve) in norm(run.prompt()), "the prompt does not carry the constant's text")
+
+
+def case_prompt_still_names_the_widening_forms():
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    cl = clauses(run.prompt().split(WIDENS_ASK, 1)[0])
+    check("widening still named scope: the prompt names style-question-form", has_pin(cl, ("style-question-form",)),
+          cl[:2])
+    if not has_pin(cl, ("style-question-form",)):
+        return
+    for name, ok, cause in still_widens(cl, "the reply prompt"):
+        check(name, ok, cause)
+
+
+def shiv_rule_block():
+    """The style-question-form rule's bullet, from its line start to its rule marker. "" when either is missing."""
+    with open(SHIV_PATH, encoding="utf-8") as f:
+        text = f.read()
+    end = text.find(SHIV_RULE)
+    start = text.rfind("\n- ", 0, end) if end >= 0 else -1
+    return text[start + 1:end] if start >= 0 else ""
+
+
+def case_shiv_style_rule_names_the_carve_out():
+    block = shiv_rule_block()
+    check("shiv rule scope: output-styles/shiv-stylisms.md has the style-question-form rule", bool(block),
+          "no style-question-form bullet before its rule marker in shiv-stylisms.md")
+    if not block:
+        return
+    cl = clauses(block)
+    check("shiv carve-out: the rule says one allow entry in claude-settings' shared settings.json is not widening "
+          "and may be recommended", has_pin(cl, *CARVE_PINS),
+          "no clause of the style-question-form rule carries the carve-out")
+    for name, ok, cause in still_widens(cl, "the style-question-form rule"):
+        check(name, ok, cause)
+
+
 # Roadmap c135, item 31's shape: options that can all be done together, asked as pick-one. The prompt
 # flags it and says to ask it as a multi-select item (`multi: true`). Options that exclude each other,
 # such as now or later, stay a pick-one question.
@@ -2180,6 +2279,9 @@ CASES = (
     case_port_finding_is_a_note_with_its_rule,
     case_prompt_count_matches_judged_rules,
     case_prompt_flags_a_recommended_option_that_widens,
+    case_prompt_carries_the_carve_out_from_one_home,
+    case_prompt_still_names_the_widening_forms,
+    case_shiv_style_rule_names_the_carve_out,
     case_widens_finding_logs_its_rule,
     case_prompt_flags_a_pick_one_question_whose_options_could_combine,
     case_route_cite_carries_cited_same_act_and_alternate_rows,
