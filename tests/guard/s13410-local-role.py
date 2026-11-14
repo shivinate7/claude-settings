@@ -119,16 +119,54 @@ sh("local-tier: the folder's path after a comment passes",
    config=LT_TRIAGE, silent=True)
 sh("local-tier: the folder's path in text with a lone quote passes",
    "echo \"it's state/session-roles\"", "allow", cwd=PUSHSSH, session=LT_SID, config=LT_TRIAGE, silent=True)
-# A local `merge <pr> --confirm` is judged by the role the launcher wrote. A triage or coordinator file never confirms; a
-# batch-runner file with both ids equal may. RED: the old guard allows every local confirm silently, whatever file is present.
-LT_CONFIRM = "~/.claude/bin/merge 7 --confirm --head 1234567"
-add("local-tier: a local confirm with a triage file is refused by the guard", "deny", rule=None,
-    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env={"CLAUDE_CODE_SESSION_ID": LT_SID}, config=LT_TRIAGE)
-add("local-tier: a local confirm with a coordinator file is refused by the guard", "deny", rule=None,
-    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env={"CLAUDE_CODE_SESSION_ID": LT_SID}, config=LT_COORD)
-# CONTROL, green on the old code: the batch-runner file with equal ids is allowed, as the old guard allows every confirm.
-add("local-tier: a local confirm with a batch-runner file and equal ids is allowed", "allow",
-    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env={"CLAUDE_CODE_SESSION_ID": LT_SID},
-    config=LT_BATCH, silent=True)
+# A local `merge <pr> --confirm` is judged by the session's OWN role file, and by CS_SESSION_ROLE when the launcher started it.
+# An own file must name batch-runner and the merge's repo (a null repo refuses). No own file is today's behaviour, even with other
+# sessions' files in the folder, and the same when the session has no id. Rule (c): CS_SESSION_ROLE set with no own file, or an own
+# file whose role differs, refuses: the hook failed to bind the session. The reds below fail on the builder's head, which refuses
+# every local confirm while any role file exists and never reads CS_SESSION_ROLE.
+LT_HEAD = "1234567890abcdef1234567890abcdef12345678"  # a lowercase full sha, as the merge tool's parser takes it
+LT_CONFIRM = "~/.claude/bin/merge 7 --confirm --head " + LT_HEAD
+LT_LINGER = lt_config("linger", {LT_OTHER + ".json": lt_role(LT_OTHER, "triage")})
+LT_OTHERENV = lt_config("otherenv", {LT_OTHER + ".json": lt_role(LT_OTHER, "triage")})
+LT_BATCH_WRONG = lt_config("batchwrong", {LT_SID + ".json": lt_role(LT_SID, "batch-runner", repo="x/y")})
+LT_BATCH_NULL = lt_config("batchnull", {LT_SID + ".json": json.dumps({"session": LT_SID, "role": "batch-runner", "repo": None})})
+LT_IDS = {"CLAUDE_CODE_SESSION_ID": LT_SID}
+
+# CONTROLS, green on the builder's head: an own triage or coordinator file refuses, an own batch-runner file for this repo passes.
+add("local-tier: a local confirm with an own triage file is refused", "deny", rule="merge-confirm-repo",
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env=LT_IDS, config=LT_TRIAGE)
+add("local-tier: a local confirm with an own coordinator file is refused", "deny", rule="merge-confirm-repo",
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env=LT_IDS, config=LT_COORD)
+add("local-tier: a local confirm with an own batch-runner file for this repo is allowed", "allow",
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env=LT_IDS, config=LT_BATCH, silent=True)
+add("local-tier: an own batch-runner file that names another repo refuses the confirm", "deny", rule="merge-confirm-repo",
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env=LT_IDS, config=LT_BATCH_WRONG)
+add("local-tier: an own batch-runner file with a null repo refuses the confirm", "deny", rule="merge-confirm-repo",
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env=LT_IDS, config=LT_BATCH_NULL)
+
+# RED on the builder's head: no own file, so the confirm is today's behaviour and is allowed, though another session's file lingers.
+add("local-tier: another session's lingering file does not refuse a session with no own file", "allow",
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env=LT_IDS, config=LT_LINGER, silent=True)
+# RED: the session has no id (hook id and env id both absent), so it has no own file, and the confirm is allowed.
+add("local-tier: a session with no id and a triage file in the folder is allowed to confirm as today", "allow",
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=None, env={"CLAUDE_CODE_SESSION_ID": None},
+    config=LT_TRIAGE, silent=True)
+# RED: the hook id and the env id are unequal, so the session has no id and no own file; the file is named for the env id.
+add("local-tier: unequal ids leave the session with no own file, so its confirm is allowed", "allow",
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env={"CLAUDE_CODE_SESSION_ID": LT_OTHER},
+    config=LT_OTHERENV, silent=True)
+
+# RED, rule (c): the launcher set CS_SESSION_ROLE, and no own file exists, so the hook failed to bind and the confirm refuses.
+add("local-tier: a launcher session with CS_SESSION_ROLE and no own file refuses the confirm", "deny",
+    rule="merge-confirm-repo", tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID,
+    env={"CLAUDE_CODE_SESSION_ID": LT_SID, "CS_SESSION_ROLE": "batch-runner"}, config=LT_EMPTY)
+# RED, rule (c): the launcher set CS_SESSION_ROLE to coordinator, and the own file says batch-runner, so the two differ and it refuses.
+add("local-tier: a launcher session whose own file differs from CS_SESSION_ROLE refuses the confirm", "deny",
+    rule="merge-confirm-repo", tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID,
+    env={"CLAUDE_CODE_SESSION_ID": LT_SID, "CS_SESSION_ROLE": "coordinator"}, config=LT_BATCH)
+# CONTROL, green on the builder's head: CS_SESSION_ROLE agrees with the own batch-runner file, so the confirm is allowed.
+add("local-tier: a launcher session whose own batch-runner file agrees with CS_SESSION_ROLE is allowed", "allow",
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID,
+    env={"CLAUDE_CODE_SESSION_ID": LT_SID, "CS_SESSION_ROLE": "batch-runner"}, config=LT_BATCH, silent=True)
 
 FAMILY = _LT_PREV_FAMILY
