@@ -1,0 +1,14 @@
+{
+ "id": "prose-judge-reads-all-cites",
+ "title": "The prose judge reads cites from every file a line names, not only changed files",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 23:18 CST Nov 13 (relayed; from lane merge-reads-newest-check-run, #3358 hand-in 23:17; merge.py read unverified): prose_judge_lines takes a line's cites from changed-file cites only, so a line citing one changed and one unchanged file can read \"unbacked\" though the unchanged cite backs it. A false alarm. The judge's verdicts also vary run to run.",
+ "source": "Coordinator message 23:18 CST Nov 13 (relayed); home: merge/merge.py prose_judge_lines.",
+ "note": "Triage 23:18 CST Nov 13: fix is to read cites from every file a line names. Test first: a line citing one changed and one unchanged file, red on main (reads unbacked), green after. The run-to-run variation is a separate claim, unmeasured; note it in the lane's report, do not fold it in. A merge-tool change (guard or check verdict), so a lane builds it, not triage. Not started.",
+ "updatedAt": "2026-11-13T23:18:00-06:00"
+}
