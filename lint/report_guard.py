@@ -1149,12 +1149,13 @@ MISTAKE_GUARD_WORD_RE = re.compile(r"\b(?:guard|check|hook)s?\b", re.I)
 # stripped), or a space after . ; ! ?. It is guard or guards, then a colon, a dash, or a spaced - or --. Markdown
 # emphasis (**, * or _) may wrap the word, with the colon inside or outside it: **Guard:**, **Guard**:, *Guard:*.
 # The emphasis mark must touch the word, so a "* " bullet is no emphasis. "Missing guard:" is a label too, because a
-# report that admits a gap writes it so. The colon form also counts mid-sentence, after a dash, a spaced hyphen, a
+# report that admits a gap writes it so; emphasis may wrap the whole phrase, as in **Missing guard:**, so the mark
+# may come before "missing" as well as before "guard". The colon form also counts mid-sentence, after a dash, a spaced hyphen, a
 # comma, the word "and" or "(", because a writer tucks the label in after the admission it answers. The dash form
 # opens a sentence only, so `guard_merge.py`, `push-guard`, "the push guard - refuses" and "the push guard --
 # refused it" are no label: prose with a guard word in it must not block.
 _EMPHASIS = r"(?:\*\*|\*|_)"
-_GUARD_WORD = r"(?:missing\s+)?" + _EMPHASIS + r"?guards?" + _EMPHASIS + r"?"
+_GUARD_WORD = _EMPHASIS + r"?(?:missing\s+)?" + _EMPHASIS + r"?guards?" + _EMPHASIS + r"?"
 MISTAKE_GUARD_LABEL_RE = re.compile(
     r"(?:^\s*(?:(?:[-*+]|\d+[.)])\s+)?(?:\*\*[^*\n]+\*\*:?\s*)?|(?<=[.;!?])\s+)"
     + _GUARD_WORD + r"(?:\s*:|\s*[\u2014\u2013]|\s+--?\s)" + _EMPHASIS + r"?"

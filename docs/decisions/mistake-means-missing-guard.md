@@ -30,9 +30,10 @@ More incidents, 2026-11-06, from the batch of PR #1034 (a batch of lanes), each 
 - Quoted and backticked text, fences and URLs are read as text, never as an admission. So a report can quote the owner's words.
 - A guard is named when the Deviations item holds `step:<slug>`, the word debt, or a sentence with a guard, check or hook word and a PR or commit ref. A negator near the word debt clears it, as the bullet on debt below says. These words match in any case. It may sit in any bullet of the item. This read keeps backticked text, so `` `step:<slug>` `` counts.
 - A guard line labels its guard in any section. The label opens a sentence: `Guard` or `Guards`, then `:`, `—`, `–`, ` - ` or ` -- `, bold or italic or plain. "Missing guard:" is a label too.
-- The colon form `Guard:` also counts after a dash, a spaced hyphen, a comma, the word "and" or a bracket, in any case. The dash form counts only at a sentence start, so "the push guard - refuses it" holds no label.
+- The colon form `Guard:` also counts after a dash, a spaced hyphen, a comma, the word "and" or an opening parenthesis, in any case. The dash form counts only at a sentence start, so "the push guard - refuses it" holds no label.
 - From the label to the end of its line, a guard line names a PR or commit ref, `step:<slug>` or a debt. The check reads it with or without an admission. Backticked refs count.
 - Owner, 2026-11-12 15:46 CST (item 628 a): a guard line with no reference is refused, with no admission needed. "none", "n/a" and "not needed" get no exemption. A report with no guard to name leaves the line out or names a step.
+- Owner, 2026-11-13 18:24 CST (item 700 a): the check finds more label forms. Role subjects stay out until a count exists.
 - A guard line's ref is `PR #N` or `/pull/N`, `/commit/<sha>`, a bare `#N` or `PR N` of two or more digits. Or it is a sha of 7 to 40 hex digits with a letter and a digit. "See item #1" is no ref.
 - A negator clears the word debt within three words before it or two words after it. So "a debt is not needed" names no debt, and "Debt check-gap filed (not urgent)" names one.
 - The refusal names the section that holds the guard line. It never quotes the line.
