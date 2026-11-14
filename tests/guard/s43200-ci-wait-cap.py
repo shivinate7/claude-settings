@@ -8,9 +8,12 @@ FAMILY = "ci-wait-cap"
 # full context rewrite.
 #
 # THE CI READING, pinned here. A message says it waits on CI when it holds, in any letter case, the whole word CI or
-# checks, or the phrase PR run or workflow run. A substring does not count (decision, specific), and neither does check
-# alone (check in with the owner). The whole message is read, not only the first line. The `at` field is read as
-# ISO-8601 with an offset and compared with LOCAL_TIME_NOW, which every case here fixes, so no case reads the real clock.
+# checks, the phrase PR run or PR runs, workflow run or workflow runs, check run, pipeline, or GitHub Actions. A
+# substring does not count (decision, specific, pipelined), and neither does check alone (check in with the owner) or
+# run alone. The whole message is read, not only the first line. A delay_minutes number counts, and so does a string
+# of digits such as "90"; a string that is not a number reads as no wait. The `at` field is read as ISO-8601: with an
+# offset it is compared with LOCAL_TIME_NOW, and with no offset it is read in LOCAL_TIME_NOW's own offset (local time).
+# Every case here fixes the clock, so no case reads the real clock or the system zone.
 #
 # The cap is read from this repository's own reader. A guard copy made by mutate_shared.guard_tree carries no data file,
 # so the cases below that change the data file's value build their own copy, and the limit must move with it.
@@ -56,6 +59,11 @@ def cap_at_z(minutes):
     return (CLOCK + timedelta(minutes=minutes)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def cap_naive(minutes):
+    """The wall-clock time `minutes` after the fixed clock, with no offset: it reads in the clock's own offset."""
+    return (CLOCK + timedelta(minutes=minutes)).replace(tzinfo=None).isoformat()
+
+
 def cap_case(name, expected, message, delay=None, at=None, guard=None, carries=(), lacks=()):
     """One send_later call from a session, with the clock fixed. A deny names the rule; an allow prints nothing."""
     fields = {"message": message}
@@ -90,6 +98,21 @@ ci_refuse("ci-wait-cap: a CI word on the second line is refused: the whole messa
           "Check-in on PR 2839.\nCI still running")
 ci_refuse("ci-wait-cap: a full-size message with the CI word last is refused", LONG_CI)
 
+# ---- Refused: each wording the reading now names, at 90 minutes. None of these holds the word CI, checks, PR run or
+# workflow run in the singular, so the reading before this change let each one through.
+ci_refuse("ci-wait-cap: a 90-minute check-in on workflow runs is refused", "workflow runs 4411 are still going")
+ci_refuse("ci-wait-cap: a 90-minute check-in on PR runs is refused", "PR runs for the draft are still red")
+ci_refuse("ci-wait-cap: a 90-minute check-in on a check run is refused", "check run 4411 is still going")
+ci_refuse("ci-wait-cap: a 90-minute check-in on a pipeline is refused", "The pipeline for PR 2839 is still going")
+ci_refuse("ci-wait-cap: a 90-minute check-in on GitHub Actions is refused", "GitHub Actions job 4411 is still going")
+
+# ---- Refused: a CI wait over the cap given as a delay_minutes string, or as an `at` time with no offset. Each miss is
+# the field's reading, not the wording, so each uses CI_MESSAGE.
+cap_case('ci-wait-cap: a CI check-in with delay_minutes as the string "90" is refused', "deny",
+         CI_MESSAGE, delay="90", carries=CAP_REMEDY)
+cap_case("ci-wait-cap: a CI check-in at a time 90 minutes ahead with no offset is refused: it reads as local time",
+         "deny", CI_MESSAGE, at=cap_naive(90), carries=CAP_REMEDY)
+
 # ---- Refused: a CI wait over the cap, by an `at` time. The offset form and the Z form name the same instant.
 cap_case("ci-wait-cap: a CI check-in at a time one minute over the cap, offset form, is refused", "deny",
          CI_MESSAGE, at=cap_at(OVER), carries=CAP_REMEDY)
@@ -122,10 +145,37 @@ cap_case("ci-wait-cap: a 1440-minute check-in that is not about CI is allowed", 
          "The owner's reply on the pick", delay=1440)
 cap_case("ci-wait-cap: an `at` time 180 minutes ahead that is not about CI is allowed", "allow",
          "The owner's reply on the pick", at=cap_at(180))
-# The empty states: no message to read, and a CI message with no wait to measure.
+
+# ---- Allowed: the new wording in a call that names no CI wait. Each word is a neighbour of a named phrase, or the
+# phrase's word alone, and none holds a named form. The 90-minute delay is over the cap, so each would be refused if read.
+cap_case("ci-wait-cap: a 90-minute check-in on the workflow doc is allowed: workflow alone is not the phrase", "allow",
+         "The workflow doc is updated", delay=90)
+cap_case("ci-wait-cap: a 90-minute check-in on the run folder is allowed: run alone is not the phrase", "allow",
+         "The run folder is swept at noon", delay=90)
+cap_case("ci-wait-cap: a 90-minute check-in on the GitHub mirror is allowed: GitHub alone is not the phrase", "allow",
+         "The GitHub mirror is down", delay=90)
+cap_case("ci-wait-cap: a 90-minute check-in with pipelined in it is allowed: a longer word is not the word", "allow",
+         "The pipelined draft is due", delay=90)
+cap_case("ci-wait-cap: a 90-minute check-in with check runner in it is allowed: a longer word is not the phrase", "allow",
+         "The check runner is idle", delay=90)
+cap_case('ci-wait-cap: a 90-minute delay as a string on a message that is not about CI is allowed', "allow",
+         "The owner's reply on the pick", delay="90")
+cap_case("ci-wait-cap: an `at` time 90 minutes ahead with no offset, on a message that is not about CI, is allowed",
+         "allow", "The owner's reply on the pick", at=cap_naive(90))
+# The limit is inclusive for the new wording too, and for the two new field readings.
+cap_case("ci-wait-cap: a pipeline check-in at the cap, %d minutes, is allowed: the limit is inclusive" % CAP, "allow",
+         "The pipeline is green", delay=CAP)
+cap_case('ci-wait-cap: a CI check-in with delay_minutes as the string "%d", at the cap, is allowed: the limit is inclusive'
+         % CAP, "allow", CI_MESSAGE, delay=str(CAP))
+cap_case("ci-wait-cap: a CI check-in at a time at the cap with no offset is allowed: it reads as local time", "allow",
+         CI_MESSAGE, at=cap_naive(CAP))
+
+# The empty states: no message to read, a CI message with no wait to measure, and a delay string with no number in it.
 cap_case("ci-wait-cap: an empty message at 90 minutes is allowed: there is no CI word", "allow", "", delay=90)
 cap_case("ci-wait-cap: a CI check-in with neither delay_minutes nor at is allowed: there is no wait to measure",
          "allow", CI_MESSAGE)
+cap_case('ci-wait-cap: a CI check-in with delay_minutes as an empty string is allowed: no number, so no wait', "allow",
+         CI_MESSAGE, delay="")
 
 # ---- The limit is read from the data file. Each copy below holds every hook module, and only its data file's cap
 # differs. A literal in the rule would give the same answer for both copies, so each direction is pinned.
