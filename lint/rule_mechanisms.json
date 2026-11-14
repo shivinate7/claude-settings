@@ -235,11 +235,11 @@
         "test": "actions/ci-done-comment/test_comment.py::Body.test_failed_job_is_named"
       }
     },
-    "git-no-merge-during-batch-ci": {
+    "git-red-main-reverts": {
       "mechanism": {
         "kind": "check",
         "ref": "merge/merge.py",
-        "test": "merge/test_merge.py::BatchBrake.test_confirm_refuses_while_another_ready_pr_has_a_required_check_pending"
+        "test": "merge/test_merge.py::GhHalf.test_a_red_main_run_read_through_gh_refuses_the_merge"
       }
     },
     "git-never-discard-output": {
@@ -285,7 +285,7 @@
     "git-integration-branch-merge": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Sequencing overlapping PRs into one integration branch and closing the originals is a manual coordination step. merge/merge.py refuses one part only: a batch that drops a lane by a revert (refuse_dropped_lane)."
+        "reason": "Whether each lane PR merges alone, on the review its risk needs, is a coordination step no check reads. merge/merge.py refuses a PR that is not green on its own head (git-never-merge-failing-ci) and a merge that drops a lane by a revert (refuse_dropped_lane)."
       }
     },
     "verification-screens-verdict": {
@@ -335,6 +335,12 @@
       "mechanism": {
         "kind": "unmechanized",
         "reason": "lint/ste_lint.py checks sentence style, not whether a published number or path has a reader that actually checked it."
+      }
+    },
+    "verification-counts-from-rest": {
+      "mechanism": {
+        "kind": "judgment",
+        "reason": "Model-judged by hooks/reply_judge.py, which flags a search total quoted as a count and never refuses (per reply-judge-samples-never-refuses)."
       }
     },
     "verification-report-unknown-reads": {
