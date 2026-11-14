@@ -697,14 +697,14 @@ class Lock:
         self.mine, self.until = frozenset({sha}), expiry_of(message)
 
     def extend_for(self, wait):
-        """Before a rate wait of `wait` s: publish an expiry that covers now + wait + LOCK_MARGIN, then return. NetStop when the lock cannot be
+        """Before a rate wait, or a debt or undo check, of `wait` s: publish an expiry that covers now + wait + LOCK_MARGIN, then return. NetStop when the lock cannot be
         extended (rate limit, the ref moved) or the hard bound LOCK_MAX_HOLD would pass: the run never waits on a lock that could expire.
         No-op while no lock is held."""
         if self.until is None:
             return
         now = self.now()
         if self.until <= now:  # expired: acquire frees a lock at expiry <= now, so a rival may hold it already. Never extend it
-            raise NetStop(f"the merge lock on {self.base} expired before the rate wait, so another run may hold it now {LOCK_CITE}. Run again.")
+            raise NetStop(f"the merge lock on {self.base} expired before a wait or check of {wait} s, so another run may hold it now {LOCK_CITE}. Run again.")
         need = int(now + wait + LOCK_MARGIN)
         if need <= self.until:
             return
@@ -3220,7 +3220,7 @@ def ready_page_state(root, n, host):
         with shared_deadline(READY_PAGE_CLEANUP_SECONDS):
             drop_worktree(root, tmp, wt)
 
-LOCK_TTL_SECONDS = 1200  # unmeasured. confirm waits on no CI run under the lock. extend_for lengthens it for a rate wait and before each debt check and undo check (UNDO_CHECK_LOCK_SECONDS and debt_check_lock_seconds), so a crashed run frees the lock in 20 minutes at any merge.deadlineMinutes
+LOCK_TTL_SECONDS = 1200  # unmeasured. confirm waits on no CI run under the lock. extend_for lengthens it for a rate wait and before each debt check and undo check (UNDO_CHECK_LOCK_SECONDS and debt_check_lock_seconds), so a crashed run frees the lock in 20 minutes before the first check and about 65 minutes once the undo check began, at any merge.deadlineMinutes
 UNDO_CHECK_LOCK_SECONDS = 3600  # unmeasured: undo_check has no time bound of its own. The lock covers this long before each call of it
 
 def debt_check_lock_seconds():
