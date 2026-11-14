@@ -3486,6 +3486,226 @@ class DoneWithoutCheck(UpkeepFixture):
         self.assertEqual((count, entries), (120, bad), "the full-size fixture lists the wrong entries")
 
 
+class StepCheckFields(unittest.TestCase):
+    """The reader of the two optional step fields, build.step_check_fields(d). A field that is absent or null is unset.
+    It reads "none" when neither field is set, "valid" when every set field is right (done_check a str with text after
+    strip, ci_only exactly True), and "bad" otherwise. Python's 1 == True and 0 == False make the ci_only cases matter.
+    The reader is read through getattr, with the fallback "none" (a step with neither field), so a case fails on its
+    own assert and never on an AttributeError."""
+
+    VALID = "python3 skills/roadmap/test_build.py passes"
+
+    def check(self, d):
+        return getattr(build, "step_check_fields", lambda _d: "none")(d)
+
+    def test_the_reader_is_defined(self):
+        self.assertTrue(hasattr(build, "step_check_fields"), "build has no step_check_fields")
+
+    def test_neither_field_reads_none(self):
+        # Control, green on main: a step with no fields reads none.
+        self.assertEqual(self.check({"title": "t"}), "none", "a step with no step fields does not read none")
+
+    def test_both_fields_null_read_none(self):
+        # Control, green on main: null is unset.
+        self.assertEqual(self.check({"done_check": None, "ci_only": None}), "none", "null fields do not read none")
+
+    def test_a_string_done_check_is_valid(self):
+        self.assertEqual(self.check({"done_check": self.VALID}), "valid", "a done_check with text does not read valid")
+
+    def test_ci_only_true_is_valid(self):
+        self.assertEqual(self.check({"ci_only": True}), "valid", "ci_only true does not read valid")
+
+    def test_both_valid_fields_read_valid(self):
+        self.assertEqual(self.check({"done_check": self.VALID, "ci_only": True}), "valid",
+                         "two valid fields do not read valid")
+
+    def test_a_blank_done_check_is_bad(self):
+        for value in ("", "   ", "\t\n"):
+            with self.subTest(done_check=value):
+                self.assertEqual(self.check({"done_check": value}), "bad", "a blank done_check does not read bad")
+
+    def test_an_int_done_check_is_bad(self):
+        self.assertEqual(self.check({"done_check": 7}), "bad", "an int done_check does not read bad")
+
+    def test_a_list_dict_or_false_done_check_is_bad(self):
+        for value in (["python3"], {"cmd": "x"}, False):
+            with self.subTest(done_check=value):
+                self.assertEqual(self.check({"done_check": value}), "bad", "a non-str done_check does not read bad")
+
+    def test_ci_only_false_is_bad(self):
+        self.assertEqual(self.check({"ci_only": False}), "bad", "ci_only false does not read bad")
+
+    def test_ci_only_text_true_is_bad(self):
+        self.assertEqual(self.check({"ci_only": "true"}), "bad", "ci_only as text does not read bad")
+
+    def test_ci_only_one_and_zero_are_bad(self):
+        for value in (1, 0):
+            with self.subTest(ci_only=value):
+                self.assertEqual(self.check({"ci_only": value}), "bad", "ci_only counts only the value True")
+
+    def test_a_valid_done_check_beside_ci_only_false_is_bad(self):
+        self.assertEqual(self.check({"done_check": self.VALID, "ci_only": False}), "bad",
+                         "one bad field does not make the step bad")
+
+
+class StepCheckRow(UpkeepFixture):
+    """The upkeep row "steps with an unreadable done_check or ci_only". It lists the id of every step, any status,
+    sorted, whose fields step_check_fields reads "bad". With none, it prints count 0 and no detail line. The row sits
+    just before "done without check". Each case builds from main with no --live file. The steps are todo or done: a
+    doing or active step would also trip the in-progress row. A valid case builds beside a bad control step, so the row is shown to work
+    before a valid step counts as absent (P7: scope before subject)."""
+
+    ROW = "steps with an unreadable done_check or ci_only"
+    BEFORE = WaitOnClosedPull.LABEL
+    AFTER = DoneWithoutCheck.ROW
+    CONTROL = "control-blank"
+    VALID = "python3 skills/roadmap/test_build.py passes"
+    # Full-size state (P8): every bad variant, and the valid ones beside them, in todo and done.
+    BAD = {
+        "bad-blank": {"done_check": ""},
+        "bad-spaces": {"done_check": "   "},
+        "bad-int": {"done_check": 7, "status": "done"},
+        "bad-list": {"done_check": ["python3"], "status": "done"},
+        "bad-false-check": {"done_check": False},
+        "bad-ci-false": {"ci_only": False},
+        "bad-ci-text": {"ci_only": "true", "status": "done"},
+        "bad-ci-one": {"ci_only": 1},
+        "bad-ci-zero": {"ci_only": 0},
+        "bad-mixed": {"done_check": VALID, "ci_only": False},
+    }
+    GOOD = {
+        "ok-text": {"done_check": VALID},
+        "ok-ci": {"ci_only": True, "status": "done"},
+        "ok-both": {"done_check": VALID, "ci_only": True},
+        "ok-absent": {},
+        "ok-null": {"done_check": None, "ci_only": None, "status": "done"},
+    }
+
+    def build_steps(self, steps):
+        """Commit each {id: fields} on the record branch, one commit per step, then build from main.
+        Returns the output."""
+        git(self.repo, "checkout", "-q", "roadmap")
+        for sid, fields in steps.items():
+            self.commit_step(sid, **fields)
+        _, out = self.build_from_main()
+        return out
+
+    def listed(self, steps):
+        """(count, detail) of the new row, raw as printed, for a build with `steps`."""
+        return self.row(self.build_steps(steps), self.ROW)
+
+    def beside_control(self, steps):
+        """The row's entries (sorted) for `steps`, built beside a bad control. The control must be listed, so a case
+        that reads a valid step as absent cannot pass on a row that never prints."""
+        merged = {self.CONTROL: {"done_check": ""}}
+        merged.update(steps)
+        _, detail = self.listed(merged)
+        entries = self.entries(detail)
+        self.assertIn(self.CONTROL, entries, "scope: the blank control step is not listed")
+        return entries
+
+    def other_rows(self, out):
+        """{label: (count, detail)} of every upkeep row except the new one."""
+        return {label: self.row(out, label) for label in self.summary_counts(out) if label != self.ROW}
+
+    def test_the_row_reads_zero_with_no_detail_when_nothing_is_bad(self):
+        # Empty state (P8): only the default step, which has no step fields.
+        self.assertEqual(self.row(self.build_steps({}), self.ROW), (0, ""))
+
+    def test_the_row_sits_just_before_done_without_check(self):
+        labels = list(self.summary_counts(self.build_steps({})))
+        self.assertIn(self.ROW, labels, "no upkeep row labelled %r" % self.ROW)
+        at = labels.index(self.ROW)
+        self.assertEqual(labels[at + 1:at + 2], [self.AFTER], "the row is not just before done without check")
+        self.assertEqual(labels[at - 1:at], [self.BEFORE],
+                         "the row does not follow open step waits on a closed unmerged PR")
+
+    def test_a_string_done_check_is_not_listed(self):
+        entries = self.beside_control({"ok-text": {"done_check": self.VALID}})
+        self.assertNotIn("ok-text", entries, "a done_check with text is listed as unreadable")
+
+    def test_ci_only_true_is_not_listed(self):
+        entries = self.beside_control({"ok-ci": {"ci_only": True}})
+        self.assertNotIn("ok-ci", entries, "ci_only true is listed as unreadable")
+
+    def test_both_valid_fields_are_not_listed(self):
+        entries = self.beside_control({"ok-both": {"done_check": self.VALID, "ci_only": True}})
+        self.assertNotIn("ok-both", entries, "a step with both valid fields is listed as unreadable")
+
+    def test_absent_and_null_fields_are_not_listed(self):
+        entries = self.beside_control({"ok-absent": {}, "ok-null": {"done_check": None, "ci_only": None}})
+        self.assertNotIn("ok-absent", entries, "a step with no fields is listed as unreadable")
+        self.assertNotIn("ok-null", entries, "a step with null fields is listed as unreadable")
+
+    def test_a_blank_done_check_is_listed(self):
+        entries = self.beside_control({"blank-spaces": {"done_check": "   "}, "blank-empty": {"done_check": ""}})
+        self.assertIn("blank-spaces", entries, "a blank done_check is not listed")
+        self.assertIn("blank-empty", entries, "an empty done_check is not listed")
+
+    def test_an_int_done_check_is_listed(self):
+        entries = self.beside_control({"int-check": {"done_check": 7}})
+        self.assertIn("int-check", entries, "an int done_check is not listed")
+
+    def test_ci_only_false_is_listed(self):
+        entries = self.beside_control({"ci-false": {"ci_only": False}})
+        self.assertIn("ci-false", entries, "ci_only false is not listed")
+
+    def test_ci_only_text_true_is_listed(self):
+        entries = self.beside_control({"ci-text": {"ci_only": "true"}})
+        self.assertIn("ci-text", entries, "ci_only as text is not listed")
+
+    def test_ci_only_one_is_listed(self):
+        entries = self.beside_control({"ci-one": {"ci_only": 1}})
+        self.assertIn("ci-one", entries, "ci_only 1 is not listed (only the value True counts)")
+
+    def test_a_done_step_with_a_bad_field_is_still_listed(self):
+        entries = self.beside_control({"done-bad": {"status": "done", "ci_only": False}})
+        self.assertIn("done-bad", entries, "a done step with a bad field is not listed")
+
+    def test_two_bad_steps_are_listed_in_id_order(self):
+        count, detail = self.listed({"zulu-step": {"ci_only": "true"}, "alpha-step": {"done_check": 7}})
+        self.assertEqual((count, detail), (2, "alpha-step, zulu-step"), "two bad steps are not listed sorted by id")
+
+    def test_a_full_fixture_lists_exactly_the_bad_steps(self):
+        count, detail = self.listed({**self.BAD, **self.GOOD})
+        self.assertEqual((count, detail), (len(self.BAD), ", ".join(sorted(self.BAD))),
+                         "the full fixture does not list exactly the bad steps")
+
+    def test_the_other_rows_read_the_same_with_and_without_a_bad_field(self):
+        # Control, green on main: only the new row reads the field, so no other row moves.
+        with_bad = self.build_steps({"probe": {"ci_only": "true"}})
+        without = self.build_steps({"probe": {"ci_only": True}})
+        self.assertEqual(self.other_rows(with_bad), self.other_rows(without),
+                         "a bad field moves an upkeep row other than the new one")
+
+
+class StepCheckDocs(unittest.TestCase):
+    """SKILL.md names the two step fields in its `## Lane and grants` section, the section that holds the
+    "Two step fields serve the guard" list. It reads that one section, as skills/waiting-page/test_skill_park_relay.py
+    does."""
+
+    HEADING = "## Lane and grants"
+
+    def section(self):
+        text = (HERE / "SKILL.md").read_text(encoding="utf-8")
+        start = text.find(self.HEADING)
+        self.assertNotEqual(start, -1, "SKILL.md has no '%s' section" % self.HEADING)
+        end = text.find("\n## ", start + len(self.HEADING))
+        return text[start:] if end == -1 else text[start:end]
+
+    def test_the_section_names_done_check(self):
+        self.assertIn("`done_check`", self.section(), "SKILL.md's Lane and grants section does not name done_check")
+
+    def test_the_section_names_ci_only(self):
+        self.assertIn("`ci_only`", self.section(), "SKILL.md's Lane and grants section does not name ci_only")
+
+    def test_the_section_still_names_the_guard_fields(self):
+        # Control, green on main: the guard fields stay documented in the section.
+        section = self.section()
+        self.assertIn("`lane`", section, "SKILL.md's Lane and grants section no longer names lane")
+        self.assertIn("`grants`", section, "SKILL.md's Lane and grants section no longer names grants")
+
+
 def baked(text, key):
     """The JSON value right after `key` in a page or a block. The data is plain JSON in a script."""
     at = text.index(key) + len(key)
