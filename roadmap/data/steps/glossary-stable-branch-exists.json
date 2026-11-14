@@ -1,0 +1,14 @@
+{
+ "id": "glossary-stable-branch-exists",
+ "title": "The glossary row for the stable branch says it exists on origin",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Finding (the #3407 lane's reviewer, outside that diff; coordinator 11:56 CST Nov 14, relayed). Triage read both sides. GLOSSARY.md line 29 (stable clone of main, read 11:57 CST): \"stable branch ... Target, not live: no `stable` branch is on origin yet.\" `git ls-remote origin refs/heads/stable` at 11:57 CST returns 0806bf59d2847e36dcaa977e0560cca8a8fbc90e, the same commit as the #3404 merge on main. So the row is false now. Whether the branch is live in the sense of the decision stable-branch (moves only to a green main commit, fast-forward only; reinstall works from it) is not measured here. Fix: rewrite the row in place to say the branch exists and where it points, with a claim bound to a check (skill fresh-prose). Docs only; a record-writer; the glossary row is read by every session. Kin: stable-switch-map-check, missing-stable-warn-hook, push-skip-text-says-stable.",
+ "source": "the #3407 lane's reviewer via coordinator 11:56 CST Nov 14",
+ "note": "Filed 11:58 CST Nov 14 by triage. Tracker: the coordinator. No lane yet.",
+ "updatedAt": "2026-11-14T11:58:00"
+}
