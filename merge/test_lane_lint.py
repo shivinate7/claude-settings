@@ -2521,14 +2521,15 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.host.pulls = {}
         self.host.draft = True
 
-    def clashing_pair(self):
-        """feat (PR 7) and open PR 8 of another session both change shared.txt. Each merges clean with main, and the two conflict. -> (head, PR 8's head)."""
+    def clashing_pair(self, n=8, draft=False):
+        """feat (PR 7) and open PR n of another session both change shared.txt. Each merges clean with main, and the two conflict. draft: PR n is a
+        draft. -> (head, PR n's head)."""
         self.own_writes({"shared.txt": "lane 7\n"})
-        other = self.pr_writes(8, {"shared.txt": "lane 8\n"}, lane_body(OTHER))
+        other = self.pr_writes(n, {"shared.txt": "lane %d\n" % n}, lane_body(OTHER), draft=draft)
         head = self.head("feat")
         self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the lane head does not merge clean with main")
-        self.assertEqual(self.clash(other, "origin/main"), "clean", "precondition: PR 8 does not merge clean with main, so the clash is not the pair the case names")
-        self.assertEqual(self.clash(head, other), "conflict", "precondition: the lane head and PR 8 do not clash, so the case probes nothing")
+        self.assertEqual(self.clash(other, "origin/main"), "clean", "precondition: PR %d does not merge clean with main, so the clash is not the pair the case names" % n)
+        self.assertEqual(self.clash(head, other), "conflict", "precondition: the lane head and PR %d do not clash, so the case probes nothing" % n)
         return head, other
 
     def pre_ready(self):
@@ -2709,6 +2710,7 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.pre_ready_lane()
         head, other = self.clashing_pair()
         self.assertFalse(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is in this lane, so the case probes no all-PR scope")
+        self.assertFalse(self.host.pulls[8]["draft"], "precondition: PR 8 is a draft, so the case probes no clash with a ready PR")
         self.use_ci_job(steps_for(), 0)
         refs_before = self.refs()
         rc, out = self.pre_ready()
@@ -2838,6 +2840,19 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertNotEqual(rc, 0, "a failing STE lint step exited 0 under --fast-checks: " + out)
         self.assertEqual(len(re.findall(r"(?m)^(?:pass|fail|unknown) ", out)), len(DECLARED_READY) + 2, "--fast-checks did not print one verdict line per check: " + out)
         self.assert_fast_checks_changed_nothing(out, refs_before)
+
+
+    def test_pre_ready_reports_a_clash_with_a_draft_pr_and_does_not_fail_on_it(self):  # a ready PR counts; a draft PR is a report line
+        self.pre_ready_lane()
+        self.clashing_pair(n=9, draft=True)
+        self.assertTrue(self.host.pulls[9]["draft"], "precondition: PR 9 is not a draft, so the case probes no draft scope")
+        self.use_ci_job(steps_for(), 0)
+        rc, out = self.pre_ready()
+        self.assertFalse(verdict_line(out, "fail", "open-PR clash"), "a clash with draft PR #9 printed a `fail open-PR clash` line: " + out)
+        self.assertEqual(rc, 0, "a clash with draft PR #9 refused the pre-ready run: " + out)
+        self.assertTrue(names_pr(out, 9), "the report line does not name draft PR #9: " + out)
+        self.assertIn("shared.txt", out, "the report line does not name the clashing file: " + out)
+        self.assertEqual(self.host.readies, [7], "a clash with draft PR #9 kept the draft from going ready: " + out)
 
 
 class PreReadyDeclared(unittest.TestCase):
