@@ -12,7 +12,7 @@ description: >
   form, and skills/ci-hygiene/snippets.md section 20 gives the child-repo copy). The caller job needs
   `permissions: {contents: read, pull-requests: read, checks: read, actions: read}`. The step needs python3 and
   runs push-skip.py from the action path, which loads lint/all_jobs_passed_rules.py and .github/scripts/nightly-skip.py
-  from the same checkout of this repo, so a pin by SHA carries its own readers. Cost per push: a handful of reads
+  from the same checkout of this repo, so a pin by SHA, or the ruled @stable (restart-plan R44), carries its own readers. Cost per push: a handful of reads
   (the pull request list, then per head its commit and its runs); no file written, no process kept.
 inputs:
   workflow:
