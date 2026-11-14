@@ -2556,10 +2556,9 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     for m in with_prs:
         if m not in rows:
             raise Stop(f"--with names PR #{m}, which is not an open pull request (closed, merged or not found), so its head cannot be compared: unknown, not a pass. {LANE_LINT_CITE}")
-    if scope in ("all", "ready"):
+    picked = sorted({m for m, d in rows.items() if lane & set(LANE_SESSION.findall(d.get("body") or ""))} | set(with_prs))
+    if scope in ("all", "ready"):  # the wide scopes pick by base, not by the lane's session URL
         picked = sorted({m for m, d in rows.items() if d.get("base", {}).get("ref") == base} | set(with_prs))
-    else:
-        picked = sorted({m for m, d in rows.items() if lane & set(LANE_SESSION.findall(d.get("body") or ""))} | set(with_prs))
     if not picked:
         return [], [], ""
     c, out = fetch_branch_heads(root)
@@ -3327,14 +3326,14 @@ def open_merge_worktree(root, info, base, host=None, n=None):
     head, tip = info["head"], f"refs/remotes/origin/{base}"
     state, tree, files = merge_tree(root, head, tip)
     if state == "conflict":
-        raise Stop(f"fail merge with {base}: the head {head[:9]} conflicts with it in {', '.join(files) or '(no file name read)'}. Merge {base} into the lane, push, and run again. Nothing was pushed.")
+        raise Stop(f"fail merge with {base}: the head {head[:9]} conflicts with it in {', '.join(files) or '(no file name read)'}. Merge {base} into the lane, push, and run again. Nothing was pushed. {READY_CHECKS_CITE}")
     if state == "unknown":
-        raise Stop(f"unknown merge with {base}: {files[0]}. Run again. Nothing was pushed.")
+        raise Stop(f"unknown merge with {base}: {files[0]}. Run again. Nothing was pushed. {READY_CHECKS_CITE}")
     if tree == git(root, "rev-parse", f"{head}^{{tree}}")[1]:
         return add_worktree(root, head)
     c, sha = git(root, "-c", "user.name=merge", "-c", "user.email=merge@localhost", "commit-tree", tree, "-p", head, "-p", tip, "-m", f"dry merge of {head[:9]} into {base}")
     if c:
-        raise Stop(f"unknown merge with {base}: git commit-tree failed: {sha}. Run again. Nothing was pushed.")
+        raise Stop(f"unknown merge with {base}: git commit-tree failed: {sha}. Run again. Nothing was pushed. {READY_CHECKS_CITE}")
     return add_worktree(root, sha)
 
 def fast_checks(root, cfg, n, host, info):
