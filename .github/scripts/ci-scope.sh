@@ -12,12 +12,12 @@
 #     lint_comment_narration (Comment narration check: any non-.md path; the checker reads no .md file).
 #   lint/layout.py, lint/layout.json and .claude/layout-extras.json set all four: each lint finds its record folders through them.
 #   checks_windows_rest_2 repeats checks_windows_rest's value (R62). No job reads it: checks-windows-rest-2 runs every step on a ready pull_request, so the output is kept only for the tests that derive it.
-# mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event.
+# mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event; false on a records-only skip.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
 # BASE_SHA, HEAD_REF, GREEN_HEAD (optional: the sha green-head.sh prints, the pull request's newest earlier fully green head), PR_HEAD
 # (optional: the pull request's head sha; HEAD when unset). GREEN_HEAD turns the 13 job and suite flags off on a pull request when it is an
-# ancestor of PR_HEAD and the delta from it to PR_HEAD is docs/records.md alone; the lint flags and mutation_report keep their whole-PR values. Any unreadable read: no skip.
+# ancestor of PR_HEAD and the delta from it to PR_HEAD is docs/records.md alone; the lint flags keep their whole-PR values and mutation_report is false. Any unreadable read: no skip.
 # The last output line, records_only_skip=true|false, is true exactly in that case.
 set -u
 JOBS="checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos pointer_windows"
@@ -195,6 +195,7 @@ case "${EVENT:-}" in
   pull_request) case "${HEAD_REF:-}" in batch-*) v=true ;; *) v=false ;; esac ;;
   *) v=true ;;
 esac
+[ "$skip" = true ] && v=false
 echo "mutation_report=$v" >> "$GITHUB_OUTPUT"
 # records_only_skip: true exactly when the records-only shortcut above forced the 13 flags off; checks.yml reads it to skip the run steps of the test jobs.
 echo "records_only_skip=$skip" >> "$GITHUB_OUTPUT"

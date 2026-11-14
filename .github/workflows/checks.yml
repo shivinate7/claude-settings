@@ -1820,7 +1820,8 @@ jobs:
   # shard 1 here, the rest in checks-windows-guard-<i> (the shard switch in hooks/test_guard.py; lint/test_windows_split.py proves each
   # case runs once). The Windows guard, merge and rest jobs run every step on a ready pull_request (the draft test stands in for scope
   # there, which skips on a draft), except a records-only push after a fully green head (records_only_skip, from .github/scripts/ci-scope.sh
-  # and green-head.sh), where every job is skipped. R62 ("each suite runs once per batch, on the batch PR"; "Part 3 keeps the full shards
+  # and green-head.sh), where every `run` step of the gated jobs is skipped (checkout and setup still start) and the mutation-report job is
+  # off through mutation_report. R62 ("each suite runs once per batch, on the batch PR"; "Part 3 keeps the full shards
   # once per batch") puts the full suites on every ready pull_request; own-830-c ("every job", owner 15:02 CST Nov 14) narrows that:
   # a push that changes docs/records.md alone adds nothing the green head's run has not proved. Push, schedule and dispatch run them whole.
   checks-windows-guard:
