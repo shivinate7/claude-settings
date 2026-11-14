@@ -1456,8 +1456,12 @@ class Host:
         (the red streak) is judged like the newest, when the newest is itself a red run; a newer success of the group clears the red runs under it. A newest run that proves nothing (in flight, cancelled, timed out, skipped) never reaches under it to an older red run. A re-run in flight in the streak makes the verdict unknown, never dropped. Only the group's first standing red run starts a walk to the breaking line.
         The revert's own run does not matter while it is absent, queued or in progress; a completed red run of it is a red run of its own. A cancelled run with no red job, a re-run in flight and a
         failed read: those stay unknown. The revert read is one `git log` over the whole origin/<base> history (the ref base_workflows reads) per call, made only when a red run exists, so its cost grows with that history. Red runs that share one head_sha share one revert, since the revert names the head; a failed read is unknown.
+        An empty run is no verdict (clear_rule.empty_without_evidence, the one home): a completed success run of the push group (push and dispatch) that ran no check, and carries
+        no evidence that a green integration run covered its tree. The newest run of the group that is not empty is the group's verdict, so an older red run stays red; a page with no run of the
+        group that is not empty keeps the newest run. A schedule run is judged as it is.
         A red verdict's detail also holds breaking_line's segment for each red run judged (one per file and group), the head group's first: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).
-        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A failed read is unknown."""
+        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A newest-first walk of the push group's
+        green runs costs one jobs read each, down to the first that is not empty (the newest, when it ran a suite). A failed read is unknown."""
         try:
             if os.path.dirname(ALARM_EVENTS) not in sys.path:
                 sys.path.insert(0, os.path.dirname(ALARM_EVENTS))
@@ -1476,7 +1480,19 @@ class Host:
                 if r["id"] not in read:
                     read[r["id"]] = self.pages(f"actions/runs/{r['id']}/jobs", "jobs")
                 return read[r["id"]]
-            newest = {(r["path"], self.BASE_EVENTS[r["event"]]): r for r in reversed(judged)}
+            rule_events = clear_rule.rule_events()
+
+            def empty(r):  # a green run of the push group that ran no suite and carries no evidence: no verdict (clear_rule.empty_without_evidence); one jobs read, cached
+                return r["conclusion"] == "success" and r["event"] in rule_events and clear_rule.empty_without_evidence(jobs_of(r), r["event"])
+            newest, settled = {}, set()  # per (file, group): the newest run, but never an empty one while an older run of the group is not; with none, the newest run
+            for r in judged:  # newest first
+                key = (r["path"], self.BASE_EVENTS[r["event"]])
+                if key in settled:
+                    continue
+                newest.setdefault(key, r)
+                if not empty(r):
+                    newest[key] = r
+                    settled.add(key)
             age = {r["id"]: i for i, r in enumerate(judged)}  # `judged` is newest first
 
             texts = {}
