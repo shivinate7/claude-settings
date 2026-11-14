@@ -386,6 +386,7 @@ WRAPPER_VALUE_FLAGS = {
 # them. Their value flags sit here so `_wrapper_flags` skips the same way.
 WRAPPER_VALUE_FLAGS.update({
     "stdbuf": {"-i", "-o", "-e"}, "caffeinate": {"-t", "-w"},
+    "ionice": {"-c", "--class", "-n", "--classdata", "-p", "--pid", "-P", "--pgid", "-u", "--uid"},
     "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
     "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
     "podman": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
@@ -2328,7 +2329,7 @@ FIND_EXEC_ACTIONS = ("-exec", "-execdir", "-ok", "-okdir")
 
 def wrapped_commands(tokens, at: int, strict: bool = False):
     """The command texts the runner at `tokens[at]` starts, else []. Read: `docker|podman exec`,
-    `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `unbuffer`,
+    `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `ionice`, `unbuffer`,
     `caffeinate`, `watch`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as
     `sh -c`. `watch` joins its words with spaces and hands the line to `sh -c`, so its text is that
     line.
@@ -2358,7 +2359,7 @@ def wrapped_commands(tokens, at: int, strict: bool = False):
         rest, skip = rest[1:], 1   # the container
     elif word == "flock":
         skip = 1   # the lock file
-    elif word not in ("stdbuf", "unbuffer", "caffeinate"):
+    elif word not in ("stdbuf", "ionice", "unbuffer", "caffeinate"):
         return []
     index, flags = _wrapper_flags(word, rest, 0)
     if strict and word in ("docker", "podman"):

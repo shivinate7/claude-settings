@@ -47,6 +47,21 @@
 #    without CMD.
 #  - TERM to the tool during the lease wait: it ends at once, not after the wait, with no boot, its queue place and the
 #    lock freed. TERM during a simctl boot: the device still comes up, so it is shut down and recorded.
+#  - Wallpaper store (step sim-wallpaper-store-drop): on its own-boot path, after the lease and the re-scan and before
+#    `simctl boot`, the tool deletes the device's PRBPosterExtensionDataStore folder while the device is shut down. The
+#    devices root is $HOME/Library/Developer/CoreSimulator/Devices, or SIM_TEST_DEVICES_DIR when that is set. Only that
+#    folder goes: its siblings and another device's store stay. Reuse (also a reuse the re-scan finds after the lease), a
+#    refusal and a no-op lease never touch it. An absent or empty folder is no error. A symlink at that path: its target
+#    is never deleted.
+#  - Own boot only: right after `simctl boot` and its record, it runs `xcrun simctl spawn UDID launchctl disable
+#    user/foreground/LABEL` for each label in bin/sim-noise-services, beside the script: one label per line, `#` comments
+#    and blank lines allowed. A failed spawn never fails the run and prints nothing; xcodebuild still runs. The reuse path,
+#    the refusals and a failed boot run no spawn. chronod and AppIntentsLiveEntityService are never disabled.
+#  - Own boot: `simctl bootstatus UDID` runs once after `simctl boot` and before the first disable call. A bootstatus that
+#    fails or hangs changes no exit code and stops no spawn. A TERM or INT during it, or during a hanging disable call,
+#    ends the tool at once with the same cleanup: the device shut down, the lease given, the lock freed.
+#  - Own boot: the whole noise step (bootstatus, then one disable call per label) is bounded by SIM_TEST_NOISE_WAIT seconds
+#    (default 90). On expiry the tool stops the step's child and goes on to xcodebuild, silently; the exit code is xcodebuild's.
 # The last line is the tally: passed and failed counts, then the failing case names.
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -100,6 +115,11 @@ export STUB_PRO_UDID=$PRO # the boot stub names the 18 Pro by this UDID, and a D
 DEST="xcodebuild test -scheme X -collect-test-diagnostics never -destination platform=iOS Simulator,id="
 crashdir=$work/crash
 lockdir=$work/home/.claude/state/sim-test.lock
+# The devices root of the wallpaper-store cases: start_tool passes it as SIM_TEST_DEVICES_DIR. devroot is the root those
+# cases fill and read; a case that tests the default root sets no_devices_seam and devroot to the default under its HOME.
+devdir=$work/devices
+devroot=$devdir
+link_target=$work/store_target
 
 # xcodebuild: logs its call. When the lock folder exists it records the lock (lock_during, lock_alive, lock_pid_seen).
 # With STUB_CRASH=N it waits 1 s, then writes N <STUB_CRASH_PREFIX or SpringBoard>-<i>.ips reports into SIM_TEST_CRASH_DIR,
@@ -136,6 +156,12 @@ SH
 # verb and whether the lock folder exists (lock_simctl), so a case can check the lock across list, boot and shutdown.
 # STUB_LIST_RC makes every simctl list exit with that code. STUB_BOOT_HOLD holds a boot open: it writes $RUN/boot_started,
 # then waits (at most 20 s) for $RUN/boot_release, so a case can send a signal while the boot is in flight.
+# At each boot it appends "<UDID> present" or "<UDID> absent" to $RUN/store_at_boot: whether that device's
+# PRBPosterExtensionDataStore folder is there at that moment, under SIM_TEST_DEVICES_DIR or the default root.
+# spawn logs its call like any verb. STUB_SPAWN_RC makes it exit with that code, after one line on stderr. Each spawn adds
+# one line to $RUN/spawn_record: `recorded` when the boot record file exists by then, else `none`. STUB_SPAWN_HANG makes
+# it write $RUN/spawn_started and sleep STUB_SPAWN_HANG_SECS (default 30). bootstatus logs its call, answers with
+# STUB_BOOTSTATUS_RC (default 0), and with STUB_BOOTSTATUS_HANG writes $RUN/bootstatus_started and sleeps like spawn.
 cat > "$stubs/xcrun" <<'SH'
 #!/bin/sh
 [ "$1" = simctl ] || exit 99
@@ -150,9 +176,17 @@ case "$1" in
     *--json*) cat "$RUN/devices.json" ;;
     *) echo "== Devices =="; echo "-- iOS 27.0 --"; cat "$RUN/booted" ;;
   esac ;;
-  boot) cp -f "$lease" "$RUN/lease_at_boot" 2>/dev/null; [ -n "${STUB_BOOT_RC:-}" ] && exit "$STUB_BOOT_RC"
+  boot) cp -f "$lease" "$RUN/lease_at_boot" 2>/dev/null
+    s="${SIM_TEST_DEVICES_DIR:-$HOME/Library/Developer/CoreSimulator/Devices}/$2/data/Library/Application Support/PRBPosterExtensionDataStore"
+    if [ -e "$s" ] || [ -L "$s" ]; then echo "$2 present"; else echo "$2 absent"; fi >> "$RUN/store_at_boot"
+    [ -n "${STUB_BOOT_RC:-}" ] && exit "$STUB_BOOT_RC"
     if [ -n "${STUB_BOOT_HOLD:-}" ]; then : > "$RUN/boot_started"; n=0; while [ ! -e "$RUN/boot_release" ] && [ "$n" -lt 40 ]; do sleep 0.5; n=$((n + 1)); done; fi
     case $2 in "$STUB_PRO_UDID") name="iPhone 18 Pro" ;; *) name="iPhone Duo" ;; esac; echo "    $name ($2) (Booted) " > "$RUN/booted" ;;
+  spawn) if [ -s "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-boots.jsonl" ]; then echo recorded >> "$RUN/spawn_record"; else echo none >> "$RUN/spawn_record"; fi
+    if [ -n "${STUB_SPAWN_HANG:-}" ]; then : > "$RUN/spawn_started"; sleep "${STUB_SPAWN_HANG_SECS:-30}"; fi
+    [ -n "${STUB_SPAWN_RC:-}" ] && { echo "xcrun stub: simctl spawn refused" >&2; exit "$STUB_SPAWN_RC"; } ;;
+  bootstatus) if [ -n "${STUB_BOOTSTATUS_HANG:-}" ]; then : > "$RUN/bootstatus_started"; sleep "${STUB_BOOTSTATUS_HANG_SECS:-30}"; fi
+    [ -n "${STUB_BOOTSTATUS_RC:-}" ] && exit "$STUB_BOOTSTATUS_RC" ;;
   shutdown) : > "$RUN/booted" ;;
 esac
 exit 0
@@ -216,17 +250,22 @@ fresh() {
   rm -f "$work/topcalls" "$work/started" "$work/xc_finished" "$work/watchdog_fired" "$work/lock_during" \
     "$work/lock_alive" "$work/lock_pid_seen" "$work/lock_simctl" "$work/devices.json" \
     "$work/cmd_udid" "$work/cmd_args" "$work/cmd_lock_seen" "$work/cmd_lock_pid" "$work/cmd_lease"
-  rm -rf "$work/home/.claude" "$crashdir" "$work/sweep_root"
-  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release"
+  rm -rf "$work/home/.claude" "$work/home/Library" "$crashdir" "$work/sweep_root" "$devdir" "$link_target"
+  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release" \
+    "$work/store_at_boot" "$work/spawn_record" "$work/spawn_started" "$work/bootstatus_started"
+  devroot=$devdir; no_devices_seam=
   /bin/mkdir -p "$crashdir" "$work/home"
 }
 # start_tool [VAR=value...]: starts the tool in its own process group, behind a hard timeout. Its stdout and stderr go
 # to run.std and run.err. Defaults: a temp HOME, no CLAUDE_CONFIG_DIR, the crash dir in the run folder, a 1 s poll and
 # a 2 s lock wait, a 1 s lease poll, CI and GITHUB_ACTIONS unset (sim-lease does nothing under them), and reports that
-# name DUO1, the Duo of slot 1. Sets tool_pid and wd_pid. ARGS holds the tool's own arguments.
+# name DUO1, the Duo of slot 1. SIM_TEST_DEVICES_DIR is devdir, unless no_devices_seam is set (then it is unset, so the
+# tool uses its default root). Sets tool_pid and wd_pid. ARGS holds the tool's own arguments.
 start_tool() {
   set -m
-  env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" SIM_TEST_CRASH_DIR="$crashdir" SIM_TEST_POLL=1 \
+  devices_env=(SIM_TEST_DEVICES_DIR="$devdir")
+  [[ -n ${no_devices_seam:-} ]] && devices_env=(-u SIM_TEST_DEVICES_DIR)
+  env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS -u SIM_TEST_NOISE_WAIT "${devices_env[@]}" HOME="$work/home" SIM_TEST_CRASH_DIR="$crashdir" SIM_TEST_POLL=1 \
     SIM_TEST_LOCK_WAIT=2 SIM_LEASE_POLL=1 \
     STUB_CRASH_UDID="$DUO1" "$@" \
     "$script" "${ARGS[@]}" > "$work/run.std" 2> "$work/run.err" &
@@ -704,11 +743,21 @@ need "steps are run only" steps_are "run "
 need "no record line" test "$(record_lines)" -eq 0
 end_case "52 reuse path: the Duo it reuses gets no sim-boots.jsonl line"
 
+# copy_tool DIR: a copy of the script under test and of sim-lease in DIR/bin, with the one hook sim-lease imports in DIR/hooks,
+# so no sim_boot_record.py is there. The list file beside the script is copied too, when it exists. A case that puts a file
+# beside the copy's script uses it; the real bin/ is never touched.
+copy_tool() {
+  rm -rf "$1"
+  /bin/mkdir -p "$1/bin" "$1/hooks"
+  cp "$script" "$1/bin/sim-test"; cp "$sim_lease" "$1/bin/sim-lease"; cp "$root/hooks/_nowindow.py" "$1/hooks/"
+  if [ -f "$(dirname "$script")/sim-noise-services" ]; then cp "$(dirname "$script")/sim-noise-services" "$1/bin/"; fi
+  chmod +x "$1/bin/sim-test" "$1/bin/sim-lease"
+}
+
 # A copy of the tool and its sim-lease, with a hooks folder that holds only what sim-lease imports: the record call finds no hook. It must print nothing, and the
 # run must still boot, test and shut down with xcodebuild's exit code.
 fresh; ps_stub; devices_json "$DUO1"
-/bin/mkdir -p "$work/nohooks/bin"; cp "$script" "$work/nohooks/bin/sim-test"; cp "$sim_lease" "$work/nohooks/bin/sim-lease"; chmod +x "$work/nohooks/bin/sim-test" "$work/nohooks/bin/sim-lease"
-/bin/mkdir -p "$work/nohooks/hooks"; cp "$root/hooks/_nowindow.py" "$work/nohooks/hooks/"
+copy_tool "$work/nohooks"
 saved_script=$script; script=$work/nohooks/bin/sim-test
 run PATH="$work/psbin:$PATH"
 script=$saved_script
@@ -898,7 +947,8 @@ lease_freed_after_reap() { env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME
 
 # pro_dies_during_duo_wait BOOTED: a pro holder takes the pro lease, a duo run queues behind it, and the holder dies. With
 # BOOTED yes the 18 Pro is still booted when the holder dies, as a pro run that never shut it down leaves it. With BOOTED
-# duo, a Duo of slot 2 is booted during the wait, so the queued run reuses that Duo after its grant.
+# duo, a Duo of slot 2 is booted during the wait, so the queued run reuses that Duo after its grant. A second argument
+# store, with duo, also gives that Duo a store folder before the holder dies.
 pro_dies_during_duo_wait() {
   fresh
   sleep 600 > /dev/null 2>&1 &
@@ -912,6 +962,10 @@ pro_dies_during_duo_wait() {
     need "the 18 Pro is booted when the holder dies" grep -Fq "iPhone 18 Pro" "$booted_file"
   elif [[ $1 = duo ]]; then
     booted "iPhone Duo" $DUO2
+    if [[ ${2:-} = store ]]; then
+      mkstore "$DUO2"
+      need "fixture: the Duo's store is there before the holder dies" store_kept "$DUO2"
+    fi
   fi
   kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
   finish_tool
@@ -1036,6 +1090,376 @@ need "no sim-test.lock.dead.* folder is left" no_dead_folder
 need "no rmdir error on stderr" no_rmdir_error
 end_case "80 dead holder's lock folder with take.out: taken over, no dead folder left, no rmdir error"
 
+# ---- Cases 81 to 87: the own-boot disable of the noise services, from bin/sim-noise-services beside the script ----
+# NOISE_LABELS is the expected list, written out here so the suite never reads the file it checks. Case 86 holds the file to it.
+NOISE_LABELS=(com.apple.assistant_cdmd com.apple.assistant_service com.apple.assistantd com.apple.corespotlightservice
+  com.apple.email.maild com.apple.hybridsearchd com.apple.icloudmailagent com.apple.intelligencetasksd com.apple.searchd
+  com.apple.siri.acousticsignature com.apple.siri.context.service com.apple.siriactionsd com.apple.siriinferenced
+  com.apple.siriknowledged com.apple.sirittsd com.apple.spotlightknowledged com.apple.spotlightknowledged.updater)
+# noise_list: the list file the tool reads, beside the script under test.
+noise_list() { echo "$(dirname "$script")/sim-noise-services"; }
+# disable_call LABEL: the one call the own-boot path makes for LABEL, on the booted Duo.
+disable_call() { echo "simctl spawn $DUO1 launchctl disable user/foreground/$1"; }
+spawn_count() { grep -c '^simctl spawn ' "$calls"; }
+no_spawn() { [[ "$(spawn_count)" -eq 0 ]]; }
+disable_once() { [[ "$(grep -Fxc "$(disable_call "$1")" "$calls")" -eq 1 ]]; }
+# spawn_window: the boot call, then every spawn call, then xcodebuild, in that order.
+spawn_window() {
+  local b first last x
+  b=$(grep -n '^simctl boot ' "$calls" | head -n 1 | cut -d: -f1)
+  first=$(grep -n '^simctl spawn ' "$calls" | head -n 1 | cut -d: -f1)
+  last=$(grep -n '^simctl spawn ' "$calls" | tail -n 1 | cut -d: -f1)
+  x=$(grep -n '^xcodebuild' "$calls" | head -n 1 | cut -d: -f1)
+  [[ -n $b && -n $first && -n $last && -n $x && $b -lt $first && $last -lt $x ]]
+}
+# spawns_after_record: spawn_record has one line per spawn, and each says the boot record was on disk at that call.
+spawns_after_record() { [[ -s $work/spawn_record ]] && ! grep -Fxq none "$work/spawn_record"; }
+no_call_names() { ! grep -Fq -- "$1" "$calls"; }
+not_in_list() { ! grep -Fq -- "$1" "$(noise_list)" 2>/dev/null; }
+not_spelled() { ! grep -Fq -- "$1" "$script"; }
+# list_is_exact: the label lines of the list file are the 17 labels, and the rest of it is comments and blank lines.
+list_is_exact() {
+  [[ "$(grep -v -e '^#' -e '^[[:space:]]*$' "$(noise_list)" 2>/dev/null | sort)" == "$(printf '%s\n' "${NOISE_LABELS[@]}" | sort)" ]]
+}
+# refused_clean: exit 1 with no boot and no xcodebuild. failed_boot_clean: a boot was tried, failed, and no xcodebuild ran.
+refused_clean() { rc_is 1 && no_boot && no_xcodebuild; }
+failed_boot_clean() { [[ $rc -ne 0 ]] && has_call "simctl boot $DUO1" && no_xcodebuild; }
+# no_spawn_output: neither stream names a spawn, launchctl, the domain, or a label of the list, whatever the text says.
+no_spawn_output() {
+  local l
+  grep -Eq 'spawn|launchctl|user/foreground' "$work/run.std" "$work/run.err" && return 1
+  for l in "${NOISE_LABELS[@]}"; do grep -Fq -- "$l" "$work/run.std" "$work/run.err" && return 1; done
+  return 0
+}
+
+fresh; ps_stub; devices_json "$DUO1"; run PATH="$work/psbin:$PATH"
+need "exit code" rc_is 0
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "exactly 17 disable calls" test "$(spawn_count)" -eq 17
+need "each call after the boot call and before xcodebuild" spawn_window
+need "each call after the boot record was written" spawns_after_record
+for label in "${NOISE_LABELS[@]}"; do
+  need "one disable call on the booted UDID, in user/foreground: $label" disable_once "$label"
+done
+end_case "81 own boot: exactly the 17 noise labels, each disabled once in user/foreground on the booted UDID, after the boot record and before xcodebuild"
+
+fresh; run
+need "17 disable calls were made" test "$(spawn_count)" -eq 17
+need "the list file exists beside the script" test -f "$(noise_list)"
+need "chronod is in no call" no_call_names chronod
+need "AppIntentsLiveEntityService is in no call" no_call_names AppIntentsLiveEntityService
+need "chronod is not in the list file" not_in_list chronod
+need "AppIntentsLiveEntityService is not in the list file" not_in_list AppIntentsLiveEntityService
+end_case "82 chronod and AppIntentsLiveEntityService: in no disable call, and not in the list file"
+
+fresh; booted "iPhone Duo" $DUO1; run
+need "exit code" rc_is 0
+need "steps are run only" steps_are "run "
+need "no disable call" no_spawn
+end_case "83 control: the reuse path makes no disable call"
+
+fresh; booted "Apple Watch Ultra 3" $THIRD; booted "iPad Pro 13-inch" $OTHER; run
+need "cap: exit 1, no boot, no xcodebuild" refused_clean
+need "cap: no disable call" no_spawn
+fresh; booted "iPhone 18 Pro" $PRO; run
+need "cross-role: exit 1, no boot, no xcodebuild" refused_clean
+need "cross-role: no disable call" no_spawn
+fresh; run STUB_LIST_RC=1
+need "list failure: exit 1, no boot, no xcodebuild" refused_clean
+need "list failure: no disable call" no_spawn
+fresh; run CI=true
+need "no-op lease: exit 1, no boot, no xcodebuild" refused_clean
+need "no-op lease: no disable call" no_spawn
+fresh; run STUB_BOOT_RC=1
+need "failed boot: exit non-zero, boot tried, no xcodebuild" failed_boot_clean
+need "failed boot: no disable call" no_spawn
+end_case "84 control: the cap, cross-role, list failure, no-op lease and a failed boot make no disable call"
+
+fresh; run STUB_SPAWN_RC=1 STUB_RC=65
+need "scope: 17 spawns ran, each refused" test "$(spawn_count)" -eq 17
+need "exit status is xcodebuild's, 65" rc_is 65
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "no spawn text on stdout or stderr" no_spawn_output
+end_case "85 a failing spawn for every label: all 17 are tried, and the exit status, xcodebuild and the output are unchanged"
+
+need "the list file exists beside the script" test -f "$(noise_list)"
+need "the file holds exactly the 17 labels as its label lines" list_is_exact
+for label in "${NOISE_LABELS[@]}"; do
+  need "the list file has $label as a line" grep -Fxq -- "$label" "$(noise_list)"
+done
+for label in "${NOISE_LABELS[@]}"; do
+  need "bin/sim-test spells no label: $label" not_spelled "$label"
+done
+end_case "86 one home: the 17 labels are the lines of bin/sim-noise-services, and bin/sim-test spells none of them"
+
+# A list with a comment and a blank line makes a call for its label line only. The second run has a list of comments and
+# blank lines alone (the empty list), which makes no call.
+fresh; copy_tool "$work/noise"
+printf '%s\n' '# a comment line' '' 'com.example.noise-test' > "$work/noise/bin/sim-noise-services"
+saved_script=$script; script=$work/noise/bin/sim-test
+run
+script=$saved_script
+need "exit code" rc_is 0
+need "one disable call" test "$(spawn_count)" -eq 1
+need "that call is for the label line" has_call "$(disable_call com.example.noise-test)"
+fresh; copy_tool "$work/noise"
+printf '%s\n' '# only a comment' '' > "$work/noise/bin/sim-noise-services"
+script=$work/noise/bin/sim-test
+run
+script=$saved_script
+need "exit code, with a list of comments and blanks" rc_is 0
+need "no disable call for a list of comments and blanks" no_spawn
+end_case "87 list file with a comment and a blank line: one label makes one call; comments and blanks alone make none"
+
+# ---- Cases 88 to 92: a signal during a hanging disable call or bootstatus, and the bootstatus call itself ----
+# hang_then_signal SIG VAR MARKER: an own boot whose stub hangs when VAR is set. Once $work/MARKER shows the hang began, SIG
+# goes to the tool alone, as a caller's own kill does. The tool must end within 5 s (a ceiling of 10 polls, 0.5 s apart).
+# If it has not, the group is killed so the case can finish; the cleanup checks then fail on the held lock.
+hang_then_signal() {
+  fresh
+  start_tool "$2=1"
+  need "the hang began (marker $3)" poll_for 20 test -e "$work/$3"
+  kill "-$1" "$tool_pid" 2>/dev/null
+  need "the tool ends within 5 s of $1 (a ceiling of 10 polls, 0.5 s apart)" poll_for 10 tool_ended
+  if ! tool_ended; then kill -KILL -- "-$tool_pid" 2>/dev/null; fi
+  finish_tool
+  need "the lock is freed" lock_gone
+  need "no xcodebuild call" no_xcodebuild
+  need "the booted Duo is shut down" has_call "simctl shutdown $DUO1"
+  need "the lease is given" lease_released
+}
+# bootstatus_on_duo: the stub log has one bootstatus call on the booted UDID, with or without flags after it.
+bootstatus_on_duo() { grep -Eq "^simctl bootstatus $DUO1( |\$)" "$calls"; }
+# bootstatus_order: the boot call, then the bootstatus call on the booted UDID, then the first disable call.
+bootstatus_order() {
+  local b s f
+  b=$(grep -n '^simctl boot ' "$calls" | head -n 1 | cut -d: -f1)
+  s=$(grep -n -E "^simctl bootstatus $DUO1( |\$)" "$calls" | head -n 1 | cut -d: -f1)
+  f=$(grep -n '^simctl spawn ' "$calls" | head -n 1 | cut -d: -f1)
+  [[ -n $b && -n $s && -n $f && $b -lt $s && $s -lt $f ]]
+}
+
+hang_then_signal TERM STUB_SPAWN_HANG spawn_started
+end_case "88 TERM during a hanging disable call: the tool ends within 5 s, with no xcodebuild, the booted Duo shut down, the lease given and the lock freed"
+
+hang_then_signal INT STUB_SPAWN_HANG spawn_started
+end_case "89 INT during a hanging disable call: the tool ends within 5 s, with the same cleanup"
+
+fresh; run
+need "scope: 17 disable calls were made" test "$(spawn_count)" -eq 17
+need "bootstatus was called on the booted UDID" bootstatus_on_duo
+need "bootstatus after the boot call and before the first disable call" bootstatus_order
+end_case "90 own boot: bootstatus on the booted UDID runs after the boot and before the first disable call"
+
+fresh; run STUB_BOOTSTATUS_RC=1
+need "scope: bootstatus was called on the booted UDID" bootstatus_on_duo
+need "all 17 disable calls are attempted" test "$(spawn_count)" -eq 17
+need "exit code unchanged, 0" rc_is 0
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+for label in "${NOISE_LABELS[@]}"; do
+  need "one disable call on the booted UDID, in user/foreground: $label" disable_once "$label"
+done
+end_case "91 a failing bootstatus (rc 1): all 17 disable calls are still attempted, and the exit status and xcodebuild are unchanged"
+
+hang_then_signal TERM STUB_BOOTSTATUS_HANG bootstatus_started
+end_case "92 TERM during a hanging bootstatus: the tool ends within 5 s, with the same cleanup, so a hanging bootstatus blocks no TERM"
+
+# ---- Cases 93 to 95: the whole noise step is bounded by SIM_TEST_NOISE_WAIT, and a prompt step changes nothing ----
+# no_noise_output: the run says nothing about the noise step: no spawn, bootstatus, launchctl, domain, bound or label.
+no_noise_output() { no_spawn_output && ! grep -Eq 'bootstatus|noise' "$work/run.std" "$work/run.err"; }
+# bounded_noise_case VAR SECS_VAR MARKER: a run whose stub hangs when VAR is set, with SIM_TEST_NOISE_WAIT=2 and the hang bounded
+# at 15 s, so a red case stays bounded. The tool must end within 8 s (16 polls, 0.5 s apart) with xcodebuild run, xcodebuild's
+# exit code, the booted Duo shut down, the lock freed, and no output about the noise step.
+bounded_noise_case() {
+  fresh
+  start_tool SIM_TEST_NOISE_WAIT=2 "$1=1" "$2=15" STUB_RC=65
+  need "the hang began (marker $3)" poll_for 20 test -e "$work/$3"
+  need "the tool ends within 8 s of the start of the hang (16 polls, 0.5 s apart)" poll_for 16 tool_ended
+  if ! tool_ended; then kill -KILL -- "-$tool_pid" 2>/dev/null; fi
+  finish_tool
+  need "exit code is xcodebuild's, 65" rc_is 65
+  need "steps are boot run shutdown: xcodebuild ran after the step" steps_are "boot run shutdown "
+  need "the booted Duo is shut down" has_call "simctl shutdown $DUO1"
+  need "the lock is freed" lock_gone
+  need "the run says nothing about the noise step" no_noise_output
+}
+
+bounded_noise_case STUB_BOOTSTATUS_HANG STUB_BOOTSTATUS_HANG_SECS bootstatus_started
+end_case "93 bootstatus hangs with SIM_TEST_NOISE_WAIT=2: the tool goes on to xcodebuild and ends within 8 s, with xcodebuild's exit code, the booted Duo shut down, and no output about the noise step"
+
+bounded_noise_case STUB_SPAWN_HANG STUB_SPAWN_HANG_SECS spawn_started
+end_case "94 a disable call hangs with SIM_TEST_NOISE_WAIT=2: the tool goes on to xcodebuild and ends within 8 s, with xcodebuild's exit code, the booted Duo shut down, and no output about the noise step"
+
+# Case 95 is a control: a prompt bootstatus under the default bound. The bound must change nothing here.
+fresh; run
+need "scope: 17 disable calls were made" test "$(spawn_count)" -eq 17
+need "bootstatus on the booted UDID, after the boot and before the first disable call" bootstatus_order
+for label in "${NOISE_LABELS[@]}"; do
+  need "one disable call on the booted UDID, in user/foreground: $label" disable_once "$label"
+done
+need "exit code 0" rc_is 0
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "the run says nothing about the noise step" no_noise_output
+end_case "95 control: a prompt bootstatus under the default bound: all 17 disable calls run once each after bootstatus, and the exit and xcodebuild are unchanged"
+
+# Wallpaper store: step sim-wallpaper-store-drop. On the own-boot path, before simctl boot, the tool deletes the device's
+# PRBPosterExtensionDataStore folder under devroot (devdir, or the default root in case 104). The xcrun stub records at
+# each boot whether that folder is there (store_at_boot). The reuse, refusal, failed-boot and symlink cases guard against
+# a build that deletes too much.
+# support_of UDID: the Application Support folder of UDID under devroot.
+support_of() { echo "$devroot/$1/data/Library/Application Support"; }
+# store_of UDID: the store folder of UDID.
+store_of() { echo "$(support_of "$1")/PRBPosterExtensionDataStore"; }
+# store_there UDID: the store is a folder, not a link.
+store_there() { [[ -d $(store_of "$1") && ! -L $(store_of "$1") ]]; }
+# store_gone UDID: no store folder and no link at the store path.
+store_gone() { local s; s=$(store_of "$1"); [[ ! -e $s && ! -L $s ]]; }
+# store_kept UDID: the store's marker file is still there.
+store_kept() { [[ -f $(store_of "$1")/store.sqlite ]]; }
+# store_at_boot_is UDID STATE: the xcrun stub saw the store of UDID as STATE ("present" or "absent") at that boot.
+store_at_boot_is() { grep -Fxq "$1 $2" "$work/store_at_boot" 2>/dev/null; }
+# mkstore UDID [full|empty]: a store folder as a device of UDID left it. full: nested folders with 11 files, the marker
+# file among them; empty: the folder with no entry.
+mkstore() {
+  local s n
+  s=$(store_of "$1")
+  /bin/mkdir -p "$s" || return 1
+  [[ ${2:-full} == empty ]] && return 0
+  /bin/mkdir -p "$s/tiles/a" "$s/tiles/b" || return 1
+  for n in 1 2 3 4 5; do
+    printf 'x\n' > "$s/tiles/a/t$n.dat" && printf 'x\n' > "$s/tiles/b/t$n.dat" || return 1
+  done
+  printf 'x\n' > "$s/store.sqlite"
+}
+# siblings_of UDID: the files beside the store that must stay: device.plist, a file in a sibling folder under Application
+# Support, and a file under Containers.
+siblings_of() {
+  local d=$devroot/$1
+  /bin/mkdir -p "$(support_of "$1")/Other" "$d/data/Containers/app" || return 1
+  printf 'x\n' > "$d/device.plist" && printf 'x\n' > "$(support_of "$1")/Other/keep.txt" && printf 'x\n' > "$d/data/Containers/app/keep.txt"
+}
+# siblings_there UDID: the three files of siblings_of are there.
+siblings_there() {
+  local d=$devroot/$1
+  [[ -f $d/device.plist && -f $(support_of "$1")/Other/keep.txt && -f $d/data/Containers/app/keep.txt ]]
+}
+# mklink_store UDID: the store path is a symlink to link_target, a folder outside the devices root, with files in it.
+mklink_store() {
+  /bin/mkdir -p "$link_target/tiles" "$(support_of "$1")" || return 1
+  printf 'x\n' > "$link_target/store.sqlite" && printf 'x\n' > "$link_target/tiles/t1.dat" && ln -s "$link_target" "$(store_of "$1")"
+}
+# refusal_keeps_store LABEL [VAR=value...]: one refused run with the Duo's store in place. Its needs name LABEL.
+refusal_keeps_store() {
+  local label=$1; shift
+  need "$label: the store is there before the run" store_there "$DUO1"
+  run "$@"
+  need "$label: exit 1" rc_is 1
+  need "$label: no boot" no_boot
+  need "$label: the Duo's store is kept" store_kept "$DUO1"
+}
+
+# Case 96: own boot. The store goes before simctl boot: the stub sees it absent at the boot, and the boot and xcodebuild
+# still run.
+fresh; mkstore "$DUO1"
+need "fixture: the store is there before the run" store_there "$DUO1"
+run
+need "the Duo was booted" has_call "simctl boot $DUO1"
+need "the store was still there when simctl boot ran" store_at_boot_is "$DUO1" absent
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "exit code" rc_is 0
+end_case "96 own boot: the store folder is gone before simctl boot, and the boot and xcodebuild still happen"
+
+# Case 97: only that one folder goes. Its siblings under Application Support and Containers, device.plist, and another
+# device's store stay.
+fresh; mkstore "$DUO1"; siblings_of "$DUO1"; mkstore "$DUO2"
+need "fixture: the store is there before the run" store_there "$DUO1"
+need "fixture: the siblings are there before the run" siblings_there "$DUO1"
+need "fixture: the other device's store is there before the run" store_there "$DUO2"
+run
+need "the Duo was booted" has_call "simctl boot $DUO1"
+need "the Duo's store was not deleted" store_gone "$DUO1"
+need "the sibling folder under Application Support stays" test -f "$(support_of "$DUO1")/Other/keep.txt"
+need "the Containers file stays" test -f "$devroot/$DUO1/data/Containers/app/keep.txt"
+need "device.plist stays" test -f "$devroot/$DUO1/device.plist"
+need "another device's store stays" store_kept "$DUO2"
+end_case "97 only the Duo's store goes: its siblings and another device's store stay"
+
+# Case 98: reuse path. A booted Duo keeps its store: no boot, no delete.
+fresh; booted "iPhone Duo" $DUO1; mkstore "$DUO1"
+need "fixture: the store is there before the run" store_there "$DUO1"
+run
+need "exit code" rc_is 0
+need "no boot" no_boot
+need "steps are run only" steps_are "run "
+need "the Duo's store is kept" store_kept "$DUO1"
+end_case "98 reuse path: a booted Duo keeps its store: no boot, no delete"
+
+# Case 99: refusal paths. Each refusal is its own run with its own fixture; the Duo's store is kept in each.
+fresh; booted "Apple Watch Ultra 3" $THIRD; booted "iPad Pro 13-inch" $OTHER; mkstore "$DUO1"
+refusal_keeps_store cap
+fresh; booted "iPhone 18 Pro" $PRO; mkstore "$DUO1"
+refusal_keeps_store cross-role
+fresh; mkstore "$DUO1"
+refusal_keeps_store "simctl list failure" STUB_LIST_RC=1
+fresh; mkstore "$DUO1"
+refusal_keeps_store "no-op lease" CI=true
+end_case "99 refusal paths (cap, cross-role, simctl list failure, no-op lease): the Duo's store is kept"
+
+# Case 100: store absent. The boot proceeds, and nothing is printed to stderr.
+fresh
+need "fixture: no store folder before the run" store_gone "$DUO1"
+run
+need "the Duo was booted" has_call "simctl boot $DUO1"
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "exit code" rc_is 0
+need "no error output on stderr" test ! -s "$work/run.err"
+end_case "100 store absent: the boot proceeds, and no error is printed"
+
+# Case 101: failed boot. Exit 1, and no xcodebuild.
+fresh; mkstore "$DUO1"; run STUB_BOOT_RC=1
+need "boot was tried on the Duo's UDID" has_call "simctl boot $DUO1"
+need "exit 1" rc_is 1
+need "no xcodebuild call" no_xcodebuild
+end_case "101 failed boot: exit 1, no xcodebuild"
+
+# Case 102: symlink at the store path. The link is never followed: its target keeps its folder and files.
+fresh
+need "fixture: the store path is a symlink to a folder with files" mklink_store "$DUO1"
+run
+need "the Duo was booted" has_call "simctl boot $DUO1"
+need "the link's target folder stays" test -d "$link_target"
+need "the link's target keeps its file" test -f "$link_target/store.sqlite"
+need "the link's target keeps its nested file" test -f "$link_target/tiles/t1.dat"
+end_case "102 symlink at the store path: its target is never deleted"
+
+# Case 103: empty store folder. It goes too, and the boot proceeds.
+fresh; mkstore "$DUO1" empty
+need "fixture: the empty store folder is there before the run" store_there "$DUO1"
+run
+need "the Duo was booted" has_call "simctl boot $DUO1"
+need "the empty store folder was still there when simctl boot ran" store_at_boot_is "$DUO1" absent
+need "exit code" rc_is 0
+end_case "103 empty store folder: it goes too, and the boot proceeds"
+
+# Case 104: no SIM_TEST_DEVICES_DIR. The devices root is the default under HOME, and the store there goes too.
+fresh; no_devices_seam=1; devroot=$work/home/Library/Developer/CoreSimulator/Devices; mkstore "$DUO1"
+need "fixture: the store is under the default root before the run" store_there "$DUO1"
+run
+need "the Duo was booted" has_call "simctl boot $DUO1"
+need "the default-root store was still there when simctl boot ran" store_at_boot_is "$DUO1" absent
+need "exit code" rc_is 0
+end_case "104 no SIM_TEST_DEVICES_DIR: the store under the default root goes too"
+
+# Case 105: the re-scan under the lock finds a Duo that a dead holder left booted. The run reuses it: no boot, the store
+# stays, and the lease goes back before xcodebuild.
+pro_dies_during_duo_wait duo store
+need "destination is the booted Duo" dest_is "$DUO2"
+need "the Duo's store is kept" store_kept "$DUO2"
+need "exit code" rc_is 0
+need "steps are run only" steps_are "run "
+need "lease not held during xcodebuild" lease_not_held_at_xc
+end_case "105 re-scan after the lease reuses a booted Duo: no boot, its store is kept, the lease goes back"
+
 # Reuse holds the lease of the reused device's slot. The real sim-lease runs beside the script, so the lease file shows the
 # slot while the run goes on, and the run gives it back on every exit.
 fresh; booted "iPhone Duo" $DUO2; run
@@ -1044,7 +1468,7 @@ need "destination is the reused Duo of slot 2" dest_is "$DUO2"
 need "no boot of the reused Duo" no_boot
 need "the lease held during xcodebuild is slot 2" lease_at_xc_slot 2
 need "lease released after the run" lease_released
-end_case "81 reuse of the booted Duo of slot 2: no boot, and slot 2's lease is held during xcodebuild and released after"
+end_case "106 reuse of the booted Duo of slot 2: no boot, and slot 2's lease is held during xcodebuild and released after"
 
 # --hold -- CMD on a reused Duo: the child reads the lease file, so it sees slot 1's lease held for the whole hold.
 fresh; booted "iPhone Duo" $DUO1; ARGS=(--hold -- "$hold_cmd" alpha beta); run; ARGS=(-scheme X)
@@ -1053,14 +1477,14 @@ need "the child got SIM_TEST_UDID for the reused Duo" test "$(cat "$work/cmd_udi
 need "the child sees slot 1's lease held" lease_at_cmd_slot 1
 need "no boot" no_boot
 need "lease released after the child ends" lease_released
-end_case "82 --hold -- CMD on a reused Duo: the child runs under slot 1's lease, which is released after"
+end_case "107 --hold -- CMD on a reused Duo: the child runs under slot 1's lease, which is released after"
 
 # A failed xcodebuild on a reused Duo: the run exits with xcodebuild's code, and the lease is still given back.
 fresh; booted "iPhone Duo" $DUO1; run STUB_RC=5
 need "exit code is xcodebuild's, 5" rc_is 5
 need "the lease held during xcodebuild is slot 1" lease_at_xc_slot 1
 need "lease released after the failed run" lease_released
-end_case "83 reuse of the Duo of slot 1, xcodebuild exits 5: the exit code is kept, and the lease is held and given back"
+end_case "108 reuse of the Duo of slot 1, xcodebuild exits 5: the exit code is kept, and the lease is held and given back"
 
 # TERM during a reused run: the lease is held while xcodebuild runs and given back on TERM. A device it did not boot is
 # never shut down.
@@ -1077,21 +1501,21 @@ need "exit is non-zero" test $rc -ne 0
 need "the lease held during xcodebuild is slot 1" lease_at_xc_slot 1
 need "lease released after TERM" lease_released
 need "no shutdown of a device it did not boot" no_shutdown
-end_case "84 TERM during a reused run: the lease is held during xcodebuild and given back, and nothing is shut down"
+end_case "109 TERM during a reused run: the lease is held during xcodebuild and given back, and nothing is shut down"
 
 # A Duo that is booted but in no slot: the run names it on stderr with exactly one line.
 UNSLOTTED_UDID=11111111-2222-4333-8444-555555555555
 fresh; booted "iPhone Duo" $UNSLOTTED_UDID; run
 need "exit code" rc_is 0
 need "one stderr line" test "$(wc -l < "$work/run.err" | tr -d ' ')" -eq 1
-end_case "85 reuse of a Duo in no slot: one stderr line"
+end_case "110 reuse of a Duo in no slot: one stderr line"
 
 fresh; booted "iPhone Duo" $UNSLOTTED_UDID; run
 need "exit code" rc_is 0
 need "destination is that UDID" dest_is "$UNSLOTTED_UDID"
 need "steps are run only" steps_are "run "
 need "no lease held during xcodebuild" lease_not_held_at_xc
-end_case "86 control: a reused Duo in no slot runs with no lease"
+end_case "111 control: a reused Duo in no slot runs with no lease"
 
 # A reused Duo of slot 2 while another live holder has slot 1: the run still holds slot 2's lease. Slot 2 is granted with
 # slot 1 held under either reading of the slot-2 rule, so this case does not depend on that ruling.
@@ -1100,7 +1524,7 @@ need "exit code" rc_is 0
 need "the lease held during xcodebuild is slot 2" lease_at_xc_slot 2
 need "lease released after the run" lease_released
 release_slot1
-end_case "87 reuse of the Duo of slot 2 while slot 1 is held by another: slot 2's lease is held during xcodebuild and released after"
+end_case "112 reuse of the Duo of slot 2 while slot 1 is held by another: slot 2's lease is held during xcodebuild and released after"
 
 # A reused Duo whose slot another live holder keeps past SIM_LEASE_WAIT: exit 1, no boot and no run, and the stderr line
 # names the holder's pid. The holder's pid is matched as a whole number, so a longer pid does not pass.
@@ -1110,19 +1534,19 @@ need "no boot" no_boot
 need "no xcodebuild" no_xcodebuild
 need "stderr names the holder's pid" grep -Eq "(^|[^0-9])$slot_holder([^0-9]|\$)" "$work/run.err"
 release_slot1
-end_case "88 reuse of a Duo whose slot another live holder keeps past the wait: exit 1, no boot, no run, stderr names the holder pid"
+end_case "113 reuse of a Duo whose slot another live holder keeps past the wait: exit 1, no boot, no run, stderr names the holder pid"
 
 # The writer side: a run with CLAUDE_CODE_SESSION_ID=X writes a lease whose session is X, on the own-boot path (89) and on
 # the reuse path (90). The lease is read while it is held: at the boot, or during xcodebuild.
 fresh; run CLAUDE_CODE_SESSION_ID=writer-own-boot-89
 need "exit code" rc_is 0
 need "the lease at boot records session X" lease_at_boot_session writer-own-boot-89
-end_case "89 own boot with CLAUDE_CODE_SESSION_ID=X: the lease held at the boot records session X"
+end_case "114 own boot with CLAUDE_CODE_SESSION_ID=X: the lease held at the boot records session X"
 
 fresh; booted "iPhone Duo" $DUO1; run CLAUDE_CODE_SESSION_ID=writer-reuse-90
 need "exit code" rc_is 0
 need "the lease held during xcodebuild records session X" lease_at_xc_session writer-reuse-90
-end_case "90 reuse of a booted Duo with CLAUDE_CODE_SESSION_ID=X: the lease held during xcodebuild records session X"
+end_case "115 reuse of a booted Duo with CLAUDE_CODE_SESSION_ID=X: the lease held during xcodebuild records session X"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
