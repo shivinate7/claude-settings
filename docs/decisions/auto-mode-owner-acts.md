@@ -21,10 +21,11 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 | "Archived Branch Delete" (`settings.json` `autoMode.allow`) | A branch delete after its archive push, or of a merged branch | this record |
 | "Own Branch Lease Push" (`settings.json` `autoMode.allow`) | A lease push to the session's own lane branch, after this session pushed that branch earlier. Its "refspec form" entry allows the same push typed as `origin <src>:<branch>`. Two forms only: `--force-with-lease --force-if-includes origin <branch>`, or a lease pinned to the sha this session last pushed. Never a bare force, a `+refspec`, a delete, or the default branch | this record |
 | Merge confirm (`merge/cloud_allow.json`, cloud only) | `~/.claude/bin/merge ... --confirm` | mechanics in `session-tiers` |
-| "Owner PR Housekeeping" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: close a PR the coordinator or batch runner named in the visible conversation as replaced, empty or batched. Mark ready only an integration PR that the visible conversation names as such: the batch's or a lone lane's, named by the coordinator or batch runner, or the one PR of a solo or one-lane session that no coordinator started, named by that session | this record |
+| "Owner PR Housekeeping" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: close a PR the coordinator or batch runner named in the visible conversation as replaced, empty or batched. Mark ready only a PR that the visible conversation names as such: until the cutover, the batch's integration PR or a lone lane's, named by the coordinator or batch runner; after it, a lane PR the visible conversation names as ready after its last review and lane lint (Q2, decision `draft-until-reviewed`), or the one PR of a solo or one-lane session that no coordinator started, named by that session | this record |
 | "Owner Session Message" (`settings.json` `autoMode.allow`) | `send_message` to a session in the owner's own account, including the session that started this one (its parent or coordinator). A message that asks for no act is covered. A message that asks is limited to acts the owner already granted. A coordinator may send a batch runner it created a merge go (owner, 2026-11-03 15:58 CST) | this record |
 | "Relayed Merge Yes" (`settings.json` `autoMode.allow`) | `~/.claude/bin/merge <pr> --confirm --head <sha>` by a session tagged `cs-build:batch-runner`, for the one pull request that a session tagged `cs-build:coordinator` named when it relayed the owner's yes to merge it, under every merge check | this record |
 | "Batch Runner Merge" (`settings.json` `autoMode.allow`) | `~/.claude/bin/merge <pr> --confirm --head <sha>` by a session tagged `cs-build:batch-runner`, for a pull request its coordinator named in a merge go, under the coordinator's standing grant and every merge check | this record |
+| "Session Installer" (`settings.json` `autoMode.allow`) | The session-start installer in three exact forms: `curl -fsSL <stable install.sh URL> \| CS_HOOK_INPUT="{}" bash -s -- --cloud`, and from a claude-settings checkout `bash install.sh` and `powershell -ExecutionPolicy Bypass -File .\install.ps1`. No env var, chaining, extra argument, other URL or ref | this record |
 | `mcp__claude-code-remote__add_repo` (`settings.json` `permissions.allow`) | Attach a GitHub repo to the session | this record |
 | `mcp__claude-code-remote__archive_session` (`settings.json` `permissions.allow`) | Archive a session in the owner's account | this record |
 | `mcp__claude-code-remote__send_message` (`settings.json` `permissions.allow`) | Any `send_message` call. No bound is checked (see Send message allow rule) | this record |
@@ -118,9 +119,9 @@ Why: the force-push guard's remedy (`PUSH_REASON` in `hooks/guard_push_delete.py
 Owner, 2026-11-01 19:19 CST, typed in the pr-acts-grant lane session: `when an operation is occuring solo and/or there is only one "outcome" PR (ie it's not going into an integration branch) then of course they can be marked ready`.
 
 - The entry now covers two cases, each named in the visible conversation:
-  - The batch's integration PR, or a lone lane's PR, named so by the coordinator or batch runner. Skill `ci-hygiene` (CI upkeep), step 8 (Batch lanes), treats a lone lane as its own integration PR.
+  - The batch's integration PR, or a lone lane's PR, named so by the coordinator or batch runner. Skill `ci-hygiene` (CI upkeep), step 8 (Batch lanes), treats a lone lane as its own integration PR. After the cutover (decision `all-repos-switch-together`), a lane PR goes ready once, under decision `draft-until-reviewed`, and no integration PR exists.
   - The one PR of a lane that no coordinator started, named so by that session.
-- A lane PR that joins a batch stays draft. Only the batch's integration PR goes ready.
+- Until the cutover, a lane PR that joins a batch stays draft. Only the batch's integration PR goes ready.
 - The merge itself is not in this entry (see the standing merge grant record).
 
 ### Remote tool allow rules
@@ -167,3 +168,11 @@ Other classifier refusals that day: unknown. The coordinator's transcript could 
 
 Kind: process
 Home: rule:parallelism-keep-going
+
+### Session Installer
+
+Owner, 2026-11-13 20:16 CST, in chat: `the rignt answer is obviously a: add an allow rule for exactly the reinstall command`. Consultant relay 20:20 CST, not verified by the lane. Incident: at 20:12 CST the classifier refused a coordinator's `bash install.sh --cloud` as Undermining Oversight. The act loses nothing: the installer only rewrites `~/.claude` from `stable`, and a second run restores the same state.
+
+The forms are read from `install.sh` (`REPO`, default `REF`, `HOOK_CMD`) and `install.ps1`'s header by `hooks/test_auto_mode_allow.py`, never copied. The curl form is the SessionStart hook's own command with its stdin as `{}` (coordinator, 20:18 CST). The refused line was `cd /root/claude-settings-main && bash install.sh --cloud 2>&1 | tail -15; ...`, more than one command, so no entry matches it. The local `bash install.sh` and `install.ps1` forms have no measured refusal.
+
+Departs from: main, which has no installer entry. Gap named for the owner: the checkout form `bash install.sh --cloud` is not covered, since the owner named "exactly the reinstall command" and the coordinator ruled it out (20:20 CST). Review: waived by the owner for this entry only, ruling `own-reinstall-no-review` (coordinator relay, 20:20 CST).

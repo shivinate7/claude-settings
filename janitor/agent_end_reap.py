@@ -34,8 +34,20 @@ the hook KEEPS the ending agent's own worktree, with the row reason OWN_TREE_REA
 removes it once idle 30 minutes. It removes every other `.claude/worktrees/agent-*`
 worktree idle 30 minutes or more that `sweep.decide_agent_end_worktree` clears: clean (no dirty or
 untracked file), no process inside, no live lock, HEAD on a remote-tracking ref. A tree it cannot
-prove keeps. The stage stops at WORKTREE_SECONDS or HOOK_BUDGET, so the hook stays inside its 60 s
-timeout.
+prove keeps. One lock and its processes are the exception (decision `when-a-worktree-may-be-removed`): a
+tree locked by this session's host is unlocked and removed only when the agent is
+proven finished (`agent_finished`: its own SubagentStop row is in the payload log and newer than its
+agent transcript, it is not listed as running in `background_tasks`, and the transcript is idle 30
+minutes or more) and the tree is clean and pushed. A process inside keeps the tree unless
+`sweep.host_child_stops` proves each one the agent's own: it holds the agent marker, the exec-time
+`CLAUDE_AGENT_ID` equal to the 17-hex id in the tree's basename (`sweep.agent_mark`), or it holds none
+and a marked process in the tree descends from it (a background job's `( )` subshell is a fork, so
+unmarked). Another agent's marker, or an unmarked process no marked one descends from, keeps the tree.
+The unlock comes first (`sweep.unlock_for_removal`); a failed one stops nothing. Pids are signalled
+deepest first, the process table is read again until empty (`stop_and_settle`), and a pid still alive,
+or a failed read, puts the lock back (the row's `relocked` says whether it took) and keeps the tree,
+with the cause as the reason. A tree kept for another reason never has a process stopped. The stage stops at
+WORKTREE_SECONDS or HOOK_BUDGET, so the hook stays inside its 60 s timeout.
 
 Every run appends the raw payload and the decisions to
 `${CLAUDE_CONFIG_DIR:-~/.claude}/state/agent-end-payloads.jsonl`, so the payload fields the docs
@@ -505,11 +517,125 @@ def build_keep(entry: dict, idle, deadline: float):
     return None, cwds
 
 
-def reap_worktrees(target: str, deadline: float):
+def stopped_agents():
+    """`{agent id: POSIX time of its newest SubagentStop row}` from the payload log, or None when the
+    log cannot be read. A row counts when its `raw` payload parses to a SubagentStop for that
+    `agent_id` and its `at` (as `log()` stamps it) parses; a row with no readable time never counts.
+    The log keeps the last 200 runs, so an agent whose row the cap cut reads as not stopped."""
+    try:
+        with open(log_path(), encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return None
+    found = {}
+    for line in lines:
+        try:
+            row = json.loads(line)
+            raw = row.get("raw")
+            payload = json.loads(raw) if isinstance(raw, str) else None
+            when = _row_time(row.get("at"))
+        except (ValueError, AttributeError, TypeError, OverflowError):
+            continue
+        if (isinstance(payload, dict) and payload.get("hook_event_name") == "SubagentStop"
+                and isinstance(payload.get("agent_id"), str)):
+            agent = payload["agent_id"]
+            found[agent] = max(found.get(agent, when), when)
+    return found
+
+
+def _row_time(stamp):
+    """POSIX time of a payload-log `at` stamp (`%Y-%m-%dT%H:%M:%S%z`). Raises ValueError or TypeError
+    for a stamp that is missing or malformed."""
+    from datetime import datetime
+    return datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%S%z").timestamp()
+
+
+def agent_finished(payload, path: str, stopped) -> bool:
+    """True when the agent that owns the tree at PATH is proven finished, by all of: STOPPED (from
+    `stopped_agents`) holds a SubagentStop row of its own that is not older than its agent
+    transcript (an older row is from before the agent was resumed); the payload's `background_tasks`
+    is a list of dicts and none lists this agent (`id` is the agent id) as running; `transcript_path`
+    names a `.jsonl`; and `<transcript minus .jsonl>/subagents/agent-<id>.jsonl` exists and has been
+    idle AGENT_END_IDLE_SECONDS. A missing or malformed field, or an unreadable file, is False.
+    Why the stop row: `background_tasks` omits a running agent in a quiet gap (decision
+    when-a-worktree-may-be-removed, "A finished agent's tree"). The row's `at` has whole seconds, so
+    the transcript time is cut to whole seconds before the compare."""
+    if not isinstance(payload, dict) or not stopped:
+        return False
+    name = os.path.basename(os.path.normpath(path))
+    if not name.startswith("agent-") or name[len("agent-"):] not in stopped:
+        return False
+    agent = name[len("agent-"):]
+    tasks = payload.get("background_tasks")
+    if not isinstance(tasks, list) or not all(isinstance(t, dict) for t in tasks):
+        return False
+    if any(t.get("id") == agent and t.get("status") == "running" for t in tasks):
+        return False
+    transcript = payload.get("transcript_path")
+    if not isinstance(transcript, str) or not transcript.endswith(".jsonl"):
+        return False
+    record = os.path.join(transcript[:-len(".jsonl")], "subagents", "agent-%s.jsonl" % agent)
+    try:
+        if not os.path.isfile(record):
+            return False
+        written = os.path.getmtime(record)
+    except OSError:
+        return False
+    return time.time() - written >= sweep.AGENT_END_IDLE_SECONDS and stopped[agent] >= int(written)
+
+
+def host_is_session_root(decision: dict) -> bool:
+    """True when the host a host-lock decision names is this session's own `claude` process or
+    descends from it (`guard_kill.session_root_pid`, `pid_is_owned`). The decision already proved
+    the host an ancestor of this hook (`sweep.own_agent_lock_verdict`); this is the second read, so a
+    root it can find must agree. It vetoes only a root it finds: with none (0), the ancestry proof
+    stands alone. Any failed read, or a missing helper, is False."""
+    found = sweep.AGENT_LOCK_RE.match(decision.get("lock_reason") or "")
+    if not found:
+        return False
+    host = int(found.group(1))
+    try:
+        import guard_kill
+        root = guard_kill.session_root_pid()
+        if not root or host == root:
+            return True
+        return guard_kill.pid_is_owned(host, root) is True
+    except Exception:
+        return False
+
+
+SETTLE_POLL_SECONDS = 0.1  # pause between two reads of the process table while a stopped process exits
+
+
+def stop_and_settle(path: str, decision: dict, deadline: float):
+    """Called only after the unlock succeeded (`sweep.unlock_for_removal`). Signal each pid in
+    DECISION["stop_pids"], deepest first, then re-read `sweep.processes_in` until it is empty or
+    DEADLINE (a `time.monotonic` time). Returns None when it came back empty, else the keep reason
+    that names the cause: a process still alive at the deadline, or a failed read of the process
+    table. The tree stays either way. Settling reads the process table, never `pid_alive`: a
+    stopped child nobody has waited on is a zombie, which `pid_alive` still reads as alive and
+    `processes_in` does not list."""
+    decision["signalled"] = [sweep.send_signal(pid) for pid in decision["stop_pids"]]
+    while True:
+        inside, _unreadable = sweep.processes_in(path)
+        if inside is not None and not inside:
+            return None
+        if inside is None:
+            return "unreadable-subject: the process table after the stop"
+        if time.monotonic() >= deadline:
+            return "process-inside: pid %s still alive at the deadline" % ", ".join(
+                str(pid) for pid in sorted(inside))
+        time.sleep(SETTLE_POLL_SECONDS)
+
+
+def reap_worktrees(target: str, deadline: float, payload=None):
     """Keep TARGET (the ending agent's own worktree and its build folders; a later agent end removes
     them once idle) and remove every other finished `.claude/worktrees/agent-*` worktree of its
     repository, idle 30 minutes or more, that `sweep.decide_agent_end_worktree` clears. Each other
-    tree it keeps gets a build pass when `build_keep` clears it. Returns one row for TARGET, one per
+    tree it keeps gets a build pass when `build_keep` clears it. PAYLOAD is the SubagentStop
+    payload: a tree whose agent it proves finished (`agent_finished`) may lose its host lock, and the
+    processes it holds that carry the agent's marker are stopped (`stop_and_settle`) before the
+    removal; any pid left alive keeps the tree. Returns one row for TARGET, one per
     other tree decided, plus one row when DEADLINE (a `time.monotonic` time) cut the stage short. A tree's row carries `buildDirs` (folders renamed)
     or `buildDirsKept` (why not)."""
     rows = [{"path": target, "action": "keep", "reason": OWN_TREE_REASON,
@@ -522,14 +648,33 @@ def reap_worktrees(target: str, deadline: float):
     queue = [e for e in entries if os.path.normcase(os.path.realpath(e["path"])) != own
              and sweep._is_agent_worktree(root, e["path"])]
     sweep._LIVE_HEADS = {}  # one remote listing per remote for the whole stage
+    stopped = stopped_agents()  # one read of the payload log for the stage
     try:
         for done, entry in enumerate(queue):
             if time.monotonic() > deadline:
                 rows.append({"action": "keep", "reason": "budget: %d trees not reached" % (len(queue) - done)})
                 break
             # Idle is read once, before `git status` in the decision can rewrite the index.
+            entry = dict(entry, finished=entry.get("locked_reason") is not None
+                         and agent_finished(payload, entry["path"], stopped))  # file reads: no index
             entry = dict(entry, idle=sweep.worktree_idle_seconds(entry["path"]))
             decision = sweep.decide_agent_end_worktree(root, entry, sweep.AGENT_END_IDLE_SECONDS)
+            if decision["action"] == "reap" and decision.get("host_lock") and not host_is_session_root(decision):
+                decision.update(action="keep", reason="unreadable-subject: the session's host")
+                for field in ("stop_pids", "unlock"):
+                    decision.pop(field, None)
+            if decision["action"] == "reap" and decision.get("stop_pids"):
+                # The unlock and its lock re-read come first: a failed one stops nothing.
+                if not sweep.unlock_for_removal(root, entry["path"], decision):
+                    decision.pop("stop_pids", None)
+                    if decision["action"] == "reap":
+                        decision.update(action="keep", reason="unreadable-subject: the unlock failed")
+                else:
+                    why = stop_and_settle(entry["path"], decision, deadline)
+                    if why is not None:
+                        decision["relocked"] = sweep.relock_worktree(root, entry["path"], decision)
+                        decision.update(action="keep", reason=why)
+                        decision.pop("unlock", None)
             if decision["action"] == "reap":
                 sweep.remove_worktree(root, entry["path"], decision)
             elif time.monotonic() > deadline:
@@ -566,7 +711,7 @@ def handle(raw: str, started=None):
     if reason is None:
         now = time.monotonic()
         deadline = min(now + WORKTREE_SECONDS, (now if started is None else started) + HOOK_BUDGET)
-        record["worktrees"] = reap_worktrees(target, deadline)
+        record["worktrees"] = reap_worktrees(target, deadline, payload)
     return record
 
 
