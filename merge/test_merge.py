@@ -4387,7 +4387,8 @@ class GhHalf(Env):
         self.merge_reply_is_retried_then_stops(RATE_API_SECONDARY_403, rate=True)
 
     def test_a_rate_wait_past_the_lock_spare_extends_the_lock_and_the_merge_goes_on(self):
-        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deadlineMinutes=1))))  # the lock lasts (3 * 1 + 10) * 60 = 780 s: the 60 s and 300 s waits fit its spare, the 900 s wait does not
+        # the take holds the lock LOCK_TTL_SECONDS (1200 s) at any deadline: the 60 s and 300 s waits fit its spare, and the 900 s wait, which starts
+        # about 360 s in, must extend it
         self.set(merge_replies=[[RATE_API_SECONDARY_403, False]] * 3 + [["", True]])  # three rate-limited merge tries, then the merge lands
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
@@ -10217,6 +10218,7 @@ class LockExtendsForRateWaits(unittest.TestCase):
 class LockProseStatesTheCode(unittest.TestCase):
     """The lock numbers and lines that the prose states are the code's values. Each is a plain text read of its file."""
     GRANT = os.path.join(os.path.dirname(HERE), "docs", "decisions", "standing-merge-grant.md")
+    LOCK = os.path.join(os.path.dirname(HERE), "docs", "decisions", "merge-lock.md")
     README = os.path.join(os.path.dirname(HERE), "README.md")
     MERGE = os.path.join(HERE, "merge.py")
 
@@ -10248,18 +10250,29 @@ class LockProseStatesTheCode(unittest.TestCase):
         self.assertIsNotNone(hold, f"the bullet does not state LOCK_MAX_HOLD as a number of hours: {bullet}")
         self.assertEqual(int(hold.group(1)), merge.LOCK_MAX_HOLD // 3600, bullet)
 
-    def test_the_grant_bullet_names_the_take_expiry_terms_and_not_the_old_cap(self):
+    def test_the_grant_bullet_names_the_take_expiry_as_the_fixed_lock_ttl(self):
         bullet = self.lock_bullet()
-        for term in ("`WAITS`", "`merge.deadlineMinutes`"):
-            self.assertIn(term, bullet, f"the bullet does not name {term} as a term of the take expiry: {bullet}")
+        self.assertIn("`LOCK_TTL_SECONDS`", bullet, f"the bullet does not name LOCK_TTL_SECONDS as the take expiry: {bullet}")
+        self.assertNotIn("`WAITS`", bullet, f"the bullet still sizes the take expiry from WAITS: {bullet}")
         self.assertNotIn("600 s lock cap", bullet)
 
-    def test_the_grant_bullet_and_the_take_call_state_the_same_ten_minute_spare(self):
+    def test_the_grant_bullet_states_the_twenty_minute_take_expiry(self):
         bullet = self.lock_bullet()
-        self.assertIn("+ 10 minutes", bullet, f"the bullet does not state the take's ten-minute spare: {bullet}")
+        self.assertIn("20 minutes", bullet, f"the bullet does not state the twenty-minute take expiry: {bullet}")
+
+    def test_the_take_call_passes_the_lock_ttl_constant(self):
         take = self.read(self.MERGE)
-        self.assertIsNotNone(re.search(r'(?m)^\s*token = lock\.acquire\(base, \(WAITS \* m\["deadlineMinutes"\] \+ 10\) \* 60\)', take),
-                             "merge.py's take call does not hold the ten-minute spare that the bullet states")
+        self.assertIsNotNone(re.search(r'(?m)^\s*token = lock\.acquire\(base, LOCK_TTL_SECONDS\)', take),
+                             "merge.py's take call does not pass LOCK_TTL_SECONDS as its TTL")
+
+    def test_the_grant_and_merge_lock_records_state_the_twenty_minute_take_expiry(self):
+        for doc in (self.GRANT, self.LOCK):
+            name = os.path.basename(doc)
+            text = self.read(doc)
+            with self.subTest(doc=name):
+                self.assertIn("20 minutes", text, f"{name} does not state the twenty-minute take expiry")
+                self.assertIn("LOCK_TTL_SECONDS", text, f"{name} does not name LOCK_TTL_SECONDS as the take expiry")
+                self.assertNotRegex(text, r"\bWAITS\b", f"{name} still sizes the take expiry from WAITS")
 
     def assert_unlock_line_never_checks_the_holder(self, line):
         self.assertNotIn("Reads no lock state", line)
@@ -10756,20 +10769,30 @@ def merge_stamp_text(deadline):
     return json.dumps({**CONFIG, "merge": merge_block}) + "\n"
 
 
-def confirmed_wait(env):
-    """Merge the fixture PR with --confirm. -> (rc, output, the deadline each lock take is given). The per-lane run waits on no check, so the
-    floored deadline reaches the lock alone: confirm takes it for (WAITS * deadline + 10) * 60 seconds, and this reads the deadline back from that."""
+def confirmed_takes(env):
+    """Merge the fixture PR with --confirm. -> (rc, output, the deadline confirm reads for each run, the TTL each lock take is given). The
+    deadline is read where confirm receives the config, after the floor, so a floored deadline shows there: the lock no longer carries it, since
+    the take holds the fixed LOCK_TTL_SECONDS (decision merge-lock)."""
     takes = []
     take = env.lock.acquire
     def record(base, ttl):
-        takes.append((ttl // 60 - 10) // merge.WAITS)
+        takes.append(ttl)
         return take(base, ttl)
     env.lock.acquire = record
     try:
-        rc, out = env.run_merge("7", "--confirm", host=FakeHost(env.co, env.other))
+        with unittest.mock.patch.object(merge, "confirm", wraps=merge.confirm) as spy:
+            rc, out = env.run_merge("7", "--confirm", host=FakeHost(env.co, env.other))
     finally:
         del env.lock.acquire
-    return rc, out, takes
+    deadlines = [call.args[1]["merge"]["deadlineMinutes"] for call in spy.call_args_list]  # confirm(root, cfg, ...): the config is the second argument
+    env.assertTrue(deadlines, "confirm was never called, so no deadline was read")
+    return rc, out, deadlines, takes
+
+
+def confirmed_wait(env):
+    """Merge the fixture PR with --confirm. -> (rc, output, the floored deadline each confirm run reads). See confirmed_takes."""
+    rc, out, deadlines, _takes = confirmed_takes(env)
+    return rc, out, deadlines
 
 
 def fix_line(floor):
@@ -15107,9 +15130,9 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         self.assertNotIn("Traceback", err)
 
 class ReviewRoundModel(ReviewEnv):
-    """The --round values against the reviewer row (agent-model-cap): a review after the first names sonnet, the last review names opus only by
-    the owner's override, the first review names haiku or sonnet, and a design reviewer names opus. Each refusal sits beside its sonnet twin, which must print a
-    record first, so a missing flag cannot pass for the refusal."""
+    """The --round values against the reviewer row (agent-model-cap): a review from the second round on, round 3 included, names sonnet, the first
+    review names haiku or sonnet, and a design reviewer names opus. Each refusal sits beside its sonnet twin, which must print a record first, so a
+    missing flag cannot pass for the refusal."""
 
     def round_flags(self, *rounds):
         """The review flags for a record with the given --round values, in order, with --head set to the live head of the feature branch."""
@@ -15120,6 +15143,8 @@ class ReviewRoundModel(ReviewEnv):
             (("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS"), ("1:reviewer:sonnet:FAIL", "2:reviewer:haiku:PASS"), "round 2 on haiku"),
             (("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:sonnet:PASS"),
              ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:haiku:PASS"), "round 3 on haiku"),
+            (("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:sonnet:PASS"),
+             ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS"), "round 3 on opus"),
             (("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS"), ("1:reviewer:sonnet:FAIL", "2:reviewer:opus:PASS"), "round 2 on opus"),
         )
         for good, bad, label in pairs:
@@ -15132,13 +15157,13 @@ class ReviewRoundModel(ReviewEnv):
                 self.assertNotIn("Traceback", err)
 
     def test_the_rounds_the_row_allows_still_print(self):
-        # controls: the first review on haiku or sonnet, a design reviewer on opus in every review, and the last review on opus by the owner's override
+        # controls: the first review on haiku or sonnet, a design reviewer on opus in every review, and a round 3 review on sonnet
         cases = (
             ("1:reviewer:haiku:PASS",),
             ("1:reviewer:sonnet:PASS",),
             ("1:reviewer:sonnet:FAIL", "1:design-reviewer:opus:PASS", "2:reviewer:sonnet:FAIL", "2:design-reviewer:opus:PASS",
              "3:reviewer:sonnet:PASS", "3:design-reviewer:opus:PASS"),
-            ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS"),
+            ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:sonnet:PASS"),
         )
         for rounds in cases:
             with self.subTest(rounds=rounds):
@@ -15181,6 +15206,19 @@ class ReviewRoundModel(ReviewEnv):
         self.assertEqual(rc, 0, "round 2 on opus was refused under a record whose round 2 row names opus:\n" + out + err)
         self.assertNotIn("Traceback", err)
 
+    def test_a_round_three_on_opus_is_refused_by_a_message_that_names_round_three_and_sonnet(self):
+        # Control: the sonnet record of the same rounds prints a record. The opus record is refused by the --round check, whose message names the
+        # round and the one model the row allows, so a refusal for another cause cannot pass (decision agent-model-cap, the round rows).
+        earlier = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL")
+        rc, out, err = self.run_args("7", "--review-record", *self.round_flags(*earlier, "3:reviewer:sonnet:PASS"))
+        self.assertEqual(rc, 0, "the sonnet control for round 3 was refused:\n" + out + err)
+        rc, out, err = self.run_args("7", "--review-record", *self.round_flags(*earlier, "3:reviewer:opus:PASS"))
+        self.assertEqual(rc, 2, "round 3 on opus was accepted, but the reviewer row runs round 3 on sonnet only:\n" + out + err)
+        self.assertIn("--round 3", err, "the refusal of round 3 on opus does not name round 3")
+        self.assertIn("sonnet", err, "the refusal of round 3 on opus does not name sonnet")
+        self.assertNotIn(REVIEW_MARKER, out, "a refused round 3 on opus still printed a record")
+        self.assertNotIn("Traceback", err)
+
 class ReviewNoRestart(ReviewEnv):
     """`merge <pr> --review-record` refuses a record whose rounds restart on a pull request that already holds rounds (decision pr-review-record;
     rule roles-review-cap-three). The earlier records are the pull request's review comments, oldest first, as review_comments reads them. A
@@ -15190,7 +15228,7 @@ class ReviewNoRestart(ReviewEnv):
 
     EARLIER_FIX_FROM = "1e" * 20  # the head a fix check's fix diff started from: a fix check line never names its own record's Head
     GRANT = REVIEW_GRANT_TEXT  # the owner's grant of a fourth review pass, bound to this pull request
-    THREE_FAILED_ARGV = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:FAIL")  # the --round values of rounds 1-3, all FAIL
+    THREE_FAILED_ARGV = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:sonnet:FAIL")  # the --round values of rounds 1-3, all FAIL
 
     def host_with(self, *bodies):
         """A host whose pull request 7 is at the live head, with the review comments `bodies`, oldest first."""
@@ -15246,7 +15284,7 @@ class ReviewNoRestart(ReviewEnv):
 
     def test_a_round_three_record_that_lists_the_earlier_rounds_is_accepted(self):
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
-        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS"),
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:sonnet:PASS"),
                                      host=self.host_with(earlier))
         self.assert_accepted(rc, out, err)
 
@@ -15269,7 +15307,7 @@ class ReviewNoRestart(ReviewEnv):
 
     def test_a_granted_round_four_after_an_earlier_round_three_is_accepted(self):
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_FAILED_THREE)
-        rc, out, err = self.run_args(*self.review_argv(*self.THREE_FAILED_ARGV, "4:reviewer:opus:PASS", grant=self.GRANT), host=self.host_with(earlier))
+        rc, out, err = self.run_args(*self.review_argv(*self.THREE_FAILED_ARGV, "4:reviewer:sonnet:PASS", grant=self.GRANT), host=self.host_with(earlier))
         self.assert_accepted(rc, out, err)
 
     def test_an_equal_top_below_round_three_with_no_fix_verifier_is_refused(self):
@@ -18851,6 +18889,82 @@ class TouchesRead(Env):
         entry = "\n".join(lines[start:end])
         for kind in ("pull list", "pulls/N/files", "jobs read", "log read"):
             self.assertIn(kind, entry, f"the `merge --touches` entry of merge.py's docstring does not name the {kind} read")
+
+# ------------------------------------------------------------------ the take's lock TTL is one fixed bound (decision merge-lock; debt lock-ttl-sized-for-gone-waits)
+FIXED_TAKE_TTL = 1200  # seconds, twenty minutes at every deadline: the value LOCK_TTL_SECONDS must hold and confirm must pass
+
+
+class LockTtlFixed(Env):
+    """confirm takes the merge lock for LOCK_TTL_SECONDS at every deadline. The code the debt describes takes 780 s at a deadline of 1 and 65400 s
+    at 360 (the sizing from WAITS), so these cases are red there, and red on any TTL that scales with merge.deadlineMinutes."""
+
+    def test_lock_ttl_seconds_is_twenty_minutes(self):
+        self.assertEqual(getattr(merge, "LOCK_TTL_SECONDS", None), FIXED_TAKE_TTL,
+                         "merge.py names no LOCK_TTL_SECONDS of 1200 s: the take's TTL is still sized from the deadline")
+
+    def test_the_take_at_deadline_one_is_the_fixed_ttl(self):
+        push_base(self, {".github/stamp.json": merge_stamp_text(1)})
+        rc, out, _deadlines, ttls = confirmed_takes(self)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(ttls, "no lock take was recorded")
+        self.assertEqual(set(ttls), {FIXED_TAKE_TTL}, f"the take at deadline 1 was given {sorted(set(ttls))} s, not the fixed {FIXED_TAKE_TTL} s")
+
+    def test_the_take_at_deadline_360_is_the_fixed_ttl(self):
+        push_base(self, {".github/stamp.json": merge_stamp_text(360)})
+        rc, out, _deadlines, ttls = confirmed_takes(self)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(ttls, "no lock take was recorded")
+        self.assertEqual(set(ttls), {FIXED_TAKE_TTL}, f"the take at deadline 360 was given {sorted(set(ttls))} s, not the fixed {FIXED_TAKE_TTL} s")
+
+    def test_the_take_ttl_is_at_most_thirty_minutes_at_the_largest_deadline(self):
+        push_base(self, {".github/stamp.json": merge_stamp_text(360)})
+        rc, out, _deadlines, ttls = confirmed_takes(self)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(ttls, "no lock take was recorded")
+        self.assertLessEqual(max(ttls), 1800, f"the take at deadline 360 holds the lock for {max(ttls)} s, over thirty minutes")
+
+    def test_merge_py_names_no_WAITS(self):
+        tree = ast.parse(pathlib.Path(merge.__file__).read_text(encoding="utf-8"))  # the parser reads names, so a comment or string cannot pass
+        named = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+        self.assertNotIn("WAITS", named, "merge.py still names WAITS, which sizes the take's TTL from waits that are gone")
+
+
+class StaleBatchCites(unittest.TestCase):
+    """The merge tool's three refusal cites name live homes and no retired batch-CI rule (debt merge-stale-texts-and-cites). Red while RED_CITE,
+    DROP_CITE or BATCH_CITE holds a retired phrase, names no decision or rule that exists, or names a line number."""
+    CITES = ("RED_CITE", "DROP_CITE", "BATCH_CITE")
+    RETIRED = ("no batch merges onto a red base", "a batch that drops a lane", "nothing merges while another ready pull request's CI runs")
+
+    def test_no_cite_holds_a_retired_batch_phrase(self):
+        for name in self.CITES:
+            text = getattr(merge, name, None)
+            self.assertIsInstance(text, str, f"merge.py names no {name} string")
+            for phrase in self.RETIRED:
+                with self.subTest(constant=name, phrase=phrase):
+                    self.assertNotIn(phrase, text, f"{name} still names the retired batch rule {phrase!r}")
+
+    def test_each_cite_names_a_decision_or_rule_that_exists(self):
+        decisions, anchors = audit.cite_homes(root=str(REPO))  # the one home of the cite pattern and the homes it reads (lint/test_rule_audit.py)
+        for name in self.CITES:
+            text = getattr(merge, name, "")
+            found = audit.CITE_RE.findall(text)
+            with self.subTest(constant=name):
+                self.assertTrue(found, f"{name} names no decision or rule: {text!r}")
+                for kind, slug in found:
+                    homes = decisions if kind == "decision" else anchors
+                    self.assertIn(slug, homes, f"{name} names {kind} {slug}, which no file or rule anchor holds")
+
+    def test_the_red_base_cite_names_the_per_lane_rule(self):
+        text = getattr(merge, "RED_CITE", "")
+        self.assertIn(("rule", "git-red-main-reverts"), audit.CITE_RE.findall(text),
+                      f"RED_CITE does not name rule git-red-main-reverts: {text!r}")
+
+    def test_no_cite_names_a_line_number(self):
+        for name in self.CITES:
+            text = getattr(merge, name, "")
+            with self.subTest(constant=name):
+                self.assertIsNone(re.search(r"\bline \d+\b", text), f"{name} cites a line number, which moves: {text!r}")
+
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":

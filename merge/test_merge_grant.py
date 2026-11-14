@@ -219,8 +219,9 @@ class ReviewGrantFlag(tm.ReviewEnv):
     and its PR must be the positional PR. Every refusal sits beside the good value, which must exit 0, so a parser that never learned the
     flag fails there too. A usage error prints no record."""
 
-    THREE = ("--round", "1:reviewer:sonnet:FAIL", "--round", "2:reviewer:sonnet:FAIL", "--round", "3:reviewer:opus:FAIL")
-    FOUR = (*THREE, "--round", "4:reviewer:opus:PASS")
+    THREE = ("--round", "1:reviewer:sonnet:FAIL", "--round", "2:reviewer:sonnet:FAIL", "--round", "3:reviewer:sonnet:FAIL")
+    FOUR = (*THREE, "--round", "4:reviewer:sonnet:PASS")
+    OPUS_FOUR = (*THREE, "--round", "4:reviewer:opus:PASS")  # a granted round 4 on opus: refused, since the row runs round 4 on sonnet
 
     def granted(self, *tail, rounds=FOUR, pr="7"):
         """The review flags for a normal change with guard no at the live head, for pull request `pr`, with `rounds`, then `tail`."""
@@ -249,10 +250,22 @@ class ReviewGrantFlag(tm.ReviewEnv):
         self.assertIn("--round: the rounds must start at 1, rise by one at a time and stop at 3", err)
         self.assertNotIn(tm.REVIEW_MARKER, out)
 
+    def test_round_four_on_opus_with_a_grant_is_refused_and_names_round_four_and_sonnet(self):
+        # The control is FOUR, the same rounds with round 4 on sonnet, which passes with the grant. The opus round 4 is refused by the --round
+        # check, whose message names the round and the model the row allows (decision agent-model-cap, the round rows).
+        rc, out, err = self.run_args(*self.granted("--grant", REVIEW_GRANT))
+        self.assertEqual(rc, 0, "merge refused the sonnet round 4 control with --grant:\n" + out + err)
+        rc, out, err = self.run_args(*self.granted("--grant", REVIEW_GRANT, rounds=self.OPUS_FOUR))
+        self.assertEqual(rc, 2, "a granted round 4 on opus was not refused with a usage error:\n" + out + err)
+        self.assertIn("--round 4", err, "the refusal of a granted round 4 on opus does not name round 4")
+        self.assertIn("sonnet", err, "the refusal of a granted round 4 on opus does not name sonnet")
+        self.assertNotIn(tm.REVIEW_MARKER, out, "a refused granted round 4 on opus still printed a record")
+        self.assertNotIn("Traceback", err)
+
     def test_round_five_with_a_grant_refuses(self):
         rc, out, err = self.run_args(*self.granted("--grant", REVIEW_GRANT))
         self.assertEqual(rc, 0, "merge refused --round 4 with --grant:\n" + out + err)
-        out, _err = self.assert_usage_error(*self.granted("--round", "5:reviewer:opus:PASS", "--grant", REVIEW_GRANT))
+        out, _err = self.assert_usage_error(*self.granted("--round", "5:reviewer:sonnet:PASS", "--grant", REVIEW_GRANT))
         self.assertNotIn(tm.REVIEW_MARKER, out)
 
     def test_grant_needs_review_record(self):
