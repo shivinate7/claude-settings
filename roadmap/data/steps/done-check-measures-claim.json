@@ -1,0 +1,14 @@
+{
+ "id": "done-check-measures-claim",
+ "title": "A done check for a measured claim measures it; a grep for the words \"unmeasured\" or \"projected\" is not a measure",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Consultant 00:06 CST Nov 14 (relayed; source the coordinator's 00:05 table; not re-read by triage): step ci-wall-time read done on a grep for the words \"unmeasured|projected\", while the checks job ran 36 minutes serial.",
+ "source": "Consultant message 00:06 CST Nov 14 (relayed). Related: shared-job-finder part (4); step step-done-check-field.",
+ "note": "Triage 00:07 CST Nov 14: two parts. (1) A done check on a step whose title or why makes a measured claim (\"wall time measured\", a count, a duration) runs the measure or cites a run, not a text grep. (2) A sweep of done steps for text-grep done checks on measured claims; each find reopens its step as a candidate. Check first what step-done-check-field already enforces. A lane builds it; not started.",
+ "updatedAt": "2026-11-14T00:07:00-06:00"
+}
