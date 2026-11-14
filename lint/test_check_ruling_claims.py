@@ -4,18 +4,21 @@ Standard library only.
 
     python3 lint/test_check_ruling_claims.py
 
-The check reads a claim in any text, prose, comment or string alike. A time claim is `owner ruling <H:MM>`, with an
-optional zone. An id claim is `ruling <id>`, where <id> is a kebab-case slug of two or more words. A time is backed by
-a decision record, CLAUDE.md or a rulings entry. An id is backed by a decision file stem, a rulings entry's `id`, or a
-CLAUDE.md rule marker. A line with `no record: <reason>` passes.
+Claims. A time claim carries a date (`YYYY-MM-DD H:MM`, or `Mon D H:MM` with an optional comma) and follows `owner ruling`,
+`owner's ruling` or `ruled at`. A bare time is refused whatever the records hold. An id claim (a kebab slug of two or
+more words) is read in backticks, after `ruling:`, after `owner ruling` or `decision`, or after a capitalised `Ruling`
+or `RULING` that starts a line. A bare lowercase `ruling` followed by a word is prose, not a claim. A claim split across
+two lines is read joined, and reported on its first line.
 
-Each case runs the check as a subprocess on a fixture tree under this run's folder (test-temp-standard). Every run
-passes --root and --rulings-dir, so no case reads origin/roadmap. A subtest starts its own tree, so one subtest's
-record cannot back another subtest's claim.
+Backing. A dated time is backed by a record that holds its date and its time on one line: a decision record, CLAUDE.md,
+or a rulings entry's `at` (its date and time as written in its own zone). An id is backed by a decision file stem, a
+rulings entry `id`, or a CLAUDE.md rule marker. A line with `no record: <reason>` passes.
 
-RULING_CLAIMS_UNDER_TEST names the script under test (default: lint/check_ruling_claims.py). Pointed at
-lint/red_run_stub_test.py, which exits 0 and prints nothing, each case that expects a refusal or exit 2 fails on its
-exit-code assertion, and the clean-pass cases stay green. That is the behavioural red for a new check.
+Each case runs the check as a subprocess on a fixture tree under this run's folder (test-temp-standard). A run passes
+--root and --rulings-dir, except the store case, so no case reads origin/roadmap. A subtest starts its own tree, so one
+subtest's record cannot back another subtest's claim.
+
+RULING_CLAIMS_UNDER_TEST names the script under test (default: lint/check_ruling_claims.py).
 """
 import os
 import shutil
@@ -41,13 +44,40 @@ def run_folder():
 
 
 # This file's source holds claim text on purpose. A line that holds claim text also holds `no record:`, so the check
-# passes this file's own lines. The fixture text the cases write has no such marker, so the check refuses it.
-TIME_CLAIMS = (
+# passes this file's own lines. The fixture text the cases write has no such marker, so the check reads it.
+UNDATED = (
     "owner ruling 14:19 CST",  # no record: test fixture
     "owner's ruling 14:19 CST",  # no record: test fixture
     "Owner Ruling 14:19 CDT",  # no record: test fixture
 )
-ID_CLAIM = "ruling past-ruling-judge"  # no record: test fixture
+DATED = "owner ruling 2026-11-13 14:19 CST"  # no record: test fixture
+BARE_FORMS = (
+    "owner ruling at 23:58",  # no record: test fixture
+    "owner ruling, 23:58 CST",  # no record: test fixture
+    "Owner ruling (23:58 CST)",  # no record: test fixture
+    "owner ruling of 23:58",  # no record: test fixture
+    "owner's ruling 23:58",  # no record: test fixture
+    "ruled at 23:58",  # no record: test fixture
+    "owner ruling 23.58",  # no record: test fixture
+)
+DATED_FORMS = (
+    "owner ruling 2026-11-13 23:58 CST",  # no record: test fixture
+    "owner ruling, 2026-11-13 23:58 CST",  # no record: test fixture
+    "Owner ruling (2026-11-13 23:58 CST)",  # no record: test fixture
+    "owner ruling of 2026-11-13 23:58",  # no record: test fixture
+    "owner's ruling 2026-11-13 23:58",  # no record: test fixture
+    "ruled at 2026-11-13 23:58",  # no record: test fixture
+    "owner ruling 2026-11-13 23.58",  # no record: test fixture
+)
+ID_FORMS = (
+    ("Ruling past-ruling-judge", "past-ruling-judge"),  # no record: test fixture
+    ("RULING x-y", "x-y"),  # no record: test fixture
+    ("ruling: x-y", "x-y"),  # no record: test fixture
+    ("ruling `x-y`", "x-y"),  # no record: test fixture
+    ("owner ruling past-ruling-judge", "past-ruling-judge"),  # no record: test fixture
+    ("decision past-ruling-judge", "past-ruling-judge"),  # no record: test fixture
+)
+CTRL_FORM = "ruling `past-ruling-judge`"  # no record: test fixture
 RULING_ENTRY = ('{"id": "claim-cites-record", "at": "2026-11-13T14:19:00-06:00", '
                 '"ruling": "Cite the record.", "source": "test fixture"}\n')
 CLEAN = "Lane brief.\n"
@@ -75,9 +105,13 @@ class RulingClaimsTests(unittest.TestCase):
         with open(os.path.join(self.root, rel), encoding="utf-8") as f:
             return f.read()
 
-    def run_check(self, *args, rulings=None, root=None):
-        """(exit code, output) of one check run. Its root and rulings store are this subtest's unless named."""
-        cmd = [sys.executable, MODULE, "--root", root or self.root, "--rulings-dir", rulings or self.rulings, *args]
+    def run_check(self, *args, rulings=None, root=None, store=True):
+        """(exit code, output) of one check run. Its root and rulings store are this subtest's unless named.
+        store=False passes no --rulings-dir, so the check reads the store of --root."""
+        cmd = [sys.executable, MODULE, "--root", root or self.root]
+        if store:
+            cmd += ["--rulings-dir", rulings or self.rulings]
+        cmd += list(args)
         r = subprocess.run(cmd, cwd=self.root, capture_output=True, text=True, encoding="utf-8", errors="replace")
         return r.returncode, r.stdout + r.stderr
 
@@ -104,21 +138,35 @@ class RulingClaimsTests(unittest.TestCase):
                            capture_output=True, text=True, check=True)
         return r.stdout
 
-    def test_01_time_claim_with_no_record_is_refused__mutant_never_refuses(self):
-        for claim in TIME_CLAIMS:
+    def test_01_time_claim_without_a_date_is_refused__mutant_backs_any_clock(self):
+        for claim in UNDATED:
             with self.subTest(claim=claim):
                 self.fresh_tree()
                 self.put("brief.md", brief(claim))
                 rc, out = self.run_check("brief.md")
-                self.assertEqual(rc, 1, "unbacked time claim: want exit 1, got %d\n%s" % (rc, out))
+                self.assertEqual(rc, 1, "undated time claim: want exit 1, got %d\n%s" % (rc, out))
                 self.assertIn("brief.md:3", out, "refusal does not name brief.md:3\n%s" % out)
                 self.assertIn("14:19", out, "refusal does not print the claim\n%s" % out)
+        with self.subTest("a decision record carries the bare time 14:19"):
+            self.fresh_tree()
+            self.put("docs/decisions/time-note.md", "# Time note\n\nDecided at 14:19 CST.\n")
+            self.put("brief.md", brief(UNDATED[0]))
+            rc, out = self.run_check("brief.md")
+            self.assertEqual(rc, 1, "bare time backed by a decision record: want exit 1, got %d\n%s" % (rc, out))
+        with self.subTest("CLAUDE.md carries the bare time 14:19"):
+            self.fresh_tree()
+            self.put("CLAUDE.md", "# Rules\n\nDecided at 14:19 CST.\n")
+            self.put("brief.md", brief(UNDATED[0]))
+            rc, out = self.run_check("brief.md")
+            self.assertEqual(rc, 1, "bare time backed by CLAUDE.md: want exit 1, got %d\n%s" % (rc, out))
 
-    def test_02_time_claim_backed_by_a_decision_record_passes__mutant_ignores_docs_decisions(self):
+    def test_02_dated_time_claim_backed_by_a_same_line_record_passes__mutant_backs_time_alone(self):
         cases = (
-            ("exact time", "owner ruling 14:19 CST", "Decided at 14:19 CST.\n"),  # no record: test fixture
-            ("zone ignored", "owner ruling 14:19 CDT", "Decided at 14:19 CST.\n"),  # no record: test fixture
-            ("leading zero ignored", "owner ruling 9:05 CST", "Decided at 09:05.\n"),  # no record: test fixture
+            ("exact", DATED, "Decided 2026-11-13 14:19 CST.\n"),
+            ("zone ignored", "owner ruling 2026-11-13 14:19 CDT", "Decided 2026-11-13 14:19 CST.\n"),  # no record: test fixture
+            ("leading zero ignored", "owner ruling 2026-11-13 9:05 CST", "Decided 2026-11-13 09:05.\n"),  # no record: test fixture
+            ("Mon D with comma", "owner ruling Nov 13, 19:53 CST", "Decided Nov 13, 19:53 CST.\n"),  # no record: test fixture
+            ("Mon D without comma", "owner ruling Nov 13 19:53 CST", "Decided Nov 13 19:53 CST.\n"),  # no record: test fixture
         )
         for name, claim, record in cases:
             with self.subTest(name):
@@ -126,62 +174,98 @@ class RulingClaimsTests(unittest.TestCase):
                 self.put("docs/decisions/time-note.md", "# Time note\n\n" + record)
                 self.put("brief.md", brief(claim))
                 rc, out = self.run_check("brief.md")
-                self.assertEqual(rc, 0, "time claim backed by a decision record: want exit 0, got %d\n%s"
-                                 % (rc, out))
+                self.assertEqual(rc, 0, "dated claim backed by a same-line record: want exit 0, got %d\n%s"
+                         % (rc, out))
+        controls = (
+            ("date and time on different lines", DATED, "2026-11-13\nDecided at 14:19 CST.\n"),
+            ("wrong date, same time", DATED, "Decided 2026-11-14 14:19 CST.\n"),
+        )
+        for name, claim, record in controls:
+            with self.subTest(name):
+                self.fresh_tree()
+                self.put("docs/decisions/time-note.md", "# Time note\n\n" + record)
+                self.put("brief.md", brief(claim))
+                rc, out = self.run_check("brief.md")
+                self.assertEqual(rc, 1, "record that does not hold date and time on one line backed the claim: "
+                         "want exit 1, got %d\n%s" % (rc, out))
         with self.subTest("full size: the match is the last of 301 records"):
             self.fresh_tree()
             for n in range(300):
                 self.put("docs/decisions/rec-%03d.md" % n, "# Note %d\n\nNothing dated.\n" % n)
-            self.put("docs/decisions/rec-300.md", "# Last\n\nDecided at 14:19 CST.\n")
-            self.put("brief.md", brief(TIME_CLAIMS[0]))
+            self.put("docs/decisions/rec-300.md", "# Last\n\nDecided 2026-11-13 14:19 CST.\n")
+            self.put("brief.md", brief(DATED))
             rc, out = self.run_check("brief.md")
-            self.assertEqual(rc, 0, "time claim not backed by the last of 301 decision records: want exit 0, got %d\n%s"
+            self.assertEqual(rc, 0, "dated claim not backed by the last of 301 records: want exit 0, got %d\n%s"
                              % (rc, out))
 
-    def test_03_time_claim_backed_by_rulings_or_claude_md_passes__mutant_drops_rulings_or_claude_md(self):
-        with self.subTest("rulings entry carries the time"):
+    def test_03_dated_time_claim_backed_by_rulings_at_or_claude_md__mutant_drops_at_or_claude_md(self):
+        with self.subTest("rulings entry at carries the date and time"):
             self.fresh_tree()
             self.put("roadmap/rulings/claim-cites-record.json", RULING_ENTRY)
-            self.put("brief.md", brief(TIME_CLAIMS[0]))
+            self.put("brief.md", brief(DATED))
             rc, out = self.run_check("brief.md", rulings=os.path.join(self.root, "roadmap", "rulings"))
-            self.assertEqual(rc, 0, "time claim backed by a rulings entry: want exit 0, got %d\n%s" % (rc, out))
-        with self.subTest("CLAUDE.md carries the time"):
+            self.assertEqual(rc, 0, "dated claim backed by a rulings entry at: want exit 0, got %d\n%s" % (rc, out))
+        with self.subTest("CLAUDE.md carries the date and time on one line"):
             self.fresh_tree()
-            self.put("CLAUDE.md", "# Rules\n\nDecided at 14:19 CST.\n")
-            self.put("brief.md", brief(TIME_CLAIMS[0]))
+            self.put("CLAUDE.md", "# Rules\n\nDecided 2026-11-13 14:19 CST.\n")
+            self.put("brief.md", brief(DATED))
             rc, out = self.run_check("brief.md")
-            self.assertEqual(rc, 0, "time claim backed by CLAUDE.md: want exit 0, got %d\n%s" % (rc, out))
-        with self.subTest("control: a rulings entry with another time does not back it"):
+            self.assertEqual(rc, 0, "dated claim backed by CLAUDE.md: want exit 0, got %d\n%s" % (rc, out))
+        with self.subTest("control: rulings entry at with another time"):
             self.fresh_tree()
             self.put("roadmap/rulings/claim-cites-record.json", RULING_ENTRY.replace("14:19", "14:20"))
-            self.put("brief.md", brief(TIME_CLAIMS[0]))
+            self.put("brief.md", brief(DATED))
             rc, out = self.run_check("brief.md", rulings=os.path.join(self.root, "roadmap", "rulings"))
-            self.assertEqual(rc, 1, "rulings entry with 14:20 backed a 14:19 claim: want exit 1, got %d\n%s"
+            self.assertEqual(rc, 1, "rulings entry at 14:20 backed a 14:19 claim: want exit 1, got %d\n%s"
+                             % (rc, out))
+        with self.subTest("control: rulings entry at with another date"):
+            self.fresh_tree()
+            self.put("roadmap/rulings/claim-cites-record.json", RULING_ENTRY.replace("2026-11-13", "2026-11-14"))
+            self.put("brief.md", brief(DATED))
+            rc, out = self.run_check("brief.md", rulings=os.path.join(self.root, "roadmap", "rulings"))
+            self.assertEqual(rc, 1, "rulings entry at 2026-11-14 backed a 2026-11-13 claim: want exit 1, got %d\n%s"
                              % (rc, out))
 
-    def test_04_id_claim_backed_by_stem_marker_or_rulings_id__mutant_ignores_slug_arms(self):
-        rulings_entry = RULING_ENTRY.replace("claim-cites-record", "past-ruling-judge")
-        cases = (
-            ("no record", {}, None, 1),
-            ("decision file stem", {"docs/decisions/past-ruling-judge.md": "# Judge\n\nDecided.\n"}, None, 0),
-            ("CLAUDE.md rule marker", {"CLAUDE.md": "# Rules\n\nJudge it. <!-- rule:past-ruling-judge -->\n"}, None, 0),
-            ("rulings entry id", {}, rulings_entry, 0),
-            ("control: another decision stem", {"docs/decisions/other-ruling-judge.md": "# Other\n"}, None, 1),
-            ("control: a decision body names the id, stem differs",
-             {"docs/decisions/other.md": "# Other\n\npast-ruling-judge\n"}, None, 1),
-            ("control: a CLAUDE.md marker for another id",
-             {"CLAUDE.md": "# Rules\n\n<!-- rule:other-ruling-judge -->\n"}, None, 1),
+    def test_04_id_claim_forms_are_read_and_backed_by_stem_marker_or_rulings_id__mutant_reads_bare_prose(self):
+        for form, ident in ID_FORMS:
+            with self.subTest(form=form):
+                self.fresh_tree()
+                self.put("brief.md", "Lane brief.\n%s\n" % form)
+                rc, out = self.run_check("brief.md")
+                self.assertEqual(rc, 1, "unbacked id claim: want exit 1, got %d\n%s" % (rc, out))
+                self.assertIn("brief.md:2", out, "refusal does not name brief.md:2\n%s" % out)
+                self.fresh_tree()
+                self.put("docs/decisions/%s.md" % ident, "# Judge\n\nDecided.\n")
+                self.put("brief.md", "Lane brief.\n%s\n" % form)
+                rc, out = self.run_check("brief.md")
+                self.assertEqual(rc, 0, "id claim backed by a decision file stem: want exit 0, got %d\n%s"
+                                 % (rc, out))
+        with self.subTest("backed by a CLAUDE.md rule marker"):
+            self.fresh_tree()
+            self.put("CLAUDE.md", "# Rules\n\nJudge it. <!-- rule:x-y -->\n")
+            self.put("brief.md", "Lane brief.\n%s\n" % ID_FORMS[3][0])
+            rc, out = self.run_check("brief.md")
+            self.assertEqual(rc, 0, "id claim backed by a CLAUDE.md rule marker: want exit 0, got %d\n%s" % (rc, out))
+        with self.subTest("backed by a rulings entry id"):
+            self.fresh_tree()
+            self.put("rulings/x-y.json", RULING_ENTRY.replace("claim-cites-record", "x-y"))
+            self.put("brief.md", "Lane brief.\n%s\n" % ID_FORMS[3][0])
+            rc, out = self.run_check("brief.md")
+            self.assertEqual(rc, 0, "id claim backed by a rulings entry id: want exit 0, got %d\n%s" % (rc, out))
+        controls = (
+            ("another decision stem", {"docs/decisions/other-ruling-judge.md": "# Other\n"}),
+            ("a decision body names the id, stem differs", {"docs/decisions/other.md": "# Other\n\npast-ruling-judge\n"}),
+            ("a CLAUDE.md marker for another id", {"CLAUDE.md": "# Rules\n\n<!-- rule:other-ruling-judge -->\n"}),
         )
-        for name, files, rulings_text, want in cases:
+        for name, files in controls:
             with self.subTest(name):
                 self.fresh_tree()
                 for rel, text in files.items():
                     self.put(rel, text)
-                if rulings_text is not None:
-                    self.put("rulings/past-ruling-judge.json", rulings_text)
-                self.put("brief.md", brief(ID_CLAIM))
+                self.put("brief.md", "Lane brief.\n%s\n" % CTRL_FORM)
                 rc, out = self.run_check("brief.md")
-                self.assertEqual(rc, want, "id claim, %s: want exit %d, got %d\n%s" % (name, want, rc, out))
+                self.assertEqual(rc, 1, "id claim backed by a record for another id: want exit 1, got %d\n%s"
+                                 % (rc, out))
 
     def test_05_base_mode_checks_added_lines_only__mutant_checks_whole_file(self):
         self.fresh_tree()
@@ -196,7 +280,7 @@ class RulingClaimsTests(unittest.TestCase):
         rc, out = self.run_check("--base", "main")
         self.assertEqual(rc, 0, "a line already on main was checked: want exit 0, got %d\n%s" % (rc, out))
         self.put("lint/test_thing.py", "import os\nx = 1\n# owner ruling 09:05 CST\n")  # no record: test fixture
-        self.put("lint/thing.js", "// ruling claim-cites-record\n")  # no record: test fixture
+        self.put("lint/thing.js", "// ruling `claim-cites-record`\n")  # no record: test fixture
         self.commit_change()
         rc, out = self.run_check("--base", "main")
         self.assertEqual(rc, 1, "an added claim line was not refused under --base: want exit 1, got %d\n%s"
@@ -208,10 +292,11 @@ class RulingClaimsTests(unittest.TestCase):
     def test_06_claims_are_read_inside_strings_and_after_comment_openers__mutant_parses_comments_only(self):
         cases = (
             ("tool.py", 'label = "a # b owner ruling 14:19 CST"\n'),  # no record: test fixture
-            ("tool.js", 'const s = "see // ruling claim-cites-record";\n'),  # no record: test fixture
-            ("tool.js", 'const c = "/* ruling claim-cites-record */";\n'),  # no record: test fixture
+            ("tool.py", 'x = "owner ruling 2026-11-13 14:19 CST"\n'),  # no record: test fixture
+            ("tool.js", 'const s = "see // ruling `claim-cites-record`";\n'),  # no record: test fixture
+            ("tool.js", 'const c = "/* ruling `claim-cites-record` */";\n'),  # no record: test fixture
             ("tool.py", "# Don't: owner ruling 14:19 CST\n"),  # no record: test fixture
-            ("page.html", "<p>Don't: ruling claim-cites-record</p>\n"),  # no record: test fixture
+            ("page.html", "<p>Don't: ruling `claim-cites-record`</p>\n"),  # no record: test fixture
         )
         for rel, text in cases:
             with self.subTest(rel=rel, text=text):
@@ -234,8 +319,8 @@ class RulingClaimsTests(unittest.TestCase):
     def test_07_no_record_marker_passes_only_with_a_reason__mutant_exempts_bare_marker(self):
         cases = (
             ("time claim, reason given",
-             "owner ruling 14:19 CST no record: the lane's own call, not yet ruled\n", 0),  # no record: test fixture
-            ("id claim, reason given", "ruling claim-cites-record no record: pending the owner\n", 0),  # no record: test fixture
+             "owner ruling 2026-11-13 14:19 CST no record: the lane's own call, not yet ruled\n", 0),  # no record: test fixture
+            ("id claim, reason given", "ruling `claim-cites-record` no record: pending the owner\n", 0),  # no record: test fixture
             ("bare no record", "owner ruling 14:19 CST no record\n", 1),  # no record: test fixture
             ("empty reason", "owner ruling 14:19 CST no record:\n", 1),  # no record: test fixture
         )
@@ -254,6 +339,11 @@ class RulingClaimsTests(unittest.TestCase):
             "The owner ruling applies to this lane.",
             "Rule: ruling foo.",
             "A ruling-based design.",
+            "ruling fb-1458-1",
+            "ruling fb-1041-2",
+            "ruling out-of-scope work",
+            "the ruling per-lane applies",
+            "a ruling re-pointed",
             "",
         )
         for text in cases:
@@ -292,36 +382,82 @@ class RulingClaimsTests(unittest.TestCase):
     def test_10_brief_mode_checks_the_whole_brief__mutant_checks_only_diff_lines(self):
         with self.subTest("untracked brief, no git"):
             self.fresh_tree()
-            self.put("brief.md", brief(TIME_CLAIMS[0]))
+            self.put("brief.md", brief(UNDATED[0]))
             rc, out = self.run_check("--brief", "brief.md")
             self.assertEqual(rc, 1, "untracked brief with a claim: want exit 1, got %d\n%s" % (rc, out))
             self.assertIn("brief.md:3", out, "refusal does not name brief.md:3\n%s" % out)
         with self.subTest("brief committed on main and unchanged"):
             self.fresh_tree()
-            self.start_repo({"brief.md": brief(TIME_CLAIMS[0])})  # no record: test fixture
+            self.start_repo({"brief.md": brief(UNDATED[0])})
             self.assertEqual(self.diff_of("brief.md"), "", "scope: the brief is in the diff")
             rc, out = self.run_check("--brief", "brief.md")
             self.assertEqual(rc, 1, "unchanged brief with a claim: want exit 1, got %d\n%s" % (rc, out))
             self.assertIn("brief.md:3", out, "refusal does not name brief.md:3\n%s" % out)
-        with self.subTest("backed by a rulings entry"):
+        with self.subTest("dated claim backed by a rulings entry"):
             self.fresh_tree()
             self.put("roadmap/rulings/claim-cites-record.json", RULING_ENTRY)
-            self.put("brief.md", brief(TIME_CLAIMS[0]))
+            self.put("brief.md", brief(DATED))
             rc, out = self.run_check("--brief", "brief.md", rulings=os.path.join(self.root, "roadmap", "rulings"))
             self.assertEqual(rc, 0, "brief claim backed by a rulings entry: want exit 0, got %d\n%s" % (rc, out))
         with self.subTest("two brief files, the second holds the claim"):
             self.fresh_tree()
             self.put("clean.md", CLEAN)
-            self.put("bad.md", brief(TIME_CLAIMS[0]))
+            self.put("bad.md", brief(UNDATED[0]))
             rc, out = self.run_check("--brief", "clean.md", "bad.md")
             self.assertEqual(rc, 1, "second brief with a claim: want exit 1, got %d\n%s" % (rc, out))
             self.assertIn("bad.md:3", out, "refusal does not name bad.md:3\n%s" % out)
         with self.subTest("full size: claim on line 2001"):
             self.fresh_tree()
-            self.put("brief.md", CLEAN * 2000 + "Rule: %s.\n" % TIME_CLAIMS[0])
+            self.put("brief.md", CLEAN * 2000 + "Rule: %s.\n" % UNDATED[0])
             rc, out = self.run_check("--brief", "brief.md")
             self.assertEqual(rc, 1, "claim on line 2001 of a brief: want exit 1, got %d\n%s" % (rc, out))
             self.assertIn("brief.md:2001", out, "refusal does not name brief.md:2001\n%s" % out)
+
+    def test_11_claim_wrapped_across_two_lines_is_read_and_reported_on_its_first_line__mutant_reads_lines_alone(self):
+        with self.subTest("wrapped, no record"):
+            self.fresh_tree()
+            self.put("brief.md", "Lane brief.\nRule: owner ruling\n2026-11-13 23:58 CST.\n")  # no record: test fixture
+            rc, out = self.run_check("brief.md")
+            self.assertEqual(rc, 1, "wrapped dated claim not refused: want exit 1, got %d\n%s" % (rc, out))
+            self.assertIn("brief.md:2", out, "refusal does not name the first line brief.md:2\n%s" % out)
+        with self.subTest("wrapped, backed by a same-line record"):
+            self.fresh_tree()
+            self.put("docs/decisions/time-note.md", "# Time note\n\nDecided 2026-11-13 23:58 CST.\n")
+            self.put("brief.md", "Lane brief.\nRule: owner ruling\n2026-11-13 23:58 CST.\n")  # no record: test fixture
+            rc, out = self.run_check("brief.md")
+            self.assertEqual(rc, 0, "wrapped dated claim backed by a record: want exit 0, got %d\n%s" % (rc, out))
+
+    def test_12_bare_forms_are_refused_and_dated_forms_need_a_same_line_record__mutant_misses_the_forms(self):
+        with self.subTest("bare forms refused, even with a record carrying 23:58"):
+            for claim in BARE_FORMS:
+                with self.subTest(claim=claim):
+                    self.fresh_tree()
+                    self.put("docs/decisions/time-note.md", "# Time note\n\nDecided at 23:58 CST.\n")
+                    self.put("brief.md", brief(claim))
+                    rc, out = self.run_check("brief.md")
+                    self.assertEqual(rc, 1, "bare time claim %r: want exit 1, got %d\n%s" % (claim, rc, out))
+        for claim in DATED_FORMS:
+            with self.subTest(claim=claim):
+                self.fresh_tree()
+                self.put("brief.md", brief(claim))
+                rc, out = self.run_check("brief.md")
+                self.assertEqual(rc, 1, "unbacked dated claim %r: want exit 1, got %d\n%s" % (claim, rc, out))
+                self.fresh_tree()
+                self.put("docs/decisions/time-note.md", "# Time note\n\nDecided 2026-11-13 23:58 CST.\n")
+                self.put("brief.md", brief(claim))
+                rc, out = self.run_check("brief.md")
+                self.assertEqual(rc, 0, "dated claim %r backed by a same-line record: want exit 0, got %d\n%s"
+                                 % (claim, rc, out))
+
+    def test_13_claims_are_refused_when_the_rulings_store_cannot_be_read__mutant_reads_empty_store_as_clear(self):
+        for claim in (DATED, UNDATED[0]):
+            with self.subTest(claim=claim):
+                self.fresh_tree()
+                self.put("brief.md", brief(claim))
+                rc, out = self.run_check("brief.md", store=False)
+                self.assertEqual(rc, 2, "claim present and the rulings store unreadable: want exit 2, got %d\n%s"
+                                 % (rc, out))
+                self.assertIn("UNKNOWN", out, "unreadable store is not reported as unknown\n%s" % out)
 
 
 def tearDownModule():
