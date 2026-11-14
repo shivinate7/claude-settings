@@ -1,0 +1,14 @@
+{
+ "id": "config-entry-waits-for-its-tool",
+ "title": "A config entry that only a new merge tool can read lands one stable cycle after that tool, or the old tool reads an unknown qualified entry as a named skip, not as unknown on every step",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Finding (coordinator 14:32 CST Nov 14; the first part from its REST read 14:25, the second part runner 10's report, which the coordinator did not read; triage read none): #3412 changed merge.readyChecks to take `<job>:<step>` and added the entry `checks-rest:project-ops skill scaffold suite` to the config the merge tool reads from origin/main. The tool itself comes from `stable`, which still sits at 3840214401009b56 (main is 66e87ec73de7; main's push run 43637314485 queued since 20:24:18Z, not started). Result, per runner 10's `merge 3414 --ready` at 14:25: STE lint, Windows split guard and Cost line pins all read \"ci-job: unknown\", and the tool says \"--step checks-rest:project-ops skill scaffold suite: no step of job 'checks' has this name\". So every `--ready` reads unknown until stable catches up (a full push run; no push-skip, since main moved after #3412's head). Cost so far: #3414 and any PR after #3063 cannot be marked; unmeasured beyond that. Cause: a config entry landed in the same PR as the tool change that reads it, and the old tool at stable cannot read the new entry. Not an owner question: nothing lifted; runner 10 told to wait, no re-sync to main (stable-branch.md, owner 2026-11-12 09:48 CST). Guard (coordinator's miss: it relayed the lane's caveat at 13:58 without seeing the stable lag; this step is the guard). First act of a lane: read how readyChecks resolves a qualified entry in the stable tool, then red then green: an entry the tool does not know is reported as \"not run: <name>\", never as unknown on all steps; and a PR that adds an entry for a new tool form says in its body which stable cycle reads it. A named skip must not turn a refusal into a pass: the verdict for that entry reads unknown, as now. Kin: ready-checks-job-qualified-steps (done at #3412), ready-checks-time-bound, ci-skip-untouched-steps.",
+ "source": "coordinator 14:32 CST Nov 14",
+ "note": "Filed 14:26 CST Nov 14 by triage. Tracker: the coordinator, who names a lane after main's push run shows green or red. Rule: verification-report-unknown-reads.",
+ "updatedAt": "2026-11-14T14:26:30"
+}
