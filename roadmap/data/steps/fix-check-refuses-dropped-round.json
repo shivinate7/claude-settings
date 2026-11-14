@@ -1,0 +1,14 @@
+{
+ "id": "fix-check-refuses-dropped-round",
+ "title": "The merge tool refuses a `--fix-check` record that drops an earlier Round line",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Runner 10 via the coordinator 01:23 CST Nov 14 (relayed; the archive and the code lines are unread by triage): closed PR #1892 (archive/fix-check-round-lines, 11c2103e3dbf). On main, the merge/merge.py `--fix-check` branch (about lines 4567-4604) checks only the top round and a bad fix base, and `review_state` (merge.py:3655) reads only the last design-reviewer line, so a fix-check record can drop an earlier Round line unnoticed.",
+ "source": "Runner 10 01:23 CST Nov 14 (relayed). Reusable from the archive: the small standalone `dropped_round_lines(last, rec)`. Owner item 741 (ruling own-741-a-lint-fix-no-r3) ruled out the old `round_floor` and net-value freeze edits, so the fresh lane writes none of those. Neighbour: fix-check-record-carries-rounds (todo: the record the tool prints carries the chain's round lines; the print side, this step is the refuse side); the lane says whether they fold.",
+ "note": "Triage 01:31 CST Nov 14: the mistake the guard would stop: a fix-check record posted with an earlier Round line missing, so the chain reads shorter than it was. Fix: a fresh lane writes `ReviewFixKeepsRounds` cases red first on main (a record that drops an earlier Round line refuses; a record that keeps every line passes; the first fix check with no earlier lines passes), then builds from `dropped_round_lines`, with none of the old `round_floor` or freeze edits (owner item 741). A guard or check change: own lane, review rounds apply. Not started.",
+ "updatedAt": "2026-11-14T01:31:00-06:00"
+}

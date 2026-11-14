@@ -1,0 +1,14 @@
+{
+ "id": "fix-check-per-cause-remedy",
+ "title": "Each `--fix-check` refusal prints its own remedy, one constant per cause",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Runner 10 via the coordinator 01:23 CST Nov 14 (relayed; unread by triage): closed PR #1881 (archive/fix-check-remedy-text, 5cf0a0fc8912). On main, merge.py:4602 still prints one fixed tail for every `--fix-check` refusal. Mailaudit #328's refusals (see merge-record-fix-check-then-r3) show the shared tail does not say which of the causes applies.",
+ "source": "Runner 10 01:23 CST Nov 14 (relayed). Causes to split: (1) the reviewed head is not the newest record's Head; (2) the newest Fix check line is FAIL; (3) the newest Fix check line is WIDE; (4) the merge head is not a clean or conflict-only merge of the base. One constant per remedy (rule building-allow-list-is-the-constant). A remedy never names the forbidden target (rule git-remedy-never-names-target). Neighbours: model-refusal-names-forms (todo, the spawn guard's own text), merge-record-fix-check-then-r3 (todo).",
+ "note": "Triage 01:31 CST Nov 14: the harm: a runner or lane reads a tail that does not fit its case and tries the wrong fix (an hour lost, as on #328). Fix: tests red first, one per cause: each refusal prints that cause's remedy and no other cause's; the existing refusals keep their verdicts (text-only change); control: a remedy text never names the forbidden target (check stack_reason_hygiene_case). A guard or check change: own lane, review rounds apply. Not started.",
+ "updatedAt": "2026-11-14T01:31:00-06:00"
+}
