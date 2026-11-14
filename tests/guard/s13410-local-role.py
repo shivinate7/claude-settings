@@ -179,4 +179,26 @@ add("local-tier: a launcher session whose own batch-runner file agrees with CS_S
     tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID,
     env={"CLAUDE_CODE_SESSION_ID": LT_SID, "CS_SESSION_ROLE": "batch-runner"}, config=LT_BATCH, silent=True)
 
+# A session may not claim a role for itself: the owner starts the launcher from his own terminal, never through Claude's tools.
+# RED on 47171b260: the guard allows each of these forms, so each stops at the deny the owner's ruling asks for.
+for _cmd in (
+    "CS_SESSION_ROLE=batch-runner claude -p x",
+    "env CS_SESSION_ROLE=triage claude",
+    "bash -c \"CS_SESSION_ROLE=triage claude\"",
+    "bin/claude-role batch-runner",
+    "~/.claude/bin/claude-role triage",
+    "bin/claude-role.cmd triage",
+):
+    add("local-role: a Bash call that starts a child session with a role is denied: " + _cmd, "deny",
+        tool="Bash", command=_cmd, cwd=PUSHSSH, session=LT_SID)
+add("local-role: a PowerShell call that sets CS_SESSION_ROLE and starts claude is denied", "deny",
+    tool="PowerShell", command="$env:CS_SESSION_ROLE='x'; claude", cwd=PUSHSSH, session=LT_SID, windows=True)
+# CONTROLS, green on 47171b260: reading the variable, grepping for the launcher's name and reading its file stay allowed.
+add("local-role: echo of CS_SESSION_ROLE is allowed", "allow", tool="Bash", command="echo $CS_SESSION_ROLE",
+    cwd=PUSHSSH, session=LT_SID, silent=True)
+add("local-role: a grep for the launcher's name is allowed", "allow", tool="Bash",
+    command="grep -rn claude-role hooks/", cwd=PUSHSSH, session=LT_SID, silent=True)
+add("local-role: reading bin/claude-role with cat is allowed", "allow", tool="Bash",
+    command="cat bin/claude-role", cwd=PUSHSSH, session=LT_SID, silent=True)
+
 FAMILY = _LT_PREV_FAMILY
