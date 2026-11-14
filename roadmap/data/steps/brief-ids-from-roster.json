@@ -1,0 +1,14 @@
+{
+ "id": "brief-ids-from-roster",
+ "title": "A lane brief takes every session id from the one roster, so a hand-typed wrong id cannot reach a lane",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The coordinator's brief to lane reinstall-from-stable-allow named runner 10 with a wrong session id (session_013NEJL2gw6EdrSyvHkTUEx6; right one session_013NEJL2f1YCYsvLdpFqtWP3). Other briefs may carry it.",
+ "source": "Coordinator 20:47 CST Nov 13 (its own miss; relayed to triage).",
+ "note": "Triage 20:48 CST Nov 13: guard named by the coordinator: a brief template that takes ids from one roster file; not built. The roster is the Standing sessions list in the roadmap CLAUDE.md, which the brief template already fills from (step role-ids-in-brief, done). Open: the miss was a hand-typed id, so the fix is a check that every session id in a brief appears in the roster, red case first. Unchecked: whether decision R22 (briefs name roles, never ids) bears on this; whether other briefs carry the wrong id.",
+ "updatedAt": "2026-11-13T20:48:14-06:00"
+}
