@@ -150,6 +150,10 @@ INSTRUCTIONS = (
     "such as a second accepted form, an allow-list entry or a per-repo exception. "
     + WIDENS_LABEL_SENTENCE +
     "Never flag an option where the repo changes to match the shared format. "
+    "One change that applies to every repo is not widening, so never flag it. "
+    "A tighter rule with no per-repo entry, such as a carry that accepts only byte-identical trees, is not widening, so never flag it. "
+    "But an option that says \"for every repo\" and also adds a per-repo allow-list entry, a second accepted form "
+    "or a per-repo exception still widens, so flag it. "
     "Judge only options the reply offers the owner to pick; never flag a reply that describes the rule itself. "
     "verification-counts-from-rest: flag a reply that names a search's total, such as total_count or a search result total, "
     "quoted as a count; "

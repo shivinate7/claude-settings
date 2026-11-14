@@ -197,8 +197,11 @@ NONE_DIRECTION_RULE = (
 WIDENING_TEMPLATE = (
     "This call sets options. An option that widens what a shared tool accepts (a second accepted form, an allow-list "
     "entry, a per-repo exception) must carry `%s: true`, the JSON boolean true, not the string \"true\". Block an unmarked widening option, and name its option key in "
-    "the reason. An option that only names a repo, or changes a repo to fit the shared tool, is not widening. A marked "
-    "option passes this rule. When unsure, allow."
+    "the reason. An option that only names a repo, or changes a repo to fit the shared tool, is not widening. "
+    "One change that applies to every repo is not widening. "
+    "A tighter rule with no per-repo entry, such as a carry that accepts only byte-identical trees, is not widening. "
+    "But an option that says \"for every repo\" and also adds a per-repo entry, a second accepted form or an exception "
+    "still widens. A marked option passes this rule. When unsure, allow."
 )
 
 
