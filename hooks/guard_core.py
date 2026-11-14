@@ -1815,9 +1815,36 @@ def worktree_prune_subject(args, where: str):
 from shared_names import config_dir  # noqa: E402  the one home, shared with the config watch
 
 
+UNSET = object()   # what a `default_word_lookup` returns for a name that is not set
+# `${NAME:-word}`, `${NAME-word}`, `${NAME:?word}`, `${NAME?word}`. The word may hold a braced use one level
+# deep (`${HOME}/.claude`), so a nested `${D:-${E:-x}}` is not matched whole. `:+` and `+` are no match: they
+# stay as written.
+DEFAULT_WORD = re.compile(r"\$\{([A-Za-z_]\w*)(:?)([-?])((?:\$\{[^{}]*\}|[^{}])*)\}")
+
+
+def expand_default_words(text: str, lookup, expand_word=lambda word: word) -> str:
+    """`text` with each default-word form read as the shell reads it. `lookup(name)` gives the value, `UNSET`
+    for a name that is not set, or None for a name it cannot tell: that form stays as written. `:-` takes
+    the word when the value is unset or empty, `-` only when unset. `:?` and `?` take the value, and stay as
+    written when it is unset (or, for `:?`, empty), since the shell then stops the command. `expand_word` reads
+    the word, which the shell expands too."""
+    def read(use):
+        name, colon, op, word = use.groups()
+        value = lookup(name)
+        if value is None:
+            return use.group(0)
+        missing = value is UNSET or (colon and value == "")
+        if op == "-":
+            return expand_word(word) if missing else value
+        return use.group(0) if missing else value
+    return DEFAULT_WORD.sub(read, text)
+
+
 def _expanded(path: str, cwd: str) -> str:
     """`~`, env vars, a Git-Bash drive spelling and a relative path resolved against `cwd`. No
     symlink is followed here, and nothing is realpath'd: see `_resolved` and `_literal_resolved`.
+    A default-word form is not read here: a path arrives with its quotes already removed, so a single-quoted
+    `'${D:-w}'` could not be told from a double-quoted one. `expand_default_words` reads it where quotes show.
     """
     target = os.path.expandvars(os.path.expanduser(path.strip("'\"")))
     if re.match(r"^/[a-zA-Z]/", target):  # Git Bash `/c/Users/...` to `C:/Users/...`
