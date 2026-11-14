@@ -1,0 +1,10 @@
+{
+ "id": "own-plan-is-the-one-queue",
+ "at": "2026-11-13T22:59:00-06:00",
+ "title": "The wave-plan file on roadmap is the one queue, current at each merge",
+ "ruling": "Owner 22:55 CST Nov 13 (relayed by the coordinator, from the consultant; triage did not see it): the wave-plan file on origin/roadmap is the one queue. It shows what is in CI, what is next in line, what is folding, and each lane row with its tracker and path. It is current at each merge. Runner 10 sends triage its fold state at each merge; triage updates the plan.",
+ "quote": "",
+ "source": "Coordinator message to triage 22:57 CST Nov 13 (relayed); filed by triage.",
+ "status": "open",
+ "step": ""
+}
