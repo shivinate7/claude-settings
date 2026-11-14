@@ -1,0 +1,14 @@
+{
+ "id": "degen-native-record-reread",
+ "title": "Degen's `native-record` job re-runs by itself when the Mac `native-check` status posts to the PR head, so no one reruns it by hand",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 01:51 CST Nov 14 (relayed; the consultant relays the Degen coordinator's feedback, owner paste 01:42 CST, \"10 PRs sat red on it\"; unread by triage): in degen's .github/workflows/checks.yml the `native-record` job (scripts/native_run_check.py reads the live `native-check` status) goes red when the Mac status posts after the job ran, and someone reruns it by hand.",
+ "source": "Likely route, unverified (the coordinator's): a workflow on the `status` event for context native-check that re-runs native-record for that sha. A lane should check, before building, what GitHub runs for a `status` event (the workflow file on the default branch, not the PR's), and whether the rerun can use the repo's own token. Neighbours: native-check-status-hand-post (todo: a hook refuses a hand-posted native-check status), own-770-a-degen-702-mac-rerun (ruling: the Mac leg of degen #702 re-run once; the Mac was offline then). Tracker runner 11, path ALONE.",
+ "note": "Triage 01:54 CST Nov 14: first the lane counts the red cases (the 10 PRs: numbers and sha, from degen's run history, with the sample size) and proves the cause is a status that posts after the job ran, not a Mac that never posts. Red first: a PR whose `native-check` status posts after `native-record` ran goes green with no manual rerun; control: a PR whose status never posts stays red (the job does not pass without the Mac). A change to degen's CI, not a guard; own small PR, draft (grant Lane draft PR). The coordinator starts the lane when this reads ready.",
+ "updatedAt": "2026-11-14T01:54:00-06:00"
+}
