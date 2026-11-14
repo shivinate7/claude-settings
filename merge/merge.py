@@ -999,6 +999,7 @@ class Host:
         self.quota_note(split_headers(raw[0])[0])
         return c, raw[0] if asked else split_headers(raw[0])[1]
 
+    hold_off = False  # merge sets it around its pull request read: that read's low reply arms no hold, because a pause before the PUT lets the PR turn BLOCKED or BEHIND unseen
     quota_until = None  # the epoch a low quota resets at, set by quota_note; the next gh call waits for it
 
     def quota_note(self, headers):
@@ -1010,6 +1011,9 @@ class Host:
         left, limit, wait = low
         if _READ_DEADLINE is not None:
             print(f"merge: the GitHub quota is low ({left} of {limit} left); not waiting inside the guard's time budget.", file=sys.stderr, flush=True)  # stdout is the guard's JSON decision
+            return
+        if self.hold_off:
+            say(f"merge: the GitHub quota is low ({left} of {limit} left); the merge call is sent without waiting.")
             return
         say(f"merge: the GitHub quota is low ({left} of {limit} left); the next call waits {wait} s for the reset.")
         self.quota_until = self.now() + wait
@@ -1895,7 +1899,12 @@ class Host:
         # The old `gh pr merge` (no --admin) refused a BLOCKED or BEHIND pull request itself. The REST PUT does not: a token that may bypass branch
         # protection merges it. So read the pull request right before the PUT; blocked or behind is a proven refusal, and no PUT is sent. Clean, unstable and the rest go on.
         taken = self.take_base or self.base  # confirm sets take_base to the base it read under the lock; with none, the last pr() read. The PUT lands on whatever base the PR has now
-        p = self.pr(n)
+        self.quota_pause()  # a hold armed by an earlier call is served here, before the read the PUT relies on
+        self.hold_off = True
+        try:
+            p = self.pr(n)
+        finally:
+            self.hold_off = False
         if p["base"] != taken:
             return None, f"#{n} base changed from {taken} to {p['base']} after the take, so its checks and lock were for the old base. No merge call was sent."
         state_now = p["merge_state"]
