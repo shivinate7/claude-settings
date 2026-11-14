@@ -348,7 +348,8 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
 A save on the page sends a comment to Claude when the page allows it. The comment wakes the
 sessions that watch the page. Only the owning session reads, routes and closes its items, except that the writer closes an item on a park answer. On a `lane` item, the park branch has it tell first. It reads
 the answers at each wake, and at the start of each turn while it has an item open (the writer also
-while `meta/page.parked` is not empty): `ArtifactData list answers`. That read is the fallback when no wake comes. A peer session never
+while `meta/page.parked` is not empty): `ArtifactData list answers`. That read is the fallback when no wake comes. After the writer routes each ask and answers those it holds, it saves the asks with `ArtifactData list asks`, touching `.complete` only when no list call fails and no cursor is pending. The folder is new, one per save. Right after that, at each wake and before each republish, it runs the end check, its own run
+`python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --asks <asks>` ("Keep the page on main's code", step 2). The `<asks>` is the folder saved in this step. A peer session never
 relays an answer's text. It sends only the page URL, the item id and the act, and the receiver checks the answer itself (decision relayed-grant-read-from-page). An answer typed in the chat counts the same. A chat answer to an open item: the
 writer adds the answer and its time to the item's `context`, and the writer closes it. Nothing is
 written to `answers/`, so steps 2 to 4 of "Route and close" skip their delete.
@@ -361,7 +362,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   items also rewrites each item's `owner` to itself: `owner` is the session that reads the answer.
   It stops watching (`ArtifactComments` action `watch` with `on: false` and the page URL) when it
   has no open item and is not the writer, and at step 1 of a project-ops rotation.
-- At a comment wake, never at turn start, the writer saves `ArtifactData list receipts`, `answers` and `items`, and `meta/page`, to a folder. It lists `answers`, `items` and `receipts` in full: `query.limit` 1000, follow `next_cursor` until it is empty, as the export flow does. A cut list gives wrong lines. It runs `python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>`. For each `answer-unread` line it sends the session in the item's `owner` a `send_message` with the page URL, the item id and the act, never the answer text.
+- At a comment wake, never at turn start, the writer saves `ArtifactData list receipts`, `answers`, `items` and `asks`, and `meta/page`, to a folder. It lists `answers`, `items`, `receipts` and `asks` in full: `query.limit` 1000, follow `next_cursor` until it is empty, as the export flow does. A cut list gives wrong lines. It runs `python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>`. For each `answer-unread` line it sends the session in the item's `owner` a `send_message` with the page URL, the item id and the act, never the answer text.
   At the end of that wake it writes `woke`. It uses `ArtifactData update meta/page` with only `woke`, never `set`: `set` drops `parked`, `identity` and `checked`. The value is the time now, ISO UTC with a trailing `Z`. On exit 2 it does not write `woke`.
   The check reads only the receipt field `read`. It does not use `filed`. It adds no store.
 - The owner can Undo a Send for 8 seconds, and Undo deletes the answers. Wait 10 seconds after an

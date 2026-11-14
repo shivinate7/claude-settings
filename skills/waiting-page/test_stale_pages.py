@@ -4,6 +4,7 @@ STALE_PAGES_UNDER_TEST names the command to run (default: stale_pages.py beside 
 same cases run red against a checkout that lacks it.
 """
 import contextlib
+import datetime
 import importlib.util
 import io
 import json
@@ -1477,6 +1478,609 @@ class Stale(unittest.TestCase):
         self.assertGreaterEqual(len(alone), 2, "the items-alone run did not start the gh processes its open waits need: %s" % alone)
         self.assertLessEqual(len(both), len(alone), "--answers started more gh processes than --items alone:\n%s" % both)
 
+    # Single-page mode with --asks <file or folder>. One open-ask line per ask with no non-blank reply, oldest `at` first, after
+    # the verdict line and the other lines; a listed line ends the run with one FAIL line. With --items and --answers too, one
+    # open-item line per open item that still holds a kept answer and is not handled another way. An input that cannot be read
+    # prints unknown, never clear. Each negative case also expects a line its own run must print, so a run that read nothing
+    # cannot pass the negative.
+
+    def asks_run(self, page, asks):
+        """One single-page run with --asks <asks>, and nothing else."""
+        return self.page_run(page, "--main", TEMPLATE, "--asks", asks)
+
+    def asks_shaped(self, asks, as_folder):
+        """`asks` (ask docs) as a list file, or as the folder `ArtifactData list` saves: one <id>.json per ask and the marker."""
+        if as_folder:
+            return self.docs_folder({ask["id"]: ask for ask in asks}, "asks")
+        return self.list_file(asks, "asks")
+
+    def open_ask_lines(self, out):
+        return [line for line in out.splitlines() if line.startswith("open-ask:")]
+
+    def listed_ask_ids(self, out):
+        """The id of each open-ask line that names an ask, in line order. The unknown line names none."""
+        return [line.split()[1] for line in self.open_ask_lines(out) if not line.startswith("open-ask: unknown")]
+
+    def unknown_lines(self, out, prefix):
+        return [line for line in out.splitlines() if line.startswith(prefix + ": unknown")]
+
+    def unreadable_asks_inputs(self):
+        """(label, --asks arg) for each asks input that cannot be read whole: malformed JSON, a JSON object, and a folder with no .complete marker."""
+        malformed = write_text(os.path.join(tempfile.mkdtemp(dir=self.tmp.name, prefix="asks-"), "asks.json"), "[{")
+        an_object = write_text(os.path.join(tempfile.mkdtemp(dir=self.tmp.name, prefix="asks-"), "asks.json"), "{}")
+        cut_short = self.docs_folder({ASK_OPEN["id"]: ASK_OPEN}, "asks")
+        os.remove(os.path.join(cut_short, ".complete"))
+        return (("malformed JSON", malformed), ("a JSON object, not a list", an_object), ("a folder with no complete marker", cut_short))
+
+    def assert_fail_last(self, r, want=None):
+        """Exactly one line starts FAIL:, and it is the last line of stdout. With `want`, that line is `want` exactly."""
+        lines = r.stdout.splitlines()
+        fails = [line for line in lines if line.startswith("FAIL:")]
+        self.assertEqual(len(fails), 1, "want one FAIL line:\n" + r.stdout + r.stderr)
+        self.assertTrue(lines and lines[-1] == fails[0], "the FAIL line is not the last line:\n" + r.stdout + r.stderr)
+        if want is not None:
+            self.assertEqual(fails[0], want, "the FAIL line differs from the wording pinned for it:\n" + r.stdout + r.stderr)
+
+    def assert_no_fail(self, r):
+        """No line starts FAIL:."""
+        fails = [line for line in r.stdout.splitlines() if line.startswith("FAIL:")]
+        self.assertEqual(fails, [], "a FAIL line with nothing listed and nothing unknown:\n" + r.stdout + r.stderr)
+
+    def assert_one_unknown(self, r, prefix):
+        """One `<prefix>: unknown (<reason>)` line, a FAIL line last, and no traceback."""
+        unknown = self.unknown_lines(r.stdout, prefix)
+        self.assertEqual(len(unknown), 1, "want one %s: unknown line:\n%s" % (prefix, r.stdout + r.stderr))
+        self.assertRegex(unknown[0], r"^%s: unknown \(.+\)" % re.escape(prefix), "the unknown line gives no reason in parentheses")
+        self.assert_fail_last(r)
+        self.assertNotIn("Traceback", r.stdout + r.stderr)
+
+    def wake_run(self, page, items_arg, answers_arg, env=None):
+        """The writer's wake run: --items and --answers as given (None leaves the flag out), and --asks naming one answered ask,
+        so no open-ask line is expected from that file."""
+        argv = ["--main", TEMPLATE, "--asks", self.list_file([ASK_REPLIED], "asks")]
+        if items_arg is not None:
+            argv += ["--items", items_arg]
+        if answers_arg is not None:
+            argv += ["--answers", answers_arg]
+        return self.page_run(page, *argv, env=env or {})
+
+    def open_item_run(self, page, items, answers, as_folder, env=None):
+        """A wake run with `items` and `answers` ((doc id, data) pairs) in one shape."""
+        items_arg, answers_arg = self.shaped(items, answers, as_folder)
+        return self.wake_run(page, items_arg, answers_arg, env=env)
+
+    def open_item_names(self, out):
+        """(n, id) of each open-item line that names an item, in line order."""
+        matches = [OPEN_ITEM_RE.match(line) for line in out.splitlines()]
+        return [(int(m.group(1)), m.group(2)) for m in matches if m]
+
+    def assert_open_items_named(self, items, answers, listed, case, env=None):
+        """In both shapes, a wake run with the open item OPEN_ID (its kept answer too) plus `items` and `answers` names exactly
+        OPEN_ID and `listed`. OPEN_ID is asserted first, so a run that read nothing cannot pass the negatives."""
+        current, _ = self.current_and_behind()
+        want = sorted({OPEN_ID, *listed})
+        for as_folder in (False, True):
+            with self.subTest(case=case, folder=as_folder):
+                r = self.open_item_run(current, [OPEN_ITEM, *items], [(OPEN_ID, OPEN_ANSWER), *answers], as_folder, env=env)
+                named = sorted(item_id for _, item_id in self.open_item_names(r.stdout))
+                self.assertIn(OPEN_ID, named, "%s: the open item %s is not named, so the run read no item and answer:\n%s"
+                              % (case, OPEN_ID, r.stdout + r.stderr))
+                self.assertEqual(named, want, "%s: the named open items differ from the expected ones:\n%s" % (case, r.stdout + r.stderr))
+
+    # --asks: the open-ask lines.
+
+    def test_open_ask_prints_one_line_with_its_id_time_and_text_in_both_shapes(self):
+        current, _ = self.current_and_behind()
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                r = self.asks_run(current, self.asks_shaped([ASK_OPEN], as_folder))
+                self.assertEqual(self.open_ask_lines(r.stdout), [open_ask_line(ASK_OPEN)], "the open-ask lines differ:\n" + r.stdout + r.stderr)
+                self.assert_page_word(r, "current", 1)
+                self.assert_fail_last(r)
+
+    def test_open_ask_list_is_oldest_first_whatever_the_file_order_in_both_shapes(self):
+        current, _ = self.current_and_behind()
+        asks = [ask_doc("ask-late", "2026-11-07T12:00:00Z"), ask_doc("ask-early", "2026-11-06T08:00:00Z"),
+                ask_doc("ask-middle", "2026-11-07T09:30:00Z")]
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                r = self.asks_run(current, self.asks_shaped(asks, as_folder))
+                self.assertEqual(self.listed_ask_ids(r.stdout), ["ask-early", "ask-middle", "ask-late"],
+                                 "the open asks are not in oldest-first order:\n" + r.stdout + r.stderr)
+
+    def test_open_ask_text_with_a_newline_prints_on_one_line(self):
+        current, _ = self.current_and_behind()
+        ask = ask_doc("ask-lines", ASK_OPEN["at"], text="First line\nsecond line")
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                r = self.asks_run(current, self.asks_shaped([ask], as_folder))
+                self.assertEqual(self.open_ask_lines(r.stdout), ["open-ask: ask-lines at %s: First line second line" % ask["at"]],
+                                 "the newline in the ask text is not collapsed to one space:\n" + r.stdout + r.stderr)
+
+    def test_open_ask_with_a_non_blank_reply_is_not_listed(self):
+        current, _ = self.current_and_behind()
+        replied = ask_doc("ask-replied", "2026-11-07T08:00:00Z", reply="Yes, ship it.")
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                r = self.asks_run(current, self.asks_shaped([ASK_OPEN, replied], as_folder))
+                self.assertIn(open_ask_line(ASK_OPEN), r.stdout.splitlines(), "the open ask is not listed, so the run read no asks:\n" + r.stdout + r.stderr)
+                self.assertNotIn("ask-replied", self.listed_ask_ids(r.stdout), "an ask with a non-blank reply is listed:\n" + r.stdout + r.stderr)
+
+    def test_open_ask_with_a_blank_or_null_reply_is_listed(self):
+        current, _ = self.current_and_behind()
+        for label, reply in (("an empty reply", ""), ("a reply of spaces", "   "), ("a null reply", None)):
+            for as_folder in (False, True):
+                with self.subTest(case=label, folder=as_folder):
+                    blank = ask_doc("ask-blank", "2026-11-07T08:30:00Z", reply=reply)
+                    r = self.asks_run(current, self.asks_shaped([ASK_OPEN, blank], as_folder))
+                    self.assertEqual(self.listed_ask_ids(r.stdout), ["ask-blank", "ask-open"],
+                                     "%s: the ask with no non-blank reply is not listed:\n%s" % (label, r.stdout + r.stderr))
+
+    def test_open_ask_marked_read_with_no_reply_is_still_listed(self):
+        # Mark read is the owner's dismiss, not an answer: page.html askDismissed keeps a thread shown while any member has no reply.
+        current, _ = self.current_and_behind()
+        for label, dismissed in (("dismissed true", True), ("dismissed at a time", "2026-11-07T10:00:00Z")):
+            for as_folder in (False, True):
+                with self.subTest(case=label, folder=as_folder):
+                    read = ask_doc("ask-dismissed", "2026-11-07T08:00:00Z", dismissed=dismissed)
+                    r = self.asks_run(current, self.asks_shaped([ASK_OPEN, read], as_folder))
+                    self.assertIn(open_ask_line(ASK_OPEN), r.stdout.splitlines(), "the open ask is not listed, so the run read no asks:\n" + r.stdout + r.stderr)
+                    self.assertEqual(self.listed_ask_ids(r.stdout), ["ask-dismissed", "ask-open"],
+                                     "%s: the ask marked read with no reply is not listed, oldest first:\n%s" % (label, r.stdout + r.stderr))
+
+    def test_open_ask_marked_read_with_a_reply_is_not_listed(self):
+        current, _ = self.current_and_behind()
+        answered = ask_doc("ask-answered-read", "2026-11-07T08:00:00Z", dismissed="2026-11-07T10:00:00Z", reply="Yes, ship it.")
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                r = self.asks_run(current, self.asks_shaped([ASK_OPEN, answered], as_folder))
+                self.assertIn(open_ask_line(ASK_OPEN), r.stdout.splitlines(), "the open ask is not listed, so the run read no asks:\n" + r.stdout + r.stderr)
+                self.assertNotIn("ask-answered-read", self.listed_ask_ids(r.stdout), "a marked-read ask with a reply is listed:\n" + r.stdout + r.stderr)
+
+    def test_open_ask_with_dismissed_null_or_false_is_listed(self):
+        current, _ = self.current_and_behind()
+        for label, dismissed in (("dismissed null", None), ("dismissed false", False)):
+            for as_folder in (False, True):
+                with self.subTest(case=label, folder=as_folder):
+                    kept = ask_doc("ask-undismissed", "2026-11-07T08:00:00Z", dismissed=dismissed)
+                    r = self.asks_run(current, self.asks_shaped([ASK_OPEN, kept], as_folder))
+                    self.assertEqual(self.listed_ask_ids(r.stdout), ["ask-undismissed", "ask-open"],
+                                     "%s: the ask is not listed:\n%s" % (label, r.stdout + r.stderr))
+
+    def test_open_ask_owner_reply_under_an_answer_with_no_reply_is_listed(self):
+        current, _ = self.current_and_behind()
+        answered = ask_doc("ask-answered", "2026-11-07T07:00:00Z", reply="Option a.")
+        owner = ask_doc("owner-reply", "2026-11-07T08:30:00Z", text="No, option b.", re="ask-answered")
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                r = self.asks_run(current, self.asks_shaped([answered, owner, ASK_OPEN], as_folder))
+                self.assertEqual(self.listed_ask_ids(r.stdout), ["owner-reply", "ask-open"],
+                                 "the owner reply under an answer is not listed like an ask:\n" + r.stdout + r.stderr)
+
+    def test_open_ask_folder_doc_with_no_id_field_is_listed_by_its_file_name(self):
+        current, _ = self.current_and_behind()
+        no_id = {key: value for key, value in ask_doc("ask-file", "2026-11-07T08:00:00Z").items() if key != "id"}
+        folder = self.docs_folder({"ask-file": no_id, ASK_OPEN["id"]: ASK_OPEN}, "asks")
+        r = self.asks_run(current, folder)
+        self.assertEqual(self.listed_ask_ids(r.stdout), ["ask-file", "ask-open"],
+                         "a folder ask with no id field is not listed by its file name:\n" + r.stdout + r.stderr)
+
+    def test_open_ask_full_size_lists_the_open_and_marked_read_asks_oldest_first(self):
+        current, _ = self.current_and_behind()
+        order = [(k * 17) % 40 for k in range(40)]  # a permutation of 0..39: the file order differs from the `at` order
+        open_asks = [ask_doc("open-%02d" % k, "2026-11-07T00:%02d:00Z" % k) for k in order]
+        replied = [ask_doc("replied-%02d" % k, "2026-11-07T01:%02d:00Z" % k, reply="Done.") for k in range(40)]
+        dismissed = [ask_doc("dismissed-%02d" % k, "2026-11-07T02:%02d:00Z" % k, dismissed=True) for k in range(40)]
+        want = ["open-%02d" % k for k in range(40)] + ["dismissed-%02d" % k for k in range(40)]  # marked read with no reply is open
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                r = self.asks_run(current, self.asks_shaped(open_asks + replied + dismissed, as_folder))
+                self.assertEqual(self.listed_ask_ids(r.stdout), want, "the 40 open and 40 marked-read asks are not listed oldest first, the replied ones out:\n" + r.stdout + r.stderr)
+                self.assert_page_word(r, "current", 1)
+
+    def test_open_ask_run_with_nothing_open_prints_only_the_verdict_line(self):
+        current, _ = self.current_and_behind()
+        quiet = [ASK_REPLIED, ask_doc("ask-answered-read", "2026-11-07T07:00:00Z", dismissed=True, reply="Done.")]
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                anchor = self.asks_run(current, self.asks_shaped([ASK_OPEN], as_folder))
+                self.assertEqual(self.listed_ask_ids(anchor.stdout), ["ask-open"], "the anchor run did not list the open ask:\n" + anchor.stdout + anchor.stderr)
+                for label, asks in (("replied and dismissed asks", quiet), ("an empty list of asks", [])):
+                    with self.subTest(label):
+                        r = self.asks_run(current, self.asks_shaped(asks, as_folder))
+                        self.assert_page_word(r, "current", 0)
+                        self.assertEqual(r.stdout.splitlines(), [self.page_line(r)],
+                                         "%s printed lines past the verdict:\n%s" % (label, r.stdout + r.stderr))
+
+    def test_open_ask_on_a_behind_page_keeps_exit_1_and_ends_with_fail(self):
+        _, behind = self.current_and_behind()
+        r = self.asks_run(behind, self.asks_shaped([ASK_OPEN], False))
+        self.assertIn(open_ask_line(ASK_OPEN), r.stdout.splitlines(), "the open ask is not listed:\n" + r.stdout + r.stderr)
+        self.assert_page_word(r, "behind", 1)
+        self.assert_fail_last(r)
+
+    def test_open_ask_on_an_unknown_page_keeps_exit_2_and_ends_with_fail(self):
+        empty = write_text(os.path.join(self.fetched, "empty.html"), "")
+        r = self.asks_run(empty, self.asks_shaped([ASK_OPEN], False))
+        self.assertIn(open_ask_line(ASK_OPEN), r.stdout.splitlines(), "the open ask is not listed:\n" + r.stdout + r.stderr)
+        self.assert_page_word(r, "unknown", 2)
+        self.assert_fail_last(r)
+
+    def test_open_ask_unreadable_list_prints_one_unknown_line_fail_and_exits_2(self):
+        current, _ = self.current_and_behind()
+        for label, text in (("malformed JSON", "[{"), ("a JSON object, not a list", "{}")):
+            with self.subTest(label):
+                path = write_text(os.path.join(tempfile.mkdtemp(dir=self.tmp.name, prefix="asks-"), "asks.json"), text)
+                r = self.asks_run(current, path)
+                self.assert_one_unknown(r, "open-ask")
+                self.assert_page_word(r, "current", 2)
+
+    def test_open_ask_folder_with_no_complete_marker_prints_one_unknown_line_fail_and_exits_2(self):
+        current, _ = self.current_and_behind()
+        folder = self.docs_folder({ASK_OPEN["id"]: ASK_OPEN}, "asks")
+        os.remove(os.path.join(folder, ".complete"))
+        r = self.asks_run(current, folder)
+        self.assert_one_unknown(r, "open-ask")
+        self.assert_page_word(r, "current", 2)
+
+    def test_open_ask_run_without_items_names_no_open_item(self):
+        current, _ = self.current_and_behind()
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                r = self.asks_run(current, self.asks_shaped([ASK_OPEN], as_folder))
+                self.assertIn(open_ask_line(ASK_OPEN), r.stdout.splitlines(), "the open ask is not listed:\n" + r.stdout + r.stderr)
+                self.assertEqual([line for line in r.stdout.splitlines() if line.startswith("open-item")], [],
+                                 "a run with no --items printed an open-item line:\n" + r.stdout + r.stderr)
+
+    def test_open_ask_non_object_entry_prints_one_unknown_line_and_still_lists_the_valid_asks(self):
+        # A null or string entry is not an ask, but skipping it would read a list that may hold an unseen ask as clear.
+        current, _ = self.current_and_behind()
+        for label, bad in (("a null entry", None), ("a string entry", "Which option?")):
+            for as_folder in (False, True):
+                with self.subTest(case=label, folder=as_folder):
+                    if as_folder:
+                        path = self.docs_folder({"ask-bad": bad, ASK_OPEN["id"]: ASK_OPEN}, "asks")
+                    else:
+                        path = self.list_file([bad, ASK_OPEN], "asks")
+                    r = self.asks_run(current, path)
+                    self.assertEqual(self.listed_ask_ids(r.stdout), ["ask-open"],
+                                     "%s: the valid ask is not listed on its own line:\n%s" % (label, r.stdout + r.stderr))
+                    self.assert_one_unknown(r, "open-ask")
+                    self.assert_page_word(r, "current", 2)
+
+    def test_open_ask_behind_page_with_an_unreadable_or_cut_short_list_keeps_exit_1_and_ends_with_fail(self):
+        # A behind page exits 1 for its own verdict. An unreadable asks list adds unknown and FAIL, and does not raise the exit to 2.
+        _, behind = self.current_and_behind()
+        for label, path in self.unreadable_asks_inputs():
+            with self.subTest(label):
+                r = self.asks_run(behind, path)
+                self.assert_one_unknown(r, "open-ask")
+                self.assert_page_word(r, "behind", 1)
+
+    def test_open_ask_unknown_page_with_an_unreadable_or_cut_short_list_keeps_exit_2_and_ends_with_fail(self):
+        empty = write_text(os.path.join(self.fetched, "empty.html"), "")
+        for label, path in self.unreadable_asks_inputs():
+            with self.subTest(label):
+                r = self.asks_run(empty, path)
+                self.assert_one_unknown(r, "open-ask")
+                self.assert_page_word(r, "unknown", 2)
+
+    def test_fail_text_one_listed_ask_says_route_each_or_name_its_holder(self):
+        current, _ = self.current_and_behind()
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                r = self.asks_run(current, self.asks_shaped([ASK_OPEN], as_folder))
+                self.assertEqual(self.open_ask_lines(r.stdout), [open_ask_line(ASK_OPEN)],
+                                 "the open ask is not listed once, so the run read no asks:\n" + r.stdout + r.stderr)
+                self.assert_page_word(r, "current", 1)
+                self.assert_fail_last(r, FAIL_ONE)
+
+    def test_fail_text_full_size_counts_asks_and_items_and_says_route_each_or_name_its_holder(self):
+        # 40 open asks and one open item with its kept answer make 41 listed lines, so the count is plural.
+        current, _ = self.current_and_behind()
+        asks = [ask_doc("ask-%02d" % k, "2026-11-06T08:%02d:00Z" % k) for k in range(40)]
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                items_arg, answers_arg = self.shaped([OPEN_ITEM], [(OPEN_ID, OPEN_ANSWER)], as_folder)
+                r = self.page_run(current, "--main", TEMPLATE, "--asks", self.asks_shaped(asks, as_folder),
+                                  "--items", items_arg, "--answers", answers_arg, env={})
+                self.assertEqual(len(self.open_ask_lines(r.stdout)), 40, "want 40 open-ask lines:\n" + r.stdout + r.stderr)
+                self.assertEqual(self.open_item_names(r.stdout), [(OPEN_N, OPEN_ID)],
+                                 "the open item is not named once, so the run read no item:\n" + r.stdout + r.stderr)
+                self.assert_page_word(r, "current", 1)
+                self.assert_fail_last(r, FAIL_MANY)
+
+    def test_fail_text_unreadable_list_line_is_unchanged(self):
+        # The unreadable list keeps its own FAIL line. The clause edit must not change it.
+        current, _ = self.current_and_behind()
+        for label, path in self.unreadable_asks_inputs():
+            with self.subTest(label):
+                r = self.asks_run(current, path)
+                self.assert_one_unknown(r, "open-ask")
+                self.assert_page_word(r, "current", 2)
+                self.assert_fail_last(r, FAIL_UNREADABLE)
+
+    def test_open_item_run_with_answers_and_no_items_prints_an_open_item_unknown_line_and_exits_2(self):
+        # --answers without --items cannot name an open item, so the run must say it read none, and must never read as clear.
+        current, _ = self.current_and_behind()
+        for label, asks, listed in (("only a replied ask", [ASK_REPLIED], []), ("an open ask", [ASK_OPEN], ["ask-open"])):
+            for as_folder in (False, True):
+                with self.subTest(case=label, folder=as_folder):
+                    answers = self.docs_folder({OPEN_ID: OPEN_ANSWER}, "answers") if as_folder else self.list_file([OPEN_ANSWER], "answers")
+                    r = self.page_run(current, "--main", TEMPLATE, "--asks", self.asks_shaped(asks, as_folder), "--answers", answers)
+                    self.assertEqual(self.listed_ask_ids(r.stdout), listed, "%s: the open asks differ:\n%s" % (label, r.stdout + r.stderr))
+                    self.assert_one_unknown(r, "open-item")
+                    self.assertEqual(self.open_item_names(r.stdout), [], "an open item is named without --items:\n" + r.stdout + r.stderr)
+                    self.assert_page_word(r, "current", 2)
+
+    # --items with --answers and --asks: the open-item lines.
+
+    def test_open_item_with_a_kept_answer_is_listed_in_both_shapes(self):
+        current, _ = self.current_and_behind()
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                r = self.open_item_run(current, [OPEN_ITEM], [(OPEN_ID, OPEN_ANSWER)], as_folder)
+                self.assertEqual(self.open_item_names(r.stdout), [(OPEN_N, OPEN_ID)],
+                                 "the open item with a kept answer is not named once:\n" + r.stdout + r.stderr)
+                self.assert_page_word(r, "current", 1)
+                self.assert_fail_last(r)
+
+    def test_open_item_with_a_non_blank_reply_is_not_listed(self):
+        item = decision_item(402, "replied-open", status="open", reply="Ship it.")
+        self.assert_open_items_named([item], [("replied-open", answer_for("replied-open", 402))], [],
+                                     "an open item with a non-blank reply")
+
+    def test_open_item_with_a_blank_reply_is_listed(self):
+        for label, reply in (("an empty reply", ""), ("a reply of spaces", "   ")):
+            with self.subTest(label):
+                item = decision_item(403, "blank-reply-open", status="open", reply=reply)
+                self.assert_open_items_named([item], [("blank-reply-open", answer_for("blank-reply-open", 403))], ["blank-reply-open"],
+                                             "an open item with %s" % label)
+
+    def test_open_item_on_a_busy_lane_is_not_listed(self):
+        item = decision_item(404, "lane-open", status="open", lane=LANE)
+        self.assert_open_items_named([item], [("lane-open", answer_for("lane-open", 404))], [], "an open item with a non-blank lane")
+
+    def test_open_item_with_a_blank_lane_is_listed(self):
+        item = decision_item(405, "blank-lane-open", status="open", lane="")
+        self.assert_open_items_named([item], [("blank-lane-open", answer_for("blank-lane-open", 405))], ["blank-lane-open"],
+                                     "an open item with an empty lane")
+
+    def test_open_item_with_truthy_waits_is_not_listed(self):
+        cases = (("a run in progress", {"repo": REPO, "run": RUN}, {RUN_ARGV: RUN_IN_PROGRESS}), ("a malformed value", "soon", {}))
+        for label, waits, gh_answers in cases:
+            with self.subTest(label):
+                env, _ = self.gh_env(gh_answers)
+                item = decision_item(406, "waits-open", status="open", waits=waits)
+                self.assert_open_items_named([item], [("waits-open", answer_for("waits-open", 406))], [],
+                                             "an open item with waits (%s)" % label, env=env)
+
+    def test_open_item_with_null_waits_is_listed(self):
+        env, _ = self.gh_env({})
+        item = decision_item(407, "null-waits-open", status="open", waits=None)
+        self.assert_open_items_named([item], [("null-waits-open", answer_for("null-waits-open", 407))], ["null-waits-open"],
+                                     "an open item with waits null", env=env)
+
+    def test_open_item_that_is_an_arbiter_ruling_is_not_listed(self):
+        item = decision_item(408, "arbiter-open", status="open", arbiter=True)
+        self.assert_open_items_named([item], [("arbiter-open", answer_for("arbiter-open", 408, choice="overturn"))], [],
+                                     "an open arbiter ruling with a kept answer")
+
+    def test_open_item_with_a_park_dot_id_answer_is_not_listed(self):
+        item = decision_item(409, "park.parked-open", status="open")
+        self.assert_open_items_named([item], [("park.parked-open", answer_for("park.parked-open", 409))], [],
+                                     "an open item whose answer has a park. id")
+
+    def test_open_item_with_a_parked_true_answer_is_not_listed(self):
+        item = decision_item(410, "parked-flag-open", status="open")
+        self.assert_open_items_named([item], [("parked-flag-open", answer_for("parked-flag-open", 410, parked=True))], [],
+                                     "an open item whose answer has parked: true")
+
+    def test_open_item_with_an_act_park_answer_is_not_listed(self):
+        item = decision_item(411, "act-park-open", status="open")
+        self.assert_open_items_named([item], [("act-park-open", answer_for("act-park-open", 411, act="park"))], [],
+                                     "an open item whose answer has act park")
+
+    def test_open_item_with_only_a_last_answer_is_not_listed(self):
+        item = decision_item(412, "last-only-open", status="open", lastAnswer={"choice": "a", "note": "x", "at": ANSWER_AT})
+        self.assert_open_items_named([item], [], [], "an open item with a lastAnswer and no kept answer")
+
+    def test_open_item_with_no_answer_is_not_listed(self):
+        item = decision_item(413, "fresh-open", status="open")
+        self.assert_open_items_named([item], [], [], "a fresh open item with no answer")
+
+    def test_open_item_closed_with_a_kept_answer_is_not_listed(self):
+        self.assert_open_items_named([INCIDENT], [(INCIDENT_ID, INCIDENT_ANSWER)], [], "a closed item with a kept answer")
+
+    def test_open_item_with_no_status_key_and_a_kept_answer_is_listed(self):
+        # Literal reading of the spec: an open item is one whose status is other than "closed", so no status key counts as open.
+        item = decision_item(414, "no-status-open", status=None)
+        self.assert_open_items_named([item], [("no-status-open", answer_for("no-status-open", 414))], ["no-status-open"],
+                                     "an item with no status key and a kept answer")
+
+    def test_open_item_full_size_names_only_the_open_ones_with_a_kept_answer(self):
+        items, answers, listed = [], [], []
+        for i in range(40):  # open, answer kept: named
+            item_id = "kept-%02d" % i
+            items.append(decision_item(500 + i, item_id, status="open"))
+            answers.append((item_id, answer_for(item_id, 500 + i)))
+            listed.append(item_id)
+        for i in range(40):  # open, lastAnswer only: not named
+            items.append(decision_item(540 + i, "last-%02d" % i, status="open", lastAnswer={"choice": "a", "note": "", "at": ANSWER_AT}))
+        for i in range(40):  # open, a reply and an answer kept: not named
+            item_id = "replied-%02d" % i
+            items.append(decision_item(580 + i, item_id, status="open", reply="Done."))
+            answers.append((item_id, answer_for(item_id, 580 + i)))
+        for i in range(40):  # closed, answer kept: a kept-answer line, never an open-item line
+            item_id = "closed-%02d" % i
+            items.append(decision_item(620 + i, item_id))
+            answers.append((item_id, answer_for(item_id, 620 + i)))
+        self.assert_open_items_named(items, answers, listed, "40 of each kind: open and kept, open with lastAnswer, open with a reply, closed and kept")
+
+    def test_open_item_with_no_answers_file_prints_one_unknown_line_fail_and_exits_2(self):
+        current, _ = self.current_and_behind()
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                items_arg = self.items_folder([OPEN_ITEM]) if as_folder else self.items_file([OPEN_ITEM])
+                r = self.wake_run(current, items_arg, None)
+                self.assert_one_unknown(r, "open-item")
+                self.assertEqual(self.open_item_names(r.stdout), [], "an open-item line is named without an answers file:\n" + r.stdout + r.stderr)
+                self.assert_page_word(r, "current", 2)
+
+    def test_open_item_unreadable_items_file_prints_one_unknown_line_fail_and_exits_2(self):
+        current, _ = self.current_and_behind()
+        for label, text in (("malformed JSON", "[{"), ("a JSON object, not a list", "{}")):
+            with self.subTest(label):
+                path = write_text(os.path.join(tempfile.mkdtemp(dir=self.tmp.name, prefix="items-"), "items.json"), text)
+                r = self.wake_run(current, path, self.list_file([OPEN_ANSWER], "answers"))
+                self.assert_one_unknown(r, "open-item")
+                self.assert_page_word(r, "current", 2)
+
+    def test_open_item_items_folder_with_no_complete_marker_prints_one_unknown_line_fail_and_exits_2(self):
+        current, _ = self.current_and_behind()
+        items = self.docs_folder({OPEN_ID: OPEN_ITEM}, "items")
+        os.remove(os.path.join(items, ".complete"))
+        r = self.wake_run(current, items, self.list_file([OPEN_ANSWER], "answers"))
+        self.assert_one_unknown(r, "open-item")
+        self.assert_page_word(r, "current", 2)
+
+    def test_open_item_unreadable_answers_file_prints_one_unknown_line_fail_and_exits_2(self):
+        current, _ = self.current_and_behind()
+        for label, text in (("malformed JSON", "[{"), ("a JSON object, not a list", "{}")):
+            with self.subTest(label):
+                path = write_text(os.path.join(tempfile.mkdtemp(dir=self.tmp.name, prefix="answers-"), "answers.json"), text)
+                r = self.wake_run(current, self.items_file([OPEN_ITEM]), path)
+                self.assert_one_unknown(r, "open-item")
+                self.assert_page_word(r, "current", 2)
+
+    def test_open_item_answers_folder_with_no_complete_marker_prints_one_unknown_line_fail_and_exits_2(self):
+        current, _ = self.current_and_behind()
+        answers = self.docs_folder({OPEN_ID: OPEN_ANSWER}, "answers")
+        os.remove(os.path.join(answers, ".complete"))
+        r = self.wake_run(current, self.items_file([OPEN_ITEM]), answers)
+        self.assert_one_unknown(r, "open-item")
+        self.assert_page_word(r, "current", 2)
+
+    def test_open_item_without_asks_keeps_the_unreadable_items_output_and_exit_0(self):
+        # Control: without --asks, an unreadable items file prints what it printed before the flag existed, with no open-item line.
+        current, _ = self.current_and_behind()
+        path = write_text(os.path.join(tempfile.mkdtemp(dir=self.tmp.name, prefix="items-"), "items.json"), "[{")
+        r = self.page_run(current, "--main", TEMPLATE, "--items", path, "--answers", self.list_file([OPEN_ANSWER], "answers"))
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual([line for line in r.stdout.splitlines() if line.startswith("open-item")], [],
+                         "a run without --asks printed an open-item line:\n" + r.stdout + r.stderr)
+        self.assert_no_fail(r)
+
+    def test_open_item_run_with_nothing_open_prints_only_the_verdict_line(self):
+        current, _ = self.current_and_behind()
+        quiet = [decision_item(421, "fresh-open", status="open"), decision_item(422, "quiet-closed")]
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                anchor = self.open_item_run(current, [OPEN_ITEM], [(OPEN_ID, OPEN_ANSWER)], as_folder)
+                self.assertEqual([item_id for _, item_id in self.open_item_names(anchor.stdout)], [OPEN_ID],
+                                 "the anchor run did not name the open item:\n" + anchor.stdout + anchor.stderr)
+                for label, items in (("open items with no answer and closed items", quiet), ("an empty items list", [])):
+                    with self.subTest(label):
+                        r = self.open_item_run(current, items, [], as_folder)
+                        self.assert_page_word(r, "current", 0)
+                        self.assertEqual(r.stdout.splitlines(), [self.page_line(r)],
+                                         "%s printed lines past the verdict:\n%s" % (label, r.stdout + r.stderr))
+
+    def test_open_item_without_asks_names_no_open_item_and_ends_with_no_fail(self):
+        # Control: the closed incident's kept-answer line shows the run read the answers, and no --asks means no open-item line.
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                r = self.paired_run([OPEN_ITEM], [(OPEN_ID, OPEN_ANSWER)], as_folder)
+                self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+                self.assertEqual(self.open_item_names(r.stdout), [], "a run without --asks named an open item:\n" + r.stdout + r.stderr)
+                self.assert_no_fail(r)
+                self.assert_page_word(r, "current", 0)
+
+
+    # --items, --answers and --asks: an open item with a lane or a reply is listed again when the owner answered after the
+    # writer routed or replied. Each boundary case runs beside a listed sibling, so each test is red on a build that never
+    # lists such an item, and the negatives are checked in the same run.
+
+    def test_open_item_on_a_lane_is_listed_only_when_its_kept_answer_is_later_than_its_last_answer(self):
+        # Later than lastAnswer.at: the owner answered again after the routing. At the same time or earlier: the routed answer.
+        routed = {"choice": "a", "note": "", "at": HANDLED_AT}
+        items = [decision_item(441, "lane-answer-later", status="open", lane=LANE, lastAnswer=routed),
+                 decision_item(442, "lane-answer-same", status="open", lane=LANE, lastAnswer=routed),
+                 decision_item(443, "lane-answer-earlier", status="open", lane=LANE, lastAnswer=routed)]
+        answers = [("lane-answer-later", answer_for("lane-answer-later", 441, at=LATER_AT)),
+                   ("lane-answer-same", answer_for("lane-answer-same", 442, at=HANDLED_AT)),
+                   ("lane-answer-earlier", answer_for("lane-answer-earlier", 443, at=EARLIER_AT))]
+        self.assert_open_items_named(items, answers, ["lane-answer-later"],
+                                         "an open lane item with a later, a same-time and an earlier kept answer")
+
+    def test_open_item_with_a_reply_is_listed_only_when_its_kept_answer_is_later_than_replied(self):
+        # Later than replied: the owner answered again after the reply. At the same time or earlier, the replied time is the later one.
+        items = [decision_item(444, "reply-answer-later", status="open", reply="Ship it.", replied=HANDLED_AT),
+                 decision_item(445, "reply-answer-same", status="open", reply="Ship it.", replied=HANDLED_AT),
+                 decision_item(446, "reply-replied-later", status="open", reply="Ship it.", replied=HANDLED_AT)]
+        answers = [("reply-answer-later", answer_for("reply-answer-later", 444, at=LATER_AT)),
+                   ("reply-answer-same", answer_for("reply-answer-same", 445, at=HANDLED_AT)),
+                   ("reply-replied-later", answer_for("reply-replied-later", 446, at=EARLIER_AT))]
+        self.assert_open_items_named(items, answers, ["reply-answer-later"],
+                                         "an open item with a reply, a kept answer later than replied, one at the same time and one earlier")
+
+    def test_open_item_on_a_lane_with_no_usable_last_answer_time_is_not_listed(self):
+        # The lane rule compares with lastAnswer.at. With no usable time the item stays out, however late the kept answer is.
+        items = [decision_item(447, "lane-valid", status="open", lane=LANE, lastAnswer={"choice": "a", "note": "", "at": HANDLED_AT}),
+                 decision_item(448, "lane-no-last-answer", status="open", lane=LANE),
+                 decision_item(449, "lane-no-at", status="open", lane=LANE, lastAnswer={"choice": "a", "note": ""}),
+                 decision_item(450, "lane-at-null", status="open", lane=LANE, lastAnswer={"choice": "a", "note": "", "at": None})]
+        answers = [(item["id"], answer_for(item["id"], item["n"], at=LATER_AT)) for item in items]
+        self.assert_open_items_named(items, answers, ["lane-valid"],
+                                         "an open lane item with no lastAnswer, no lastAnswer.at, and a null lastAnswer.at, each with a later kept answer")
+
+    def test_open_item_with_a_reply_and_no_usable_replied_time_is_not_listed(self):
+        # The reply rule compares with replied. With no usable time the item stays out, however late the kept answer is.
+        items = [decision_item(451, "reply-valid", status="open", reply="Ship it.", replied=HANDLED_AT),
+                 decision_item(452, "reply-no-replied", status="open", reply="Ship it."),
+                 decision_item(453, "reply-null-replied", status="open", reply="Ship it.", replied=None),
+                 decision_item(454, "reply-blank-replied", status="open", reply="Ship it.", replied="")]
+        answers = [(item["id"], answer_for(item["id"], item["n"], at=LATER_AT)) for item in items]
+        self.assert_open_items_named(items, answers, ["reply-valid"],
+                                         "an open item with a reply and no replied, a null replied and a blank replied, each with a later kept answer")
+
+    def test_open_item_with_an_unparseable_time_is_not_listed_and_never_a_traceback(self):
+        # A time that is not an ISO string is unusable: the item stays out, the run prints no traceback, and the valid lane sibling is listed.
+        current, _ = self.current_and_behind()
+        valid = decision_item(455, "lane-valid-time", status="open", lane=LANE, lastAnswer={"choice": "a", "note": "", "at": HANDLED_AT})
+        valid_answer = answer_for("lane-valid-time", 455, at=LATER_AT)
+        cases = (("a lastAnswer.at that is not a time", {"lane": LANE, "lastAnswer": {"choice": "a", "note": "", "at": "soon"}}, LATER_AT),
+                 ("a lastAnswer.at that is a number", {"lane": LANE, "lastAnswer": {"choice": "a", "note": "", "at": 1762509600}}, LATER_AT),
+                 ("a replied that is not a time", {"reply": "Ship it.", "replied": "yesterday"}, LATER_AT),
+                 ("a replied that is an impossible date", {"reply": "Ship it.", "replied": "2026-13-45T99:00:00Z"}, LATER_AT))
+        for as_folder in (False, True):
+            for n, (label, extra, answer_at) in enumerate(cases, start=456):
+                with self.subTest(case=label, folder=as_folder):
+                    item_id = "unparseable-%d" % n
+                    item = decision_item(n, item_id, status="open", **extra)
+                    r = self.open_item_run(current, [OPEN_ITEM, valid, item],
+                                           [(OPEN_ID, OPEN_ANSWER), (valid["id"], valid_answer), (item_id, answer_for(item_id, n, at=answer_at))],
+                                           as_folder)
+                    self.assertNotIn("Traceback", r.stdout + r.stderr, "%s: the run printed a traceback:\n%s" % (label, r.stdout + r.stderr))
+                    named = sorted(named_id for _, named_id in self.open_item_names(r.stdout))
+                    self.assertEqual(named, sorted([OPEN_ID, valid["id"]]),
+                                     "%s: the named open items differ from the expected ones:\n%s" % (label, r.stdout + r.stderr))
+
+    def test_open_item_whose_kept_answer_time_is_unreadable_is_unknown_and_exits_2(self):
+        # The kept answer's time is the only clock the item's reply is checked against. Unreadable, it cannot show the owner
+        # answered after the reply, so the item is unknown: never listed as handled, never read as clear.
+        current, _ = self.current_and_behind()
+        item = decision_item(457, "unreadable-kept-at", status="open", reply="Done.", replied="2026-11-07T09:00:00Z")
+        for as_folder in (False, True):
+            with self.subTest(folder=as_folder):
+                r = self.open_item_run(current, [OPEN_ITEM, item],
+                                       [(OPEN_ID, OPEN_ANSWER), (item["id"], answer_for(item["id"], item["n"], at="not-a-time"))], as_folder)
+                named = sorted(item_id for _, item_id in self.open_item_names(r.stdout))
+                self.assertIn(OPEN_ID, named, "the open item is not named, so the run read no item and answer:\n" + r.stdout + r.stderr)
+                self.assert_one_unknown(r, "open-item")
+                self.assertEqual(named, [OPEN_ID], "the item with an unreadable kept-answer time is named as an open item:\n" + r.stdout + r.stderr)
+                self.assertEqual(r.returncode, 2, "exit %d, want 2 for an unknown open item:\n%s" % (r.returncode, r.stdout + r.stderr))
+
 
 # Fixtures for the --items cases: a repo, a run that ended completed/failure, and the PR that run checked.
 REPO, RUN, PR = "shivinate7/q_max", "41861801325", 1011
@@ -1578,6 +2182,41 @@ def kept_lines(out):
 INCIDENT_N, INCIDENT_ID = 356, "round3-fail-holds"  # the incident: a closed decision whose answer was kept
 INCIDENT = decision_item(INCIDENT_N, INCIDENT_ID)
 INCIDENT_ANSWER = answer_for(INCIDENT_ID, INCIDENT_N)
+
+# Fixtures for the --asks cases. An ask doc is {id, text, at} plus any of reply, answered, re, dismissed. A folder doc's id is its
+# file name and a list entry's id is its id field, so the fixtures carry the id in both. ASK_OPEN is the ask every --asks case
+# expects to see listed, so a negative case has a line to check first.
+ASK_OPEN = {"id": "ask-open", "text": "Which option do you want?", "at": "2026-11-07T09:00:00Z"}
+ASK_REPLIED = {"id": "ask-replied", "text": "Ship it?", "at": "2026-11-07T08:00:00Z", "reply": "Yes, ship it."}
+
+
+def ask_doc(ask_id, at, text="A question for the owner?", **extra):
+    """An ask doc with id `ask_id`, asked at `at`, with the `extra` fields added."""
+    doc = {"id": ask_id, "text": text, "at": at}
+    doc.update(extra)
+    return doc
+
+
+def open_ask_line(ask):
+    """The line --asks prints for an ask with no reply: its id, its time and its text, newlines as spaces."""
+    return "open-ask: %s at %s: %s" % (ask["id"], ask["at"], ask["text"].replace("\n", " "))
+
+
+# The FAIL lines --asks prints, pinned as literal text and never read back from stale_pages.py: the count with its plural
+# suffixes, the clause that tells the writer what to do, and the unreadable-list line, which keeps its own wording.
+FAIL_ONE = "FAIL: 1 owner ask or item with no reply; route each, or name its holder, before this wake ends"
+FAIL_MANY = "FAIL: 41 owner asks or items with no reply; route each, or name its holder, before this wake ends"
+FAIL_UNREADABLE = "FAIL: the open asks could not be read; do not treat the page as clear"
+
+
+# The open item every --items, --answers and --asks case expects to see named: open, with its answer kept under answers/<id>.
+# OPEN_ITEM_RE takes the item number and id from an open-item line; its suffix is not pinned.
+OPEN_N, OPEN_ID = 401, "open-kept"
+OPEN_ITEM = decision_item(OPEN_N, OPEN_ID, status="open")
+OPEN_ANSWER = answer_for(OPEN_ID, OPEN_N)
+OPEN_ITEM_RE = re.compile(r"^open-item: item (\d+) \(([^)]*)\)")
+# The times the changed-answer cases compare: the writer routed or replied at HANDLED_AT, and a kept answer is later or earlier.
+HANDLED_AT, EARLIER_AT, LATER_AT = "2026-11-07T10:00:00Z", "2026-11-07T09:30:00Z", "2026-11-07T10:30:00Z"
 
 
 def load_stale_pages():
@@ -2063,6 +2702,16 @@ class UnreadStale(FolderCase):
         self.assert_unknown(rc, out, "woke")
         self.assert_no_listed_line(out, "an answer was listed against an unreadable woke")
 
+    def test_an_int_woke_20261112_checks_the_answers_as_main_does_and_is_not_unknown(self):
+        # Proves an int woke in YYYYMMDD form checks the answers by the date main reads from it: before that day the ask is listed (exit 1), after it not (exit 0). A read that calls the int unknown (exit 2) would drop a listed ask.
+        cases = ((EARLY, [unread_line("colour-pick", 143, "ops", EARLY, woke=20261112)], 1), ("2026-11-13T12:00:00Z", ["unread: clean"], 0))
+        for at, want, code in cases:
+            with self.subTest(answered=at):
+                self.store(meta={"writer": "triage", "woke": 20261112}, items=[item_entry("colour-pick", "open", n=143, owner="ops")],
+                           answers=[pick_answer_entry("colour-pick", at)])
+                rc, out = self.run_unread(codes=(0, 1, 2))
+                self.assertEqual((rc, output_lines(out)), (code, want), "meta woke 20261112 did not gate the answer as main does: %s" % out)
+
     def test_a_missing_file_is_unknown_and_exits_2(self):
         for name in ("meta", "items", "answers", "receipts"):
             with self.subTest(missing=name):
@@ -2119,6 +2768,16 @@ class UnreadStale(FolderCase):
         code, out, _, error = self.run_main("--unread", self.folder)
         self.assert_mode_lines(out, error)
         self.assertEqual((code, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "main() did not send --unread to its mode: " + out)
+
+
+class ParseUtcTime(unittest.TestCase):
+    """parse_utc reads an int date as main does: an int in YYYYMMDD form is the midnight of that day, not None. Main reads it through fromisoformat
+    on str(text), which takes the basic form from Python 3.11, the CI version."""
+
+    def test_an_int_date_reads_as_its_midnight_timestamp_as_main_reads_it(self):
+        stale = load_stale_pages()
+        got = stale.parse_utc(20261112)
+        self.assertEqual(got, datetime.datetime(2026, 11, 12).timestamp(), "parse_utc(20261112) is not main's timestamp for 2026-11-12: %r" % (got,))
 
 
 if __name__ == "__main__":
