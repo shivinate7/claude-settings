@@ -1,0 +1,10 @@
+{
+ "id": "own-810-subagent-writes-handoff",
+ "at": "2026-11-13T22:58:00-06:00",
+ "title": "A Sonnet subagent writes the handoff at each checkpoint; no claude -p premise",
+ "ruling": "Owner 22:52 CST Nov 13 (relayed by the consultant; triage did not see it), item 810: the handoff is written by a subagent at the thresholds that remind the session to edit it; today, as a stopgap, a Sonnet agent checks the transcript against the handoff, as for every session. The old reason for \"no model call\" is stale: model calls now work inside the app and session (the judges work that way), so claude -p is not needed. Consultant reading, not the owner's words: at each Stop-nudge checkpoint and after each compaction the hook refuses the Stop until the session has spawned one Sonnet subagent (a role allowed to write the handoff file) that reads the transcript since the last write plus the prior handoff and rewrites it; the session then reads it. Decision precompact-handoff item 4 is stale; a lane rewrites it in place.",
+ "quote": "i mean cant it just have a subagent doing the handoff write for it at the thresholds that remind it to edit its handoff? and currently as a stopgap dont i have it always run a sonnet agent to check its transcript vs its handoff just like for all of u rn given the model hooks rnt working well?",
+ "source": "Consultant message to triage 22:52 CST Nov 13 (relayed verbatim); filed by triage.",
+ "status": "open",
+ "step": "handoff-written-by-hook"
+}
