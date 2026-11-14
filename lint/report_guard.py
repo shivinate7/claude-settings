@@ -232,7 +232,7 @@ def _hooks_on_path():
 
 
 _hooks_on_path()
-from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with hooks/guard.py
+from shared_names import CONSULTANT_TAG, LANE_TAG  # noqa: E402  the one home of the lane and consultant tags, shared with hooks/guard.py
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -1177,10 +1177,13 @@ def mistake_problem(text):
 
 def _own_lane_read(path, own_id):
     """(is_lane, parent id): this session's own get_session record in the transcript. A lane carries the
-    tag cs-build:lane or a parent_session_id. No record reads as owner-facing."""
+    tag cs-build:lane or a parent_session_id. No record reads as owner-facing, and so does the consultant tag
+    even with a parent id."""
     import own_session
     tags, _tagged_after, parent = own_session.own_session_read(path, own_id)
-    return tags is not None and (LANE_TAG in tags or bool(parent)), parent
+    if tags is None or CONSULTANT_TAG in tags:
+        return False, None
+    return LANE_TAG in tags or bool(parent), parent
 
 
 PAGE_WRITER_ROLE = "triage"  # the session role that always writes the waiting page
