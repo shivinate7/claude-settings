@@ -1196,5 +1196,266 @@ sh("pwsh-r3 scanner twin: PowerShell tool, a call block that runs Remove-Item of
    "[pwsh-r3 green]",
    "& { Remove-Item hooks/test_x.py }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
    **dict(BR, cwd=TESTHOLD))
+# Builder: the comma after a quoted docs path joins it to a quoted test path, so the test path
+# is a write. The last row is the allow twin: both paths are outside the tests.
+sh("pwsh-r3-limits quoted comma: PowerShell tool, Set-Content of a quoted docs file, a comma, then a quoted test "
+   "path, is refused [pwsh-r3-limits red]",
+   'Set-Content "docs/a.md", "hooks/test_x.py" x', "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits quoted comma: PowerShell tool, Add-Content of a quoted docs file, a comma, then a quoted test "
+   "path, is refused [pwsh-r3-limits red]",
+   'Add-Content "docs/a.md", "hooks/test_x.py" x', "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits quoted comma control: PowerShell tool, Set-Content of two quoted docs files joined by a comma, "
+   "is allowed [pwsh-r3-limits green]",
+   'Set-Content "docs/a.md", "docs/b.md" x', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+# A listed `$_` that is a -Path source, an -InputObject value or an -Exclude filter is read or
+# text, never the target, so each of these ALLOWS. The twin writes `$_` as its -Destination and is REFUSED.
+sh("pwsh-r3-limits listing: PowerShell tool, Copy-Item of each listed hooks file as a -Path source into a docs "
+   "list, is allowed [pwsh-r3-limits red]",
+   "gci hooks | % { Copy-Item -Path $_.FullName -Destination docs/list.txt }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing: PowerShell tool, Out-File of each listed hooks file as -InputObject into a docs file, "
+   "is allowed [pwsh-r3-limits red]",
+   "gci hooks | % { Out-File -InputObject $_ docs/x.md }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing: PowerShell tool, Remove-Item of a docs file excluded by each listed name, is allowed "
+   "[pwsh-r3-limits red]",
+   "gci hooks | % { Remove-Item docs/x -Exclude $_.Name }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing twin: PowerShell tool, Copy-Item of a docs file onto each listed FullName, is refused "
+   "[pwsh-r3-limits green]",
+   "gci hooks | % { Copy-Item docs/x -Destination $_.FullName }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+# A pin with no red on the old code: a folder copy of each listed test file writes docs/test_x.py,
+# a test path, so it stays REFUSED. A fix that reads the -Path source must still refuse this folder destination.
+sh("pwsh-r3-limits listing pin: PowerShell tool, Copy-Item of each listed test file into a docs folder, is refused "
+   "[pwsh-r3-limits green]",
+   "gci hooks | % { Copy-Item -Path $_.FullName -Destination docs/ }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+# The listed folder is the one a listing names, through a filter, a Where-Object or Select-Object,
+# a colon-bound -Path:$_, a parenthesized $_, or a quoted $(...). Each hooks listing (it holds a test) is REFUSED.
+# Each docs twin of the same form holds no test and is ALLOWED.
+sh("pwsh-r3-limits listing: PowerShell tool, Set-Content of $_ from a filtered hooks listing, is refused "
+   "[pwsh-r3-limits red]",
+   "gci -Filter *.py hooks | % { Set-Content $_ x }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing: PowerShell tool, Set-Content of $_ after a Where-Object over a hooks listing, is refused "
+   "[pwsh-r3-limits red]",
+   "gci hooks | Where-Object { $_.Name -like '*.py' } | % { Set-Content $_ x }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing: PowerShell tool, Set-Content of $_.FullName after a Select-Object over a hooks listing, "
+   "is refused [pwsh-r3-limits red]",
+   "gci hooks | Select-Object -First 1 | % { Set-Content $_.FullName x }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing: PowerShell tool, Set-Content with a colon-bound -Path:$_ over a hooks listing, is refused "
+   "[pwsh-r3-limits red]",
+   "gci hooks | % { Set-Content -Path:$_ x }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing: PowerShell tool, Set-Content of a parenthesized $_.FullName over a hooks listing, is "
+   "refused [pwsh-r3-limits red]",
+   "gci hooks | % { Set-Content ($_.FullName) x }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing: PowerShell tool, Set-Content of a quoted $(...) of $_.FullName over a hooks listing, is "
+   "refused [pwsh-r3-limits red]",
+   'gci hooks | % { Set-Content "$($_.FullName)" x }', "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing control: PowerShell tool, Set-Content of $_ from a filtered docs listing with no test, "
+   "is allowed [pwsh-r3-limits green]",
+   "gci -Filter *.py docs | % { Set-Content $_ x }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing control: PowerShell tool, Set-Content of $_ after a Where-Object over a docs listing, "
+   "is allowed [pwsh-r3-limits green]",
+   "gci docs | Where-Object { $_.Name -like '*.md' } | % { Set-Content $_ x }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing control: PowerShell tool, Set-Content of $_.FullName after a Select-Object over a docs "
+   "listing, is allowed [pwsh-r3-limits green]",
+   "gci docs | Select-Object -First 1 | % { Set-Content $_.FullName x }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing control: PowerShell tool, Set-Content with -Path:$_ over a docs listing, is allowed "
+   "[pwsh-r3-limits green]",
+   "gci docs | % { Set-Content -Path:$_ x }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing control: PowerShell tool, Set-Content of a parenthesized $_.FullName over a docs listing, "
+   "is allowed [pwsh-r3-limits green]",
+   "gci docs | % { Set-Content ($_.FullName) x }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing control: PowerShell tool, Set-Content of a quoted $(...) of $_.FullName over a docs "
+   "listing, is allowed [pwsh-r3-limits green]",
+   'gci docs | % { Set-Content "$($_.FullName)" x }', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+# The command is the word after a cast, a parenthesis or `return`. Each write of a test path below
+# is REFUSED. Each docs twin of the same write is ALLOWED.
+sh("pwsh-r3-limits command: PowerShell tool, New-Item of a test path under a cast to void, is refused "
+   "[pwsh-r3-limits red]",
+   "[void] New-Item hooks/test_x.py", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits command: PowerShell tool, New-Item of a test path in parentheses under a cast to void, is refused "
+   "[pwsh-r3-limits red]",
+   "[void](New-Item hooks/test_x.py)", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits command: PowerShell tool, Set-Content of a test path after return, is refused "
+   "[pwsh-r3-limits red]",
+   "return Set-Content hooks/test_x.py x", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits command control: PowerShell tool, New-Item of a docs file under a cast to void, is allowed "
+   "[pwsh-r3-limits green]",
+   "[void] New-Item docs/a.md", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits command control: PowerShell tool, Set-Content of a docs file after return, is allowed "
+   "[pwsh-r3-limits green]",
+   "return Set-Content docs/a.md x", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+# A pin: a `#` inside a double-quoted string is text, so the if block after it still runs its
+# Remove-Item, and that test removal is REFUSED. The control removes a docs file and is ALLOWED.
+sh("pwsh-r3-limits scanner: PowerShell tool, a # and a brace inside a double-quoted string, then an if block that "
+   "runs Remove-Item of a test, is refused [pwsh-r3-limits green]",
+   'Write-Host "# {"; if ($x) { Remove-Item hooks/test_x.py }', "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits scanner control: PowerShell tool, the same line with Remove-Item of a docs file, is allowed "
+   "[pwsh-r3-limits green]",
+   'Write-Host "# {"; if ($x) { Remove-Item docs/x }', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+# PWSH-R3-LIMITS listed-target forms. A listed `$_` that is the target of a write is REFUSED, whether `ni` takes it
+# as a name, an -ErrorAction flag comes before it, a `return` sits in front of the command, or it is a braced `${_}`.
+# Each docs twin of the same form has no `$_` target and is ALLOWED. A `$_` that is only the value written into a
+# docs file is no target, so each of those ALLOWS (the -Path docs file is the target).
+sh("pwsh-r3-limits ni: PowerShell tool, ni of docs with each listed hooks file's Name, which creates a docs test "
+   "file, is refused [pwsh-r3-limits red]",
+   "gci hooks | % { ni docs $_.Name }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits ni control: PowerShell tool, ni of docs/x.md over a hooks listing, with no $_ target, is allowed "
+   "[pwsh-r3-limits green]",
+   "gci hooks | % { ni docs x.md }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits remove: PowerShell tool, Remove-Item of docs/x with each listed FullName as a second path, is "
+   "refused [pwsh-r3-limits red]",
+   "gci hooks | % { Remove-Item docs/x $_.FullName }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits remove control: PowerShell tool, Remove-Item of two docs paths over a hooks listing, with no $_ "
+   "target, is allowed [pwsh-r3-limits green]",
+   "gci hooks | % { Remove-Item docs/x docs/y.md }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits remove: PowerShell tool, Remove-Item of each listed FullName after a -ErrorAction flag, is refused "
+   "[pwsh-r3-limits red]",
+   "gci hooks | % { Remove-Item -ErrorAction SilentlyContinue $_.FullName }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits remove control: PowerShell tool, Remove-Item of a docs file after a -ErrorAction flag over a hooks "
+   "listing, is allowed [pwsh-r3-limits green]",
+   "gci hooks | % { Remove-Item -ErrorAction SilentlyContinue docs/x.md }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits copy: PowerShell tool, Copy-Item of each listed FullName after a -ErrorAction flag into a docs "
+   "folder, is refused [pwsh-r3-limits red]",
+   "gci hooks | % { Copy-Item $_.FullName -ErrorAction SilentlyContinue docs/ }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits copy control: PowerShell tool, Copy-Item of a docs file after a -ErrorAction flag into a docs "
+   "folder, over a hooks listing, is allowed [pwsh-r3-limits green]",
+   "gci hooks | % { Copy-Item docs/a.md -ErrorAction SilentlyContinue docs/ }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits set: PowerShell tool, Set-Content of each listed FullName after a -ErrorAction flag, is refused "
+   "[pwsh-r3-limits red]",
+   "gci hooks | % { Set-Content -ErrorAction SilentlyContinue $_.FullName x }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits set control: PowerShell tool, Set-Content of a docs file after a -ErrorAction flag over a hooks "
+   "listing, is allowed [pwsh-r3-limits green]",
+   "gci hooks | % { Set-Content -ErrorAction SilentlyContinue docs/x.md x }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing: PowerShell tool, Set-Content of $_ after a -ErrorAction flag on the listing, is "
+   "refused [pwsh-r3-limits red]",
+   "gci -ErrorAction SilentlyContinue hooks | % { Set-Content $_ x }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing control: PowerShell tool, Set-Content of a docs file after a -ErrorAction flag on the "
+   "listing, is allowed [pwsh-r3-limits green]",
+   "gci -ErrorAction SilentlyContinue hooks | % { Set-Content docs/x.md x }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits cast: PowerShell tool, Set-Content of a parenthesized $_.FullName.ToString() over a hooks "
+   "listing, is refused [pwsh-r3-limits red]",
+   "gci hooks | % { Set-Content ($_.FullName.ToString()) x }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits cast control: PowerShell tool, Set-Content of a parenthesized docs path over a hooks listing, is "
+   "allowed [pwsh-r3-limits green]",
+   'gci hooks | % { Set-Content ("docs/x.md") x }', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits brace: PowerShell tool, Set-Content of a braced ${_} over a hooks listing, is refused "
+   "[pwsh-r3-limits red]",
+   "gci hooks | % { Set-Content ${_} x }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits brace control: PowerShell tool, Set-Content of a quoted docs path over a hooks listing, is allowed "
+   "[pwsh-r3-limits green]",
+   'gci hooks | % { Set-Content "docs/x.md" x }', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits return pin: PowerShell tool, return ni of a test path inside a hooks listing, is refused "
+   "[pwsh-r3-limits green]",
+   "gci hooks | % { return ni hooks/test_x.py }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits return control: PowerShell tool, return ni of a docs file inside a hooks listing, is allowed "
+   "[pwsh-r3-limits green]",
+   "gci hooks | % { return ni docs/x.md }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits value: PowerShell tool, Add-Content of each listed Name as the value of a docs list file, is "
+   "allowed [pwsh-r3-limits red]",
+   "gci hooks | % { Add-Content -Path docs/list.txt $_.Name }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits value control: PowerShell tool, Add-Content of a fixed value to a docs list file over a hooks "
+   "listing, is allowed [pwsh-r3-limits green]",
+   "gci hooks | % { Add-Content -Path docs/list.txt x }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits value: PowerShell tool, Set-Content of each listed file as the value of a docs list file, is "
+   "allowed [pwsh-r3-limits red]",
+   "gci hooks | % { Set-Content -Path docs/list.txt $_ }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits value control: PowerShell tool, Set-Content of a fixed value to a docs list file over a hooks "
+   "listing, is allowed [pwsh-r3-limits green]",
+   "gci hooks | % { Set-Content -Path docs/list.txt x }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+# The unknown-flag gap: a valued flag may take the next word, so a listed `$_` after it can
+# be the write target. -ProgressAction is a common parameter that takes a value; -SomeNewFlag is made up, so the
+# fix cannot rest on a closed list of flags.
+sh("pwsh-r3-limits r2 flag: PowerShell tool, Set-Content of each listed file after -ProgressAction Ignore is "
+   "refused [pwsh-r3-limits r2 red]",
+   "gci hooks | % { Set-Content -ProgressAction Ignore $_ x }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 flag: PowerShell tool, Add-Content of each listed file after -ProgressAction Ignore is "
+   "refused [pwsh-r3-limits r2 red]",
+   "gci hooks | % { Add-Content -ProgressAction Ignore $_ x }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 flag: PowerShell tool, Out-File of each listed file after -ProgressAction Ignore is "
+   "refused [pwsh-r3-limits r2 red]",
+   "gci hooks | % { Out-File -ProgressAction Ignore $_ x }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 flag: PowerShell tool, ni -Type File of docs with each listed Name is refused "
+   "[pwsh-r3-limits r2 red]",
+   "gci hooks | % { ni -Type File docs $_.Name }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 flag: PowerShell tool, Set-Content of each listed file after a -ProgressAction flag on the "
+   "listing is refused [pwsh-r3-limits r2 red]",
+   "gci -ProgressAction Ignore hooks | % { Set-Content $_ x }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 flag: PowerShell tool, Set-Content of each listed file after a made-up valued flag is refused "
+   "[pwsh-r3-limits r2 red]",
+   "gci hooks | % { Set-Content -SomeNewFlag v $_ x }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+# The group gap: a path inside a `( )` group is read by its own command, so it is no write
+# target of the outer command. Each allow row writes a docs file (or a list) and only reads the hooks file.
+sh("pwsh-r3-limits r2 group: PowerShell tool, Set-Content of a docs file whose value is a group that reads a test "
+   "file is allowed [pwsh-r3-limits r2 red]",
+   "Set-Content docs/a.md (Get-Content hooks/test_x.py)", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 group: PowerShell tool, Add-Content of a docs file whose value is a group that reads a test "
+   "file, with gc, is allowed [pwsh-r3-limits r2 red]",
+   "Add-Content docs/a.md (gc hooks/test_x.py)", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 group: PowerShell tool, ni of a docs file with -Value a group that reads a test file is "
+   "allowed [pwsh-r3-limits r2 red]",
+   "ni docs/x.md -Value (gc hooks/test_x.py)", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 group: PowerShell tool, Out-File of a docs file with -InputObject a group that reads a test "
+   "file is allowed [pwsh-r3-limits r2 red]",
+   "Out-File docs/a.md -InputObject (Get-Content hooks/test_x.py)", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 group pin: PowerShell tool, Remove-Item of a test file inside a [void] group is refused "
+   "[pwsh-r3-limits r2 green]",
+   "[void](Remove-Item hooks/test_x.py)", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 group pin: PowerShell tool, rm of a test file inside a return group is refused "
+   "[pwsh-r3-limits r2 green]",
+   "return (rm hooks/test_x.py)", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 group pin: PowerShell tool, New-Item of a test file inside a [void] group is refused "
+   "[pwsh-r3-limits r2 green]",
+   "[void](New-Item -Path hooks -Name test_z.py)", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 group pin: PowerShell tool, Set-Content whose -Path is a group that gets a test file is "
+   "refused [pwsh-r3-limits r2 green]",
+   "Set-Content (Get-Item hooks/test_x.py) x", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+# The copy alias and the comma list: `cp` is the Copy-Item alias, so a listed FullName is the
+# source and a docs folder is the destination. A comma list in a written value is text, not paths.
+sh("pwsh-r3-limits r2 copy: PowerShell tool, cp of each listed FullName to a docs file is allowed "
+   "[pwsh-r3-limits r2 red]",
+   "gci hooks | % { cp $_.FullName docs/x.md }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 list: PowerShell tool, Add-Content of a docs file whose value is a comma list of two test "
+   "paths is allowed [pwsh-r3-limits r2 red]",
+   'Add-Content docs/list.md "hooks/test_x.py", "hooks/test_y.py"', "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
 
 # ---- the diff, judged at commit, push and SubagentStop

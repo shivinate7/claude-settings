@@ -1138,6 +1138,28 @@ sh("frozen shell: PowerShell tool, ni assigned to a variable, onto the config se
    "$f=ni " + CFG_SETTINGS, "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
 sh("frozen shell: PowerShell tool, ni cast to void, onto the config settings denies [pwsh-r3 red]",
    "[void] ni " + CFG_SETTINGS, "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+# Frozen: a comma after a quoted word joins it to the next word, so a frozen path in quotes
+# after that comma is a write. The last row is the allow twin: both paths are non-frozen.
+sh("frozen shell: PowerShell tool, Set-Content of a quoted docs file, a comma, then the config settings in quotes, "
+   "denies [pwsh-r3-limits red]",
+   'Set-Content "docs/a.md", "' + CFG_SETTINGS + '" x', "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, Add-Content of a quoted docs file, a comma, then the config settings in quotes, "
+   "denies [pwsh-r3-limits red]",
+   'Add-Content "docs/a.md", "' + CFG_SETTINGS + '" x', "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen pin: PowerShell tool, Set-Content of two quoted docs files joined by a comma, allows "
+   "[pwsh-r3-limits green]",
+   'Set-Content "docs/a.md", "docs/b.md" x', "allow", tool="PowerShell", cwd=NOGIT)
+# Frozen, the group gap: a frozen path inside a `( )` group is a read of that group's command,
+# so it is no write target of the outer command. The pins write the frozen path through the group, so they stay denied.
+sh("frozen allow: PowerShell tool, Set-Content into a backup file whose value is a group that reads the config "
+   "settings is allowed [pwsh-r3-limits r2 red]",
+   "Set-Content backup.json (Get-Content " + CFG_SETTINGS + ")", "allow", tool="PowerShell", cwd=NOGIT)
+sh("frozen allow: PowerShell tool, Copy-Item of a group that reads the config settings into a backup file is "
+   "allowed [pwsh-r3-limits r2 red]",
+   "Copy-Item (Get-Item " + CFG_SETTINGS + ") backup.json", "allow", tool="PowerShell", cwd=NOGIT)
+sh("frozen pin: PowerShell tool, Set-Content whose -Path is a group that gets the config settings denies "
+   "[pwsh-r3-limits r2 green]",
+   "Set-Content (Get-Item " + CFG_SETTINGS + ") x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
 
 # A FROZEN PATH HELD IN A SHELL VARIABLE, written by a script that a `python -c` or `node -e` runs. The guard
 # expands `$F` in the command text, so the script's own text names the frozen hook, and the write denies. The
