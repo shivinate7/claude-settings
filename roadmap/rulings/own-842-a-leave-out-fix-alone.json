@@ -1,0 +1,10 @@
+{
+ "id": "own-842-a-leave-out-fix-alone",
+ "at": "2026-11-14T16:30:57-06:00",
+ "title": "Leave #3224 and #3308 out of #3418 and fix each in its own lane, then merge each alone.",
+ "ruling": "Owner, page item 842 (pick-3418-closed-grant-members), option a, saved on the page at 16:30 CST Nov 14 with no note: leave #3224 and #3308 out of the combined PR #3418 now and fix each in its own lane (the receiver's routed case counts; the owning session's own count before the receiver reports done is refused), then merge each alone. Options b (keep both in, widens) and c (hold the whole combine until both are fixed) are not chosen. Basis: rulings own-748-b-rule-4 and own-753-a-relayed-grant-entry, which #3224 and #3308 implement. The grant covers these two PRs and this one narrow path; nothing wider. The coordinator rebuilds #3418 without the two; its new review chain follows.",
+ "quote": "a",
+ "source": "waiting/answers/pick-3418-closed-grant-members.json (22:30:57Z Nov 14, choice a, optionId leave-two-out-fix-each). Owner.",
+ "status": "open",
+ "step": "page-grant-closed-item-leftovers"
+}
