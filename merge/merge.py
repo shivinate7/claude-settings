@@ -127,17 +127,21 @@
                           one line per `priority: <slug> | pr: <owner>/<repo>#<N>` or `priority: <slug> | branch: <name> [| repo: <owner>/<repo>]` row
                           (FILE, or `-` for stdin), then a summary: `ok`, `waiting` (a run still going), `done` (merged into main), `flag` or `unknown`.
                           A flag: the row names no pr or branch (no read), the PR is closed and not on main, merged into another base, a draft, dirty
-                          (conflicts), behind its base, blocked (GitHub refuses the merge), or a newest run per name is red; a branch with no open PR is
-                          judged by its newest closed PR (merged into main: done; merged elsewhere or closed: flag; none: flag). Unknown, never ok: a read
-                          failed, the row names another repo (no read, a branch row's `repo:` too), GitHub has not computed the merge state, a ready clean
-                          head shows no run, two open PRs have the branch, or the row names more than one pr or branch (no read). A draft that is also
+                          (conflicts), behind its base, or a newest run per name is red. A blocked head reads its runs: red is a flag, pending is waiting,
+                          all green is a flag (blocked), none is unknown. A branch with no open PR is judged by its newest closed PR (merged into main:
+                          done, unless the local origin/<branch> ref names a sha other than that PR's head: flag, branch reused after merge; merged
+                          elsewhere or closed: flag; none: flag). Unknown, never ok: a read failed, the row names another repo (no read, a branch row's
+                          `repo:` too), this checkout's repo cannot be named (no read), the row names an empty `branch:` or `repo:` value (no read),
+                          GitHub has not computed the merge state, a ready clean or blocked head shows no run, two open PRs have the branch, or the row
+                          names more than one pr or branch (no read). A draft that is also
                           dirty prints both. No rows, or a file that is missing or empty, exits 1 with `no rows`, never clear. Exit 0 only when every row is ok,
                           waiting or done. Reads the PR and runs the way --reviewed does (Host.pr, Host.runs, Host.judge_runs). Stands alone (-C and --config
                           allowed); takes no lock and no merge role, merges and posts nothing, writes no file; any session may run it, the batch runner
                           at each wake. Cost per call: at most two reads per `pr:` row (the pull request; the runs on its head only when the verdict needs
-                          them: a row that is merged, closed, a draft, dirty, behind, blocked or unknown reads the pull request alone). Branch rows: one shared
+                          them: a row that is merged, closed, a draft, dirty, behind or unknown reads the pull request alone). Branch rows: one shared
                           read of the open pull list per call (one call per 100 PRs), then two reads per row with an open match, or one closed read
-                          (`pulls?state=closed&head=<owner>:<branch>&per_page=1`) for a row with none. No timer, process or file.
+                          (`pulls?state=closed&head=<owner>:<branch>&per_page=1`) for a row with none, plus one local `git rev-parse` of origin/<branch>
+                          when that PR merged into main. No timer, process or file.
   merge --idle-lanes --live FILE
                           lane lines (a lane the roadmap's live file shows done and safe to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step's status is set to todo or done), then a summary line. A lane that waits (a step not done, an open pull, an open item) prints no line, except a lane only stale drafts hold: that prints one `joint (close #N ...; archive archive/<branch> ...; archive lane <id>)` line, counted among the lanes to archive. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -4349,9 +4353,10 @@ PRIORITY_PR = re.compile(r"([\w.-]+/[\w.-]+)#(\d+)")
 PRIORITY_REPO = re.compile(r"[\w.-]+/[\w.-]+")
 # The owner's rulings name main as where work must land; a repo whose default branch is another name would read its own work as not landed.
 PRIORITY_LANDS_ON = "main"
-# Merge states whose verdict the newest run per name decides. BLOCKED is a flag of its own, since GitHub refuses that merge whatever the runs say.
+# Merge states whose verdict the newest run per name decides. GitHub reads BLOCKED while a required run is still going, so BLOCKED reads the runs
+# too; only a BLOCKED head whose runs are all green is a flag, since then something other than the runs refuses the merge.
 # A state outside this list and outside the earlier branches is unknown, never ok.
-PRIORITY_RUN_STATES = ("CLEAN", "UNSTABLE", "HAS_HOOKS")
+PRIORITY_RUN_STATES = ("CLEAN", "UNSTABLE", "HAS_HOOKS", "BLOCKED")
 
 def priority_row(line):
     """-> (slug, targets, repo) of one `priority: <slug> | key: value | ...` row. `targets` is the value of every `pr` and `branch` key, in order (a
@@ -4387,8 +4392,6 @@ def priority_verdict(h, number):
         return "unknown", "GitHub has not computed the merge state yet"
     if info["merge_state"] == "BEHIND":
         return "flag", "behind base"
-    if info["merge_state"] == "BLOCKED":
-        return "flag", "blocked: GitHub refuses the merge"
     if info["merge_state"] not in PRIORITY_RUN_STATES:
         return "unknown", f"merge state {info['merge_state'].lower()} is not one this read judges"
     runs = h.runs(info["head"])
@@ -4399,11 +4402,14 @@ def priority_verdict(h, number):
         return "flag", "; ".join(red)
     if pending:
         return "waiting", ", ".join(pending)
+    if info["merge_state"] == "BLOCKED":
+        return "flag", "blocked: GitHub refuses the merge though the runs are green"
     return "ok", "ready, clean, runs green"
 
-def priority_closed_branch(h, here, branch):
+def priority_closed_branch(h, here, branch, repo_dir=None):
     """-> (verdict, why) of a branch with no open pull request: one read of the newest closed pull request with that head. Merged into main is done,
-    merged elsewhere or closed is a flag, none is a flag. A failed read raises."""
+    unless the local `origin/<branch>` ref names a sha other than that pull request's head: the branch was pushed again after the merge, so that
+    work is not on main. Merged elsewhere or closed is a flag, none is a flag. A failed read raises."""
     c, out = h.api("pulls", fields={"state": "closed", "head": f"{here.split('/')[0]}:{branch}", "per_page": 1})
     try:
         if c:
@@ -4415,15 +4421,25 @@ def priority_closed_branch(h, here, branch):
         raise Stop(f"reading the closed pull requests of {branch} failed: {e} " + UNKNOWN_CITE)
     if not found:
         return "flag", f"no pull request has the head {branch}"
-    if found[0].get("merged_at"):
-        return priority_landed(found[0]["base"]["ref"], "merged")
-    return "flag", "closed, not on main"
+    if not found[0].get("merged_at"):
+        return "flag", "closed, not on main"
+    verdict, why = priority_landed(found[0]["base"]["ref"], "merged")
+    if verdict == "done":
+        # A local read only: a missing ref and a failed git read both mean the branch was deleted after its merge, the usual case.
+        try:
+            c, out = sh(["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}^{{commit}}"], cwd=repo_dir)
+        except (OSError, subprocess.SubprocessError):
+            c, out = 1, ""
+        sha = out.split()[0] if out.split() else ""  # stdout comes first; a stderr warning after it never reads as the sha
+        if not c and sha and sha != (found[0].get("head") or {}).get("sha"):
+            return "flag", "branch reused after merge, no open PR"
+    return verdict, why
 
 def priority_rows(source, repo_dir=None, host=None):
     """merge --priority-rows: one verdict line per `priority:` row of the file SOURCE (`-` is stdin), then a summary. Verdicts: ok, waiting, done, flag, unknown.
     Exit 0 only when every row is ok, waiting or done. No rows, or a file that is missing or empty, exits 1: never clear.
     Cost: the reads priority_verdict makes per pull request row; for branch rows one shared open-pull list read per call, then one closed read for a row
-    that no open pull request matches. It writes nothing and takes no lock."""
+    that no open pull request matches, and one local `git rev-parse` when that closed read finds it merged into main. It writes nothing and takes no lock."""
     try:
         text = sys.stdin.read() if source == "-" else pathlib.Path(source).read_text(encoding="utf-8", errors="replace")
     except OSError as e:
@@ -4450,7 +4466,7 @@ def priority_rows(source, repo_dir=None, host=None):
         hits = [n for n, info in opened[0] if info["branch"] == branch]
         if len(hits) > 1:
             return None, ("unknown", f"{len(hits)} open pull requests have the head {branch}")
-        return (hits[0], None) if hits else (None, priority_closed_branch(h, here, branch))
+        return (hits[0], None) if hits else (None, priority_closed_branch(h, here, branch, repo_dir))
 
     lines, counts = [], {k: 0 for k in ("ok", "waiting", "done", "flag", "unknown")}
     for row in rows:
@@ -4459,7 +4475,9 @@ def priority_rows(source, repo_dir=None, host=None):
         else:
             slug, targets, repo = priority_row(row)
             try:
-                if not targets:
+                if any(k == "branch" and not v for k, v in targets) or repo == "":
+                    verdict, why = "unknown", "row names an empty value"
+                elif not targets:
                     verdict, why = "flag", "row names no branch or pr"
                 elif len(targets) > 1:
                     verdict, why = "unknown", "row names more than one target"
@@ -4472,8 +4490,10 @@ def priority_rows(source, repo_dir=None, host=None):
                     else:
                         verdict, why = priority_verdict(h, int(m.group(2)))
                         slug += f" #{m.group(2)}"
+                elif not here:
+                    verdict, why = "unknown", "this checkout's repo cannot be read, so the branch is not read"
                 elif repo is not None and repo.lower() != here:
-                    verdict, why = "unknown", (f"{repo} is not this checkout's repo, so it is not read" if here else "this checkout's repo cannot be read, so the branch is not read")
+                    verdict, why = "unknown", f"{repo} is not this checkout's repo, so it is not read"
                 else:
                     number, early = by_branch(targets[0][1])
                     verdict, why = early or priority_verdict(h, number)
