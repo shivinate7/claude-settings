@@ -58,12 +58,13 @@ the desktop app has none.
   than stored opens a gate and prints {"decision": "block", "reason": ...}: spawn the Sonnet
   subagent of the prompt file's steps 3-4. A lower bucket (after compaction) is stored silently.
   The gate stays open, across Stops, until a main-session Agent or Task call on Sonnet (its brief's
-  first non-blank line not `Audit:`, its result no error) follows the checkpoint and the newest
-  compact_boundary and the handoff's mtime is newer than both. A compact_boundary newer than the handoff
-  opens its own gate, kept apart ("compact": {"ts", "n"}), and a new boundary resets its count. Each
-  gate refuses 3 times; the next Stop passes with a stderr line. An unreadable transcript passes
-  at once. Cost: one extra small JSON file read (~/.claude.json) and one more read of the
-  transcript at each Stop; no process start, no file written beyond the nudge state.
+  first non-blank line not `Audit:`, its brief naming the handoff path, its result no error) follows the
+  checkpoint and the newest compact_boundary and the handoff's mtime is newer than both. Each
+  compact_boundary opens its own gate, kept apart ("compact": {"ix", "n", "done"}) and ordered by
+  record place, with the same satisfaction; a new boundary starts a new count. Each gate refuses 3
+  times; the next Stop passes with a stderr line. An unreadable transcript passes at once. Cost: one
+  extra small JSON file read (~/.claude.json) at each Stop, and a second transcript read only while a
+  gate is open; no process start, no file written beyond the nudge state.
   The same Stop also checks the handoff's sections: when the session's handoff exists and
   missing_sections() finds a required section absent, it blocks once per handoff mtime, naming the
   missing ones, and keeps that mtime as "sections_mtime" in the same <session_id>.nudge.json (no new
@@ -1002,11 +1003,13 @@ def window_limit(model=None):
 
 
 def _checkpoint_facts(payload, state):
-    """(size, messages, index, time) when the context size passed a new checkpoint, else None. Index
-    counts the transcript's parsed entries, as _transcript.read_transcript does, so it addresses the same
-    record there; time is that entry's epoch seconds or None. Sets state["bucket"] when the transcript
-    gave a size."""
-    size = overhead = model = at = None
+    """(facts, boundary). facts is (size, messages, index, time) when the context size passed a new
+    checkpoint, else None. Index counts the transcript's parsed entries, as _transcript.read_transcript
+    does, so it addresses the same record there; time is that entry's epoch seconds or None. boundary is
+    (index, epoch time or None) of the newest main-session compact_boundary record, else None: read in
+    this pass, so a Stop with no gate open parses the transcript once. Sets state["bucket"] when the
+    transcript gave a size."""
+    size = overhead = model = at = boundary = None
     index = -1
     with open(payload.get("transcript_path", ""), "r", encoding="utf-8") as f:
         for line in f:
@@ -1017,6 +1020,9 @@ def _checkpoint_facts(payload, state):
             if not isinstance(entry, dict):
                 continue
             index += 1
+            if entry.get("type") == "system" and entry.get("subtype") == "compact_boundary" \
+                    and not entry.get("isSidechain") and not entry.get("agent_id"):
+                boundary = (index, _entry_time(entry))
             if entry.get("type") != "assistant" or entry.get("isSidechain") is True:
                 continue
             msg = entry.get("message") or {}
@@ -1032,7 +1038,7 @@ def _checkpoint_facts(payload, state):
                 model = msg.get("model") or model
                 at = (index, _entry_time(entry))
     if size is None:
-        return None
+        return None, boundary
     # Proxy (record hook-inputs-carry-token-counts): the first turn is mostly overhead.
     messages = max(size - overhead, 0)
     if messages == 0:
@@ -1045,7 +1051,7 @@ def _checkpoint_facts(payload, state):
     except Exception:
         stored = -1
     state["bucket"] = bucket
-    return (size, messages) + at if bucket > stored else None
+    return ((size, messages) + at if bucket > stored else None), boundary
 
 
 def _unflagged_missing(session_id, state):
@@ -1083,11 +1089,11 @@ def _is_audit_brief(prompt):
     return False
 
 
-def _gate_scan(transcript_path):
-    """(spawns, boundary) of the main session. A spawn is an Agent or Task call on Sonnet whose brief is
-    no audit: {"index", "time", "returned", "failed"}, with returned/failed read from its tool_result
-    (`_transcript.failed_tool_use_ids`). Boundary is (index, epoch time or None) of the newest
-    compact_boundary record, else None. Index is the record's place in `_transcript.read_transcript`.
+def _gate_scan(transcript_path, handoff):
+    """The spawns of the main session: Agent or Task calls on Sonnet whose brief names `handoff` (the
+    session's handoff path: a spawn for other work never counts) and is no audit:
+    {"index", "time", "returned", "failed"}, with returned/failed read from the call's tool_result
+    (`_transcript.failed_tool_use_ids`). Index is the record's place in `_transcript.read_transcript`.
     Raises OSError when the transcript cannot be read."""
     lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
     if lint not in sys.path:
@@ -1097,22 +1103,20 @@ def _gate_scan(transcript_path):
     failed = _transcript.failed_tool_use_ids(records)
     returned = {b.get("tool_use_id") for r in records if r.get("type") == "user"
                 for b in _transcript.tool_results(r)}
-    spawns, boundary = [], None
+    spawns = []
     for index, rec in enumerate(records):
         if rec.get("isSidechain") or rec.get("agent_id"):
-            continue
-        if rec.get("type") == "system" and rec.get("subtype") == "compact_boundary":
-            boundary = (index, _entry_time(rec))
             continue
         for use in _transcript.tool_uses(rec):
             given = use.get("input")
             if use.get("name") not in SUBAGENT_TOOLS or not isinstance(given, dict):
                 continue
-            if "sonnet" not in str(given.get("model") or "").lower() or _is_audit_brief(given.get("prompt")):
+            if "sonnet" not in str(given.get("model") or "").lower() or _is_audit_brief(given.get("prompt")) \
+                    or handoff not in str(given.get("prompt") or ""):
                 continue
             spawns.append({"index": index, "time": _entry_time(rec), "returned": use.get("id") in returned,
                            "failed": use.get("id") in failed})
-    return spawns, boundary
+    return spawns
 
 
 def _classify(spawns, anchor, boundary, mtime):
@@ -1156,28 +1160,37 @@ def _gate_reason(payload, refusal, kind, what, size_note):
     return "%s (refusal %d of %d) %s (decision precompact-handoff)" % (lead, refusal, GATE_MAX_REFUSALS, route)
 
 
-def _gate(payload, state, crossing):
+def _gate(payload, state, crossing, boundary):
     """(refusal number, kind, gate name) when this Stop is refused, else None. Updates the gate records
     in `state`. Two gates, each refused at most GATE_MAX_REFUSALS times, whatever stop_hook_active says:
-    a Stop after the last refusal passes with a stderr line, and the record then stays at a count above
-    the cap, so it is silent. `crossing` is (record place, time) of the entry that opened a checkpoint now.
-    - state["pending"]: a checkpoint opened and not yet satisfied. Satisfied by a Sonnet spawn
-      (_gate_scan) that follows the checkpoint and the newest compaction, whose result is no error, with
-      the handoff newer than both. The checkpoint's record place ("ix") and time ("ts") are stored,
-      so a later Stop finds the same checkpoint.
-    - state["compact"]: the newest compact_boundary. Satisfied by a handoff newer than it.
+    a Stop after the last refusal passes with a stderr line. `crossing` is (record place, time) of the
+    entry that opened a checkpoint now. `boundary` is the newest compact_boundary, (record place, time or
+    None), from _checkpoint_facts. The transcript is scanned (_gate_scan) only when a gate is open.
+    - state["pending"]: a checkpoint opened and not yet satisfied; its record place ("ix") and time
+      ("ts") are stored, so a later Stop finds the same checkpoint. Satisfied by a Sonnet spawn that
+      follows the checkpoint and the newest compaction, whose result is no error, with the handoff newer
+      than both. An exhausted record is dropped.
+    - state["compact"]: the newest compact_boundary, by its record place ("ix"), so a boundary with no
+      time still gates. Satisfied the same way, by a spawn after the boundary, and then marked "done"; a
+      handoff the session wrote itself does not satisfy it. A new boundary starts a new record.
     Raises on an unreadable transcript; the caller fails open."""
     if not _is_count(state.get("pending"), "ix"):
         state.pop("pending", None)
-    if not _is_count(state.get("compact")):
+    if not _is_count(state.get("compact"), "ix"):
         state.pop("compact", None)
-    spawns, boundary = _gate_scan(payload.get("transcript_path", ""))
-    try:
-        mtime = os.stat(handoff_path(payload.get("session_id", ""))).st_mtime
-    except OSError:
-        mtime = None
     if crossing:
         state["pending"] = {"ix": crossing[0], "ts": crossing[1], "n": 0}
+    comp = state.get("compact")
+    comp_open = boundary is not None and not (
+        comp and comp["ix"] == boundary[0] and (comp.get("done") or comp["n"] > GATE_MAX_REFUSALS))
+    if "pending" not in state and not comp_open:
+        return None
+    session_id = payload.get("session_id", "")
+    spawns = _gate_scan(payload.get("transcript_path", ""), handoff_path(session_id))
+    try:
+        mtime = os.stat(handoff_path(session_id)).st_mtime
+    except OSError:
+        mtime = None
     open_gates = []
     if "pending" in state:
         anchor = {"index": state["pending"]["ix"], "time": state["pending"].get("ts")}
@@ -1186,10 +1199,14 @@ def _gate(payload, state, crossing):
             del state["pending"]
         else:
             open_gates.append((state["pending"], kind, "checkpoint"))
-    if boundary and boundary[1] is not None and not (mtime is not None and mtime > boundary[1]):
-        if state.get("compact", {}).get("ts") != boundary[1]:
-            state["compact"] = {"ts": boundary[1], "n": 0}
-        open_gates.append((state["compact"], _classify(spawns, None, boundary, mtime), "compaction"))
+    if comp_open:
+        if not comp or comp["ix"] != boundary[0]:
+            comp = state["compact"] = {"ix": boundary[0], "n": 0}
+        kind = _classify(spawns, None, boundary, mtime)
+        if kind == "satisfied":
+            comp["done"] = True
+        else:
+            open_gates.append((comp, kind, "compaction"))
     refused = None
     for record, kind, what in open_gates:
         if record["n"] < GATE_MAX_REFUSALS:
@@ -1200,6 +1217,8 @@ def _gate(payload, state, crossing):
             sys.stderr.write("precompact_handoff: the Sonnet subagent was never spawned, or its write failed, "
                              "after %d refusals at the %s; letting this Stop pass.\n"
                              % (GATE_MAX_REFUSALS, what))
+            if what == "checkpoint":
+                del state["pending"]
     return refused
 
 
@@ -1219,13 +1238,13 @@ def run_nudge(payload):
     except Exception:
         pass
     before = json.loads(json.dumps(state))
-    facts, missing, refusal = None, [], None
+    facts, boundary, missing, refusal = None, None, [], None
     try:
-        facts = _checkpoint_facts(payload, state)
+        facts, boundary = _checkpoint_facts(payload, state)
     except Exception as e:
         sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)
     try:
-        refusal = _gate(payload, state, facts and facts[2:])
+        refusal = _gate(payload, state, facts and facts[2:], boundary)
     except Exception as e:  # fail open: an unreadable transcript never holds a Stop
         sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)
     # a refusal already says to rewrite the handoff; the sections wait for the next Stop
