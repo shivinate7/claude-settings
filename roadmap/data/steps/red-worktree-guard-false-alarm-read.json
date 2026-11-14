@@ -1,0 +1,14 @@
+{
+ "id": "red-worktree-guard-false-alarm-read",
+ "title": "The guard that refuses a -red worktree path for a red run is read for false alarms",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Incidents (coordinator 15:30 and 15:36 CST Nov 14, relayed from two lanes; triage read no code): the #3420 lane (checked out old code for its red run) and the #3414 lane's test-author (its red run could not use a red checkout) each had a guard refuse a `-red` worktree path. Both worked around it (the #3420 lane used git archive in the scratchpad). The guard is unnamed in the refusal and in both messages; unmeasured. Triage's candidate, unconfirmed: guard.py hand_made_worktree_hit, the guard in step agent-worktree-add-in-tool-dir (it refuses a worktree add inside .claude/worktrees/ unless the target is the agent's recorded home or its own agent-<id>-<suffix> red-run folder). Rule: verification-cry-wolf-guard-is-spent (a guard that goes red when nothing is wrong is spent). Brief: first act, find which guard fired in each lane (the refusal text, guard.log), read that guard's record, then say whether each refusal was a false alarm, with the path each lane used; measure the count of refusals against sanctioned red runs, or say unmeasured. Also: the refusal must name the guard and its remedy.",
+ "source": "coordinator 15:36 CST Nov 14 (two lanes, same shape)",
+ "note": "Filed 15:37 CST Nov 14 by triage. Tracker: the coordinator. Not started. Kin: agent-worktree-add-in-tool-dir.",
+ "updatedAt": "2026-11-14T15:37:00-06:00"
+}
