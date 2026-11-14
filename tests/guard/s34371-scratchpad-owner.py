@@ -564,16 +564,203 @@ def spo_mv_carry_case():
 
 
 def spo_cp_own_case():
-    """Agent A writes probe2.py. Agent B copies it to mine.py with cp: a read of A's file and a new file of B's.
-    B's run of mine.py is allowed, since the copier owns the copy."""
+    """Agent A writes probe2.py. Agent B copies it to mine.py with cp. The copy keeps A as its writer, as an mv does,
+    so B's run of mine.py is refused: B ran a script it never read. A's run of it is the control, which is allowed.
+    The refusal's remedy says to read the file and write an own copy, and never names cp."""
     fx = spo_fixture("cp-own")
     probe = os.path.join(fx["scratch"], "probe2.py")
     mine = os.path.join(fx["scratch"], "mine.py")
     problems = [spo_scope(fx, "cp own", probe)] + spo_wrote(fx, "cp own", SPO_WRITER, probe, PY_TEXT)
     problems += spo_wrote(fx, "cp own", SPO_OTHER, mine, PY_TEXT, tool="Bash", command="cp %s %s" % (probe, mine))
     got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % mine)
-    problems.append(spo_allowed("cp own, B's run of its own copy", got, reason))
-    return spo_result(problems, "agent B's copy of agent A's file is B's own, and B's run of it is allowed")
+    problems.append(spo_refused("cp own, B's run of its copy of A's file", got, reason, (fx["scratch"], "mine.py")))
+    if "read the file" not in reason or re.search(r"\bcp\b", reason):
+        problems.append("cp own: the remedy must say read, then write an own copy, and never name cp (%s)" % reason[:160])
+    got, reason = spo_run(fx, SPO_WRITER, "python3 %s" % mine)
+    problems.append(spo_allowed("cp own, control: A's run of the copy of its file", got, reason))
+    return spo_result(problems, "agent B's copy of agent A's file keeps A as writer, and B's run of it is refused")
+
+
+def spo_cp_keeps_cases(tag, name, first_agent, passed):
+    """`first_agent` writes src.py (None is the top-level session, whose write leaves no record). Agent B copies it
+    to c.py with cp, and runs c.py. When B wrote src.py, or no agent did, the copy is B's: B's run is allowed and another agent's is refused."""
+    fx = spo_fixture(tag)
+    src = os.path.join(fx["scratch"], "src.py")
+    dest = os.path.join(fx["scratch"], "c.py")
+    problems = [spo_scope(fx, name, src)] + spo_wrote(fx, name, first_agent, src, PY_TEXT)
+    problems += spo_wrote(fx, name, SPO_OTHER, dest, PY_TEXT, tool="Bash", command="cp %s %s" % (src, dest))
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % dest)
+    problems.append(spo_allowed(name + ", B's run of its copy", got, reason))
+    got, reason = spo_run(fx, SPO_WRITER, "python3 %s" % dest)   # the copy is B's text: another agent's run is refused
+    problems.append(spo_refused(name + ", A's run of the copy B made", got, reason, (fx["scratch"], "c.py")))
+    return spo_result(problems, passed)
+
+
+def spo_cp_own_file_case():
+    return spo_cp_keeps_cases("cp-keeps-own", "cp-mv 7", SPO_OTHER, "agent B's copy of B's own file is B's, and B's run "
+                                                                   "of it is allowed")
+
+
+def spo_cp_top_level_case():
+    """Agent A writes src.py. The top-level session (no agent_id) copies it to c.py with cp: the file is the
+    session's own now, as any write of that call makes it, so agent B's run of c.py is allowed."""
+    fx = spo_fixture("cp-top")
+    src = os.path.join(fx["scratch"], "src.py")
+    dest = os.path.join(fx["scratch"], "c.py")
+    problems = [spo_scope(fx, "cp-mv 9", src)] + spo_wrote(fx, "cp-mv 9", SPO_WRITER, src, PY_TEXT)
+    problems += spo_wrote(fx, "cp-mv 9", None, dest, PY_TEXT, tool="Bash", command="cp %s %s" % (src, dest))
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % dest)
+    problems.append(spo_allowed("cp-mv 9, B's run of the top-level session's copy", got, reason))
+    return spo_result(problems, "the top-level session's cp of agent A's file clears the record, and B's run is allowed")
+
+
+SPO_THIRD = "spo-third-03"
+
+
+def spo_cp_copier_case():
+    """Agent A writes src.py. Agent B copies it to c.py with cp. B runs c.py: refused, as the writer is A. B may
+    still re-run the cp, write over c.py with the Write tool, and remove it with rm: the copier owns its copy. A and
+    a third agent C, who are not the copier, may not write over c.py."""
+    fx = spo_fixture("cp-copier")
+    src = os.path.join(fx["scratch"], "src.py")
+    dest = os.path.join(fx["scratch"], "c.py")
+    copy = "cp %s %s" % (src, dest)
+    problems = [spo_scope(fx, "cp-mv 10", src)] + spo_wrote(fx, "cp-mv 10", SPO_WRITER, src, PY_TEXT)
+    problems += spo_wrote(fx, "cp-mv 10", SPO_OTHER, dest, PY_TEXT, tool="Bash", command=copy)
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % dest)
+    problems.append(spo_refused("cp-mv 10, B's run of its copy", got, reason, (fx["scratch"], "c.py")))
+    got, reason = spo_call(fx, "Write", SPO_WRITER, file_path=dest, content="print(3)\n")   # the record still names A
+    problems.append(spo_refused("cp-mv 10, control: A's Write over B's fresh copy", got, reason, (fx["scratch"], "c.py")))
+    got, reason = spo_run(fx, SPO_OTHER, copy)
+    problems.append(spo_allowed("cp-mv 10, B's retry of the cp", got, reason))
+    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=dest, content="print(2)\n")
+    problems.append(spo_allowed("cp-mv 10, B's Write over its copy", got, reason))
+    for agent in (SPO_WRITER, SPO_THIRD):
+        got, reason = spo_call(fx, "Write", agent, file_path=dest, content="print(3)\n")
+        problems.append(spo_refused("cp-mv 10, control: %s's Write over B's file" % agent, got, reason,
+                                    (fx["scratch"], "c.py")))
+    problems += spo_wrote(fx, "cp-mv 10", SPO_OTHER, dest, PY_TEXT, tool="Bash", command=copy)
+    got, reason = spo_run(fx, SPO_OTHER, "rm %s" % dest)
+    problems.append(spo_allowed("cp-mv 10, B's rm of its copy", got, reason))
+    return spo_result(problems, "agent B's copy of A's file runs refused, and B may still re-copy, rewrite and remove "
+                                "it, which no other agent may")
+
+
+def spo_cp_mv_case(tag, name, one_call, mover=SPO_OTHER):
+    """Agent A writes src.py. Agent B copies it to c.py, and `mover` moves the copy to d.py, in two calls or in one
+    (`mover` is None for the top-level session). The mv carries the copier: C's rm of d.py is refused, B's rm of it is
+    allowed, and B's run of it is refused."""
+    fx = spo_fixture(tag)
+    src = os.path.join(fx["scratch"], "src.py")
+    mid = os.path.join(fx["scratch"], "c.py")
+    dest = os.path.join(fx["scratch"], "d.py")
+    problems = [spo_scope(fx, name, src)] + spo_wrote(fx, name, SPO_WRITER, src, PY_TEXT)
+    if one_call:
+        problems += spo_wrote(fx, name, SPO_OTHER, dest, PY_TEXT, tool="Bash",
+                              command="cp %s %s && mv %s %s" % (src, mid, mid, dest))
+    else:
+        problems += spo_wrote(fx, name, SPO_OTHER, mid, PY_TEXT, tool="Bash", command="cp %s %s" % (src, mid))
+        got, reason = spo_run(fx, mover, "mv %s %s" % (mid, dest))
+        who = "B's mv of its own copy" if mover == SPO_OTHER else "the top-level session's mv of B's copy"
+        problems.append(spo_allowed(name + ", " + who, got, reason))
+        if os.path.exists(mid):
+            os.replace(mid, dest)   # the mv lands, as the harness would run it
+        else:
+            write(dest, PY_TEXT)
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % dest)
+    problems.append(spo_refused(name + ", B's run of the moved copy", got, reason, (fx["scratch"], "d.py")))
+    got, reason = spo_run(fx, SPO_THIRD, "rm %s" % dest)
+    problems.append(spo_refused(name + ", control: C's rm of the moved copy", got, reason, (fx["scratch"], "d.py")))
+    got, reason = spo_run(fx, SPO_OTHER, "rm %s" % dest)
+    problems.append(spo_allowed(name + ", B's rm of the moved copy", got, reason))
+    return spo_result(problems, "an mv of a copy keeps its copier: B may remove it and C may not")
+
+
+def spo_cp_mv_two_call():
+    return spo_cp_mv_case("cp-mv-two", "cp-mv 12", False)
+
+
+def spo_cp_mv_one_call():
+    return spo_cp_mv_case("cp-mv-one", "cp-mv 13", True)
+
+
+def spo_cp_mv_top_case():
+    return spo_cp_mv_case("cp-mv-top", "cp-mv 14", False, mover=None)
+
+
+def spo_mv_unrecorded_case():
+    """The top-level session writes src.py, so no record names it. Agent B moves it to new.py with mv. An mv of an
+    unrecorded source gets no record, so agent A's run of new.py and B's rm of it are allowed."""
+    fx = spo_fixture("mv-unrecorded")
+    src = os.path.join(fx["scratch"], "src.py")
+    moved = os.path.join(fx["scratch"], "new.py")
+    problems = [spo_scope(fx, "cp-mv 15", src)] + spo_wrote(fx, "cp-mv 15", None, src, PY_TEXT)
+    got, reason = spo_run(fx, SPO_OTHER, "mv %s %s" % (src, moved))
+    problems.append(spo_allowed("cp-mv 15, B's mv of the unrecorded file", got, reason))
+    if got == "allow":
+        os.replace(src, moved)   # the mv lands, as the harness would run it
+    got, reason = spo_run(fx, SPO_WRITER, "python3 %s" % moved)
+    problems.append(spo_allowed("cp-mv 15, A's run of the moved file", got, reason))
+    got, reason = spo_run(fx, SPO_OTHER, "rm %s" % moved)
+    problems.append(spo_allowed("cp-mv 15, B's rm of the moved file", got, reason))
+    return spo_result(problems, "an mv of a file no record names gets no record: A's run and B's rm are allowed")
+
+
+def spo_guard_crashes(log):
+    """The messages of the `guard-crash` lines in a guard log. A guard crash fails open to allow, so the decision
+    alone does not show it."""
+    if not os.path.exists(log):
+        return []
+    with open(log, encoding="utf-8") as handle:
+        lines = handle.read().split("\n")
+    return [line.split("\t")[4] for line in lines if line.split("\t")[2:4] == ["crash", "guard-crash"]]
+
+
+def spo_mv_chain_case():
+    """Agent A writes src.py, and agent B copies it to c.py. B's one call moves c.py to d.py and back to c.py. The call
+    is allowed, and the guard does not crash on it: the cycle between the two moves ends. What later runs of c.py read
+    is not asserted."""
+    fx = spo_fixture("cp-mv-chain")
+    src = os.path.join(fx["scratch"], "src.py")
+    mid = os.path.join(fx["scratch"], "c.py")
+    dest = os.path.join(fx["scratch"], "d.py")
+    cfg = os.path.join(os.path.dirname(fx["work"]), "cfg")   # this case's config folder, so its guard.log is its own
+    os.makedirs(cfg, exist_ok=True)
+    problems = [spo_scope(fx, "cp-mv 16", src)] + spo_wrote(fx, "cp-mv 16", SPO_WRITER, src, PY_TEXT)
+    problems += spo_wrote(fx, "cp-mv 16", SPO_OTHER, mid, PY_TEXT, tool="Bash", command="cp %s %s" % (src, mid))
+    chain = "mv %s %s && mv %s %s" % (mid, dest, dest, mid)
+    got, reason = decide({"raw": None, "tool": "Bash", "cwd": fx["work"], "session": fx["sid"], "env_path": None,
+                          "config": cfg, "agent_id": SPO_OTHER, "process_cwd": None, "temp": fx["tmp"],
+                          "tool_input": {"command": chain}})
+    problems.append(spo_allowed("cp-mv 16, B's mv chain in one call", got, reason))
+    crashes = spo_guard_crashes(os.path.join(cfg, "guard.log"))
+    if crashes:
+        problems.append("cp-mv 16, the guard crashed on B's mv chain and failed open: %s" % crashes[0][:120])
+    return spo_result(problems, "agent B's one call that moves its copy to d.py and back is allowed, with no guard crash")
+
+
+def spo_cp_copier_folder_case():
+    """Agent A writes src.py. Agent B copies it into the folder d, and removes the folder with rm -rf: allowed, since
+    the file in it is B's copy. A third agent's rm -rf of d is refused. B's run of d/c.py is refused."""
+    fx = spo_fixture("cp-copier-dir")
+    src = os.path.join(fx["scratch"], "src.py")
+    folder = os.path.join(fx["scratch"], "d")
+    dest = os.path.join(folder, "c.py")
+    os.makedirs(folder, exist_ok=True)
+    problems = [spo_scope(fx, "cp-mv 11", src)] + spo_wrote(fx, "cp-mv 11", SPO_WRITER, src, PY_TEXT)
+    problems += spo_wrote(fx, "cp-mv 11", SPO_OTHER, dest, PY_TEXT, tool="Bash", command="cp %s %s" % (src, dest))
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % dest)
+    problems.append(spo_refused("cp-mv 11, B's run of d/c.py", got, reason, (fx["scratch"], "c.py")))
+    got, reason = spo_run(fx, SPO_THIRD, "rm -rf %s" % folder)
+    problems.append(spo_refused("cp-mv 11, control: C's rm -rf of d", got, reason, (fx["scratch"], "c.py")))
+    got, reason = spo_run(fx, SPO_OTHER, "rm -rf %s" % folder)
+    problems.append(spo_allowed("cp-mv 11, B's rm -rf of d", got, reason))
+    return spo_result(problems, "agent B may remove a folder that holds only its copy of A's file, and C may not")
+
+
+def spo_cp_unrecorded_case():
+    return spo_cp_keeps_cases("cp-keeps-none", "cp-mv 8", None, "agent B's copy of a file with no recorded writer is "
+                                                                "B's, and B's run of it is allowed")
 
 
 def spo_mv_approved_case():
@@ -1439,8 +1626,28 @@ spo_register("scratchpad-owner: cp-mv 1 agent B's run of a script agent A copied
              "refused", spo_cp_in_case)
 spo_register("scratchpad-owner: cp-mv 2 agent B's run of a file agent A moved to a new name with mv: refused",
              spo_mv_carry_case)
-spo_register("scratchpad-owner: cp-mv 3 agent B copies agent A's file with cp, and runs its own copy: allowed",
+spo_register("scratchpad-owner: cp-mv 3 agent B copies agent A's file with cp, and runs the copy: refused",
              spo_cp_own_case)
+spo_register("scratchpad-owner: cp-mv 7 agent B copies its own file with cp, and runs the copy: allowed",
+             spo_cp_own_file_case)
+spo_register("scratchpad-owner: cp-mv 9 the top-level session's cp of agent A's file, then agent B's run of the copy: "
+             "allowed", spo_cp_top_level_case)
+spo_register("scratchpad-owner: cp-mv 10 agent B's copy of agent A's file: B's run is refused, B's re-copy, "
+             "rewrite and rm are allowed, and A's and C's rewrite are refused", spo_cp_copier_case)
+spo_register("scratchpad-owner: cp-mv 12 agent B's mv of its copy of agent A's file, in two calls: C's rm is "
+             "refused and B's is allowed", spo_cp_mv_two_call)
+spo_register("scratchpad-owner: cp-mv 13 agent B's cp and mv of agent A's file in one call: C's rm is refused and "
+             "B's is allowed", spo_cp_mv_one_call)
+spo_register("scratchpad-owner: cp-mv 14 the top-level session's mv of agent B's copy of agent A's file: C's rm is "
+             "refused, and B's rm is allowed", spo_cp_mv_top_case)
+spo_register("scratchpad-owner: cp-mv 15 the top-level session wrote a file, and agent B's mv of it: agent A's run "
+             "and B's rm are allowed", spo_mv_unrecorded_case)
+spo_register("scratchpad-owner: cp-mv 16 agent B's one call moves its copy to d.py and back: the call is allowed "
+             "and returns", spo_mv_chain_case)
+spo_register("scratchpad-owner: cp-mv 11 agent B's rm -rf of a folder holding its copy of agent A's file: "
+             "allowed, and C's is refused", spo_cp_copier_folder_case)
+spo_register("scratchpad-owner: cp-mv 8 agent B copies a file with no recorded writer with cp, and runs the copy: "
+             "allowed", spo_cp_unrecorded_case)
 spo_register("scratchpad-owner: cp-mv 4 agent B's mv of agent A's file to m.py, approved by the owner: A's run of "
              "m.py is allowed and B's is refused", spo_mv_approved_case)
 spo_register("scratchpad-owner: cp-mv 5 agent B's run of a file agent A moved in from outside the scratchpad: "
