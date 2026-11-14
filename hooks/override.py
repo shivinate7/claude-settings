@@ -34,8 +34,9 @@ writes, so a session cannot grant itself an override. It is valid only while now
       grant()'s own result (a reason form: a one-act override, with the reason logged). A judge no or error never
       widens a one-act override to a timed one.
   The keyword route is the fast path, and it never asks a judge. `override <length>` with any words after the length
-  (`override 15m please`, `override 2 hours`) is timed (_fast_length). A second length, a decimal or a compound
-  length (`1.5h`, `1h30m`) grants nothing. `override off <word>` grants nothing. A grant needs the owner's typed words
+  (`override 15m please`, `override 2 hours`) is timed (_fast_length). A second length outside pasted blocks and code
+  spans, a decimal or a compound length (`1.5h`, `1h30m`) grants nothing; one inside a pasted block or a code span is quoted
+  text and does not count. `override off <word>` grants nothing. A grant needs the owner's typed words
   (_keyword_typed): payload `source` absent or the owner's, and the prompt's own transcript record no harness turn
   and no peer or task-notification origin. Each grant prints one receipt line (local_time.override_line).
 An Opus override is the file <config dir>/state/override/opus/<session_id>.json, {"kind": "opus",
@@ -555,7 +556,8 @@ def _fast_length(reason):
     """(number, unit letter or None) for a keyword reason that starts with one length (`15m`, `4h`, `2 hours`,
     `90 minutes`, or a bare `15` that is the whole rest), False when it starts with a decimal or compound length or
     holds a second length, else None (the reason starts with no length, or with a bare number and words, which
-    grant defers). The words after a length with a unit may be anything but another length."""
+    grant defers). The words after a length with a unit may be anything but another length. A second length counts
+    only outside pasted blocks and code spans (_strip_blocks, _outside_code), like the plain ask's."""
     first = ASK_LENGTH.match(reason)
     if first:
         number, unit, rest = first.group(1), (first.group(2) or first.group(3))[0], reason[first.end():]
@@ -565,8 +567,8 @@ def _fast_length(reason):
             return False if LEADING_UNCLEAR.match(reason) else None
         number, unit, rest = first.group(1), None, reason[first.end():]
         if rest.strip():  # a bare number is minutes only as the whole rest: with words after it, the plain ask judges it
-            return False if _ask_lengths(rest) != [] else None
-    return False if _ask_lengths(rest) != [] else (number, unit)
+            return False if _ask_lengths(_outside_code(_strip_blocks(rest))) != [] else None
+    return False if _ask_lengths(_outside_code(_strip_blocks(rest))) != [] else (number, unit)
 
 
 def grant(session_id, prompt, at, defer=True, transcript=None, source=None):
@@ -575,8 +577,8 @@ def grant(session_id, prompt, at, defer=True, transcript=None, source=None):
     else None: the prompt is not a word. The keyword route (decision owner-override):
       `override`, or `override <reason>`: a one-act override, the reason logged.
       `override <length>`, with any words after a length with a unit, or a bare number as the whole rest (_fast_length):
-        a timed override. This is the fast path: no model call. A second length, a decimal or a compound length:
-        nothing. A bare number with words (`override 15 please`) is no fast-path length.
+        a timed override. This is the fast path: no model call. A second length outside pasted blocks and code
+        spans (one inside either is quoted text), a decimal or a compound length: nothing. A bare number with words (`override 15 please`) is no fast-path length.
       `override off`: ends the override, as the whole prompt only; a word after `off` grants nothing.
     A grant needs _keyword_typed on the payload's `source` and `transcript`; `off` needs no check. With `defer`, a first
     word `override` whose rest starts with no length and holds one, or starts with a bare number and words, returns None, so the plain ask (grant_override_ask)
