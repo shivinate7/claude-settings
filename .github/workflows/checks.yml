@@ -1130,8 +1130,8 @@ jobs:
     # A schedule and a dispatch run it. all-jobs-passed reads the skip as green through scope-skips.
     # Cap 75 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 30.5 min
     # is 41% of it (range 14.3-30.5, median 19.4, n 30 green runs, same window as `checks`), after the split into
-    # checks-macos and checks-macos-b. The janitor sweep mutation test runs on any event when the scope flag sweep is true (a pull request that
-    # changes the sweep included); a push and a pull request that leaves sweep false differ by that test: push median 20.5 min,
+    # checks-macos and checks-macos-b. This job runs the janitor sweep mutation test on a pull request, a schedule and a dispatch when the scope
+    # flag sweep is true; a push starts no macOS runner, and checks-rest runs the push sweep test. Before R61 a push ran it here: push median 20.5 min,
     # pull request median 18.7 (n 13 each).
     # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
     # Unmeasured since R61: the guard shard became the macOS slice, so the figures above describe the old shape.
