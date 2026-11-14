@@ -2313,6 +2313,77 @@ def case_grant_act_words_narrowed_passes():
                       homed(new_cfg(), "narrowed", (), text=text))
 
 
+# The grant line: a message's first line that starts `Grant:` and holds a Central time is the owner's record of
+# a grant. Its words are not read for grant words. Every other line is read as before.
+GRANT_LINE_CST = "Grant: merge any PR, owner 19:53 CST Nov 13"
+GRANT_LINE_CDT = "Grant: merge any PR, owner 19:53 CDT Nov 13"
+GRANT_LINE_NO_TIME = "Grant: merge all PRs"
+GRANT_BODY = "Rebase the lane on main, then run the checks."
+CENTRAL_TIME = re.compile(r"\d{1,2}:\d{2} C[SD]T")
+
+
+def block_lines(text):
+    """The lines of one block, read back the way the test reader reads an inbox block."""
+    blocks = read_blocks(render_block(text))
+    return blocks[0]["text"].split("\n") if blocks and blocks[0]["text"] is not None else []
+
+
+def case_grant_line_with_a_central_time_is_not_read_passes():
+    """A first line that starts `Grant:` and holds a Central time is not read for grant words. The first line
+    holds a grant word and an act word. The body holds neither, so each row passes. The lone line is the empty
+    body state. Red now: the first line blocks each row, as it holds a grant word and an act word."""
+    rows = (
+        ("the CST line with a clean body", GRANT_LINE_CST + "\n" + GRANT_BODY, ("- fb-0958-2 [note] -> noted",)),
+        ("the CDT line with a clean body", GRANT_LINE_CDT + "\n" + GRANT_BODY, ("- fb-0958-2 [note] -> noted",)),
+        ("the CST line alone", GRANT_LINE_CST, ()),
+    )
+    for label, text, items in rows:
+        first = text.split("\n")[0]
+        check("grant line, %s: the first line holds a Central time" % label,
+              CENTRAL_TIME.search(first) is not None, first)
+        check("grant line, %s: the Grant line is the block's first line" % label,
+              block_lines(text)[:1] == [first], block_lines(text))
+        expect_silent("grant line: %s passes" % label, homed(new_cfg(), "grant-line-time", items, text=text))
+
+
+def case_grant_line_body_is_still_read_blocks():
+    """The lines after a Grant line are read as before: a body line with a grant word and an act word blocks,
+    with no home. Green control: the message blocks today on its first line, and the fix must still block it on
+    this body line."""
+    text = GRANT_LINE_CST + "\napprove and merge it."
+    p = homed(new_cfg(), "grant-line-body", ("- fb-0958-2 [note] -> noted",), text=text)
+    expect_grant_block("grant line: a body line 'approve and merge it.' still blocks", p, text)
+
+
+def case_grant_line_not_first_still_blocks():
+    """A Grant line that is not the first line is read like any other line, so the message blocks with no home.
+    Green control: the fix must exempt the first line only."""
+    text = GRANT_BODY + "\n" + GRANT_LINE_CST
+    check("grant line not first: the Grant line is the block's second line",
+          block_lines(text)[1:2] == [GRANT_LINE_CST], block_lines(text))
+    p = homed(new_cfg(), "grant-line-second", ("- fb-0958-2 [note] -> noted",), text=text)
+    expect_grant_block("grant line: a Grant line that is not the first line still blocks", p, text)
+
+
+def case_grant_line_without_a_time_still_blocks():
+    """A first line that starts `Grant:` with no Central time is read as before, so the lone line blocks with no
+    home. Green control: the Central time is what exempts the line."""
+    check("grant line without a time: the line holds no Central time",
+          CENTRAL_TIME.search(GRANT_LINE_NO_TIME) is None, GRANT_LINE_NO_TIME)
+    p = homed(new_cfg(), "grant-line-no-time", (), text=GRANT_LINE_NO_TIME)
+    expect_grant_block("grant line: 'Grant: merge all PRs' with no time still blocks", p, GRANT_LINE_NO_TIME)
+
+
+def case_grant_line_fenced_text_is_not_read_passes():
+    """Fenced text after a Grant line is still not read. The first line holds a Central time and no act word, so
+    only the fence holds a grant word and an act word. Green control: it passes today, and the fix must keep the
+    fence unread."""
+    text = ("Grant: coordinator role, owner flywheel (2026-11-11 22:38 CST)\n"
+            "```\napprove and merge it.\n```\n" + GRANT_BODY)
+    p = homed(new_cfg(), "grant-line-fence", ("- fb-0958-2 [note] -> noted",), text=text)
+    expect_silent("grant line: fenced 'approve and merge it.' after a Grant line passes", p)
+
+
 def case_pick_letters_a_to_h_passes():
     """Pick letters are a to h. "1 y, 2 n" is no pick, so it passes with no send. Red now."""
     p = page_run(new_cfg(), "pick-yn", [("1 y, 2 n", ())], [owner_rec("1 y, 2 n"), said_rec("Noted.")],
@@ -4455,6 +4526,11 @@ CASES = (
     case_grant_fenced_text_is_not_scanned_passes,
     case_grant_needs_an_act_word_passes,
     case_grant_act_words_narrowed_passes,
+    case_grant_line_with_a_central_time_is_not_read_passes,
+    case_grant_line_body_is_still_read_blocks,
+    case_grant_line_not_first_still_blocks,
+    case_grant_line_without_a_time_still_blocks,
+    case_grant_line_fenced_text_is_not_read_passes,
     case_closed_note_without_a_home_blocks,
     case_closed_note_with_a_home_passes,
     case_task_open_step_home_passes,
