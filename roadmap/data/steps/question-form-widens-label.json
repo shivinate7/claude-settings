@@ -1,0 +1,14 @@
+{
+ "id": "question-form-widens-label",
+ "title": "The \"goes against your ruling\" widening label fires on a global allow entry in claude-settings itself",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "It steered triage and the consultant to the wrong pick on the reinstall allow entry.",
+ "source": "Consultant 20:20 CST Nov 13, from the owner's chat 20:16 (\"My sessions shudda known better the right answer is obviously a\"); triage did not see the chat.",
+ "note": "Filed 20:17 CST Nov 13. The label \"Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo\" (hooks/question_form.py, skill waiting-page, decisions question-form and port-keeps-behaviour) was meant only for a per-repo exception that bends a shared tool. It fired on a global allow entry in claude-settings itself, where the shared tool is what is being changed. Fix: the label and the widens flag apply only when a change is for one repo against a shared tool; a change to claude-settings' own shared settings does not widen. The lane reads the check and the texts first. A check change: test-author red case first, builder, reviewer. Needs a lane.",
+ "updatedAt": "2026-11-13T20:17:22-06:00"
+}

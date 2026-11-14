@@ -1,0 +1,10 @@
+{
+  "id": "own-reinstall-allow-a",
+  "at": "2026-11-13T20:16:00-06:00",
+  "title": "One shared allow entry for exactly the session-start installer command, in every repo",
+  "ruling": "Owner 20:16 CST Nov 13, relayed by the consultant (chat; triage did not see it): option a. Add one autoMode.allow entry in the shared settings.json, everywhere, for exactly the session-start installer command (the curl of stable/install.sh piped to bash -s -- --cloud, and the Windows and Mac installer forms), by PR. Overrides triage's pick b of 20:18 CST.",
+  "quote": "My sessions shudda known better the rignt answer is obviously a: add an allow rule for exactly the reinstall command.",
+  "source": "Consultant 20:20 CST Nov 13 (quoting the owner's chat 20:16 CST); filed by triage.",
+  "status": "open",
+  "step": "reinstall-from-stable-allow"
+}
