@@ -5273,18 +5273,30 @@ class SupersededRuns(Env):
         self.assertIn("a check is red: lint: fail", out)
         self.assertNotIn(MERGE_CALL, self.calls())
 
+    def test_a_newest_run_failed_row_beside_its_own_pass_of_the_same_name_is_refused(self):
+        # The newest run's pass row must not clear that run's own failure. Only the older run's red row may drop.
+        self.head_rows(
+            [("test", "fail", job_link(OLD_RUN, 101)), ("test", "pass", job_link(NEW_RUN, 201)), ("test", "fail", job_link(NEW_RUN, 202))],
+            [("checks", "completed", "failure", NEW_RUN), ("checks", "completed", "failure", OLD_RUN)])
+        self.assertEqual([r["databaseId"] for r in self.gh_host().runs(self.head())], [NEW_RUN, OLD_RUN], "the runs read's list")  # scope first
+        red, _ = self.judged(["test"])
+        self.assertTrue(any(r.startswith("test: fail") for r in red), red)
+        rc, out = self.go(required=["test"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is red: test: fail", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
     def test_an_older_failed_run_beside_a_newer_pending_run_is_pending(self):
         # The newer run holds the wait, so the older run's failure is not red.
         self.head_rows(
             [("lint", "fail", job_link(OLD_RUN, 101)), ("lint", "pending", job_link(NEW_RUN, 201))],
             [("checks", "in_progress", "", NEW_RUN), ("checks", "completed", "failure", OLD_RUN)])
         red, _ = self.judged(["lint"])
-        self.assertEqual(red, [], "the older run's failure is red beside the newer run's pending row")
+        self.assertEqual(red, [], "the older run's failure is not red beside the newer run's pending row")
         verdict, detail = self.gh_host().head_read(7)
         self.assertEqual(verdict, "pending", detail)
         self.assertIn("lint", detail)
         self.assertEqual(self.gh_host(required=["lint"]).head_state(7), "pending: lint")
-        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_a_check_with_only_failed_runs_is_refused(self):
         # Two failed runs and no green run: neither run's failure is superseded.
