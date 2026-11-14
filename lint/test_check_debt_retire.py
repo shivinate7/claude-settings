@@ -551,6 +551,87 @@ class RetireRun(Case):
         self.assertEqual(self.retired_of(body, None), {})
 
 
+class Heartbeat(Case):
+    """run_span prints a start line, then a `still running` line every D.HEARTBEAT seconds while its span runs. A span that
+    ends before its first beat prints only the start line. The slow script waits for a release file, which the recorder
+    touches on a beat, and gives up after its own bound (exit 3)."""
+
+    WAIT = ("import time\n"
+            "for _ in range(200):  # the script's own bound: 200 x 0.1 s, 20 s\n"
+            "    if os.path.exists(os.environ['RETIRE_RELEASE']):\n"
+            "        sys.exit(0)\n"
+            "    time.sleep(0.1)\n"
+            "sys.exit(3)\n")
+    SLOW = MARKED.replace("sys.exit(%d)\n", WAIT)  # MARKED's mark, then the wait
+    SLOW_RETIRE = "Delete the old helper. Check: `tests/test_slow.py`."
+
+    def setUp(self):
+        super().setUp()
+        self.release, self.lines = os.path.join(self.folder, "release"), []
+        patch = unittest.mock.patch.dict(os.environ, {"RETIRE_RELEASE": self.release})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def beat(self, seconds):
+        """Set D.HEARTBEAT for this case. create=True: the old code has no such name, so the case fails by assert, not by error."""
+        patch = unittest.mock.patch.object(D, "HEARTBEAT", seconds, create=True)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def record(self, release=True):
+        """Keep each line run_span prints. With release, a `still running` line touches the release file, so the slow script exits 0."""
+        def say(line):
+            self.lines.append(line)
+            if release and "still running" in line:
+                put(self.release, "go")
+        patch = unittest.mock.patch.object(D, "say", say)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def starts(self, span):
+        return [line for line in self.lines if "debt-retire: running %s (cap %d s)" % (span, D.TIMEOUT) in line]
+
+    def beats(self, span):
+        return [line for line in self.lines if "still running" in line and span in line]
+
+    def test_h1_a_slow_span_prints_its_start_line_and_a_beat_and_passes_once_released(self):
+        self.repo(debts={"d-slow": self.SLOW_RETIRE})
+        self.change(write={"tests/test_slow.py": self.SLOW}, rm=["docs/debts/d-slow.md"])
+        self.beat(0.1)
+        self.record()
+        found = self.findings()
+        self.assertEqual(self.ran(), [("test_slow.py", self.dir)], "scope: the slow span's check did not run in the head folder")
+        self.assertTrue(self.starts("tests/test_slow.py"), "the start line with the span and its cap was not printed")
+        self.assertTrue(self.beats("tests/test_slow.py"), "no still running line named the span while it ran")
+        self.assertEqual(pairs(found), [], "a slow span read red although its beat reached the release")
+
+    def test_h2_a_fast_span_prints_its_start_line_and_no_beat(self):
+        self.repo(debts={"d-pass": PASS})
+        self.change(rm=["docs/debts/d-pass.md"])
+        self.beat(30)  # far above a fast span's run, so no beat can fall inside it
+        self.record()
+        self.findings()
+        self.assertEqual(self.ran(), [("test_pass.py", self.dir)], "scope: the fast span's check did not run in the head folder")
+        self.assertTrue(self.starts("tests/test_pass.py"), "the start line with the span and its cap was not printed")
+        self.assertEqual(self.beats("tests/test_pass.py"), [], "a span that ended before its first beat printed a still running line")
+
+    def test_h3_a_span_cut_off_at_its_cap_prints_beats_before_the_cut(self):
+        self.repo()
+        put(os.path.join(self.dir, "tests", "test_slow.py"), self.SLOW)
+        self.beat(0.1)
+        self.record(release=False)
+        kind, text = D.run_span(self.dir, "tests/test_slow.py", 1)
+        self.assertEqual((kind, "ran past" in text), ("unknown", True), "scope: a span past its cap did not read unknown with ran past")
+        self.assertTrue(self.beats("tests/test_slow.py"), "a span cut off at its cap printed no still running line before the cut")
+
+    def test_h4_the_cli_prints_the_start_line_on_stdout(self):
+        self.repo(debts={"d-pass": PASS})
+        self.change(rm=["docs/debts/d-pass.md"])
+        r = self.cli()
+        self.assertEqual(r.returncode, 0, "scope: the CLI did not close the passing debt green: " + r.stdout + r.stderr)
+        self.assertIn("debt-retire: running tests/test_pass.py (cap %d s)" % D.TIMEOUT, r.stdout, "the CLI printed no start line for its span")
+
+
 class TemplateExcuses(unittest.TestCase):
     """The PR template's own excuse lines. A PR body starts from the template, so a live excuse line in it would excuse a
     path or a debt in every PR that keeps it (decision debt-close-runs-retire)."""
