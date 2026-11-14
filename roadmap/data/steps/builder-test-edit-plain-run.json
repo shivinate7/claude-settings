@@ -1,0 +1,14 @@
+{
+ "id": "builder-test-edit-plain-run",
+ "title": "The builder-test-edit guard does not refuse a builder's plain run of a test file; it only refuses writes",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane shared-savings-gap-read via the coordinator 01:03 CST Nov 14 (relayed; the builder's hand-back in that lane is the evidence, unread by triage): the guard rule builder-test-edit refused a builder agent's plain `python3 lint/test_rule_audit.py` run (a call that only runs the test) twice, about 00:14 CST. How often is unmeasured.",
+ "source": "Lane message 01:03 CST Nov 14 (relayed). Same family, not the same cause as read: builder-test-edit-label-words (todo: an env-assignment value or label words read as a test-file write), write-then-run-test-edit (done: a script an agent wrote gets the interpreter check when Bash runs it). The refusal text was not given.",
+ "note": "Triage 01:05 CST Nov 14: mistake the guard stops: a builder editing tests (the builder's role bars it). The false alarm: running a test. Fix: red first: a builder's `python3 lint/test_<name>.py` with no write to a test path passes; control: a write to a test file by a builder still refuses. The lane first gets the refusal text and the hand-back, and says whether the cause is the interpreter check, the words, or something else, and whether this step folds into builder-test-edit-label-words. A guard change: own lane, review rounds apply. Not started.",
+ "updatedAt": "2026-11-14T01:05:05-06:00"
+}
