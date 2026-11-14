@@ -1,0 +1,14 @@
+{
+ "id": "inbox-owner-message-gets-fb-id",
+ "title": "Every owner message in a session's inbox gets a feedback id line within the turn",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Consultant 22:18 CST Nov 13, relaying runner 10's 22:16 report (triage did not see it): runner 10 skipped the post-compaction audit after its 20:19 compaction; the owner's 20:21 ask (\"send to retrospective\") carried no inbox id, so nothing tracked it until the owner asked again at 22:14.",
+ "source": "Consultant 22:18 CST Nov 13 (relayed); second guard for the audit step.",
+ "note": "Triage 22:18 CST Nov 13: guard idea, not built. Mistake it stops: an owner ask that no record tracks, so nothing follows up. Harm: the owner repeats an ask. Check as the consultant states it: every owner-message heading in a session's inbox gets an fb id line within the turn. Triage read \"fb id\" as the feedback id the inbox gives a message (unchecked); the lane confirms the form against the inbox code before building. Pairs with step compaction-audit-before-reply, which is the first guard for the same incident (its text names check handoff-audit-ran). Needs a past-ruling and guard-record read before any build.",
+ "updatedAt": "2026-11-13T22:18:23-06:00"
+}
