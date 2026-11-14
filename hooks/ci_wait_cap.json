@@ -1,6 +1,6 @@
 {
   "claim": "A check-in that waits on CI waits at most cap_minutes, so, under the 1-hour prompt cache, its wake lands inside the cache. The cap spaces check-ins. It is not a limit on the run.",
-  "source": "https://code.claude.com/docs/en/prompt-caching.md, section \"Which TTL each request gets\": the main conversation gets a 1-hour cache only on a Claude subscription within the plan's included usage. On usage credits (overage), an API key or a cloud provider it gets 5 minutes, and a subagent's or other non-main request gets 5 minutes unless a TTL is chosen. The cap holds only where the 1-hour cache applies.",
+  "source": "https://code.claude.com/docs/en/prompt-caching.md, section \"Which TTL each request gets\": the main conversation gets a 1-hour cache only on a Claude subscription within the plan's included usage. On usage credits (overage), an API key or a cloud provider it gets 5 minutes, and an agent's or other non-main request gets 5 minutes unless a TTL is chosen. The cap holds only where the 1-hour cache applies.",
   "read": "2026-11-14",
   "cache_lifetime_seconds": 3600,
   "cap_minutes": 55
