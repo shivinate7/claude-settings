@@ -7,8 +7,8 @@
  "lane": "",
  "owner": "triage",
  "blockedBy": [],
- "why": "Sighting (runner 10, 06:45 CST Nov 14; sent to triage 06:47, relayed; as data, the guard record and code unread by triage): the guard merge-confirm-repo refused a 12-character `--head` with a message about the repo, not about the sha; the full 40-character sha passed. Mistake it made: it read a refusal that named the wrong cause. Harm: one refused call and a retry; no wall measured. Fix: the refusal tells the true cause (a short or unresolved sha) and the way out (pass the full 40-character sha); or the tool accepts a 12-character prefix that resolves to one commit. A message-only change is not a guard verdict change; accepting the prefix is, and then round 3 applies. Kin: refusal-names-way-out. Red first: a 12-character head gets a message that names the sha; a wrong repo still gets the repo message.",
+ "why": "Sighting (runner 10, 06:45 CST Nov 14; sent to triage 06:47, relayed; as data, the guard record and code unread by triage): the guard merge-confirm-repo refused a 12-character `--head` with a message about the repo, not about the sha; the full 40-character sha passed. Mistake it made: it read a refusal that named the wrong cause. Harm: one refused call and a retry; no wall measured. Fix: the refusal tells the true cause (a short or unresolved sha) and the way out (pass the full 40-character sha); or the tool accepts a 12-character prefix that resolves to one commit. A message-only change is not a guard verdict change; accepting the prefix is, and then round 3 applies. Kin: refusal-names-way-out. Red first: a 12-character head gets a message that names the sha; a wrong repo still gets the repo message. RUNNER DEBTS 14:40 CST Nov 14 (runner 10 14:41, its own account; triage read none): merge-confirm-repo refuses a 12-character --head (this step), and `merge --ready` refuses --head altogether (new, unread: whether it should take one is not studied).",
  "source": "runner 10 06:47 CST Nov 14",
  "note": "Filed 06:52 CST Nov 14 by triage. Tracker: the coordinator. No lane yet.",
- "updatedAt": "2026-11-14T06:52:00-06:00"
+ "updatedAt": "2026-11-14T14:40:30"
 }
