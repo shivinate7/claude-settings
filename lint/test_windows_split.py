@@ -201,16 +201,29 @@ LINUX_SUITES = {
     "bash .github/scripts/mod-tests.sh": (LINUX_MODS, "bash"),
 }
 
-# The macOS split. The guard suite runs in two shards, one per job, each with its GUARD_SHARD env. No other macOS job runs it.
+# The macOS split. R61 (owner pick b, 15:29 CST Nov 12): checks-macos runs one mac-tagged slice of the guard suite
+# (GUARD_TESTS=macos-slice, no GUARD_SHARD), and no other macOS job runs the guard suite.
 MACOS_SPLIT = ("checks-macos", "checks-macos-b")
 MACOS_GUARD = "python3 hooks/test_guard.py"
-MACOS_GUARD_SHARD = {"checks-macos": "1/2", "checks-macos-b": "2/2"}
+MACOS_SLICE_JOB = "checks-macos"
+MACOS_SLICE_ENV = {"GUARD_TESTS": "macos-slice"}
+# A macOS job whose runs-on is an expression that reads the scope job's mac_runner output, a list of macOS labels from
+# mac-runner.py. is_macos counts that job as macOS, so the macOS checks still see it.
+# MAC_PICK_RUNS_ON is that runs-on text. The constant that holds it is not on this base, so the fixture keeps its own copy.
+MAC_PICK = "needs.scope.outputs.mac_runner"
+MAC_PICK_RUNS_ON = (f"${{{{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) "
+                    f"&& fromJSON('[\"macos-latest\"]') || fromJSON({MAC_PICK}) }}}}")
+# R61 part 1: a push starts no macOS runner. Each job named here keeps `github.event_name != 'push'` as its job-level if.
+MACOS_JOBS = ("shell-macos", "checks-macos", "checks-macos-b")
+# R61 part 3: the 03:17 nightly's gate job, and the one scope output it reads (the gate's skip).
+NIGHTLY_SKIP_JOB = "nightly-skip"
+# The values the gate's skip output can hold: unset (''), skip (`true`) or run (`false`). A guard predicate must give one answer for all.
+SKIP_VALUES = ("", "true", "false")
 MAC_OWN = "(needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()"
 MAC_CODE = f"{MAC_OWN} && needs.scope.outputs.code == 'true'"
 MAC_SWEEP = f"{MAC_OWN} && github.event_name != 'pull_request' && needs.scope.outputs.sweep == 'true'"
 MAC_MODS = f"{MAC_OWN} && needs.scope.outputs.mods == 'true'"
 MACOS_SUITES = {
-    MACOS_GUARD: (MAC_CODE, None),
     "python3 hooks/test_guard_load_os.py": (MAC_CODE, None),
     "python3 lint/test_rm_shim.py": (MAC_CODE, None),
     "python3 lint/test_hook_platform_exit.py": (MAC_CODE, None),
@@ -409,10 +422,11 @@ FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "check
          "code", "guard", "sweep", "shoot"]
 
 
-def eval_if(expr, event, flag_value, draft=False):
+def eval_if(expr, event, flag_value, draft=False, nightly_skip=""):
     """Evaluate an `if:` (a job's, a step's or a scope condition) for an event with every scope output set to flag_value and
     github.event.pull_request.draft set to draft. Reads only !cancelled(), success(), always(), &&, ||, !, parentheses,
-    == and != on github.event_name, github.event.pull_request.draft and needs.scope.outputs.*."""
+    == and != on github.event_name, github.event.pull_request.draft, needs.scope.outputs.* and another job's output (`gate`,
+    the value of every such output: '' when unset, as GitHub reads an output no step set)."""
     e = expr.strip()
     if e.startswith("${{") and e.endswith("}}"):
         e = e[3:-2]
@@ -421,6 +435,8 @@ def eval_if(expr, event, flag_value, draft=False):
     e = e.replace("&&", " and ").replace("||", " or ")
     e = e.replace("github.event_name", repr(event))
     e = re.sub(r"needs\.scope\.outputs\.\w+", repr(flag_value), e)
+    # Only the nightly gate's skip output is read. Any other job's output stays unread, so the reader raises on it, as before.
+    e = re.sub(rf"needs\.{re.escape(NIGHTLY_SKIP_JOB)}\.outputs\.skip\b", repr(nightly_skip), e)
     e = re.sub(r"!(?!=)", " not ", e)
     return bool(eval(e, {"__builtins__": {}}))
 
@@ -546,12 +562,13 @@ def scope_condition_step_problems(name, job, scope_condition):
 
 def draft_guard_only(expr):
     """True when a job-level `if:` holds only the draft guard (ci-hygiene steps 11 and 19): it skips a draft PR, runs on a
-    ready PR and on push, and reads no scope flag, so its answer does not change with the flags. Any other expression is False."""
+    ready PR and on push, and reads no scope flag, so its answer does not change with the flags. Any other expression is False.
+    It also reads no other job's output: the answer must match for every skip value (SKIP_VALUES)."""
     e = unwrap(expr)
     if not e:
         return False
     try:
-        return all(eval_if(e, event, flag, draft=draft) == want for event, flag, draft, want in (
+        return all(eval_if(e, event, flag, draft=draft, nightly_skip=nightly_skip) == want for nightly_skip in SKIP_VALUES for event, flag, draft, want in (
             ("pull_request", "false", True, False),
             ("pull_request", "false", False, True),
             ("pull_request", "true", False, True),
@@ -575,7 +592,8 @@ def job_check_problems(name, job, flag=None):
         return problems + ([] if expr == SHARD_JOB_IF else [f"{name}: shard job if is {expr}, want {SHARD_JOB_IF}"])
     if name in LINT_JOBS:  # they run on every PR: no scope condition, and a job-level if only when it is the draft guard
         return problems + ([] if expr is None or draft_guard_only(expr) else [f"{name}: job-level if: {expr}"])
-    if expr is not None and not draft_guard_only(expr):
+    # R61 part 1: a macOS job may keep the push guard as its job-level if (a step-level skip still starts its runner).
+    if expr is not None and not draft_guard_only(expr) and not (name in MACOS_JOBS and push_guard_only(expr)):
         return problems + [f"{name}: scoped job keeps a job-level if, its scope condition belongs in its steps: {expr}"]
     scope_condition = read_scope_condition(job)
     if scope_condition is None:
@@ -593,16 +611,16 @@ def scope_problems(text):
         return ["no scope job"]
     if not (sc["os"] or "").startswith("ubuntu"):
         problems.append(f"scope runs on {sc['os']}, want ubuntu")
-    if sc["needs"]:
-        problems.append(f"scope has needs: {sc['needs']}")
+    if sc["needs"] not in (None, NIGHTLY_SKIP_JOB):  # R61 part 3: scope waits on the nightly gate, and no other job
+        problems.append(f"scope has needs: {sc['needs']}, want none or {NIGHTLY_SKIP_JOB}")
     block = re.search(r"^  scope:\s*$(.*?)(?=^  [\w-]+:\s*$|\Z)", text, re.M | re.S).group(1)
     for f in FLAGS:
         if not re.search(rf"^      {f}:\s*\S", block, re.M):
             problems.append(f"scope job has no output {f}")
     for name, job in jobs.items():
         # ci-done is the fan-in that comments when a run ends red: it needs every job, not scope
-        # alone (actions/ci-done-comment/test_comment.py checks its needs and if).
-        if name not in ("scope", "ci-done", ALL_JOBS_PASSED_JOB):
+        # alone (actions/ci-done-comment/test_comment.py checks its needs and if). The nightly gate has its own checks.
+        if name not in ("scope", "ci-done", ALL_JOBS_PASSED_JOB, NIGHTLY_SKIP_JOB):
             problems += job_check_problems(name, job, FLAG_OF.get(name))
     return problems
 
@@ -674,9 +692,12 @@ def guard_problems(text):
             problems.append(f"{GUARD_JOB}: slice env is {st.get('env')}, want {GUARD_SLICE_ENV}")
         if step_rest(st, read_scope_condition(job)) != unwrap(IF_PIN[GUARD_SLICE]):
             problems.append(f"{GUARD_JOB}: slice condition is not the pinned text: {step_if(st)}")
-    g = text.count("GUARD_TESTS")  # one mention only: the slice step's env
-    if g != 1:
-        problems.append(f"GUARD_TESTS appears {g} times in checks.yml, want exactly 1 (the guard slice step's env)")
+    # One mention per slice step's env, and no other: the Windows slice (GUARD_JOB) and the macOS slice (R61, MACOS_SLICE_JOB).
+    g = text.count("GUARD_TESTS")
+    homes = sorted(n for n, j in all_jobs(text).items() for st in j["steps"] if "GUARD_TESTS" in (st.get("env") or {}))
+    if g != len(homes) or any(h not in (GUARD_JOB, MACOS_SLICE_JOB) for h in homes):
+        problems.append(f"GUARD_TESTS appears {g} times in checks.yml, in {homes}: want one slice step's env per slice, "
+                        f"in {GUARD_JOB} or {MACOS_SLICE_JOB}")
     # CI runs the whole guard suite. A GUARD_FAMILY here would make CI run one family and call it green.
     f = text.count("GUARD_FAMILY")
     if f:
@@ -805,29 +826,36 @@ def linux_split_problems(text):
 
 
 def macos_split_problems(text):
-    """Each MACOS_SUITES command runs in exactly one MACOS_SPLIT job, pinned as above, except the guard suite: one shard in
-    each job of the split, each with its GUARD_SHARD value, and no other macOS job runs it."""
+    """Each MACOS_SUITES command runs in exactly one MACOS_SPLIT job, pinned as above. The guard suite is not in the table:
+    macos_slice_problems pins its one slice."""
     problems = job_env_problems(text, MACOS_SPLIT)
     for cmd, (want_if, want_shell) in MACOS_SUITES.items():
-        if cmd == MACOS_GUARD:
-            continue
         homes = split_homes(text, MACOS_SPLIT, cmd)
         if len(homes) != 1:
             problems.append(f"{cmd!r} runs {len(homes)} times in {MACOS_SPLIT}: {[j for j, _ in homes]}")
         else:
             problems += pin_problems(homes[0][0], homes[0][1], cmd, want_if, want_shell)
-    want_if, want_shell = MACOS_SUITES[MACOS_GUARD]
-    homes = split_homes(text, MACOS_SPLIT, MACOS_GUARD)
-    if sorted(j for j, _ in homes) != sorted(MACOS_GUARD_SHARD):
-        problems.append(f"{MACOS_GUARD!r} runs in {sorted(j for j, _ in homes)}, want one shard in each of "
-                        f"{sorted(MACOS_GUARD_SHARD)}")
+    return problems + macos_slice_problems(text)
+
+
+def is_macos(job):
+    """A macOS job: a literal macos-* runs-on, or the runner pick that reads needs.scope.outputs.mac_runner (MAC_PICK)."""
+    runs_on = job["os"] or ""
+    return runs_on.startswith("macos") or MAC_PICK in runs_on
+
+
+def macos_slice_problems(text):
+    """R61 part 2: the guard suite runs once on macOS, as the mac-tagged slice (GUARD_TESTS=macos-slice) in MACOS_SLICE_JOB,
+    with no GUARD_SHARD and on the MAC_CODE condition. No other macOS job runs a guard step, so checks-macos-b runs none."""
+    macos = [n for n, j in all_jobs(text).items() if is_macos(j)]
+    homes = split_homes(text, macos, MACOS_GUARD)
+    problems = []
+    if [j for j, _ in homes] != [MACOS_SLICE_JOB]:
+        problems.append(f"{MACOS_GUARD!r} runs in {[j for j, _ in homes]}, want exactly one slice in {MACOS_SLICE_JOB} "
+                        "and no guard step in any other macOS job")
     for job, st in homes:
-        if job in MACOS_GUARD_SHARD:
-            problems += pin_problems(job, st, MACOS_GUARD, want_if, want_shell, {"GUARD_SHARD": MACOS_GUARD_SHARD[job]})
-    macos = [n for n, j in all_jobs(text).items() if (j["os"] or "").startswith("macos")]
-    third = [j for j, _ in split_homes(text, macos, MACOS_GUARD) if j not in MACOS_SPLIT]
-    if third:
-        problems.append(f"{MACOS_GUARD!r} runs in a macOS job outside {MACOS_SPLIT}: {third}")
+        if job == MACOS_SLICE_JOB:
+            problems += pin_problems(job, st, MACOS_GUARD, MAC_CODE, None, MACOS_SLICE_ENV)
     return problems
 
 
@@ -1310,7 +1338,7 @@ class SplitJobs(unittest.TestCase):
     def test_each_linux_suite_runs_once_in_its_split(self):
         self.assertEqual(linux_split_problems(self.text), [])
 
-    def test_each_macos_suite_runs_once_in_its_split_and_the_guard_in_two_shards(self):
+    def test_each_macos_suite_runs_once_in_its_split_and_the_guard_slice_in_checks_macos(self):
         self.assertEqual(macos_split_problems(self.text), [])
 
     def test_a_macos_shard_value_outside_its_step_is_flagged(self):
@@ -1341,33 +1369,40 @@ class SplitJobs(unittest.TestCase):
                 self.assertTrue(linux_split_problems(text), label)
 
     def test_checker_sees_the_macos_split_defects(self):
-        rows = [(c, i, s, {}) for c, (i, s) in MACOS_SUITES.items() if c != MACOS_GUARD]
+        rows = [(c, i, s, {}) for c, (i, s) in MACOS_SUITES.items()]
         half = len(rows) // 2
-        guard_i, guard_s = MACOS_SUITES[MACOS_GUARD]
+        slice_step = (MACOS_GUARD, MAC_CODE, None, MACOS_SLICE_ENV)
 
-        def guard(shard):
-            return (MACOS_GUARD, guard_i, guard_s, {"GUARD_SHARD": shard})
+        def doc_on(runs_on):
+            def doc(a=None, b=None, extra=None):
+                a = rows[:half] + [slice_step] if a is None else a
+                b = rows[half:] if b is None else b
+                return split_doc({"checks-macos": (runs_on, a), "checks-macos-b": (runs_on, b), **(extra or {})})
+            return doc
 
-        def doc(a=None, b=None, extra=None):
-            a = rows[:half] + [guard("1/2")] if a is None else a
-            b = rows[half:] + [guard("2/2")] if b is None else b
-            return split_doc({"checks-macos": ("macos-latest", a), "checks-macos-b": ("macos-latest", b), **(extra or {})})
-
-        self.assertEqual(macos_split_problems(doc()), [])
-        c0, i0, s0, _ = rows[0]
-        bad = {
-            "a suite dropped": doc(a=rows[1:half] + [guard("1/2")]),
-            "a suite run in both jobs": doc(b=rows[half:] + [rows[0], guard("2/2")]),
-            "a suite's if changed": doc(a=[(c0, "needs.scope.outputs.code == 'false'", s0, {})] + rows[1:half] + [guard("1/2")]),
-            "a suite's env set": doc(a=[(c0, i0, s0, {"BASE_REF": "main"})] + rows[1:half] + [guard("1/2")]),
-            "the second shard missing": doc(b=rows[half:]),
-            "the second shard value dropped": doc(b=rows[half:] + [(MACOS_GUARD, guard_i, guard_s, {})]),
-            "both shards 1/2": doc(b=rows[half:] + [guard("1/2")]),
-            "the guard in a third macOS job": doc(extra={"checks-macos-c": ("macos-latest", [guard("1/2")])}),
-        }
-        for label, text in bad.items():
-            with self.subTest(defect=label):
-                self.assertTrue(macos_split_problems(text), label)
+        # Each case runs on a literal macos-* runs-on and on the runner pick: the checker must see both as macOS.
+        for runs_on in ("macos-latest", MAC_PICK_RUNS_ON):
+            with self.subTest(runs_on=runs_on):
+                doc = doc_on(runs_on)
+                with self.subTest(case="the good split passes"):
+                    self.assertEqual(macos_split_problems(doc()), [])
+                # Named failure: on the pick, a slice in checks-macos-b is reported as in no job, so the problem names no job.
+                with self.subTest(case="a slice in checks-macos-b names that job"):
+                    self.assertIn("['checks-macos-b']", "\n".join(macos_slice_problems(doc(a=rows[:half], b=rows[half:] + [slice_step]))))
+                c0, i0, s0, _ = rows[0]
+                bad = {
+                    "a suite dropped": doc(a=rows[1:half] + [slice_step]),
+                    "a suite run in both jobs": doc(b=rows[half:] + [rows[0]]),
+                    "a suite's if changed": doc(a=[(c0, "needs.scope.outputs.code == 'false'", s0, {})] + rows[1:half] + [slice_step]),
+                    "a suite's env set": doc(a=[(c0, i0, s0, {"BASE_REF": "main"})] + rows[1:half] + [slice_step]),
+                    "the slice dropped from checks-macos": doc(a=rows[:half]),
+                    "the slice in checks-macos-b too": doc(b=rows[half:] + [slice_step]),
+                    "a shard value on the slice": doc(a=rows[:half] + [(MACOS_GUARD, MAC_CODE, None, {**MACOS_SLICE_ENV, "GUARD_SHARD": "1/2"})]),
+                    "the slice in a third macOS job": doc(extra={"checks-macos-c": (runs_on, [slice_step])}),
+                }
+                for label, text in bad.items():
+                    with self.subTest(defect=label):
+                        self.assertTrue(macos_split_problems(text), label)
 
     def test_the_unknown_reads_check_runs_once_in_each_split(self):
         # Named failure: check_unknown_reads_contract.py runs twice, or not at all, in a split, and no case notices.
@@ -1478,6 +1513,265 @@ class SplitJobs(unittest.TestCase):
             for shard in LINUX_GUARD_SHARD:
                 with self.subTest(job=job, shard=shard):
                     self.assertTrue(check(without_need(planned, job, shard)), f"{shard} left out of {job}")
+
+
+# ---- R61 (owner pick b, 15:29 CST Nov 12): macOS runs once per batch. The macOS jobs skip a push at job level, checks-macos
+# runs one mac-tagged guard slice, and the 03:17 nightly is gated on main's head. Each helper reads checks.yml text; each
+# case reads the real file, so it is red until the change lands.
+
+# The scope condition's truth table on a run: (event, draft, the gate's skip output, scope runs?). An unset output is ''.
+NIGHTLY_TRUTH = (("push", False, "", True), ("pull_request", False, "", True), ("pull_request", True, "", False),
+                 ("workflow_dispatch", False, "", True), ("schedule", False, "false", True), ("schedule", False, "", True),
+                 ("schedule", False, "true", False))
+
+
+def push_guard_only(expr):
+    """True when a job-level `if:` is the push guard and nothing else: true on a pull_request (draft or not), a schedule and a
+    workflow_dispatch, false on a push. It reads no scope flag, so its answer holds for every flag value, and it reads no other
+    job's output: the answer must match for every skip value (SKIP_VALUES)."""
+    e = unwrap(expr)
+    if not e:
+        return False
+    try:
+        return all(eval_if(e, event, flag, draft=draft, nightly_skip=nightly_skip) == want for nightly_skip in SKIP_VALUES for event, flag, draft, want in (
+            ("pull_request", "false", True, True), ("pull_request", "true", False, True),
+            ("schedule", "false", False, True), ("workflow_dispatch", "false", False, True),
+            ("push", "false", False, False), ("push", "true", False, False)))
+    except Exception:
+        return False
+
+
+def schedule_only(expr):
+    """True when a job-level `if:` runs on a schedule and nowhere else: false on a push, a pull_request and a workflow_dispatch.
+    Like push_guard_only, its answer must match for every gate value."""
+    e = unwrap(expr)
+    if not e:
+        return False
+    try:
+        return all(eval_if(e, event, "false", nightly_skip=nightly_skip) == want for nightly_skip in SKIP_VALUES for event, want in (
+            ("schedule", True), ("pull_request", False), ("push", False), ("workflow_dispatch", False)))
+    except Exception:
+        return False
+
+
+def push_guard_jobs(text):
+    """The jobs whose job-level if is the push guard, sorted."""
+    return sorted(n for n, j in all_jobs(text).items() if j["if"] is not None and push_guard_only(j["if"]))
+
+
+def macos_push_guard_problems(text):
+    """R61 part 1: each MACOS_JOBS job keeps the push guard as its job-level if, and no other job has one. A step-level skip still
+    starts the macOS runner, so the guard sits on the job."""
+    jobs = all_jobs(text)
+    problems = []
+    for name in MACOS_JOBS:
+        job = jobs.get(name)
+        if job is None:
+            problems.append(f"no {name} job")
+        elif job["if"] is None:
+            problems.append(f"{name} has no job-level if: a push still starts its macOS runner")
+        elif not push_guard_only(job["if"]):
+            problems.append(f"{name} job-level if is not the push guard: {job['if']}")
+    if push_guard_jobs(text) != sorted(MACOS_JOBS):
+        problems.append(f"the push guard is a job-level if on {push_guard_jobs(text)}, want {sorted(MACOS_JOBS)}")
+    return problems
+
+
+def skip_job_problems(text):
+    """R61 part 3: the nightly gate is an ubuntu job with no job-level if, so it runs on every event: a skipped gate would skip every
+    job behind scope, since a skipped ancestor skips a job whose own if holds no status function. It reads no flag and needs no other job."""
+    nightly_skip = all_jobs(text).get(NIGHTLY_SKIP_JOB)
+    if nightly_skip is None:
+        return [f"no {NIGHTLY_SKIP_JOB} job: a scheduled run has no gate to read"]
+    problems = []
+    if nightly_skip["if"] is not None:
+        problems.append(f"{NIGHTLY_SKIP_JOB} if is {nightly_skip['if']}, want none: a skipped gate skips every job behind scope")
+    if not (nightly_skip["os"] or "").startswith("ubuntu"):
+        problems.append(f"{NIGHTLY_SKIP_JOB} runs on {nightly_skip['os']}, want ubuntu")
+    return problems
+
+
+def skip_block_problems(text):
+    """R61 part 3: the gate's own block holds a timeout, exactly read-only actions and contents, and a skip output that a step sets."""
+    if NIGHTLY_SKIP_JOB not in all_jobs(text):
+        return [f"no {NIGHTLY_SKIP_JOB} job: a scheduled run has no gate to read"]
+    block = job_block(text, NIGHTLY_SKIP_JOB) or ""
+    problems = []
+    if not re.search(r"^    timeout-minutes:[ \t]*\d+", block, re.M):
+        problems.append(f"{NIGHTLY_SKIP_JOB} has no timeout-minutes number")
+    perms = re.search(r"^    permissions:[ \t]*(?:#[^\n]*)?\n((?:      \S[^\n]*\n)+)", block, re.M)
+    got = dict(re.findall(r"^      (\w+):[ \t]*(\S+)", perms.group(1), re.M)) if perms else {}
+    if got != {"actions": "read", "contents": "read"}:
+        problems.append(f"{NIGHTLY_SKIP_JOB} permissions are {got}, want exactly actions: read and contents: read")
+    if not re.search(r"^    outputs:[ \t]*(?:#[^\n]*)?\n      skip:[ \t]*\$\{\{[ \t]*steps\.[\w-]+\.outputs\.skip[ \t]*\}\}", block, re.M):
+        problems.append(f"{NIGHTLY_SKIP_JOB} has no skip output that a step sets")
+    return problems
+
+
+def scope_skip_problems(text):
+    """R61 part 3: scope needs the gate, and its if skips a scheduled run exactly when the gate says skip. A skipped scope skips
+    every job through needs; an unset or failed gate reads '' and runs everything (unknown is not skip)."""
+    sc = all_jobs(text).get("scope") or {}
+    problems = []
+    if sc.get("needs") != NIGHTLY_SKIP_JOB:
+        problems.append(f"scope needs {sc.get('needs')}, want {NIGHTLY_SKIP_JOB}: scope must wait on the gate")
+    expr = sc.get("if")
+    if expr is None:
+        return problems + ["scope has no if"]
+    # A job whose needed job is skipped is skipped too, unless its if holds a status function at the top level. The truth table
+    # below reads always() as true, so it cannot see this: a push, where the gate is skipped, would skip scope and every job.
+    if not any(c in ("always()", "!cancelled()") for c in top_level_conjuncts(expr)):
+        problems.append("scope if has no top-level always() or !cancelled() conjunct: a skipped gate skips scope and every job")
+    for event, draft, skip, runs in NIGHTLY_TRUTH:
+        try:
+            got = eval_if(expr, event, "true", draft=draft, nightly_skip=skip)
+        except Exception as ex:
+            return problems + [f"scope if is unreadable ({ex!r}): {expr}"]
+        if got != runs:
+            problems.append(f"scope on {event} (draft {draft}, gate skip {skip!r}) runs {got}, want {runs}")
+    return problems
+
+
+def _pair_closes_at_end(e):
+    """True when the `(` at index 0 of `e` closes at its last character, outside quotes: `(a) && (b)` does not."""
+    depth, quoted = 0, False
+    for i, ch in enumerate(e):
+        if ch == "'":
+            quoted = not quoted
+        elif not quoted and ch == "(":
+            depth += 1
+        elif not quoted and ch == ")":
+            depth -= 1
+            if depth == 0:
+                return i == len(e) - 1
+    return False
+
+
+def top_level_conjuncts(expr):
+    """The `&&` parts of an `if:` at the top level: outside quotes and parentheses. A status function inside a quoted string or
+    under an `||` is not one of them."""
+    e = unwrap(expr) or ""
+    while e.startswith("(") and e.endswith(")") and _pair_closes_at_end(e):  # one pair around all of the expression
+        e = e[1:-1].strip()
+    parts, depth, quoted, start, i = [], 0, False, 0, 0
+    while i < len(e):
+        ch = e[i]
+        if ch == "'":
+            quoted = not quoted
+        elif not quoted:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            elif depth == 0 and e.startswith("&&", i):
+                parts.append(e[start:i].strip())
+                start = i + 2
+                i += 2
+                continue
+        i += 1
+    return parts + [e[start:].strip()]
+
+
+class MacOnceByBatch(unittest.TestCase):
+    """R61 on checks.yml. Each case reads the real file, so it is red until the change lands. The checker self-tests run on
+    synthetic text and pass on any file: each defect below is the only flag."""
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+
+    def test_each_macos_job_skips_a_push_at_job_level(self):
+        # Named failure: a macOS job has no job-level push guard, so a push starts its runner; a step-level skip still starts it.
+        self.assertEqual(macos_push_guard_problems(self.text), [])
+
+    def test_the_macos_jobs_still_run_on_a_pull_request_a_schedule_and_a_dispatch(self):
+        # Named failure: the push guard also skips the batch PR's macOS proof, or the scheduled or manual macOS run.
+        for name in MACOS_JOBS:
+            with self.subTest(job=name):
+                expr = all_jobs(self.text).get(name, {}).get("if")
+                self.assertIsNotNone(expr, f"{name} has no job-level if")
+                for event in ("pull_request", "schedule", "workflow_dispatch"):
+                    self.assertTrue(eval_if(expr, event, "true"), f"{name} does not run on {event}")
+
+    def test_checks_macos_runs_one_guard_slice_and_checks_macos_b_runs_none(self):
+        # Named failure: checks-macos still runs a guard shard, or checks-macos-b still runs a guard step.
+        self.assertEqual(macos_slice_problems(self.text), [])
+
+    def test_the_nightly_skip_is_an_ubuntu_job_with_no_job_level_if(self):
+        # Named failure: no gate job, or one with a job-level if, so it is skipped on a pull request and every job behind scope skips.
+        self.assertEqual(skip_job_problems(self.text), [])
+
+    def test_the_nightly_skip_holds_a_timeout_read_only_permissions_and_a_skip_output(self):
+        # Named failure: the gate can write, has no cap, or has no skip output for scope to read.
+        self.assertEqual(skip_block_problems(self.text), [])
+
+    def test_scope_waits_on_the_skip_and_skips_a_scheduled_run_only_when_the_skip_says_skip(self):
+        # Named failure: a scheduled run reruns a green main, or a skipped gate skips a push or a red run.
+        self.assertEqual(scope_skip_problems(self.text), [])
+
+    def test_checker_sees_the_push_guard_defects(self):
+        # The control: the push guard on a macOS job, with its scope condition in the steps, passes. Each defect is flagged.
+        def job_text(name, if_):
+            text = split_doc({name: ("macos-latest", [(MACOS_GUARD, MAC_CODE, None, {})])})
+            return text.replace("    needs: scope\n", f"    needs: scope\n    if: ${{{{ {if_} }}}}\n", 1)
+
+        self.assertEqual(job_check_problems("checks-macos", all_jobs(job_text("checks-macos", "github.event_name != 'push'"))["checks-macos"]), [])
+        bad = {
+            "a push-only guard": ("checks-macos", "github.event_name == 'push'"),
+            "a pull-request-only guard": ("checks-macos", "github.event_name == 'pull_request'"),
+            "the push guard on a Windows job": ("checks-windows", "github.event_name != 'push'"),
+            "the push guard with a flag": ("checks-macos", "github.event_name != 'push' && needs.scope.outputs.checks_macos == 'true'"),
+            "the push guard reads the gate": ("checks-macos", "github.event_name != 'push' && needs.nightly-skip.outputs.skip != 'true'"),
+        }
+        for label, (name, if_) in bad.items():
+            with self.subTest(defect=label):
+                self.assertTrue(job_check_problems(name, all_jobs(job_text(name, if_))[name]), label)
+
+    def test_checker_sees_the_nightly_skip_defects(self):
+        # The control: an ubuntu gate with no job-level if, its timeout, read-only permissions and skip output passes, and so does
+        # a scope that waits on it. Each defect below is flagged, and only the named defect.
+        # Trailing comments on the if, the cap, the permissions and the outputs headers, and a # inside a quoted step, read as
+        # text or as a comment as YAML does: none of them changes the answer.
+        nightly_skip = ("  nightly-skip:\n    runs-on: ubuntu-latest\n"
+                "    timeout-minutes: 5  # the cap\n    permissions:  # read-only\n      actions: read  # reads runs\n      contents: read\n"
+                "    outputs:  # the gate's answer\n      skip: ${{ steps.decide.outputs.skip }}\n"
+                "    steps:\n      - id: gate\n        run: echo \"skip=false # not a comment\" >> \"$GITHUB_OUTPUT\"\n")
+        scope = ("  scope:\n    if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) "
+                 "&& needs.nightly-skip.outputs.skip != 'true' }}\n    needs: nightly-skip\n    runs-on: ubuntu-latest\n    steps:\n"
+                 "      - run: echo scope\n")
+        self.assertEqual(skip_job_problems("jobs:\n" + nightly_skip), [])
+        self.assertEqual(skip_block_problems("jobs:\n" + nightly_skip), [])
+        self.assertEqual(scope_skip_problems("jobs:\n" + scope + nightly_skip), [])
+        # The control, with !cancelled() as the status function: it passes too.
+        self.assertEqual(scope_skip_problems("jobs:\n" + scope.replace("always()", "!cancelled()") + nightly_skip), [])
+        skip_bad = {
+            "the gate skips on a pull request": nightly_skip.replace(
+                "    runs-on:", "    if: ${{ github.event_name == 'schedule' }}  # the 03:17 run only\n    runs-on:", 1),
+            "the gate on macOS": nightly_skip.replace("ubuntu-latest", "macos-latest"),
+        }
+        for label, text in skip_bad.items():
+            with self.subTest(defect=label):
+                self.assertTrue(skip_job_problems("jobs:\n" + text), label)
+        block_bad = {
+            "no timeout": nightly_skip.replace("    timeout-minutes: 5  # the cap\n", ""),
+            "contents write": nightly_skip.replace("contents: read", "contents: write"),
+            "no skip output": nightly_skip.replace("    outputs:  # the gate's answer\n      skip: ${{ steps.decide.outputs.skip }}\n", ""),
+        }
+        for label, text in block_bad.items():
+            with self.subTest(defect=label):
+                self.assertTrue(skip_block_problems("jobs:\n" + text), label)
+        scope_bad = {
+            "scope does not wait on the gate": scope.replace("    needs: nightly-skip\n", ""),
+            "scope ignores the gate": scope.replace(" && needs.nightly-skip.outputs.skip != 'true'", ""),
+            "a draft PR runs": scope.replace("!github.event.pull_request.draft", "true"),
+            # R61 part 3 status function: without a top-level always() or !cancelled(), a skipped gate skips scope on push.
+            "scope without a status function": scope.replace("always() && ", ""),
+            "always() only inside a quoted string": scope.replace("always() && (", "'always()' && ("),
+            "always() only under an or": scope.replace("always() && (", "(always() || github.event_name == 'push') && ("),
+        }
+        for label, text in scope_bad.items():
+            with self.subTest(defect=label):
+                self.assertTrue(scope_skip_problems("jobs:\n" + text + nightly_skip), label)
 
 
 class TopLevelOr(unittest.TestCase):
