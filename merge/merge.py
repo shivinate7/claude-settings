@@ -1852,15 +1852,35 @@ def claim_only(root, cfgrel, base, linted, live):
 
 PAGE_SUBJECT = "Rebuild the records page"  # the subject of a page-only commit (commit_claim with no trailer)
 
-def page_only(wt, sha):
+def page_only(wt, sha, strict=False):
     """-> the parent of `sha` when it is a page-only commit: one parent, the subject PAGE_SUBJECT, and the records page alone changed. Else None,
-    a read that fails too. A lane resumes a claim by pushing one when the page goes stale, so it is no move of the head."""
+    a read that fails too. A lane resumes a claim by pushing one when the page goes stale, so it is no move of the head. `strict`: a read that
+    fails raises Stop (unknown) instead, for the carry of a review record, which must never read a commit it could not see as no page commit."""
+    def fail(what, out):
+        if strict:
+            raise Stop(f"cannot read {what} of {sha[:9]} to tell whether it is a records-page commit: {' '.join(out.split())[:200]} " + REVIEW_CITE)
+        return None
     c, row = git(wt, "log", "-1", "--format=%P%x09%s", sha)
+    if c:
+        return fail("the commit", row)
     parents, _, subject = row.partition("\t")
-    if c or len(parents.split()) != 1 or subject.strip() != PAGE_SUBJECT:
+    if len(parents.split()) != 1 or subject.strip() != PAGE_SUBJECT:
         return None
     c, files = git(wt, "diff-tree", "--no-commit-id", "--name-only", "-r", sha)
-    return parents.strip() if not c and files.split() == [RECORDS_PAGE] else None
+    if c:
+        return fail("the files", files)
+    return parents.strip() if files.split() == [RECORDS_PAGE] else None
+
+def page_is_generated(root, sha):
+    """True when the records page of `sha` is what the generator writes for its tree: rebuild_records on a temporary worktree at `sha` changes
+    nothing. The tool's own page commit passes (it was written by that rebuild); a hand edit, or a page the generator would write differently, does not.
+    Any failure to make the tree, read it or run the generator raises Stop (unknown), never True. The tree is removed on every path.
+    Cost: one worktree add and remove, and one generator run."""
+    tmp, wt = add_worktree(root, sha)
+    try:
+        return not rebuild_records(wt)
+    finally:
+        drop_worktree(root, tmp, wt)
 
 def head_under_claims(wt, cfgrel, base, sha):
     """The commit under the claim and page-only commits at the top of `sha`, or `sha` itself when none is there. A claim commit is claim_only's: one
@@ -3757,11 +3777,14 @@ def clean_merges_after(h, head, live, base=None, claims=None):
     """True when every commit after `head`, up to the live head `live`, is a clean merge of main. A clean merge of main has two
     parents, a second parent main holds (Host.holds_head, main being `base`, else the host's base), and git's clean merge of its parents as its tree
     (merge_state). `claims`, the stamp config path: a one-parent claim commit (claim_only, read in the host's checkout) also counts, since the
-    merge tool's own claim moves the reviewed head by exactly that. The walk follows first parents from `live` and must reach `head` within
+    merge tool's own claim moves the reviewed head by exactly that. A one-parent records-page commit (page_only) counts too, but only when the
+    committed page is what the generator writes for its tree (page_is_generated): the tool's own rebuild, never a hand edit. The walk follows first parents from `live` and must reach `head` within
     REVIEW_MERGE_WALK commits. A commit with one parent (an empty commit too), a merge of three, a merge of a branch main lacks, an edited or conflicted merge, a
     longer walk and a head that is never reached are all False. A failed read, a commit read that names no tree, and a merge git cannot read
-    (merge_state "unknown") raise Stop: unknown, never False and never True. Cost: one commit read per commit walked (each sha read once);
-    one holds_head compare and one merge_state per merge commit; and at most one fetch_branch_heads a run."""
+    (merge_state "unknown") raise Stop: so do a page commit whose reads fail and a generator run that fails: unknown, never False and never True.
+    Cost: one commit read per commit walked (each sha read once); one holds_head compare and one merge_state per merge commit; per one-parent
+    commit that is no claim, page_only's two git reads, and for a page commit one temporary worktree and one generator run (at most one per
+    commit, never repeated for a sha); and at most one fetch_branch_heads a run."""
     sha, read = live, {}
 
     def commit(s):
@@ -3774,6 +3797,9 @@ def clean_merges_after(h, head, live, base=None, claims=None):
             return True
         parents, tree = commit(sha)
         if claims and len(parents) == 1 and claim_only(h.cwd or ".", claims, base or h.base, parents[0], sha):
+            sha = parents[0]
+            continue
+        if len(parents) == 1 and page_only(h.cwd or ".", sha, strict=True) and page_is_generated(h.cwd or ".", sha):
             sha = parents[0]
             continue
         if len(parents) != 2 or not h.holds_head(parents[1], base or h.base):  # a one-parent commit, even an empty one, is no merge of main
