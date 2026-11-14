@@ -1,0 +1,16 @@
+{
+ "id": "scope-drops-dead-lint-mapping",
+ "title": "ci-scope.sh stops mapping an edit to lint/check_unknown_reads_contract.py to the Windows, macOS and guard job flags, which no longer run it",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "unknown-reads-lint-linux-only"
+ ],
+ "why": "Coordinator 03:27 and 03:28 CST Nov 14 (relayed; the lane of #3005 read .github/scripts/ci-scope.sh line 44; unchecked by triage): after #3005 an edit to that lint starts jobs that no longer run it. The #3005 lane chose to keep the mapping out of #3005 (posted on its PR): the extra jobs are harmless (it fails safe) and a head move costs another round and lane lint. It asked for its own step.",
+ "source": "Replaces triage's 03:28 pick (a sighting on unknown-reads-lint-linux-only): the lane's wish fits better as its own small step. Neighbours: unknown-reads-lint-linux-only (#3005; blockedBy for this step), macos-jobs-gated-by-scope (reads the same file; the two lanes may both edit ci-scope.sh: the later one merges main in).",
+ "note": "Triage 03:29 CST Nov 14: blockedBy unknown-reads-lint-linux-only (#3005 merged). Done check: an edit to lint/check_unknown_reads_contract.py sets no Windows or macOS flag in ci-scope.sh and still sets the Linux flag; red first on main after #3005 (the test fails: the flags are set), green after; control: an edit to another lint keeps its flags. Cost saved: jobs started for a lint that no longer runs on them (unmeasured). Path ALONE; small; tracker: the coordinator. No lane started. No owner question.",
+ "updatedAt": "2026-11-14T03:29:20-06:00"
+}
