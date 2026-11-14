@@ -11012,14 +11012,14 @@ def live_nightly():
 
 
 # The two real push shapes, read from the jobs API (owner ruling own-812-a-judge-suite-runs: judge only the runs that ran their suites). LIVE_PUSH_SKIP is run
-# 43553756879: push-skip ran and passed, scope was skipped, and every suite job of checks.yml was skipped with it (31 jobs). OLD_BUG_PUSH_SKIP is
+# 43553756879: push-skip ran and passed, scope was skipped, and every suite job of checks.yml was skipped with it (31 jobs). OLD_DEFECT_PUSH_SKIP is
 # run 43515441901: scope passed, nightly-skip was skipped, and no push-skip job ran (29 jobs). Each names its jobs as the API does.
 LIVE_PUSH_SKIP = [main_job("nightly-skip", "success"), main_job("push-skip", "success")] + [main_job(name, "skipped") for name in (
     "scope checks-guard checks-guard-2 checks-windows-merge-4 checks-windows-guard-2 checks-merge-install checks-macos-b checks-windows-rest-2 "
     "checks-mutate-guard-b mutation-report checks-waiting-page checks-mutate-guard-c checks-windows-merge-5 checks-windows-guard pointer-windows "
     "checks-windows-merge-3 checks-windows-merge-2 checks checks-windows all-jobs-passed checks-windows-rest checks-windows-sweep checks-macos "
     "checks-shoot checks-windows-merge checks-windows-guard-3 shell-macos checks-mutate-guard ci-done").split()]
-OLD_BUG_PUSH_SKIP = [main_job("scope", "success")] + [main_job(name, "skipped") for name in (
+OLD_DEFECT_PUSH_SKIP = [main_job("scope", "success")] + [main_job(name, "skipped") for name in (
     "nightly-skip checks-guard checks-windows-guard-3 checks-macos checks-windows-merge-4 checks-windows-sweep checks-waiting-page "
     "checks-merge-install checks-windows-merge-2 checks-guard-2 checks-mutate-guard-b checks-shoot checks-mutate-guard checks-windows-merge-5 "
     "checks-windows-merge pointer-windows checks-windows-guard-2 checks-windows-merge-3 checks-macos-b shell-macos checks checks-windows "
@@ -11514,7 +11514,7 @@ class RedMainBrake(Env):
         self.assertIn("checks: fail", out)
         self.assertEqual(self.host.reads.count("actions/runs/1701/jobs"), 1, "the empty green run is not read once, to see that it is empty")
 
-    # A red push run, then a newer green push run that ran no suite job. That run is passed over, so the older red run is the verdict, and main
+    # A failed push run, then a newer green push run that ran no suite job. That run is passed over, so the older failed run is the verdict, and main
     # stays red. One method per shape: a merge that goes through empties the fixture.
     def test_an_empty_green_push_run_without_evidence_does_not_hide_an_older_red_push_run(self):
         self.assert_red_stays_over_empty_green(*self.red_then_empty_green("push", self.EMPTY_PUSH))
@@ -11525,10 +11525,10 @@ class RedMainBrake(Env):
     def test_a_full_size_empty_green_push_run_does_not_hide_an_older_red_push_run(self):
         self.assert_red_stays_over_empty_green(*self.red_then_empty_green("push", self.forty_job_empty_push()))
 
-    def test_an_empty_green_push_run_with_evidence_does_not_clear_an_older_red_push_run(self):
-        # push-skip passed and scope was skipped, but every suite job was skipped: the run skipped its suites, so it is passed over and the red run stands
+    def test_an_empty_green_push_run_with_evidence_does_not_clear_an_older_failed_push_run(self):
+        # push-skip passed and scope was skipped, but every suite job was skipped: the run skipped its suites, so it is passed over and the failed run stands
         rc, out, before = self.go([main_run(1711, "success"), main_run(1710, "failure")], {1710: self.RED_PUSH, 1711: self.EVIDENCE_PUSH})
-        self.refused_because(rc, out, before, "the push-skip run with scope skipped cleared the older red push run")
+        self.refused_because(rc, out, before, "the push-skip run with scope skipped cleared the older failed push run")
         self.assertIn("run 1710", out)
         self.assertIn("checks: fail", out)
 
@@ -11587,16 +11587,16 @@ class RedMainBrake(Env):
 
     # The suites-run verdict (decision no-merge-onto-red-main; owner ruling own-812-a-judge-suite-runs): the push group's verdict is its newest run
     # that ran its suites. A run that skipped its suites is passed over, whatever its push-skip job says. A page with no such run is UNKNOWN.
-    def test_a_live_push_skip_run_over_a_red_suites_run_refuses_and_names_the_red_run(self):
+    def test_a_live_push_skip_run_over_a_failed_suites_run_refuses_and_names_the_failed_run(self):
         rc, out, before = self.go([main_run(1811, "success"), main_run(1810, "failure")], {1810: self.RED_PUSH, 1811: LIVE_PUSH_SKIP})
-        self.refused_because(rc, out, before, "the live push-skip run hid the red suites run beneath it")
+        self.refused_because(rc, out, before, "the live push-skip run hid the failed suites run beneath it")
         self.assertIn("run 1810", out)
         self.assertIn("checks: fail", out)
 
-    def test_two_live_push_skip_runs_back_to_back_over_a_red_suites_run_refuse_and_name_it(self):
+    def test_two_live_push_skip_runs_back_to_back_over_a_failed_suites_run_refuse_and_name_it(self):
         rc, out, before = self.go([main_run(1822, "success"), main_run(1821, "success"), main_run(1820, "failure")],
                                   {1820: self.RED_PUSH, 1821: LIVE_PUSH_SKIP, 1822: LIVE_PUSH_SKIP})
-        self.refused_because(rc, out, before, "two push-skip runs hid the red suites run beneath them")
+        self.refused_because(rc, out, before, "two push-skip runs hid the failed suites run beneath them")
         self.assertIn("run 1820", out)
         self.assertIn("checks: fail", out)
 
@@ -11609,11 +11609,11 @@ class RedMainBrake(Env):
     def test_a_page_of_one_live_push_skip_run_is_unknown_not_green(self):
         self.assert_unknown_page([1831], {1831: LIVE_PUSH_SKIP}, "one live push-skip run")
 
-    def test_a_page_of_one_old_bug_run_is_unknown_not_green(self):
-        self.assert_unknown_page([1832], {1832: OLD_BUG_PUSH_SKIP}, "one old bug run")
+    def test_a_page_of_one_old_defect_run_is_unknown_not_green(self):
+        self.assert_unknown_page([1832], {1832: OLD_DEFECT_PUSH_SKIP}, "one old defect run")
 
     def test_a_page_of_both_shapes_is_unknown_not_green(self):
-        self.assert_unknown_page([1834, 1833], {1833: LIVE_PUSH_SKIP, 1834: OLD_BUG_PUSH_SKIP}, "both push-skip shapes")
+        self.assert_unknown_page([1834, 1833], {1833: LIVE_PUSH_SKIP, 1834: OLD_DEFECT_PUSH_SKIP}, "both push-skip shapes")
 
     def test_a_zero_job_green_push_run_alone_is_unknown_not_green(self):
         # a green push run that ran no job ran no suite: with no other push run on the page, there is no verdict
@@ -11622,21 +11622,21 @@ class RedMainBrake(Env):
         self.assertIn("UNKNOWN", out)
 
     # Controls: main already reads these shapes as the ruling says, so they pass before and after the change.
-    def test_the_old_bug_shape_over_a_red_suites_run_refuses_and_names_it(self):
-        # no push-skip job and scope passed: the run skipped its suites, so it is passed over and the red run is the verdict
-        rc, out, before = self.go([main_run(1861, "success"), main_run(1860, "failure")], {1860: self.RED_PUSH, 1861: OLD_BUG_PUSH_SKIP})
+    def test_the_old_defect_shape_over_a_failed_suites_run_refuses_and_names_it(self):
+        # no push-skip job and scope passed: the run skipped its suites, so it is passed over and the failed run is the verdict
+        rc, out, before = self.go([main_run(1861, "success"), main_run(1860, "failure")], {1860: self.RED_PUSH, 1861: OLD_DEFECT_PUSH_SKIP})
         self.refused(rc, out, before)
         self.assertIn("run 1860", out)
         self.assertIn("checks: fail", out)
 
-    def test_a_zero_job_green_push_run_over_a_red_suites_run_refuses_and_names_it(self):
+    def test_a_zero_job_green_push_run_over_a_failed_suites_run_refuses_and_names_it(self):
         rc, out, before = self.go([main_run(1871, "success"), main_run(1870, "failure")], {1870: self.RED_PUSH, 1871: []})
         self.refused(rc, out, before)
         self.assertIn("run 1870", out)
         self.assertIn("checks: fail", out)
 
-    def test_the_newest_suites_run_is_the_verdict_over_push_skip_runs_above_it_and_a_red_run_beneath(self):
-        # the run that ran its suites passed: the push-skip runs above it are passed over, and the red run beneath it is no verdict
+    def test_the_newest_suites_run_is_the_verdict_over_push_skip_runs_above_it_and_a_failed_run_beneath(self):
+        # the run that ran its suites passed: the push-skip runs above it are passed over, and the failed run beneath it is no verdict
         rc, out, _ = self.go([main_run(1882, "success"), main_run(1881, "success"), main_run(1880, "failure")],
                              {1880: self.RED_PUSH, 1881: self.RAN_PUSH, 1882: LIVE_PUSH_SKIP})
         self.merged(rc, out)
