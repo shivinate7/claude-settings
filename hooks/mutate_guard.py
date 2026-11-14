@@ -3571,6 +3571,27 @@ MUTATIONS = [
      '    return clause\n\n\ndef _claim_clause',
      '    return None\n\n\ndef _claim_clause',
      "guard", 'brief-claim: test-author brief where main refuses all three today'),
+    # ---- agent-owned kill (step agent-owned-processes): hooks/guard_kill.py agent_pid_kill, the guard's call site ----
+    ('agent-owned kill: another agent\'s live marker is never read, so a marked pid with no record is killed',
+     '        if marker and marker != agent_id:\n',
+     '        if False:\n',
+     "guard", 'marked for another agent, with no record'),
+    ('agent-owned kill: another agent\'s record is never read, so an unmarked pid it lists is killed',
+     '        if agent_procs is not None and agent_procs.held_by_others(pid, agent_id):\n',
+     '        if False:\n',
+     "guard", 'recorded to another agent, with no marker'),
+    ('agent-owned kill: the calling agent\'s own marked pid is refused as if another agent started it',
+     '        if marker and marker != agent_id:\n',
+     '        if marker:\n',
+     "guard", 'recorded to the calling agent is allowed'),
+    ('agent-owned kill: the calling agent\'s own recorded pid is refused as if another agent started it',
+     '        if agent_procs is not None and agent_procs.held_by_others(pid, agent_id):\n',
+     '        if agent_procs is not None and agent_procs.recorded_owners(pid):\n',
+     "guard", 'recorded to the calling agent is allowed'),
+    ('agent-owned kill: the guard never passes the calling agent to agent_pid_kill, so no kill is judged for an agent',
+     '            matched = agent_pid_kill(tokens, caller if isinstance(caller, str) else "")\n',
+     '            matched = agent_pid_kill(tokens, "")\n',
+     "guard", 'kill: a pid recorded to another agent is refused for the calling agent'),
 ]
 
 
