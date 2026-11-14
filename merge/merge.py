@@ -3527,15 +3527,20 @@ def review_round_model(n):
     rounds = hook_guard.role_round_table(hook_guard.pointer_checkout())
     return hook_guard.role_round_model(rounds, REVIEW_ROLES[0], str(min(n, REVIEW_LAST_ROUND)) if isinstance(n, int) else n)
 
-def review_restart_remedy(earlier, earlier_top):
-    """-> the routes a refused restart can take, from the parsed `earlier` records (oldest first, None for a comment that did not parse). A fix
-    verifier over the newest earlier record's Head is the route when that record holds no Fix check line or a PASS one; a FAIL Fix check line,
-    or a newest comment that did not parse, closes it, and the fresh full review stands in its place. A record with a higher top round is always open."""
+def review_restart_remedy(earlier, earlier_top, head):
+    """-> the routes a refused restart can take, from the parsed `earlier` records (oldest first, None for a comment that did not parse) and the
+    live `head`. A fix verifier over the newest earlier record's Head is a route when that record holds no Fix check line or a PASS one and its
+    Head is not the live head (a fix check whose reviewed head is --head is refused). A FAIL Fix check line, or a newest comment that did not
+    parse, leaves the fresh full review in its place. A top round past REVIEW_LAST_ROUND is a granted last round: its route is rounds 1 to
+    that top again with --grant, which needs no fix check, and no record can post a round above it."""
     last = earlier[-1] if earlier else None
+    fix_open = bool(last) and not (last["fix"] and last["fix"][3] == "FAIL")
+    if earlier_top > REVIEW_LAST_ROUND:
+        return f" The route is to post rounds 1 to {earlier_top} again with --grant, the owner's grant of round {earlier_top}."
     routes = []
-    if last and not (last["fix"] and last["fix"][3] == "FAIL"):
-        routes.append(f"post rounds 1 to {earlier_top} again with --fix-check {last['head']}:reviewer:{review_round_model(REVIEW_FIX_ROW)}:PASS (or FAIL), the fix verifier's verdict over this head ({last['head'][:9]} is the Head of the newest earlier record)")
-    elif earlier_top <= REVIEW_LAST_ROUND:
+    if fix_open and last["head"] != head:
+        routes.append(f"post rounds 1 to {earlier_top} again with --fix-check {last['head']}:reviewer:{review_round_model(REVIEW_FIX_ROW)}:VERDICT, the fix verifier's verdict over this head ({last['head'][:9]} is the Head of the newest earlier review log)")
+    elif not fix_open:
         routes.append(f"order a fresh full review (the builder's brief line 1 `Round {REVIEW_LAST_ROUND} of {REVIEW_LAST_ROUND}`) and post rounds 1 to {REVIEW_LAST_ROUND} with no Fix check line")
     routes.append(f"post a record whose top round is above {earlier_top}" + (" (a round past 3 takes the owner's --grant)" if earlier_top >= REVIEW_LAST_ROUND else ""))
     return " Either " + ", or ".join(routes) + "."
@@ -4558,7 +4563,7 @@ def main(argv, host=None, lock=None, hosts=None):
             new_top = max((r[0] for r in a.round), default=0)
             # a new record may not lower the top round an earlier record holds, and below REVIEW_LAST_ROUND it may not repeat that top round without a fix verifier of its own (a head moved after the last round posts rounds 1..REVIEW_LAST_ROUND again, and a granted round past it is above)
             if earlier_top and (new_top < earlier_top or (new_top == earlier_top and new_top < REVIEW_LAST_ROUND and not a.fix_check)):
-                print(f"merge: this record restarts the review: it has the same or fewer rounds than an earlier record on this pull request, stops below round {REVIEW_LAST_ROUND}, and has no fix verifier." + review_restart_remedy(earlier, earlier_top) + " " + REVIEW_CITE, file=sys.stderr)
+                print(f"merge: this record restarts the review: it has the same or fewer rounds than an earlier record on this pull request, stops below round {REVIEW_LAST_ROUND}, and has no fix verifier." + review_restart_remedy(earlier, earlier_top, a.head) + " " + REVIEW_CITE, file=sys.stderr)
                 return 2
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
                 last = earlier[-1] if earlier else None
