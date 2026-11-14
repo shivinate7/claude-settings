@@ -633,9 +633,9 @@ class RecordsOnlyPush(unittest.TestCase):
     ABSENT_SHA = "0123456789abcdef0123456789abcdef01234567"  # a sha no scratch repo holds
     BASE_CHANGE = "janitor/sweep.py"  # a base change the merge commit brings in, never in the pull request's own diff
 
-    def whole_pr(self, paths, contents=None):
-        """The whole PR diff: `paths` in one head commit, with GREEN_HEAD empty."""
-        return run(paths, contents=contents)
+    def whole_pr(self, paths, contents=None, landed=None):
+        """The whole PR diff: `paths` in one head commit, with GREEN_HEAD empty. `landed` is run()'s landed-dirs list."""
+        return run(paths, contents=contents, landed=landed)
 
     def assertSkipFlag(self, got, skipped):
         """records_only_skip is 'true' when the shortcut forced the 13 flags off, and 'false' in every other case."""
@@ -703,6 +703,22 @@ class RecordsOnlyPush(unittest.TestCase):
         self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the real earlier head's delta is not records only: {facts}")
         self.assertEqual(differing(got, whole), [], f"an absent GREEN_HEAD moved a flag off the whole PR diff: {got}")
         self.assertSkipFlag(got, False)
+
+    # An empty landed-dirs.txt is the fail-safe: every flag is on. The shortcut's inputs all hold here (GREEN_HEAD is an earlier
+    # head and the delta is docs/records.md alone), so only the fail-safe keeps the flags on. The whole PR diff is read with
+    # the same empty list.
+    def test_records_only_empty_landed_dirs_list_runs_everything(self):
+        whole = self.whole_pr(self.CODE + [self.RECORDS], landed=[])
+        self.assertEqual(whole.get("code"), "true", f"scope: the whole PR diff must turn code on: {whole}")
+        facts = {}
+        got = run([self.RECORDS], green=self.CODE, landed=[], facts=facts)
+        self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+        self.assertEqual(facts.get("delta"), [self.RECORDS],
+                         f"scope: the delta from GREEN_HEAD to HEAD is not docs/records.md alone: {facts}")
+        self.assertSkipFlag(got, False)
+        for n in self.OFF:
+            self.assertEqual(got.get(n), "true", f"{n} is off with an empty landed-dirs list, so the fail-safe did not set it: {got}")
+        self.assertEqual(differing(got, whole), [], f"an empty landed-dirs list moved a flag off the whole PR diff: {got}")
 
     # Only docs/records.md skips. The delta must be exactly that path, so a second path, of any kind, runs the whole PR diff.
     def test_records_only_delta_with_one_other_path_runs_as_before(self):
