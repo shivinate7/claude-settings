@@ -653,11 +653,9 @@ jobs:
         run: python3 hooks/test_config_watch_fast_exit.py
 
       - name: Shared names suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_shared_names.py
 
       - name: Precompact handoff fixture suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_precompact_handoff.py
 
       - name: Claude Code compaction check fixture suite
@@ -665,11 +663,9 @@ jobs:
         run: python3 hooks/test_cc_version_check.py
 
       - name: CI-wait cap fixture suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_ci_wait_cap.py
 
       - name: Handoff wave-2 fixture suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_handoff_wave2.py
 
       - name: Decision watch fixture suite
@@ -677,7 +673,6 @@ jobs:
         run: python3 hooks/test_decision_watch.py
 
       - name: Reply judge fixture suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_reply_judge.py
 
       - name: Prose judge fixture suite
@@ -685,7 +680,6 @@ jobs:
         run: python3 hooks/test_prose_judge.py
 
       - name: SendMessage state fixture suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_sendmessage_state.py
 
       - name: Refusal note fixture suite
@@ -705,7 +699,6 @@ jobs:
         run: python3 hooks/test_call_judge.py
 
       - name: Question form fixture suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_question_form.py
 
       - name: Question form option-key gap suite
@@ -725,11 +718,9 @@ jobs:
         run: python3 hooks/test_rm_prompt_answer.py
 
       - name: Agent brief fixture suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_agent_brief.py
 
       - name: Blind brief fixture suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_blind_brief.py
 
       - name: Local time line fixture suite
@@ -737,7 +728,6 @@ jobs:
         run: python3 hooks/test_local_time.py
 
       - name: Guard probe helper fixture suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_probe.py
 
       - name: CI wake-up fixture suite
@@ -753,7 +743,6 @@ jobs:
         run: python3 hooks/test_waiting_export.py
 
       - name: Daily note fixture suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_daily_note.py
 
       - name: Git mailbox suite
@@ -761,7 +750,6 @@ jobs:
         run: python3 hooks/test_mail.py
 
       - name: Git mailbox wait suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_mail_wait.py
 
       - name: No-window helper fixture suite
@@ -782,7 +770,6 @@ jobs:
         run: python3 hooks/test_stall_watch_stop.py
 
       - name: Proc env read suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_proc_env.py
 
       - name: Simulator boot-record fixture suite
@@ -790,12 +777,10 @@ jobs:
         run: python3 hooks/test_sim_boot_record.py
 
       - name: Guard wrappers fixture suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_wrappers.py
 
       # Fuzzes every deny check that judge_shell and judge reach, with each tool judge branches on. Linux only, like the other guard-module suites here.
       - name: Deny checks never raise suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_checks_never_raise.py
 
       - name: Session start notice suite
@@ -803,7 +788,6 @@ jobs:
         run: python3 hooks/test_session_start.py
 
       - name: Session role file suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_session_role.py
 
       - name: Directory before a segment suite
@@ -815,7 +799,6 @@ jobs:
         run: python3 hooks/test_ruling_home.py
 
       - name: Scratchpad owner fixture suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_scratchpad_owner.py
 
   # The janitor, mutation, skills, actions-script, PowerShell and mod suites of the old `checks` job. See checks-hooks for why it split.
@@ -840,19 +823,18 @@ jobs:
           python-version: "3.11"
 
       - name: Janitor sweep fixture suite
-        if: ${{ (needs.scope.outputs.code == 'true' && needs.scope.outputs.sweep == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ needs.scope.outputs.code == 'true' && needs.scope.outputs.sweep == 'true' }}
         run: python3 janitor/test_sweep.py
 
       - name: Janitor sweep mutation test
-        if: ${{ (needs.scope.outputs.sweep == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ needs.scope.outputs.sweep == 'true' }}
         run: python3 janitor/mutate_sweep.py
 
       - name: Reap proof Git Bash one-home suite
-        if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 janitor/test_prove_agent_end_reap.py
 
       - name: Mutation verdict fixture suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_mutate_shared.py
 
       - name: Mutation report-mode fixture suite
@@ -861,25 +843,21 @@ jobs:
 
       # The engine parses with typescript, which a bare checkout lacks. The guard is the one map-check.sh uses.
       - name: Mutation JS engine fixture suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: |
           [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
           python3 hooks/test_mutate_js.py
 
       - name: Mutation replay fixture suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: |
           [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
           python3 hooks/test_mutate_replay.py
 
       - name: Mutation CI report fixture suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: |
           [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
           python3 hooks/test_mutate_ci.py
 
       - name: Map check
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: bash .github/scripts/map-check.sh
 
       - name: Waiting page staleness fixture suite
@@ -903,7 +881,6 @@ jobs:
         if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/waiting-page/test_question_source.py
       - name: Waiting page park relay prose suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/waiting-page/test_skill_park_relay.py
 
       - name: Roadmap builder fixture suite
@@ -911,11 +888,9 @@ jobs:
         run: python3 skills/roadmap/test_build.py
 
       - name: project-ops skill scaffold suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/project-ops/tests/test_scaffold.py
 
       - name: project-ops brief tool suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 skills/project-ops/tests/test_brief_from_step.py
 
       - name: ios-apps skill starter suite
@@ -923,7 +898,7 @@ jobs:
         run: python3 skills/ios-apps/tests/test_new_app.py
 
       - name: PowerShell syntax check, install.ps1
-        if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ needs.scope.outputs.code == 'true' }}
         shell: pwsh
         run: |
           $e = $null
@@ -931,24 +906,21 @@ jobs:
           if ($e) { $e; exit 1 }
 
       - name: Pointer encoding test, install.test.ps1
-        if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ needs.scope.outputs.code == 'true' }}
         run: pwsh -NoProfile -File install.test.ps1
 
       - name: Record stamp engine fixture suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: node actions/stamp/test_stamp.mjs
 
       - name: Scanner trap lint
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: node lint/test_scanner_traps.mjs
 
       - name: Record stamp action fixture suite
-        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         shell: bash
         run: bash actions/stamp/test_action.sh
 
       - name: Mod and map-skill tests
-        if: ${{ (!cancelled() && needs.scope.outputs.mods == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
         shell: bash
         run: bash .github/scripts/mod-tests.sh
 
@@ -1871,12 +1843,15 @@ jobs:
   # The guard fixture suite on Windows, split off checks-windows by cut F. Every run, a ready pull_request included (R62, owner
   # 15:55 CST Nov 12: the integration PR run carries the full guard so the push to main can skip it), runs the full suite in shards:
   # shard 1 here, the rest in checks-windows-guard-<i> (the shard switch in hooks/test_guard.py; lint/test_windows_split.py proves each
-  # case runs once). The Windows guard, merge and rest jobs run every step on a ready pull_request (the draft test stands in for scope
-  # there, which skips on a draft), except a records-only push after a fully green head (records_only_skip, from .github/scripts/ci-scope.sh
-  # and green-head.sh), where every `run` step of the gated jobs is skipped (checkout and setup still start) and the mutation-report job is
-  # off through mutation_report. R62 ("each suite runs once per batch, on the batch PR"; "Part 3 keeps the full shards
-  # once per batch") puts the full suites on every ready pull_request; own-830-c ("every job", owner 15:02 CST Nov 14) narrows that:
-  # a push that changes docs/records.md alone adds nothing the green head's run has not proved. Push, schedule and dispatch run them whole.
+  # case runs once). A ready pull_request runs every step of the Windows guard, merge and rest jobs (the draft test stands in for scope
+  # there, which skips on a draft). The records-only skip (records_only_skip, from .github/scripts/ci-scope.sh and green-head.sh) is a
+  # push that changes docs/records.md alone after a fully green head. It turns off every `run` step of the Windows guard, merge and rest
+  # jobs and the scope-condition steps of checks-hooks and checks-rest (the steps lint/test_checks_step_scope.py lists as NO_MD and
+  # NAMES_ONLY), and the mutation-report job through mutation_report. A step that reads a .md file stays on, and so does the `checks`
+  # job, because the records page is a .md file. Checkout and setup steps still start. R62 ("each suite runs once per batch, on the
+  # batch PR"; "Part 3 keeps the full shards once per batch") puts the full suites on every ready pull_request; own-830-c ("every
+  # job", owner 15:02 CST Nov 14) narrows that: the green head's run already proved what a records-only push changes. Push, schedule
+  # and dispatch run them whole.
   checks-windows-guard:
     runs-on: windows-latest
     needs: scope
