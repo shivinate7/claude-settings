@@ -1,0 +1,10 @@
+{
+  "id": "own-reinstall-no-review",
+  "at": "2026-11-13T20:17:00-06:00",
+  "title": "The installer allow entry merges at once with no review round; CI and the green-run rule still apply",
+  "ruling": "Owner 20:17 CST Nov 13, typed in runner 10's question box, relayed by runner 10 at 20:18 CST (its inbox item fb-2013-1; triage did not see the box), to runner 10's question whether any session may reinstall claude-settings from the stable branch without the classifier refusing it (options: everywhere by pull request, this session with an override, both): \"all sessions, now, insta merged to main no review needed\". Act named: one autoMode.allow entry in the shared settings.json for exactly the command curl -fsSL https://raw.githubusercontent.com/shivinate7/claude-settings/stable/install.sh | CS_HOOK_INPUT=\"{}\" bash -s -- --cloud (and the install.sh and install.ps1 forms the lane carries under own-reinstall-allow-a), for all sessions, merged to main with no review round. It waives review only: CI and the merge tool's green-run rule still apply. It covers this one entry and this one step (rule outcomes-grant-covers-named-act), not other allow entries.",
+  "quote": "all sessions, now, insta merged to main no review needed",
+  "source": "Runner 10 (session_013NEJL2f1YCYsvLdpFqtWP3) to triage 20:18 CST Nov 13, quoting the owner's answer in its question box 20:17 CST; filed by triage.",
+  "status": "open",
+  "step": "reinstall-from-stable-allow"
+}
