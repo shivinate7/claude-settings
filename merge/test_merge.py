@@ -6412,13 +6412,18 @@ class DebtRetire(Env):
     # The lock outlasts the long checks (debt_check runs each Retire test up to 1800 s; undo_check has no bound). Each check call is preceded by
     # its own extend_for, so the lock is never left to the take's fixed expiry under a check.
 
-    def recording_lock(self, events):
-        """A GitLock whose extend_for appends ("extend", wait) to `events`, then runs the real method. confirm reads the method with getattr, so the
+    LOCK_REFUSAL = "the fake lock refuses the extension"
+
+    def recording_lock(self, events, stop_when=None):
+        """A GitLock whose extend_for appends ("extend", wait) to `events`, then runs the real method. With `stop_when`, a call made while
+        stop_when() is true raises NetStop instead: the lock cannot be extended. confirm reads the method with getattr, so the
         instance attribute is what it finds."""
         lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)
         real = lock.extend_for
         def extend_for(wait):
             events.append(("extend", wait))
+            if stop_when and stop_when():
+                raise merge.NetStop(self.LOCK_REFUSAL)
             return real(wait)
         lock.extend_for = extend_for
         return lock
@@ -6436,6 +6441,16 @@ class DebtRetire(Env):
             patch = unittest.mock.patch.object(merge, name, fn)
             patch.start()
             self.addCleanup(patch.stop)
+
+    def spy_pushes(self, events):
+        """merge.push_branch appends ("push", branch) to `events` at each push, then pushes. confirm's claim is the first push."""
+        real = merge.push_branch
+        def push(wt, branch, *a, **k):
+            events.append(("push", branch))
+            return real(wt, branch, *a, **k)
+        patch = unittest.mock.patch.object(merge, "push_branch", push)
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def confirm_closed_debt_under_spies(self, events):
         """A confirm of a PR that closes a debt, with each extension and check call logged in `events`. -> (rc, out)."""
@@ -6475,6 +6490,40 @@ class DebtRetire(Env):
         self.assertEqual(rc, 0, out)
         self.assertNotIn("AttributeError", out, "a lock with no extend_for crashed confirm")
         self.assertTrue(getattr(self.host, "merged", False), out)
+
+    def test_confirm_stops_before_the_undo_and_debt_checks_when_the_lock_cannot_be_extended(self):
+        """confirm extends the lock before the undo check, its first call under the lock. The extension is refused: no check runs, no claim is pushed, nothing merges."""
+        self.pr_on_debt(0)
+        events = []
+        self.spy_checks(events)
+        rc, out = self.run_merge("7", "--confirm", lock=self.recording_lock(events, stop_when=lambda: True))
+        checks = [e for e in events if e[0] == "check"]
+        self.assertEqual(checks, [], f"a check ran after the lock extension was refused (run order: {events}). The extension stops the run before the check it covers")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(self.LOCK_REFUSAL, out, "the refusal does not name the lock's stop")
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.claims("feat"), 0, "a claim was pushed although the run stopped before the claim")
+        self.assertFalse(self.lock_ref(), "the merge lock was left on origin")
+
+    def test_prove_stops_before_the_checks_when_the_lock_cannot_be_extended_after_the_claim_push(self):
+        """prove extends the lock after confirm pushes the claim. The extension is refused there: no check runs after the push, the claim stays
+        on the branch, and nothing is reverted or merged."""
+        self.pr_on_debt(0)
+        events = []
+        self.spy_checks(events)
+        self.spy_pushes(events)
+        pushed = lambda: any(e[0] == "push" for e in events)
+        rc, out = self.run_merge("7", "--confirm", lock=self.recording_lock(events, stop_when=pushed))
+        pushes = [i for i, e in enumerate(events) if e[0] == "push"]
+        self.assertTrue(pushes, f"the claim was not pushed, so the run never reached prove (run order: {events})")
+        late = [e for e in events[pushes[0] + 1:] if e[0] == "check"]
+        self.assertEqual(late, [], f"a check ran after the claim push, past the lock extension that was refused (run order: {events})")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(self.LOCK_REFUSAL, out, "the refusal does not name the lock's stop")
+        self.assertNotIn("reverted on", out, "the claim was reverted although the run stopped on a refused lock extension")
+        self.assertEqual(self.claims("feat"), 1, "the claim is not kept on the branch")
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertFalse(self.lock_ref(), "the merge lock was left on origin")
 
 class DraftPreview(Env):
     """`merge <pr>` with no --confirm: a draft is previewed, not refused. The silent-undo check runs on the head
