@@ -371,7 +371,7 @@ jobs:
         run: python3 lint/test_report_guard_refusal.py
 
       - name: Stop-hook guard fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_agents == 'true' || github.event_name != 'pull_request' }}
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_report_guard.py
 
       - name: Stop-hook triage hold suite
@@ -638,10 +638,10 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: python3 lint/check_plan_refuter.py --base "origin/$BASE_REF"
 
-      # No `if:`: ci-scope.sh turns no flag on for a docs/map/*.md path, and a map page changed alone must still be read.
+      # The scope condition reads doc_map (a map page changed alone must still be read), doc_decisions and doc_other (MAP10 reads every decision and debt record).
       # The script says why it runs `npm ci` first.
       - name: Map check
-        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_map == 'true' || github.event_name != 'pull_request' }}
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_decisions == 'true' || needs.scope.outputs.doc_map == 'true' || needs.scope.outputs.doc_other == 'true' || github.event_name != 'pull_request' }}
         run: bash .github/scripts/map-check.sh
 
       - name: Layout fixture suite
@@ -724,17 +724,17 @@ jobs:
         run: python3 lint/check_claude_md_size.py
 
       - name: Glossary fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_glossary == 'true' || github.event_name != 'pull_request' }}
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_check_glossary.py
 
       - name: Glossary homes and avoided names
-        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_glossary == 'true' || github.event_name != 'pull_request' }}
+        if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/check_glossary.py
 
       - name: Retired names, one word per meaning
         if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_retired_names.py
-      # No scope condition: the suite reads the skill's .md templates, and a .md-only change must run it too.
+      # The scope condition reads doc_skills: the suite reads the skill's .md templates, and a .md-only change must run it too.
       - name: project-ops skill scaffold suite
         if: ${{ needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_skills == 'true' || github.event_name != 'pull_request' }}
         run: python3 skills/project-ops/tests/test_scaffold.py

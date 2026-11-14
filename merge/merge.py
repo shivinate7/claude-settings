@@ -3049,7 +3049,11 @@ def express_refusal(root, wt, base_ref, info):
     every = re.search(r'^ALL="([^"]*)"', script, re.M)
     if c or c2 or not jobs or not every:
         return f"unknown: {base_ref}'s {CI_SCOPE} cannot be read, so whether the diff is prose-only is unproven"
-    names = every.group(1).replace("$JOBS", jobs.group(1)).split()
+    docs = re.search(r'^DOCS="([^"]*)"', script, re.M)
+    names = every.group(1).replace("$JOBS", jobs.group(1))
+    if docs:
+        names = names.replace("$DOCS", docs.group(1))
+    names = names.split()
     fd, copy = tempfile.mkstemp(prefix="merge-express-", suffix=".sh")
     os.close(fd)
     fd, out_file = tempfile.mkstemp(prefix="merge-express-scope-")
@@ -3071,7 +3075,8 @@ def express_refusal(root, wt, base_ref, info):
     missing = [n for n in names if n not in flags]
     if c or missing:
         return f"unknown: {CI_SCOPE} " + (f"failed (exit {c}; last line: {(said.splitlines() or ['no output'])[-1][:200]})" if c else "wrote no flag for " + ", ".join(missing)) + ", so whether the diff is prose-only is unproven"
-    on = sorted(k for k, v in flags.items() if k != "mutation_report" and v != "false")
+    # doc_* flags only pick which .md-reading steps of the PR's own run start; express relies on the PR's own CI steps for them.
+    on = sorted(k for k, v in flags.items() if k != "mutation_report" and not k.startswith("doc_") and v != "false")
     if on:
         paths = git(wt, "diff", "--name-only", "--no-renames", f"{base_tip}...HEAD")[1].splitlines()
         shown = ", ".join(paths[:EXPRESS_PATHS_SHOWN]) + (f" and {len(paths) - EXPRESS_PATHS_SHOWN} more" if len(paths) > EXPRESS_PATHS_SHOWN else "")
