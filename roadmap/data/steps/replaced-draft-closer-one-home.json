@@ -1,0 +1,14 @@
+{
+ "id": "replaced-draft-closer-one-home",
+ "title": "One text says who closes a replaced draft PR: the batch runner, from the evidence ledger",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Ruling pr-close-by-batch-runner (owner 14:29 CST Nov 10; owner 11:45 CST Nov 13, item 711 a): the batch runner is the one closer of old PRs, from the evidence ledger only. Conflict read 16:52 CST Nov 14 by triage in /root/claude-settings-main (the numbers differ from g1's reviewer: session-tiers.md lines 78 and 85 and operating-model.md line 81 are the reviewer's; triage's checkout shows these): docs/decisions/session-tiers.md lines 77 to 78 and 81 say the batch runner closes each replaced draft; skills/project-ops/templates/operating-model.md line 50 says triage closes the build's stale drafts once and then at each batch, and line 166 says \"Only triage writes new steps, merges, order and closes\". Triage is the session that reads that template, so a debt (a likely hit in normal work), not a note. Change: one home, the decision, says the batch runner closes replaced and stale drafts; the template points to it and drops the triage-closes lines. Relayed from g1's #3259 reviewer via the coordinator 16:50 CST. Docs only: a record-writer lane.",
+ "source": "coordinator 16:50 CST Nov 14 (g1 #3259 reviewer); triage read of the two files",
+ "note": "Filed 16:52 CST Nov 14 by triage. Tracker: the coordinator. Not started. Ruling: pr-close-by-batch-runner.",
+ "updatedAt": "2026-11-14T16:52:00-06:00"
+}
