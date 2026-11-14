@@ -452,7 +452,7 @@ class FixedLayout(BriefCase):
         files = section(out, "Files")
         self.assertIsNotNone(files, "the brief has no ## Files section")
         self.assertIn(PATH_IN_NOTE, files, "the path the note names is not in Files")
-        self.assertNotIn("```python", out, "the step note's code fence reaches the output")
+        self.assertNotIn("```", out, "a code fence from the step note reaches the output")
         leaked = [n for n in range(PASTED_LINES) if "value_%02d" % n in out]
         self.assertEqual(leaked, [], "%d of %d lines of the pasted block reach the output"
                          % (len(leaked), PASTED_LINES))
