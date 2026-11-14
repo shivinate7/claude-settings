@@ -69,7 +69,7 @@ A test-support helper lives in the top-level `testing/` folder, such as `testing
 - A helper named `test_<name>.py` needs a run step in `checks.yml` (`CiCoverage` and `TEST_FILE` in `lint/test_windows_split.py`) and runs as a script (`TEST_PATTERNS` in `.github/scripts/touched-tests.py`).
 - A helper a builder may write would let builder code decide what tests import. That works against "a green run must mean the code is right".
 - `testing/` is not installed: it is not a landed folder, so `~/.claude` has no `testing/` and product code cannot import from it.
-- Unproven: a hooks test would import the helper with `sys.path.insert(0, os.path.join(HERE, "..", "testing"))`, the insert the lint tests use. No lane has run it.
+- Hooks tests already import from `testing/` this way: `hooks/test_session_start.py` line 28 inserts `os.path.join(HERE, "..", "testing")`, and `hooks/test_mail.py` line 102 inserts `os.path.join(REPO, "testing")`.
 
 ## The shell check
 
