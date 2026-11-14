@@ -184,6 +184,39 @@ REFSPEC_REFUSED = tuple(item for item in LEASE_REFUSED if item[0] not in ("+refs
     ("a + before either ref", r"`\+` before either ref"),
     ("delete (an empty <src>)", r"a delete \(an empty <src>\)"))
 
+INSTALLER = "Session Installer:"
+# Each act the Session Installer "Never covers" sentence must name (decision `auto-mode-owner-acts`).
+INSTALLER_REFUSED = (("an env var before the command", "environment variable"),
+                     ("the checkout cloud form", r"bash install\.sh --cloud"),
+                     ("CLAUDE_SETTINGS_REF", "CLAUDE_SETTINGS_REF"),
+                     ("CLAUDE_SETTINGS_RAW", "CLAUDE_SETTINGS_RAW"),
+                     ("chaining", r"chain"), ("a second pipe", "second pipe"),
+                     ("extra arguments", "extra argument"), ("another URL", "another URL"),
+                     ("another ref", "another branch or ref"), ("main", r"`main`"),
+                     ("a fork", "fork"), ("another repo's install.sh", "another repo"),
+                     ("extra PowerShell flags", "PowerShell flag"), ("-NoProfile", "-NoProfile"),
+                     ("permissions", "permission"), ("overrides", "override"),
+                     ("any other act", "any other act"))
+INSTALLER_SCOPE = (("checkout of the repo", "checkout"), ("origin", "origin"),
+                   ("incident time", "20:12 CST"), ("owner ruling", "20:16 CST"))
+
+
+def installer_forms():
+    """The three installer forms, read from install.sh and install.ps1 themselves, never copied."""
+    sh = open(os.path.join(REPO_ROOT, "install.sh"), encoding="utf-8").read()
+    ps = open(os.path.join(REPO_ROOT, "install.ps1"), encoding="utf-8").read()
+    repo = re.search(r'^REPO="([^"]+)"', sh, re.M).group(1)
+    ref = re.search(r'^REF="\$\{CLAUDE_SETTINGS_REF:-([^}]+)\}"', sh, re.M).group(1)
+    hook = re.search(r"HOOK_CMD='i=\$\(cat\); (curl -\w+) '\"\$\{RAW\}\"'/install\.sh \| "
+                     r"(CS_HOOK_INPUT)=\"\$i\" (bash -s -- --cloud)'", sh)
+    win = re.search(r"Run once from the clone:\s+(powershell -ExecutionPolicy Bypass -File \.\\install\.ps1)", ps)
+    mac = re.search(r"Local \(from a clone\):\s+(bash install\.sh)\b", sh)
+    assert repo and ref and hook and win and mac, "installer forms moved: update the readers"
+    url = "https://raw.githubusercontent.com/%s/%s/install.sh" % (repo, ref)
+    return {"repo": repo, "url": url, "curl": "`%s %s | %s=\"{}\" %s`" % (hook.group(1), url, hook.group(2), hook.group(3)),
+            "cloud": "`%s --cloud`" % mac.group(1), "mac": "`%s`" % mac.group(1),
+            "win": "`%s`" % win.group(1)}
+
 
 def auto_mode():
     path = os.environ.get("AUTO_MODE_SETTINGS") or os.path.join(REPO_ROOT, "settings.json")
@@ -675,6 +708,49 @@ class OwnBranchLeaseRefspecPushIsAllowed(unittest.TestCase):
 
     def test_never_covers_names_each_refused_act(self):
         missing = unnamed_terms(entry_part(self, REFSPEC, never=True), REFSPEC_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+
+class SessionInstallerIsAllowed(unittest.TestCase):
+    def test_one_entry_names_the_installer(self):
+        hits = [e for e in auto_mode().get("allow", []) if e.startswith(INSTALLER)]
+        self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
+                         % (INSTALLER, len(hits)))
+
+    def test_covers_quotes_each_form_read_from_the_installers(self):
+        covers = entry_part(self, INSTALLER)
+        forms = installer_forms()
+        missing = [k for k in ("curl", "mac", "win") if forms[k] not in covers]
+        self.assertFalse(missing, "Covers text does not quote the installer form(s) %r" % missing)
+
+    def test_covers_does_not_quote_the_checkout_cloud_form(self):
+        self.assertNotIn(installer_forms()["cloud"], entry_part(self, INSTALLER),
+                         "the checkout form `bash install.sh --cloud` is not the ruled act")
+
+    def test_covers_quotes_exactly_the_three_installer_forms(self):
+        spans = [x for x in re.findall(r"`([^`]+)`", entry_part(self, INSTALLER)) if "install" in x]
+        forms = installer_forms()
+        self.assertEqual(sorted(spans), sorted(forms[k].strip("`") for k in ("curl", "mac", "win")),
+                         "Covers text quotes a command other than the three installer forms")
+
+    def test_no_other_entry_quotes_the_install_url(self):
+        self.assertIsNotNone(allow_entry(INSTALLER), "need the Session Installer entry")
+        url = installer_forms()["url"]
+        others = [e[:40] for e in auto_mode().get("allow", []) if url in e and not e.startswith(INSTALLER)]
+        self.assertFalse(others, "a second entry quotes the install URL: %r" % others)
+
+    def test_covers_binds_the_checkout_and_names_the_ruling(self):
+        missing = unnamed_terms(entry_part(self, INSTALLER), INSTALLER_SCOPE)
+        self.assertFalse(missing, "Covers text does not name %r" % missing)
+        self.assertIn(installer_forms()["repo"], entry_part(self, INSTALLER))
+
+    def test_entry_quotes_no_other_ref(self):
+        entry = allow_entry(INSTALLER)
+        self.assertIsNotNone(entry, "need the Session Installer entry")
+        self.assertNotRegex(entry, r"raw\.githubusercontent\.com/[^`\s]*/(?!stable/)[^/`\s]+/install\.sh")
+
+    def test_never_covers_names_each_refused_act(self):
+        missing = unnamed_terms(entry_part(self, INSTALLER, never=True), INSTALLER_REFUSED)
         self.assertFalse(missing, "Never covers does not name %r" % missing)
 
 

@@ -224,8 +224,9 @@
     },
     "git-ci-wait-checks-in": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No hook sees that a cloud session is waiting on CI, or reads whether it set a send_later check-in. The ci-done comment covers the red-run wake; the check-in covers a lost wake."
+        "kind": "check",
+        "ref": "hooks/stall_watch.py",
+        "setting": {"file": "settings.json", "path": "hooks.Stop[*].hooks[*].command", "contains": "stall_watch.py"}
       }
     },
     "git-ci-done-comment-wakes": {

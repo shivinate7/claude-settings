@@ -36,6 +36,9 @@ Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane han
 `~/.claude/bin/merge --lane-lint <pr>` once and report its verdict. It runs
 `bin/ci-job checks --lint` at the PR head: the fast lint steps of the checks job, the STE lint
 among them, and no full suite. A red lane does not hand off.
+Run it through `verdict` in the background, with a Bash `timeout` above the merge tool's bound
+(`LINT_SECONDS` plus `PUSHED_HEAD_WAIT_MINUTES` times 60, in ms). A shorter limit ends the run
+with no verdict, and the guard refuses it (rule `check-timeout`).
 Order at the end of a lane: open the draft PR early; wait for `--lane-lint <pr> --touched-tests`; post the review record; then hand in to the batch runner. Run the four-point check (work landed or handed off, no unpushed branch, no owner question waiting, handoff written), commit the handoff to the record branch at `roadmap/outbox/<slug>-handoff.md`, and tag the lane archive-ready (ruling R46). The owner never reads a lane: send each owner act and question to the parent with the exact line. Mark each part that is ruled but not built "ruled, not built".
 Run `merge --lane-lint` from the main checkout, never from a session or agent isolated in a worktree: Claude Code's worktree check can refuse it there.
 

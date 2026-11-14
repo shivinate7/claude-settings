@@ -25,6 +25,7 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 | "Owner Session Message" (`settings.json` `autoMode.allow`) | `send_message` to a session in the owner's own account, including the session that started this one (its parent or coordinator). A message that asks for no act is covered. A message that asks is limited to acts the owner already granted. A coordinator may send a batch runner it created a merge go (owner, 2026-11-03 15:58 CST) | this record |
 | "Relayed Merge Yes" (`settings.json` `autoMode.allow`) | `~/.claude/bin/merge <pr> --confirm --head <sha>` by a session tagged `cs-build:batch-runner`, for the one pull request that a session tagged `cs-build:coordinator` named when it relayed the owner's yes to merge it, under every merge check | this record |
 | "Batch Runner Merge" (`settings.json` `autoMode.allow`) | `~/.claude/bin/merge <pr> --confirm --head <sha>` by a session tagged `cs-build:batch-runner`, for a pull request its coordinator named in a merge go, under the coordinator's standing grant and every merge check | this record |
+| "Session Installer" (`settings.json` `autoMode.allow`) | The session-start installer in three exact forms: `curl -fsSL <stable install.sh URL> \| CS_HOOK_INPUT="{}" bash -s -- --cloud`, and from a claude-settings checkout `bash install.sh` and `powershell -ExecutionPolicy Bypass -File .\install.ps1`. No env var, chaining, extra argument, other URL or ref | this record |
 | `mcp__claude-code-remote__add_repo` (`settings.json` `permissions.allow`) | Attach a GitHub repo to the session | this record |
 | `mcp__claude-code-remote__archive_session` (`settings.json` `permissions.allow`) | Archive a session in the owner's account | this record |
 | `mcp__claude-code-remote__send_message` (`settings.json` `permissions.allow`) | Any `send_message` call. No bound is checked (see Send message allow rule) | this record |
@@ -167,3 +168,11 @@ Other classifier refusals that day: unknown. The coordinator's transcript could 
 
 Kind: process
 Home: rule:parallelism-keep-going
+
+### Session Installer
+
+Owner, 2026-11-13 20:16 CST, in chat: `the rignt answer is obviously a: add an allow rule for exactly the reinstall command`. Consultant relay 20:20 CST, not verified by the lane. Incident: at 20:12 CST the classifier refused a coordinator's `bash install.sh --cloud` as Undermining Oversight. The act loses nothing: the installer only rewrites `~/.claude` from `stable`, and a second run restores the same state.
+
+The forms are read from `install.sh` (`REPO`, default `REF`, `HOOK_CMD`) and `install.ps1`'s header by `hooks/test_auto_mode_allow.py`, never copied. The curl form is the SessionStart hook's own command with its stdin as `{}` (coordinator, 20:18 CST). The refused line was `cd /root/claude-settings-main && bash install.sh --cloud 2>&1 | tail -15; ...`, more than one command, so no entry matches it. The local `bash install.sh` and `install.ps1` forms have no measured refusal.
+
+Departs from: main, which has no installer entry. Gap named for the owner: the checkout form `bash install.sh --cloud` is not covered, since the owner named "exactly the reinstall command" and the coordinator ruled it out (20:20 CST). Review: waived by the owner for this entry only, ruling `own-reinstall-no-review` (coordinator relay, 20:20 CST).

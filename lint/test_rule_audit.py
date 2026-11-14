@@ -3413,5 +3413,19 @@ class RefusalCiteRatchetTests(unittest.TestCase):
         self.assertTrue(any("needs a reason" in p for p in module_problems(src, exempt)))
 
 
+class SectionDirTests(unittest.TestCase):
+    """section_dir(): the folder the guard runner's SECTION_DIR names. This repo names tests/guard; a root with no runner names none."""
+
+    def test_this_repo_names_the_guard_section_folder(self):
+        self.assertTrue(os.path.isdir(os.path.join(rule_audit.ROOT, "tests", "guard")), "scope: tests/guard is not a folder of this repo")
+        self.assertEqual(rule_audit.section_dir(), "tests/guard")
+
+    def test_a_root_with_no_runner_names_no_folder(self):
+        root = tempfile.mkdtemp(dir=_test_temp.run_folder())
+        self.addCleanup(shutil.rmtree, root, True)
+        self.assertFalse(os.path.exists(os.path.join(root, "hooks", "test_guard.py")), "scope: the root has a runner")
+        self.assertIsNone(rule_audit.section_dir(root), "section_dir named a folder for a root with no runner")
+
+
 if __name__ == "__main__":
     unittest.main()
