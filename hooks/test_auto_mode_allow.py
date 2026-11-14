@@ -187,6 +187,7 @@ REFSPEC_REFUSED = tuple(item for item in LEASE_REFUSED if item[0] not in ("+refs
 INSTALLER = "Session Installer:"
 # Each act the Session Installer "Never covers" sentence must name (decision `auto-mode-owner-acts`).
 INSTALLER_REFUSED = (("an env var before the command", "environment variable"),
+                     ("the checkout cloud form", r"bash install\.sh --cloud"),
                      ("CLAUDE_SETTINGS_REF", "CLAUDE_SETTINGS_REF"),
                      ("CLAUDE_SETTINGS_RAW", "CLAUDE_SETTINGS_RAW"),
                      ("chaining", r"chain"), ("a second pipe", "second pipe"),
@@ -207,12 +208,12 @@ def installer_forms():
     repo = re.search(r'^REPO="([^"]+)"', sh, re.M).group(1)
     ref = re.search(r'^REF="\$\{CLAUDE_SETTINGS_REF:-([^}]+)\}"', sh, re.M).group(1)
     hook = re.search(r"HOOK_CMD='i=\$\(cat\); (curl -\w+) '\"\$\{RAW\}\"'/install\.sh \| "
-                     r"CS_HOOK_INPUT=\"\$i\" (bash -s -- --cloud)'", sh)
+                     r"(CS_HOOK_INPUT)=\"\$i\" (bash -s -- --cloud)'", sh)
     win = re.search(r"Run once from the clone:\s+(powershell -ExecutionPolicy Bypass -File \.\\install\.ps1)", ps)
     mac = re.search(r"Local \(from a clone\):\s+(bash install\.sh)\b", sh)
     assert repo and ref and hook and win and mac, "installer forms moved: update the readers"
     url = "https://raw.githubusercontent.com/%s/%s/install.sh" % (repo, ref)
-    return {"repo": repo, "url": url, "curl": "`%s %s | %s`" % (hook.group(1), url, hook.group(2)),
+    return {"repo": repo, "url": url, "curl": "`%s %s | %s=\"{}\" %s`" % (hook.group(1), url, hook.group(2), hook.group(3)),
             "cloud": "`%s --cloud`" % mac.group(1), "mac": "`%s`" % mac.group(1),
             "win": "`%s`" % win.group(1)}
 
@@ -719,8 +720,12 @@ class SessionInstallerIsAllowed(unittest.TestCase):
     def test_covers_quotes_each_form_read_from_the_installers(self):
         covers = entry_part(self, INSTALLER)
         forms = installer_forms()
-        missing = [k for k in ("curl", "cloud", "mac", "win") if forms[k] not in covers]
+        missing = [k for k in ("curl", "mac", "win") if forms[k] not in covers]
         self.assertFalse(missing, "Covers text does not quote the installer form(s) %r" % missing)
+
+    def test_covers_does_not_quote_the_checkout_cloud_form(self):
+        self.assertNotIn(installer_forms()["cloud"], entry_part(self, INSTALLER),
+                         "the checkout form `bash install.sh --cloud` is not the ruled act")
 
     def test_no_other_entry_quotes_the_install_url(self):
         url = installer_forms()["url"]
