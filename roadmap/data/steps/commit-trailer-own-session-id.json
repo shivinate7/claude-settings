@@ -1,0 +1,14 @@
+{
+ "id": "commit-trailer-own-session-id",
+ "title": "A commit's Claude-Session trailer carries the committing session's own id, and a check refuses another",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Incident (coordinator 16:15 CST Nov 14, relayed from the #3285 lane; triage read no commit; n=1): commit 78aeb0b4 on #3285 carries a Claude-Session trailer with the coordinator's session id (013NEJL1gw6...) instead of the lane's own (013NEJL1cLmoJwGPfFHtCQJU). It is pushed; a rewrite would be the wrong cure (no force push; the trailer names a session, not a rule). Mistake class: a session writes the parent's session id into attribution. Harm: the commit points a reader at the wrong session's transcript. Guard ideas (the lane's and the coordinator's; no guard exists today as far as the lane knows): (a) a check that a trailer's session id matches the committing session; or (b) the lane's brief carries the id to use. First act of a lane: find where commit trailers are checked (kin: step commit-trailer-model, which checks the model in the Co-Authored-By trailer) and whether the committing session's id is readable there; if not, say unmeasured. Rule: building-mistake-names-its-guard. Extend commit-trailer-model's home before building a second check (rule building-one-home-per-capability).",
+ "source": "coordinator 16:15 CST Nov 14 (from the #3285 lane)",
+ "note": "Filed 16:15 CST Nov 14 by triage. Tracker: the coordinator. Not started. Kin: commit-trailer-model.",
+ "updatedAt": "2026-11-14T16:15:00-06:00"
+}
