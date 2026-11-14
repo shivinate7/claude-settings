@@ -18,7 +18,7 @@ from guard_core import (
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -1472,6 +1472,13 @@ def _head_landed(module, repo: str, row) -> bool:
     return _compare_status(module, module.Host(repo=repo), base, sha) in _CONTAINED
 
 
+def open_pull_rows(module, repo: str):
+    """The open pull request rows of `repo`, every page, through the merge tool's page reader `module`. The one home of
+    this read: rules lane-closes-after-records and lane-step-dup call it. A failed read raises. The caller holds the
+    one shared deadline over the read (a nested shared_deadline would reset it)."""
+    return module.Host(repo=repo).pages("pulls", fields={"state": "open"})
+
+
 def _branch_repos(ccr, tag_repos):
     """The repos a lane's branches may live in: its cs-repo tags, the github repos of
     session_context.sources[].git_repository.url, and each current_branches key that names owner/repo, in first-seen
@@ -1677,7 +1684,7 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
         open_rows = {}
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             for repo in repos:
-                rows = open_rows[repo] = module.Host(repo=repo).pages("pulls", fields={"state": "open"})
+                rows = open_rows[repo] = open_pull_rows(module, repo)
                 for row in rows:
                     ref = str(row["head"]["ref"])
                     slug = next((s for s in slugs if ref in lane_head_refs(s)), None)
@@ -1812,6 +1819,157 @@ def brief_hit(tool: str, tool_input, transcript: str):
     if tagged_after:  # a set_session_tags call on the target followed its record, so the topic or steps may have changed
         return "lane brief to a target whose record is stale", BRIEF_STALE_REASON
     return topic_hit(first, tags)
+
+
+# ---- one lane per step (rule lane-step-dup)
+STEP_DUP_TAIL = " (decision session-tiers, a step has one lane)"  # glossary-ok: session-tiers is the decision's file name
+STEP_DUP_REASON = (
+    "session %s is live and carries cs-step:%s in the same repo, so this would start a second lane on one step. "
+    "Send the work to that session with send_message instead." + STEP_DUP_TAIL
+)
+STEP_DUP_UNKNOWN_REASON = (
+    "this session's transcript does not prove that no other live session carries cs-step:%s in this repo: it holds "
+    "no whole list_sessions read (a read with no cursor, then reads that each pass the last session id of the page "
+    "before as after_id, the last with has_more false, none with tags or mine), the brief's target has no current "
+    "record, or the subject has no cs-repo tag. Run list_sessions in its own turn that way, run get_session on the "
+    "target alone, check that the target or the new lane carries a cs-repo tag, then retry." + STEP_DUP_TAIL
+)
+
+
+STEP_PR_REASON = (
+    "open pull request #%(pr)s of this repo has the head of step %(step)s, so a lane already holds the step. Send the work to "
+    "that lane, or say in the brief that it `continues #%(pr)s` or `replaces #%(pr)s`, then retry." + STEP_DUP_TAIL
+)
+STEP_PR_READ_REASON = (
+    "the open pull requests of this repo, or the subject's record, could not be read, so the guard cannot tell whether "
+    "a lane pull request holds cs-step:%s. Retry once gh answers and the target has a current record." + STEP_DUP_TAIL
+)
+_STEP_CONTINUES = re.compile(r"\b(?:continues|replaces)\s+#(\d+)", re.IGNORECASE)  # a brief that names the pull request it takes over
+
+
+def _tag_values(tags, prefix: str):
+    """The lower-cased, non-empty values of the tags that start with `prefix`, stripped."""
+    return [v.lower() for v in (str(t)[len(prefix):].strip() for t in tags if str(t).startswith(prefix)) if v]
+
+
+def _step_call(tool: str, tool_input):
+    """(steps, target) of a lane brief (a send_message whose first non-blank line after any Grant line is `Lane brief:
+    <step>. Topic: <topic>.`) or of a create_session tagged cs-step:<step>, else None. Steps are lower case; `target`
+    is the brief's session id, None for a create."""
+    if not isinstance(tool_input, dict):
+        return None
+    if tool == BRIEF_TOOL:
+        message = tool_input.get("message")
+        lines = [line.strip() for line in message.splitlines() if line.strip()] if isinstance(message, str) else []
+        if lines and lines[0].startswith(LANE_GRANT_MARKER):
+            lines = lines[1:]
+        found = _BRIEF_LINE.match(lines[0]) if lines and _BRIEF_MARKER_LINE.match(lines[0]) else None
+        return ([found.group("step").lower()], tool_input.get("session_id")) if found else None
+    if tool == CREATE_SESSION_TOOL:
+        tags = tool_input.get("tags")
+        steps = _tag_values(tags, ARCHIVE_STEP_PREFIX) if isinstance(tags, list) else []
+        return (steps, None) if steps else None
+    return None
+
+
+def _step_subject(tool_input, transcript: str, target):
+    """(tags, mine) of the subject of a step call: the create's own tags, or the target's newest record in the
+    transcript, and the steps that subject carries. Raises ValueError when a brief's target has no current record."""
+    if target is None:
+        return tool_input["tags"], []
+    tags, tagged_after = _own_session_read(transcript, target, created=True) \
+        if transcript and isinstance(target, str) and target else (None, False)
+    if tags is None or tagged_after:
+        raise ValueError("no current record of the target")
+    return tags, _tag_values(tags, ARCHIVE_STEP_PREFIX)
+
+
+def step_dup_hit(tool: str, tool_input, transcript: str):
+    """Return (matched, reason) when this call would put a second live session on a step, else None. The call is a lane
+    brief or a create_session tagged cs-step:<step> (_step_call). It is refused when another live session, not the
+    brief's target, carries that step and shares a cs-repo tag with the subject (_step_subject); the reason names that
+    session. A brief to a target that carries the step itself starts no new lane, so it passes before any list read.
+    Steps and tags match without case. A session is live unless its newest row in the transcript's list_sessions reads
+    is archived (own_session.list_sessions_read). A session an earlier create_session of this transcript started and no
+    archive_session names is live too, when no list row shows it (own_session.created_sessions). A carrier on any page, whole read or not, is refused. With no
+    carrier found, no whole list read, a brief whose target has no current record, or a subject with no cs-repo tag is
+    refused too: unknown is never an allow, and the guard-wide crash path fails open, so any error here is a refusal.
+    Known limit: only this transcript is read, so a session another transcript started after its newest list read is not seen.
+    Cost: one transcript read per brief or create with a step, plus one for the target's record; no file written, no
+    process, no extra tool call."""
+    call = _step_call(tool, tool_input)
+    if call is None:
+        return None
+    steps, target = call
+    try:
+        subject, mine = _step_subject(tool_input, transcript, target)
+        steps = [s for s in steps if s not in mine]
+        if not steps:
+            return None
+        repos = set(_tag_values(subject, ARCHIVE_REPO_PREFIX))
+        if not repos:
+            raise ValueError("no cs-repo tag")
+        rows, whole = own_session.list_sessions_read(transcript)
+        live = [(sid, tags) for sid, (tags, archived) in rows.items() if not archived]
+        # A session a create_session of this transcript started is no row unless a later read showed it; a row,
+        # archived or not, is newer than the create and decides.
+        live += [(sid, tags) for sid, tags in own_session.created_sessions(transcript).items() if sid not in rows]
+        for sid, tags in live:
+            if sid == target:
+                continue
+            for step in steps:
+                if step in _tag_values(tags, ARCHIVE_STEP_PREFIX) and repos & set(_tag_values(tags, ARCHIVE_REPO_PREFIX)):
+                    return "lane step " + step + " carried by " + sid, STEP_DUP_REASON % (sid, step)
+        if not whole:
+            raise ValueError("no whole list read")
+    except (Exception, SystemExit):
+        return "lane step with no proof", STEP_DUP_UNKNOWN_REASON % steps[0]
+    return None
+
+
+def step_pr_hit(tool: str, tool_input, transcript: str):
+    """Return (matched, reason) when this call would start a second lane on a step an open lane pull request holds, else
+    None (rule lane-step-dup, part two). The call is a step call (_step_call). An open pull request in a cs-repo of the
+    subject whose head is lane_head_refs(step) refuses it, and the reason names the pull request. The brief's own text
+    (the message of a brief, the prompt of a create) lifts it when it says `continues #N` or `replaces #N` and N is
+    such an open pull request, whichever the list reads first; any other N lifts nothing. A brief to a target that carries the step passes too. The
+    read is open_pull_rows, the one reader lane-closes-after-records uses. A failed read, a repo tag that is no
+    owner/name, or a brief target with no current record is a refusal: the guard-wide crash path fails open.
+    Cost: one paged gh read per cs-repo tag, for each step call."""
+    call = _step_call(tool, tool_input)
+    if call is None:
+        return None
+    steps, target = call
+    text = tool_input.get("message" if tool == BRIEF_TOOL else "prompt")
+    taken = set(_STEP_CONTINUES.findall(text)) if isinstance(text, str) else set()
+    try:
+        subject, mine = _step_subject(tool_input, transcript, target)
+        steps = [s for s in steps if s not in mine]
+        if not steps:
+            return None
+        module = merge_module()
+        if module is None:
+            raise RuntimeError("the merge tool could not be loaded")
+        first = None
+        for repo in dict.fromkeys(_tag_values(subject, ARCHIVE_REPO_PREFIX)):
+            if not _REPO_NAME.fullmatch(repo):
+                raise ValueError("not an owner/name repo tag")
+            with module.shared_deadline(MERGE_READ_TIMEOUT):
+                pulls = open_pull_rows(module, repo)
+            for row in pulls:
+                ref = str(row["head"]["ref"]).lower()
+                for step in steps:
+                    if ref in lane_head_refs(step):
+                        if str(row.get("number")) in taken:
+                            return None
+                        first = first or (row, step)
+        if first:
+            row, step = first
+            return ("lane step " + step + " has open pull request " + str(row.get("number", "?")),
+                    STEP_PR_REASON % {"pr": row.get("number", "?"), "step": step})
+    except (Exception, SystemExit):
+        return "lane step with an unreadable pull request list", STEP_PR_READ_REASON % steps[0]
+    return None
 
 
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)
