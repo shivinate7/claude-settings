@@ -9,6 +9,10 @@ sh("stream: the long follow flag", "tail --follow=name app.log", "deny", "live-s
 sh("stream: a combined short flag", "tail -fn 20 app.log", "deny", "live-stream", cwd=NOGIT)
 sh("stream: Get-Content -Wait never ends", "Get-Content app.log -Wait", "deny", "live-stream",
    tool="PowerShell", cwd=NOGIT)
+# A filter after a follow does not end it. The remedy names the Monitor tool, the way an agent follows a stream.
+sh("stream: tail -f piped to grep still denies, and the remedy names the Monitor tool",
+   "tail -f app.log | grep --line-buffered ERROR", "deny", "live-stream", cwd=NOGIT,
+   carries=("Monitor tool",))
 
 sh("stream: an ordinary line count", "tail -n 50 app.log", "allow", cwd=NOGIT)
 sh("stream: a short line count", "tail -5 app.log", "allow", cwd=NOGIT)
