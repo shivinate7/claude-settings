@@ -37,18 +37,18 @@ cp -r "$here" "$pin/actions/push-skip" && cp -r "$root/lint" "$pin/lint" \
 python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import test_all_jobs_passed as t; sys.stdout.write(t.CHILD_GOOD)' "$root/lint" \
   > "$caller/.github/workflows/checks.yml" || { echo "FAIL - fixture: lint/test_all_jobs_passed.py did not give CHILD_GOOD"; exit 1; }
 
-# The gated callers: this repo's checks.yml, which sets the macOS scope-skips map, and the same file with that input removed. The gate's
+# The scope-skip callers: this repo's checks.yml, which sets the macOS scope-skips map, and the same file with that input removed. The scope-skip
 # jobs come from testing/scope_skips.py here, since the pinned copy holds no testing/ folder.
-gated_caller="$work/gated_caller"; nomap_caller="$work/nomap_caller"
-mkdir -p "$gated_caller/.github/workflows" "$nomap_caller/.github/workflows"
+scope_skipped_caller="$work/scope_skipped_caller"; nomap_caller="$work/nomap_caller"
+mkdir -p "$scope_skipped_caller/.github/workflows" "$nomap_caller/.github/workflows"
 [ "$(grep -c '^          scope-skips: ' "$root/.github/workflows/checks.yml")" -eq 1 ] \
   || { echo "FAIL - fixture: checks.yml does not set its scope-skips input exactly once"; exit 1; }
-cp "$root/.github/workflows/checks.yml" "$gated_caller/.github/workflows/checks.yml" \
+cp "$root/.github/workflows/checks.yml" "$scope_skipped_caller/.github/workflows/checks.yml" \
   && sed '/^          scope-skips: /d' "$root/.github/workflows/checks.yml" > "$nomap_caller/.github/workflows/checks.yml" \
-  || { echo "FAIL - fixture: the gated callers could not be written"; exit 1; }
-GATED=$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import scope_skips; print(" ".join(sorted(scope_skips.MACOS_GATE)))' "$root/testing") \
-  || { echo "FAIL - fixture: testing/scope_skips.py did not give MACOS_GATE"; exit 1; }
-export GATED
+  || { echo "FAIL - fixture: the scope-skip callers could not be written"; exit 1; }
+SCOPE_SKIPPED=$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import scope_skips; print(" ".join(sorted(scope_skips.MACOS_SCOPE_SKIPS)))' "$root/testing") \
+  || { echo "FAIL - fixture: testing/scope_skips.py did not give MACOS_SCOPE_SKIPS"; exit 1; }
+export SCOPE_SKIPPED
 
 # The driver: loads the pinned script, answers its reads from the case's canned routes, and prints the skip value it wrote.
 cat > "$work/drive.py" <<'PY'
@@ -88,7 +88,7 @@ def lane_reads(jobs=None):
             "actions/runs/7/jobs": {"jobs": jobs}}
 
 
-GATED = os.environ.get("GATED", "").split()  # the macOS gate's jobs, from testing/scope_skips.py (test_action.sh reads it: the pinned copy holds no testing/)
+SCOPE_SKIPPED = os.environ.get("SCOPE_SKIPPED", "").split()  # the macOS scope skip's jobs, from testing/scope_skips.py (test_action.sh reads it: the pinned copy holds no testing/)
 
 
 def caller_needed():
@@ -99,14 +99,14 @@ def caller_needed():
         return all_jobs_passed_rules.split_jobs(handle.read())[0] + [ROLLUP]
 
 
-def gated_runs(needed):
-    """The check runs of a ready batch head: each gated job skipped by its flags, every other job passed."""
-    return [run(name, "skipped" if name in GATED else "success") for name in needed]
+def scope_skipped_runs(needed):
+    """The check runs of a ready batch head: each scope-skipped job skipped by its flags, every other job passed."""
+    return [run(name, "skipped" if name in SCOPE_SKIPPED else "success") for name in needed]
 
 
-def gated_jobs(needed):
-    """The jobs of a ready lone-lane run: each gated job skipped with no steps, every other job passed."""
-    return [job(name, "skipped", steps=[]) if name in GATED else job(name) for name in needed]
+def scope_skipped_jobs(needed):
+    """The jobs of a ready lone-lane run: each scope-skipped job skipped with no steps, every other job passed."""
+    return [job(name, "skipped", steps=[]) if name in SCOPE_SKIPPED else job(name) for name in needed]
 
 
 NEEDED = caller_needed()
@@ -118,9 +118,9 @@ CASES = {
     "schedule": (lane_reads(), {"EVENT": "schedule"}),
     "dispatch": (lane_reads(), {"EVENT": "workflow_dispatch"}),
 }
-CASES["gated_batch"] = (batch_reads(gated_runs(NEEDED)), {})
-CASES["gated_lane"] = (lane_reads(gated_jobs(NEEDED)), {})
-CASES["gated_nomap"] = CASES["gated_batch"]  # the same ready run, judged against a caller whose scope-skips input is removed
+CASES["scope_skipped_batch"] = (batch_reads(scope_skipped_runs(NEEDED)), {})
+CASES["scope_skipped_lane"] = (lane_reads(scope_skipped_jobs(NEEDED)), {})
+CASES["scope_skipped_nomap"] = CASES["scope_skipped_batch"]  # the same ready run, judged against a caller whose scope-skips input is removed
 routes, extra = CASES[case]
 
 
@@ -159,8 +159,8 @@ pinned skipped_suite false
 pinned skipped_step true
 pinned schedule false
 pinned dispatch false
-pinned gated_batch true "$gated_caller"
-pinned gated_lane true "$gated_caller"
-pinned gated_nomap false "$nomap_caller"
+pinned scope_skipped_batch true "$scope_skipped_caller"
+pinned scope_skipped_lane true "$scope_skipped_caller"
+pinned scope_skipped_nomap false "$nomap_caller"
 
 exit "$bad"

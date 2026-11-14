@@ -1130,8 +1130,9 @@ jobs:
     # A schedule and a dispatch run it. all-jobs-passed reads the skip as green through scope-skips.
     # Cap 75 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 30.5 min
     # is 41% of it (range 14.3-30.5, median 19.4, n 30 green runs, same window as `checks`), after the split into
-    # checks-macos and checks-macos-b. A push runs the janitor sweep mutation test and a pull request does not:
-    # push median 20.5 min, pull request median 18.7 (n 13 each).
+    # checks-macos and checks-macos-b. The janitor sweep mutation test runs on any event when the scope flag sweep is true (a pull request that
+    # changes the sweep included); a push and a pull request that leaves sweep false differ by that test: push median 20.5 min,
+    # pull request median 18.7 (n 13 each).
     # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
     # Unmeasured since R61: the guard shard became the macOS slice, so the figures above describe the old shape.
     timeout-minutes: 75
@@ -1367,7 +1368,7 @@ jobs:
 
   # The second half of checks-macos, split off for wall time: that job took 40.6 min in run 41730427997. The guard slice (R61)
   # runs in checks-macos alone, so this job has no guard step, and the slow CI steps are shared out between the jobs. Same scope flag, same `if:`
-  # on every CI step as checks-macos. The scope flag gates the job and its steps, so a pull request with no macOS-scoped change starts no macOS runner.
+  # on every CI step as checks-macos. The scope flag decides whether the job and its steps run, so a pull request with no macOS-scoped change starts no macOS runner.
   checks-macos-b:
     runs-on: macos-latest
     needs: scope
@@ -2165,7 +2166,7 @@ jobs:
 
   # The one check branch protection requires. It fails on a needed job that failed, was cancelled or was
   # skipped, so every needed job runs on a ready PR and puts its scope condition on its steps, never on the job. The three macOS
-  # jobs are the exception: their job-level scope gate skips a runner that a step-level skip would still start, and scope-skips
+  # jobs are the exception: their job-level scope skip stops a runner that a step-level skip would still start, and scope-skips
   # (actions/all-jobs-passed) names them so their skip reads as green only while scope succeeded with their flags false.
   # It runs on a ready pull_request only: on a push or a schedule it would read green over a red shard job it does not need.
   all-jobs-passed:

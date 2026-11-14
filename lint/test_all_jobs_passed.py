@@ -4,7 +4,7 @@
 Branch protection requires that one check (actions/all-jobs-passed). It fails on a needed job that failed, was
 cancelled or was skipped, so every job all-jobs-passed needs must run on a non-draft pull_request. This file proves:
 all-jobs-passed needs exactly the jobs that run there, derived from the file and not from a copied list; only the shard
-jobs (test_windows_split.SHARD_VAR) stay off it; a needed job has no job-level if, except a macOS job's scope gate, which
+jobs (test_windows_split.SHARD_VAR) stay off it; a needed job has no job-level if, except a macOS job's scope skip, which
 scope-skips names (testing/scope_skips.py); the job's shape, its own if (non-draft pull_request only) and its
 checkout pin; scope skips only a draft PR; and ci-done needs all-jobs-passed.
 
@@ -32,7 +32,7 @@ from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the o
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  test-temp-standard: teardown removes the run folder (testing/tracked_tree.py)
-import scope_skips  # noqa: E402  the one home of the macOS gate and its scope-skips entry (testing/scope_skips.py)
+import scope_skips  # noqa: E402  the one home of the macOS scope skip and its scope-skips entry (testing/scope_skips.py)
 from test_ci_scope import run as scope_run  # noqa: E402  the scope script's one harness (lint/test_ci_scope.py)
 
 PIN = "08c6903cd8c0fde910a37f88322edcfb5dd907a8"
@@ -148,11 +148,11 @@ class AllJobsPassedJob(unittest.TestCase):
     def test_all_jobs_passed_is_a_pinned_checkout_then_the_action(self):
         self.assertEqual(steps_problems(self.text), [])
 
-    def test_only_shard_jobs_stay_off_and_a_needed_job_level_if_is_a_listed_gate(self):
-        # Named failure: a macOS job's job-level gate is not named in all-jobs-passed's scope-skips, so its skip reads as red.
-        # The planned file (the gate and its entry, testing/scope_skips.py) is red on the old rules until the change lands.
+    def test_only_shard_jobs_stay_off_and_a_needed_job_level_if_is_a_listed_scope_skip(self):
+        # Named failure: a macOS job's job-level scope skip is not named in all-jobs-passed's scope-skips, so its skip reads as red.
+        # The planned file (the scope skip and its entry, testing/scope_skips.py) is red on the old rules until the change lands.
         self.assertEqual(off_problems(self.text), [])
-        self.assertEqual(off_problems(scope_skips.planned_scope_gate(self.text)), [])
+        self.assertEqual(off_problems(scope_skips.planned_scope_skips(self.text)), [])
 
     def test_scope_skips_only_a_draft_pr(self):
         self.assertEqual(scope_if_problems(self.text), [])
@@ -207,8 +207,8 @@ def planned_nightly_skip(text):
 class MacOnceByBatchRollup(unittest.TestCase):
     """R61 on the one required check: the push guard keeps each macOS job needed, the rollup still needs every job, and the
     nightly gate is an off-rollup job that is not a shard. Each case is a control that holds on the old rules and on the landed
-    file: the subject is built from the planned gate, with one known line swapped and asserted present, and the allowance stays
-    narrow. The planned gate with its scope-skips entry is ScopeSkipsWiring's case."""
+    file: the subject is built from the planned scope skip, with one known line swapped and asserted present, and the allowance stays
+    narrow. The planned scope skip with its scope-skips entry is ScopeSkipsWiring's case."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
@@ -238,25 +238,25 @@ class MacOnceByBatchRollup(unittest.TestCase):
 
     def test_a_macos_job_whose_if_skips_a_ready_pr_is_flagged(self):
         # Control: an if that is false on a ready PR still makes its job off the rollup, and is named as a non-shard. The subject is
-        # the planned file, with shell-macos's gate line swapped for a push-only if. The gate line is asserted present first, so a
-        # landed gate cannot turn the swap into a no-op.
-        planned = scope_skips.planned_scope_gate(self.text)
-        gate = "    if: ${{ " + scope_skips.gate_expr("shell-macos") + " }}\n"
-        self.assertEqual(planned.count(gate), 1, "shell-macos's planned gate line is not in the planned file: this case must follow it")
-        swapped = planned.replace(gate, "    if: ${{ github.event_name == 'push' }}\n", 1)
+        # the planned file, with shell-macos's scope-skip line swapped for a push-only if. The scope-skip line is asserted present first, so a
+        # landed one cannot turn the swap into a no-op.
+        planned = scope_skips.planned_scope_skips(self.text)
+        line = "    if: ${{ " + scope_skips.scope_skip_expr("shell-macos") + " }}\n"
+        self.assertEqual(planned.count(line), 1, "shell-macos's planned scope-skip line is not in the planned file: this case must follow it")
+        swapped = planned.replace(line, "    if: ${{ github.event_name == 'push' }}\n", 1)
         self.assertTrue(off_problems(swapped), "an if false on a ready PR passes the rollup rules")
 
     def test_a_flag_reading_job_level_if_on_a_job_scope_skips_does_not_name_is_flagged(self):
         # Control: a job-level if that reads a scope flag is refused on a job that scope-skips does not name. The subject is
-        # checks-hooks, which is no macOS job, so no gate or entry of the planned file covers it.
-        planned = scope_skips.planned_scope_gate(self.text)
+        # checks-hooks, which is no macOS job, so no scope skip or entry of the planned file covers it.
+        planned = scope_skips.planned_scope_skips(self.text)
         anchor = "  checks-hooks:\n"
         self.assertEqual(planned.count(anchor), 1, "checks-hooks' header changed: this case must follow it")
         text = planned.replace(anchor, anchor + "    if: ${{ needs.scope.outputs.checks_macos == 'true' }}\n", 1)
         self.assertTrue(off_problems(text) or needs_problems(text), "a flag-reading job-level if on an unnamed job passes the rollup rules")
 
 
-# The macOS gate (testing/scope_skips.py). A pull_request starts a macOS job only when one of its own flags is "true", and
+# The macOS scope skip (testing/scope_skips.py). A pull_request starts a macOS job only when one of its own flags is "true", and
 # all-jobs-passed reads its skip as green only when scope-skips names the job and every flag it lists is "false" (check.sh).
 CHECK_SH = os.path.join(HERE, "..", "actions", "all-jobs-passed", "check.sh")
 # Each defect is one substring of the planned file, replaced by the defect. The wiring rule must add a problem for each.
@@ -265,9 +265,9 @@ SCOPE_SKIPS_DEFECTS = [
     ("the map gives shell-macos checks_macos", '"shell-macos":["shell_macos"]', '"shell-macos":["checks_macos"]'),
     ("the map drops sweep from checks-macos", '["checks_macos","sweep"]', '["checks_macos"]'),
     ("the map drops checks-macos-b", ',"checks-macos-b":["checks_macos"]', ""),
-    ("the map names a job with no gate", '{"shell-macos"', '{"checks-hooks":["code"],"shell-macos"'),
+    ("the map names a job with no scope skip", '{"shell-macos"', '{"checks-hooks":["code"],"shell-macos"'),
     ("the map is not JSON", "scope-skips: '" + scope_skips.SCOPE_SKIPS_JSON + "'", "scope-skips: 'not json'"),
-    ("shell-macos's gate reads checks_macos",
+    ("shell-macos's scope skip reads checks_macos",
      "    if: ${{ github.event_name != 'push' && (needs.scope.outputs.shell_macos == 'true'",
      "    if: ${{ github.event_name != 'push' && (needs.scope.outputs.checks_macos == 'true'"),
 ]
@@ -311,7 +311,7 @@ class MacOsOnlyWhenScoped(unittest.TestCase):
         for flag in ("shell_macos", "checks_macos", "sweep"):  # scope first: a docs-only pull request sets no macOS flag
             self.assertEqual(flags[flag], "false", f"a docs-only pull request sets {flag}: {flags}")
         for name in MACOS_JOBS:
-            values = {flag: flags[flag] for flag in scope_skips.MACOS_GATE[name]}
+            values = {flag: flags[flag] for flag in scope_skips.MACOS_SCOPE_SKIPS[name]}
             with self.subTest(job=name):
                 self.assertFalse(eval_with(self.job_if(name), "pull_request", values), f"{name} runs on a pull_request with flags {values}")
         # The same pull request as all-jobs-passed sees it: every needed job passed, and the three macOS jobs skipped.
@@ -336,33 +336,33 @@ class MacOsOnlyWhenScoped(unittest.TestCase):
 
 
 class ScopeSkipsWiring(unittest.TestCase):
-    """(h): the wiring rule reads each macOS gate and its scope-skips entry together. The planned file is checks.yml with the
+    """(h): the wiring rule reads each macOS scope skip and its scope-skips entry together. The planned file is checks.yml with the
     change applied (testing/scope_skips.py). The rules pass it once the change lands, and refuse it on the rules as they stand."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
             self.text = f.read()
-        self.planned = scope_skips.planned_scope_gate(self.text)
+        self.planned = scope_skips.planned_scope_skips(self.text)
 
-    def test_the_planned_gate_and_its_scope_skips_entry_pass_the_wiring_rule(self):
-        # Named failure: the wiring rule refuses a macOS gate that its scope-skips entry names, so all-jobs-passed cannot skip it.
+    def test_the_planned_scope_skip_and_its_scope_skips_entry_pass_the_wiring_rule(self):
+        # Named failure: the wiring rule refuses a macOS scope skip that its scope-skips entry names, so all-jobs-passed cannot skip it.
         self.assertEqual(all_problems(self.planned), [])
 
     def test_the_wiring_rule_passes_the_checks_yml_on_disk(self):
         # Control: the file as it is passes the rules, so the planned file's problems belong to the change alone.
         self.assertEqual(all_problems(self.text), [])
 
-    def test_the_planned_file_changes_only_the_gate_lines_and_the_input(self):
+    def test_the_planned_file_changes_only_the_scope_skip_lines_and_the_input(self):
         # Control for the fixture: the comment and string lines of checks.yml (`# not a comment` inside quotes, a `#` in a
         # block body) come through unchanged. Every changed line is a macOS job's job-level if or the scope-skips input.
         changed = [line for line in difflib.unified_diff(self.text.split("\n"), self.planned.split("\n"), lineterm="", n=0)
                    if line[:1] in ("+", "-") and line[:3] not in ("+++", "---")]
         for line in changed:
             with self.subTest(line=line):
-                gate = line[1:].startswith("    if: ${{ github.event_name != 'push'")
-                self.assertTrue(gate or "scope-skips: '" in line, f"the planned file changes a line it should not: {line}")
+                skip_line = line[1:].startswith("    if: ${{ github.event_name != 'push'")
+                self.assertTrue(skip_line or "scope-skips: '" in line, f"the planned file changes a line it should not: {line}")
 
-    def test_a_scope_skips_entry_that_disagrees_with_a_macos_gate_is_flagged(self):
+    def test_a_scope_skips_entry_that_disagrees_with_a_macos_scope_skip_is_flagged(self):
         # Named failure: the wiring rule passes a scope-skips entry that disagrees with the job-level if it names. A defect is
         # flagged when it adds a problem that the planned file does not have.
         clean = all_problems(self.planned)

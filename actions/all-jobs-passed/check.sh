@@ -11,8 +11,8 @@ if [ -z "${SCOPE_SKIPS:-}" ]; then
 else
   echo "$NEEDS" | jq -e --argjson skips "$SCOPE_SKIPS" '
     . as $needs
-    | def gated($name): ($skips | type) == "object" and ($skips[$name] | type) == "array" and ($skips[$name] | length) > 0
+    | def named_skip($name): ($skips | type) == "object" and ($skips[$name] | type) == "array" and ($skips[$name] | length) > 0
         and $needs.scope.result == "success"
         and all($skips[$name][]; . as $flag | $needs.scope.outputs[$flag] == "false");
-    length > 0 and all(to_entries[]; .value.result == "success" or (.value.result == "skipped" and gated(.key)))' >/dev/null
+    length > 0 and all(to_entries[]; .value.result == "success" or (.value.result == "skipped" and named_skip(.key)))' >/dev/null
 fi

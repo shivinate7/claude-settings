@@ -88,7 +88,7 @@ nopy_case() { # nopy_case <label>: wiring.sh with python3 off PATH must exit non
 nopy_case "wiring: python3 off PATH exits non-zero, never 0"
 
 # Scope-skips (decision: roadmap step macos-jobs-gated-by-scope). A skipped job that the scope-skips input names passes only when the
-# scope job succeeded and every flag the input lists is exactly "false". The map is testing/scope_skips.py's, the one home of the gate.
+# scope job succeeded and every flag the input lists is exactly "false". The map is testing/scope_skips.py's, the one home of the scope skips.
 map_json="$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import scope_skips; sys.stdout.write(scope_skips.SCOPE_SKIPS_JSON)' "$root/testing")" || map_json=""
 [ -n "$map_json" ] || { echo "FAIL - scope-skips fixture: testing/scope_skips.py did not load"; exit 1; }
 skips_case() { # skips_case <pass|fail> <label> <SCOPE_SKIPS value> <NEEDS json>: check.sh with the input set to that value
@@ -105,9 +105,9 @@ unset_case() { # unset_case <pass|fail> <label> <NEEDS json>: check.sh with SCOP
 MAC_SKIPPED='"shell-macos":{"result":"skipped"},"checks-macos":{"result":"skipped"},"checks-macos-b":{"result":"skipped"}'
 LINT_OK='"lint":{"result":"success"}'
 SCOPE_OFF='"scope":{"result":"success","outputs":{"shell_macos":"false","checks_macos":"false","sweep":"false"}}'
-GATE_OFF="{$SCOPE_OFF,$MAC_SKIPPED,$LINT_OK}"
+SKIPS_OFF="{$SCOPE_OFF,$MAC_SKIPPED,$LINT_OK}"
 # (c) a scope job that did not succeed keeps the macOS skips red. With the scope job green and every flag off, they pass.
-skips_case pass "scope success with every flag false: the skipped macOS jobs pass" "$map_json" "$GATE_OFF"
+skips_case pass "scope success with every flag false: the skipped macOS jobs pass" "$map_json" "$SKIPS_OFF"
 SCOPE_FAILED='"scope":{"result":"failure","outputs":{"shell_macos":"false","checks_macos":"false","sweep":"false"}}'
 SCOPE_CANCELLED='"scope":{"result":"cancelled","outputs":{"shell_macos":"false","checks_macos":"false","sweep":"false"}}'
 SCOPE_SKIPPED='"scope":{"result":"skipped"}'
@@ -127,10 +127,10 @@ skips_case fail "sweep true: a skipped checks-macos stays red" "$map_json" "{$SW
 skips_case fail "a skipped job the map does not name stays red" "$map_json" "{$SCOPE_OFF,$MAC_SKIPPED,$LINT_OK,\"checks-rest\":{\"result\":\"skipped\"}}"
 MAC_ONE_FAILED='"shell-macos":{"result":"failure"},"checks-macos":{"result":"skipped"},"checks-macos-b":{"result":"skipped"}'
 skips_case fail "a listed job that failed stays red" "$map_json" "{$SCOPE_OFF,$MAC_ONE_FAILED,$LINT_OK}"
-skips_case fail "an empty map names no job: the skipped macOS jobs stay red" "{}" "$GATE_OFF"
+skips_case fail "an empty map names no job: the skipped macOS jobs stay red" "{}" "$SKIPS_OFF"
 # (f) with the input unset, a skipped job is red as it was before. A malformed input fails closed.
-unset_case fail "SCOPE_SKIPS unset: a skipped macOS job stays red, as before" "$GATE_OFF"
-skips_case fail "a malformed SCOPE_SKIPS fails closed: the skipped macOS job stays red" "{not json" "$GATE_OFF"
+unset_case fail "SCOPE_SKIPS unset: a skipped macOS job stays red, as before" "$SKIPS_OFF"
+skips_case fail "a malformed SCOPE_SKIPS fails closed: the skipped macOS job stays red" "{not json" "$SKIPS_OFF"
 skips_case fail "a named job with an empty flag list stays red: a skip passes only on a flag that says no" '{"shell-macos":[]}' '{"scope":{"result":"success","outputs":{}},"shell-macos":{"result":"skipped"}}'
 # The action's default is '', so every other repo's check sees SCOPE_SKIPS set to the empty string. Each of the five cases above
 # gives the same verdict with it empty, and a skipped macOS job stays red. With the map set and every flag "true", a green run passes.
@@ -139,7 +139,7 @@ skips_case fail "SCOPE_SKIPS empty: one failed stays red, as unset" "" '{"a":{"r
 skips_case fail "SCOPE_SKIPS empty: one cancelled stays red, as unset" "" '{"a":{"result":"cancelled"}}'
 skips_case fail "SCOPE_SKIPS empty: one skipped stays red, as unset" "" '{"a":{"result":"success"},"b":{"result":"skipped"}}'
 skips_case fail "SCOPE_SKIPS empty: empty needs stays red, as unset" "" '{}'
-skips_case fail "SCOPE_SKIPS empty: a skipped macOS job stays red" "" "$GATE_OFF"
+skips_case fail "SCOPE_SKIPS empty: a skipped macOS job stays red" "" "$SKIPS_OFF"
 SCOPE_ON='"scope":{"result":"success","outputs":{"shell_macos":"true","checks_macos":"true","sweep":"true"}}'
 MAC_OK='"shell-macos":{"result":"success"},"checks-macos":{"result":"success"},"checks-macos-b":{"result":"success"}'
 skips_case pass "map set, scope success, flags true, macOS jobs succeeded: a green run passes" "$map_json" "{$SCOPE_ON,$MAC_OK,$LINT_OK}"
@@ -173,7 +173,7 @@ inputs_expect() { # inputs_expect <ok, or a substring the reader must print> <la
   case "$problems" in *"$1"*) echo "ok   $2";; *) echo "FAIL $2: the reader did not print: $1"; bad=1;; esac
 }
 input_yml() { # input_yml <scope-skips body lines> <env line, or empty> [description]: a one-step action.yml with that input, env and description
-  d="${3:-}"; [ -n "$d" ] || d="The macOS gate's map."
+  d="${3:-}"; [ -n "$d" ] || d="The macOS scope skip's map."
   cat <<YML
 name: All jobs passed
 inputs:
