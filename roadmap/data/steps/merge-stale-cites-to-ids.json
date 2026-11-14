@@ -1,0 +1,14 @@
+{
+ "id": "merge-stale-cites-to-ids",
+ "title": "The merge tool's stale line cites BATCH_CITE 223, DROP_CITE 222 and RED_CITE 216 point at ids, not at moved text",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Debt merge-stale-texts-and-cites: the three cites no longer match the records.",
+ "source": "Consultant 20:59 CST Nov 13, from its Opus read-only audit of merge/merge.py at origin/main 309fa5ed5b; line numbers and debts are its, unchecked by triage.",
+ "note": "Triage 21:00 CST Nov 13: rule git-cite-by-id. Small fix; unchecked by triage.",
+ "updatedAt": "2026-11-13T21:00:15-06:00"
+}

@@ -1,0 +1,14 @@
+{
+ "id": "merge-red-base-resume-on-merge",
+ "title": "The merge tool resumes the queue when the blamed revert merges, not when its run is green; --base-red-ok covers only that revert",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "red_base (merge.py 2961-2987) waits longer than the rulings say. Saves 10-15 min per red-main incident per queued PR (debt measured-time-table; consultant's figure, unmeasured by triage).",
+ "source": "Consultant 20:59 CST Nov 13, from its Opus read-only audit of merge/merge.py at origin/main 309fa5ed5b; line numbers and debts are its, unchecked by triage.",
+ "note": "Triage 21:00 CST Nov 13: rulings own-745-b (13:20 CST Nov 13) and own-772-a (18:24 CST Nov 13), per the consultant; triage has not reread them. Red case first. Fix is inside the rulings, so no owner item.",
+ "updatedAt": "2026-11-13T21:00:15-06:00"
+}

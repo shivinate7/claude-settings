@@ -1,0 +1,16 @@
+{
+ "id": "merge-express-cut-or-skip",
+ "title": "merge --express adds a refusal and skips nothing: cut it, or make it skip lint for a ruled prose-only head",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "owner pick: cut or skip"
+ ],
+ "why": "The audit read merge.py 3009-3059 and found --express refuses more and skips no check.",
+ "source": "Consultant 20:59 CST Nov 13, from its Opus read-only audit of merge/merge.py at origin/main 309fa5ed5b; line numbers and debts are its, unchecked by triage.",
+ "note": "Triage 21:00 CST Nov 13: the choice (cut or make it skip) needs a ruling that names prose-only; no owner item yet. Unchecked: whether any session uses --express today.",
+ "updatedAt": "2026-11-13T21:00:15-06:00"
+}

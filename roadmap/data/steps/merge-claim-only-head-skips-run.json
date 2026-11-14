@@ -1,0 +1,14 @@
+{
+ "id": "merge-claim-only-head-skips-run",
+ "title": "A head that only adds a claim needs no new full CI run in q_max and degen",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Each such head costs 8-10 min per PR (13 runs, consultant's sample).",
+ "source": "Consultant 20:59 CST Nov 13, from its Opus read-only audit of merge/merge.py at origin/main 309fa5ed5b; line numbers and debts are its, unchecked by triage.",
+ "note": "Triage 21:00 CST Nov 13: the check is for a head whose diff is claim-only. Repos q_max and degen. Unchecked by triage: the 13-run sample and the claim-only test.",
+ "updatedAt": "2026-11-13T21:00:15-06:00"
+}
