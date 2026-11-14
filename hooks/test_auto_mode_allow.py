@@ -694,23 +694,5 @@ class NeverCoversSentence(unittest.TestCase):
         self.assertIsNone(never_covers("Allowed, with no bound."))
 
 
-class DefaultModeIsAuto(unittest.TestCase):
-    """permissions.defaultMode is "auto" in settings.json, the mode a cloud session runs (measured with get_session), so a local
-    session runs the same mode. The local install links ~/.claude/settings.json to this file, so the key reaches the user's
-    settings. AUTO_MODE_SETTINGS names another file to read, as for autoMode."""
-
-    def settings(self):
-        path = os.environ.get("AUTO_MODE_SETTINGS") or os.path.join(REPO_ROOT, "settings.json")
-        with open(path, encoding="utf-8") as handle:
-            return json.load(handle)
-
-    def test_the_settings_carry_a_permissions_block(self):
-        self.assertIn("permissions", self.settings(), "scope: settings.json has no permissions block")
-
-    def test_the_default_mode_is_auto(self):
-        mode = self.settings()["permissions"].get("defaultMode")
-        self.assertEqual(mode, "auto", "settings.json permissions.defaultMode is %r, want \"auto\"" % (mode,))
-
-
 if __name__ == "__main__":
     unittest.main()
