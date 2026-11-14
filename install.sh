@@ -21,9 +21,11 @@ case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) echo "install.sh does not run on Win
 
 REPO="shivinate7/claude-settings"
 REF="${CLAUDE_SETTINGS_REF:-stable}"   # stable: the branch sessions install from. CLAUDE_SETTINGS_REF=main is the recovery.
-RAW="https://raw.githubusercontent.com/${REPO}/${REF}"; REFRESH_CURL="curl -fsSL ${RAW}/install.sh"  # REFRESH_CURL: the part of the cloud refresh hook that every form of it shares
-# REFRESH_HEAD: REFRESH_CURL up to its ref. A refresh hook built at any ref holds REFRESH_HEAD, a ref, then /install.sh.
-REFRESH_HEAD=${REFRESH_CURL%"${REF}/install.sh"}
+RAW="https://raw.githubusercontent.com/${REPO}/${REF}"
+# REFRESH_FETCH: the fetch the cloud refresh hook runs. HOOK_CMD builds the hook from it and from the RAW in force at write time.
+# REFRESH_HEAD: that fetch up to a ref. A refresh hook built at any ref holds REFRESH_HEAD, a ref, then /install.sh.
+REFRESH_FETCH="curl -fsSL"
+REFRESH_HEAD="${REFRESH_FETCH} ${RAW%"${REF}"}"
 TARBALL="https://github.com/${REPO}/archive/refs/heads/${REF}.tar.gz"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
@@ -1078,7 +1080,7 @@ if [ "$CLOUD" = 1 ]; then
   # install runs them itself once the hooks are copied (see "cloud startup entries" below).
   # The refresh hook hands its stdin to install.sh, which reads the session source from it.
   # Locals get no refresh hook: their settings.json is a symlink into the clone.
-  HOOK_CMD='i=$(cat); curl -fsSL '"${RAW}"'/install.sh | CS_HOOK_INPUT="$i" bash -s -- --cloud'
+  HOOK_CMD='i=$(cat); '"${REFRESH_FETCH} ${RAW}"'/install.sh | CS_HOOK_INPUT="$i" bash -s -- --cloud'
   SRC_SHA=$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null) || SRC_SHA="no git"
   if command -v jq >/dev/null 2>&1; then
     # merge/cloud_allow.json: the `merge --confirm` and `merge --role` allow rules only a cloud session gets (a local settings.json links to the repo's, which has none).

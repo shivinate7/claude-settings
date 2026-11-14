@@ -1847,7 +1847,7 @@ in_order() { case "$1" in *"$2"*"$3"*) return 0 ;; esac; return 1; }
 hk_envrun() {
   hk_co=$1; shift
   hk_so=$(mktemp "$work/hk-out.XXXXXX"); hk_se=$(mktemp "$work/hk-err.XXXXXX")
-  ( cd "$hk_co" && env -i "$@" CLAUDE_SETTINGS_REF=main bash -s -- --cloud < "$INSTALL_SH" > "$hk_so" 2> "$hk_se" ); rc=$?
+  ( cd "$hk_co" && env -i CLAUDE_SETTINGS_REF=main "$@" bash -s -- --cloud < "$INSTALL_SH" > "$hk_so" 2> "$hk_se" ); rc=$?
   out=$(cat "$hk_so"); err=$(cat "$hk_se")
 }
 # hookfix_checkout DIR [SETTINGS]: a checkout whose settings.json is the file SETTINGS, or else four entries:
@@ -2163,7 +2163,7 @@ snap_old_line='HOOK_CMD="curl -fsSL ${RAW}/install.sh | bash -s -- --cloud"'
 snap_eval_hook() {
   (
     export CLAUDE_SETTINGS_REF=main
-    eval "$(grep -E '^(REPO|REF|RAW)=' "$INSTALL_SH")"
+    eval "$(grep -E '^(REPO|REF|RAW|REFRESH_FETCH)=' "$INSTALL_SH")"
     eval "$1"
     printf '%s' "$HOOK_CMD"
   )
