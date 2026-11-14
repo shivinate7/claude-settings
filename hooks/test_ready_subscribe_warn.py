@@ -16,8 +16,11 @@ Contract, as the cases pin it:
 - Silent: stdout empty and exit 0 for a call whose draft is absent or true, any other tool, empty or junk
   stdin, no transcript_path, or a transcript_path that cannot be read. A call that is not a ready mark
   reads no transcript.
-- The transcript is read with lint/_transcript.py (read_transcript, tool_uses). A call in an isSidechain
-  record counts. A call in an api-request-blob record does not.
+- The transcript is read with lint/_transcript.py (read_transcript, tool_uses, tool_results,
+  failed_tool_use_ids, result_text). A call in an isSidechain record counts. A call in an api-request-blob
+  record does not.
+- A subscribe whose tool_result is an error, or whose result text says a Claude agent is already watching the
+  PR (case-insensitive), does not count: the ready mark warns. A subscribe with no result record still counts.
 - Cost: one read of the transcript per ready mark. No subprocess, no file opened for writing, no timer.
 
 A warning case is a red on a commit without the hook: it fails on the missing warning. A silent case is the
@@ -43,7 +46,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
-from _transcript import read_transcript, tool_uses  # noqa: E402  the one transcript reader (lint/_transcript.py)
+from _transcript import (failed_tool_use_ids, read_transcript, result_text, tool_results,  # noqa: E402
+                         tool_uses)  # the one transcript reader (lint/_transcript.py)
 from case_runner_test import run_cases  # noqa: E402  the one case runner (hooks/case_runner_test.py)
 
 HOOK = os.path.join(HERE, "ready_subscribe_warn.py")
@@ -51,6 +55,10 @@ READY_TOOL = "mcp__github__update_pull_request"
 SUBSCRIBE = "mcp__claude-code-remote__subscribe_pr_activity"
 UNSUBSCRIBE = "mcp__claude-code-remote__unsubscribe_pr_activity"
 OWNER, REPO, PR = "octo-org", "app", 12
+ERRORED = "Error: the PR could not be subscribed."
+SUBSCRIBED = "Subscribed to octo-org/app#12."
+WATCHING = ("Subscribed to octo-org/app#12. A Claude agent is already watching this PR, "
+            "so this session will not receive its events.")
 ABSENT = object()  # mcp_input leaves draft out of the call when this is passed
 TIMEOUT = 60  # a safety bound on one hook process; no case asserts on a time
 FILLER = 300  # records of about 1 KB each: more than the reader's 256 KB chunk
@@ -106,6 +114,31 @@ def subscribe(pull=PR, owner=OWNER, repo=REPO, **kw):
 
 def unsubscribe(pull=PR, owner=OWNER, repo=REPO):
     return call(UNSUBSCRIBE, pr_input(pull, owner, repo))
+
+
+def use_id_of(use_rec):
+    """The tool_use id of the one call in a record from call()."""
+    return next(b["id"] for b in use_rec["message"]["content"] if b.get("type") == "tool_use")
+
+
+def tool_result_for(use_rec, body, is_error=False):
+    """The user record that carries the result of the call in use_rec, shaped as the transcript writes it.
+    body is a plain string or a list of content blocks, as the transcript holds either."""
+    block = {"type": "tool_result", "tool_use_id": use_id_of(use_rec), "content": body}
+    if is_error:
+        block["is_error"] = True
+    return {"type": "user", "message": {"role": "user", "content": [block]}}
+
+
+def results_of(path):
+    """What the shared reader yields for results: the tool_use ids whose result failed, and each result's text,
+    by tool_use id. An id can hold more than one block, so its texts are a list."""
+    records = list(read_transcript(path))
+    texts = {}
+    for rec in records:
+        for block in tool_results(rec):
+            texts.setdefault(block.get("tool_use_id"), []).append(result_text(block))
+    return failed_tool_use_ids(records), texts
 
 
 def filler(n):
@@ -234,6 +267,21 @@ def premise(path, name, want):
     return None
 
 
+def result_premise(path, use_id, failed, holds):
+    """A problem when the shared reader does not read the result of `use_id` as the fixture means it, else None.
+    failed is whether the reader calls it failed. holds is a text a result must contain, case-insensitive; None
+    means the fixture has no result record for the call at all."""
+    failed_ids, texts = results_of(path)
+    if (use_id in failed_ids) != failed:
+        return "fixture premise: the shared reader calls the result of %s failed %s, not %s" % (
+            use_id, use_id in failed_ids, failed)
+    if holds is None:
+        return None if use_id not in texts else "fixture premise: the shared reader yields a result for %s" % use_id
+    if not any(holds.lower() in t.lower() for t in texts.get(use_id, [])):
+        return "fixture premise: the shared reader yields no result for %s holding %r" % (use_id, holds)
+    return None
+
+
 def exit_problem(run):
     if run.ran and run.rc != 0:
         return "exit %s, not 0" % run.rc
@@ -243,7 +291,7 @@ def exit_problem(run):
 def expect_warning(run):
     """A problem when the run does not print the subscribe warning, else None."""
     if run.out.strip() == "":
-        return "no warning on stdout for a ready mark with no subscribe_pr_activity call before it"
+        return "no warning on stdout for a ready mark the session has not subscribed to"
     try:
         obj = json.loads(run.out)
     except ValueError:
@@ -409,6 +457,73 @@ def case_resumed_blob_copy_of_a_subscribe_does_not_count():
     return result(expect_warning(run_hook(hook_json(mcp_input(), path))))
 
 
+def case_subscribe_whose_result_is_an_error_does_not_count_warns():
+    """A subscribe whose tool_result is an error does not count: the ready mark warns."""
+    sub = subscribe()
+    path = write_transcript([sub, tool_result_for(sub, ERRORED, is_error=True)])
+    bad = (premise(path, SUBSCRIBE, [pr_input()])
+           or result_premise(path, use_id_of(sub), True, "could not be subscribed"))
+    if bad:
+        return [bad]
+    return result(expect_warning(run_hook(hook_json(mcp_input(), path))))
+
+
+def case_subscribe_that_says_already_watching_warns():
+    """A subscribe whose result says a Claude agent is already watching the PR does not count: the ready mark warns."""
+    sub = subscribe()
+    path = write_transcript([sub, tool_result_for(sub, WATCHING)])
+    bad = premise(path, SUBSCRIBE, [pr_input()]) or result_premise(path, use_id_of(sub), False, "already watching")
+    if bad:
+        return [bad]
+    return result(expect_warning(run_hook(hook_json(mcp_input(), path))))
+
+
+def case_subscribe_with_an_ordinary_result_is_silent():
+    """A subscribe whose result is an ordinary success keeps the ready mark silent."""
+    sub = subscribe()
+    path = write_transcript([sub, tool_result_for(sub, SUBSCRIBED)])
+    bad = premise(path, SUBSCRIBE, [pr_input()]) or result_premise(path, use_id_of(sub), False, "Subscribed")
+    if bad:
+        return [bad]
+    return result(expect_silence(run_hook(hook_json(mcp_input(), path))))
+
+
+def case_subscribe_with_no_result_record_is_silent():
+    """A subscribe with no result record in the transcript still counts: fail open, the ready mark stays silent."""
+    sub = subscribe()
+    path = write_transcript([sub])
+    bad = premise(path, SUBSCRIBE, [pr_input()]) or result_premise(path, use_id_of(sub), False, None)
+    if bad:
+        return [bad]
+    return result(expect_silence(run_hook(hook_json(mcp_input(), path))))
+
+
+def case_failed_subscribe_then_a_successful_one_is_silent():
+    """A failed first subscribe, then a successful second one for the same PR, keeps the ready mark silent."""
+    first, second = subscribe(), subscribe()
+    path = write_transcript([first, tool_result_for(first, ERRORED, is_error=True)] + filler(FILLER)
+                            + [second, tool_result_for(second, SUBSCRIBED)])
+    bad = (premise(path, SUBSCRIBE, [pr_input(), pr_input()])
+           or result_premise(path, use_id_of(first), True, "could not be subscribed")
+           or result_premise(path, use_id_of(second), False, "Subscribed"))
+    if bad:
+        return [bad]
+    return result(expect_silence(run_hook(hook_json(mcp_input(), path))))
+
+
+def case_already_watching_in_a_content_list_warns():
+    """An already-watching result in content-list blocks, not a plain string, does not count: the ready mark warns."""
+    sub = subscribe()
+    body = [{"type": "text", "text": "Subscribed to octo-org/app#12. "},
+            {"type": "text", "text": "A Claude agent Is Already Watching this PR, "
+                                     "so this session will not receive its events."}]
+    path = write_transcript([sub, tool_result_for(sub, body)])
+    bad = premise(path, SUBSCRIBE, [pr_input()]) or result_premise(path, use_id_of(sub), False, "already watching")
+    if bad:
+        return [bad]
+    return result(expect_warning(run_hook(hook_json(mcp_input(), path))))
+
+
 def case_missing_transcript_path_is_silent():
     """A ready mark with no transcript_path fails open: silent, exit 0."""
     return result(expect_silence(run_hook(hook_json(mcp_input(), None))))
@@ -479,6 +594,12 @@ CASES = [
     case_subscribed_session_that_marks_ready_twice_stays_silent,
     case_sidechain_subscribe_counts,
     case_resumed_blob_copy_of_a_subscribe_does_not_count,
+    case_subscribe_whose_result_is_an_error_does_not_count_warns,
+    case_subscribe_that_says_already_watching_warns,
+    case_subscribe_with_an_ordinary_result_is_silent,
+    case_subscribe_with_no_result_record_is_silent,
+    case_failed_subscribe_then_a_successful_one_is_silent,
+    case_already_watching_in_a_content_list_warns,
     case_missing_transcript_path_is_silent,
     case_missing_transcript_file_is_silent,
     case_transcript_path_that_is_a_directory_is_silent,
