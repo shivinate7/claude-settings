@@ -5769,7 +5769,7 @@ class MistakeNamesGuardTests(unittest.TestCase):
     def test_mg_green_guard_label_next_mid_sentence_guard_passes(self):
         self.assert_allowed(mg_report("none", nxt="> **Next** the report guard — it refuses the reply"))
 
-    # Owner ruling 2026-11-13 18:24 CST (own-700-a-labels-then-count): a label after a dash counts in colon form.
+    # A guard label after a dash counts in colon form, so the incident sentence "... broke X — Guard: ..." is read.
     def test_mg_red_guard_label_done_guard_after_dash_blocks(self):
         self.assert_blocked(mg_report(
             "none", done="> **Done** BUILT the lint fix — guard: future briefs run it first"))
@@ -5823,7 +5823,7 @@ class MistakeNamesGuardTests(unittest.TestCase):
     def test_mg_red_guard_r3_underscore_label_blocks(self):
         self.assert_blocked(mg_report("_Guard:_ future briefs run the check."))
 
-    # Owner ruling 2026-11-13 18:24 CST (own-700-a-labels-then-count): emphasis may wrap "Missing guard", so a bold,
+    # Emphasis may wrap "Missing guard", so a bold,
     # italic or underscore "Missing guard:" label counts too. Each red has no ref after its label; each green has one.
     def test_mg_red_bold_missing_guard_colon_inside_blocks(self):
         self.assert_blocked(mg_report("**Missing guard:** none yet."))
