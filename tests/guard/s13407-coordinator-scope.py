@@ -185,6 +185,34 @@ sh("coordinator-scope: a cloud coordinator's install -m 644 into a decision reco
 sh("coordinator-scope: a cloud coordinator's install -m 644 into a repository file that is no record home is refused",
    "install -m 644 a hooks/b.py", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
 
+# --- a target the guard cannot read: xargs takes its files from a pipe or a list, --reference names the mode's file ---
+# Each deny writes a repository path that is no record home, or a path the guard cannot read, so each is refused. A bare
+# chmod or truncate names no operand: the guard refuses it as a write whose target it cannot read.
+sh("coordinator-scope: a cloud coordinator's xargs chmod of a git file list is refused",
+   "git ls-files hooks | xargs chmod 755", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's xargs chmod with its files read from a list file is refused",
+   "xargs chmod +x < list.txt", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's xargs truncate of a hooks glob is refused",
+   "ls hooks/* | xargs truncate -s 0", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's chmod +x with no file operand is refused",
+   "chmod +x", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's truncate -s 0 with no file operand is refused",
+   "truncate -s 0", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's chmod of a repository file with --reference after it is refused",
+   "chmod hooks/x --reference=docs/todo.md", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's chmod --reference onto a repository file is refused",
+   "chmod --reference=docs/todo.md hooks/b", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's install -d of a repository path beside a record home is refused",
+   "install -d hooks/a docs/decisions/b", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's install -t into a repository folder that is no record home is refused",
+   "install -t hooks src/a", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+# The -t folder is the write and the last word is a record home. A change that leaves the -t folder unjudged, as -m's
+# mode word is, allows this call. `install -t hooks src/a` does not show it: its source is refused either way.
+sh("coordinator-scope: a cloud coordinator's install -t into a repository folder from a record-home source is refused",
+   "install -t hooks docs/decisions/x.md", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's cat <> onto a repository file that is no record home is refused",
+   "cat <> hooks/x", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+
 # --- no role file: the role is the cs-build tag the session's own get_session record holds, after its own tag calls ---
 add("coordinator-scope: with no role file, a coordinator record's role refuses an Edit of a repository path", "deny",
     COORD_RULE, tool="Edit", cwd=REPO, env=COORD_ENV, config=COORD_NOROLE,
