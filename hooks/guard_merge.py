@@ -1814,28 +1814,21 @@ def brief_hit(tool: str, tool_input, transcript: str):
     return topic_hit(first, tags)
 
 
-# ---- A lane brief names only roster ids (rule brief-ids-in-roster)
-ROSTER_HEADING = "## Standing sessions"  # the roster's heading in the roadmap branch's top-level notes file
-ROSTER_FILE = "CLAUDE.md"
-# A session id as a brief types it, in any case. SESSION_ID_RE (guard_shared_tree) is a full match, so this scans: the id is
-# `session_`, a digit, then letters and digits, so a parameter name such as `session_id` is no id, and a `.md`, a dot or a
-# dash after the id is not part of it.
+# ---- A lane brief names a slug or a role, never a session id (rule brief-ids-in-roster)
+# A session id as a brief types it, in any case. SESSION_ID_RE (guard_shared_tree) is a full match, so this scans: the id
+# is `session_`, a digit, then letters and digits, so a parameter name such as `session_id` is no id, and a `.md`, a dot or
+# a dash after the id is not part of it.
 _BRIEF_ID = re.compile(r"(?<![A-Za-z0-9_])session_[0-9][A-Za-z0-9]*", re.IGNORECASE)
 _DATA_QUOTES = "`\""  # an id with one of these right before it and right after it is data (an incident quote)
 # A line that opens a brief: an optional markdown lead, then Grant: or Lane brief:. The lead is _MARKDOWN_LEAD plus the
 # list dash, which the other readers of the lead do not take.
-_ROSTER_LEAD = r"[-#*_>\s]*"
-_ROSTER_OPENER = re.compile(_ROSTER_LEAD + r"(?:" + re.escape(LANE_GRANT_MARKER) + r"|(?i:" + re.escape(LANE_BRIEF_MARKER) + r"))")
-ROSTER_REASON = (
-    "this brief names a session id that is not in the roster on the roadmap branch. A hand-typed id can wake "
-    "the wrong session or none. Run `git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap`, then copy the "
-    "id from the roster. "
-    "(decision brief-ids-in-roster, a lane brief names only roster ids)"
+_BRIEF_LEAD = r"[-#*_>\s]*"
+_BRIEF_OPENER = re.compile(_BRIEF_LEAD + r"(?:" + re.escape(LANE_GRANT_MARKER) + r"|(?i:" + re.escape(LANE_BRIEF_MARKER) + r"))")
+BRIEF_ID_REASON = (
+    "this brief names a session id. A hand-typed id can wake the wrong session or none. Name the lane's slug or the "
+    "session's role instead, and the lane looks the id up in the roster. "
+    "(decision brief-ids-in-roster, a lane brief names a slug or a role, never a session id)"
 )
-
-
-def _ids_in(text: str) -> list[str]:
-    return [found.group(0).lower() for found in _BRIEF_ID.finditer(text)]
 
 
 def _bare_ids_in(text: str) -> list[str]:
@@ -1849,36 +1842,16 @@ def _bare_ids_in(text: str) -> list[str]:
     return bare
 
 
-def roster_ids(cwd: str):
-    """The session ids in the roster (the Standing sessions section of the roadmap branch's notes file, as the lane last
-    fetched it), or an empty set when no roster can be read: no ref, no section, no id in it, an unreadable ref. Cost: one
-    `git show` per call."""
-    from override import STEP_REF  # the one name of the record branch ref as fetched
-    shown = _git(cwd, "show", STEP_REF + ":" + ROSTER_FILE) if cwd and os.path.isdir(cwd) else None
-    if shown is None or shown.returncode != 0:
-        return set()
-    section, inside = [], False
-    for line in shown.stdout.splitlines():
-        if inside and line.startswith("## "):
-            break
-        if line.startswith(ROSTER_HEADING):
-            inside = True
-        elif inside:
-            section.append(line)
-    return set(_ids_in("\n".join(section)))
-
-
 def brief_roster_hit(tool: str, tool_input, cwd: str):
-    """Return (matched, reason) when a lane brief names a bare session id that is not in the roster, else None. Read: a
-    create_session that tags a lane (its prompt), and a send_message whose first non-blank line starts with
-    LANE_GRANT_MARKER or LANE_BRIEF_MARKER (its message). An id inside backticks or double quotes is data and passes. The
-    send_message target is not judged: lanes are not on the roster. Fails open: with no roster to read (child repos have
-    none) every id passes, and so does any error in the read."""
+    """Return (matched, reason) when a lane brief names a bare session id, else None. Read: a create_session that tags a
+    lane (its prompt), and a send_message with a line that starts LANE_GRANT_MARKER or LANE_BRIEF_MARKER (its message). An
+    id inside backticks or double quotes is data and passes. The send_message target is not judged. No git read and no
+    file written: the text alone decides. Fails open on any error in the read. `cwd` is unused; the call site passes it."""
     if not isinstance(tool_input, dict):
         return None
     if tool == BRIEF_TOOL:
         text = tool_input.get("message")
-        if not isinstance(text, str) or not any(_ROSTER_OPENER.match(ln) for ln in text.splitlines()):
+        if not isinstance(text, str) or not any(_BRIEF_OPENER.match(ln) for ln in text.splitlines()):
             return None
     elif is_lane_create_session(tool, tool_input):
         text = tool_input.get("prompt")
@@ -1888,15 +1861,11 @@ def brief_roster_hit(tool: str, tool_input, cwd: str):
         return None
     try:
         bare = _bare_ids_in(text)
-        if not bare:
-            return None
-        roster = roster_ids(cwd)
-        wrong = sorted({i for i in bare if i not in roster}) if roster else []
     except Exception:
         return None
-    if not wrong:
+    if not bare:
         return None
-    return "lane brief naming " + ", ".join(wrong), ROSTER_REASON
+    return "lane brief naming " + ", ".join(sorted(set(bare))), BRIEF_ID_REASON
 
 
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)

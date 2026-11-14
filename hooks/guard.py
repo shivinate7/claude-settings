@@ -6846,10 +6846,10 @@ def judge(payload) -> None:
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
-    # A lane brief that names a bare session id the roster does not hold (rule brief-ids-in-roster).
-    unrostered = brief_roster_hit(tool, tool_input, cwd)
-    if unrostered:
-        refuse(tool, "deny", "brief-ids-in-roster", unrostered[1], unrostered[0])
+    # A lane brief that names a bare session id (rule brief-ids-in-roster).
+    named_id = brief_roster_hit(tool, tool_input, cwd)
+    if named_id:
+        refuse(tool, "deny", "brief-ids-in-roster", named_id[1], named_id[0])
 
     # 8b. agent-no-remote-tools. An agent never starts, messages, tags or archives sessions, nor sets scheduled tasks;
     # the session that spawned it does. Keyed on a truthy agent_id of any shape, so a drifted id stays refused. After the
