@@ -1,14 +1,14 @@
 {
  "id": "red-ready-pr-back-to-draft",
- "title": "A ready PR that goes red and gets a lane push returns to draft first, and the tool or lane lint says so before the push",
+ "title": "The lane lint \"unknown\" line on a ready PR names the return-to-draft remedy, and the lane brief template carries the rule",
  "status": "ready",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
  "owner": "triage",
  "blockedBy": [],
- "why": "Debt named by runner 10 (08:02 CST Nov 14, relayed; triage read nothing): a ready PR that goes red and gets a lane push must return to draft first. Sighting on #3272 (coordinator 08:02): ready run red (checks-mutate-guard, test_guard_beat.py line 307), made draft again, lane fixing. Mistake it would stop: a lane pushing a fix to a PR that is still marked ready, so a fresh CI run starts on a PR the runner may still treat as ready. Harm: unmeasured. Fix: unbuilt; two candidates, (a) a refusal in the lane push path that says \"this PR is ready and red; mark it draft first\", (b) the runner or tool does it when a ready run ends red. Kin: pr-state-is-on-the-pr, lane-lint-unknown-on-ready-pr (not read). Ask the coordinator whether the draft step is already in the tool before a lane starts; this step may only need a rule line.",
+ "why": "Debt named by runner 10 (08:02 CST Nov 14, relayed): a ready PR that goes red and gets a lane push must return to draft first. Sightings: #3272 (ready run red in checks-mutate-guard, test_guard_beat.py line 307; made draft again by hand, lane fixing) and #3238 (lane lint unknown on a ready head). Coordinator read of main 60db33f8801c merge/merge.py by grep, 08:04 (not the whole file; triage read none): (a) stale_page_remedy (about line 3137) prints \"Return #N to draft ... run merge N --confirm on the draft ... then mark ready\" and DRAFT_ROUTES (about line 1952) names the two routes, but only for a stale records page on a ready PR. (b) draft_run_state (about lines 1297-1319) reads a ready head's skipped `touched` job as \"unknown ... no touched test ran\", which is what runner 10 hit on #3238 and #3272's lane lint; it prints the symptom, not the remedy. (c) No step converts a PR to draft or refuses a lane push onto a ready red PR; runner 10 toggled both by hand. Scope after the coordinator's read (rewritten 08:08 CST Nov 14, replacing triage's two-candidate list): (1) make the lane-lint \"unknown\" line name the return-to-draft remedy, reusing DRAFT_ROUTES (one home); (2) put the rule in the lane brief template. Not read by the coordinator: the tool's phase code, or whether the cloud route has failed anywhere. A message change to a check's output; no verdict changes, so round 3 does not apply by itself. Red first: a ready head with a skipped touched job prints the remedy line; a draft head does not.",
  "source": "runner 10 08:02 CST Nov 14, relayed",
  "note": "Filed 08:06 CST Nov 14 by triage. Tracker: the coordinator. No lane yet.",
- "updatedAt": "2026-11-14T08:06:00-06:00"
+ "updatedAt": "2026-11-14T08:08:00-06:00"
 }
