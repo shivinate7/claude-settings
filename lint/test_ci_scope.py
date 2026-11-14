@@ -58,14 +58,18 @@ def git(cwd, *a):
 
 
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
-        green_sibling=False, green_head=None, contents=None, facts=None):
+        green_sibling=False, green_head=None, contents=None, facts=None, merged=None):
     """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `head_ref` is HEAD_REF,
     empty when not given, so no HEAD_REF of the caller's environment reaches the script.
     `green` (a list of paths) is the pull request's earlier head, committed before the head commit, so the whole diff against
     the base holds it too. `green_sibling` puts that earlier head on a branch off the base instead: a commit HEAD does not
     descend from. GREEN_HEAD is the earlier head's sha (empty when there is none) unless `green_head` gives another value.
-    `contents` maps a path to its text, in place of "changed". `facts`, a dict, is filled with the earlier head's `green` sha,
-    the `delta` (git diff --name-only --no-renames GREEN_HEAD HEAD) and `ancestor` (GREEN_HEAD is an ancestor of HEAD)."""
+    `contents` maps a path to its text, in place of "changed". `merged` (a list of paths) is a base change the pull request did
+    not make: a commit off the base that adds them, merged into the head with --no-ff, so HEAD is a merge commit as in CI.
+    BASE_SHA is then that base commit, and PR_HEAD is the head commit's sha. Without `merged`, PR_HEAD is unset, whatever the
+    caller's environment holds. `facts`, a dict, is filled with the earlier head's `green` sha, the `delta` and `delta_head`
+    (git diff --name-only --no-renames GREEN_HEAD HEAD), `delta_pr_head` (the same to the head commit) and `ancestor`
+    (GREEN_HEAD is an ancestor of HEAD)."""
     contents = contents or {}
     with tempfile.TemporaryDirectory(dir=RUN_DIR) as d:
         git(d, "init", "-q")
@@ -111,13 +115,27 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         write(paths)
         git(d, "add", "-A")
         git(d, "commit", "-qm", "head", "--allow-empty")
+        head_sha = git(d, "rev-parse", "HEAD")
+        base_sha = sha if base == "auto" else base
+        if merged is not None:
+            git(d, "checkout", "-q", "-b", "base-moved", sha)
+            write(merged)
+            git(d, "add", "-A")
+            git(d, "commit", "-qm", "base change", "--allow-empty")
+            if base == "auto":
+                base_sha = git(d, "rev-parse", "HEAD")
+            git(d, "checkout", "-q", "-")
+            git(d, "merge", "-q", "--no-ff", "--no-edit", "base-moved")
         out = os.path.join(d, "..", f"out-{os.getpid()}.txt")
         env = dict(os.environ, EVENT=event, GITHUB_OUTPUT=out, HEAD_REF=head_ref,
-                   BASE_SHA=sha if base == "auto" else base,
-                   GREEN_HEAD=green_sha if green_head is None else green_head)
+                   BASE_SHA=base_sha, GREEN_HEAD=green_sha if green_head is None else green_head)
+        env.pop("PR_HEAD", None)  # a caller's value never reaches the script; only `merged` sets it
+        if merged is not None:
+            env["PR_HEAD"] = head_sha
         if facts is not None and green_sha:
-            facts.update(green=green_sha,
-                         delta=git(d, "diff", "--name-only", "--no-renames", green_sha, "HEAD").split(),
+            delta_head = git(d, "diff", "--name-only", "--no-renames", green_sha, "HEAD").split()
+            facts.update(green=green_sha, delta=delta_head, delta_head=delta_head,
+                         delta_pr_head=git(d, "diff", "--name-only", "--no-renames", green_sha, head_sha).split(),
                          ancestor=subprocess.run(["git", "merge-base", "--is-ancestor", green_sha, "HEAD"],
                                                  cwd=d).returncode == 0)
         r = subprocess.run([BASH, os.path.abspath(SCRIPT)], cwd=d, env=env, capture_output=True, text=True)
@@ -611,6 +629,7 @@ class RecordsOnlyPush(unittest.TestCase):
     RECORDS = "docs/records.md"
     OFF = JOB_FLAGS + STEP_FLAGS + DERIVED_FLAGS  # the 13 flags a records-only push after a green head turns off
     ABSENT_SHA = "0123456789abcdef0123456789abcdef01234567"  # a sha no scratch repo holds
+    BASE_CHANGE = "janitor/sweep.py"  # a base change the merge commit brings in, never in the pull request's own diff
 
     def whole_pr(self, paths, contents=None):
         """The whole PR diff: `paths` in one head commit, with GREEN_HEAD empty."""
@@ -712,6 +731,32 @@ class RecordsOnlyPush(unittest.TestCase):
         got = run([other], green=self.CODE, facts=facts)
         self.assertEqual(facts.get("delta"), [other], f"scope: the delta is not the one docs page: {facts}")
         self.assertEqual(differing(got, whole), [], f"a docs page other than records moved a flag: {got}")
+
+    # In CI HEAD is the merge commit, which also holds a base change the pull request did not make. The delta must run to
+    # PR_HEAD, the pull request's own head, or that base change keeps the jobs on. The delta is asserted before the flags.
+    def test_records_only_uses_pr_head_not_the_merge_commit_skips_the_jobs(self):
+        whole = self.whole_pr(self.CODE + [self.RECORDS])
+        self.assertEqual(whole.get("code"), "true", f"scope: the whole PR diff must turn code on: {whole}")
+        facts = {}
+        got = run([self.RECORDS], green=self.CODE, merged=[self.BASE_CHANGE], facts=facts)
+        self.assertNotEqual(facts.get("delta_head"), [self.RECORDS],
+                            f"scope: the delta to the merge commit is records only, so the base change is not in it: {facts}")
+        self.assertEqual(facts.get("delta_pr_head"), [self.RECORDS],
+                         f"scope: the delta to PR_HEAD is not docs/records.md alone: {facts}")
+        for n in self.OFF:
+            self.assertEqual(got.get(n), "false", f"{n} stays on: the delta ran to the merge commit, not PR_HEAD: {got}")
+        keep = list(LINT_FLAGS) + ["mutation_report"]
+        self.assertEqual(differing(got, whole, keep), [], f"a lint flag or mutation_report moved off the whole PR diff: {got}")
+
+    # The control beside the case above: a second delta path runs the whole PR diff, with the base change in the merge commit too.
+    def test_records_only_uses_pr_head_not_the_merge_commit_second_path_runs_as_before(self):
+        other = "hooks/extra.py"
+        whole = self.whole_pr(self.CODE + [self.RECORDS, other])
+        self.assertEqual(whole.get("code"), "true", f"scope: the whole PR diff must turn code on: {whole}")
+        facts = {}
+        got = run([self.RECORDS, other], green=self.CODE, merged=[self.BASE_CHANGE], facts=facts)
+        self.assertEqual(facts.get("delta_pr_head"), sorted([self.RECORDS, other]), f"scope: the delta to PR_HEAD is not the two paths: {facts}")
+        self.assertEqual(differing(got, whole), [], f"a second delta path moved a flag off the whole PR diff: {got}")
 
 
 # The mod phase must run each mods check script (mods/**/check.mjs), not only *.test.mjs. The script cds to its own
