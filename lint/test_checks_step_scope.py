@@ -164,6 +164,7 @@ MUST_STAY_UNSCOPED = [
     'Scratchpad owner fixture suite',  # runs test_guard.py, whose section files read skills/impeccable/SKILL.md
     'Guard wrappers fixture suite',  # runs test_guard.py through drive_test_guard
     'Skill model rows fixture suite',  # its checks job step has no `if:` (test_check_skill_model_rows.py pins it)
+    'Skill model rows check',  # a skipped check reads as passing, so it always runs (test_check_skill_model_rows.py pins it)
     'Reply judge fixture suite',  # reads CLAUDE.md at run time (hooks/test_reply_judge.py), so a CLAUDE.md-only pull request must run it
     'Nightly skip fixture suite',  # not audited yet, so it stays unscoped (fail safe)
     'Proc env read suite',  # not audited yet, so it stays unscoped (fail safe)
@@ -219,13 +220,12 @@ DOC_STEPS = {
     'Agent and skill model floor': ("any",),
     'Agent and skill model floor fixture suite': ("any",),
     'Agent push form fixture suite': ("any",),
-    'Skill model rows check': ("any",),
 }
 
 # The steps with no `if:` at all, on purpose, and the two Mod version steps that stay unscoped (their reads are mods/ paths).
 UNSCOPED_ON_PURPOSE = [
     'Checks step scope suite', 'Reply judge fixture suite', 'Scratchpad owner fixture suite', 'Guard wrappers fixture suite',
-    'Skill model rows fixture suite', 'Proc env read suite', 'Nightly skip fixture suite', 'Stable workflow move job suite',
+    'Skill model rows check', 'Skill model rows fixture suite', 'Proc env read suite', 'Nightly skip fixture suite', 'Stable workflow move job suite',
     'Code check', 'Workflow supply-chain audit (zizmor)', 'Mod version fixture suite', 'Mod version bump',
 ]
 
