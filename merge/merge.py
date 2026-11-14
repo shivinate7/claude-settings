@@ -136,7 +136,9 @@
   merge <pr> --fast-checks  the pre-ready run alone, on a dry merge of the PR onto its base (a temporary worktree and one commit object, no ref). Read-only: no lock,
                           no push, no ready mark, no comment, no records page. Exit 0 only when every line is a pass. A repo with no readyChecks runs none.
                           The open-PR clash reads the open PRs through the host's open_pulls (GitHub REST `GET pulls`, the read a lane or runner has),
-                          and a failed list read prints `unknown open-PR clash`, never a pass. Cost: see run_ready_checks, pre_ready_rows, cross_measure.
+                          and a failed list read prints `unknown open-PR clash`, never a pass. A clash counts only with a PR that is not a draft; a clash
+                          with a draft is a report line naming the PR and the files (PRE_READY_CLASH_SCOPE: "ready", or "all" for every open PR).
+                          Cost: see run_ready_checks, pre_ready_rows, cross_measure.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
 
@@ -2509,7 +2511,9 @@ def is_unknown_reason(reason):
     """True when a merge_reason answer says unknown (unknown_reason wrote it), not a conflict."""
     return reason.startswith("unknown (")
 
-PROBE_WORKERS = 8  # parallel `git diff` starts of the open-PR clash's path read (cross_measure, scope "all"); each is one short git process
+PROBE_WORKERS = 8  # parallel `git diff` starts of the open-PR clash's path read (cross_measure, scope "all" or "ready"); each is one short git process
+PRE_READY_CLASH_SCOPE = "ready"  # which open PRs the pre-ready run's clash counts (coordinator ruling, undoable): "ready" counts a clash only with a PR that is not a draft and reports the rest; "all" counts every open PR on the base
+PRE_READY_REPORT_LINES = 5  # report lines the clash verdict prints under its line; a repo with hundreds of drafts would print one for each
 
 def changed_paths(root, base, head):
     """-> the set of paths the branch `head` changes against origin/<base> (`git diff --name-only --no-renames`, three dots: from the merge base),
@@ -2535,18 +2539,20 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     `integration` is true for a batch integration PR (is_integration_pr): a clash that would count is a report line instead, for the lane rebases after the merge.
     A PR that --with names and that is not open is a Stop here: never a pass. --lint-unknown-ok lifts none of it. A PR posted under another
     session id is found only through --with.
-    `scope` is "lane" (the lint's: the lane's PRs and --with) or "all" (the pre-ready run's: every other open PR on the same base). The list is the
+    `scope` is "lane" (the lint's: the lane's PRs and --with), "all" (every other open PR on the same base) or "ready" (the same PRs, but a clash counts only with
+    one that is not a draft: a clash with a draft is a report line, and a draft's own merge with the base is not read). The pre-ready run passes PRE_READY_CLASH_SCOPE. The list is the
     host's open_pulls, GitHub REST through the merge tool's own host, the route a lane or a runner has in a cloud session (no `gh` flag, no GraphQL).
-    A failed list read is a Stop, which the pre-ready run reads as unknown, never a pass. In scope "all" a PR whose changed paths (changed_paths) meet none of
+    A failed list read is a Stop, which the pre-ready run reads as unknown, never a pass. In scope "all" or "ready" a PR whose changed paths (changed_paths) meet none of
     this head's (paths_meet) is skipped before any merge-tree: with hundreds open, only an overlap can clash. A diff git cannot read does not skip.
-    Cost of scope "all": one list read (a REST page per 100 PRs), one fetch of every branch head, then per other open PR on the base one `git diff`
+    A PR whose `draft` field is not true or false is an unknown in scope "ready", never a pass.
+    Cost of scope "all" or "ready": one list read (a REST page per 100 PRs), one fetch of every branch head, then per other open PR on the base one `git diff`
     start (PROBE_WORKERS at once), and for an overlap one merge-tree of the two heads (PROBE_WORKERS at once) and, for a clash only, merge_reason's. No file or process is kept."""
     lane = set(LANE_SESSION.findall(body or ""))
     rows = {d["number"]: d for d in host.open_pulls() if d["number"] != n}
     for m in with_prs:
         if m not in rows:
             raise Stop(f"--with names PR #{m}, which is not an open pull request (closed, merged or not found), so its head cannot be compared: unknown, not a pass. {LANE_LINT_CITE}")
-    if scope == "all":
+    if scope in ("all", "ready"):
         picked = sorted({m for m, d in rows.items() if d.get("base", {}).get("ref") == base} | set(with_prs))
     else:
         picked = sorted({m for m, d in rows.items() if lane & set(LANE_SESSION.findall(d.get("body") or ""))} | set(with_prs))
@@ -2556,7 +2562,8 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     if c:
         raise Stop(f"the cross-measure of {head[:9]} is unknown: git fetch origin failed: {out} {LANE_LINT_CITE}")
     conflicts, reports, unknown, unfetched = [], [], [], []
-    mine, theirs = (changed_paths(root, base, head) if scope == "all" else None), {}
+    wide = scope in ("all", "ready")
+    mine, theirs = (changed_paths(root, base, head) if wide else None), {}
     if mine is not None:  # a diff that succeeds proves the head is in the clone; one that fails (None) falls through to the checks below
         with concurrent.futures.ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:
             theirs = dict(zip(picked, pool.map(lambda m: changed_paths(root, base, rows[m]["head"]["sha"]), picked)))
@@ -2568,6 +2575,9 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         if git(root, "rev-parse", "--verify", "-q", f"{other}^{{commit}}")[0]:  # a fork's head is not on origin, so no fetch brings it
             unfetched.append(f"  #{m}: its head {other[:9]} could not be fetched from origin (a fork's head), so it cannot be compared")
             continue
+        if scope == "ready" and not isinstance(rows[m].get("draft"), bool):
+            unknown.append(f"  #{m}: the open-PR list does not say whether it is a draft")
+            continue
         held = head_holds(root, other, head)
         if held is False:
             held = head_holds(root, head, other)
@@ -2577,15 +2587,16 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         if held:
             continue  # a stack pair
         todo.append(m)
-    if scope == "all" and todo and base not in fetched:
+    drafts = {m for m in todo if rows[m].get("draft") is True} if scope == "ready" else set()  # no merge with the base is read for these: they only report
+    if wide and todo and base not in fetched:
         merge_reason(root, n, base, head, fetched)  # the base is fetched once, before the workers below read `fetched`
 
     def read_pair(m):
         """-> ((state, files), why) for PR `m`. why: merge_reason of #m's head, which the lint reads for a clean pair too; scope "all" reads it only for a clash,
-        since whether #m's own head conflicts with the base decides if the clash counts."""
+        since whether #m's own head conflicts with the base decides if the clash counts; a draft's clash only reports, so it is never read."""
         sha = rows[m]["head"]["sha"]
         pair = conflicting_files(root, head, sha)
-        return pair, merge_reason(root, m, base, sha, fetched) if scope != "all" or pair[0] == "conflict" else None
+        return pair, merge_reason(root, m, base, sha, fetched) if (not wide or pair[0] == "conflict") and m not in drafts else None
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:  # each merge-tree is its own git process, and writes only objects
         read = dict(zip(todo, pool.map(read_pair, todo)))
@@ -2599,6 +2610,8 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         named = f"  #{m}: {', '.join(files) or '(no file name read)'}"
         if not head_clean:
             reports.append(f"{named}. Not counted: this head conflicts with {base}, so the clash comes through {base}.")
+        elif m in drafts:
+            reports.append(f"{named}. Not counted: #{m} is a draft.")
         elif why is not None and is_unknown_reason(why):
             unknown.append(f"  #{m}: the clash with this head cannot be counted, because {why}")
         elif why is not None:
@@ -3230,7 +3243,7 @@ def debt_verdict(wt, base, host, info):
     return "pass", "debt retire", ""
 
 def clash_verdict(root, n, base, host, info):
-    """-> (verdict, "open-PR clash", detail): the head of PR `n` against every other open PR on `base`, by cross_measure with scope "all". A head that does not merge
+    """-> (verdict, "open-PR clash", detail): the head of PR `n` against every other open PR on `base`, by cross_measure with scope PRE_READY_CLASH_SCOPE. A head that does not merge
     clean with the base, a failed list read, a fetch that failed and any pair git cannot read are unknown, never a pass."""
     name = "open-PR clash"
     try:
@@ -3238,14 +3251,18 @@ def clash_verdict(root, n, base, host, info):
         why = merge_reason(root, n, base, info["head"], fetched)
         if why is not None and is_unknown_reason(why):
             return "unknown", name, why
-        fails, reports, stop = cross_measure(root, info["head"], n, info.get("body", ""), host, (), base, fetched, why is None, scope="all")
+        fails, reports, stop = cross_measure(root, info["head"], n, info.get("body", ""), host, (), base, fetched, why is None, scope=PRE_READY_CLASH_SCOPE)
     except (Stop, subprocess.TimeoutExpired, OSError, ValueError) as e:  # ValueError: gh printed a reply that is not JSON
         return "unknown", name, " ".join(str(e).split())
     if fails:
         return "fail", name, "\n".join(fails)
     if stop:
         return "unknown", name, stop
-    return "pass", name, f"{len(reports)} clash(es) not counted" if reports else ""
+    if not reports:
+        return "pass", name, ""
+    shown = reports[:PRE_READY_REPORT_LINES]
+    more = [f"  and {len(reports) - len(shown)} more clash(es) not counted"] if len(reports) > len(shown) else []
+    return "pass", name, "\n".join([f"{len(reports)} clash(es) not counted:", *shown, *more])
 
 def pre_ready_rows(wt, n, base, checks, pre):
     """The pre-ready run: one ci-job run of `merge.readyChecks` `checks` in the tree `wt`, then, when `pre` is (root, host, info), the debt-close lint on `wt` and the
