@@ -2101,13 +2101,22 @@ def candidates_block(candidates, unknown) -> str:
     return text
 
 
+def _plain_record_refs(reason):
+    """`reason` with each `docs/decisions/<stem>.md` spelled `decisions/<stem>`, the same record."""
+    return re.sub(r"(?<=[\w-])\.md\b", "", re.sub(r"(?<![\w/-])docs/(?=(?:decisions|debts)/)", "", reason))
+
+
+def names_record(reason) -> bool:
+    """Whether `reason` names a `decisions/..` or `debts/..` record, shown or not."""
+    return bool(RECORD_REF.search(_plain_record_refs(reason)))
+
+
 def ruling_cite(reason, ids, strict=False) -> str:
     """Classify a refusal reason against the ids the model was shown. "bogus" when the reason opens with a
     `decisions/..` or `debts/..` record that was not shown. With `strict` (a call that judges item 8 alone), also
     "bogus" when it names such a record anywhere, or names no shown id. "cited" when it names a shown id and is not
     bogus. "" for any other refusal (a form item): without `strict`, an unshown id named mid-reason stays one."""
-    # `docs/decisions/<stem>.md` is the same record as `decisions/<stem>`.
-    reason = re.sub(r"(?<=[\w-])\.md\b", "", re.sub(r"(?<![\w/-])docs/(?=(?:decisions|debts)/)", "", reason))
+    reason = _plain_record_refs(reason)
 
     def names(i):
         return re.search(r"(?<![\w/-])%s(?![\w/-])" % re.escape(i), reason)

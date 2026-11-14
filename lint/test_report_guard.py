@@ -4532,6 +4532,9 @@ DONE_ONLY = "> **Done** OTHER read the audit\n> **Next** wait"
 FENCED_Q = "```\nkeep the apps?\n```\n> **Done** OTHER read the audit\n> **Next** wait"
 UNVETTED = "Unvetted: the model review could not run, so the owner reads this question unchecked."
 REFUSE_APPS = json.dumps({"ok": False, "reason": "past-ruling: %s, 2026-10-28, already decides this." % tcj.APPS_SLUG})
+# A refusal that names no record: the model ran and refused. Its own literal, so this file's red run needs no new symbol of
+# hooks/test_call_judge.py.
+REFUSE_UNCITED = json.dumps({"ok": False, "reason": "Already settled: the owner decided this before, so he is not asked again."})
 KEYS_SAME = "> **Input Needed** Two questions.\n> a) keep the apps\n> b) remove the apps\n> a) about 2x\n> b) under 80%"
 KEYS_DISTINCT = ("> **Input Needed** Two questions.\n> 1a) keep the apps\n> 1b) remove the apps\n"
                  "> 2a) about 2x\n> 2b) under 80%")
@@ -4542,6 +4545,18 @@ KEYS_EARLIER = "> **Input Needed** Keep the apps?\n> a) keep\n> b) remove"
 C153_MARK = "c153-5e7a"
 C153_SENTENCE = ("Ruling (owner, Oct 28): keep the apps' access to claude-settings as is, because calling into a repo "
                  "is straightforward; revisit if it gets bloated. Marker " + C153_MARK + ".")
+
+
+# An owner question sent by a send tool is judged when its Goal and Problem lines sit outside code fences
+# (hooks/call_judge.py). A fence line that never closes must not hide the lines after it, so it opens no fence: a
+# question there is read as prose. The closed-fence case is the control.
+class UnclosedFenceIsProse(unittest.TestCase):
+    def test_red_a_question_after_an_unclosed_fence_line_is_prose(self):
+        self.assertIn("Is the Problem still open?", RG.prose_questions("Goal: x\n```\nIs the Problem still open?"),
+                      "a question after a fence line that never closes reads as code")
+
+    def test_green_a_closed_fence_hides_its_question(self):
+        self.assertNotIn("Is the Problem still open?", RG.prose_questions("```\nIs the Problem still open?\n```\nAfter."))
 
 
 class PastRulingRelay(SameTurnWriter, unittest.TestCase):
@@ -4654,6 +4669,21 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         bogus = json.dumps({"ok": False, "reason": "decisions/no-such-record: already decided."})
         out, _ = self.stop(self.decided, RELAY, answer=bogus)
         self.assertIn("Unvetted guard", self.reason(out), out)
+
+    def test_an_uncited_refusal_is_not_passed_by_an_unvetted_line(self):
+        # The Stop check judges item 8 alone. A refusal that names no record is a refusal from a check that ran, so the
+        # Unvetted line in the reply does not pass it (question-form: the marker decides only when the check cannot run).
+        # to_writer: the question went to the page writer in its turn, so the Pick guard stays quiet.
+        out, _ = self.stop(self.decided, RELAY + "\n" + UNVETTED, answer=REFUSE_UNCITED, to_writer=True)
+        self.assertEqual(len(self.model_calls()), 1)  # scope: the relay's one model call judged the question
+        self.assertIn("Unvetted guard", self.reason(out), out)
+
+    def test_an_uncited_refusal_without_a_marker_prints_the_unvetted_text(self):
+        # Control: the relay's printed text starts with the constant's text, byte for byte. A second
+        # rule may append its own label after it, so the test reads a prefix.
+        out, _ = self.stop(self.decided, RELAY, answer=REFUSE_UNCITED, to_writer=True)
+        self.assertTrue(self.reason(out).startswith(RG.UNVETTED_REASON % "the review cited a record that was not in the list"),
+                        out)
 
     # Two git starts: the one this claim already counted, and the ruled store's ls-tree (one start when the roadmap ref is absent).
     def test_a_relayed_question_costs_two_git_processes_and_one_model_call(self):

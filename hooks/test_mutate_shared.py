@@ -281,6 +281,7 @@ class GuardTreeImportsTests(unittest.TestCase):
 
 MOCKUP_HOME_ARM = "mockup-home: the refuse arm is dropped"  # the label prefix of the mockup-home guard mutant
 ROLE_MODEL_ARM = "role-model: Explore loses its audit exemption"  # the label prefix of a role-model guard mutant
+RULING_ARM = "ruling home: main() is an always-silent stub"  # the label prefix of a ruling-home mutant
 
 
 def git_listed(folder):
@@ -304,9 +305,10 @@ class GuardMutantLayoutTests(unittest.TestCase):
         self.run = _test_temp.run_folder()
         self.addCleanup(shutil.rmtree, self.run, True)
 
-    def built_root(self, prefix):
-        """(root, copy path) of the guard mutant whose label starts with `prefix`, as run_mutant builds it. The
-        suite is stubbed out, so this builds the root and runs no case."""
+    def built_root(self, prefix, sources=None):
+        """(root, copy path) of the mutant whose label starts with `prefix`, as run_mutant builds it. The
+        suite is stubbed out, so this builds the root and runs no case. `sources` is run_mutant's source map:
+        a guard mutant reads none of it, a ruling mutant reads its own module's text."""
         entry = next(e for e in mutate_guard.MUTATIONS if mutate_guard.mutation_parts(e)[0].startswith(prefix))
         copies = []
 
@@ -320,7 +322,7 @@ class GuardMutantLayoutTests(unittest.TestCase):
 
         with mock.patch.object(mutate_guard, "run_suite", side_effect=record), \
                 mock.patch.object(mutate_shared, "staged_suite", side_effect=one_stage):
-            mutate_guard.run_mutant({}, self.run, entry)
+            mutate_guard.run_mutant(sources or {}, self.run, entry)
         self.assertEqual(len(copies), 1)
         self.assertTrue(os.path.isfile(copies[0]), "run_mutant wrote no guard.py for %s" % prefix)
         return os.path.dirname(os.path.dirname(copies[0])), copies[0]
@@ -379,6 +381,17 @@ class GuardMutantLayoutTests(unittest.TestCase):
                         "scope: the checkout holds no skills/impeccable/SKILL.md")
         self.assertTrue(os.path.isfile(os.path.join(root, "skills", "impeccable", "SKILL.md")),
                         "the mutant root lacks skills/impeccable/SKILL.md, which guard.py reads")
+
+    def test_ruling_mutant_copy_has_shared_names_beside_it(self):
+        # lint/_transcript.py, which the ruling copy imports, imports shared_names from ../hooks. A copy
+        # without it fails that import, ruling_home fails open on it, and every mutant reads UNKNOWN.
+        self.assertTrue(os.path.isfile(os.path.join(mutate_shared.HOOKS_DIR, "shared_names.py")),
+                        "scope: the checkout's hooks/ holds no shared_names.py")
+        with open(mutate_guard.TARGETS["ruling"][0], encoding="utf-8") as handle:
+            sources = {"ruling": handle.read()}
+        _root, copy_path = self.built_root(RULING_ARM, sources)
+        self.assertTrue(os.path.isfile(os.path.join(os.path.dirname(copy_path), "shared_names.py")),
+                        "the ruling copy's hooks/ folder lacks shared_names.py, which lint/_transcript.py imports")
 
 
 def tree_text(copy_path):
