@@ -25,7 +25,7 @@ A finding becomes a debt only when Claude is likely to hit it in normal work. An
 
 ## Closing a debt
 
-In the PR that closes the finding, delete the debt file. A rename inside this folder that changes the Retire part counts as a close too. The merge tool runs the Retire check first and refuses the close if it is red or cannot run. A PR with no runnable check, or one that cannot run, adds `Retire-run: <slug> -- <run URL>` to its body, for a run that succeeded on the PR head or a descendant of it. A cite never clears a red check. If a decision names the finding, rewrite that decision in place, so it no longer lists the finding. Git keeps the history.
+In the PR that closes the finding, delete the debt file. A rename inside this folder that changes the Retire part counts as a close too. The merge tool runs the Retire check first and refuses the close if it is red or cannot run. A PR with no runnable check, or one that cannot run, adds `Retire-run: <slug> -- <run URL>` to its body, for a run that succeeded on the PR head or a descendant of it. For a wrong refusal, a PR with no runnable check may instead add a line to `notes.md` with the slug, the words `wrong refusal` and decision `cull-guard-wrong-refusals` (a wrong refusal is a note only). A cite never clears a red check. If a decision names the finding, rewrite that decision in place, so it no longer lists the finding. Git keeps the history.
 
 A feel-fix debt closes in three steps. A device trial comes first (decision `feel-fix-waits-device-check`):
 

@@ -13,6 +13,10 @@ check reads that debt's Retire paragraph from the base and runs what it names, o
             `Retire-run: <slug> -- <run URL>`, read as the Drops-lines line of check_silent_undo is. The run must be
             green and on the PR head or a commit above it. A cite also clears a check that could not run here (unknown);
             a red check is never cleared by a cite.
+            A prose close with no cite also holds when the same change adds a line to the debt notes file that carries the
+            debt's slug and names decision cull-guard-wrong-refusals, whole tokens each, and says `wrong refusal` in any case
+            (a wrong refusal is a note only, so a note for any other close does not count).
+            A runnable Retire is judged by its test alone, and a cited run that is red stays red, whatever the notes say.
 
 Exit 1 on any finding. Design: decision debt-close-runs-retire.
 """
@@ -38,6 +42,8 @@ INTERPRETERS = {".py": ["python3"], ".mjs": ["node", "--test"], ".sh": ["bash"]}
 TEST_NAME = re.compile(r"^(?:test_[^/]+\.(?:py|mjs|sh)|[^/]+_test\.py|[^/]+\.test\.mjs)$")
 SPAN = re.compile(r"`([^`\s]+)`")  # no space inside: a lone backtick in prose never swallows the real span after it
 CITE_LINE = re.compile(r"\s*(\S+)\s+--\s+(\S+)\s*$")
+NOTE_DECISION = "cull-guard-wrong-refusals"  # the ruling that makes a wrong refusal a note instead of a red test
+NOTE_WORDS = re.compile(r"wrong refusal", re.IGNORECASE)  # the ruling covers wrong refusals only, so the note must say it is one
 
 
 class Finding:
@@ -168,6 +174,27 @@ def judge_run(wt, head, url, run_state):
     return "unknown", "the cited run %s is on %s, which this checkout does not hold" % (url, str(sha)[:9])
 
 
+def token(word):
+    """A regex for `word` as a whole slug token: slug characters never touch it, so `d-prose` does not match inside `d-prose-old`."""
+    return re.compile(r"(?<![\w-])" + re.escape(word) + r"(?![\w-])")
+
+
+def noted(wt, mb, head, slug):
+    """True when the change from `mb` to `head` adds a line to the debt notes file that carries `slug` and the decision name as whole
+    tokens and the words `wrong refusal`. Only added lines count, so a line already in the base never closes a debt. Raises Unknown when git cannot say."""
+    try:
+        paths = layout.candidates(wt, "debt-notes")
+    except layout.LayoutError as e:
+        raise Unknown("the debt notes file is not known: %s" % e)
+    r = _nowindow.run(["git", "diff", "--unified=0", "--no-color", "--no-ext-diff", mb, head, "--", *paths], cwd=wt,
+                      capture_output=True, encoding="utf-8", errors="replace")
+    if r.returncode:
+        raise Unknown("git diff failed: %s" % r.stderr.strip())
+    want = token(slug), token(NOTE_DECISION), NOTE_WORDS
+    return any(all(t.search(line[1:]) for t in want)
+               for line in r.stdout.splitlines() if line.startswith("+") and not line.startswith("+++"))
+
+
 SKIP = object()  # a rename inside the debts folder with its Retire unchanged: not a close
 
 
@@ -215,13 +242,17 @@ def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_stat
         if got:
             return Finding(slug, got[0], "debt %s: its Retire check %s. Retire: %s" % (slug, got[1], text))
         return None
-    got = judge_run(wt, head, cited[slug], run_state) if slug in cited else ("prose", None)
+    if slug in cited:
+        got = judge_run(wt, head, cited[slug], run_state)
+    else:
+        got = None if noted(wt, mb, head, slug) else ("prose", None)
     if got is None:
         return None
     if got[0] == "prose":
         got = "prose", ("debt %s closes with a Retire that names no runnable check. Retire: %s\n"
-                        "Name a test file in backticks in the Retire line, or cite a passing run in the PR body: `%s: %s -- <run URL>`."
-                        % (slug, text or "(no Retire line)", CITE, slug))
+                        "Name a test file in backticks in the Retire line, or cite a passing run in the PR body: `%s: %s -- <run URL>`.\n"
+                        "If the debt is a wrong refusal, add a line to the debt notes file with the slug, the words `wrong refusal` and decision %s."
+                        % (slug, text or "(no Retire line)", CITE, slug, NOTE_DECISION))
     else:
         got = got[0], "debt %s: %s" % (slug, got[1])
     return Finding(slug, *got)
