@@ -2439,6 +2439,38 @@ class DropsLinesHint(unittest.TestCase):
         self.assertIn("app.txt -- the owner wants Card back", read_back(block), "git reads no Drops-lines trailer from the merge refusal's message")
         self.assertIn(PROOF, text, "the merge refusal does not print the proof command: %r" % text)
 
+    # ------------------------------------------------ which reason is kept
+
+    def two_reasons(self, first, second):
+        """PR 1 lands; `oops` reverts it, so app.txt has a finding. The revert commit carries the first reason, and a later
+        commit on the branch carries the second. The branch's tip is the later commit."""
+        self.land_pr()
+        self.revert_with("Bring Card back\n\nDrops-lines: app.txt -- %s" % first)
+        self.r.commit("tidy again\n\nDrops-lines: app.txt -- %s" % second, other_txt="other v3\n")
+
+    def test_the_oldest_commit_reason_is_kept(self):  # characterization: green on this head
+        """Two commits carry a reason for the same path. allowed() keeps the oldest: git lists the newest first and each
+        line overwrites the one before it. check() prints that reason, and the later one does not replace it."""
+        self.two_reasons("FIRST wrong reason", "SECOND right reason")
+        self.assertEqual(C.allowed(self.r.dir, "origin/main..HEAD"), {"app.txt": "FIRST wrong reason"},
+                         "allowed() did not keep the oldest commit's reason")
+        got = self.r.verdict()
+        self.assertEqual(got, [], "premise: the revert is excused by the trailers")
+        self.assertEqual(self.r.notes, ["ALLOWED app.txt: FIRST wrong reason"], "check() does not print the oldest commit's reason")
+
+    def test_a_pr_body_reason_beats_both_commits(self):  # characterization: green on this head
+        """The PR body's Drops-lines line is read after the commits, so it overwrites both of their reasons."""
+        self.two_reasons("FIRST wrong reason", "SECOND right reason")
+        body = "Why this lands.\n\nDrops-lines: app.txt -- BODY reason"
+        self.assertEqual(C.allowed(self.r.dir, "origin/main..HEAD", body), {"app.txt": "BODY reason"},
+                         "the PR body's reason did not beat the commits")
+        got, notes = C.check(self.r.dir, "origin/main", "HEAD", pr_body=body)
+        self.assertEqual(got, [], "premise: the revert is excused by the PR body")
+        self.assertEqual(notes, ["ALLOWED app.txt: BODY reason"], "check() does not print the PR body's reason")
+
+    def test_the_remedy_says_the_oldest_reason_is_kept(self):  # red on this head: the remedy has no such sentence
+        self.assertIn("oldest", C.remedy_text(), "the remedy does not say that the oldest commit's reason is the one kept")
+
     # ------------------------------------------------ reads of the message
 
     def test_a_folded_parsed_trailer_does_not_hide_a_misplaced_line(self):
