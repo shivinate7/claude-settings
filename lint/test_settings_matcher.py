@@ -303,6 +303,16 @@ class Matcher(unittest.TestCase):
                 self.assertTrue(covers(starts[0], source),
                                 "the session_start.sh SessionStart matcher %r does not cover %s" % (matcher, source))
 
+    def test_a_forked_launcher_session_keeps_its_role_file(self):
+        # Ruling: a fork keeps its role. The session_start.sh entry writes the launcher's role file, so its matcher must cover fork.
+        with open(SETTINGS, encoding="utf-8") as f:
+            entries = json.load(f)["hooks"]["SessionStart"]
+        starts = [e for e in entries if any("/hooks/session_start.sh" in h.get("command", "") for h in e.get("hooks", []))]
+        self.assertEqual(len(starts), 1, "want one SessionStart entry running session_start.sh, found %d" % len(starts))
+        matcher = starts[0].get("matcher", "")
+        self.assertTrue(covers(starts[0], "fork"),
+                        "the session_start.sh SessionStart matcher %r does not cover fork: a forked launcher session keeps no role file" % matcher)
+
     def test_cloud_pull_session_start_entry_does_not_match_compact(self):
         # A compaction mid-task must not run the cloud pull: it would move main and reinstall the pin under the session.
         # The entry is found by its pin install, merge/install_from_main.sh, which only the cloud pull runs.
