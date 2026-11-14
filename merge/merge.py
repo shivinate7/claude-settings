@@ -447,8 +447,8 @@ def refuse_closing_reason(*reasons):
             raise Stop(f"the reason given with {flag} would close an issue when the merge commit lands. Reword the reason so no closing word comes right before an issue number, for example \"cause and fix: PR 2390\". {CLOSE_CITE}")
 
 
-SUITE_GATE_JOB = "scope"  # the job that decides which suites run; it is never a suite (decision no-merge-onto-red-main)
-NOT_SUITE_JOBS = (SUITE_GATE_JOB, "nightly-skip", ROLLUP_JOB, "ci-done")  # checks.yml's jobs that run whatever the suites do: the gate, the nightly skip note, the rollup and the done signal
+SCOPE_JOB = "scope"  # the job that decides which suites run; it is never a suite (decision no-merge-onto-red-main)
+NOT_SUITE_JOBS = (SCOPE_JOB, "nightly-skip", ROLLUP_JOB, "ci-done")  # checks.yml's jobs that run whatever the suites do: the gate, the nightly skip note, the rollup and the done signal
 
 def suites_ran(jobs):
     """-> how many of a run's `jobs` (dicts with name and conclusion) are suites that ran: every job except NOT_SUITE_JOBS and the skipped ones. A failed job ran.
@@ -3002,7 +3002,7 @@ def red_base(root, host, base, red_ok=""):
 
 def own_run_line(root, host, base, n, head):
     """-> the one line printed about the PR's own run when the base is not green: how many suites the newest run of the workflow that holds the scope job
-    (SUITE_GATE_JOB, on origin/<base>) ran on the PR head. Another workflow's newer run (it skips both its jobs) is not the suites' run. Information only: it never
+    (SCOPE_JOB, on origin/<base>) ran on the PR head. Another workflow's newer run (it skips both its jobs) is not the suites' run. Information only: it never
     refuses and never raises, so an unreadable run reads `unknown: <why>` and the merge goes on. A run that ran no suite proves nothing, so the line says so.
     Cost: one workflow-runs read of the head and one jobs read of that run, only when the base is not green (the workflow files are read with git, no gh call)."""
     head9 = head[:9]
@@ -3013,18 +3013,18 @@ def own_run_line(root, host, base, n, head):
             if c:
                 raise Stop(f"cannot read {f} on origin/{base}: {text}")
             run_name, jobs = workflow_name(f.rsplit("/", 1)[-1], text)
-            if SUITE_GATE_JOB in jobs:
+            if SCOPE_JOB in jobs:
                 names.append(run_name)
         if not names:
-            return f"merge: own run of #{n} unknown: no workflow on origin/{base} holds the {SUITE_GATE_JOB} job"
+            return f"merge: own run of #{n} unknown: no workflow on origin/{base} holds the {SCOPE_JOB} job {RED_CITE}"
         runs = [r for r in host.runs(head) if r.get("databaseId") and r.get("name") in names]
         if not runs:
-            return f"merge: own run of #{n} unknown: no run of the {SUITE_GATE_JOB} workflow ({', '.join(names)}) on {head9}"
+            return f"merge: own run of #{n} unknown: no run of the {SCOPE_JOB} workflow ({', '.join(names)}) on {head9} {RED_CITE}"
         newest = max(runs, key=lambda r: r["databaseId"])
         ran = suites_ran(host.pages(f"actions/runs/{newest['databaseId']}/jobs", "jobs"))
     except Exception as e:  # print only: whatever goes wrong here must not stop a merge that is past its claim push
-        return f"merge: own run of #{n} unknown: {type(e).__name__ + ': ' if not isinstance(e, Stop) else ''}{' '.join(str(e).split())}"
-    return f"merge: own run of #{n} ran {ran} suites on {head9}" + (": the run proves nothing, do not advise forcing this PR" if not ran else "")
+        return f"merge: own run of #{n} unknown: {type(e).__name__ + ': ' if not isinstance(e, Stop) else ''}{' '.join(str(e).split())} {RED_CITE}"
+    return f"merge: own run of #{n} ran {ran} suites on {head9}" + (": the run proves nothing, do not advise forcing this PR" if not ran else "") + f" {RED_CITE}"
 
 def head_not_green(state):
     """-> why `state`, the one read of a head's own checks (Host.head_state), is not green; None when it is green. The read never waits:
