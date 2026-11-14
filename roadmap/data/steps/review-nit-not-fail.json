@@ -1,0 +1,14 @@
+{
+ "id": "review-nit-not-fail",
+ "title": "A review round fails only on a finding that misstates a record, a count or behaviour; a nit is a note and the round passes",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Consultant 00:24 CST Nov 14 (relayed; from a lane's draft retrospective the owner pasted, lane unnamed; owner priority fb-1556-6, cut repetition): several review rounds failed on nits that misstated no record or count.",
+ "source": "Consultant message 00:24 CST Nov 14 (relayed). Rule roles-review-cap-three (a round that passes ends review). Overlaps: step review-record-restart-on-doc-nit (figure-only doc nit and the review budget), step review-rounds-rework (what each round catches; a change to the rule needs the owner's word), step review-net-matches-rounds.",
+ "note": "Triage 00:24 CST Nov 14: a reviewer's verdict fails the round only for a finding that misstates a record, a count or behaviour; a nit goes in as a note and the round passes. The lane first reads the three overlapping steps and builds only the gap, and says whether the reviewer agent's text is the fix or the rule roles-review-cap-three needs the owner's word; that choice is the owner's, not triage's. A guard or agent-text change: review rounds apply. Not started.",
+ "updatedAt": "2026-11-14T00:24:40-06:00"
+}
