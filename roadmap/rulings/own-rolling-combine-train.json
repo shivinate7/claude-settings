@@ -1,0 +1,10 @@
+{
+  "id": "own-rolling-combine-train",
+  "at": "2026-11-13T21:48:00-06:00",
+  "title": "The batch runner runs a rolling combine train as a standing duty",
+  "ruling": "Owner 21:48 CST Nov 13, in runner 10's chat, relayed by the consultant at 21:49 (triage did not see it; the retrospective agrees): the combining should be sort of continuous, so that lane PRs keep getting combined and batched behind the tournament, making the runner a scaling machine; if the idea is sound, relay it to the retrospective and make it part of how a batch runner is briefed or operates. The consultant's reading: a batch closes when its real PR is built and linted; later hand-ins join the next batch; clashing members leave by name; each merge report gives members in, left out, clash rate, dry-round, lint and CI minutes; review after 3 batches against lone merges. Homes: decision session-tiers and the project-ops batch-runner template, via a lane. Merges stay serial. Filed as step batch-runner-rolling-train.",
+  "quote": "it should be sorta continuous tho, ie yes u do all this and atop it lane prs keep getting combined and batching and batching basically having u become a true scaling machine - if u find this idea sound relay it to retro and ask for it to be part of how a batch runner is briefed and or operates standingly shd this be sound thinking",
+  "source": "Consultant 21:49 CST Nov 13 (quoting the owner via runner 10); filed by triage.",
+  "status": "open",
+  "step": "batch-runner-rolling-train"
+}
