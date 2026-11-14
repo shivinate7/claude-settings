@@ -1,14 +1,14 @@
 {
  "id": "stylisms-apply-six-changes",
  "title": "Edit the reply-style file: six signed changes, two rules kept, 29 rules become 25",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1qCRuRX1kcKFMqrQC",
  "owner": "triage",
  "blockedBy": [],
  "why": "Owner signed the table at 22:28 CST Nov 13 (page item 807 a; ruling own-807-a-stylisms-sign), with two rows kept (ruling own-800-stylisms-two-keeps).",
  "source": "Ruling own-807-a-stylisms-sign; table in PR #3340 (docs/plans/stylisms-rules-table.md, head 15e4ccf41cd1).",
- "note": "Triage 22:28 CST Nov 13: ready, not started; the coordinator assigns a lane. Edits output-styles/shiv-stylisms.md: shorten style-plain-words; shrink style-question-form to a pointer to decision question-form plus one line of intent (the guard stays); fold style-question-inside-box's one clause into style-question-form; merge style-hand-off-cleanup into style-hand-off-irreversible; merge style-hand-off-one-shell into style-hand-off-runs-as-is; move style-command-in-item to the waiting-page skill (guard stays). Keep style-offer-screen-takeover and style-press-has-link as they are. Red test first wherever a check, the rule map or lint/rule_mechanisms.json cites a mark; a fresh reviewer reads it (it changes a rule's text). Done check: 25 marks in the file by the same grep the table used, every check green, the table's counts updated.",
- "updatedAt": "2026-11-13T22:28:32-06:00"
+ "note": "Triage 22:28 CST Nov 13: ready, not started; the coordinator assigns a lane. Edits output-styles/shiv-stylisms.md: shorten style-plain-words; shrink style-question-form to a pointer to decision question-form plus one line of intent (the guard stays); fold style-question-inside-box's one clause into style-question-form; merge style-hand-off-cleanup into style-hand-off-irreversible; merge style-hand-off-one-shell into style-hand-off-runs-as-is; move style-command-in-item to the waiting-page skill (guard stays). Keep style-offer-screen-takeover and style-press-has-link as they are. Red test first wherever a check, the rule map or lint/rule_mechanisms.json cites a mark; a fresh reviewer reads it (it changes a rule's text). Done check: 25 marks in the file by the same grep the table used, every check green, the table's counts updated. Coordinator 22:29 CST Nov 13 (22:29): lane started, session_013NEJL1qCRuRX1kcKFMqrQC. Tracker the coordinator; path alone, runner 10 merges; reads the table from #3340.",
+ "updatedAt": "2026-11-13T22:29:39-06:00"
 }
