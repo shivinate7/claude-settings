@@ -1,0 +1,14 @@
+{
+ "id": "answered-lines-age-out",
+ "title": "The waiting page hides an answered line a set time after it closed, with no press",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 19:4x CST Nov 13: answered items pile up on the page and nothing clears them.",
+ "source": "Measured by triage 19:46 CST Nov 13 from a page export: 778 items, 735 closed; 683 of those have no closed time (already hidden); 52 have a closed time and no dismissed mark, so they show as lines in Answered. Ages: 9 under 1 h, 37 under 6 h, 51 under 24 h, 1 older (max 44.8 h). Skill waiting-page: a closed item with a closed time stays a line until the owner presses Mark read; only the page writes dismissed.",
+ "note": "Filed 19:47 CST Nov 13. Cause: the only thing that clears an Answered line is the owner pressing Mark read; no age-out exists (skill waiting-page, lines on closed and dismissed). Fix proposed: the page template treats a closed line as read once its closed time is older than a set age (page-side, no data write, no session writes dismissed); a reply later than closed still brings it back. Age is the owner's to pick (24 h proposed; unmeasured how fast he reads). Test: a closed item older than the age does not draw; a younger one draws; one with a newer replied draws. Home: skill waiting-page template. Needs a test-author red case first, then a builder; a page change, so a designer is skipped (no new screen). Related, not a duplicate: answered-section-folded (folds the section), answered-leaves-page (routing).",
+ "updatedAt": "2026-11-13T19:47:10-06:00"
+}
