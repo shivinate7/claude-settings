@@ -1178,10 +1178,10 @@ def mistake_problem(text):
 def _own_lane_read(path, own_id):
     """(is_lane, parent id): this session's own get_session record in the transcript. A lane carries the
     tag cs-build:lane or a parent_session_id. No record reads as owner-facing, and so does the consultant tag
-    even with a parent id."""
+    even with a parent id, unless the lane tag is there too."""
     import own_session
     tags, _tagged_after, parent = own_session.own_session_read(path, own_id)
-    if tags is None or CONSULTANT_TAG in tags:
+    if tags is None or (CONSULTANT_TAG in tags and LANE_TAG not in tags):
         return False, None
     return LANE_TAG in tags or bool(parent), parent
 
