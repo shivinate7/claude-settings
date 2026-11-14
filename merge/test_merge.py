@@ -18735,7 +18735,7 @@ class OwnRunSuites(Env):
     A job counts when its name is not `scope` and its conclusion is not `skipped`. Zero suites adds a line that the run proves nothing.
     The lift line red_base prints is the scope the own-run line follows: a case asserts it first.
     Not a GhHalf subclass: the GhHalf tests must not run twice."""
-    set, gh_host, gh_state = GhHalf.set, GhHalf.gh_host, GhHalf.gh_state
+    set, gh_host, gh_state, calls = GhHalf.set, GhHalf.gh_host, GhHalf.gh_state, GhHalf.calls
 
     def setUp(self):
         super().setUp()
@@ -18747,24 +18747,40 @@ class OwnRunSuites(Env):
     OWN_LINE = re.compile(r"^merge: own run of #7 ran (\d+) suites on ([0-9a-f]{9})((?:: the run proves nothing, do not advise forcing this PR)?)$", re.M)
     UNKNOWN_LINE = re.compile(r"^merge: own run (?:of #7 )?unknown: (.*)$", re.M)
 
-    def own_run(self, jobs, *flags, base="red", **state):
-        """Main's latest run is red (or green, with base="green"), and the PR's own run (HEAD_RUN) has `jobs`. -> (rc, out, the PR head before the run)."""
-        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})
+    THREE_SUITES = [main_job("scope", "success"), main_job("checks", "success"), main_job("checks-guard", "success"), main_job("checks-macos", "success")]
+    ALL_SKIPPED = [main_job("scope", "skipped"), main_job("checks", "skipped"), main_job("checks-guard", "skipped")]
+    LTT_SKIPPED = [main_job("touched", "skipped"), main_job("run", "skipped")]  # lane-touched-tests.yml's two jobs, both skipped
+
+    def own_run(self, jobs=None, *flags, base="red", head_runs=None, head_jobs=None, confirm=True, push_main=True, **state):
+        """Main's latest run is red (or green, with base="green"), and the PR's own run (HEAD_RUN) has `jobs`. A case that gives its own runs passes
+        `head_runs` (runs_seq entries) and `head_jobs` ({run id: jobs}) instead. confirm=False runs the preview. push_main=False reuses the main
+        an earlier run of the case pushed. -> (rc, out, the PR head before the run)."""
+        if push_main:
+            push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})
         green = base == "green"
+        if head_runs is None:
+            head_runs, head_jobs = [("checks", "completed", "success", self.HEAD_RUN, 9)], {str(self.HEAD_RUN): jobs}
         self.set(base_runs=[main_run(901, "success" if green else "failure")],
-                 base_jobs={"901": [main_job("scope", "success"), main_job("checks", "success" if green else "failure", 20)],
-                            str(self.HEAD_RUN): jobs},
-                 runs_seq=[[("checks", "completed", "success", self.HEAD_RUN, 9)]], **state)
+                 base_jobs={"901": [main_job("scope", "success"), main_job("checks", "success" if green else "failure", 20)], **head_jobs},
+                 runs_seq=[head_runs], **state)
         pre = self.head()
-        rc, out = self.run_merge("7", "--confirm", *flags, host=self.gh_host())
+        rc, out = self.run_merge(*(("7", "--confirm") if confirm else ("7",)), *flags, host=self.gh_host())
         return rc, out, pre
 
     def assert_lift_reached(self, out):
         self.assertIn(self.LIFT, out, "the lift did not run: red_base printed no lift line, so the own-run line has no scope")
 
+    def merged_sha(self):
+        fields = self.gh_state("merge_fields") or []
+        self.assertEqual(len(fields), 1, "the merge call was not sent once, so there is no merged head to read")
+        return fields[0]["sha"]
+
     def assert_head_named(self, head9s, pre):
+        """The own-run line names the head the merge call sent. With a claim, that is the claim commit the second confirm merged, not the head before
+        the run: pre is the lane head under the claim, so it is no answer here."""
+        merged = self.merged_sha()
         for h9 in head9s:
-            self.assertIn(h9, (pre[:9], self.head()[:9]), "the own-run line names a head that is neither the PR head before the claim nor after it")
+            self.assertEqual(h9, merged[:9], "the own-run line names a head other than the one the merge call sent")
 
     def test_suites_ran_counts_the_jobs_outside_scope_that_did_not_skip(self):
         # the rule the own-run line reads: a job is a suite unless it is the scope gate or skipped. A failed job is a suite.
@@ -18826,6 +18842,128 @@ class OwnRunSuites(Env):
         self.assertTrue(self.gh_state("merge_fields"), "the merge was not sent")
         self.assertNotIn(self.LIFT, out, "the lift line prints for a green base, so the lift was used")
         self.assertNotRegex(out, r"own run (?:of #7 )?(?:ran|unknown)", "an own-run line prints with a green base, where the lift is unused")
+
+    GATE_AND_ROLLUP = ("scope", "nightly-skip", "all-jobs-passed", "ci-done")  # checks.yml's jobs that are not suites
+
+    def checks_yml_job_ids(self):
+        """-> the job ids of the real checks.yml, the file as it is on disk: the ids the exclusion matches."""
+        text = pathlib.Path(REAL_CHECKS).read_text(encoding="utf-8")
+        at = re.search(r"^jobs:\s*$", text, re.M)
+        self.assertIsNotNone(at, "checks.yml has no jobs: key")
+        return re.findall(r"^  ([A-Za-z0-9_-]+):\s*$", text[at.end():], re.M)
+
+    def two_runs(self, checks_id, ltt_id):
+        """The head's two workflow runs: checks (holds scope) and lane-touched-tests, each under its own id, as runs_seq entries."""
+        return [("checks", "completed", "success", checks_id, 9), ("lane-touched-tests", "completed", "skipped", ltt_id, 11)]
+
+    def assert_own_line_before_advice(self, out):
+        lines = out.splitlines()
+        own = [i for i, l in enumerate(lines) if l.startswith("merge: own run of #7 ")]
+        advice = [i for i, l in enumerate(lines) if "--base-red-ok" in l]
+        self.assertTrue(own, "the red-base preview prints no own-run line to order against the advice")
+        self.assertTrue(advice, "the red-base preview prints no line that names --base-red-ok")
+        self.assertLess(own[0], advice[0], "the own-run line comes after the advice to pass --base-red-ok")
+
+    def test_suites_ran_leaves_out_the_gate_nightly_skip_and_rollup_jobs_when_no_suite_ran(self):
+        # checks.yml's gate and rollup jobs are not suites: a run of only those, with every suite skipped, ran none
+        gate = [{"name": "scope", "conclusion": "success"}, {"name": "nightly-skip", "conclusion": "success"},
+                {"name": "all-jobs-passed", "conclusion": "success"}, {"name": "ci-done", "conclusion": "success"}]
+        skipped = [{"name": "checks", "conclusion": "skipped"}, {"name": "checks-macos", "conclusion": "skipped"}]
+        self.assertEqual(merge.suites_ran(gate + skipped), 0, "suites_ran counts nightly-skip, all-jobs-passed or ci-done as a suite that ran")
+        self.assertEqual(merge.suites_ran(gate + skipped + [{"name": "checks-guard", "conclusion": "success"}]), 1,
+                         "suites_ran does not count the one suite that ran beside the gate and rollup jobs")
+
+    def test_every_checks_yml_job_ran_counts_every_job_but_the_gate_and_rollup_jobs(self):
+        # full size: each job of the real checks.yml ran and passed
+        ids = self.checks_yml_job_ids()
+        self.assertTrue(ids, "checks.yml names no jobs, so the full-size case has nothing to count")
+        full = [{"name": i, "conclusion": "success"} for i in ids]
+        self.assertEqual(merge.suites_ran(full), len([i for i in ids if i not in self.GATE_AND_ROLLUP]),
+                         "suites_ran counts a gate or rollup job of checks.yml as a suite when every job ran")
+
+    def test_the_gate_and_rollup_job_ids_are_checks_yml_job_ids(self):
+        # the exclusion matches job ids: a renamed job would slip past the cases above, so this reads the ids from the real checks.yml
+        ids = self.checks_yml_job_ids()
+        for name in self.GATE_AND_ROLLUP:
+            self.assertIn(name, ids, f"{name} is not a job id in checks.yml")
+        self.assertEqual(merge.ROLLUP_JOB, "all-jobs-passed", "merge.ROLLUP_JOB is not checks.yml's rollup job id")
+
+    def test_the_own_run_line_counts_the_newest_run_of_the_workflow_holding_scope(self):
+        # checks (older id) ran three suites; lane-touched-tests (newer id) skipped both its jobs. The count is checks': it holds scope.
+        rc, out, pre = self.own_run(None, "--base-red-ok", self.REASON, head_runs=self.two_runs(self.HEAD_RUN, self.HEAD_RUN + 1),
+                                    head_jobs={str(self.HEAD_RUN): self.THREE_SUITES, str(self.HEAD_RUN + 1): self.LTT_SKIPPED})
+        self.assert_lift_reached(out)
+        found = self.OWN_LINE.findall(out)
+        self.assertTrue(found, "no own-run line after the lift")
+        self.assertEqual({(n, s) for n, _, s in found}, {("3", "")},
+                         "the own-run line counts the newer lane-touched-tests run, not the checks run that holds scope")
+        self.assert_head_named([h for _, h, _ in found], pre)
+
+    def test_the_own_run_line_counts_the_scope_run_when_it_is_the_newer_one(self):
+        # the reverse ids: checks is the newer run, so the count is the same three suites. A control for the count only: the head is not named here
+        rc, out, pre = self.own_run(None, "--base-red-ok", self.REASON, head_runs=self.two_runs(self.HEAD_RUN + 1, self.HEAD_RUN),
+                                    head_jobs={str(self.HEAD_RUN + 1): self.THREE_SUITES, str(self.HEAD_RUN): self.LTT_SKIPPED})
+        self.assert_lift_reached(out)
+        found = self.OWN_LINE.findall(out)
+        self.assertTrue(found, "no own-run line after the lift when checks is the newer run")
+        self.assertEqual({(n, s) for n, _, s in found}, {("3", "")}, "the own-run line does not count checks' three suites when checks is the newer run")
+
+    def test_a_resumed_claim_names_the_merged_head_and_reads_that_heads_run(self):
+        # the first confirm pushes the claim and the second merges it: the lane head under the claim is not the merged head, and the line must name the merged one
+        rc, out, pre = self.own_run(self.THREE_SUITES, "--base-red-ok", self.REASON)
+        self.assert_lift_reached(out)
+        merged = self.merged_sha()
+        self.assertNotEqual(merged, pre, "the merge sent the head before the run, so no claim was resumed")
+        found = self.OWN_LINE.findall(out)
+        self.assertTrue(found, "no own-run line after the lift")
+        self.assertEqual([h for _, h, _ in found], [merged[:9]], "the own-run line names a head other than the merged one")
+        reads = self.calls().splitlines()
+        merge_at = next(i for i, l in enumerate(reads) if l.startswith("PUT pulls/7/merge"))
+        last_run_read = [l for l in reads[:merge_at] if l.startswith("run list --commit ")][-1]
+        self.assertEqual(last_run_read.split()[3], merged, "the own run's workflow runs were read for a head other than the merged one")
+
+    def test_a_red_base_preview_prints_the_own_run_line_before_the_advice(self):
+        rc, out, pre = self.own_run(self.THREE_SUITES, confirm=False)
+        self.assertRegex(out, r"(?m)^  main run: red", "the preview's base line does not read red, so no own-run line has a red base to follow")
+        found = self.OWN_LINE.findall(out)
+        self.assertTrue(found, "a red base's preview prints no own-run line when no flag is given")
+        self.assertEqual({(n, s) for n, _, s in found}, {("3", "")}, "the red-base preview does not count the own run's three suites")
+        self.assertEqual([h for _, h, _ in found], [pre[:9]], "the preview names a head other than the PR head, the only head it reads")
+        self.assert_own_line_before_advice(out)
+
+    def test_a_red_base_preview_of_an_all_skipped_own_run_prints_the_proves_nothing_line(self):
+        rc, out, pre = self.own_run(self.ALL_SKIPPED, confirm=False)
+        self.assertRegex(out, r"(?m)^  main run: red", "the preview's base line does not read red, so no own-run line has a red base to follow")
+        found = self.OWN_LINE.findall(out)
+        self.assertTrue(found, "a red base's preview prints no own-run line for an all-skipped own run")
+        self.assertEqual({(n, s) for n, _, s in found}, {("0", ": the run proves nothing, do not advise forcing this PR")},
+                         "the red-base preview of an all-skipped own run does not print 0 suites with the do-not-force words")
+        self.assert_own_line_before_advice(out)
+
+    def test_a_red_base_preview_with_no_run_on_the_head_prints_the_unknown_line(self):
+        # the empty state: the head has no workflow run at all
+        rc, out, pre = self.own_run(None, head_runs=[], head_jobs={}, confirm=False)
+        self.assertRegex(out, r"(?m)^  main run: red", "the preview's base line does not read red, so no own-run line has a red base to follow")
+        unknown = self.UNKNOWN_LINE.findall(out)
+        self.assertTrue(unknown, "a red base's preview prints no own-run line when the head has no run")
+        self.assertIn(pre[:9], unknown[0], "the unknown line does not name the head that has no run")
+
+    def test_a_green_base_preview_prints_no_own_run_line(self):
+        rc, out, pre = self.own_run(self.THREE_SUITES, base="green", confirm=False)
+        self.assertRegex(out, r"(?m)^  main run: green", "the preview's base line does not read green, so the green case did not run")
+        self.assertNotRegex(out, r"(?m)^merge: own run of #7 ", "a preview with a green base prints an own-run line, where the base needs no lift")
+
+    def test_the_own_run_reads_happen_only_when_the_base_is_not_green(self):
+        rc, out, pre = self.own_run(self.THREE_SUITES, confirm=False)
+        self.assertRegex(out, r"(?m)^  main run: red", "the red-base preview did not read a red base, so its reads prove nothing")
+        red = self.calls().splitlines()
+        pathlib.Path(self.state, "calls.log").unlink(missing_ok=True)
+        rc, out, pre = self.own_run(self.THREE_SUITES, base="green", confirm=False, push_main=False)
+        self.assertRegex(out, r"(?m)^  main run: green", "the green-base preview did not read a green base, so its reads prove nothing")
+        green = self.calls().splitlines()
+        own_jobs = f"GET actions/runs/{self.HEAD_RUN}/jobs"
+        self.assertTrue(any(l.startswith(own_jobs) for l in red), "the red-base preview did not read the own run's jobs")
+        self.assertFalse(any(l.startswith(own_jobs) for l in green), "the green-base preview read the own run's jobs, which only a red base needs")
 
 
 if __name__ == "__main__":
