@@ -21,6 +21,7 @@ import argparse
 import concurrent.futures
 import contextlib
 import errno
+import functools
 import gc
 import hashlib
 import io
@@ -5604,6 +5605,7 @@ class AgentEndProcessMarkerTests(_AgentEndFixture):
 
 MARKER_NAMES = ("CLAUDE_AGENT_ID", "CLAUDE_CODE_SESSION_ID")
 PROCS_DIR_NAME = "CLAUDE_AGENT_PROCS_DIR"
+DISPLAY_NAMES = ("DISPLAY", "WAYLAND_DISPLAY")  # a process with one of these may hold a window (Linux)
 
 
 class AgentOwnedProcessTests(_AgentEndFixture):
@@ -5630,16 +5632,20 @@ class AgentOwnedProcessTests(_AgentEndFixture):
         self.scratch = os.path.join(self.root, "scratch")  # outside every agent worktree
         os.makedirs(self.scratch)
 
-    def child_env(self, agent=None):
-        """This process's environment without the agent markers, with AGENT's marker set when given."""
-        env = {k: v for k, v in os.environ.items() if k not in MARKER_NAMES}
+    def child_env(self, agent=None, display=None):
+        """This process's environment without the agent markers, with AGENT's marker set when given. DISPLAY is set
+        to DISPLAY when given (a headed child). Without it, DISPLAY and WAYLAND_DISPLAY are removed (a headless child)."""
+        env = {k: v for k, v in os.environ.items() if k not in MARKER_NAMES + DISPLAY_NAMES}
         if agent:
             env["CLAUDE_AGENT_ID"] = agent
+        if display:
+            env["DISPLAY"] = display
         return env
 
-    def spawn(self, agent=None):
-        """A sleeping child with AGENT's marker in its exec-time environment (none when AGENT is None)."""
-        return self.sleeper(self.scratch, env=self.child_env(agent))
+    def spawn(self, agent=None, display=None):
+        """A sleeping child with AGENT's marker in its exec-time environment (none when AGENT is None), with DISPLAY
+        set when DISPLAY is given."""
+        return self.sleeper(self.scratch, env=self.child_env(agent, display))
 
     def run_stop(self, agent):
         """The SubagentStop hook for AGENT, as the harness runs it, with the record folder set and the
@@ -5765,6 +5771,93 @@ class AgentOwnedProcessTests(_AgentEndFixture):
         with mock.patch.object(proc_env, "entry_value", return_value=None):
             stops = self.stop_list([proc.pid], self.AGENT)
         self.assertIsNone(stops, "the stop list is %r with an unreadable marker, not a keep" % (stops,))
+
+    def office_start(self, agent, before):
+        """SubagentStart of AGENT on the Windows Office path, run here: the Office processes BEFORE are injected and
+        stored in AGENT's record as its start list."""
+        with mock.patch.dict(os.environ, {PROCS_DIR_NAME: self.procs_dir}):
+            stored = self.reap.agent_procs.mark_office_start(agent, platform="win32", lister=lambda: before)
+        self.assertTrue(stored, "scope: the Office start list of agent %s was not stored" % agent)
+
+    def office_stop(self, agent, after):
+        """SubagentStop of AGENT, run in this process on the Windows Office path: the Office processes AFTER are
+        injected, and no window is visible. The reaper calls the adapter by its module attribute, so the patch
+        reaches the real path. Returns the reaper's answer."""
+        adapter = self.reap.agent_procs.office_candidates
+        injected = functools.partial(adapter, platform="win32", lister=lambda: after, visible=lambda: set())
+        with mock.patch.dict(os.environ, {PROCS_DIR_NAME: self.procs_dir}), \
+                mock.patch.object(self.reap.agent_procs, "office_candidates", injected):
+            return self.reap.end_agent_processes({"hook_event_name": "SubagentStop", "agent_id": agent})
+
+    def assert_two_agents_keep_one_office_pid(self, first, second):
+        """Finding 1: the diffs of two agents both hold one Office pid. Neither stop ends it, whichever agent stops
+        first. Each assert names the stop that ended it."""
+        self.office_start(self.AGENT, {})
+        self.office_start(self.OTHER, {})
+        for agent in (first, second):
+            self.assertIn("office_before", self.record_of(agent) or {},
+                          "scope: agent %s holds no Office start list before the run" % agent)
+        proc = self.spawn(None)
+        after = {proc.pid: "EXCEL.EXE"}
+        self.office_stop(first, after)
+        self.assertIsNone(proc.poll(), "the first stop (agent %s) ended Office pid %d, which the other agent also saw"
+                          % (first, proc.pid))
+        self.office_stop(second, after)
+        self.assertIsNone(proc.poll(), "the second stop (agent %s) ended Office pid %d, which the first agent also saw"
+                          % (second, proc.pid))
+
+    def test_two_agents_one_office_pid_is_kept_when_the_first_stop_is_the_first_agent(self):
+        """Finding 1, stop order A then B."""
+        self.assert_two_agents_keep_one_office_pid(self.AGENT, self.OTHER)
+
+    def test_two_agents_one_office_pid_is_kept_when_the_first_stop_is_the_second_agent(self):
+        """Finding 1, stop order B then A."""
+        self.assert_two_agents_keep_one_office_pid(self.OTHER, self.AGENT)
+
+    def test_control_an_office_pid_only_the_stopping_agent_saw_ends_at_its_stop(self):
+        """Control, the baseline of finding 7: AGENT's diff holds one Office pid and no other agent has a start list.
+        The Office path ends it, so the in-process path is one that does end a pid."""
+        self.office_start(self.AGENT, {})
+        proc = self.spawn(None)
+        self.office_stop(self.AGENT, {proc.pid: "EXCEL.EXE"})
+        self.assertIsNotNone(proc.poll(), "control: the Office pid %d that AGENT alone saw is still running" % proc.pid)
+
+    def test_an_office_pid_only_the_stopping_agent_saw_ends_though_a_later_agent_has_a_start_list(self):
+        """Finding 7, a false alarm: AGENT's diff holds one Office pid. OTHER starts later, so its start list already
+        holds that pid, and OTHER never saw it as new. Only a pid another agent also saw is shared, so AGENT's stop
+        ends it."""
+        self.office_start(self.AGENT, {})
+        proc = self.spawn(None)
+        self.office_start(self.OTHER, {proc.pid: "EXCEL.EXE"})
+        held = (self.record_of(self.OTHER) or {}).get("office_before") or {}
+        self.assertIn(str(proc.pid), held, "scope: the later agent's start list does not hold Office pid %d" % proc.pid)
+        self.office_stop(self.AGENT, {proc.pid: "EXCEL.EXE"})
+        self.assertIsNotNone(proc.poll(), "AGENT's stop left Office pid %d running, though the later agent never saw it as new"
+                             % proc.pid)
+
+    def test_a_headed_process_of_the_agent_is_reported_and_never_ended(self):
+        """Finding 6: a marked process with a display, which a background job's headed app is, is reported in the
+        record and never ended at SubagentStop. The display is read from the same exec-time environment as the marker."""
+        import proc_env
+        proc = self.spawn(self.AGENT, display=":0")
+        self.assertEqual(sweep.agent_mark(proc.pid), self.AGENT,
+                         "scope: pid %d does not read as the agent's marker" % proc.pid)
+        self.assertEqual(proc_env.entry_value(proc.pid, "DISPLAY"), ":0", "scope: pid %d does not carry DISPLAY" % proc.pid)
+        self.run_stop(self.AGENT)
+        with self.subTest(arm="not ended"):
+            self.assertIsNone(proc.poll(), "the agent's headed process pid %d was ended at SubagentStop" % proc.pid)
+        with self.subTest(arm="reported"):
+            entry = self.entry_for(self.record_of(self.AGENT) or {}, proc.pid)
+            self.assertIsNotNone(entry, "the record does not report the headed process pid %d" % proc.pid)
+
+    def test_control_a_headless_process_of_the_agent_still_ends(self):
+        """Control, finding 6: a marked process with no display ends at SubagentStop, as before."""
+        import proc_env
+        proc = self.spawn(self.AGENT)
+        for name in DISPLAY_NAMES:
+            self.assertIsNone(proc_env.entry_value(proc.pid, name), "scope: pid %d carries %s" % (proc.pid, name))
+        self.run_stop(self.AGENT)
+        self.assertIsNotNone(proc.poll(), "control: the headless marked process pid %d still runs at SubagentStop" % proc.pid)
 
 
 def _sigkill_quietly(pid):
