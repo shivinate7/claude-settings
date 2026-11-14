@@ -3,6 +3,7 @@
 STALE_PAGES_UNDER_TEST names the command to run (default: stale_pages.py beside this file), so the
 same cases run red against a checkout that lacks it.
 """
+import ast
 import contextlib
 import importlib.util
 import io
@@ -1866,6 +1867,52 @@ def parked_data_answer(item_id, at):
     return {"id": item_id, "data": {"parked": True, "item": item_id, "n": 27, "at": at, "note": "Later."}}
 
 
+# The sessions an item wakes: its `wakes` field (a list of session ids), and the owner that asked. The names are in the
+# repo's session id shape (session_ and word characters, hooks/own_session.py), the only shape the mode reads as a session.
+# named_sessions finds each name as a whole word.
+OWNER_SESSION, TRIAGE_SESSION, COORD_SESSION, LANE_SESSION = "session_asker", "session_triage", "session_coord", "session_lane_7"
+SESSION_NAMES = (OWNER_SESSION, TRIAGE_SESSION, COORD_SESSION, LANE_SESSION)
+SESSION_OK = "session_ok"  # an entry in the session id shape, whole: the one form the mode reads as a session
+# The full-size store's items take each of these by item number: no wakes (so the owner alone), one name, two names,
+# and three names with the owner among them.
+FULL_WAKES = (None, [TRIAGE_SESSION], [TRIAGE_SESSION, COORD_SESSION], [OWNER_SESSION, COORD_SESSION, LANE_SESSION])
+
+
+def named_sessions(line):
+    """The names of SESSION_NAMES that `line` holds as whole words, sorted. A name inside a longer word is not named."""
+    return sorted(name for name in SESSION_NAMES if re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(name), line))
+
+
+def answer_lines(out):
+    """The answer-unread lines of an output, in order."""
+    return [line for line in output_lines(out) if line.startswith("answer-unread ")]
+
+
+def read_script():
+    """The source of the script under test (CMD), as text, for the checks that read its syntax tree."""
+    with open(CMD, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def is_re_compile(func):
+    return isinstance(func, ast.Attribute) and func.attr == "compile" and isinstance(func.value, ast.Name) and func.value.id == "re"
+
+
+def own_session_patterns(source):
+    """The line numbers of the `re.compile` calls in `source` whose pattern holds "session_". Read from the syntax tree, so a
+    docstring, a comment or a string that names the shape is text, never a pattern of its own."""
+    return sorted(node.lineno for node in ast.walk(ast.parse(source))
+                  if isinstance(node, ast.Call) and is_re_compile(node.func) and node.args
+                  and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
+                  and "session_" in node.args[0].value)
+
+
+def imports_session_shape(source):
+    """True when `source` imports `_CREATED_ID` from own_session, anywhere in its syntax tree."""
+    return any(isinstance(node, ast.ImportFrom) and node.module == "own_session" and any(a.name == "_CREATED_ID" for a in node.names)
+               for node in ast.walk(ast.parse(source)))
+
+
 class UnreadStale(FolderCase):
     """The --unread mode. Each case writes its own four files, then runs the script on them."""
     FOLDER = "unread"
@@ -2016,6 +2063,141 @@ class UnreadStale(FolderCase):
         rc, out = self.run_unread()
         expected = [unread_line("item-%03d" % i, i, "ops", EARLY) for i in range(count) if i % 3]
         self.assertEqual((rc, output_lines(out)), (1, expected), "a full store did not list each unread answer, in order: " + out[:300])
+
+    def one_answer_line(self, **item_fields):
+        """Stores one item (n 143, with `item_fields` set on it) and its unread answer, runs the mode, and returns the one
+        answer-unread line. Scope first: the answer must be the only line, so each name check reads a line that exists."""
+        self.store(items=[item_entry("colour-pick", "open", n=143, **item_fields)], answers=[pick_answer_entry("colour-pick", EARLY)])
+        rc, out = self.run_unread(codes=(1,))
+        lines = answer_lines(out)
+        self.assertEqual([line.split()[1] for line in lines], ["colour-pick"], "the unread answer did not get its one line: " + out)
+        return lines[0]
+
+    def test_the_answer_line_names_each_session_in_wakes(self):
+        line = self.one_answer_line(owner=OWNER_SESSION, wakes=[TRIAGE_SESSION, COORD_SESSION])
+        self.assertTrue({TRIAGE_SESSION, COORD_SESSION} <= set(named_sessions(line)),
+                        "the answer line does not name each session in wakes: " + line)
+
+    def test_the_answer_line_does_not_name_the_owner_when_the_owner_is_not_in_wakes(self):
+        line = self.one_answer_line(owner=OWNER_SESSION, wakes=[TRIAGE_SESSION, COORD_SESSION])
+        self.assertNotIn(OWNER_SESSION, named_sessions(line), "the answer line names the owner, which wakes does not hold: " + line)
+
+    def test_an_answer_line_for_an_item_with_no_wakes_names_its_owner_alone(self):
+        """Green on the old code too: with no wakes the owner is the one session the line names."""
+        line = self.one_answer_line(owner=OWNER_SESSION)
+        self.assertEqual(named_sessions(line), [OWNER_SESSION], "an item with no wakes does not name its owner alone: " + line)
+
+    def test_an_answer_line_for_an_item_whose_wakes_is_null_names_its_owner_alone(self):
+        """Green on the old code too: a `wakes` key that holds null is the absent form, so the owner is the one session the line
+        names. A mutant that tests the key's presence (`"wakes" not in item`) reads it as a bad wakes, and exits 2 here."""
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner=OWNER_SESSION, wakes=None)],
+                   answers=[pick_answer_entry("colour-pick", EARLY)])
+        rc, out = self.run_unread(codes=(0, 1, 2))
+        self.assertEqual(rc, 1, "an item whose wakes is null did not list its unread answer: exit %d: %s" % (rc, out))
+        lines = answer_lines(out)
+        self.assertEqual(len(lines), 1, "an item whose wakes is null did not get one answer line: " + out)
+        self.assertEqual(named_sessions(lines[0]), [OWNER_SESSION], "an item whose wakes is null does not name its owner alone: " + lines[0])
+
+    def test_wakes_that_name_no_session_are_unknown_and_list_no_answer(self):
+        for label, wakes in (("a string", TRIAGE_SESSION), ("an empty list", []), ("a list with a non-string", [TRIAGE_SESSION, 7]),
+                             ("a list with an empty name", [""])):
+            with self.subTest(wakes=label):
+                self.clear_store()
+                self.store(items=[item_entry("colour-pick", "open", n=143, owner=OWNER_SESSION, wakes=wakes)],
+                           answers=[pick_answer_entry("colour-pick", EARLY)])
+                rc, out = self.run_unread(codes=(0, 1, 2))
+                self.assert_unknown(rc, out, "colour-pick")
+                self.assert_no_listed_line(out, "%s: an answer was listed against wakes that name no session" % label)
+
+    def test_a_wakes_entry_that_is_not_a_whole_session_id_is_unknown_and_lists_no_answer(self):
+        """An entry is a session only when the whole entry is session_ plus word characters. A bare word, a padded name, a
+        name with a prefix, or one such entry beside a good one, makes the answer unknown: exit 2, no answer line. The exit
+        code is checked before the output, so a run that lists the answer fails on its own cause."""
+        cases = (("a bare word", ["triage"]), ("a leading space, no prefix", [" sB"]), ("a trailing space, no prefix", ["sB "]),
+                 ("a trailing newline, no prefix", ["sB\n"]), ("a leading space on an id", [" " + SESSION_OK]),
+                 ("a trailing space on an id", [SESSION_OK + " "]), ("a trailing newline on an id", [SESSION_OK + "\n"]),
+                 ("an id with a prefix", ["x" + SESSION_OK]), ("an id beside a bare word", [SESSION_OK, "triage"]))
+        for label, wakes in cases:
+            with self.subTest(wakes=label):
+                self.clear_store()
+                self.store(items=[item_entry("colour-pick", "open", n=143, owner=OWNER_SESSION, wakes=wakes)],
+                           answers=[pick_answer_entry("colour-pick", EARLY)])
+                r = Stale.run_script(self, "--unread", self.folder)
+                self.assertEqual(r.returncode, 2, "wakes %r was read as a session, not as unknown: exit %d: %s"
+                                 % (wakes, r.returncode, r.stdout + r.stderr))
+                self.assert_mode_lines(r.stdout, r.stderr)
+                self.assert_unknown(r.returncode, r.stdout, "colour-pick")
+                self.assert_no_listed_line(r.stdout, "%s: an answer was listed against a wakes entry that is not a whole session id" % label)
+
+    def test_a_wakes_entry_in_the_session_id_shape_is_listed_with_its_name(self):
+        """Green on the old code too: an entry in the session id shape is one word, and the answer line names it."""
+        line = self.one_answer_line(owner=OWNER_SESSION, wakes=[SESSION_OK])
+        self.assertIn("wakes %s" % SESSION_OK, line, "an entry in the session id shape is not named in its answer line: " + line)
+
+    def test_the_pattern_finder_reads_code_and_never_a_string_or_a_comment(self):
+        """Green on the old code too: it tests the finder the shape cases read. A docstring, a comment and a literal that hold
+        the shape are text, never a compiled pattern. Only the compiled pattern counts, on its own line."""
+        source = "\n".join([
+            "def f():",
+            '    """A docstring: it\'s text, with a call on the next line',
+            '    REAL_LOOKING = re.compile("session_x")',
+            '    """',
+            "LITERAL = \"# re.compile('session_y') is text, not code\"",
+            'REAL = re.compile(r"session_[A-Za-z0-9_-]+")  # the one shape',
+        ])
+        self.assertEqual(own_session_patterns(source), [6], "the finder read text as a pattern, or missed the compiled one: %r" % own_session_patterns(source))
+
+    def test_the_session_shape_is_imported_from_own_session(self):
+        self.assertTrue(imports_session_shape(read_script()),
+                        "stale_pages.py does not import _CREATED_ID from own_session, the one session id shape")
+
+    def test_stale_pages_compiles_no_session_pattern_of_its_own(self):
+        lines = own_session_patterns(read_script())
+        self.assertEqual(lines, [], "stale_pages.py compiles a session id pattern of its own, on line %s, not the one in own_session" % lines)
+
+    def test_a_bad_hooks_import_prints_unknown_and_exits_2(self):
+        """The mode reads each wakes entry in the one session id shape, from hooks/own_session.py. The control runs a copy of the
+        script with that module beside it, and the mode lists the answer. The same copy with no hooks folder beside it, and no
+        hooks folder under its HOME, must say so: an unknown line and exit 2, never a listed answer."""
+        scratch = os.path.join(self.tmp.name, "scratch")
+        script = os.path.join(scratch, "skills", "waiting-page", "stale_pages.py")
+        home = os.path.join(scratch, "home")
+        hooks = os.path.join(scratch, "hooks")
+        os.makedirs(os.path.dirname(script))
+        os.makedirs(home)
+        os.makedirs(hooks)
+        shutil.copy(CMD, script)
+        shutil.copy(SPLICE, os.path.join(os.path.dirname(script), "splice.py"))
+        shutil.copy(os.path.join(HOOKS, "own_session.py"), os.path.join(hooks, "own_session.py"))
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner=OWNER_SESSION, wakes=[SESSION_OK])],
+                   answers=[pick_answer_entry("colour-pick", EARLY)])
+        control = Stale.run_script(self, "--unread", self.folder, script=script, home=home)
+        self.assertEqual(control.returncode, 1, "the control copy, with its hooks module beside it, did not list the answer: exit %d: %s"
+                         % (control.returncode, control.stdout + control.stderr))
+        shutil.rmtree(hooks)
+        r = Stale.run_script(self, "--unread", self.folder, script=script, home=home)
+        self.assertEqual(r.returncode, 2, "a bad hooks import did not exit 2: exit %d: %s" % (r.returncode, r.stdout + r.stderr))
+        self.assertTrue(any(line.startswith("unknown:") for line in output_lines(r.stdout)),
+                        "a bad hooks import printed no unknown: line: %r" % r.stdout)
+
+    def test_a_full_store_names_each_unread_answers_own_wakes_and_no_other_items(self):
+        count = 120  # a full page of items, each kind of wakes in turn (FULL_WAKES), and every third answer read back
+        items, answers = [], []
+        for i in range(count):
+            item_id = "item-%03d" % i
+            extra = {} if FULL_WAKES[i % 4] is None else {"wakes": FULL_WAKES[i % 4]}
+            items.append(item_entry(item_id, "open", n=i, owner=OWNER_SESSION, **extra))
+            answers.append(pick_answer_entry(item_id, EARLY))
+        receipts = [receipt_entry("item-%03d" % i, read=EARLY) for i in range(0, count, 3)]
+        self.store(items=items, answers=answers, receipts=receipts)
+        rc, out = self.run_unread()
+        lines = answer_lines(out)
+        self.assertEqual([line.split()[1] for line in lines], ["item-%03d" % i for i in range(count) if i % 3],
+                         "the full store did not list each unread answer, in order: " + out[:300])
+        for line in lines:
+            i = int(line.split()[1][len("item-"):])
+            self.assertEqual(named_sessions(line), sorted(FULL_WAKES[i % 4] or [OWNER_SESSION]),
+                             "the answer line for %s does not name exactly its own wakes: %s" % (line.split()[1], line))
 
     def test_an_empty_store_is_clean(self):
         self.store()

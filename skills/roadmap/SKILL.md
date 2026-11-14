@@ -100,7 +100,8 @@ GitHub, so the publisher reads them just before the build and passes one file:
 - `items`: `ArtifactData list items` of the repo's page, every page, each row copied with only
   `n`, `status`, `home`, `lane` and `owner`. `lane` is where the item's answer went: the lane's slug, a tier name
   such as `batch-runner`, or `null` for none. Copy it when the item has one; leave the key out when the
-  page row has none. `owner` is the session that reads the answer, also optional. The build keeps each
+  page row has none. `owner` is the session that asked, also optional. The sessions in the row's `wakes`
+  read the answer, or the owner when `wakes` is absent; the build does not copy `wakes`. The build keeps each
   exactly when its key is present. The upkeep list reads the items for page rulings and for lanes to archive,
   and the red line reads `lane` for stalled items. A live file with no `items` list still renders Live work.
 - An entry with the wrong shape is counted on the page and in the upkeep list, never dropped. A

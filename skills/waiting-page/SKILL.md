@@ -51,7 +51,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
 - `items/<id>`: one per waiting item. The database key is the item's id. The `id` field is optional
   and ignored: the page, the guard and the tools read the key. Fields: `n` (a stable number the owner answers by),
   `kind` (`decision` or `task`), `status` (`open` or `closed`), `added` (ISO time), `ref` (each id
-  with its plain name), `title`, `short` (optional, 24 characters or fewer: the name on the wide left list; longer or missing, the list shows `title` cut with an ellipsis), `owner` (the session that reads the answer at its wake), `home` (the step, PR or
+  with its plain name), `title`, `short` (optional, 24 characters or fewer: the name on the wide left list; longer or missing, the list shows `title` cut with an ellipsis), `owner` (the session that asked), `wakes` (optional: a list of session ids, the sessions the owner's answer wakes. Each id is `session_` and word characters, whole. Absent or `null` means the owner alone. `[]`, a string, or an entry that is not a whole session id is unknown: the writer wakes nobody on it and asks the `owner` to fix it), `home` (the step, PR or
   record the answer goes to; a step is its bare step id, so the roadmap upkeep row can match it), `context` (plain text, line breaks kept).
   - The page derives the tier from these fields. Never write a tier.
     - `holds` (one plain sentence: what is stopped until the answer) puts the item in Blocking.
@@ -250,7 +250,7 @@ extras key `page-writer`; the pick guard uses it when the transcript has no `met
 
 - Every other session sends its question to the writer, which writes the item. A lane sends its question
   to its parent in the same turn, and triage writes the item ("Add an item", step 0). Not built: the route from a lane to triage.
-  `owner` stays the session that asked. It reads its own answer at its wake, so nobody relays answers.
+  `owner` stays the session that asked and files the answer. The writer wakes the sessions in the item's `wakes`, or the `owner` when `wakes` is absent. Each reads the answer from the page at its wake, so nobody relays answer text.
 - The writer ranks. The fact tiers are the base: Blocking, Upcoming, Whenever and Pick stands. Never
   write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
   the page, not only its own. It re-ranks when it adds, updates or closes an item. A close by
@@ -283,11 +283,11 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
   (`hooks/feedback_guard.py`) blocks until the transcript shows that send. The writer puts the item's
   `n` in every items write, set or update, so the guard can match it.
   - Not written yet: the writer writes the item closed (`status: "closed"` and `closed` set to now), with the answer and its
-    time in `context`. The asking session (`owner`) then files the answer to `home` ("Route and
+    time in `context`. The item's `owner` then files the answer to `home` ("Route and
     close" step 1) and writes `receipts/<id>`. The writer never writes receipts.
-  - Written: the writer closes the item (`status: "closed"` and `closed` set to now), with the answer and its time in `context`. The owning
-    session then files the answer to `home`, as "Route and close" step 1 says. Either way, every
-    question and answer ends in the page's record.
+  - Written: the writer closes the item (`status: "closed"` and `closed` set to now), with the answer and its time in `context`. The item's `owner`
+    then files the answer to `home`, as "Route and close" step 1 says. Either way, every
+    question and answer ends in the page's record. The writer wakes the sessions in the item's `wakes`, or its `owner` when `wakes` is absent ("Read the answers").
 - A lane has no chat with the owner. Its question goes in its report, and a lane also sends it
   to its parent with `send_message` in the same turn. The Stop report guard blocks a lane reply whose
   Input Needed asks a pick or a yes/no unless the same turn sent it to its parent or the writer. A box,
@@ -300,7 +300,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
 
 0. A lane's question comes in the lane's report. Write the item from that report, with yourself as
    `owner`. Never tell a lane to write an item: it has no wake after it ends, so it cannot read the
-   answer, and two writers clash on the design republish (see "Add a design").
+   answer, and two writers clash on the design republish (see "Add a design"). Never name a lane in `wakes`, for the same reason: it has no wake after it ends.
 1. Only the writer does this step. Read the open items with `ArtifactData list items`. Take the next free `n`. Never reuse an `n`
    while its item is open.
 2. Write it with `ArtifactData set items/<id>`. Make the key a slug of the question, 32 characters
@@ -346,7 +346,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
 ## Read the answers
 
 A save on the page sends a comment to Claude when the page allows it. The comment wakes the
-sessions that watch the page. Only the owning session reads, routes and closes its items, except that the writer closes an item on a park answer. On a `lane` item, the park branch has it tell first. It reads
+sessions that watch the page. A session reads the answers to its own items, by `owner` or `wakes`. Only the item's `owner` routes and closes it, except that the writer closes an item on a park answer. On a `lane` item, the park branch has it tell first. It reads
 the answers at each wake, and at the start of each turn while it has an item open (the writer also
 while `meta/page.parked` is not empty): `ArtifactData list answers`. That read is the fallback when no wake comes. A peer session never
 relays an answer's text. It sends only the page URL, the item id and the act, and the receiver checks the answer itself (decision relayed-grant-read-from-page). An answer typed in the chat counts the same. A chat answer to an open item: the
@@ -358,16 +358,16 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   adds an item, takes the writer role, or inherits open items. A writer gets the URL from
   `meta/page`, or from the `Watch:` line of the project-ops role handoff
   (`templates/role-handoff.md`), which names the watch for its successor. A session that inherits
-  items also rewrites each item's `owner` to itself: `owner` is the session that reads the answer.
+  items also rewrites each item's `owner` to itself and clears each item's `wakes` (or rewrites it to name itself), so the answer wakes the session that now holds the item.
   It stops watching (`ArtifactComments` action `watch` with `on: false` and the page URL) when it
   has no open item and is not the writer, and at step 1 of a project-ops rotation.
-- At a comment wake, never at turn start, the writer saves `ArtifactData list receipts`, `answers` and `items`, and `meta/page`, to a folder. It lists `answers`, `items` and `receipts` in full: `query.limit` 1000, follow `next_cursor` until it is empty, as the export flow does. A cut list gives wrong lines. It runs `python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>`. For each `answer-unread` line it sends the session in the item's `owner` a `send_message` with the page URL, the item id and the act, never the answer text.
+- At a comment wake, never at turn start, the writer saves `ArtifactData list receipts`, `answers` and `items`, and `meta/page`, to a folder. It lists `answers`, `items` and `receipts` in full: `query.limit` 1000, follow `next_cursor` until it is empty, as the export flow does. A cut list gives wrong lines. It runs `python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>`. Each `answer-unread` line names the sessions it wakes: the sessions in the item's `wakes`, or the item's `owner` when `wakes` is absent. For each line the writer sends exactly those sessions, and nobody else, a `send_message` with the page URL, the item id and the act, never the answer text. An `unknown:` line (`wakes` that is not a non-empty list of whole session ids) sends nothing: the writer asks the item's `owner` to fix `wakes`.
   At the end of that wake it writes `woke`. It uses `ArtifactData update meta/page` with only `woke`, never `set`: `set` drops `parked`, `identity` and `checked`. The value is the time now, ISO UTC with a trailing `Z`. On exit 2 it does not write `woke`.
   The check reads only the receipt field `read`. It does not use `filed`. It adds no store.
 - The owner can Undo a Send for 8 seconds, and Undo deletes the answers. Wait 10 seconds after an
   answer's `at` before you route it. An "Undone on the waiting page" notice withdraws the items it
   names.
-- On a comment wake, read `answers/` for your own items only (by `owner` and `n`). Route them as
+- On a comment wake, read `answers/` for your own items only (by `owner` or `wakes`, and `n`). Route them as
   below. The writer also reads each `answers/park.<id>` whenever `meta/page.parked` is not empty. At each wake it also reads each item answer
   with `act: "park"`, whoever owns the item. It routes both by the parked branch below, and the item's owner skips a park answer.
   If no item in the comment is yours and you are not the writer, stay silent.

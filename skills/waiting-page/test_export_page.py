@@ -1078,6 +1078,17 @@ class Mirror(Base):
         self.assertEqual(r.returncode, 0, shown(r))
         self.assertEqual(read_text(os.path.join(out, "items", "k29.json")), canonical(data))
 
+    def test_an_item_with_wakes_exports_its_wakes_unchanged(self):
+        """Green on the old code too: the export holds no item-field list, so `wakes` passes as fetched. The session ids
+        have the shape of real ones, so a pass also shows the secret scan does not take a session id for a credential."""
+        data = dict(item(7), wakes=["session_01TriageWake7Vx4Lq2mZ", "session_01CoordWake3Rt8Ny5Pd"])
+        fetched = self.fetch(items={"item-007": data}, meta={"page": META})
+        out = self.out()
+        r = self.export(fetched, out)
+        self.assertFalse(says(r, "refused"), "the scan refused a session id in wakes. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.assertEqual(read_text(os.path.join(out, "items", "item-007.json")), canonical(data), "wakes did not export unchanged")
+
     def test_a_rewrite_with_the_same_data_is_same(self):
         fetched = self.fetch(items={"a": {"id": "a", "n": 2}})
         out = self.out()
