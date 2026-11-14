@@ -1450,15 +1450,17 @@ need "the default-root store was still there when simctl boot ran" store_at_boot
 need "exit code" rc_is 0
 end_case "104 no SIM_TEST_DEVICES_DIR: the store under the default root goes too"
 
-# Case 105: the re-scan under the lock finds a Duo that a dead holder left booted. The run reuses it: no boot, the store
-# stays, and the lease goes back before xcodebuild.
+# Case 105: the re-scan under the lock finds a Duo a dead holder left booted. The run gives the granted slot back,
+# then reuses it: no boot, the store stays, and slot 2's reuse lease is held during xcodebuild and given back after.
 pro_dies_during_duo_wait duo store
 need "destination is the booted Duo" dest_is "$DUO2"
 need "the Duo's store is kept" store_kept "$DUO2"
 need "exit code" rc_is 0
 need "steps are run only" steps_are "run "
-need "lease not held during xcodebuild" lease_not_held_at_xc
-end_case "105 re-scan after the lease reuses a booted Duo: no boot, its store is kept, the lease goes back"
+need "the lease held during xcodebuild is slot 2" lease_at_xc_slot 2
+need "the granted slot 1 is given back before xcodebuild" lease_at_xc_lacks_slot 1
+need "lease released after the run" lease_released
+end_case "105 re-scan after the lease reuses a booted Duo: no boot, its store is kept, the granted lease goes back, and slot 2's reuse lease is held during xcodebuild and released after"
 
 # Reuse holds the lease of the reused device's slot. The real sim-lease runs beside the script, so the lease file shows the
 # slot while the run goes on, and the run gives it back on every exit.
