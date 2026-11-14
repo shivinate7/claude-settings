@@ -1,0 +1,14 @@
+{
+ "id": "ready-push-merges-main",
+ "title": "The ready push makes the merge tree equal the head tree, so main's push run skips by the existing rule",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJKyzT11AdU32mgrLnAC",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Source: the consultant's measured read at 12:15 CST Nov 14 (owner goal: CI speed, top priority), one tree pair re-read by the coordinator (coordinator 12:16, relayed; triage read none of it). Facts: REST read at 12:14: the last 8 main push `checks` runs each ran 30 of 33-35 jobs; the push skip fired 0 of 8. Cause as read: the merged tree never equals the green PR head tree (strict=false: the head is behind main at merge). The pair the coordinator read: #3402 head ef8582befd5f tree 2c29427dc8; merge 245e168db806 tree 28705afa96. Cost: a full run on main per merge (the run for 415e8b51b was still going at 31 min); its queued legs held the next ready mark (#3158 unmarked about 40 min). Proposal (the consultant's, no rule change): the ready-time records push becomes a merge of origin/main plus the records commit; if nothing merges during that PR's CI, the head tree equals the merge tree and main's push run skips by the existing rule (owner ruling push-skip-proven-tree, 12:18 CST Nov 13, item 729 a: skip the push re-run when the pushed tree equals the tree the PR tested). Risks the coordinator named in the lane's brief: a one-parent records commit after a record makes it stale (cost #3405 a fix check at 11:36), and overlap with #3396 (step records-page-before-ready, held on owner item 830). The standing grant lets the batch runner push a plain merge of main into a handed-in PR; each new head gets a fix verifier and a fresh review log. Related: owner item 830; steps records-page-before-ready, push-skip-proven-tree, tree-equal-skip-mutation-prs. Also asked: runner 11 reads the last 8 main push runs of home and degen the same way (they use the same push skip). Lane started 12:16 CST by the coordinator (session_013NEJKyzT11AdU32mgrLnAC) with a first deliverable before any build: design, the record-staleness answer, overlap with #3396, and whether an owner pick is needed; it stops there if one is. A guard-or-check change: if a verdict moves, round 3 applies.",
+ "source": "coordinator 12:16 CST Nov 14, from the consultant's measured read at 12:15 CST",
+ "note": "Filed 12:17 CST Nov 14 by triage. Tracker: the coordinator. Lane session_013NEJKyzT11AdU32mgrLnAC started 12:16 CST.",
+ "updatedAt": "2026-11-14T12:17:00"
+}
