@@ -228,24 +228,45 @@ def record_section(text, heading):
     return "\n".join(lines[start:end])
 
 
+def first_paragraph(section):
+    """The lines of `section` before its first bullet. The home sentence is this paragraph."""
+    lines = []
+    for line in section.split("\n"):
+        if line.startswith("- "):
+            break
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
 class HelperHomeRecordTests(unittest.TestCase):
 
-    def test_the_decision_record_names_the_testing_home_for_a_test_helper(self):
-        # Why: a builder reads the record for where a helper goes. The test reads that one section only,
+    def home_section(self):
+        # Why: a builder reads the record for where a helper goes. Each test reads that one section only,
         # so no other line of the record can satisfy it.
         with open(RECORD_PATH, encoding="utf-8") as f:
             section = record_section(f.read(), HELPER_HOME_HEADING)
         self.assertIsNotNone(section, "the decision record has no '%s' section" % HELPER_HOME_HEADING)
-        self.assertIn("testing/", section,
-                      "the '%s' section does not name the testing/ folder as the home" % HELPER_HOME_HEADING)
-        self.assertIn("test-author writes it", section,
-                      "the '%s' section does not say a test-author writes the helper" % HELPER_HOME_HEADING)
-        self.assertIn("private to one test", section,
-                      "the '%s' section does not say a helper private to one test is one" % HELPER_HOME_HEADING)
-        self.assertIn("stays inside that test", section,
-                      "the '%s' section does not say a private helper stays inside that test" % HELPER_HOME_HEADING)
-        self.assertNotIn("_test_", section,
-                         "the '%s' section still names the underscore _test_ home" % HELPER_HOME_HEADING)
+        return section
+
+    def test_the_home_sentence_names_the_testing_folder_and_the_author(self):
+        # Why: the home sentence is the paragraph before the first bullet. A testing/ mention in a bullet is no home.
+        home = first_paragraph(self.home_section())
+        self.assertIn("testing/", home, "the home sentence does not name the testing/ folder")
+        self.assertIn("test-author writes it", home, "the home sentence does not say a test-author writes the helper")
+        self.assertIn("private to one test", home,
+                      "the home sentence does not say a helper private to one test is one")
+        self.assertIn("stays inside that test file", home,
+                      "the home sentence does not say a private helper stays inside that test file")
+
+    def test_a_bullet_says_testing_is_not_installed(self):
+        # Why: testing/ is not landed, so ~/.claude has no testing/ and a helper there is no install concern.
+        bullets = [line for line in self.home_section().split("\n") if line.startswith("- ")]
+        self.assertTrue(any("not installed" in line for line in bullets),
+                        "no bullet in the section says testing/ is not installed")
+
+    def test_the_section_names_no_underscore_home(self):
+        # Why: the underscore _test_<name>.py home was dropped, so the section must not name it anywhere.
+        self.assertNotIn("_test_", self.home_section(), "the section still names the underscore _test_ home")
 
 
 if __name__ == "__main__":
