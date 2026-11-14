@@ -131,6 +131,17 @@ skips_case fail "an empty map names no job: the skipped macOS jobs stay red" "{}
 # (f) with the input unset, a skipped job is red as it was before. A malformed input fails closed.
 unset_case fail "SCOPE_SKIPS unset: a skipped macOS job stays red, as before" "$GATE_OFF"
 skips_case fail "a malformed SCOPE_SKIPS fails closed: the skipped macOS job stays red" "{not json" "$GATE_OFF"
+# The action's default is '', so every other repo's check sees SCOPE_SKIPS set to the empty string. Each of the five cases above
+# gives the same verdict with it empty, and a skipped macOS job stays red. With the map set and every flag "true", a green run passes.
+skips_case pass "SCOPE_SKIPS empty: all success passes, as unset" "" '{"a":{"result":"success"},"b":{"result":"success"}}'
+skips_case fail "SCOPE_SKIPS empty: one failed stays red, as unset" "" '{"a":{"result":"success"},"b":{"result":"failure"}}'
+skips_case fail "SCOPE_SKIPS empty: one cancelled stays red, as unset" "" '{"a":{"result":"cancelled"}}'
+skips_case fail "SCOPE_SKIPS empty: one skipped stays red, as unset" "" '{"a":{"result":"success"},"b":{"result":"skipped"}}'
+skips_case fail "SCOPE_SKIPS empty: empty needs stays red, as unset" "" '{}'
+skips_case fail "SCOPE_SKIPS empty: a skipped macOS job stays red" "" "$GATE_OFF"
+SCOPE_ON='"scope":{"result":"success","outputs":{"shell_macos":"true","checks_macos":"true","sweep":"true"}}'
+MAC_OK='"shell-macos":{"result":"success"},"checks-macos":{"result":"success"},"checks-macos-b":{"result":"success"}'
+skips_case pass "map set, scope success, flags true, macOS jobs succeeded: a green run passes" "$map_json" "{$SCOPE_ON,$MAC_OK,$LINT_OK}"
 # (i) action.yml declares scope-skips as an optional input with default '', and its one step passes it to check.sh as SCOPE_SKIPS.
 inputs_static() { # inputs_static <action.yml>: one line per problem, none when clean
   python3 -I - "$1" <<'PY'
@@ -160,7 +171,8 @@ inputs_expect() { # inputs_expect <ok, or a substring the reader must print> <la
   fi
   case "$problems" in *"$1"*) echo "ok   $2";; *) echo "FAIL $2: the reader did not print: $1"; bad=1;; esac
 }
-input_yml() { # input_yml <scope-skips body lines> <env line, or empty>: a one-step action.yml with that input and that env
+input_yml() { # input_yml <scope-skips body lines> <env line, or empty> [description]: a one-step action.yml with that input, env and description
+  d="${3:-}"; [ -n "$d" ] || d="The macOS gate's map."
   cat <<YML
 name: All jobs passed
 inputs:
@@ -172,7 +184,7 @@ inputs:
     required: false
     default: ''
   scope-skips:
-    description: "The macOS gate's map."
+    description: "$d"
 $1
 runs:
   using: composite
@@ -194,11 +206,17 @@ input_yml "    required: true
 input_yml "    required: false" "$SKIPS_ENV" > "$work/input-nodefault.yml"
 input_yml "    required: false
     default: ''" "" > "$work/input-noenv.yml"
+input_yml "    required: false
+    default: ''" "        # SCOPE_SKIPS: \${{ inputs.scope-skips }}" > "$work/input-commented.yml"
+input_yml "    required: false
+    default: ''" "$SKIPS_ENV" "map # kept inside the quoted text" > "$work/input-hash.yml"
 inputs_expect ok "static: scope-skips is an optional input with default '', and the one step passes it as SCOPE_SKIPS" "$here/action.yml"
 inputs_expect ok "static control: a synthetic action with the input and the env is clean" "$work/input-ok.yml"
+inputs_expect ok "static control: a # inside a quoted description is text, and the input is still clean" "$work/input-hash.yml"
 inputs_expect "not an optional input" "static control: a required scope-skips input is reported" "$work/input-required.yml"
 inputs_expect "default of empty string" "static control: a scope-skips input with no default is reported" "$work/input-nodefault.yml"
 inputs_expect "does not pass inputs.scope-skips" "static control: a step without SCOPE_SKIPS is reported" "$work/input-noenv.yml"
+inputs_expect "does not pass inputs.scope-skips" "static control: a commented-out SCOPE_SKIPS line does not count" "$work/input-commented.yml"
 
 # Static: action.yml has exactly one step under runs.steps. That step runs run.sh, sets no if: and no continue-on-error:,
 # and sets WORKFLOW from inputs.workflow. The reader drops full-line comments and matches each key and the run line exactly.
