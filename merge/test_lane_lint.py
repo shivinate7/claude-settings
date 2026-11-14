@@ -124,15 +124,18 @@ def rollup_by_run(runs):
 
 
 class NoLock:
-    """The lane run takes no merge lock: a lock call fails the case."""
+    """The run named by `mode` takes no merge lock: a lock call fails the case, and its message names the mode."""
+    def __init__(self, mode="merge --lane-lint"):
+        self.mode = mode
+
     def acquire(self, *args, **kwargs):
-        raise AssertionError("merge --lane-lint took the merge lock")
+        raise AssertionError("%s took the merge lock" % self.mode)
 
     def release(self, *args, **kwargs):
-        raise AssertionError("merge --lane-lint released a merge lock")
+        raise AssertionError("%s released a merge lock" % self.mode)
 
     def unlock(self, *args, **kwargs):
-        raise AssertionError("merge --lane-lint unlocked a merge lock")
+        raise AssertionError("%s unlocked a merge lock" % self.mode)
 
 
 
@@ -2794,6 +2797,47 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertNotEqual(rc, 0, "an unreadable pair read passed the pre-ready run: " + out)
         self.assertEqual(self.host.readies, [], "an unreadable pair read marked the draft ready: " + out)
         self.assertEqual(self.refs(), refs_before, "the pre-ready run pushed beside an unreadable pair read: " + out)
+
+
+    def fast_checks_run(self):
+        """`merge 7 --fast-checks` on the draft. -> (rc, stdout and stderr together). Nothing else is run."""
+        rc, out, err = self.run_args("7", "--fast-checks")
+        return rc, out + err
+
+    def assert_fast_checks_changed_nothing(self, out, refs_before):
+        """The read-only run pushed nothing, marked nothing ready, kept the draft and posted no comment. Its lock is the case's NoLock."""
+        self.assertEqual(self.refs(), refs_before, "--fast-checks pushed a ref: " + out)
+        self.assertEqual(self.host.readies, [], "--fast-checks marked the draft ready: " + out)
+        self.assertTrue(self.host.draft, "--fast-checks cleared the draft flag: " + out)
+        self.assertEqual(self.host.posted, [], "--fast-checks posted a comment: " + out)
+
+    def test_fast_checks_on_a_clean_pr_prints_one_pass_line_per_check_and_changes_nothing(self):
+        self.pre_ready_lane()
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.pr_writes(8, {"elsewhere.txt": "lane 8\n"}, lane_body(OTHER))
+        self.use_ci_job(steps_for(), 0)
+        self.lock = NoLock("merge --fast-checks")
+        refs_before = self.refs()
+        rc, out = self.fast_checks_run()
+        checks = DECLARED_READY + ["debt retire", "open-PR clash"]
+        self.assertEqual(rc, 0, "a clean PR refused --fast-checks: " + out)
+        self.assertEqual(len(re.findall(r"(?m)^(?:pass|fail|unknown) ", out)), len(checks), "--fast-checks did not print one verdict line per check: " + out)
+        for name in checks:
+            self.assertTrue(verdict_line(out, "pass", name), "--fast-checks printed no `pass %s` line: %s" % (name, out))
+        self.assertEqual(len(self.lint_calls()), 1, "--fast-checks ran the declared steps %d times, want once: %s" % (len(self.lint_calls()), out))
+        self.assert_fast_checks_changed_nothing(out, refs_before)
+
+    def test_fast_checks_on_a_failing_check_prints_its_fail_line_exits_nonzero_and_changes_nothing(self):
+        self.pre_ready_lane()
+        self.own_writes({"own.txt": "lane 7\n"})
+        self.use_ci_job(steps_for(["STE lint"]), 1)
+        self.lock = NoLock("merge --fast-checks")
+        refs_before = self.refs()
+        rc, out = self.fast_checks_run()
+        self.assertTrue(verdict_line(out, "fail", "STE lint"), "--fast-checks printed no `fail STE lint` line for a failing STE lint step: " + out)
+        self.assertNotEqual(rc, 0, "a failing STE lint step exited 0 under --fast-checks: " + out)
+        self.assertEqual(len(re.findall(r"(?m)^(?:pass|fail|unknown) ", out)), len(DECLARED_READY) + 2, "--fast-checks did not print one verdict line per check: " + out)
+        self.assert_fast_checks_changed_nothing(out, refs_before)
 
 
 class PreReadyDeclared(unittest.TestCase):
