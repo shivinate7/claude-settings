@@ -210,6 +210,17 @@ def _section_dir(tree, full):
     return None
 
 
+def section_dir(root: str = ROOT):
+    """The folder of the guard runner's section files (hooks/test_guard.py SECTION_DIR, read by `_section_dir`), relative to `root` with `/`
+    separators, or None when the runner is missing, does not parse, or names no folder. Another tool reads the path here, never copies it."""
+    full = os.path.join(root, "hooks", "test_guard.py")
+    try:
+        folder = _section_dir(ast.parse(read(full)), full)
+    except (OSError, SyntaxError):
+        return None
+    return os.path.relpath(folder, root).replace(os.sep, "/") if folder else None
+
+
 def _with_sections(tree, full):
     """`tree` with the body of each section file of its runner added, so a case a section file registers
     resolves as one the runner registers. The runner execs the sections in its own globals, one module."""
