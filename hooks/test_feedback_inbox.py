@@ -4712,16 +4712,21 @@ def run_case(case):
 # what it leaves out: the one git start that is not the grep, and a quiet Stop that starts no git at all.
 
 class CostTests(unittest.TestCase):
-    def judging_stop(self, name, answer=None):
+    def judging_stop(self, name, answer=None, fresh=True):
         """One capture, one new item, then the judging Stop. `answer` is the model's answer, and by default it names
-        the item as a repeat. Returns (exit codes of the capture and the Stop, the Stop's model calls, its git starts,
-        the relative paths whose bytes it changed under the config folder)."""
+        the item as a repeat. The Stop's repo gets a fresh roadmap FETCH_HEAD first, so its read is the fresh read the
+        claims count; fresh=False clears it, so the read is a stale one. Returns (exit codes of the capture and the Stop,
+        the Stop's model calls, its git starts, the relative paths whose bytes it changed under the config folder)."""
         root = repeat_repo(name, step=True, debt=True)
         cfg, sid = new_cfg(), name
         env = git_counter(cfg)
         captured = capture(cfg, sid, MSG_ONE, cwd=root)
         add_item(cfg, sid, ITEM_LINE)
         before = snapshot(cfg)
+        if fresh:
+            fixture.set_fetch_head(root)
+        else:
+            fixture.without_fetch_head(root)
         start = len(git_lines(env))
         answer = repeat_answer(ITEM_ID) if answer is None else answer
         stopped, calls = stop(cfg, sid, root, answer=answer, extra_env=env)
@@ -4737,6 +4742,18 @@ class CostTests(unittest.TestCase):
         self.assertEqual(len(others), 1, "one other git start; got %r" % others)
         self.assertIn("rev-parse", others[0].split(), "the other start reads the repo root: %r" % others)
         self.assertIn("--show-toplevel", others[0].split(), "the other start reads the repo root: %r" % others)
+
+    def test_a_stale_roadmap_ref_adds_one_fetch_to_a_judging_stop(self):
+        codes, calls, lines, _ = self.judging_stop("cost-stale", fresh=False)
+        self.assertEqual(codes, (0, 0), "the capture and the judging Stop both exit 0; got %r" % (codes,))
+        self.assertEqual(len(calls), 1, "the judging Stop makes one model call; got %d" % len(calls))
+        self.assertEqual(grep_starts(lines), 1, "the judging Stop starts one git grep; got %r" % lines)
+        verbs = cost_probe.verbs([ln.split() for ln in lines])
+        self.assertEqual(verbs.count("fetch"), 1, "a stale roadmap ref is fetched once per judging Stop; got %r" % lines)
+        # The probe's fetch guard reads the origin URL before the fetch (a `config` start of the test, not the product's).
+        self.assertEqual(verbs, ["rev-parse", "config", "fetch", "log", "grep"],
+                         "the stale Stop starts the root read, the guard's origin read, the fetch, the tip-time log, and the "
+                         "one grep; got %r" % verbs)
 
     def test_a_judging_stop_writes_the_turn_state_and_the_inbox_and_no_other_file(self):
         codes, _, _, changed = self.judging_stop("cost-files")

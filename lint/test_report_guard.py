@@ -5752,14 +5752,23 @@ class CostTests(unittest.TestCase):
         cls.decided = tcj.make_repo("cost-decided", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
         cls.ci = tcj.CI_REPO  # a roadmap ref, so the two git processes are the ruled-store ls-tree and the roadmap cat-file
 
-    def stop(self, repo, reply, answers, earlier=()):
-        """One Stop after the owner's message: the `earlier` replies, then `reply`, the one the hook reads."""
+    def stop(self, repo, reply, answers, earlier=(), fresh=True):
+        """One Stop after the owner's message: the `earlier` replies, then `reply`, the one the hook reads. The repo gets
+        a fresh roadmap FETCH_HEAD first, so the past-ruling read is the fresh read the claims count; fresh=False clears
+        it, so the read is a stale one."""
         folder = tempfile.mkdtemp(dir=RUN_FOLDER)
         texts = list(earlier) + [reply]
         path = write_transcript([human("decide")] + [assistant_text(text) for text in texts], folder)
         hook = json.dumps({"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
                            "cwd": repo})
-        return cost_probe.run_hook(REPORT_GUARD, hook, folder, answers)
+        if fresh:
+            fixture.set_fetch_head(repo)
+        else:
+            fixture.without_fetch_head(repo)
+        try:
+            return cost_probe.run_hook(REPORT_GUARD, hook, folder, answers)
+        finally:
+            fixture.without_fetch_head(repo)
 
     def test_a_reply_with_no_question_starts_nothing(self):
         run = self.stop(self.ci, DONE_ONLY, [[{"ok": True}, None]])
@@ -5771,6 +5780,15 @@ class CostTests(unittest.TestCase):
         self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
                          "two children, the ruled-store ls-tree and the roadmap cat-file; got %r" % run["children"])
         self.assertEqual(run["files"], [], "an allow writes no file")
+
+    def test_a_stale_roadmap_ref_adds_one_fetch_to_a_reply_with_one_question(self):
+        run = self.stop(self.ci, RELAY, [[{"ok": True}, None]], fresh=False)
+        self.assertEqual(len(run["models"]), 1, "one question, one past-ruling call; got %r" % run["models"])
+        verbs = cost_probe.verbs(run["children"])
+        self.assertEqual(verbs.count("fetch"), 1, "a stale roadmap ref is fetched once per judged question; got %r" % verbs)
+        # The fixture repo has no origin, so the fetch fails and the read falls back to the ref's tip time (one log).
+        self.assertEqual(verbs, ["fetch", "log", "ls-tree", "cat-file"],
+                         "the stale read starts the fetch, the tip-time log, then the two reads; got %r" % verbs)
 
     def test_two_relayed_questions_cost_one_model_call_and_two_git_reads(self):
         run = self.stop(self.ci, TWO_QUESTIONS, [[{"ok": True}, None]])

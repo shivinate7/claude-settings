@@ -1810,9 +1810,21 @@ class CostTests(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.folder, ignore_errors=True)
 
-    def fire(self, stdin_text, answers=None):
+    def fire(self, stdin_text, answers=None, fresh=True):
+        """One hook run. Its repo (the payload's cwd) gets a fresh roadmap FETCH_HEAD first, so the past-ruling read is
+        the fresh read the claims count. fresh=False clears the ref, so the read is a stale one."""
         folder = tempfile.mkdtemp(dir=self.folder)
-        return cost_probe.run_hook(HOOK, stdin_text, folder, answers)
+        repo = payload_cwd(stdin_text)
+        if repo is not None:
+            if fresh:
+                fixture.set_fetch_head(repo)
+            else:
+                fixture.without_fetch_head(repo)
+        try:
+            return cost_probe.run_hook(HOOK, stdin_text, folder, answers)
+        finally:
+            if repo is not None:
+                fixture.without_fetch_head(repo)
 
     def test_a_tool_this_hook_does_not_judge_starts_nothing(self):
         run = self.fire(json.dumps({"session_id": SID_A, "tool_name": "Bash", "tool_input": {"command": "ls"}}))
@@ -1847,6 +1859,17 @@ class CostTests(unittest.TestCase):
         self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
                          "the two children are the ruled-store ls-tree and the roadmap cat-file; got %r" % run["children"])
         self.assertEqual(run["files"], [], "an allowed question writes no file; got %r" % run["files"])
+
+    def test_a_stale_roadmap_ref_adds_one_fetch_to_a_judged_question(self):
+        box = good_box(goal=CI_GOAL, problem=CI_PROBLEM, based=CI_BASED, options=CI_CHAT_OPTIONS)
+        run = self.fire(question_input(box=box, cwd=CI_REPO), [[json.loads(ALLOW), None]], fresh=False)
+        self.assertEqual(len(run["models"]), 1, "one judged question, one model call; got %r" % run["models"])
+        verbs = cost_probe.verbs(run["children"])
+        self.assertEqual(verbs.count("fetch"), 1, "a stale roadmap ref is fetched once per judged question; got %r" % verbs)
+        # The fixture repo has no origin, so the fetch fails and the read falls back to the ref's tip time (one log).
+        self.assertEqual(verbs, ["fetch", "log", "ls-tree", "cat-file"],
+                         "the stale read starts the fetch, the tip-time log, then the two reads; got %r" % verbs)
+        self.assertEqual(run["files"], [], "a stale read writes no file under the config dir; got %r" % run["files"])
 
     def test_a_refused_page_write_adds_the_guard_log_line_and_no_other_file(self):
         item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
