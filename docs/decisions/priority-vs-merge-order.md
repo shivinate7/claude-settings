@@ -11,11 +11,13 @@ The rules:
 - N is a row's own pull request when a `pr:` row names N in this checkout's repo, or a `branch:` row names N's head branch. Then N goes, with one line saying so, and no other row is read.
 - A row that reads flag, waiting, done or unknown never blocks. Each row's verdict line is printed, so a lower pull request that goes says why. A pull request GitHub cannot be read for is unknown, never ok and never printed as clear.
 - No `--priority-rows` given: `priority: no rows given, not checked` is printed, and the merge goes on as before.
-- An empty or missing FILE given on purpose refuses, with "not clear". The runner named a file it cannot supply, and a local fix supplies it.
+- A FILE the reader cannot use refuses, because the runner fixes it locally. That is an empty or missing FILE, a FILE with no `priority:` row, and any malformed row: a line that is no `priority:` row, an empty value, more than one target, or a pr that is not `owner/repo#N` (`pr: #3302`). One line says the row cannot be read and is not clear, names the row's slug and the pr it names where it has one, and says nothing was merged. It runs before any read and before the lock. It names no override and no flag that lifts it: the fix is the row. The malformed row is the case that let a ready row go unseen: the check could not tell which row was ready.
+- A well-formed row whose pull request read fails stays unknown and does not block, because a network blip must not stop every merge. Its line says unknown, never clear. The own-row exit above still skips every other row, malformed ones too.
+- The runner's hand-off wiring is the project-ops templates: each merging `--confirm` carries `--priority-rows`, on a file of only the `priority:` rows.
 - The check runs before the lock, the claim and any push, so a refusal lands nothing: no merge, no claim on main, no lock held, no ref moved. A draft's `--confirm` is the records step and never merges, so it skips the check.
 - `merge --priority-rows FILE` alone behaves as before, and still stands alone. With a pull request number and `--confirm`, the flag goes with them.
 
-Cost: the reads `priority_judge` already makes for `merge --priority-rows FILE`, at most two per `pr:` row, plus the shared open-pull list read for branch rows. None when N is itself a row. No process, timer, lock or file write. Test: `merge/test_priority_vs_merge_order.py` counts the reads and checks that a refusal moves nothing.
+Cost: the reads `priority_judge` already makes for `merge --priority-rows FILE`, at most two per `pr:` row, plus the shared open-pull list read for branch rows. None when N is itself a row or a row is malformed. No process, timer, lock or file write. Test: `merge/test_priority_vs_merge_order.py` counts the reads and checks that a refusal moves nothing.
 
 Kind: build
 Plan: docs/decisions/priority-vs-merge-order.md#the-ruling (all)

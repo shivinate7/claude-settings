@@ -4458,6 +4458,21 @@ def priority_line(slug, verdict, why, number):
     """-> the one printed line of a judged row."""
     return " ".join(f"{verdict} {slug}{f' #{number}' if number else ''}: {why}".split())
 
+def priority_format(row):
+    """-> (slug, targets, repo, why) of one row. `why` is "" when the row is well formed, else why the reader cannot parse it: a line that is no
+    `priority:` row, an empty value, more than one target, or a pr that is not owner/repo#N. A row naming no target is well formed (it reads flag).
+    The one home of what a malformed row is, for priority_judge and priority_gate. No read."""
+    if not row.startswith("priority:"):
+        return row[:60], [], None, "not a priority row"
+    slug, targets, repo = priority_row(row)
+    if any(k == "branch" and not v for k, v in targets) or repo == "":
+        return slug, targets, repo, "row names an empty value"
+    if len(targets) > 1:
+        return slug, targets, repo, "row names more than one target"
+    if targets and targets[0][0] == "pr" and not PRIORITY_PR.fullmatch(targets[0][1]):
+        return slug, targets, repo, f"pr {targets[0][1]} is not owner/repo#N"
+    return slug, targets, repo, ""
+
 def priority_judge(rows, h, here, repo_dir=None):
     """-> one (slug, verdict, why, number) per row, in order. The one reader of a priority row, for --priority-rows and the --confirm check.
     `number` is the pull request whose verdict was read, or None when none was."""
@@ -4479,22 +4494,16 @@ def priority_judge(rows, h, here, repo_dir=None):
     judged = []
     for row in rows:
         number = None
-        if not row.startswith("priority:"):
-            slug, verdict, why = row[:60], "unknown", "not a priority row"
+        slug, targets, repo, bad = priority_format(row)
+        if bad:
+            verdict, why = "unknown", bad
         else:
-            slug, targets, repo = priority_row(row)
             try:
-                if any(k == "branch" and not v for k, v in targets) or repo == "":
-                    verdict, why = "unknown", "row names an empty value"
-                elif not targets:
+                if not targets:
                     verdict, why = "flag", "row names no branch or pr"
-                elif len(targets) > 1:
-                    verdict, why = "unknown", "row names more than one target"
                 elif targets[0][0] == "pr":
                     m = PRIORITY_PR.fullmatch(targets[0][1])
-                    if not m:
-                        verdict, why = "unknown", f"pr {targets[0][1]} is not owner/repo#N"
-                    elif m.group(1).lower() != here:
+                    if m.group(1).lower() != here:
                         verdict, why = "unknown", (f"{m.group(1)} is not this checkout's repo, so it is not read" if here else "this checkout's repo cannot be read, so the pull request is not read")
                     else:
                         verdict, why = priority_verdict(h, int(m.group(2)))
@@ -4551,17 +4560,30 @@ def priority_is_row(row, here, n, branch):
 def priority_gate(source, n, info, h, repo_dir=None):
     """merge N --confirm --priority-rows FILE, before the lock: refuse merging pull request N while a priority row's own pull request reads ok and N is no
     row's pull request or branch. A row that reads flag, waiting, done or unknown never blocks, and its line is printed so a lower pull request that
-    goes says why; an unread row is unknown, never clear. An empty or missing FILE refuses: the runner named a file it cannot supply, and a local fix
-    supplies it. Cost: the reads priority_judge makes, none when N is itself a row; no process, timer, lock or file write."""
+    goes says why; an unread row is unknown, never clear. A failed read of a well-formed row stays unknown because a network blip must not stop every
+    merge. A FILE the reader cannot use refuses, because the runner fixes it locally: an empty or missing FILE, a FILE with no `priority:` row, and a
+    malformed row (see priority_format), which is named by its slug and its pr. No override and no lifting flag. When N is itself a row the other rows
+    are not read. Cost: the reads priority_judge makes, none when N is itself a row or a row is malformed; no process, timer, lock or file write."""
     rows, why = priority_text(source)
     if not rows:
         raise Stop(f"--priority-rows could not read {source}: {why}. Nothing was checked; this is not clear. Nothing was merged." if why
                    else f"--priority-rows: no rows in {source}. Nothing was checked; this is not clear. Nothing was merged.")
+    if not any(r.startswith("priority:") for r in rows):
+        raise Stop(f"--priority-rows: {source} has no priority row. Nothing was checked; this is not clear. Nothing was merged.")
     here = priority_here(h, repo_dir)
     own = next((r for r in rows if priority_is_row(r, here, n, info["branch"])), None)
     if own:
         say(f"priority: #{n} is the row {priority_row(own)[0]}, so it goes first. The other rows are not read.")
         return
+    bad = []
+    for row in rows:
+        slug, targets, _, reason = priority_format(row)
+        if reason:
+            named = next((v for k, v in targets if k == "pr"), None)
+            bad.append(f"{slug}{f' (pr {named})' if named else ''}: {reason}")
+    if bad:
+        raise Stop(f"--priority-rows: the priority row{'s' if len(bad) > 1 else ''} {'; '.join(bad)} cannot be read. "
+                   "Nothing was checked; this is not clear. Fix the row in the hand-off file. Nothing was merged.")
     judged = priority_judge(rows, h, here, repo_dir)
     say(*(priority_line(*j) for j in judged))
     ready = [f"{slug} (#{number})" for slug, verdict, _, number in judged if verdict == "ok"]
