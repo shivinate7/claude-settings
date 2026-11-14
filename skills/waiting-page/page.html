@@ -173,6 +173,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .opt.sel .key { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
 .opt .lab { font-weight: 700; line-height: 1.3; padding-top: 2px; }
 .opt .how { margin: 0; font-size: 14.5px; color: var(--muted); }
+.opt .how .optnote { display: block; margin-top: 4px; font-weight: 600; color: var(--ink); }
 .opt .tr { margin: 0; display: grid; gap: 4px; font-size: 14.5px; align-content: start; }
 .opt .tr div { display: grid; grid-template-columns: 18px minmax(0, 1fr); }
 .opt .tr .s { font: 600 15px/1.4 var(--mono); }
@@ -1011,7 +1012,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 
 <!-- The one list of top-level item fields. The page warns on a field outside it, and the guard (rule item-field-rendered) refuses a write of one.
      Add a field here when the page draws it. A key inside options or steps is not listed. -->
-<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "waits", "repo", "checked_with", "closed", "dismissed"]</script>
+<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "recommended", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "waits", "repo", "checked_with", "closed", "dismissed", "shown"]</script>
 
 <!-- The roadmap build writes only this block (skills/roadmap/build.py --block). The page writer replaces it on each publish
      (splice.py) and keeps designData. Empty, the Status tab says the plan is unknown. -->
@@ -1036,8 +1037,9 @@ const pickName = (it, key) => { const o = (it.options || []).find((x) => x.key =
 const isMulti = (it) => it.kind === "decision" && (it.multi === true || it.ranked === true);
 const validKeys = (it, l) => Array.isArray(l) && l.length > 0 && new Set(l).size === l.length && l.every((k) => (it.options || []).some((o) => o.key === k));
 // The keys of my pick, or null when the pick does not fit the kind of item: a pick-one pick is one key, a multi pick is a valid list. An unranked multi pick is shown and saved in option order, as ticks are; a ranked one keeps its order.
-const pickKeys = (it) => (isMulti(it) ? (validKeys(it, it.pick) ? (it.ranked === true ? it.pick : (it.options || []).map((o) => o.key).filter((k) => it.pick.includes(k))) : null) : typeof it.pick === "string" && (it.options || []).some((o) => o.key === it.pick) ? [it.pick] : null);
-const pickChoice = (it) => (isMulti(it) ? pickKeys(it).slice() : it.pick);
+const recOf = (it) => (it.recommended != null ? it.recommended : it.pick); // `recommended` is the field; `pick` is its old name, read on an old item
+const pickKeys = (it) => { const r = recOf(it); return isMulti(it) ? (validKeys(it, r) ? (it.ranked === true ? r : (it.options || []).map((o) => o.key).filter((k) => r.includes(k))) : null) : typeof r === "string" && (it.options || []).some((o) => o.key === r) ? [r] : null; };
+const pickChoice = (it) => (isMulti(it) ? pickKeys(it).slice() : recOf(it));
 // "A", "A and B", "A, B and C"; a ranked list is an order, so it reads "A, B, C".
 // A ready line names an option by its title, or by its letter when the title is missing, as its chip does. The none-key block keeps pickName's "".
 const optName = (it, key) => pickName(it, key) || letterOf(it, key);
@@ -1241,9 +1243,12 @@ function sorted() {
   // Newest answer first; a group sits at its newest member's time.
   const sentAt = (it) => Math.max(...mates(it).map((x) => Date.parse(sentOf(x).at) || 0));
   by.answered.sort((a, b) => sentAt(b) - sentAt(a) || a.n - b.n);
-  const age = (it) => Math.min(...mates(it).map((x) => ts(x.added)));
+  // An item with no valid date counts as oldest, so it comes last among the new items (it is never seen, so seen items still follow it); a group sits at its newest member, as the Answered section does.
+  const born = (x) => { const t = ts(x.added); return t === Infinity ? -Infinity : t; };
+  const age = (it) => Math.max(...mates(it).map(born));
   const dl = (it) => Math.min(...mates(it).map((x) => ts(x.by)));
-  const byAge = (a, b) => age(a) - age(b) || ts(a.added) - ts(b.added) || a.n - b.n;
+  // Newest first inside a tier (owner ruling page-newest-first, 2026-11-12 21:37 CST); rank and tiers still lead.
+  const byAge = (a, b) => age(b) - age(a) || born(b) - born(a) || b.n - a.n;
   // The writer's `rank` (lower first) orders items inside a tier; an unranked item follows the ranked ones. A group takes its best member's rank.
   const rk = (it) => Math.min(...mates(it).map((x) => (Number.isFinite(x.rank) ? x.rank : Infinity)));
   const byRank = (a, b) => { const x = rk(a), y = rk(b); return x === y ? 0 : x < y ? -1 : 1; };
@@ -1404,6 +1409,7 @@ function choose(it, key) {
   const cur = state.draft[it.id] || {};
   // A "none" note says what the owner wants instead. It does not carry over to an option.
   const patch = { choice: key, auto: false, act: null };
+  if (key !== null && key !== NONE) patch.picked = capturePick(it, key);
   if (key === null && stoodNow(it)) patch.unstood = true; // else my pick would stand again
   if (cur.choice === NONE && key !== NONE) patch.note = "";
   edited(); setDraft(it, patch); repaint(it);
@@ -1417,6 +1423,7 @@ function toggle(it, key) {
   const next = it.ranked === true ? (on ? [...cur, key] : cur.filter((k) => k !== key))
     : (it.options || []).map((o) => o.key).filter((k) => k === key ? on : cur.includes(k));
   const patch = { choice: next.length ? next : null, auto: false, act: null };
+  if (on) patch.picked = capturePick(it, key);
   if (!next.length && stoodNow(it)) patch.unstood = true;
   if ((eff(it) || {}).choice === NONE) patch.note = "";
   edited(); setDraft(it, patch); repaint(it);
@@ -1432,8 +1439,29 @@ function answerBody(it, d, at) {
   const typed = d.note != null ? d.note : "";
   if (d.act === "park") return { item: it.id, n: it.n, at, act: "park", note: typed };
   const body = { item: it.id, n: it.n, at, note: typed || (d.auto ? "accepted pick" : "") };
-  if (isRuling(it)) body.choice = OVERTURN; else if (it.kind === "decision") body.choice = d.choice || NONE; else if (d.done) body.done = true;
+  if (isRuling(it)) body.choice = OVERTURN; else if (it.kind === "decision") {
+    body.choice = d.choice || NONE; body.label = choiceLabel(it, body.choice, d.picked);
+    const oid = choiceOptionId(it, body.choice, d.picked);
+    if (oid != null) body.optionId = oid;
+  } else if (d.done) body.done = true;
   return body;
+}
+// What an option read when the owner picked it: its id (null when it has none) and its label as "A: Red". The draft keeps this per picked key, so a move of the letters between the pick and Send cannot change what the answer saves (ruling R60).
+const optionIdOf = (it, k) => { const o = (it.options || []).find((x) => x.key === k); return o && typeof o.id === "string" && o.id ? o.id : null; };
+const optionLabelOf = (it, k) => { const o = (it.options || []).find((x) => x.key === k), t = o && o.label != null ? String(o.label).trim() : ""; return letterOf(it, k) + (t ? ": " + t : ""); };
+const capturePick = (it, key) => Object.assign({}, (state.draft[it.id] || {}).picked, { [key]: { id: optionIdOf(it, key), label: optionLabelOf(it, key) } });
+// The id of the option picked (a list of ids for a multi item), saved beside the key so a later move of the letters cannot change which option the owner meant (ruling R60). `picked` is the draft's capture; a key it lacks reads the item as it is now. Absent when an option has no id, and for none of these.
+function choiceOptionId(it, choice, picked) {
+  if (choice === NONE) return null;
+  const one = (k) => picked && picked[k] ? picked[k].id : optionIdOf(it, k);
+  if (!Array.isArray(choice)) return one(choice);
+  const ids = choice.map(one);
+  return ids.every((x) => x !== null) ? ids : null;
+}
+// The saved answer's words, so a reader sees what the letter meant on the page: "A: Red" for a pick, a list of those for a multi item, "none of these" for none. `choice` stays the key and alone decides the answer.
+function choiceLabel(it, choice, picked) {
+  const one = (k) => picked && picked[k] ? picked[k].label : optionLabelOf(it, k);
+  return choice === NONE ? "none of these" : Array.isArray(choice) ? choice.map(one) : one(choice);
 }
 const edited = () => { state.barNote = ""; state.copyOffer = false; };
 
@@ -1447,7 +1475,7 @@ function readyText(it) {
   if (d.act === "park") return "Ready to send: park.";
   if (isRuling(it)) return d.choice === OVERTURN ? "Ready to send: overturn." : "";
   if (it.kind === "task") return d.done ? "Ready to send: done." : (d.note || "").trim() ? "Ready to send: note, not done." : "";
-  if (d.stood) return "My pick goes with your next Send.";
+  if (d.stood) return "The recommended option goes with your next Send.";
   if (!d.choice) return (d.note || "").trim() ? "Ready to send: none of these, with your note." : "";
   if (d.choice === NONE) return (d.note || "").trim() ? "Ready to send: none of these." : "Say what you want instead.";
   if (isMulti(it)) return validKeys(it, d.choice) ? "Ready to send: " + namesOf(it, d.choice) + (it.ranked === true ? ", your order." : ", your choice.") : "";
@@ -1456,11 +1484,11 @@ function readyText(it) {
 // The longest lines a multi item's ready line can show: every option ticked, with each ending, and the lines with no tick.
 function readyFits(it) {
   const all = "Ready to send: " + namesOf(it, (it.options || []).map((o) => o.key));
-  return [all + (it.ranked === true ? ", your order." : ", your choice."), "Ready to send: none of these, with your note.", "My pick goes with your next Send."];
+  return [all + (it.ranked === true ? ", your order." : ", your choice."), "Ready to send: none of these, with your note.", "The recommended option goes with your next Send."];
 }
 // The AI sparkle: a four-point star with two small ones. It takes the colour of its box.
 function sparkle() {
-  const b = h("b", { class: "spark", "aria-label": "My pick", title: "My pick" });
+  const b = h("b", { class: "spark", "aria-label": "Recommended", title: "Recommended" });
   b.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M10 4c.7 4.6 2.9 6.8 7.5 7.5-4.6.7-6.8 2.9-7.5 7.5-.7-4.6-2.9-6.8-7.5-7.5C7.1 10.8 9.3 8.6 10 4z"/><path d="M19 2.5c.3 1.8 1 2.5 2.8 2.8-1.8.3-2.5 1-2.8 2.8-.3-1.8-1-2.5-2.8-2.8 1.8-.3 2.5-1 2.8-2.8z"/><path d="M19 15c.25 1.4.8 1.95 2.2 2.2-1.4.25-1.95.8-2.2 2.2-.25-1.4-.8-1.95-2.2-2.2 1.4-.25 1.95-.8 2.2-2.2z"/></svg>';
   return b;
 }
@@ -1524,10 +1552,11 @@ function optCard(it, o, chosen) {
   // On a ranked item the tick box holds the rank number.
   const headKids = multi ? [h("span", { class: "tick" + (ranked ? "" : " mark"), "aria-hidden": "true" }, ranked && sel ? String(at + 1) : ""), key, lab] : [key, lab];
   const body = [
-    h("p", { class: "how" + (on("how") ? " dif" : ""), id: "h-" + sfx }, mark("how"), o.how, tail("how")),
+    h("p", { class: "how" + (on("how") ? " dif" : ""), id: "h-" + sfx }, mark("how"), o.how, tail("how"),
+      typeof o.note === "string" && o.note.trim() ? h("span", { class: "optnote" }, o.note) : null),
     hasOptLinks(it) ? (linksOf(o).length ? h("div", { class: "links", id: "k-" + sfx }, linksOf(o).map(linkEl)) : h("span", { class: "nolinks" })) : null,
     h("div", { class: "tr", id: "t-" + sfx }, o.widens === true ? h("p", { class: "stake due dwarn widens" }, glyph("due"), h("span", {}, "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo")) : null, h("div", { class: "gain" + (on("gain") ? " dif" : "") }, mark("gain"), h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain), tail("gain")), h("div", { class: "lose" + (on("lose") ? " dif" : "") }, mark("lose"), h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose), tail("lose"))),
-    pi >= 0 ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), !multi ? it.why : ranked ? ordinal(pi + 1) + "." + (pi === 0 ? " " + (it.why || "") : "") : pi === 0 ? it.why : "Also my pick.") : h("span", { class: "nopick" })];
+    pi >= 0 ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), !multi ? it.why : ranked ? ordinal(pi + 1) + "." + (pi === 0 ? " " + (it.why || "") : "") : pi === 0 ? it.why : "Also recommended.") : h("span", { class: "nopick" })];
   if (!ranked) return h("label", { class: "opt" + (sel ? " sel" : ""), for: id }, pic, input, h("span", { class: "head" }, ...headKids), ...body);
   const n = list.length;
   const mv = (dir) => {
