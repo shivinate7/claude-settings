@@ -1131,11 +1131,11 @@ class LaneLint(LaneFixture):
             return self.run_lane(*argv)
 
     def assert_mutation_test_runs_at(self, head, count):
-        """The mutate command ran `count` times, each in a detached tree at `head`, and every tree is gone afterwards."""
+        """The mutate command ran `count` times, each in a detached tree on the lint's merge commit of `head` into main, and every tree is gone afterwards."""
         calls = self.mutation_test_calls()
         self.assertEqual(len(calls), count, "the mutation test run started %d times, want %d" % (len(calls), count))
         for call in calls:
-            self.assertEqual(call["head"], head, "the mutation test run ran on a head other than the PR head")
+            self.assert_lint_merge(call["head"], head, "main")  # the one home of the merge-commit read
             self.assertTrue(call["detached"], "the mutation test run ran on a branch, not a detached tree")
             self.assertNotEqual(call["cwd"], os.path.realpath(self.co), "the mutation test run ran in the lane checkout")
             self.assertFalse(os.path.exists(call["cwd"]), "the mutate tree is still on disk")
@@ -1143,7 +1143,7 @@ class LaneLint(LaneFixture):
         self.assertEqual(self.worktrees(), 1, "a worktree is still listed after the lint")
 
     def assert_one_mutation_test_run(self, head):
-        """The mutate command ran once, in a detached tree at `head`, and both trees are gone afterwards."""
+        """The mutate command ran once, in a detached tree on the lint's merge commit of `head` into main, and both trees are gone afterwards."""
         self.assert_mutation_test_runs_at(head, 1)
 
     def push_sharded_lane(self, jobs, shards=None):
@@ -3843,10 +3843,10 @@ class BatchHeadMutation(LaneFixture):
         return tm.sh(self.co, "git", "diff", "--name-only", "origin/main", head).splitlines()
 
     def assert_lint_ran_at(self, head, text):
-        """The scope of a pre-join case: the lint ran once, in a tree at `head`."""
+        """The scope of a pre-join case: the lint ran once, in the lint's merge commit of `head` into main."""
         runs = self.lint_calls()
         self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
-        self.assertEqual(runs[0]["head"], head, "the lint ran on a tree other than the head: " + text)
+        self.assert_lint_merge(runs[0]["head"], head, "main")  # the lint tree is the merge of main and the head
 
     def pre_join(self, comments, role="batch-runner"):
         """The batch runner's pre-join call: `merge --lane-lint 7` in a cloud session, through the real Host on the gh shim, with `comments` as the
@@ -3873,7 +3873,7 @@ class BatchHeadMutation(LaneFixture):
         self.assert_lint_ran_at(head, text)
         calls = self.mutation_test_calls()
         self.assertEqual(len(calls), 1, "the mutation test run started %d times, want once: %s" % (len(calls), text))
-        self.assertEqual(calls[0]["head"], head, "the mutation test run ran on a head other than the one linted: " + text)
+        self.assert_lint_merge(calls[0]["head"], head, "main")  # the mutation tree is the lint's merge commit of main and the head
         self.assertNotIn(MUTATE_SKIPPED, text, "the mutation test run started, and the lint also printed the skip line: " + text)
 
     def test_the_batch_runners_pre_join_lint_of_a_head_with_a_hand_off_pass_starts_no_mutation_run_and_says_it_was_skipped(self):
