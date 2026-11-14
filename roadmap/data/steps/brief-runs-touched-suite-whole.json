@@ -1,7 +1,7 @@
 {
  "id": "brief-runs-touched-suite-whole",
  "title": "A builder brief names the whole file of each test suite the diff can break",
- "status": "todo",
+ "status": "folded",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "A builder ran only selected test_merge classes and missed that a test double (FakeHost) lacked the new seams.",
  "source": "Lane gh-quota-budget (PR #3288) to triage 20:04 CST Nov 13; the lane's read, unchecked by triage.",
- "note": "Filed 20:05 CST Nov 13. Fix: a builder brief names the whole file of every test suite the diff can break, and the done check runs those whole files, not selected classes. Home: the brief rules (roles-brief-contents; check briefs through skill or hook, to be found by the lane). Duplicate check owed: similar steps builder-brief-names-code-check and brief-from-step; the lane reads both first. Red case first.",
- "updatedAt": "2026-11-13T20:05:36-06:00"
+ "note": "Filed 20:05 CST Nov 13. Fix: a builder brief names the whole file of every test suite the diff can break, and the done check runs those whole files, not selected classes. Home: the brief rules (roles-brief-contents; check briefs through skill or hook, to be found by the lane). Duplicate check owed: similar steps builder-brief-names-code-check and brief-from-step; the lane reads both first. Red case first. Coordinator 20:08 CST Nov 13 (20:07): folded under step brief-from-step as part 3 (one home for brief content); its lane builds it after #3261 lands. No new lane. No rule on main says \"whole file\" (grep of agents/ and skills/ 20:07). builder-brief-names-code-check is ready with PR #2204, a different check.",
+ "updatedAt": "2026-11-13T20:08:11-06:00"
 }

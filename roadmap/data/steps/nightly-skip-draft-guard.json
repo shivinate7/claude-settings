@@ -1,7 +1,7 @@
 {
  "id": "nightly-skip-draft-guard",
  "title": "nightly-skip now runs on every event, so every draft PR push starts one ubuntu runner; add a draft guard that fits the lint",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL3n4EBCRV5dQ7Y8GVZ",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Decision draft-until-reviewed says CI skips drafts, and PR #3292 lets one cheap job run on each draft push.",
  "source": "Lane all-jobs-passed-docs-only-red (session_013NEJL2mVxp6aijDQkbL7Rd), 16:58 CST Nov 13, on PR #3292 (head bbcec1566f); the round 1 reviewer's read of checks.yml; unchecked by triage.",
- "note": "Filed 16:59 CST Nov 13. PR #3292 fixes the red gate (step all-jobs-passed-docs-only-red) by running nightly-skip on every event. Cost: one cheap ubuntu runner per draft push, unmeasured. A job guard `!github.event.pull_request.draft` would avoid it, but the new lint demands no job-level `if` on that job. Fix: a draft guard that FITS the lint; do not relax the lint to fit this repo (owner ruling: a repo changes to fit a shared tool, never the tool to fit a repo). Also test it against the skipped-ancestor bug that caused the red gate. Follow-up to #3292; waits for it to merge. Past rulings not checked. Not started. Coordinator 19:54 CST Nov 13 (19:53, owner asked it to start the lanes): lane started, session_013NEJL3n4EBCRV5dQ7Y8GVZ (Sonnet, medium; searches for duplicates first).",
- "updatedAt": "2026-11-13T19:54:01-06:00"
+ "note": "Filed 16:59 CST Nov 13. PR #3292 fixes the red gate (step all-jobs-passed-docs-only-red) by running nightly-skip on every event. Cost: one cheap ubuntu runner per draft push, unmeasured. A job guard `!github.event.pull_request.draft` would avoid it, but the new lint demands no job-level `if` on that job. Fix: a draft guard that FITS the lint; do not relax the lint to fit this repo (owner ruling: a repo changes to fit a shared tool, never the tool to fit a repo). Also test it against the skipped-ancestor bug that caused the red gate. Follow-up to #3292; waits for it to merge. Past rulings not checked. Not started. Coordinator 19:54 CST Nov 13 (19:53, owner asked it to start the lanes): lane started, session_013NEJL3n4EBCRV5dQ7Y8GVZ (Sonnet, medium; searches for duplicates first). Lane measure 20:08 CST Nov 13 (via the coordinator 20:07; REST, floor because of a 1000-run page cap): 94 nightly-skip jobs in the last 24 h of checks.yml pull_request runs, 87 on draft pushes, 3.0 s average, 7 s max, about 4.3 runner-minutes; the repo is public (REST private=false, 20:07), so no billing. Cost is small: nothing to build. Closed by triage.",
+ "updatedAt": "2026-11-13T20:08:11-06:00"
 }
