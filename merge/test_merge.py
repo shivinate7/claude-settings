@@ -18165,9 +18165,18 @@ class ProseJudge(Env):
         sh(self.other, "git", "fetch", "-q", "origin")
         return set(sh(self.other, "git", "diff", "--name-only", "origin/main...origin/feat").split())
 
+    def setup_ruling(self, main_files):
+        """setup_range for the ruling PR, then the records page the generator writes for the head, committed on the head. The merge's records
+        check rebuilds the page on the merged tree and stops the merge when the head's page would change, so the ruling PR carries it."""
+        self.setup_range(main_files, {RULING_PATH: RULING_DOC})
+        o = self.other
+        sh(o, sys.executable, merge.RECORDS, "--root", o, "--records-only")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: the records page the generator writes for this head")
+        sh(o, "git", "push", "-q", "origin", "feat")
+
     def assert_where_else_unknown(self, answer, cause):
         """One where-else UNKNOWN line naming `cause`, no candidate line, and the merge landed with exit status 0: the judge is report-only."""
-        self.setup_range(SECTIONS, {RULING_PATH: RULING_DOC})
+        self.setup_ruling(SECTIONS)
         before = self.head("main")
         stub, rc, out = self.judge(route(answer))
         lines = where_else_unknown_lines(out)
@@ -18178,8 +18187,9 @@ class ProseJudge(Env):
         self.assertNotEqual(self.head("main"), before, "origin main did not move: the merge did not land\n" + out)
 
     def test_a_ruling_pr_sends_the_ruling_and_the_section_files_in_one_where_else_call(self):
-        self.setup_range(SECTIONS, {RULING_PATH: RULING_DOC})
-        self.assertEqual(self.changed_paths(), {RULING_PATH}, "scope: the PR must land the ruling and nothing else")
+        self.setup_ruling(SECTIONS)
+        self.assertEqual(self.changed_paths(), {RULING_PATH, merge.RECORDS_PAGE},
+                         "scope: the PR must land the ruling and its records page, and nothing else")
         stub, rc, out = self.judge(route(no_places))
         where = [p for p in stub.prompts if SECTION_PATH in p]
         self.assertEqual(len(where), 1, "where-else calls: %d, want 1: one ruling PR makes one call\n%s" % (len(where), out))
@@ -18189,7 +18199,7 @@ class ProseJudge(Env):
                          "the where-else prompt does not say that other repos are unread")
 
     def test_a_where_else_reply_naming_a_section_prints_one_candidate_line(self):
-        self.setup_range(SECTIONS, {RULING_PATH: RULING_DOC})
+        self.setup_ruling(SECTIONS)
         stub, rc, out = self.judge(route(lambda prompt: (WHERE_ELSE_REPLY, None)))
         candidates = where_else_candidates(out)
         self.assertEqual(len(candidates), 1, "candidate lines: %d, want 1: one reply that names one place\n%s" % (len(candidates), out))
@@ -18219,7 +18229,7 @@ class ProseJudge(Env):
 
     def test_a_tree_with_sixty_section_files_names_every_one_in_the_where_else_prompt(self):
         sections = {**SECTIONS, **{"tests/guard/s%05d-case-%d.py" % (n, n): "# section %d\n" % n for n in range(1, 60)}}
-        self.setup_range(sections, {RULING_PATH: RULING_DOC})
+        self.setup_ruling(sections)
         stub, rc, out = self.judge(route(no_places))
         where = [p for p in stub.prompts if SECTION_PATH in p]
         self.assertEqual(len(where), 1, "where-else calls: %d, want 1 for sixty section files\n%s" % (len(where), out))
