@@ -23,7 +23,7 @@ A job name maps to a job when exactly one job has it as `name:` or key. Two matc
 The empty-run rule (decision no-merge-onto-red-main). A push can run no suite: push-skip skips the whole run, or a docs-only push turns every
 scope flag off. That run concludes `success` and must not hide an older red run of its group. A completed `success` run of the push
 group (the events of events.json that share a group with `push`: push and workflow_dispatch) is EMPTY when no job of it concluded
-`success` except the bookkeeping jobs `scope` and `push-skip`. An empty run is a verdict only when it carries evidence: its `push-skip`
+`success` except the bookkeeping jobs `scope`, `push-skip` and `nightly-skip`. An empty run is a verdict only when it carries evidence: its `push-skip`
 job is `success` and its `scope` job is `skipped`, which is the path where push-skip.py found the push tree equal to the head tree of a
 pull request whose run passed (decision push-skip-on-proven-tree; checks.yml, jobs push-skip and scope). Only a `push` run carries evidence: a dispatch runs no
 push-skip job. `empty_without_evidence` is that test; a caller walks past such a run to the group's newest run that is not, and when the
@@ -233,7 +233,7 @@ def rule_events():
 
 def empty_without_evidence(jobs, event):
     """True when a completed `success` run of `event` (a push-group event) ran no check and carries no evidence (the module docstring).
-    Empty: no job but `scope` and `push-skip` concluded success. Evidence: a `push` run whose push-skip job is success and scope job is skipped.
+    Empty: no job but `scope`, `push-skip` and `nightly-skip` concluded success. Evidence: a `push` run whose push-skip job is success and scope job is skipped.
     Callers check the run-level conditions (the event is in rule_events, the run concluded success) before they read the jobs."""
     if any(j.get("status") == "completed" and j.get("conclusion") == "success" and j["name"] not in BOOKKEEPING for j in jobs):
         return False

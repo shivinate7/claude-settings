@@ -334,11 +334,12 @@ pull requests skips at its CI steps the same way. A skipped job fails the rollup
 
 The `push-skip` job asks the shared action whether the pushed commit's tree is the head tree of a
 merged PR whose run passed. `scope` waits on the job. The suite jobs need `scope`, so a skip
-reaches every job through `needs`, and the run ends green.
+reaches every job through `needs`, and the run ends green. The job starts on every event and its
+steps run on a push only. A job-level `if` would leave it skipped on a pull request. A skipped
+needed job fails the rollup.
 
 ```yaml
   push-skip:
-    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -350,9 +351,11 @@ reaches every job through `needs`, and the run ends green.
       skip: ${{ steps.decide.outputs.skip }}
     steps:
       - uses: actions/checkout@<full-sha>  # v5.0.0
+        if: ${{ github.event_name == 'push' }}
         with: {persist-credentials: false}
       - name: Decide whether the push can skip
         id: decide
+        if: ${{ github.event_name == 'push' }}
         uses: shivinate7/claude-settings/actions/push-skip@<full-sha>  # <version>
         env:
           GH_TOKEN: ${{ github.token }}
