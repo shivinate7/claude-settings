@@ -316,11 +316,8 @@ def run(path, raw, cfg, args=(), extra_env=None):
         env.pop(name, None)
     env.update(CLAUDE_CONFIG_DIR=cfg, HOME=home, USERPROFILE=home)
     env.update(extra_env or {})
-    try:
-        cp = subprocess.run([sys.executable, path, *args], input=raw, capture_output=True,
-                            env=env, cwd=home, timeout=30)
-    except subprocess.TimeoutExpired:
-        return Proc(-1, "", "timed out after 30 s")
+    cp = subprocess.run([sys.executable, path, *args], input=raw, capture_output=True,
+                        env=env, cwd=home)
     return Proc(cp.returncode, cp.stdout.decode("utf-8", "replace"),
                 cp.stderr.decode("utf-8", "replace"))
 
@@ -3312,7 +3309,7 @@ def plain_folder(base):
 
 def in_a_repo(path):
     cp = subprocess.run(["git", "-C", path, "rev-parse", "--is-inside-work-tree"],
-                        capture_output=True, timeout=30)
+                        capture_output=True)
     return cp.returncode == 0
 
 
@@ -4291,11 +4288,11 @@ def case_page_form_closed_not_page_form_passes():
 
 
 def case_fixture_git_has_no_wall_clock_bound():
-    """The fixture git helper carries no wall-clock bound: a slow runner can pass any fixed one, and a fixed
-    timeout then fails a case that is correct. A fake runner records each call's kwargs and raises
-    TimeoutExpired for any call with a timeout, as a slow runner would. Both calls must reach the fake, and
-    neither may time out."""
-    name = "fixture git: no wall-clock bound"
+    """The fixture helpers git(), run() and in_a_repo() carry no wall-clock bound: a slow runner can pass any
+    fixed one, and a fixed timeout then fails a case that is correct. A fake runner records each call's kwargs
+    and raises TimeoutExpired for any call with a timeout, as a slow runner would. Every helper call must reach
+    the fake, and none may time out."""
+    name = "fixture helpers: no wall-clock bound"
     calls, timed_out = [], []
     real_run = subprocess.run
 
@@ -4305,17 +4302,23 @@ def case_fixture_git_has_no_wall_clock_bound():
             raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
         return subprocess.CompletedProcess(argv, 0, stdout=b"", stderr=b"")
 
+    script, cfg = os.path.join(ROOT, "trivial.py"), new_cfg()
+    steps = (
+        ("git hash-object", lambda: git(ROOT, "hash-object", "-w", "--stdin-paths", stdin=b"x\n")),
+        ("git status", lambda: git(ROOT, "status")),
+        ("run", lambda: run(script, b"", cfg)),
+        ("in_a_repo", lambda: in_a_repo(ROOT)),
+    )
     subprocess.run = slow_runner
     try:
-        for label, args, stdin in (("hash-object", ("hash-object", "-w", "--stdin-paths"), b"x\n"),
-                                   ("status", ("status",), None)):
+        for label, step in steps:
             try:
-                git(ROOT, *args, stdin=stdin)
+                step()
             except subprocess.TimeoutExpired as exc:
                 timed_out.append("%s after %ss" % (label, exc.timeout))
     finally:
         subprocess.run = real_run
-    check(name + ": scope, both calls reached the fake runner", len(calls) == 2,
+    check(name + ": scope, all 4 helper calls reached the fake runner", len(calls) == 4,
           "%d calls reached the fake" % len(calls))
     check(name + ": no call passes a timeout", all(kw.get("timeout") is None for kw in calls),
           "timeouts passed: %s" % [kw.get("timeout") for kw in calls])
