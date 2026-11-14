@@ -80,9 +80,11 @@ a turn end in these cases:
     (its home gets the check above), an open `[page]` item (its send gets the check above), or
     `[note] -> not-a-grant`. Lines inside the message's fence are text, never items. For a block
     with a grant, a ruling home may also be `settings.json` or `.claude/CLAUDE.md` at the repo root
-    (GRANT_ROOT_HOMES), if some branch tracks it. A lone short message counts. Risk kind: named
+    (GRANT_ROOT_HOMES), if some branch tracks it. A lone short message counts. A block's first line that
+    starts `Grant:` and holds a Central time (such as 19:53 CST) is the owner's record of a grant, and is
+    not read for grant words; every other line is. Risk kind: named
     incident. F47 (an all-repos grant left in chat) and F31 (a grant homed to the handoff), same
-    audit. Cost: two regexes on text already in memory;
+    audit. Cost: two regexes on text already in memory, and one match on the first line;
   - page-form-to-template (roadmap step page-feedback-to-template; ruling c164: a waiting-page comment is never
     answered with a thread reply, the item is rewritten). In the claude-settings repo (layout.repo_name equals
     shared_names.SETTINGS_REPO) and in the page writer's session (the transcript's newest meta/page get names the
@@ -885,9 +887,20 @@ def unfenced(text):
     return "\n".join(kept)
 
 
-def is_grant(text):
-    """True when the message, fenced text left out, holds a grant word and an act or scope word."""
-    plain = unfenced(text)
+GRANT_LINE = re.compile(r"Grant:.*\d{1,2}:\d{2} C[SD]T")
+
+
+def without_grant_line(text):
+    """`text` without its first line when that line starts `Grant:` and holds a Central time. The line is the
+    owner's record of a grant, so its own words are not a new grant."""
+    first, _, rest = text.partition("\n")
+    return rest if GRANT_LINE.match(first) else text
+
+
+def is_grant(text, skip_grant_line=False):
+    """True when the message, fenced text left out, holds a grant word and an act or scope word. With
+    `skip_grant_line`, a Grant line is left out too."""
+    plain = unfenced(without_grant_line(text) if skip_grant_line else text)
     return GRANT.search(plain) is not None and ACT.search(plain) is not None
 
 
@@ -904,7 +917,7 @@ def grant_problem(b, text, items):
     (its own check judges the path), an open [page] item (its own check judges the send), a
     `[note] -> not-a-grant` item, or an open `[note] -> once:<act>` item when the message holds no standing
     word. `items` holds item() of each item line of the block."""
-    if not is_grant(text):
+    if not is_grant(text, skip_grant_line=True):
         return None
     for it in items:
         if it is None or not it[2]:
