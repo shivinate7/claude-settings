@@ -67,6 +67,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    each lane head before the build starts, once per lane. A red lane does not join. Before it marks
    the PR ready, the batch runner runs `~/.claude/bin/merge --lane-lint <PR number>`
    on the head, after the draft step's page push. The ready route (`merge <pr> --ready`) runs the records step and the repo's ready checks (`merge.readyChecks`).
+   A lane run of `merge --lane-lint` goes through `verdict` in the background with a Bash `timeout` above the merge tool's bound
+   (`LINT_SECONDS` plus `PUSHED_HEAD_WAIT_MINUTES` times 60, in ms); a shorter limit ends it with no verdict (guard rule `check-timeout`).
    A lane's `merge --lane-lint <pr> --touched-tests` runs each test file the diff touches, once, in the lint worktree, after the lint passes. That catches a test that fails only on that head before the CI run. A ref target posts no comment, so it cannot
    satisfy the join. A FAIL keeps it a draft. The lint counts a clash between two heads only when both
    merge clean with their base (decision `lanes-run-no-full-ci-job`). A hand list of checks never stands in for that run: `bin/ci-job`
