@@ -1,14 +1,14 @@
 {
  "id": "combine-tournament",
  "title": "A Workflow of Sonnet agents merges combined PRs pairwise on dry trees round by round while CI runs; the real PR is built once from the last round",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "wf_536c232a-608",
  "owner": "triage",
  "blockedBy": [],
  "why": "Owner idea 21:45 CST Nov 13, in runner 10's chat (relayed by the consultant): combine the merge queues further and further while a run is already in CI, instead of one big serial queue.",
  "source": "Consultant 21:46 CST Nov 13, relaying runner 10 relaying the owner.",
- "note": "Triage 21:46 CST Nov 13: under step batch-runner-scales. Shape per the consultant: a Workflow of Sonnet agents takes two large combined PRs each, merges them pairwise on dry trees (no push), round by round (8 combine to 4, then further) while CI runs; a clashing member leaves by name to its lane; the real PR is built from the last round on the newest main, linted once, one CI run. Runner 10 runs it (its Workflow grant, ruling own-runner-workflow-optin, covers Sonnet agents); the coordinator tracks. Merges stay serial. Nothing here is measured: the number of rounds, the clash rate (runner 10's dry runs found 46 of 62 members clean for combine-m2, 17 of 990 pairs clashing in set 1) and the time saved are unmeasured by triage.",
- "updatedAt": "2026-11-13T21:46:34-06:00"
+ "note": "Triage 21:46 CST Nov 13: under step batch-runner-scales. Shape per the consultant: a Workflow of Sonnet agents takes two large combined PRs each, merges them pairwise on dry trees (no push), round by round (8 combine to 4, then further) while CI runs; a clashing member leaves by name to its lane; the real PR is built from the last round on the newest main, linted once, one CI run. Runner 10 runs it (its Workflow grant, ruling own-runner-workflow-optin, covers Sonnet agents); the coordinator tracks. Merges stay serial. Nothing here is measured: the number of rounds, the clash rate (runner 10's dry runs found 46 of 62 members clean for combine-m2, 17 of 990 pairs clashing in set 1) and the time saved are unmeasured by triage. Started 21:48 CST Nov 13 (coordinator 21:48, runner 10's account; unchecked by triage): workflow wf_536c232a-608 (task wdc9jfv8q), Explore agents run on the role's model, read-only, no pushes. Round 1 (2 agents in parallel): A = #3331's 19 clean-with-#3314 members + #3332's 28; B = #3333's #3109 + #3335. Round 2 (1 agent) folds the two proven lists. Base = main 309fa5ed5b28 + #3314 head ad8c791056b7 as stand-in. #3338 joins a second pass on lint PASS; #3340 held for the owner. Agents report start and end UTC, so round times and the clash rate come measured; the coordinator sends the table when it ends. The runner's first launch was refused by the model-cap hook because the call named a model; it dropped the field.",
+ "updatedAt": "2026-11-13T21:48:40-06:00"
 }
