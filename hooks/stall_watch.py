@@ -855,7 +855,8 @@ def stopped_ids(content):
     m = STOPPED.match(msg) if isinstance(msg, str) else None
     return [m.group(1)] if m else []
 
-CI_VERDICT = re.compile(r"^CI (green|red|cancelled|unknown) on \S", re.M)
+# "finished" is the word actions/ci-done-comment/comment.sh puts in its red line; test CI94 runs that script, so the pattern follows it.
+CI_VERDICT = re.compile(r"^CI (?:finished )?(green|red|cancelled|unknown) on \S", re.M)
 CI_KEYS = (b"ready", b"pull_request", b"merge", b"send_later", b"create_trigger", b"CronCreate",
            b"ScheduleWakeup", b"CI ", b"close", b'"is_error":true', b'"is_error": true')
 CI_CHECKIN_TOOLS = ("send_later", "create_trigger", "CronCreate", "ScheduleWakeup")
