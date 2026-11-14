@@ -61,15 +61,15 @@ The payload must carry an `agent_id`. The main session, reviewers, Explore, and 
 
 ## Where a test-support helper lives
 
-A test-support helper lives in one place: a flat `_test_<name>.py` file beside the tests that use it, such as `lint/_test_git.py` and `lint/_test_temp.py`.
+A test-support helper lives in the top-level `testing/` folder, such as `testing/tracked_tree.py` and `testing/shallow_clone.py`. A test-author writes it. A helper that is private to one test stays inside that test file.
 
-- The guard's `TEST_BASENAME` in `hooks/guard.py` is anchored (`^test_.*\.py`). A leading underscore is not a test path, so a builder writes the helper and a test-author may not.
-- `TEST_FILE` in `lint/test_windows_split.py` and `TEST_PATTERNS` in `.github/scripts/touched-tests.py` do not match it, so it needs no run step in `checks.yml`. A plain `test_<name>.py` helper would fail CiCoverage and run as a script.
-- `check_landed_dirs` accepts a flat file and refuses a subfolder of a landed folder, such as `test_support/`. It accepts no new path form.
-- Roles: the builder writes the helper. The test-author writes the test that imports it.
-- `hooks/test_refusal_note.py` and `hooks/test_mutate_js.py` are real suites with run steps in `checks.yml`, not helpers.
-- Two hook checks still read a `_test_` helper under `hooks/` (their skip lists name only `test_`, `mutate_`, `prove_`): `lint/check_hook_dup_names.py` (skip at line 87 is `test_` only) fails a name assigned twice in one file, and `lint/check_layout.py` (`NOT_READERS`, line 42) fails a record path literal (a string constant naming a record folder path). So a helper assigns no top-level name twice and holds no record path literal. Adding `_test_` to those skip lists would widen shared checks and needs the owner's ruling; none is taken here.
-- Run against an empty probe file, `hooks/_test_cost_probe.py` (a scratch file, removed): `guard.py` `is_builder_test_rel` False and `author_path_ok` False; `TEST_FILE` and `TEST_PATTERNS` no match; `check_landed_dirs`, `check_layout`, `check_hook_stubs`, `check_hook_dup_names`, `check_glossary`, `check_record_slugs` all PASS.
+- A builder is refused in `testing/`: `TEST_DIRS` in `hooks/guard.py` holds `"testing"`. Run on `testing/cost_probe.py`, the guard's builder test-path check and `author_path_ok` both return True.
+- `testing/` is not a landed folder (`landed-dirs.txt` does not list it), so `check_landed_dirs` never reads it (`lint/test_check_landed_dirs.py`, the unlanded-subfolder case). Tests already import from it: `lint/test_check_landed_dirs.py` puts `testing/` on `sys.path` and imports `tracked_tree`.
+- A subfolder of a landed folder, such as `hooks/test_support/`, fails `check_landed_dirs`.
+- A helper named `test_<name>.py` needs a run step in `checks.yml` (`CiCoverage` and `TEST_FILE` in `lint/test_windows_split.py`) and runs as a script (`TEST_PATTERNS` in `.github/scripts/touched-tests.py`).
+- A helper a builder may write would let builder code decide what tests import. That works against "a green run must mean the code is right".
+- Lane `test-helper-has-a-home` (the lane for this record, asked 04:22 CST) carried `hooks/test_support/` over from an older design and never considered `testing/`. Nothing was tried there, so nothing broke.
+- Unproven: a hooks test would import the helper with `sys.path.insert(0, os.path.join(HERE, "..", "testing"))`, the insert the lint tests use. No lane has run it.
 
 ## The shell check
 

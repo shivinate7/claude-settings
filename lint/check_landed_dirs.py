@@ -227,8 +227,7 @@ def main():
     if nested:
         fail(
             "file(s) in a subfolder of a landed folder: install.sh's land_dir lands only "
-            "top-level files, so they never reach ~/.claude there. A test helper goes in a flat "
-            "_test_<name>.py file beside its tests; a builder writes it: %s" % ", ".join(nested)
+            "top-level files, so they never reach ~/.claude there: %s" % ", ".join(nested)
         )
 
     check_install_sh(read(INSTALL_SH_PATH), manifest_dirs)
