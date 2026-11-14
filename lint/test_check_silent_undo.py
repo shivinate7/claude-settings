@@ -2162,6 +2162,34 @@ class RestoredLine(MainLineDrop, unittest.TestCase):
         self.assertTrue(any("added by main" in g for g in got), "no finding names the dropped line: %r" % got)
 
 
+REMEDY_BEGIN, REMEDY_END = "--- begin commit message ---", "--- end commit message ---"  # the marker lines a refusal prints around its message
+PROOF = "git log -1 --format='%(trailers:key=Drops-lines)'"  # the command a refusal prints to read the trailer back
+
+
+def printed_message(text):
+    """The commit message a refusal prints: the unprefixed lines between the two marker lines, each with its newline.
+    None when the text holds no such block, or a marker more than once."""
+    lines = text.splitlines()
+    if lines.count(REMEDY_BEGIN) != 1 or lines.count(REMEDY_END) != 1:
+        return None
+    i, j = lines.index(REMEDY_BEGIN), lines.index(REMEDY_END)
+    return "\n".join(lines[i + 1:j]) + "\n" if i < j else None
+
+
+def read_back(message):
+    """Commits `message` in a scratch repo, with a real path and reason in place of the placeholders, and reads the
+    Drops-lines trailer back with git. -> what git reads: empty when the line is not in the last paragraph."""
+    text = message.replace("<path>", "app.txt").replace("<reason>", "the owner wants Card back")
+    scratch = Repo()
+    path = os.path.join(scratch.tmp.name, "COMMIT_MSG")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    scratch.put("note.txt", "a file\n")
+    scratch.sh("add", "-A")
+    scratch.sh("commit", "-q", "-F", path)
+    return scratch.sh("log", "-1", "--format=%(trailers:key=Drops-lines)")
+
+
 class DropsLinesHint(unittest.TestCase):
     """A `Drops-lines:` line that git does not parse as a trailer (it is not in the last paragraph) excuses nothing.
     A refusal names the commit and says where the trailer goes. The hint never excuses a finding, and it shows
@@ -2301,6 +2329,64 @@ class DropsLinesHint(unittest.TestCase):
         text = out.getvalue() + "\n" + str(cm.exception)
         self.assertIn("app.txt", str(cm.exception))  # the refusal holds
         self.assertTrue(any(sha[:7] in l and self.HINT in l for l in text.splitlines()), text)
+
+    # ------------------------------------------------ the remedy a refusal prints
+
+    def remedy_run(self):
+        """PR 1 lands and `oops` reverts it, so main() refuses the branch. -> (rc, the text main() prints)."""
+        self.land_pr()
+        self.revert_with("Bring Card back")
+        return self.run_main(["--upstream", "origin/main", "--head", "HEAD", "--repo", self.r.dir], "utf-8")
+
+    def test_a_refusal_prints_a_complete_commit_message(self):
+        """The remedy is a commit message: a subject line, a blank line, then one last paragraph that holds the Drops-lines
+        line with Co-Authored-By and Claude-Session under it and no blank line between them."""
+        rc, text = self.remedy_run()
+        self.assertEqual(rc, 1, "premise: the refused check exits 1: %r" % text)
+        block = printed_message(text)
+        self.assertIsNotNone(block, "the refusal prints no commit message between the marker lines: %r" % text)
+        lines = block.splitlines()
+        self.assertTrue(lines, "the commit message block is empty: %r" % block)
+        self.assertTrue(lines[0].strip(), "the commit message has no subject line: %r" % block)
+        self.assertEqual(lines[1:2], [""], "the subject is not followed by a blank line: %r" % block)
+        last = lines[2:]
+        self.assertNotIn("", last, "the trailers are split by a blank line, so git reads only the part after it: %r" % block)
+        self.assertIn("Drops-lines: <path> -- <reason>", last, "the last paragraph has no Drops-lines line with placeholders: %r" % block)
+        self.assertTrue(any(l.startswith("Co-Authored-By:") for l in last), "the last paragraph has no Co-Authored-By line: %r" % block)
+        self.assertTrue(any(l.startswith("Claude-Session:") for l in last), "the last paragraph has no Claude-Session line: %r" % block)
+
+    def test_the_printed_message_reads_its_trailer_once_committed(self):
+        """The proof: committed with git, with a real path and reason in place of the placeholders, the printed message reads
+        back as a Drops-lines trailer."""
+        rc, text = self.remedy_run()
+        block = printed_message(text)
+        self.assertIsNotNone(block, "the refusal prints no commit message, so there is nothing to commit: %r" % text)
+        read = read_back(block)
+        self.assertIn("app.txt -- the owner wants Card back", read, "git reads no Drops-lines trailer from the printed message: %r" % read)
+
+    def test_the_refusal_prints_the_proof_command(self):
+        """After the commit, the refusal says how to read the trailer back."""
+        rc, text = self.remedy_run()
+        self.assertIn(PROOF, text, "the refusal does not print the proof command: %r" % text)
+
+    def test_a_green_check_prints_no_remedy(self):  # control: green on the old code, and must stay so
+        """No finding: no marker block and no proof command. The green output stays as it is."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", "clean")
+        r.commit("other work", other_txt="other v2\n")
+        rc, text = self.run_main(["--upstream", "origin/main", "--head", "HEAD", "--repo", r.dir], "utf-8")
+        self.assertEqual(rc, 0, "premise: a branch with no finding exits 0: %r" % text)
+        self.assertIsNone(printed_message(text), "a green check printed a commit message: %r" % text)
+        self.assertNotIn(PROOF, text, "a green check printed the proof command")
+
+    def test_a_drops_lines_line_in_its_own_paragraph_reads_as_nothing_and_is_hinted(self):  # control
+        """The pitfall the remedy's layout avoids: a Drops-lines line in its own paragraph above Co-Authored-By reads as no
+        trailer, and misplaced() names the commit."""
+        self.land_pr()
+        sha = self.revert_with(self.ABOVE)
+        self.assertEqual(self.parsed(sha), "", "fixture: git must not parse the line as a trailer")
+        hints = C.misplaced(self.r.dir, "origin/main..HEAD")
+        self.assertTrue(any(sha[:9] in h and self.HINT in h for h in hints), "misplaced() does not name the commit: %r" % hints)
 
     # ------------------------------------------------ reads of the message
 
