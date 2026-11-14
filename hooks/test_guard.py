@@ -114,6 +114,7 @@ FAMILIES = {
     "write": "the silent write",
     "readonly-shell-write": "a read-only agent's shell write: a redirect, tee, touch or mktemp, in the shell or inside an ssh command, is refused; its own scratchpad, the null devices, the reads, a writing role and a call with no agent pass",
     "push-delete": "push and delete",
+    "push-needs-review-record": "a shell git push asks while a PR known to the session has a reviewer or design-reviewer report (a notice, a hand-back, or a foreground result) that no posted review record clears; a record clears a report by its role, verdict and round, and by the reviewed head when the report names one; a posted Fix check line for a PR whose head branch is the push's destination is denied; the held-report cost; a PR-less session, a dry run, a non-push command, and a missing or unreadable transcript are allowed",
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
     "argv": "process arguments: a ps, pgrep or /proc form that prints other processes' full arguments is refused; pid-and-name forms, quoted or heredoc text and the guard's own readers pass",
