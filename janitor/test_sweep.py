@@ -5877,6 +5877,39 @@ class AgentOwnedProcessTests(_AgentEndFixture):
         self.run_stop(self.AGENT)
         self.assertIsNotNone(proc.poll(), "control: the headless marked process pid %d still runs at SubagentStop" % proc.pid)
 
+    def planted_lease_entry(self, pid, ended):
+        """AGENT's record with the sim-lease entry that bin/sim-lease writes for PID at a take (kind "sim-lease", a ps
+        start text). ENDED adds the mark a give leaves on it. The give's own write is pinned in lint/test_sim_lease.py
+        (LeaseRecord), so this case plants the record a give leaves."""
+        entry = {"pid": pid, "start": "Thu Nov 12 10:00:00 2026", "owner": self.AGENT, "kind": "sim-lease"}
+        if ended:
+            entry["ended"] = True
+        self.write_record(self.AGENT, [entry])
+
+    def owners_of(self, pid):
+        """The agents whose record lists PID now, read as the guard reads it (agent_procs.recorded_owners)."""
+        with mock.patch.dict(os.environ, {PROCS_DIR_NAME: self.procs_dir}):
+            return self.reap.agent_procs.recorded_owners(pid)
+
+    def test_a_stop_keeps_a_released_lease_entry_ended_so_its_pid_names_no_owner(self):
+        """SubagentStop keeps an ended mark that is already set. A give marks the agent's sim-lease entry ended, so the
+        released pid names no owner. The holder carries no marker, so the stop ends nothing, and its entry stays ended."""
+        holder = self.spawn(None)
+        self.planted_lease_entry(holder.pid, ended=True)
+        self.assertEqual(self.owners_of(holder.pid), [], "scope: the released lease of pid %d names an owner before SubagentStop" % holder.pid)
+        self.run_stop(self.AGENT)
+        owners = self.owners_of(holder.pid)
+        self.assertEqual(owners, [], "SubagentStop un-ended the released lease of pid %d; its record names %r" % (holder.pid, owners))
+
+    def test_control_a_live_lease_entry_still_names_its_owner_after_stop(self):
+        """Control: the same entry without the ended mark is a live lease, so SubagentStop leaves it naming its owner."""
+        holder = self.spawn(None)
+        self.planted_lease_entry(holder.pid, ended=False)
+        self.assertEqual(self.owners_of(holder.pid), [self.AGENT], "scope: the live lease of pid %d does not name its owner before SubagentStop" % holder.pid)
+        self.run_stop(self.AGENT)
+        owners = self.owners_of(holder.pid)
+        self.assertEqual(owners, [self.AGENT], "control: SubagentStop dropped the live lease owner of pid %d; it names %r" % (holder.pid, owners))
+
 
 def _sigkill_quietly(pid):
     """SIGKILL PID if it is still there. A test's cleanup: the process may be gone already."""
