@@ -51,8 +51,8 @@ os.environ.update(LC_ALL="C", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os
                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
 # CI sets none of these and a cloud session sets all three. A cloud session's values would make every `--confirm` case below meet the
 # merge-role check and make a role writer write the live session's role file. A case that needs one sets it (CloudSession.cloud).
-for _name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CONFIG_DIR"):
-    os.environ.pop(_name, None)
+for _name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_SESSION_ID", "CS_SESSION_ROLE"):
+    os.environ.pop(_name, None)  # the local role reads (a launcher run sets the last two) must not leak into a case
 
 def windows_slice(x):
     """Mark a test or a leaf class as Windows-specific. MERGE_TESTS=windows-slice runs only these.
@@ -19393,6 +19393,115 @@ class TouchesRead(Env):
         entry = "\n".join(lines[start:end])
         for kind in ("pull list", "pulls/N/files", "jobs read", "log read"):
             self.assertIn(kind, entry, f"the `merge --touches` entry of merge.py's docstring does not name the {kind} read")
+
+
+LOCAL_SID = "local-tier-check-session"  # what a local Bash call carries in CLAUDE_CODE_SESSION_ID
+LOCAL_OTHER = "local-tier-other-session"
+
+
+class LocalSessionRoleCheck(CloudSession):
+    """A local session's `merge <pr> --confirm` reads the role the launcher wrote for it: <config dir>/state/session-roles/<session id>.json,
+    {"session", "role", "repo"}. The id is the one a local Bash call carries in CLAUDE_CODE_SESSION_ID, and the cloud remote id is unset.
+    The session is judged by its OWN file: one that exists must name batch-runner, and a corrupt one refuses. With no own file the confirm
+    is today's, even when another session's file lingers. CS_SESSION_ROLE, when the launcher set it, must agree with the own file (rule (c)).
+    run_main is overridden to run as a local session, so the CloudSession assertions (no host read, no lock, no push on a refusal) apply."""
+
+    def run_main(self, *argv, **env):
+        """-> (rc, stdout, stderr) of merge.main in a local session: the cloud variables unset, CLAUDE_CODE_SESSION_ID as this case names
+        (default LOCAL_SID; None unsets it), and this case's config dir."""
+        values = {"CLAUDE_CODE_REMOTE": None, "CLAUDE_CODE_REMOTE_SESSION_ID": None, "CLAUDE_CODE_SESSION_ID": LOCAL_SID,
+                  "CS_SESSION_ROLE": None, "CLAUDE_CONFIG_DIR": self.cfg, **env}
+        out, err = io.StringIO(), io.StringIO()
+        with unittest.mock.patch.dict(os.environ):
+            for name, value in values.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+            try:
+                rc = self.run_merge(*argv, stdout=out, stderr=err)[0]
+            except SystemExit as e:
+                rc = e.code
+        return rc, out.getvalue(), err.getvalue()
+
+    def put_local_role(self, role, session=LOCAL_SID, name=LOCAL_SID):
+        """The launcher's role file for this session: `session` is the id inside, `name` the id the file is named for."""
+        put(os.path.join(self.cfg, "state", "session-roles", name + ".json"),
+            json.dumps({"session": session, "role": role, "repo": "o/r"}))
+
+    # The refusal and reach assertions have one home, MergeRoleCheck. They call run_main, which this class overrides.
+    assert_refused = MergeRoleCheck.assert_refused
+    assert_reaches_host = MergeRoleCheck.assert_reaches_host
+
+    # RED: the old local confirm reads no role file, so a triage file does not refuse it.
+    def test_a_triage_file_refuses_a_local_confirm(self):
+        self.put_local_role("triage")
+        self.assert_refused()
+
+    # RED: the old local confirm reads no role file, so a coordinator file does not refuse it.
+    def test_a_coordinator_file_refuses_a_local_confirm(self):
+        self.put_local_role("coordinator")
+        self.assert_refused()
+
+    # RED: the old local confirm reads no role file, so a file for another session does not refuse it.
+    def test_a_file_that_names_another_session_refuses_a_local_confirm(self):
+        self.put_local_role("batch-runner", session=LOCAL_OTHER)
+        self.assert_refused()
+
+    # Unequal ids leave the session with no own file, so today's confirm applies and the host is read.
+    def test_unequal_ids_leave_the_session_with_no_own_file(self):
+        self.put_local_role("batch-runner")
+        self.assert_reaches_host("7", "--confirm", CLAUDE_CODE_SESSION_ID=LOCAL_OTHER)
+
+    # With no id there is no own file, so a batch-runner file elsewhere does not refuse the confirm.
+    def test_an_absent_id_leaves_the_session_with_no_own_file(self):
+        self.put_local_role("batch-runner")
+        self.assert_reaches_host("7", "--confirm", CLAUDE_CODE_SESSION_ID=None)
+
+    # Another session's lingering file does not refuse a session that has no file of its own.
+    def test_another_sessions_lingering_file_does_not_refuse_a_session_with_no_file(self):
+        self.put_local_role("triage", session=LOCAL_OTHER, name=LOCAL_OTHER)
+        self.assert_reaches_host("7", "--confirm")
+
+    # Rule (c): CS_SESSION_ROLE is set and no own file exists, so the hook failed to bind the session and the confirm refuses.
+    def test_a_launcher_session_with_no_own_file_refuses_the_confirm(self):
+        self.assert_refused(CS_SESSION_ROLE="batch-runner")
+
+    # Rule (c): CS_SESSION_ROLE is set and the session has no id at all, so the hook could not bind it and the confirm refuses.
+    def test_a_launcher_session_with_no_id_at_all_refuses_the_confirm(self):
+        self.assert_refused(CLAUDE_CODE_SESSION_ID=None, CS_SESSION_ROLE="batch-runner")
+
+    # Rule (c): the own file says batch-runner and CS_SESSION_ROLE says coordinator. They differ, so the confirm refuses.
+    def test_a_launcher_session_whose_own_file_differs_refuses_the_confirm(self):
+        self.put_local_role("batch-runner")
+        reads = len(self.host.pr_calls)
+        rc, out, err = self.run_main("7", "--confirm", "--head", self.head(), CS_SESSION_ROLE="coordinator")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(len(self.host.pr_calls), reads, "the run read the host although CS_SESSION_ROLE and the own file differ")
+
+    # CONTROL, green on the builder's head: CS_SESSION_ROLE agrees with the own batch-runner file, so the confirm passes the check.
+    def test_a_launcher_session_whose_own_file_agrees_passes_the_check(self):
+        self.put_local_role("batch-runner")
+        self.assert_reaches_host("7", "--confirm", "--head", self.head(), CS_SESSION_ROLE="batch-runner")
+
+    # RED: the old local confirm reads no role file, so a malformed file does not refuse it.
+    def test_a_malformed_file_refuses_a_local_confirm(self):
+        put(os.path.join(self.cfg, "state", "session-roles", LOCAL_SID + ".json"), '{"session": ')
+        self.assert_refused()
+
+    # CONTROL, green on the old code: a batch-runner file with both ids present and equal passes the gate and reads the host.
+    def test_a_batch_runner_file_with_equal_ids_passes_the_check(self):
+        self.put_local_role("batch-runner")
+        self.assert_reaches_host("7", "--confirm", "--head", self.head())
+
+    # CONTROL, green on the old code: with no file, a local confirm keeps today's behaviour and reads the host.
+    def test_no_file_keeps_the_local_confirm_as_it_is(self):
+        self.assert_reaches_host("7", "--confirm", "--head", self.head())
+
+    # CONTROL, green on the old code: no file and no id keeps today's local confirm as it is.
+    def test_no_file_and_no_id_keeps_the_local_confirm_as_it_is(self):
+        self.assert_reaches_host("7", "--confirm", CLAUDE_CODE_SESSION_ID=None)
+
 
 # ------------------------------------------------------------------ the take's lock TTL is one fixed bound (decision merge-lock; debt lock-ttl-sized-for-gone-waits)
 FIXED_TAKE_TTL = 1200  # seconds, twenty minutes at every deadline: the value LOCK_TTL_SECONDS must hold and confirm must pass

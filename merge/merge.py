@@ -143,7 +143,10 @@
                           project-ops scaffold suite is not covered. A repo with no readyChecks prints `unknown pre-ready: no merge.readyChecks declared` and exits 1.
                           Cost: see fast_checks, run_ready_checks, pre_ready_rows, cross_measure.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
-                          runs only when that role is recorded for the session (read_merge_role).
+                          runs only when that role is recorded for the session (read_merge_role). A local session reads the role the launcher
+                          (bin/claude-role) recorded in its role file instead: a session with its own role file runs `--confirm` only when
+                          that file names batch-runner, and one the launcher started (CS_SESSION_ROLE set) with no matching own file is refused.
+                          A session with neither is as it was, whatever other sessions' files are on disk.
 
 Git half: the merge lock, the temporary worktree, the claim, the push, the revert, resume, the
 local base branch, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
@@ -4539,11 +4542,19 @@ def role_path():
     return pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")) / "state" / "merge-role.json"
 
 def read_merge_role():
-    """This session's recorded merge role, or None: no session id, no file, unreadable or malformed, another session's, or a tier outside MERGE_ROLES.
+    """This session's recorded merge role, or None: no session id (cloud, else the local CLAUDE_CODE_SESSION_ID with the launcher's file), no file, unreadable or malformed, another session's, or a tier outside MERGE_ROLES.
     Every failure is None, so the check fails closed. An absent id never equals an absent record."""
     sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
     if not sid:
-        return None
+        if os.environ.get("CLAUDE_CODE_REMOTE") == "true":  # a cloud session with no id has no role, whatever file is on disk
+            return None
+        # no cloud id: a local session reads the role the launcher recorded for its own id (hooks/session_role.py, the one reader)
+        try:
+            import session_role
+            role = session_role.own_role(os.environ.get("CLAUDE_CODE_SESSION_ID"))
+        except Exception:
+            return None
+        return role if role in MERGE_ROLES else None
     try:
         data = json.loads(role_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):  # UnicodeDecodeError and JSONDecodeError are ValueErrors
@@ -4552,6 +4563,20 @@ def read_merge_role():
         return None
     role = data.get("role")
     return role if isinstance(role, str) and role in MERGE_ROLES else None  # a list is unhashable: test the type first
+
+LOCAL_ROLE_REFUSAL = "this session may not merge: its own role record does not name the batch runner. Hand the pull request to the batch runner, or ask the owner. Nothing was claimed or pushed. " + ROLE_CITE
+
+def local_role_allows_confirm():
+    """A local session's confirm check, judged by the session's OWN record only (hooks/session_role.py local_judgement, rules a, b, c). The id is
+    CLAUDE_CODE_SESSION_ID. An own file must name a MERGE_ROLES role; with no own file and no CS_SESSION_ROLE nothing is judged and today's
+    local behaviour stands, whatever other sessions' files are on disk; CS_SESSION_ROLE set with no matching own file refuses.
+    Fails closed: a reader that cannot load or run is a refusal, since the caller's crash path would otherwise let the confirm through."""
+    try:
+        import session_role  # hooks/session_role.py, on sys.path from the top of this file
+        judged, record = session_role.local_judgement(os.environ.get("CLAUDE_CODE_SESSION_ID"))
+        return not judged or (record is not None and record["role"] in MERGE_ROLES)
+    except Exception:
+        return False
 
 def write_merge_role(tier):
     """Record `tier` as this cloud session's merge role. Refuses outside the cloud, with no session id, or for a tier outside MERGE_ROLES; nothing is written then."""
@@ -4815,6 +4840,8 @@ def main(argv, host=None, lock=None, hosts=None):
             return 0 if ok else 1
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
             raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
+        if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") != "true" and not local_role_allows_confirm():  # a local session the launcher started; before any host read or lock
+            raise Stop(LOCAL_ROLE_REFUSAL)
         if a.confirm and not a.head and read_merge_role() == "batch-runner":  # before the lock, a claim or any write
             raise Stop(BATCH_RUNNER_NEEDS_HEAD)
         c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=a.repo_dir)
