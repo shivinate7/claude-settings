@@ -50,7 +50,7 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   `auto-mode-owner-acts`).
 - Both merge entries, "Relayed Merge Yes:" and "Batch Runner Merge:", quote one act:
   `merge <pr> --confirm --head <sha> [--priority-rows <file>]`. Their Covers text grants no flag beyond
-  that one, which the owner ruled on 2026-11-14 00:19 CST (own-817-a-priority-rows).
+  that one, the single flag the ruling own-817-a-priority-rows grants.
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
 same cases run against a copy with a clause removed and show red there.
 """
@@ -145,7 +145,7 @@ BATCH_MERGE_REFUSED = (("not tagged cs-build:batch-runner", "not tagged `cs-buil
 # The reason flags that lift a merge check (merge/merge.py); each entry's Never covers names both.
 REASON_FLAGS_REFUSED = (("--base-red-ok", "--base-red-ok"),
                         ("--undo-check-unknown-ok", "--undo-check-unknown-ok"))
-# The own-817 ruling (owner, 2026-11-14 00:19 CST): both merge entries name this flag after --head <sha>, and the
+# The ruling own-817-a-priority-rows: both merge entries name this flag after --head <sha>, and the
 # grant covers that one flag on that one act. A constant, not read from merge/merge.py, so the case goes red on
 # the entry text and not on a flag the merge tool has not built yet.
 PRIORITY_ROWS = "[--priority-rows <file>]"
