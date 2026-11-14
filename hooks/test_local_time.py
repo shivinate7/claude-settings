@@ -2578,11 +2578,15 @@ def case_override_ask_judge_kill_keeps_the_inbox_capture():
 # ONE ROUTE (decision owner-override). The owner's typed prompt reads one route, and the fast path makes no model call.
 # `override` alone, or with a reason, is one act. `override` plus a length is timed: `15m`, `4h`, `2 hours`,
 # `90 minutes`, or a bare `15` that is the whole rest. A word may follow a length with a unit. A bare number with words
-# after it is no fast-path length: the plain ask judges it. Each grant prints one receipt line. The cases run in this
+# after it is no fast-path length: the plain ask judges it. A length inside a pasted block or a code span is quoted
+# text, not a second length. Each grant prints one receipt line. The cases run in this
 # process, with the plain override judge (call_judge.override_ask) stood in by a JudgeRecorder and the Opus judge by
 # JudgeStub, so no model runs. A case counts the judge calls before it reads the grant, so a grant read after a judge that was never
 # asked proves nothing.
 OV_WINTER = datetime(2026, 1, 12, 18, 0, tzinfo=timezone.utc)  # 12:00 in US Central (CST)
+# `override 15m` with a length inside quoted text (a pasted block, a code span): that is no second length.
+PASTED_LENGTH = 'override 15m\n<pasted_content index="1">3 minutes</pasted_content>'
+CODE_LENGTH = "override 15m `3h`"
 # (name, prompt, kind, how long the override lasts). The judge answers no for each: a grant that waits on it fails.
 FAST_GRANTS = (
     ("`override 15m please`, a word after the length", "override 15m please", "timed", timedelta(minutes=15)),
@@ -2594,6 +2598,8 @@ FAST_GRANTS = (
     ("`override 15m`, the whole prompt", "override 15m", "timed", timedelta(minutes=15)),
     ("`override 15`, the whole prompt", "override 15", "timed", timedelta(minutes=15)),
     ("`override 4h`, the whole prompt", "override 4h", "timed", timedelta(hours=4)),
+    ("`override 15m` then a pasted block that holds `3 minutes`", PASTED_LENGTH, "timed", timedelta(minutes=15)),
+    ("`override 15m` then a backtick span that holds `3h`", CODE_LENGTH, "timed", timedelta(minutes=15)),
     ("`override`, one act", "override", "once", OV_ONCE),
     ("`override run the tests`, one act with its reason", "override run the tests", "once", OV_ONCE),
 )
@@ -2673,6 +2679,16 @@ def case_override_timed_receipt():
     lines = receipt_lines(proc.stdout if proc else "")
     check("override receipt: `override 15m please` prints one receipt line that begins `Override: until 13:15 CDT`",
           len(lines) == 1 and lines[0].startswith("Override: until 13:15 CDT"), "receipt lines %r" % (lines,))
+    proc = ov_type(ov_cfg(), PASTED_LENGTH)
+    lines = receipt_lines(proc.stdout if proc else "")
+    check("override receipt: `override 15m` then a pasted block that holds `3 minutes` prints one receipt line that "
+          "begins `Override: until 13:15 CDT`",
+          len(lines) == 1 and lines[0].startswith("Override: until 13:15 CDT"), "receipt lines %r" % (lines,))
+    proc = ov_type(ov_cfg(), CODE_LENGTH)
+    lines = receipt_lines(proc.stdout if proc else "")
+    check("override receipt: `override 15m` then a backtick span that holds `3h` prints one receipt line that begins "
+          "`Override: until 13:15 CDT`",
+          len(lines) == 1 and lines[0].startswith("Override: until 13:15 CDT"), "receipt lines %r" % (lines,))
     _, _, out, _ = opus_type("override 15m please", at=OV_WINTER)
     lines = receipt_lines(out)
     check("override receipt: in January the same grant prints one receipt line that begins `Override: until 12:15 CST`",
@@ -2729,6 +2745,8 @@ def case_override_relayed_grants_nothing():
     ask_no_grant("source loop_wakeup, `override 15m please`", fast, {None}, extra={"source": "loop_wakeup"})
     ask_no_grant("source system, `override 15m`", bare, {None}, extra={"source": "system"})
     ask_no_grant("source loop_wakeup, `override 15m`", bare, {None}, extra={"source": "loop_wakeup"})
+    ask_no_grant("source system, `override 15m` then a pasted block that holds `3 minutes`", PASTED_LENGTH, {None},
+                 extra={"source": "system"})
     ask_no_grant("a peer origin on the prompt's own record, `override 15m please`", fast, {None},
                  transcript=peer_fast)
     ask_no_grant("a task-notification origin on the prompt's own record, `override 15m please`", fast, {None},
