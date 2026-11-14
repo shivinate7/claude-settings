@@ -1,0 +1,14 @@
+{
+ "id": "red-run-warn-before-commit",
+ "title": "A lane sees \"a test-file edit needs a Red-run: trailer\" before its first commit, not after",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Incident (coordinator 16:24 CST Nov 14, from the note in the #3421 lane's 15:28 report; triage read none; n=1): lane root-clause-done-at-fix-check had to squash and force push #3421 because a test-file edit needed a Red-run: trailer and the lane learned it after committing. Harm: a rewrite of pushed history on a PR branch (kin: rule shared-trees-no-destructive-git; the force push was not asked to the owner as far as triage read). Guard (the coordinator's proposal): the lane sees the warning before its first commit. First act of a lane: find where the trailer is checked today (kin: steps red-run-pre-push, red-run-trailer-fits-mutant-proof) and move or add the warning at commit time; red then green: a commit of a test file without the trailer prints the warning before the commit lands. Rule: building-mistake-names-its-guard.",
+ "source": "coordinator 16:24 CST Nov 14 (from the #3421 lane's 15:28 report)",
+ "note": "Filed 16:25 CST Nov 14 by triage. Tracker: the coordinator. Queued, not started. Kin: red-run-pre-push.",
+ "updatedAt": "2026-11-14T16:25:00-06:00"
+}
