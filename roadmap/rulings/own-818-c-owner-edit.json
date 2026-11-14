@@ -1,0 +1,10 @@
+{
+ "id": "own-818-c-owner-edit",
+ "at": "2026-11-14T00:21:40-06:00",
+ "title": "Item 818: the owner or a named session makes the one inbox edit; none named",
+ "ruling": "Owner, saved on the waiting page 00:19 CST Nov 14 (06:19:47Z), item 818, pick c: \"You, or a session you name, make the one edit (homed to step backlog-drain, or relabelled as not-a-grant).\" The note was empty and no session was named, so the edit has no holder yet. Triage does not make it (two classifier refusals; rule: no going around a check). Item 818 stays open until the edit is made or a session is named.",
+ "quote": "C: You, or a session you name, make the one edit (homed to step backlog-drain, or relabelled as not-a-grant). Coordinator recommends this.",
+ "source": "Owner page save 00:19 CST Nov 14 (06:19:47Z), read by triage in the answers store; filed by triage.",
+ "status": "open",
+ "step": "grant-line-not-grant-word"
+}

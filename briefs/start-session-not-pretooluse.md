@@ -22,7 +22,7 @@ What the guard checks on start_session today (`hooks/guard.py`; line numbers are
 ## Triage notes for the lane
 
 - Touches a guard's verdict and `settings.json`: a lane builds it; review rounds apply (rule roles-review-cap-three). A test-author writes the red test first (rule roles-each-layer-proves-once).
-- Related rows: step c107 and item 751 (the same hook family; separate question, stays open); step local-autonomy-equals-cloud (lane session_013NEJL2xbx9cwQLXuRSA66d held item 809).
+- Related rows: step c107 and item 751 (the same hook family; separate question, stays open); step local-autonomy-equals-cloud (lane local-autonomy-equals-cloud held item 809).
 - Check, for failure classes (outcomes-tests-are-statements): any test that expects a start_session deny at PreToolUse is stale by this ruling; re-point it red then green. Any scanner over `settings.json` matchers must read every matcher form (list, pipe-joined string, `*`, regex).
 - Done check: the new settings test is green; it was red on the old `settings.json`; the guard tests pass; the decision record is on main; one fresh Bypass session started a session with no card (the owner runs that last test; no cloud session can).
 - Report cap: 25 lines. Say which of a, b or c you chose, which checks are lost, and the harm.

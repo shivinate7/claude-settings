@@ -1,0 +1,10 @@
+{
+ "id": "own-817-a-priority-rows",
+ "at": "2026-11-14T00:21:40-06:00",
+ "title": "The runner's merge allow entries name the --priority-rows flag",
+ "ruling": "Owner, saved on the waiting page 00:19 CST Nov 14 (06:19:47Z), item 817, pick a: extend both allow entries (\"Relayed Merge Yes\" and \"Batch Runner Merge\", settings.json autoMode.allow, lines 59-60 per the lane) to name `merge <pr> --confirm --head <sha> [--priority-rows <file>]`. Widening chosen knowingly (the option carried \"a repo changes to fit a shared tool, never the tool to fit a repo\"). The grant covers that one flag on that one act, nothing else. Lane priority-vs-merge-order makes the change by draft PR, with its pinned test hooks/test_auto_mode_allow.py.",
+ "quote": "A: Extend both allow entries to name `merge <pr> --confirm --head <sha> [--priority-rows <file>]`",
+ "source": "Owner page save 00:19 CST Nov 14 (06:19:47Z), read by triage in the answers store; filed by triage.",
+ "status": "open",
+ "step": "priority-vs-merge-order"
+}

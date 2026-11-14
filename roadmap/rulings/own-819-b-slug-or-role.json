@@ -1,0 +1,10 @@
+{
+ "id": "own-819-b-slug-or-role",
+ "at": "2026-11-14T00:21:40-06:00",
+ "title": "A brief names a lane slug or role only, never a session id",
+ "ruling": "Owner, saved on the waiting page 00:19 CST Nov 14 (06:19:47Z), item 819, pick b: a brief names a slug or role only; the lane looks the id up in the roster (R22 point 3 as written). The roster header in the roadmap CLAUDE.md is rewritten to match. Lane brief-ids-from-roster changes the check in PR #3352 and docs/decisions/brief-ids-in-roster.md to match; its check must refuse an id in a brief, the roster included.",
+ "quote": "B: A brief names a slug or role only; the lane looks the id up in the roster (R22 point 3 as written)",
+ "source": "Owner page save 00:19 CST Nov 14 (06:19:47Z), read by triage in the answers store; filed by triage.",
+ "status": "open",
+ "step": "brief-ids-from-roster"
+}

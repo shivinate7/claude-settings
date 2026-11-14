@@ -1,0 +1,14 @@
+{
+ "id": "archive-guard-counts-workflow-reads",
+ "title": "The archive guard counts get_session reads made by the session's own workflow agents",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Consultant 00:20 CST Nov 14 (relayed; the coordinator's 00:20 evidence, not re-read by triage): guard lane-closes-after-records counts only the archiving session's own get_session reads, so workflow subagents archived 0 of about 120 tonight and runner 10 archived by hand.",
+ "source": "Consultant message 00:20 CST Nov 14 (relayed). Related: done step archive-guard-reads-agent-calls (the Agent-tool case); owner grant 20:43 CST (runner 10 may use workflows).",
+ "note": "Triage 00:21 CST Nov 14: the guard counts reads made by the session's own workflow agents, red first. The lane also lists any other guard that reads \"this session's own reads\" and refuses its workflow agents, and records the list here. Triage has not read the guards; the list is unstarted. A guard change: review rounds apply. Check first what step archive-guard-reads-agent-calls already did for subagents.",
+ "updatedAt": "2026-11-14T00:21:40-06:00"
+}

@@ -23,7 +23,7 @@ It moved here from shivinate7/advisor on Oct 26 (owner, step c51), with that rep
 
 ## Standing sessions
 
-Lane briefs name these ids. Triage rewrites a line when a role changes hands.
+A lane brief names a standing session by role or lane slug, never by session id (owner 00:19 CST Nov 14, item 819 b; ruling R22 point 3). The lane looks the id up here. Triage rewrites a line when a role changes hands.
 
 - Coordinator: "Claude settings coordinator onboarding", session_013NEJL1gw6EdrSyvHkTUEx6, since 2026-11-11 22:38 CST.
 - Triage: "cs triage: claude-settings (7)", session_013NEJKzCzoWhfP8FMCPtQU6, since 2026-11-11 22:38 CST.
