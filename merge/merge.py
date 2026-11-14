@@ -23,6 +23,10 @@
                           then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
   merge <pr> --confirm --express   go on to the merge only for a prose-only diff (main's ci-scope.sh turns on nothing) whose body has a `Ruling: <id>`
                           line naming an entry in origin/roadmap's rulings; any other case refuses before a push.
+  merge <pr> --confirm --base-red-ok "<reason>"   lift the red-main refusal (decision no-merge-onto-red-main) and log the reason in the merge commit message. In the run that merges it also prints
+                          `merge: own run of #N ran K suites on HEAD9`: K counts the PR head's newest workflow run's jobs that are not `scope` and not skipped (suites_ran). K of 0 adds
+                          `: the run proves nothing, do not advise forcing this PR`; an unreadable run prints `merge: own run of #N unknown: WHY`. Print only: it never refuses.
+                          Cost: one workflow-runs read and one jobs read per lift; none without the lift.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--grant "#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT"]
@@ -440,6 +444,13 @@ def refuse_closing_reason(*reasons):
         if CLOSE_FORM.search(reason):
             raise Stop(f"the reason given with {flag} would close an issue when the merge commit lands. Reword the reason so no closing word comes right before an issue number, for example \"cause and fix: PR 2390\". {CLOSE_CITE}")
 
+
+SUITE_GATE_JOB = "scope"  # the job that decides which suites run; it is never a suite (decision no-merge-onto-red-main)
+
+def suites_ran(jobs):
+    """-> how many of a run's `jobs` (dicts with name and conclusion) are suites that ran: every job except the scope gate and the skipped ones. A failed job ran.
+    The one home of that count: the red-base lift line reads it, and the gate for a push run that skipped every suite calls it too."""
+    return sum(1 for j in jobs if j.get("conclusion") != "skipped" and j.get("name") != SUITE_GATE_JOB)
 
 def record_lift(lifts, flag, reason):
     """Keep a reason flag that lifted a check in `lifts` ({flag: reason}), so the merge can carry it. `reason` is what the check returned: None when it passed with no lift.
@@ -2986,6 +2997,21 @@ def red_base(root, host, base, red_ok=""):
                "Wait for the re-run to finish, then run again. Or, " if rerun else "Re-run the cancelled run named above, then run again. Or, " if cancelled and RERUN_REMEDY in detail else "") + carries
     raise Liftable(f"{what}\nNo batch merges onto a red {base}. {way[0].upper() + way[1:]} {RED_CITE}")
 
+def own_run_line(host, n, head):
+    """-> the one line `--base-red-ok` prints about the PR's own run: how many suites the newest workflow run of the PR head ran. Information only: it never
+    refuses and never raises, so an unreadable run reads `unknown: <why>` and the merge goes on. A run that ran no suite proves nothing, so the line says so.
+    Cost: one workflow-runs read of the head and one jobs read of its newest run, only when the lift was used."""
+    head9 = head[:9]
+    try:
+        runs = [r for r in host.runs(head) if r.get("databaseId")]
+        if not runs:
+            return f"merge: own run of #{n} unknown: no workflow run on {head9}"
+        newest = max(runs, key=lambda r: r["databaseId"])
+        ran = suites_ran(host.pages(f"actions/runs/{newest['databaseId']}/jobs", "jobs"))
+    except Exception as e:  # print only: whatever goes wrong here must not stop a merge that is past its claim push
+        return f"merge: own run of #{n} unknown: {type(e).__name__ + ': ' if not isinstance(e, Stop) else ''}{' '.join(str(e).split())}"
+    return f"merge: own run of #{n} ran {ran} suites on {head9}" + (": the run proves nothing, do not advise forcing this PR" if not ran else "")
+
 def head_not_green(state):
     """-> why `state`, the one read of a head's own checks (Host.head_state), is not green; None when it is green. The read never waits:
     rule M3 merges only a head that is already green, so a pending head is refused, and the lane runs --confirm again when its run ends."""
@@ -3421,6 +3447,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             if pushed:  # the first step of two: the pushed commit's own checks start now, and the merge call waits for the next confirm
                 say(f"merge: the claim is pushed to {branch} at {claim_sha[:9]}. Nothing was merged. Run --confirm again when the new head is green. {CLAIM_STEP_CITE}")
                 return 0
+            if RED_FLAG in lifts:  # once per merge: the claim step above returns before this, so only the run that merges prints. The head under the claims is the PR's own run
+                say(own_run_line(host, n, lane_head))
             try:  # the PR's own paths. --no-renames: a moved file names both paths. -z: git does not quote a non-ASCII name. Any failure of this read leaves the list unknown and never holds the merge
                 c, names = git(wt, "diff", "--name-only", "--no-renames", "-z", f"{base_ref}...{sha}")
             except (subprocess.TimeoutExpired, OSError):
