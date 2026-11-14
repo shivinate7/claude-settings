@@ -57,9 +57,16 @@ def git(cwd, *a):
     return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref=""):
+def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
+        green_sibling=False, green_head=None, contents=None, facts=None):
     """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `head_ref` is HEAD_REF,
-    empty when not given, so no HEAD_REF of the caller's environment reaches the script."""
+    empty when not given, so no HEAD_REF of the caller's environment reaches the script.
+    `green` (a list of paths) is the pull request's earlier head, committed before the head commit, so the whole diff against
+    the base holds it too. `green_sibling` puts that earlier head on a branch off the base instead: a commit HEAD does not
+    descend from. GREEN_HEAD is the earlier head's sha (empty when there is none) unless `green_head` gives another value.
+    `contents` maps a path to its text, in place of "changed". `facts`, a dict, is filled with the earlier head's `green` sha,
+    the `delta` (git diff --name-only --no-renames GREEN_HEAD HEAD) and `ancestor` (GREEN_HEAD is an ancestor of HEAD)."""
+    contents = contents or {}
     with tempfile.TemporaryDirectory(dir=RUN_DIR) as d:
         git(d, "init", "-q")
         git(d, "config", "user.email", "t@t")
@@ -79,15 +86,40 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         git(d, "add", "-A")
         git(d, "commit", "-qm", "base")
         sha = git(d, "rev-parse", "HEAD")
-        for p in paths:
-            full = os.path.join(d, p)
-            os.makedirs(os.path.dirname(full), exist_ok=True)
-            open(full, "w").write("changed\n")
+        def write(names):
+            for p in names:
+                full = os.path.join(d, p)
+                os.makedirs(os.path.dirname(full), exist_ok=True)
+                open(full, "w").write(contents.get(p, "changed\n"))
+        green_sha = ""
+        if green is not None and green_sibling:
+            git(d, "checkout", "-q", "-b", "side")
+            write(green)
+            git(d, "add", "-A")
+            git(d, "commit", "-qm", "earlier head")
+            green_sha = git(d, "rev-parse", "HEAD")
+            git(d, "checkout", "-q", "-")
+            # HEAD's line gets the same paths in a commit of its own, so the two trees differ by `paths` alone.
+            write(green)
+            git(d, "add", "-A")
+            git(d, "commit", "-qm", "pr code")
+        elif green is not None:
+            write(green)
+            git(d, "add", "-A")
+            git(d, "commit", "-qm", "earlier head", "--allow-empty")
+            green_sha = git(d, "rev-parse", "HEAD")
+        write(paths)
         git(d, "add", "-A")
         git(d, "commit", "-qm", "head", "--allow-empty")
         out = os.path.join(d, "..", f"out-{os.getpid()}.txt")
         env = dict(os.environ, EVENT=event, GITHUB_OUTPUT=out, HEAD_REF=head_ref,
-                   BASE_SHA=sha if base == "auto" else base)
+                   BASE_SHA=sha if base == "auto" else base,
+                   GREEN_HEAD=green_sha if green_head is None else green_head)
+        if facts is not None and green_sha:
+            facts.update(green=green_sha,
+                         delta=git(d, "diff", "--name-only", "--no-renames", green_sha, "HEAD").split(),
+                         ancestor=subprocess.run(["git", "merge-base", "--is-ancestor", green_sha, "HEAD"],
+                                                 cwd=d).returncode == 0)
         r = subprocess.run([BASH, os.path.abspath(SCRIPT)], cwd=d, env=env, capture_output=True, text=True)
         assert r.returncode == 0, r.stdout + r.stderr
         lines = open(out).read().split()
@@ -561,6 +593,125 @@ class Scope(unittest.TestCase):
         self.assertFlags(got, want_false=["code", "shoot"])
         self.assertIn("checks_guard", got, got)
         self.assertEqual(got["checks_guard"], "false", f"checks_guard: {got}")
+
+
+# A records-only push after a fully green head (owner ruling own-830-c-ci-scope-green-before-head). GREEN_HEAD names the
+# pull request's newest earlier head whose `checks` run was fully green. When the delta from it to HEAD is docs/records.md
+# alone, the 13 job and suite flags below are false, and the four lint flags and mutation_report keep their whole-PR
+# values. Every other case runs as before: the flags follow the whole PR diff against BASE_SHA.
+def differing(got, want, names=None):
+    """-> the sorted names whose value in `got` is not `want`'s. Default: every name either one holds."""
+    names = set(got) | set(want) if names is None else names
+    return sorted(n for n in names if got.get(n) != want.get(n))
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class RecordsOnlyPush(unittest.TestCase):
+    CODE = ["hooks/guard.py"]  # the whole PR diff holds a code file, so the whole-PR result turns the jobs on
+    RECORDS = "docs/records.md"
+    OFF = JOB_FLAGS + STEP_FLAGS + DERIVED_FLAGS  # the 13 flags a records-only push after a green head turns off
+    ABSENT_SHA = "0123456789abcdef0123456789abcdef01234567"  # a sha no scratch repo holds
+
+    def whole_pr(self, paths, contents=None):
+        """The whole PR diff: `paths` in one head commit, with GREEN_HEAD empty."""
+        return run(paths, contents=contents)
+
+    # A sibling GREEN_HEAD is not an earlier head of HEAD. Its tree differs from HEAD's by docs/records.md alone, so the
+    # delta lists exactly that path, and only the ancestry check tells it apart from a real earlier head. The flags must
+    # follow the whole PR diff, never the shortcut.
+    def test_records_only_green_head_not_an_ancestor_of_head_runs_everything(self):
+        whole = self.whole_pr(self.CODE + [self.RECORDS])
+        self.assertEqual(whole.get("code"), "true", f"scope: the whole PR diff must turn code on: {whole}")
+        facts = {}
+        got = run([self.RECORDS], green=self.CODE, green_sibling=True, facts=facts)
+        self.assertEqual(facts.get("delta"), [self.RECORDS],
+                         f"scope: the delta from GREEN_HEAD to HEAD is not docs/records.md alone: {facts}")
+        self.assertIs(facts.get("ancestor"), False, f"scope: GREEN_HEAD is an ancestor of HEAD: {facts}")
+        self.assertEqual(differing(got, whole), [], f"a sibling GREEN_HEAD moved a flag off the whole PR diff: {got}")
+
+    def test_records_only_delta_after_green_head_sets_all_13_flags_off(self):
+        whole = self.whole_pr(self.CODE + [self.RECORDS])
+        self.assertEqual(whole.get("code"), "true", f"scope: the whole PR diff must turn code on: {whole}")
+        facts = {}
+        got = run([self.RECORDS], green=self.CODE, facts=facts)
+        self.assertEqual(facts.get("delta"), [self.RECORDS],
+                         f"scope: the delta from GREEN_HEAD to HEAD is not docs/records.md alone: {facts}")
+        self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+        for n in self.OFF:
+            self.assertEqual(got.get(n), "false", f"{n} stays on after a records-only push past a green head: {got}")
+        keep = list(LINT_FLAGS) + ["mutation_report"]
+        self.assertEqual(differing(got, whole, keep), [], f"a lint flag or mutation_report moved off the whole PR diff: {got}")
+
+    # GREEN_HEAD empty: the earlier head is unknown or its run was red. The whole PR diff decides, as before.
+    def test_records_only_green_head_empty_runs_as_before(self):
+        whole = self.whole_pr(self.CODE + [self.RECORDS])
+        self.assertEqual(whole.get("code"), "true", f"scope: the whole PR diff must turn code on: {whole}")
+        facts = {}
+        got = run([self.RECORDS], green=self.CODE, green_head="", facts=facts)
+        self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
+        self.assertEqual(differing(got, whole), [], f"an empty GREEN_HEAD moved a flag off the whole PR diff: {got}")
+
+    # GREEN_HEAD names a sha the repo lacks: git cannot read the delta from it, so the whole PR diff decides. Never green.
+    def test_records_only_green_head_absent_from_repo_runs_as_before(self):
+        whole = self.whole_pr(self.CODE + [self.RECORDS])
+        self.assertEqual(whole.get("code"), "true", f"scope: the whole PR diff must turn code on: {whole}")
+        facts = {}
+        got = run([self.RECORDS], green=self.CODE, green_head=self.ABSENT_SHA, facts=facts)
+        self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the real earlier head's delta is not records only: {facts}")
+        self.assertEqual(differing(got, whole), [], f"an absent GREEN_HEAD moved a flag off the whole PR diff: {got}")
+
+    # Only docs/records.md skips. The delta must be exactly that path, so a second path, of any kind, runs the whole PR diff.
+    def test_records_only_delta_with_one_other_path_runs_as_before(self):
+        for other in ("README.md", "hooks/extra.py"):
+            with self.subTest(other=other):
+                whole = self.whole_pr(self.CODE + [self.RECORDS, other])
+                self.assertEqual(whole.get("code"), "true", f"scope: the whole PR diff must turn code on: {whole}")
+                facts = {}
+                got = run([self.RECORDS, other], green=self.CODE, facts=facts)
+                self.assertEqual(facts.get("delta"), sorted([self.RECORDS, other]), f"scope: the delta is not the two paths: {facts}")
+                self.assertEqual(differing(got, whole), [], f"a second delta path moved a flag off the whole PR diff: {got}")
+
+    # The script judges no page content: the `checks` job runs hook_catalog.py --check on the page. So a hand-edited records
+    # page skips the same jobs as a generated one, and the lint flags keep their whole-PR values.
+    def test_records_only_hand_edited_page_turns_the_jobs_off_and_keeps_lint_flags(self):
+        hand = {self.RECORDS: "# Records\n\nHand-edited, not a generated page.\n"}
+        whole = self.whole_pr(self.CODE + [self.RECORDS], contents=hand)
+        self.assertEqual(whole.get("code"), "true", f"scope: the whole PR diff must turn code on: {whole}")
+        facts = {}
+        got = run([self.RECORDS], green=self.CODE, contents=hand, facts=facts)
+        self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
+        for n in self.OFF:
+            self.assertEqual(got.get(n), "false", f"{n} stays on for a hand-edited records page: {got}")
+        keep = list(LINT_FLAGS) + ["mutation_report"]
+        self.assertEqual(differing(got, whole, keep), [], f"a lint flag or mutation_report moved for a hand-edited page: {got}")
+
+    # A push never reads GREEN_HEAD: every flag is on, as it was before the change.
+    def test_records_only_push_event_runs_everything(self):
+        facts = {}
+        got = run([self.RECORDS], green=self.CODE, event="push", facts=facts)
+        self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
+        for n in JOB_FLAGS + DERIVED_FLAGS + STEP_FLAGS + list(LINT_FLAGS):
+            self.assertEqual(got.get(n), "true", f"a push runs {n} whatever GREEN_HEAD says: {got}")
+        self.assertEqual(got.get("mutation_report"), "true", f"a push turns mutation_report on: {got}")
+
+    # An empty delta (no commit past GREEN_HEAD) is not records-only, so the whole PR diff decides.
+    def test_records_only_empty_delta_runs_as_before(self):
+        whole = self.whole_pr(self.CODE)
+        self.assertEqual(whole.get("code"), "true", f"scope: the whole PR diff must turn code on: {whole}")
+        facts = {}
+        got = run([], green=self.CODE, facts=facts)
+        self.assertEqual(facts.get("delta"), [], f"scope: the delta from GREEN_HEAD to HEAD is not empty: {facts}")
+        self.assertEqual(differing(got, whole), [], f"an empty delta moved a flag off the whole PR diff: {got}")
+
+    # Another docs page alone after a green head is not docs/records.md, so it runs the whole PR diff, as before.
+    def test_records_only_other_docs_page_alone_runs_as_before(self):
+        other = "docs/notes.md"
+        whole = self.whole_pr(self.CODE + [other])
+        self.assertEqual(whole.get("code"), "true", f"scope: the whole PR diff must turn code on: {whole}")
+        facts = {}
+        got = run([other], green=self.CODE, facts=facts)
+        self.assertEqual(facts.get("delta"), [other], f"scope: the delta is not the one docs page: {facts}")
+        self.assertEqual(differing(got, whole), [], f"a docs page other than records moved a flag: {got}")
 
 
 # The mod phase must run each mods check script (mods/**/check.mjs), not only *.test.mjs. The script cds to its own
