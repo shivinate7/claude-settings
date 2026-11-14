@@ -621,6 +621,7 @@ jobs:
         run: python3 hooks/test_cc_version_check.py
 
       - name: CI-wait cap fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_ci_wait_cap.py
 
       - name: Handoff wave-2 fixture suite
