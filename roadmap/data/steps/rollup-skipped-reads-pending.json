@@ -1,0 +1,14 @@
+{
+ "id": "rollup-skipped-reads-pending",
+ "title": "Settle how the merge tool reads a skipped rollup job on scheduled and dispatched runs",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 23:33 CST Nov 13 (relayed; lane child-ci-degen's read, unverified by the coordinator or triage): a PR-only rollup job drops the rollup on schedule and dispatch runs, and merge/merge.py ~1620 reads a skipped rollup as pending.",
+ "source": "Coordinator message 23:33 CST Nov 13 (relayed), from lane child-ci-degen.",
+ "note": "Triage 23:33 CST Nov 13: a lane first reproduces the read: a run with the rollup skipped, what the merge tool says, and whether the merge check ever consults such a run. Then decide the right reading (a skipped rollup is not pending forever), or say it never reaches a verdict; test first. Not started.",
+ "updatedAt": "2026-11-13T23:33:00-06:00"
+}
