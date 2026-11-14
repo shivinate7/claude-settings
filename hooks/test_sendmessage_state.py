@@ -804,6 +804,8 @@ def store(kind):
             STORES[kind] = make_repo("empty", None, ref="roadmap")
         elif kind == "absent":
             STORES[kind] = make_repo("absent", None, ref=None)
+        elif kind == "absent-stale-head":  # no roadmap ref anywhere; its FETCH_HEAD is set by its one case
+            STORES[kind] = make_repo("absent-stale-head", None, ref=None)
         elif kind == "stale-local":  # the local roadmap ref lacks r44, and origin/roadmap has it
             full = store_files()
             STORES[kind] = make_repo("stale-local", {k: v for k, v in full.items() if k != "r44.json"},
@@ -817,10 +819,14 @@ def store(kind):
     return STORES[kind]
 
 
+STORE_KINDS = ("full", "origin", "empty", "stale-local", "broken")  # the kinds whose repo holds a roadmap ref
+
+
 def prime(kind):
     """A fresh roadmap FETCH_HEAD in the repo of store `kind`, written by each run. One written at build time ages past
-    roadmap_ref.MAX_AGE on a slow runner, and the run then reads the ref as stale."""
-    if kind != "plain":  # the plain folder is no repository
+    roadmap_ref.MAX_AGE on a slow runner, and the run then reads the ref as stale. A kind with no roadmap ref gets none,
+    so the freshness check finds no roadmap fetch on record for it."""
+    if kind in STORE_KINDS:
         fixture.write_fetch_head(store(kind), "roadmap")
 
 
@@ -957,6 +963,25 @@ def case_absent_store_allows_silently():
         r = past_run(settled_text(SETTLING[0][1], "`decision %s`" % SLUG), kind)
         check("absent store (%s): allow silently (exit 0, no output, no stderr), the send reaches the judge" % label,
               r.code == 0 and r.out == "" and r.err == "" and len(r.wording_calls) == 1, detail(r))
+
+
+def case_absent_store_with_a_stale_fetch_head_allows_silently():
+    """An absent store (no roadmap ref, no origin) whose FETCH_HEAD is an old fetch of main alone. No roadmap fetch is
+    on record and nothing is primed, so the store is absent: the read allows and says nothing on stderr."""
+    repo = store("absent-stale-head")
+    check("fixture: the absent-stale-head repo has no roadmap ref, local or origin",
+          not ref_resolves(repo, "roadmap") and not ref_resolves(repo, "origin/roadmap"))
+    head = fixture.fetch_head(repo)
+    fixture.write_fetch_head(repo, "main")
+    stamp = os.stat(head).st_mtime
+    os.utime(head, (stamp - 120, stamp - 120))  # 120 s old: past roadmap_ref.MAX_AGE
+    check("fixture: its FETCH_HEAD is an old fetch of main only",
+          "branch 'main' of" in read_text(head) and "branch 'roadmap' of" not in read_text(head))
+    r = past_run(settled_text(SETTLING[0][1], "`decision %s`" % SLUG), "absent-stale-head")
+    check("absent store, stale FETCH_HEAD: the send reaches the wording judge once", len(r.wording_calls) == 1,
+          detail(r))
+    check("absent store, stale FETCH_HEAD: allow silently (exit 0, no output, no stderr)",
+          r.code == 0 and r.out == "" and r.err == "", detail(r))
 
 
 def case_a_store_aged_by_a_slow_runner_reads_fresh():
@@ -1215,6 +1240,7 @@ def case_hook_runs():
                  case_settled_citing_nothing_is_allowed_with_no_git,
                  case_cite_forms_are_caught,
                  case_absent_store_allows_silently,
+                 case_absent_store_with_a_stale_fetch_head_allows_silently,
                  case_a_store_aged_by_a_slow_runner_reads_fresh,
                  case_broken_store_fails_open_with_one_stderr_line,
                  case_free_text_decision_is_not_superseded,
