@@ -47,8 +47,10 @@ DETAILS = __DETAILS__  # step name -> the text after its verdict word; a step no
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
 detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0
+body_file = os.environ.get("CI_JOB_PR_BODY_FILE")  # the body ci-job is given: a UTF-8 file, read whole; None when no file is named
+body = None if body_file is None else open(body_file, encoding="utf-8", newline="").read()
 with open(LOG, "a", encoding="utf-8") as f:
-    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached}), file=f)
+    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached, "pr_body": body}), file=f)
 if "--plan" in sys.argv:
     for state, name in STEPS:
         print("would run " + name)
@@ -343,6 +345,45 @@ class LaneLint(LaneFixture):
         self.assertIn("Push-only lint A", lines[0], out)
         self.assertIn("Push-only lint B", lines[0], out)
         self.assertRegex(lines[0], r"\b2\b", out)
+
+    def test_lane_lint_gives_ci_job_the_live_pr_body_in_its_body_file(self):
+        """ci-job takes the PR body from the UTF-8 file named by CI_JOB_PR_BODY_FILE, so lane_lint passes the body the host reports
+        for the pull request now. The states are an empty body and the largest body GitHub keeps."""
+        self.use_ci_job(PASSING, 0)
+        bodies = ("", "Summary.\n\nDrops-lines: lint/gone.py -- the file is gone\n\nGenerated with Claude Code\n\nhttps://claude.ai/code/session_X",
+                  "x" * 65536)
+        for body in bodies:
+            with self.subTest(length=len(body)):
+                self.host.body = body
+                rc, out = self.lint_run("--lane-lint", "7")
+                self.assertEqual(rc, 0, out)
+                runs = self.lint_calls()
+                self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), out))
+                got = runs[0].get("pr_body")
+                self.assertIsNotNone(got, "lane_lint named no body file for ci-job: CI_JOB_PR_BODY_FILE was unset")
+                self.assertEqual(got, body, "lane_lint gave ci-job a body of %d characters, want the PR's body of %d characters"
+                                 % (len(got), len(body)))
+
+    def test_a_ref_target_gives_ci_job_an_empty_pr_body_whatever_the_run_holds(self):
+        """A commit or ref has no PR body, so lane_lint gives ci-job an empty body file. The host body, and the body file and
+        event file the run inherits, all hold the body, so a body passed on from any of them shows as a value."""
+        self.use_ci_job(PASSING, 0)
+        body = "Summary.\n\nDrops-lines: lint/gone.py -- the file is gone\n\nhttps://claude.ai/code/session_X"
+        self.host.body = body
+        inherited = os.path.join(self.t, "inherited-body.txt")
+        with open(inherited, "w", encoding="utf-8", newline="") as f:
+            f.write(body)
+        event = os.path.join(self.t, "inherited-event.json")
+        with open(event, "w", encoding="utf-8") as f:
+            json.dump({"pull_request": {"body": body}}, f)
+        inherit = {"CI_JOB_PR_BODY": body, "CI_JOB_PR_BODY_FILE": inherited, "GITHUB_EVENT_PATH": event, "PR_BODY": body}
+        for target in ("feat", self.head("feat")):
+            with self.subTest(target=target), unittest.mock.patch.dict(os.environ, inherit):
+                rc, out = self.lint_run("--lane-lint", target, head=self.head("feat"))  # asserts: one lint run, at this head
+                self.assertEqual(rc, 0, out)
+                got = self.lint_calls()[-1].get("pr_body")
+                self.assertIsNotNone(got, "ci-job got no body file for a ref target: the empty body file is missing")
+                self.assertEqual(got, "", "ci-job got a PR body for a ref target: %r" % (got,))
 
     def test_a_lane_lint_merges_nothing_takes_no_lock_and_waits_for_no_check(self):
         self.use_ci_job(PASSING, 0)
@@ -1629,7 +1670,9 @@ BATCH_CI_STEPS = ("Silent undo check", "Comment narration check", "Red-run trail
 STE = "STE lint"  # the one CI step whose script is bin/ste-changed, not a file of the batch
 REPO = os.path.dirname(HERE)
 CHECKS_YML = os.path.join(REPO, ".github", "workflows", "checks.yml")  # read at test time; no expectation comes from a copy of it
-CALL_STUB = "import json, sys\nwith open(%r, 'a', encoding='utf-8') as f:\n    print(json.dumps({'argv': sys.argv}), file=f)\n"  # logs its argv, exits 0
+CALL_STUB = ("import json, os, sys\n"
+             "body = json.load(open(os.environ['GITHUB_EVENT_PATH'], encoding='utf-8')).get('pull_request', {}).get('body') if os.environ.get('GITHUB_EVENT_PATH') else None\n"
+             "with open(%r, 'a', encoding='utf-8') as f:\n    print(json.dumps({'argv': sys.argv, 'pr_body': body}), file=f)\n")  # logs its argv and the PR body its event file holds, exits 0
 BATCH_NO_LINT = "batch-lint-flags-no-lint"  # a batch whose checks job holds NO_LINT_STEPS: no lint step at all
 NO_LINT_STEPS = (("Build", "      - name: Build\n        run: make build\n"),
                  ("Unit tests", "      - name: Unit tests\n        run: python3 -m pytest -q\n"))
@@ -2294,6 +2337,20 @@ class BatchLintFlags(tm.Env):
             self.assertEqual(source.get("FAIL"), gh_text(gh_eval(with_["fail"], inputs)),
                              "bin/ste-changed sets FAIL to other than the PR-path fail of checks.yml")
 
+    def test_the_silent_undo_step_reads_the_pull_requests_body_from_its_event_file(self):
+        """A pull request's lint gives the silent-undo step the PR's body in its event file: lane_lint takes the body from the host,
+        and ci-job gives the step the event file that CI gives it, with no body in the step's env. The body holds a Drops-lines line."""
+        body = "Summary.\n\nDrops-lines: lint/gone.py -- the file is gone\n\nhttps://claude.ai/code/session_X\n"
+        self.push_batch(BATCH)
+        self.host.branch, self.host.body = BATCH, body
+        out = io.StringIO()
+        rc = self.lane_lint("7", out)
+        text = out.getvalue()
+        self.assertEqual(rc, 0, text)
+        calls = self.stub_calls(script_of(dict(self.found)["Silent undo check"]))
+        self.assertEqual(len(calls), 1, "the silent-undo step's script ran %d times, want once: %s" % (len(calls), text))
+        self.assertEqual(calls[0].get("pr_body"), body, "the silent-undo step read %r from its event file, want the PR's body" % (calls[0].get("pr_body"),))
+
     def test_a_missing_check_script_refuses_and_never_passes(self):
         red_run = dict(self.found)["Red-run trailer"]
         self.push_batch(BATCH_MISSING, skip={script_of(red_run)})
@@ -2550,6 +2607,21 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertEqual(runs[0]["head"], before, "the ready check ran on a tree other than the PR head")
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.host.readies, [7], out)
+
+    def test_a_ready_check_that_reads_the_pr_body_gets_the_pull_requests_body(self):
+        """The ready check's ci-job run gets the PR's body in its body file (CI_JOB_PR_BODY_FILE), as the PR's own lint does, so a step
+        that reads the body (silent-undo) sees the body it sees in CI."""
+        body = "Summary.\n\nDrops-lines: docs/decisions/first.md -- the lines are dead\n"
+        self.host.body = body
+        self.declare(["Silent undo check"])
+        self.stale_feat()
+        self.use_ci_job([("PASS", "Silent undo check")], 0)
+        rc, out = self.draft_confirm()
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the ready check did not run ci-job once: " + out)
+        self.assertIsNotNone(runs[0].get("pr_body"), "the ready check's ci-job run named no body file (CI_JOB_PR_BODY_FILE was unset)")
+        self.assertEqual(runs[0].get("pr_body"), body, "the ready check's ci-job run got a different body than the PR's")
+        self.assertEqual(rc, 0, out)
 
     def test_a_declared_name_with_no_step_refuses_as_unknown_with_no_unknown_ok_escape(self):
         self.declare(["no such step"])
