@@ -1,0 +1,16 @@
+{
+ "id": "brief-ids-mail-route",
+ "title": "The brief-ids check also reads a brief sent by `mail send`, so a bare session id on the mail route is caught",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [
+  "brief-ids-from-roster"
+ ],
+ "why": "Ask (lane brief-ids-from-roster, session_013NEJKzfF8ADFGPK5pb7EdJ, 15:14 CST Nov 14; triage read no code): the check `brief-ids-in-roster` (PR #3352) reads only `send_message` and a lane `create_session` prompt. A brief sent by `mail send` (a Bash command) with a bare session id passes. The hole is real by design: decision session-messages (owner 2026-11-10 09:33 CST) makes the git mailbox the one route between sessions. Found by the round 1 reviewer on head efde322cb5b9067d5e0a1358813c4a637f6d03bb. The coordinator's own sessions send none by mail today (coordinator 15:13 CST, its session only). The hole will be listed in the known holes of docs/decisions/brief-ids-in-roster.md. Fix wanted: the reader also reads a `mail send` body, including `--body-file -` piped from printf; red case first. Blocked on #3352 (step brief-ids-from-roster). Round 3 applies if a verdict moves (a guard check). Scanner test: comment openers and a lone quote inside the body.",
+ "source": "lane brief-ids-from-roster 15:14 CST Nov 14",
+ "note": "Filed 15:14 CST Nov 14 by triage. Tracker: the coordinator. Blocked on #3352 merging.",
+ "updatedAt": "2026-11-14T15:14:45"
+}
