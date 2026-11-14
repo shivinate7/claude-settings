@@ -116,6 +116,7 @@ from action_pin import pin_regex  # noqa: E402  the one home of the sha pin's pa
 from workflow_steps import job_block, job_workflow, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 
 SELECTOR_LIMIT = 60  # seconds the --lint-suites selector may run (about 10 s on this repo's 123 suites) before it reads unknown
+STEP_BOUND_ENV = "CI_JOB_STEP_SECONDS"  # ci-job's own bound on each --step step; no step's env gets it, so a nested ci-job reads no bound it was not given
 PREAMBLE_MARK = "ci-job-preamble-done"
 PREAMBLE_DONE = "echo; echo " + PREAMBLE_MARK  # the line preamble_marked adds right before a CI step's first suite line; the bare echo ends a preamble line that has no newline, so the mark lands at line start
 SUITE_LINE = re.compile(r"python3 ((?:hooks|merge)/test_[\w.-]+\.py)(?: [^|&;`<>]*)?")  # a CI step's suite line, arguments allowed
@@ -506,12 +507,12 @@ def lint_workers():
 def step_bound(environ=None):
     """The seconds CI_JOB_STEP_SECONDS gives each --step step: (seconds or None when unset, a reason when the value is not a
     positive whole number). A bad value is never read as no bound: a caller that set a bound meant to have one."""
-    raw = (os.environ if environ is None else environ).get("CI_JOB_STEP_SECONDS", "").strip()
+    raw = (os.environ if environ is None else environ).get(STEP_BOUND_ENV, "").strip()
     if not raw:
         return None, ""
     if raw.isascii() and raw.isdigit() and int(raw) > 0:
         return int(raw), ""
-    return None, "CI_JOB_STEP_SECONDS=%r is not a positive whole number of seconds" % raw
+    return None, "%s=%r is not a positive whole number of seconds" % (STEP_BOUND_ENV, raw)
 
 
 def kill_tree(proc):
@@ -552,7 +553,7 @@ def run_step(name, step, install, detail, shell, env, cwd, ctx, log, suite=False
                              cwd=os.path.join(top, cwd) if cwd else top, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True,
                              **({"start_new_session": True} if bound and os.name != "nt" else {}),  # a group of its own, for kill_tree
-                             env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF", PIN_NOTE_ENV, HEAD_SHA_ENV}},
+                             env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF", PIN_NOTE_ENV, HEAD_SHA_ENV, STEP_BOUND_ENV}},
                                   **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
                                   **env, "VERDICT_LOG": log}) as proc:
             if bound:

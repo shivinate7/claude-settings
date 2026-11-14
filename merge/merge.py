@@ -2600,7 +2600,7 @@ READY_CI_RUN_SECONDS = 900  # the whole ready ci-job run: the backstop under the
 READY_CLASH_SECONDS = 480  # clash_verdict: its merge read and its cross_measure together
 try:
     READY_DEBT_SECONDS = 3 * load_debt_retire().TIMEOUT  # three suites' worth of the debt lint's own per-suite cap, read from its one home, never copied
-except ImportError:  # debt_check raises the same error at once, so a missing lint module cannot hang; debt_verdict then runs unbounded
+except Exception:  # a lint module that cannot load stops only the debt check, as load_debt_retire says, never `import merge`. debt_check raises the same error at once, so it cannot hang; debt_verdict then runs unbounded
     READY_DEBT_SECONDS = None
 
 def changed_paths(root, base, head):
@@ -3542,7 +3542,8 @@ def step_verdicts(raw, checks, state):
 def bounded(seconds, call):
     """-> (True, what `call()` returned) or (False, None) when it did not return in `seconds`; an exception it raised is raised here. `call` runs in a daemon
     thread, so a hang in Python code (not only in a child process) is cut off. Limit: Python cannot stop a thread, so work that outran its bound lingers until
-    this process exits, and may still write or start git and gh children meanwhile. `seconds` None waits for it."""
+    this process exits, and may still write or start git and gh children meanwhile. A git or gh child it already started has no timeout (sh() adds none) and is
+    orphaned, so it may outlive this process. `seconds` None waits for it."""
     box = {}
 
     def work():
@@ -3562,7 +3563,7 @@ def bounded(seconds, call):
 
 def debt_verdict(wt, base, host, info):
     """-> (verdict, "debt retire", detail): the debt-close lint (debt_check) on the tree `wt`, bounded by READY_DEBT_SECONDS in all, a hang in Python code included
-    (bounded: the stuck lint may linger until process exit). Past the bound it is unknown. Unread and any read that could not run are unknown, a Dropped finding is a fail."""
+    (bounded: the stuck lint may linger until process exit, and a child it started may outlive the process). Past the bound it is unknown. Unread and any read that could not run are unknown, a Dropped finding is a fail."""
     done, row = bounded(READY_DEBT_SECONDS, lambda: debt_read(wt, base, host, info))
     return row if done else ("unknown", "debt retire", f"did not finish in {READY_DEBT_SECONDS} s")
 
@@ -3581,7 +3582,7 @@ def debt_read(wt, base, host, info):
 def clash_verdict(root, n, base, host, info):
     """-> (verdict, "open-PR clash", detail): the head of PR `n` against every other open PR on `base`, by cross_measure with scope PRE_READY_CLASH_SCOPE. A head that does not merge
     clean with the base, a failed list read, a fetch that failed and any pair git cannot read are unknown, never a pass. READY_CLASH_SECONDS bounds all of it, the merge read
-    too (bounded: a read past it is unknown, and its git or gh call may linger until process exit)."""
+    too (bounded: a read past it is unknown, its thread may linger until process exit, and a git or gh child it started may outlive the process)."""
     done, row = bounded(READY_CLASH_SECONDS, lambda: clash_read(root, n, base, host, info))
     return row if done else ("unknown", "open-PR clash", f"did not finish in {READY_CLASH_SECONDS} s")
 
@@ -3614,14 +3615,14 @@ def pre_ready_rows(wt, n, base, checks, pre):
     Each check has a bound of its own and prints `start: <check> (bound N s)` before it runs (ci-job prints its steps' lines): READY_CI_STEP_SECONDS per ci-job step,
     READY_CI_RUN_SECONDS for the whole ci-job run, READY_DEBT_SECONDS, READY_CLASH_SECONDS. A check past its bound is unknown, never a pass.
     Cost: one ci-job run, one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees.
-    A bounded check adds one thread; a check that outran its bound may linger until process exit."""
+    A bounded check adds one thread; a check that outran its bound may linger until process exit, and a git or gh child it started may outlive the process."""
     raw = []
     args = ["checks", "--pinned", *[a for name in checks for a in ("--step", name)], "--base", f"origin/{base}"]
     ci = ci_job_run(wt, *args, raw=raw, bound=READY_CI_RUN_SECONDS, step_seconds=READY_CI_STEP_SECONDS)
     rows = step_verdicts(raw, checks, ci[0])
     if pre:
         root, host, info = pre
-        say(f"start: debt retire (bound {READY_DEBT_SECONDS} s)")
+        say("start: debt retire" + (f" (bound {READY_DEBT_SECONDS} s)" if READY_DEBT_SECONDS is not None else " (no bound: the debt lint did not load)"))
         rows.append(debt_verdict(wt, base, host, info))
         say(f"start: open-PR clash (bound {READY_CLASH_SECONDS} s)")
         rows.append(clash_verdict(root, n, base, host, info))
