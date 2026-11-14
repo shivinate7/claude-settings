@@ -676,6 +676,12 @@ jobs:
       - name: Skill model rows fixture suite
         run: python3 lint/test_check_skill_model_rows.py
 
+      - name: Waiting copy backup check
+        run: python3 lint/check_waiting_copy_backup.py
+
+      - name: Waiting copy backup fixture suite
+        run: python3 lint/test_check_waiting_copy_backup.py
+
       - name: Python 3.9 floor check
         run: python3 lint/check_python_floor.py
 

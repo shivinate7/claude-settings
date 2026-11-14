@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Copy an artifact's page, its files and its database into the repo, build the database back, and merge a copy into a live page (skill waiting-page, decision waiting-data-in-repo).
 
+The copy in git is a backup for recovery and account moves. The page's database is the one store (decision
+waiting-page-one-store). The one exception is the filing check in hooks/feedback_guard.py (debt filing-check-reads-copy).
+
 Four modes: export (--fetched, --out), rebuild (--rebuild, --batches), merge (--merge, --live, --batches) and --all.
 
 Export, the writer's step at each wake and before each republish:

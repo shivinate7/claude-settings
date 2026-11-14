@@ -5,7 +5,12 @@ Read this when the writer keeps the page's copy in the repo, when a repo registe
 ## Keep a copy in the repo
 
 A page that is lost or moved to another org takes its items with it. So the writer keeps a copy of the page's data in the repo (decision
-`waiting-data-in-repo`). The copy lives on the repo's record branch, never on main. Main moves only by pull
+`waiting-data-in-repo`). The copy is a backup, for recovery and for an account move. The page's database is the one
+store (decision `waiting-page-one-store`). The filing check is the one exception that reads the copy (debt
+`filing-check-reads-copy`). Outside `export_page.py`'s recovery, merge and export modes,
+`lint/check_waiting_copy_backup.py` fails a tool under skills/, hooks/, lint/ or bin/ whose code reads the copy:
+Python it follows through names, `self` attributes, closures and helpers; JavaScript and shell statement by statement. A
+read it cannot trace, such as a path built at run time, still passes. The copy lives on the repo's record branch, never on main. Main moves only by pull
 request. The record branch (`roadmap` by default, `~/.claude/lint/layout.py` `record_branch()`) takes a direct push.
 
 The writer runs this at each wake, as step 3 of "Keep the page on main's code", before any republish. A lane

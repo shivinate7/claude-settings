@@ -294,7 +294,9 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
   a page link or a promise does not pass.
 
 - The writer keeps the page on main's code (see "Keep the page on main's code").
-- The writer keeps a copy of the page's data in the repo (see "Keep a copy in the repo").
+- The writer keeps a copy of the page's data in the repo (see "Keep a copy in the repo"). The copy is a backup for
+  recovery and account moves. The page's database is the one store (decision `waiting-page-one-store`). One
+  exception stands: the filing check reads the copy (debt `filing-check-reads-copy`).
 
 ## Add an item
 
