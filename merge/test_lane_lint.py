@@ -3452,10 +3452,25 @@ class ReplacedAtHandIn(LaneFixture):
     def lane(self, *argv):
         return LintPostsPassComment.lane(self, *argv, host=merge.Host())
 
-    def push_branch(self, name):
-        """origin gets `name` at the feat head, so the integration PR's head ref exists there: fetch_pr_head fetches it."""
-        tm.sh(self.other, "git", "fetch", "-q", "origin")
-        tm.sh(self.other, "git", "push", "-q", "origin", f"{self.head('feat')}:refs/heads/{name}")
+    def integration_pr(self, lanes, dropped=(), pr_extra=None, stray=()):
+        """Seed integration PR #7 on batch `x`: a freeze block of `lanes` ({PR: head}, the `dropped` ones marked), one open-list row for each lane and each
+        `stray` number, the batch branch on origin (fetch_pr_head fetches it), and a passing stub ci-job. `pr_extra` gives a pull request its state when
+        it is not open. -> the body."""
+        self.push_branch(merge.integration_branch("x"))
+        body = "\n".join(merge.freeze_lines("x", lanes, dropped=dropped))
+        self.assertTrue(merge.is_integration_pr({"body": body, "branch": merge.integration_branch("x")}), "precondition: the case reads as a lane PR, so it probes no integration hand-in")
+        tm.GhHalf.set(self, head_ref=merge.integration_branch("x"), body=body,
+                      open_prs=[[f"lane-{n}", self.head("main"), "main", n] for n in [*lanes, *stray]], pr_extra=pr_extra or {})
+        self.use_ci_job(PASSING, 0)
+        return body
+
+    def posts_on(self, n):
+        """The comment bodies posted on pull request n."""
+        return [p["body"] for p in tm.GhHalf.gh_state(self, "posted") or [] if p["n"] == n]
+
+    def lint_proofs(self):
+        """The lane-lint comments posted on the integration PR #7, in order."""
+        return [p["body"] for p in tm.GhHalf.gh_state(self, "posted") or [] if p["n"] == 7 and p["body"].startswith(LANE_LINT_MARKER)]
 
     def test_a_hand_in_that_names_an_open_pull_request_it_replaces_is_refused(self):
         tm.GhHalf.set(self, body="Replaces #1636", open_prs=[["old-lane", self.head("main"), "main", 1636]])
@@ -3475,12 +3490,7 @@ class ReplacedAtHandIn(LaneFixture):
 
     def test_an_integration_hand_in_closes_each_open_lane_its_freeze_block_names(self):
         lanes = {3301: "a" * 40, 3302: "b" * 40}
-        self.push_branch(merge.integration_branch("x"))
-        body = "\n".join(merge.freeze_lines("x", lanes))
-        self.assertTrue(merge.is_integration_pr({"body": body, "branch": merge.integration_branch("x")}), "precondition: the case reads as a lane PR, so it probes no integration hand-in")
-        tm.GhHalf.set(self, head_ref=merge.integration_branch("x"), body=body,
-                      open_prs=[[f"lane-{n}", self.head("main"), "main", n] for n in lanes])
-        self.use_ci_job(PASSING, 0)
+        self.integration_pr(lanes)
         rc, out = self.lane("--lane-lint", "7")
         calls = tm.GhHalf.calls(self).splitlines()
         for n in lanes:
@@ -3489,6 +3499,90 @@ class ReplacedAtHandIn(LaneFixture):
                 posted = [p["body"] for p in tm.GhHalf.gh_state(self, "posted") or [] if p["n"] == n]
                 self.assertEqual(len(posted), 1, f"lane #{n} did not get one pointer comment:\n{out}")
                 self.assertIn("#7", posted[0], f"the pointer on lane #{n} does not name the integration PR #7:\n{posted[0]}")
+
+    def test_a_closed_dropped_lane_is_reopened_with_a_pointer_at_the_next_pass(self):
+        lanes = {3301: "a" * 40, 3302: "b" * 40, 3303: "c" * 40}
+        self.integration_pr(lanes, dropped=[3302, 3303], pr_extra={n: {"state": "closed"} for n in lanes})
+        rc, out = self.lane("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        calls = tm.GhHalf.calls(self).splitlines()
+        for n in (3302, 3303):
+            with self.subTest(n=n):
+                self.assertEqual(calls.count(f"PATCH pulls/{n} state=open"), 1, f"the dropped lane #{n}, closed, was not reopened once at the PASS:\n{out}")
+                posted = self.posts_on(n)
+                self.assertEqual(len(posted), 1, f"the reopened lane #{n} did not get one pointer comment:\n{out}")
+                self.assertIn("#7", posted[0], f"the pointer on #{n} does not name the integration PR #7:\n{posted[0]}")
+                self.assertIn("dropped", posted[0].lower(), f"the pointer on #{n} does not say it was dropped from the batch:\n{posted[0]}")
+
+    def test_a_dropped_lane_that_is_open_merged_or_unnamed_and_a_kept_closed_lane_are_not_reopened(self):  # control: green on the old code
+        lanes = {3301: "a" * 40, 3302: "b" * 40, 3303: "c" * 40}
+        self.integration_pr(lanes, dropped=[3302, 3303], stray=[3399],
+                            pr_extra={"3301": {"state": "closed"}, "3303": {"state": "closed", "merged": True}, "3399": {"state": "closed"}})
+        rc, out = self.lane("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        calls = tm.GhHalf.calls(self).splitlines()
+        for n in (3301, 3302, 3303, 3399):
+            with self.subTest(n=n):
+                self.assertNotIn(f"PATCH pulls/{n} state=open", calls, f"#{n} was reopened, though it is not a closed dropped lane:\n{out}")
+                self.assertEqual(self.posts_on(n), [], f"#{n} got a comment, though it is not a closed dropped lane:\n{out}")
+
+    def test_a_dropped_lane_that_is_open_is_never_closed_at_the_hand_in(self):  # control: green on the old code
+        lanes = {3301: "a" * 40, 3302: "b" * 40}
+        self.integration_pr(lanes, dropped=[3302])
+        rc, out = self.lane("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        calls = tm.GhHalf.calls(self).splitlines()
+        self.assertIn("PATCH pulls/3301 state=closed", calls, "precondition: the kept lane #3301 was not closed, so the hand-in did not run its close:\n" + out)
+        self.assertNotIn("PATCH pulls/3302 state=closed", calls, f"the dropped lane #3302 was closed at the hand-in:\n{out}")
+        self.assertEqual(self.posts_on(3302), [], f"the dropped lane #3302 got a pointer comment at the hand-in:\n{out}")
+
+    def test_a_refused_close_at_an_integration_hand_in_stops_the_run_and_names_the_lane(self):  # control: green on the old code
+        lanes = {3301: "a" * 40, 3302: "b" * 40}
+        self.integration_pr(lanes)
+        tm.GhHalf.set(self, close_fail={"3301": tm.rest_err(422, "Unprocessable Entity")})
+        rc, out = self.lane("--lane-lint", "7")
+        self.assertIn("PATCH pulls/3301 state=closed", tm.GhHalf.calls(self).splitlines(), "the close of #3301 was never sent:\n" + out)
+        self.assertNotEqual(rc, 0, "a refused close left the integration hand-in at exit 0, so the batch read the lane as done:\n" + out)
+        self.assertIn("3301", out, "the stop does not name the lane #3301:\n" + out)
+        self.assertNotIn("Traceback", out)
+
+    def test_the_lint_proof_is_posted_before_a_refused_close_stops_the_integration_hand_in(self):
+        lanes = {3301: "a" * 40, 3302: "b" * 40}
+        self.integration_pr(lanes)
+        tm.GhHalf.set(self, close_fail={"3301": tm.rest_err(422, "Unprocessable Entity")})
+        rc, out = self.lane("--lane-lint", "7")
+        proofs = self.lint_proofs()
+        self.assertEqual(len(proofs), 1, "the lane-lint PASS was not posted on #7 before the refused close of #3301 stopped the run:\n" + out)
+        self.assertIn("Result: PASS", proofs[0].splitlines(), "the comment on #7 is not the PASS proof:\n" + proofs[0])
+        self.assertNotEqual(rc, 0, "the refused close did not stop the run:\n" + out)
+        self.assertIn("3301", out, "the stop does not name the lane #3301:\n" + out)
+
+    def test_the_lint_proof_is_posted_before_a_refused_pointer_comment_stops_the_integration_hand_in(self):
+        lanes = {3301: "a" * 40, 3302: "b" * 40}
+        self.integration_pr(lanes)
+        tm.GhHalf.set(self, post_fail={"3301": tm.rest_err(422, "Unprocessable Entity")})
+        rc, out = self.lane("--lane-lint", "7")
+        proofs = self.lint_proofs()
+        self.assertEqual(len(proofs), 1, "the lane-lint PASS was not posted on #7 before the refused pointer comment on #3301 stopped the run:\n" + out)
+        self.assertIn("Result: PASS", proofs[0].splitlines(), "the comment on #7 is not the PASS proof:\n" + proofs[0])
+        self.assertNotEqual(rc, 0, "the refused pointer comment did not stop the run:\n" + out)
+        self.assertIn("3301", out, "the stop does not name the lane #3301:\n" + out)
+        self.assertNotIn("PATCH pulls/3301 state=closed", tm.GhHalf.calls(self).splitlines(), "#3301 was closed though its pointer comment was refused, so it has no pointer:\n" + out)
+
+    def test_a_retry_after_a_refused_close_posts_no_second_pointer_on_a_lane_already_closed(self):  # control: green on the old code
+        lanes = {3301: "a" * 40, 3302: "b" * 40}
+        self.integration_pr(lanes)
+        tm.GhHalf.set(self, close_fail={"3302": tm.rest_err(422, "Unprocessable Entity")})
+        rc, out = self.lane("--lane-lint", "7")
+        self.assertNotEqual(rc, 0, "precondition: the refused close of #3302 did not stop the first run:\n" + out)
+        before = len(tm.GhHalf.calls(self).splitlines())
+        tm.GhHalf.set(self, close_fail=None)
+        rc, out = self.lane("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        retry = tm.GhHalf.calls(self).splitlines()[before:]
+        self.assertEqual([l for l in retry if re.search(r"(?:pulls|issues)/3301(?:\s|/|$)", l)], [], f"the retry sent a call to #3301, which is already closed:\n{out}")
+        self.assertEqual(len(self.posts_on(3301)), 1, f"#3301 has other than one pointer comment after the retry:\n{out}")
+        self.assertIn("PATCH pulls/3302 state=closed", tm.GhHalf.calls(self).splitlines(), f"the retry did not close #3302:\n{out}")
 
 
 if __name__ == "__main__":
