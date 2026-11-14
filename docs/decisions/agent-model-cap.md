@@ -7,7 +7,7 @@ Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it
 and the owner watches that cost. The refuter runs Opus too (owner, 2026-11-06 12:43 CST, waiting-page item 279, pick d; decision `plan-refuter`). An Explore may run Sonnet or Opus when its brief's first non-blank line carries the `Audit:` marker
 (owner, 2026-11-01 18:38 CST, waiting-page item 137, pick a). An Explore on Opus with no marker is refused, and an override lifts it; no scoped `opus explore` form exists (option b, not picked).
 The question reviewer agent hook keeps its class-level grant of 2026-10-21 (see its row). Any other spawn above its role's model, a reviewer's round 3 on Opus too, is refused. It runs only when the owner's typed override or grant names it
-(owner, 2026-11-01 17:25 CST, item 127, pick a: the same for Sonnet and Opus). A lane session or an arbiter session is a session, not an agent: it runs the model of its row below. A review round runs the model of its round row (see the round rows). Haiku runs only in Explore,
+(owner, 2026-11-01 17:25 CST, item 127, pick a: the same for Sonnet and Opus). A lane, an arbiter, a coordinator, a triage or a batch runner is a session, not an agent: it runs the model of its row below. A review round runs the model of its round row (see the round rows). Haiku runs only in Explore,
 claude-code-guide, test-author, reviewer and record-writer. The guard enforces the ceiling and the role rows. An Agent
 or Task spawn that sets model opus is refused, unless Plan, designer, design-reviewer, refuter, a builder's `Round 3 of 3` or an Explore's `Audit:` marker covers it.
 The general override lifts any refusal of a spawn above its role's row. An Opus spawn refusal is also lifted by `opus [role] <time>` (for example `opus 2h` or `opus builders 2h`), by the owner's plain Opus ask in his own typed prompt (owner, 2026-11-03 19:47 CST, chat; the override decision `owner-override`, The Opus override), or by a step grant.
@@ -56,6 +56,9 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | cloud routines | sonnet | default |
 | Claude GitHub Action, if added | haiku | xhigh |
 | teammates, Workflow `agent()` | the role table, by `agentType` | the role table |
+| coordinator, standing session (decision `session-tiers`; overrides the separate-sessions row below) | opus, the owner's ruling of 2026-11-11 13:52 CST (R33, "all three stay on opus for now until 3.7"); stays on Opus after R52 | not ruled; model default |
+| triage, standing session (decision `session-tiers`; overrides the separate-sessions row below) | opus, the owner's ruling of 2026-11-11 13:52 CST (R33); stays on Opus after R52 | not ruled; model default |
+| batch runner, in this repo and in child repos (decision `session-tiers`; overrides the separate-sessions row below) | claude-sonnet-5-5, the owner's ruling of 2026-11-12 13:07 CST (R52), which ends his Opus hold of 2026-11-11 13:52 CST for this role only; it becomes the default when its batches show no wrong drop, no wrong merge and no stalled batch against the Opus runs before it | medium, the owner's ruling of 2026-11-12 13:07 CST (R52) |
 | separate sessions (`start_session`, `create_session`) | main model unless the owner names one | default |
 | lane (decision `session-tiers`) | sonnet (temporary), the owner's ruling of 2026-11-08 12:21 CST, waiting-page item 439 (lane-model-sonnet), pick none; debt `lane-model-recheck` rechecks it | medium, the owner's ruling of 2026-11-10 13:19 CST; set by the start's effort field, below |
 | arbiter session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-29 16:42 CDT, waiting item 81, pick a | high |
@@ -132,7 +135,7 @@ started with no `cs-build:lane` tag is unseen; the
 tag is the coordinator's rule in `session-tiers`. An owner override lifts it; it is not one of the role and model guards
 that `owner-override` keeps beyond every override (owner, 2026-10-30 16:25 CDT, in chat to lane-effort-medium (session_013NEJL28Sky6HBLLehmziKH), pick a: liftable). `LANE_EFFORT` in `hooks/guard.py` is the one
 value; `lint/check_agent_models.py` fails when the lane row's effort cell does not start with it.
-Other tiers keep the model default. Ruled out: `effortLevel` in user settings does not count for Opus
+The session roles that set an effort are the lane, the batch runner and the arbiter; the others keep the model default. Ruled out: `effortLevel` in user settings does not count for Opus
 5.5, project settings and an environment's `CLAUDE_CODE_EFFORT_LEVEL` reach every tier, and a
 SessionStart hook reaches only Bash.
 
@@ -161,10 +164,23 @@ the roadmap page, because the live check matches the full tag.
 whose input has no `model` or no `source_url`; an empty or whitespace-only value counts as missing. A lane with no
 repo has nothing to work in. A lane with no model starts on the coordinator's model, not the lane row's. The coordinator
 passes both on every lane start. The rule runs after `lane-repo-tag`. An owner override lifts it.
-Known gaps: a lane tag set after the start is not judged, and a lane tag sent to `start_session` is not
-judged (both inherited from the lane effort pin and the lane repo tag). The rule checks that a model is
-present, not which model.
+Known gaps: a lane tag set after the start is not judged, and `start_session` is not judged (both inherited from the
+lane effort pin and the lane repo tag). Only `create_session` tagged `cs-build:lane` is a lane start to the guard,
+because `start_session` carries no tags field. Mac lanes start by `start_session` (decision `lanes-start-as-agents`),
+so they pass this rule unjudged; the owner decides whether to judge them. The rule checks that a model is present, not
+which model.
 Kind of risk: likely. Landed 2026-11-08.
+
+**The lane title.** Guard rule `lane-title-slug` refuses a `create_session` call tagged `cs-build:lane` whose `title`
+does not open with `Lane <branch slug>:` (`LANE_TITLE_FORM` in `hooks/shared_names.py`). The form is the word `Lane`, a slug of
+lower-case letters and digits joined by single hyphens, and a colon. A missing, empty or placeholder title (`Lane <branch
+slug>: <task>`) is refused. The deny reason prints `LANE_TITLE_FORM`; `LANE_TITLE_OPENING` is cut from that same string, so one source feeds the remedy and the check.
+The rule runs after `lane-start-settings`. An owner override lifts it. Outcome: the owner reads a lane's branch in his
+session list (rule `git-slug-then-claim-number`, name a lane by its branch slug). Lane start text: `templates/brief.md`
+and `templates/operating-model.md` in skill `project-ops`. Known gaps: the rule reads the form, not that the slug is the
+lane's real branch. A title set after the start is not judged. `start_session` has no tags, so no call of it is a lane
+start and none is judged.
+Kind of risk: likely.
 
 **The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in
 the brief. A line that starts with it counts. When the brief's first non-blank line starts with no marker, the

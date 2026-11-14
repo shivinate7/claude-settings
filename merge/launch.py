@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Fresh-code guard. Usage: launch.py <checkout> [--dev] [merge args...]
 
-Fetches origin main, runs merge/merge.py from a detached temporary worktree at that SHA, and
-fast-forwards the checkout only when it is on main, clean, behind and not a cloud mirror. When
+Fetches origin main and origin stable, runs merge/merge.py from a detached temporary worktree at
+stable's SHA (the commit sessions install from, which moves only after a green main run; origin's main
+when origin has no stable, with one WARN line, or when CLAUDE_SETTINGS_REF=main), and
+fast-forwards the checkout to origin/main only when it is on main, clean, behind and not a cloud mirror. When
 fresh code cannot be proven, prints a warning block and runs the checkout's own tree. --dev runs
 the checkout's own tree and nothing else. README: "The `merge` command".
 """
@@ -44,14 +46,23 @@ def main(co, args):
     if code:  # offline or fetch refused: run the code we have
         warn(sha, behind, "fetch of origin main failed: " + (out.splitlines() or ["no output"])[-1])
         return run(co, args)
-    want = git(co, "rev-parse", "origin/main")[1]
+    # The merge tool runs stable, not main: stable moves only to a main commit whose run is green (restart-plan R42 part 2).
+    # An origin with no stable branch (or one that cannot be fetched) runs origin's main with one WARN line; so does
+    # CLAUDE_SETTINGS_REF=main, the recovery, with none.
+    ref = os.environ.get("CLAUDE_SETTINGS_REF") or "stable"
+    if ref != "main":
+        code, out = git(co, "fetch", "-q", "origin", f"+refs/heads/{ref}:refs/remotes/origin/{ref}")
+        if code:
+            print(f"merge: WARN: origin has no {ref} branch (or its fetch failed), so this run uses origin/main", file=sys.stderr)
+            ref = "main"
+    want = git(co, "rev-parse", f"origin/{ref}")[1]
     tmp = os.path.realpath(tempfile.mkdtemp(prefix="merge-fresh-"))  # /var is a symlink on macOS
     wt = os.path.join(tmp, "tree")
     try:
         c, o = git(co, "worktree", "add", "-q", "--detach", wt, want)
         got = git(wt, "rev-parse", "HEAD")[1] if c == 0 else ""
         if got != want:
-            warn(sha, behind, "temporary worktree at origin/main failed or did not match: " + (o or got))
+            warn(sha, behind, f"temporary worktree at origin/{ref} failed or did not match: " + (o or got))
             return run(co, args)
         branch = git(co, "rev-parse", "--abbrev-ref", "HEAD")[1]
         clean = git(co, "status", "--porcelain")[1] == ""
@@ -63,7 +74,7 @@ def main(co, args):
                     print("merge: checkout not fast-forwarded: ff-only merge refused", file=sys.stderr)
             else:
                 print(f"merge: checkout left as is in {os.path.realpath(co)}: {'cloud mirror, install.sh refreshes it' if mirror else 'not on main' if branch != 'main' else 'dirty tree'}", file=sys.stderr)
-        print(f"merge: running claude-settings {want[:12]} (origin/main)", file=sys.stderr)
+        print(f"merge: running claude-settings {want[:12]} (origin/{ref})", file=sys.stderr)
         return run(wt, args)
     finally:
         git(co, "worktree", "remove", "--force", wt)

@@ -38,8 +38,39 @@ jobs:
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          fetch-depth: 0
+          fetch-depth: 50
           persist-credentials: false
+
+      # touched-tests.py reads one diff, BASE_SHA...HEAD, so the checkout is shallow (R62). The checkout drops its token, so this step
+      # passes it for the fetches only, and the step that runs the PR's code gets none. Fetch the base by sha, then deepen until the two
+      # commits share a merge base, and only then fetch it all. A fetch that fails fails the step: an unreadable diff is red, never 0.
+      - name: Reach the merge base
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -u
+          # GitHub masks the token, not its base64 form, so mask the form and the header before anything can print them.
+          b64=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$b64"
+          auth="AUTHORIZATION: basic $b64"
+          echo "::add-mask::$auth"
+          # First argument: the one fetch option. Then the remote and what to fetch.
+          fetch() { local opt=$1; shift; git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags "$opt" origin "$@"; }
+          head_sha=$(git rev-parse HEAD)
+          fetch --depth=50 "$BASE_SHA" || { echo "cannot fetch the base commit $BASE_SHA"; exit 1; }
+          tries=0
+          until git merge-base "$BASE_SHA" HEAD > /dev/null 2>&1; do
+            tries=$((tries + 1))
+            if [ "$tries" -gt 20 ]; then
+              echo "no merge base within 1000 commits, so fetching the full history"
+              fetch --unshallow "$head_sha" "$BASE_SHA" || { echo "cannot fetch the full history"; exit 1; }
+              git merge-base "$BASE_SHA" HEAD > /dev/null || { echo "no merge base with the full history"; exit 1; }
+              break
+            fi
+            fetch --deepen=50 "$head_sha" "$BASE_SHA" || { echo "cannot deepen the history"; exit 1; }
+          done
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
@@ -69,7 +100,7 @@ jobs:
     needs: touched
     if: ${{ github.event.pull_request.draft && needs.touched.outputs.any == 'true' }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10   # provisional, 4 runs, slowest 4.7 min (decision ci-job-caps)
+    timeout-minutes: 30   # interim stopgap (decision ci-job-caps): both systems ended at the old 10 min cap with no red step (macOS 10.3 min twice, run 43493592401; Windows 10.2 and 10.1 min cap-end jobs, runs 43505306735 and 43510710739); Windows green 7.7 min, macOS green 5.7 min
     # One entry per system that has tests to run: the selector leaves a system out when its list is empty.
     strategy:
       fail-fast: false
@@ -77,7 +108,7 @@ jobs:
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          fetch-depth: 0
+          fetch-depth: 50
           persist-credentials: false
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0

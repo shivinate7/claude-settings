@@ -1,9 +1,9 @@
 # A fast-forwarded first lane is no tip
 
-**What.** `lane_tips` reads merge commits only. A lane that fast-forwards onto the base has no merge commit. Its tip is never read, so its branch is never cut. 0 of 112 recent lane merges did this.
+**What.** The old tip reader read merge commits only, so a lane that fast-forwarded onto the base had its tip unread and its branch never cut. Act 4 (per-lane merge) removed that reader and the batch cut. No lane branch is cut now, so nothing reads a lane's tip.
 
-**Where.** `merge/merge.py`, `lane_tips`.
+**Where.** None at head.
 
-**Decision.** `merge-deletes-batch-lanes` (a merge deletes its batch's lane branches).
+**Decision.** `merge-deletes-batch-lanes` (a merge deletes its own branch only).
 
-**Retire.** Read the tip of a fast-forwarded lane too. Check: a fixture test whose first lane fast-forwards. Its branch is cut. Red on the current code, green after the fix.
+**Retire.** Runnable: `merge/test_lane_fast_forward.py`, which is not written yet. It holds a case whose PR head fast-forwards onto the base and brings in a lane: the lane's branch stays on origin and the PR's own branch is cut. Until that file is tracked and green, no check runs, so a close is held.
