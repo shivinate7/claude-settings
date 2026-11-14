@@ -1,0 +1,6 @@
+# The hand-closed lane test passes whatever closed_by_tool returns
+
+- **What.** The hand-closed case in `ReplacedAtHandIn` closes the dropped lane's pull request #3302 by hand, with no pointer, but never seeds the issue-comment list. The read of `issues/comments` returns 404, so the run takes the unreadable-comments path and never reaches `closed_by_tool`. With `closed_by_tool` changed to `return True`, all 13 `ReplacedAtHandIn` tests stay green, so a regression that reopens a lane closed by hand would ship green.
+- **Where.** `merge/test_lane_lint.py`, class `ReplacedAtHandIn`, the hand-closed case at about lines 3544 to 3553. The code it should guard is `closed_by_tool` and `reopen_dropped` in `merge/merge.py`.
+- **Decision.** `roles-findings-are-debts-or-notes` (a CLAUDE.md rule: a finding is a debt only for a gap that Claude is likely to hit in normal work). No decision names this gap. The merge tool step `close-replaced-at-open` (the step that closes the pull requests a lane replaces) owns the fix.
+- **Retire.** The hand-closed case seeds the issue-comment list, oldest first, with three cases that must each stay closed at every pass: no pointer on the lane, another pull request's pointer, and a reopen pointer as the newest. Runnable: `merge/test_lane_lint.py`. Red with `closed_by_tool` returning True, green on the current code.

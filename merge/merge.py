@@ -123,12 +123,18 @@
                           Before any step: a lint worktree that lacks lint/check_python_floor.py or .github/workflows/checks.yml, which the head's
                           own tree holds, reads UNKNOWN (exit 1, as every lane-lint refusal) and names the file; no step runs and --lint-unknown-ok never lifts it. Cost:
                           one `git ls-tree` of the head.
+                          Replaced PRs: a hand-in that is not an integration PR is refused while its body names an open replaced PR (a
+                          `Replaces #N` or `Carries #N` line); no override lifts it. On a batch integration PR, a PASS posts a pointer
+                          comment on each open lane its freeze block names, then closes it as replaced (its branch stays); the same PASS
+                          reopens each closed lane the block has dropped when the tool closed it (its own pointer is the newest on that lane),
+                          and posts a pointer after the reopen. Cost: one open-list read, one read of each dropped lane not open, and one read
+                          of the repo's comments when any is closed.
   merge --idle-lanes --live FILE
                           lane lines (a lane the roadmap's live file shows done and safe to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step's status is set to todo or done), then a summary line. A lane that waits (a step not done, an open pull, an open item) prints no line, except a lane only stale drafts hold: that prints one `joint (close #N ...; archive archive/<branch> ...; archive lane <id>)` line, counted among the lanes to archive. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
                           posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
   merge <pr> --ready      a lane's one act on its own draft: the draft step of --confirm (rebuild the records page, run the repo's ready
-                          checks, push the page, ask the host to mark the PR ready) and nothing more. A PR that is ready already is left as it is. It
+                          checks, push the page, close each open PR the body names as replaced, ask the host to mark the PR ready) and nothing more. A PR that is ready already is left as it is. It
                           never merges, takes no lock and needs no merge role. A red head or a head that conflicts with the base is not marked ready.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
@@ -1080,12 +1086,16 @@ class Host:
         """-> the open pull requests (drafts too), every page, as `GET pulls` lists them. A failed read is a Stop, never an empty list."""
         return self.pages("pulls", fields={"state": "open"})
 
-    def pr(self, n):
-        """-> {head, branch, base, state, mergeable, merge_state, draft, body, created, changed_files}"""
+    def read_pr(self, n):
+        """-> the pr() fields of pull request n, one read, with no change to this Host. A failed read is a Stop."""
         c, out = self.api(f"pulls/{self.pr_number(n)}")
         if c:
-            raise Stop("reading the pull request failed: " + out)
-        info = self.info(json.loads(out))
+            raise Stop("reading the pull request failed " + READ_CITE + ": " + out)
+        return self.info(json.loads(out))
+
+    def pr(self, n):
+        """-> {head, branch, base, state, mergeable, merge_state, draft, body, created, changed_files}"""
+        info = self.read_pr(n)
         self.base = info["base"]  # the PR's own base drives required_names
         self.branch = info["branch"]
         return info
@@ -1125,12 +1135,14 @@ class Host:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
     def issue_comments(self, since):
-        """-> (records, lints): one list read of the repo's issue comments updated since `since`. The number comes from the comment's issue_url.
+        """-> (records, lints, pointers): one list read of the repo's issue comments updated since `since`. The number comes from the comment's issue_url.
         records is {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: a body counts only when the review record
         marker is its whole first line. A timestamp the read did not give is None.
         lints is {PR number: [lane-lint comment bodies, oldest first]}: the lint marker is the whole first line and the author is the repo's owner.
-        A failed read is a Stop. The one home of the comment read: review_records, review_comments and the lane-lint check each take their part."""
-        records, lints = {}, {}
+        pointers is {PR number: [pointer comment bodies, oldest first]}: the replaced-pointer marker (REPLACED_MARKER) is the whole first line. Any author
+        counts, since the tool posts as whichever account runs it; only the tool writes the marker.
+        A failed read is a Stop. The one home of the comment read: review_records, review_comments, the lane-lint check and reopen_dropped each take their part."""
+        records, lints, pointers = {}, {}, {}
         for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
             body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
             first = body.splitlines()[:1]
@@ -1138,7 +1150,9 @@ class Host:
                 records.setdefault(int(m.group(1)), []).append((body, c.get("created_at"), c.get("updated_at")))
             elif m and first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR:
                 lints.setdefault(int(m.group(1)), []).append(body)
-        return records, lints
+            elif m and first == [REPLACED_MARKER]:
+                pointers.setdefault(int(m.group(1)), []).append(body)
+        return records, lints, pointers
 
     def review_records(self, since):
         """-> {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: the records half of issue_comments."""
@@ -1149,6 +1163,14 @@ class Host:
         c, out = self.api(f"issues/{n}/comments", method="POST", body={"body": body})
         if c:
             raise Stop(f"posting the comment on #{n} failed {LANE_LINT_CITE}: {out}")
+
+    def set_pr_state(self, m, state, by):
+        """Set pull request m to `state` (REST PATCH state=<state>): "closed" as replaced by pull request `by`, or "open" as dropped from the batch of `by`.
+        The branch stays. A failed call is a Stop."""
+        c, out = self.api(f"pulls/{m}", method="PATCH", fields={"state": state}, idempotent=True)
+        if c:
+            act = f"closing #{m} as replaced by #{by}" if state == "closed" else f"reopening #{m}, dropped from the batch of #{by},"
+            raise Stop(f"{act} failed {REPLACED_CITE}: {out}")
 
     def review_comments(self, since):
         """-> {PR number: [review record bodies, oldest first]}: review_records without the timestamps."""
@@ -2399,6 +2421,8 @@ def drop_worktree(root, tmp, wt):
     git(root, "worktree", "prune")
     shutil.rmtree(tmp, ignore_errors=True)
 
+REPLACED_CITE = "(decision session-tiers, a pull request closes as replaced when the pull request that replaces it opens)"
+REPLACED_MARKER = "<!-- replaced-pointer -->"  # the whole first line of each pointer the tool posts (close_replaced, reopen_dropped); issue_comments reads it back
 LANE_LINT_REMEDY = "Fix it on the lane, push, and run `merge --lane-lint` again. Do not hand this head to the batch runner or join it to a batch until the lint passes. " + LANE_LINT_CITE
 
 def lane_head_and_base(root, target, base):
@@ -2686,7 +2710,10 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     A PASS on a pull request number posts the lane-lint comment (lint_body) naming the head it read, which `--reviewed` and the join require; a failed post
     prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing.
     `touched_tests` (--touched-tests): after a lint pass only, run_touched_tests runs the tests the head's diff touches in the same tree. A failing test refuses always;
-    an unknown (timeout, unloadable selector, unreadable diff) refuses unless `unknown_ok` gives a reason. The PASS line then also names the run and skipped counts."""
+    an unknown (timeout, unloadable selector, unreadable diff) refuses unless `unknown_ok` gives a reason. The PASS line then also names the run and skipped counts.
+    A hand-in of a pull request that is not an integration PR is refused while its body names an open replaced pull request (open_named); no override lifts it.
+    On a batch integration PR, a PASS (after its lint comment) posts a pointer comment on each open lane its freeze block names, then closes it as replaced
+    (close_replaced); the same PASS reopens each closed lane the block has dropped when the tool closed it, and posts a pointer after the reopen (reopen_dropped)."""
     if target.isdigit():
         host = host or Host(cwd=root)
         n = int(target)
@@ -2694,6 +2721,11 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         base = info["base"]
         info = fetch_pr_head(root, info, base, host, n)  # a lane lints right after its push, when GitHub may still show the old head
         head = info["head"]
+        if not is_integration_pr(info):  # an integration PR's lanes close at its own pass, below
+            still_open = open_named(host, info, n)
+            if still_open:
+                raise Stop(f"the body of #{n} names {', '.join(f'#{m}' for m in still_open)} as replaced, and it is open. "
+                           f"Close it as replaced by #{n} (a pointer comment; its branch stays), then run `merge --lane-lint {n}` again. {REPLACED_CITE}")
         tmp, wt = add_worktree(root, head)
     else:
         head, base = lane_head_and_base(root, target, base)
@@ -2758,6 +2790,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             except Stop as e:  # the lint stands; only the proof on the PR is missing, so say how to get it
                 say(f"merge: the lane-lint comment was not posted on #{n}: {' '.join(str(e).split())} The join and `merge --reviewed` read no PASS for {short} until it is. "
                     f"Run `merge --lane-lint {n}` again, or post this comment on #{n} as the repo's owner:", *lint_body(n, head).splitlines())
+            if is_integration_pr(info):  # after the proof, so a refused close or reopen still leaves the PASS on the pull request
+                close_replaced(host, n, info)
+                reopen_dropped(host, n, info)
         return 0
     if state == "fail":
         raise LintFail("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]), lines, log)
@@ -3153,6 +3188,59 @@ def run_ready_checks(wt, n, base, checks, remedy="Fix it on the branch, push, an
         raise LintFail(message, lines, log) if state == "fail" else Stop(message)
     say(f"merge: the ready checks ({', '.join(checks)}) pass on {short}.")
 
+def open_named(host, info, n):
+    """-> the pull requests that the body of `n` (`info`) names as replaced and that are open now (replaced_names, then one read of the open list).
+    A body that names none reads nothing. A closed or merged one is not in the open list, so it gets no call."""
+    names = replaced_names(info, n)
+    if not names:
+        return []
+    still_open = {m for m, _ in host.open_prs()}
+    return [m for m in names if m in still_open]
+
+def close_replaced(host, n, info):
+    """Close each open pull request that pull request `n` names as replaced, with a pointer comment to `n` posted first (a retry after a refused close
+    posts a second pointer; a retry after a refused comment closes nothing without one). Cost: one read of the open list, then one comment and one
+    close for each open one, only at --ready and at a batch integration PR's lane-lint pass."""
+    done = open_named(host, info, n)
+    for m in done:
+        host.post_comment(m, f"{REPLACED_MARKER}\nReplaced by #{n}, which carries this work. This PR is closed and its branch stays. The tool reopens it when the lane is dropped from the batch; otherwise reopen it by hand if #{n} is dropped.")
+        host.set_pr_state(m, "closed", n)
+    if done:
+        say(f"merge: closed {', '.join(f'#{m}' for m in done)} as replaced by #{n}. Each branch stays; the tool reopens a lane dropped from the batch, and any other is reopened by hand. {REPLACED_CITE}")
+
+def closed_by_tool(pointers, n):
+    """-> whether the newest pointer the tool posted on a pull request (`pointers`, oldest first, from issue_comments) is its close as replaced by `n`.
+    A reopen pointer posted after it, a close by another pull request, or no pointer at all (a close by hand) reads False."""
+    return bool(pointers) and bool(re.match(rf"Replaced by #{n}\b", (pointers[-1].splitlines()[1:] or [""])[0]))
+
+def reopen_dropped(host, n, info):
+    """At the lane-lint pass of batch integration PR `n` (`info`): reopen each lane that its freeze block marks Dropped, that is closed now, and whose newest
+    pointer is the tool's close as replaced by `n` (closed_by_tool), so a lane the tool closed is open again once the batch lets it go. A lane closed by hand,
+    an open, a merged and an unnamed pull request is never touched. The reopen pointer is posted only after the reopen succeeds, so a refused reopen
+    leaves no pointer, and its retry posts one. A failed comment read leaves each lane closed and says so; the PASS stands.
+    Cost: one read of the open list, then one read of each dropped lane not in it, one read of the repo's comments since `n` opened when any of them is
+    closed, and one reopen and one comment for each lane the tool closed."""
+    dropped = parse_freeze(info["body"])["dropped"]
+    if not dropped:
+        return
+    still_open = {m for m, _ in host.open_prs()}
+    closed = [m for m in dropped if m not in still_open and host.read_pr(m)["state"] == "CLOSED"]  # a merged lane reads MERGED, so it stays
+    if not closed:
+        return
+    try:
+        pointers = host.issue_comments(info.get("created") or "1970-01-01T00:00:00Z")[2]
+    except Stop as e:
+        say(f"merge: {', '.join(f'#{m}' for m in closed)} left closed: the comments that show whether the tool closed it could not be read "
+            f"({' '.join(str(e).split())}). Run `merge --lane-lint {n}` again to retry, or reopen a lane the tool closed by hand. {REPLACED_CITE}")
+        return
+    done = []
+    for m in (m for m in closed if closed_by_tool(pointers.get(m, []), n)):
+        host.set_pr_state(m, "open", n)
+        done.append(m)
+        host.post_comment(m, f"{REPLACED_MARKER}\nDropped from the batch of #{n}, so this lane is reopened by the tool. Its branch stayed, and #{n} no longer carries this work.")
+    if done:
+        say(f"merge: reopened {', '.join(f'#{m}' for m in done)}, dropped from the batch of #{n}. {REPLACED_CITE}")
+
 def draft_step(root, cfg, n, host, info):
     """`merge <pr> --confirm` on a draft: rebuild the records page on the head, push it, mark the pull request ready, and
     stop. So the branch is final at ready, and the ready confirm pushes nothing (decision records-index-at-merge).
@@ -3197,6 +3285,7 @@ def draft_step(root, cfg, n, host, info):
                     say(f"merge: the records page on {info['branch']} at {info['head'][:9]} is current. Nothing was pushed.")
         finally:
             drop_worktree(root, tmp, wt)
+    close_replaced(host, n, info)  # after the checks and the push, so a red or refused step closes nothing; before the ready mark, which may stay unmarked
     ok, why = host.ready(n)
     if ok:
         say(f"merge: #{n} is ready now. Nothing was merged. When its run is green, run --confirm again to merge.")
@@ -3843,7 +3932,7 @@ def reviewed_read(h, cfgrel=None):
     pulls = h.pages("pulls", fields={"state": "open"})
     if not pulls:
         return ["no open pull requests."]
-    rows, lints = h.issue_comments(min(d["created_at"] for d in pulls))
+    rows, lints, _pointers = h.issue_comments(min(d["created_at"] for d in pulls))
     records = {n: [r[0] for r in rs] for n, rs in rows.items()}  # reviewed_read needs the bodies only
     lines, bare = [], []
     for d in sorted(pulls, key=lambda d: d["number"]):
@@ -4253,6 +4342,30 @@ def freeze_lines(name, lanes, dropped=(), on=None, base=None, blamed=(), linted=
             *(f"Lane: #{n} {lanes[n]}" for n in sorted(lanes)),
             *(f"Dropped: #{n}" for n in dropped), *(f"Blamed: #{n}" for n in sorted(blamed)), *([f"Linted: {linted}"] if linted else []), BATCH_END]
 
+REPLACES_LINE = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?\**(?:Replaces|Carries)\**:?\**[ \t]+(?:PR[ \t]+)?(#\d+(?:(?:[ \t]*,[ \t]*(?:and[ \t]+|&[ \t]*)?|[ \t]+and[ \t]+|[ \t]*&[ \t]*)(?:PR[ \t]+)?#\d+)*)(?=\**[ \t]*(?:$|[.!?;](?:[ \t]|$)))", re.I)
+
+def replaced_names(info, n):
+    """-> the numbers of the pull requests that the body of pull request `n` (`info`: its "branch" and "body") names as replaced, in order, once each.
+    A line that starts `Replaces #N` or `Carries #N` names them (`PR #N`, a colon and bold marks may stand between; a list like `#1, #2, and #3` may follow), outside a fenced block, a quote line and a code span, so an example
+    names none. The number list counts only when the line or its sentence ends right after it (`Replaces #1 in the docs`, `Replaces #12's polling`
+    and `Carries #5 forward` name nothing). A batch integration PR also names each lane of its freeze block, and never a lane it has dropped, not even
+    from a `Replaces` or `Carries` line. The PR itself and a reference to another repo (`org/repo#N`, a URL) are never named; `see #N` and `related #N`
+    start no line of either form."""
+    rows = info["body"].replace("\r\n", "\n").split("\n")
+    fenced = stale_cites.fenced_lines(rows)
+    names = []
+    for number, row in enumerate(rows, 1):
+        if number in fenced or stale_cites.HEADING_OR_QUOTE.match(row):
+            continue
+        m = REPLACES_LINE.match(stale_cites.CODE_SPAN.sub("", row))
+        names += [int(x) for x in re.findall(r"#(\d+)", m.group(1))] if m else []
+    dropped = ()
+    if is_integration_pr(info):
+        block = parse_freeze(info["body"])
+        names += list(block["lanes"])
+        dropped = block["dropped"]
+    return [x for x in dict.fromkeys(names) if x != n and x not in dropped]
+
 MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
 
 def role_path():
@@ -4367,7 +4480,7 @@ def build_parser():
     p.add_argument("--with", dest="with_prs", default=None, metavar="PR,PR,...", help="with --lane-lint on a PR number: also check the head against each named open PR (a comma list), even one of another session")
     p.add_argument("--touched-tests", action="store_true", help="with --lane-lint: after the lint passes, run the test files the diff touches in the lint worktree; a failing test refuses, a timeout is unknown (lifted by --lint-unknown-ok)")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
-    p.add_argument("--ready", action="store_true", help="mark a lane's draft pull request ready, once: the records step and the repo's ready checks, then the host's mark; a ready pull request is left as it is; merges nothing, takes no lock")
+    p.add_argument("--ready", action="store_true", help="mark a lane's draft pull request ready, once: the records step and the repo's ready checks, then close each open pull request the body names as replaced, then the host's mark; a ready pull request is left as it is; merges nothing, takes no lock")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
     p.add_argument("--base-red-ok", default="", metavar="REASON", help="go on when the base's latest run is red or unreadable (this merge carries the fix); logged")
