@@ -5,13 +5,19 @@
 
 Reads prose only and runs none of the skill's code. Each case pins one claim:
   1. "Route and close" has a Park sentence that closes an item gated on `lane`, outside the park branch.
-  2. In the park branch, the writer's send_message tell comes before the close update that drops `lane`.
+  2. In the park branch, the writer's `mail send` tell comes before the close update that drops `lane`.
   3. No sentence has the owning session send or tell the receiver at its wake after a park.
   4. The untold-receiver note no longer says the receiver cannot be found while a close drops `lane`.
   5. In the park branch, every message is under a `lane` condition, and a park on an item with no `lane` just closes.
   6. The park tell names only the page URL, the item id and the act withdrawn, never the answer's note or text.
   7. The decision's option bullet (the one with the option shape `{key, label, how`) says a settings-change option's
      label names settings.json and the entry.
+  8. The lane-to-parent tell names `mail send`.
+  9. The answer-unread tell names `mail send`.
+  10. The park tell names `mail send`.
+
+The three tells name `mail send`, the mailbox route (decision session-messages, "One route"). No case requires
+send_message.
 """
 import os
 import re
@@ -42,7 +48,7 @@ NEG = re.compile(r"\b(?:not|never|no|none|nothing|nor)\b|n't\b", re.I)
 TELL_VERB = re.compile(r"\btells?\b|\bsends?\b|\bmessag\w*|\bnotif(?:y|ies|ied)\b|send_message", re.I)
 # Case 5's trigger: a sentence that sends or names a message, or a withdrawn act.
 MESSAGE_ACT = re.compile(r"send_message|\btells?\b|\bsends?\b|\bmessag\w*|\bnotif\w*|\bwithdrawn\b", re.I)
-SEND_MESSAGE = re.compile(r"send_message", re.I)
+MAIL_SEND = re.compile(r"\bmail send\b", re.I)  # the mailbox route, which each tell names
 NOTE_OR_TEXT = re.compile(r"\bnote\b|\btext\b", re.I)
 PAGE_URL = re.compile(r"\burl\b", re.I)
 ITEM_ID = re.compile(r"\bitem id\b", re.I)
@@ -54,6 +60,13 @@ DROP_LANE = re.compile(r"\bdrops?\b[^.]{0,60}\blane\b", re.I)
 # `how` does not move the anchor. The label names the settings file and the entry, in code or plain text.
 OPTION_SHAPE = "{key, label, how"
 SETTINGS_LABEL = re.compile(r"label names `?settings\.json`? and the entry", re.I)
+# Cases 8 to 10: each tell is found from its own anchor, then checked for `mail send`. The lane tell sits in the bullet
+# that holds LANE_BULLET; its sentence sends to the parent. Another sentence in that bullet says "sent ... to its parent",
+# which SENDS does not match.
+LANE_BULLET = "A lane has no chat with the owner"
+TO_PARENT = re.compile(r"\bto its parent\b", re.I)
+SENDS = re.compile(r"\bsends?\b", re.I)
+ANSWER_UNREAD = re.compile(r"\banswer-unread\b", re.I)
 
 
 def read(path):
@@ -159,6 +172,23 @@ def option_bullet(text):
     return text[head + 1:min(stops) if stops else len(text)]
 
 
+def lane_tell(text):
+    """The lane-to-parent tell: the sentence in the lane bullet that sends to the parent, or "" when none is found."""
+    for block in blocks(text):
+        flat = " ".join(block.split())
+        if LANE_BULLET in flat:
+            for sent in sentences(flat):
+                if TO_PARENT.search(sent) and SENDS.search(sent):
+                    return sent
+            return ""
+    return ""
+
+
+def unread_tells(text):
+    """Every sentence that names the answer-unread line, the sentence that tells each owner."""
+    return [s for block in blocks(text) for s in sentences(block) if ANSWER_UNREAD.search(s)]
+
+
 class ParkRelayProse(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -173,11 +203,11 @@ class ParkRelayProse(unittest.TestCase):
 
     def test_2_park_tell_comes_before_the_close_that_drops_lane(self):
         self.assertTrue(self.park, "SKILL.md has no park branch (answers/<item id> with act park)")
-        tell = self.park.find("send_message")
-        self.assertGreaterEqual(tell, 0, "the park branch has no send_message tell to the receiver")
+        tell = MAIL_SEND.search(self.park)
+        self.assertIsNotNone(tell, "the park branch has no `mail send` tell to the receiver")
         close = CLOSE_UPDATE.search(self.park)
         self.assertIsNotNone(close, "the park branch has no close update")
-        self.assertLess(tell, close.start(),
+        self.assertLess(tell.start(), close.start(),
                         "the park branch sends the receiver its tell after the close update that drops lane")
 
     def test_3_no_sentence_has_the_owner_send_or_tell_the_receiver_at_its_wake_after_a_park(self):
@@ -214,8 +244,8 @@ class ParkRelayProse(unittest.TestCase):
 
     def test_6_the_park_tell_names_only_the_page_url_the_item_id_and_the_act_withdrawn(self):
         self.assertTrue(self.park, "SKILL.md has no park branch, so there is no park to scope the scan to")
-        tells = [s for s in sentences(self.park) if SEND_MESSAGE.search(s)]
-        self.assertTrue(tells, "the park branch has no send_message tell to check")
+        tells = [s for s in sentences(self.park) if MAIL_SEND.search(s)]
+        self.assertTrue(tells, "the park branch has no `mail send` tell to check")
         self.assertFalse([s for s in tells if NOTE_OR_TEXT.search(s)],
                          "the park tell names the answer's note or text: %s" % (tells[0] if tells else ""))
         self.assertTrue(any(PAGE_URL.search(s) and ITEM_ID.search(s) and WITHDRAWN.search(s) for s in tells),
@@ -231,6 +261,30 @@ class OptionLabelGuidance(unittest.TestCase):
         self.assertTrue(self.bullet, "SKILL.md has no decision option bullet with the option shape `{key, label, how`")
         self.assertRegex(self.bullet, SETTINGS_LABEL,
                          "the option guidance does not say a settings-change option's label names settings.json and the entry")
+
+
+class TellsNameMailSend(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.skill = read(SKILL)
+        cls.park = park_branch(cls.skill)
+
+    def test_8_lane_to_parent_tell_names_mail_send(self):
+        tell = lane_tell(self.skill)
+        self.assertTrue(tell, "SKILL.md has no lane-to-parent tell (a sentence in the lane bullet that sends to its parent)")
+        self.assertTrue(MAIL_SEND.search(tell), "the lane-to-parent tell does not name `mail send`: %s" % tell)
+
+    def test_9_answer_unread_tell_names_mail_send(self):
+        tells = unread_tells(self.skill)
+        self.assertTrue(tells, "SKILL.md has no answer-unread tell (a sentence that names the answer-unread line)")
+        self.assertTrue(any(MAIL_SEND.search(s) for s in tells),
+                        "the answer-unread tell does not name `mail send`: %s" % tells[0])
+
+    def test_10_park_tell_names_mail_send(self):
+        self.assertTrue(self.park, "SKILL.md has no park branch, so there is no park tell to check")
+        tells = [s for s in sentences(self.park) if PAGE_URL.search(s) and WITHDRAWN.search(s)]
+        self.assertTrue(tells, "the park branch has no tell that names the page URL and the withdrawn act")
+        self.assertTrue(any(MAIL_SEND.search(s) for s in tells), "the park tell does not name `mail send`: %s" % tells[0])
 
 
 if __name__ == "__main__":

@@ -1179,6 +1179,119 @@ def case_page_sendmessage_proof_passes():
     expect_silent("page: a SendMessage naming 98 after the owner record passes", p)
 
 
+MAIL_SEND = "mail send --to cloud/session_x --kind inform --body-file -"
+MAIL_FAILED = "mail: session cloud/session_x could not be reached"  # a fixture text: only the is_error flag is read
+
+
+def mail_rec(body, tool_id=None, head=MAIL_SEND):
+    """A Bash tool_use that runs `head` with `body` on stdin as a heredoc, the way a mail send takes its body.
+    `tool_id` is set only when a result must pair with it."""
+    return used_rec("Bash", {"command": "%s <<'EOF'\n%s\nEOF" % (head, body)}, tool_id=tool_id)
+
+
+def case_page_mail_send_proof_passes():
+    """A Bash `mail send` whose heredoc body names page item 98 as a whole token, after the owner record, proves the
+    send as a send_message does. The head may be `mail` or `bin/mail`. The item may sit on the last line of a long body."""
+    long_body = "\n".join(["- a plain reason sentence"] * 300 + ["Ruling on page item 98: a"])
+    for label, head, body in (
+            ("a mail send whose body names 98", MAIL_SEND, "Ruling on page item 98: a"),
+            ("a bin/mail send whose body names 98", "bin/" + MAIL_SEND, "Ruling on page item 98: a"),
+            ("a mail send with 98 on the last line of a 301-line body", MAIL_SEND, long_body)):
+        p = page_run(new_cfg(), "page-mail", [("98: a", (PAGE_ITEM,))],
+                     [owner_rec("98: a"), mail_rec(body, head=head)])
+        expect_silent("page: %s passes" % label, p)
+
+
+def case_page_mail_send_refusals_block():
+    """Still refused. No send at all, or a Bash call that is no mail send: an `ls` naming 98, or an echo or a grep that
+    only quotes `mail send`. A mail send whose body names another item, or whose body is empty. A mail send before the
+    owner record, and a mail send whose result is an error. Each block names item 98 and the page writer."""
+    owner = owner_rec("98: a")
+    for label, records in (
+            ("no send at all", [owner, said_rec("Noted.")]),
+            ("a Bash ls that names 98", [owner, used_rec("Bash", {"command": "ls items/98"}), said_rec("Noted.")]),
+            ("an echo that quotes a mail send naming 98",
+             [owner, used_rec("Bash", {"command": "echo 'mail send --to cloud/session_x --body-file - Ruling on page item 98: a'"})]),
+            ("a grep for mail send that names 98",
+             [owner, used_rec("Bash", {"command": 'grep -n "mail send" docs/items/98.md'})]),
+            ("a mail send naming item 980", [owner, mail_rec("Ruling on page item 980: a")]),
+            ("a mail send naming item 198", [owner, mail_rec("Ruling on page item 198: a")]),
+            ("a mail send with an empty body", [owner, mail_rec("")]),
+            ("a mail send before the owner record",
+             [mail_rec("Ruling on page item 98: a"), owner, said_rec("Noted.")]),
+            ("a mail send whose result is an error",
+             [owner, mail_rec("Ruling on page item 98: a", tool_id="m1"), result_rec("m1", MAIL_FAILED, is_error=True)])):
+        p = page_run(new_cfg(), "page-mail-refused", [("98: a", (PAGE_ITEM,))], records)
+        expect_send_missing("page: %s does not prove 98" % label, p, "fb-0958-7", "98")
+
+
+def case_page_mail_send_to_address_proves_nothing():
+    """A mail send whose --to address is `x/98` and whose body names no item does not prove page item 98: the address is
+    no part of the message."""
+    p = page_run(new_cfg(), "page-mail-to", [("98: a", (PAGE_ITEM,))],
+                 [owner_rec("98: a"), mail_rec("Noted.", head="mail send --to x/98 --kind inform --body-file -")])
+    expect_send_missing("page: a mail send whose --to is x/98 and whose body is Noted. does not prove 98", p,
+                        "fb-0958-7", "98")
+
+
+def case_page_mail_send_exit_code_result_does_not_count():
+    """A mail send whose tool_result reads `Exit code 1`, with no is_error, did not send: the shell's nonzero exit is a
+    failed result, as the report guard reads it (`^Exit code [1-9]`). An `Exit code 0` result is no failure."""
+    failed = page_run(new_cfg(), "page-exit-one", [("98: a", (PAGE_ITEM,))],
+                      [owner_rec("98: a"), mail_rec("Ruling on page item 98: a", tool_id="m1"),
+                       result_rec("m1", "Exit code 1\nmail: no session cloud/session_x")])
+    expect_send_missing("page: a mail send whose result reads Exit code 1, with no is_error, does not prove 98",
+                        failed, "fb-0958-7", "98")
+    passed = page_run(new_cfg(), "page-exit-zero", [("98: a", (PAGE_ITEM,))],
+                      [owner_rec("98: a"), mail_rec("Ruling on page item 98: a", tool_id="m1"),
+                       result_rec("m1", "Exit code 0\nSent to cloud/session_x")])
+    expect_silent("page: a mail send whose result reads Exit code 0 still proves 98", passed)
+
+
+def case_page_mail_send_fd_redirect_proves_nothing():
+    """A redirect is no part of the body. `2>&1` is a file-descriptor number and a redirect, so the echo's text is
+    `build ok` and the send does not prove item 2. `> f` sends the echo's text to a file, so the pipe carries nothing."""
+    fd_redirect = page_run(new_cfg(), "page-fd", [("2: a", ("- fb-0958-9 [page] -> page:2",))],
+                           [owner_rec("2: a"),
+                            used_rec("Bash", {"command": 'echo "build ok" 2>&1 | mail send --to pw --kind inform --body-file -'},
+                                     tool_id="e1"),
+                            result_rec("e1", "ok")])
+    expect_send_missing("page: an echo with 2>&1 piped into mail send does not prove item 2", fd_redirect,
+                        "fb-0958-9", "2")
+    file_redirect = page_run(new_cfg(), "page-redirect", [("5: a", ("- fb-0958-11 [page] -> page:5",))],
+                             [owner_rec("5: a"),
+                              used_rec("Bash", {"command": "echo 5 > f | mail send --to pw --kind inform --body-file -"},
+                                       tool_id="e1"),
+                              result_rec("e1", "ok")])
+    expect_send_missing("page: an echo 5 > f piped into mail send does not prove item 5", file_redirect,
+                        "fb-0958-11", "5")
+
+
+def case_page_grep_quoting_a_heredoc_does_not_swallow_the_send():
+    """A quoted `<<EOF` on an earlier line of the same Bash call is a grep's text, not a heredoc. It must not take the
+    real send's heredoc for its own body: the send's body names item 5, so the send proves it."""
+    command = ('grep -n "<<EOF" f\n'
+               "mail send --to pw --kind inform --body-file - <<'EOF'\n"
+               "Ruling on page item 5: a\n"
+               "EOF")
+    p = page_run(new_cfg(), "page-grep-heredoc", [("5: a", ("- fb-0958-11 [page] -> page:5",))],
+                 [owner_rec("5: a"), used_rec("Bash", {"command": command}, tool_id="e1"), result_rec("e1", "ok")])
+    expect_silent("page: an earlier grep of \"<<EOF\" does not swallow the send's heredoc; its body names 5", p)
+
+
+def case_page_mail_send_false_alarms_pass():
+    """Two shapes that send and must pass. An echo whose line ends in a backslash continues into `mail send`, so the
+    pipe carries 5. `python3 bin/mail send` runs the mail script, as `bin/mail send` does."""
+    for label, command in (
+            ("an echo 5 piped into a mail send on a continued line",
+             "echo 5 | \\\nmail send --to pw --kind inform --body-file -"),
+            ("python3 bin/mail send with a heredoc naming 5",
+             "python3 bin/mail send --to pw --kind inform --body-file - <<'EOF'\nRuling on page item 5: a\nEOF")):
+        p = page_run(new_cfg(), "page-false-alarm", [("5: a", ("- fb-0958-11 [page] -> page:5",))],
+                     [owner_rec("5: a"), used_rec("Bash", {"command": command}, tool_id="e1"), result_rec("e1", "ok")])
+        expect_silent("page: %s passes" % label, p)
+
+
 CLOUD_UNVERIFIED = "target session could not be verified; retry send_message shortly"  # a cloud send_message failure
 # A failed local SendMessage (unknown name) has no is_error flag: the text is this JSON, and the user record's
 # toolUseResult carries success false. The name here is a fixture, since the real message is not fixed.
@@ -1818,6 +1931,45 @@ def case_repo_send_naming_the_repo_passes():
         expect_silent("repo: %s passes" % label, p)
 
 
+def case_repo_mail_send_naming_the_repo_passes():
+    """A Bash `mail send` whose heredoc body names owner/name as a whole token, after the owner record, proves the repo
+    item as a send_message does. The name may sit in backticks, before a colon, or in another letter case."""
+    for label, body in (("in backticks", "Filed the rename in `acme/widgets`"),
+                        ("before a colon", "acme/widgets: the rename is filed"),
+                        ("in another letter case", "rename filed in ACME/widgets now")):
+        p = page_run(new_cfg(), "repo-mail", [("rename", (REPO_ITEM,))], [owner_rec("rename"), mail_rec(body)])
+        expect_silent("repo: a mail send whose body names the repo, %s, passes" % label, p)
+
+
+def case_repo_mail_send_refusals_block():
+    """Still refused. A Bash call that is no mail send, an `ls` or an echo, though it names the repo. A mail send whose
+    body names another repo, or only the owner. A mail send before the owner record, and one whose result is an error.
+    Each block names the repo's slug."""
+    owner = owner_rec("rename")
+    for label, records in (
+            ("a Bash ls that names the repo",
+             [owner, used_rec("Bash", {"command": "ls acme/widgets"}), said_rec("Noted.")]),
+            ("an echo that quotes a mail send naming the repo",
+             [owner, used_rec("Bash", {"command": "echo 'mail send --to cloud/session_x --body-file - filed in acme/widgets'"})]),
+            ("a mail send naming another repo", [owner, mail_rec("filed in acme/gadgets")]),
+            ("a mail send naming the owner alone", [owner, mail_rec("filed by acme")]),
+            ("a mail send before the owner record", [mail_rec("filed in acme/widgets"), owner, said_rec("Noted.")]),
+            ("a mail send whose result is an error",
+             [owner, mail_rec("Filed the rename in `acme/widgets`", tool_id="m1"),
+              result_rec("m1", MAIL_FAILED, is_error=True)])):
+        p = page_run(new_cfg(), "repo-mail-refused", [("rename", (REPO_ITEM,))], records)
+        expect_repo_unsent("repo: %s does not prove the item" % label, p, "fb-0958-21", REPO_SLUG)
+
+
+def case_repo_mail_send_to_address_proves_nothing():
+    """A mail send whose --to address is acme/widgets and whose body names no repo does not prove the repo item: the
+    address is no part of the message."""
+    p = page_run(new_cfg(), "repo-mail-to", [("rename", (REPO_ITEM,))],
+                 [owner_rec("rename"), mail_rec("Noted.", head="mail send --to acme/widgets --kind inform --body-file -")])
+    expect_repo_unsent("repo: a mail send whose --to is acme/widgets and whose body is Noted. does not prove the item",
+                       p, "fb-0958-21", REPO_SLUG)
+
+
 def case_repo_send_with_error_result_does_not_count():
     """A send that names the repo, whose tool_result (the one with its tool_use_id) is an error, does not prove
     the repo item. repo_problem reads the same proof through Pages.sent, so the fix must reach that path too."""
@@ -2188,6 +2340,35 @@ def case_chat_pick_with_a_send_passes():
                 "action": "set", "collection": "items", "doc_id": "99", "data": {"n": 99}})])):
         p = page_run(new_cfg(), "pick-sent", [(text, ())], records, cwd=repo)
         expect_silent("pick answer: %r with a send proving its numbers passes" % text, p)
+
+
+def case_chat_pick_mail_send_passes():
+    """A Bash `mail send` whose body names each number of a chat answer proves it, as a send_message does."""
+    repo = waiting_repo()
+    for text, body in (("143 b", "Ruling on page item 143: b"),
+                       ("137 a, 138 b", "Ruling on pages 137 and 138: a, b")):
+        p = page_run(new_cfg(), "pick-mail", [(text, ())], [owner_rec(text), mail_rec(body)], cwd=repo)
+        expect_silent("pick answer: %r with a mail send whose body proves its numbers passes" % text, p)
+
+
+def case_chat_pick_mail_send_refusals_block():
+    """Still refused. A mail send whose body names 1430, not 143. A mail send whose result is an error, or that comes
+    before the owner record. A Bash ls, or an echo that only quotes a mail send. Each block names item 143."""
+    repo = waiting_repo()
+    text = "143 b"
+    owner = owner_rec(text)
+    for label, records in (
+            ("a mail send naming 1430", [owner, mail_rec("Ruling on page 1430: b")]),
+            ("a mail send whose result is an error",
+             [owner, mail_rec("Ruling on page item 143: b", tool_id="m1"), result_rec("m1", MAIL_FAILED, is_error=True)]),
+            ("a mail send before the owner record",
+             [mail_rec("Ruling on page item 143: b"), owner, said_rec("Noted.")]),
+            ("a Bash ls that names 143",
+             [owner, used_rec("Bash", {"command": "ls items/143"}), said_rec("Noted.")]),
+            ("an echo that quotes a mail send naming 143",
+             [owner, used_rec("Bash", {"command": "echo 'mail send --to cloud/session_x --body-file - Ruling on page item 143: b'"})])):
+        p = page_run(new_cfg(), "pick-mail-refused", [(text, ())], records, cwd=repo)
+        expect_numbers_named("pick answer: 143 b, %s, does not prove item 143" % label, p, ("143",))
 
 
 def case_chat_prose_and_no_waiting_page_pass():
@@ -4369,6 +4550,13 @@ CASES = (
     case_guard_router_home_names_the_tracked_ruling_homes,
     case_page_send_message_proof_passes,
     case_page_sendmessage_proof_passes,
+    case_page_mail_send_proof_passes,
+    case_page_mail_send_refusals_block,
+    case_page_mail_send_to_address_proves_nothing,
+    case_page_mail_send_exit_code_result_does_not_count,
+    case_page_mail_send_fd_redirect_proves_nothing,
+    case_page_grep_quoting_a_heredoc_does_not_swallow_the_send,
+    case_page_mail_send_false_alarms_pass,
     case_page_send_with_error_result_does_not_count,
     case_page_send_with_ok_result_still_counts,
     case_page_error_result_of_another_call_does_not_cancel_the_send,
@@ -4409,6 +4597,9 @@ CASES = (
     case_page_read_back_that_misses_n_does_not_prove_the_filing,
     case_page_unfiled_remedy_offers_the_read_back,
     case_repo_send_naming_the_repo_passes,
+    case_repo_mail_send_naming_the_repo_passes,
+    case_repo_mail_send_refusals_block,
+    case_repo_mail_send_to_address_proves_nothing,
     case_repo_send_with_error_result_does_not_count,
     case_repo_slug_match_ignores_case,
     case_repo_send_before_the_owner_record_blocks,
@@ -4436,6 +4627,8 @@ CASES = (
     case_chat_pick_shapes_block,
     case_pick_letters_a_to_h_passes,
     case_chat_pick_with_a_send_passes,
+    case_chat_pick_mail_send_passes,
+    case_chat_pick_mail_send_refusals_block,
     case_chat_prose_and_no_waiting_page_pass,
     case_grant_without_a_home_blocks,
     case_grant_with_a_home_passes,
