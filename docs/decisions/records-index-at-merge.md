@@ -20,7 +20,10 @@ change the tree, `--confirm` refuses before any wait, claim or push. The refusal
 the remedy: return the PR to draft (route pr-draft-mcp-cloud), run
 `merge <n> --confirm` on the draft, then mark it ready after its draft run shows. A head that holds a
 Record-claim on a base with no stamp kinds first reverts that claim commit, since the draft step refuses a
-claim head. A current page makes no
+claim head. A push that changes only docs/records.md after a head whose run was fully green starts no
+second full run of the jobs. CI scope skips the test run steps of the Windows, hooks and rest jobs for it
+(owner, 2026-11-14 15:02 CST, ruling own-830-c; `.github/scripts/ci-scope.sh`, `green-head.sh`). The merge
+tool still refuses a ready PR with a stale page, and the records push before ready stays. A current page makes no
 commit. A claim stays at confirm under the lock, so its numbers are free on the base tip, as before. The
 claim commit carries the rebuilt page, so the claim and the page share one commit. That batch still runs
 CI twice (unmeasured in other repos; none in this repo, Oct 24 to 31). The draft step refuses a claim head,
