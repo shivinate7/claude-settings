@@ -244,11 +244,36 @@ def trailing_only(g, base):
 
 
 def extends(line, g):
-    """True when every token of line survives, in order, in g, starts the same way, and g adds no negation, so a line pasted into a comment is not one: the merge
-    only added to the line (`subprocess.run(a, b)` became `subprocess.run(a, b, timeout=T)`)."""
-    lt, gt = TOKEN.findall(line), TOKEN.findall(g)
-    it = iter(gt)
-    return bool(lt) and lt[0] == gt[0] and all(tok in it for tok in lt) and len(NEGATION.findall(g)) <= len(NEGATION.findall(line))
+    """True when every token of line survives, in order, in g, starts the same way, and any negation g adds sits only in
+    an appended tail, so a line pasted into a comment is not one: the merge only added to the line
+    (`subprocess.run(a, b)` became `subprocess.run(a, b, timeout=T)`; `Keep CI waits short.` became `Keep CI waits
+    short, never past 55 minutes.`). The tail is what follows the match of the line's last word token, so the line's
+    own closing `.` re-matching after the clause is no part of it. The head, up to that word, may hold no more
+    negation than the line. A tail that adds a negation also holds a word beside the negation words, so `now.` to
+    `now, never.` stays a change. Known gap: a tail that restates the line with a negation (`Keep CI waits short. Do
+    not keep CI waits short.`) passes."""
+    lt, spans = TOKEN.findall(line), [(m.group(), m.end()) for m in TOKEN.finditer(g)]
+    gt = [t for t, _ in spans]
+    if not lt or not gt or lt[0] != gt[0]:
+        return False
+    pos, last = 0, -1
+    for tok in lt:
+        while pos < len(gt) and gt[pos] != tok:
+            pos += 1
+        if pos == len(gt):
+            return False
+        if WORD.search(tok):
+            last = pos
+        pos += 1
+    have = len(NEGATION.findall(line))
+    if last < 0:
+        return len(NEGATION.findall(g)) <= have
+    head, tail = g[:spans[last][1]], g[spans[last][1]:]
+    if len(NEGATION.findall(head)) > have:
+        return False
+    if len(NEGATION.findall(g)) <= have:
+        return True
+    return any(WORD.search(t) for t in TOKEN.findall(NEGATION.sub(" ", tail)))
 
 
 def wrapped(line, new):
