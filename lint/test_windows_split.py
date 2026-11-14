@@ -117,6 +117,8 @@ LINUX_SUITES = {
     "python3 hooks/test_session_start.py": (None, None),
     "python3 hooks/test_session_role.py": (None, None),
     "python3 lint/test_claude_role.py": (None, None),
+    "python3 lint/test_guard_merge_imports.py": (None, None),
+    "python3 lint/test_refusal_route.py": (None, None),
     "python3 lint/test_report_guard.py": (None, None),
     "python3 lint/test_ste_autofix.py": (LINUX_CODE, None),
     "python3 hooks/test_ruling_home.py": (None, None),
