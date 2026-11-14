@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 from guard_core import (
     SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    dir_before_segment, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    command_indexes, dir_before_segment, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
@@ -1138,6 +1138,147 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
     return ""
 
 
+# ---- self-role-claim: a session does not start a child session that claims a role (decision session-tiers)
+SELF_ROLE_VARIABLE = "CS_SESSION_ROLE"
+SELF_ROLE_LAUNCHERS = ("claude-role", "claude-role.cmd")
+SELF_ROLE_REASON = (
+    "self-role-claim: a session does not claim a role for a session it starts, because a role proves who may merge and who writes "
+    "the roadmap. The owner starts a role session from his own terminal. Do the work in this session, or ask the owner to start "
+    "the session he wants. "
+    "(decision session-tiers, a local role comes from the owner's launcher, never from a session's own call)"  # glossary-ok: session-tiers is the decision's file name
+)
+
+
+def _set_environment_variable_names(lowered) -> bool:
+    """True when a `SetEnvironmentVariable(` call in the lowered tokens takes the role variable as its first argument. The tokenizer drops
+    the quotes and leaves the paren glued, so the name is the rest of the call's token, or the next token when that rest is empty."""
+    variable = SELF_ROLE_VARIABLE.lower()
+    for at, token in enumerate(lowered):
+        call = token.find("setenvironmentvariable")
+        if call < 0:
+            continue
+        first = token[call + len("setenvironmentvariable"):].lstrip("( ")
+        if not first and at + 1 < len(lowered):
+            first = lowered[at + 1]
+        if first.strip("'\"(), ") == variable:
+            return True
+    return False
+
+
+def _claims_a_role(tokens) -> bool:
+    """True when one tokenized command sets the role variable (a `VAR=x` prefix, also glued to a subshell's `(`, `env VAR=x`, `export VAR=x`,
+    PowerShell `$env:VAR=x`, `Set-Item` or `New-Item` on `Env:VAR`, `SetEnvironmentVariable('VAR', ...)`) or runs the launcher, as its command
+    word or as the script of a python call. A PowerShell read of `Env:VAR` (Test-Path, Get-Item, Remove-Item) is no claim."""
+    index = resolve_command(tokens)
+    before = tokens if index is None else tokens[:index]
+    if any(t.lstrip("(").startswith(SELF_ROLE_VARIABLE + "=") for t in before):
+        return True
+    lowered = [t.lower() for t in tokens]
+    variable = SELF_ROLE_VARIABLE.lower()
+    if any(t.startswith("$env:" + variable) and t[len("$env:" + variable):].lstrip().startswith("=") for t in lowered):
+        return True
+    if any(t == "$env:" + variable for t in lowered) and any(t.startswith("=") for t in lowered):
+        return True
+    if _set_environment_variable_names(lowered):
+        return True
+    if index is None:
+        return False
+    word = basename(tokens[index])
+    rest = tokens[index + 1:]
+    if word.lower() in ("set-item", "new-item") and any(t in ("env:" + variable, "env:\\" + variable) for t in lowered):
+        return True
+    if word in ("export", "declare", "typeset", "setenv") and any(t.startswith(SELF_ROLE_VARIABLE + "=") for t in rest):
+        return True
+    if word in SELF_ROLE_LAUNCHERS:
+        return True
+    if word.startswith("python"):
+        script = next((t for t in rest if not t.startswith("-")), None)
+        return script is not None and basename(script) in SELF_ROLE_LAUNCHERS
+    return False
+
+
+def _self_role_hit(text: str, depth: int, judge=None) -> bool:
+    """True when `judge` (default `_claims_a_role`) is true of any command the text runs, reading the same places each time."""
+    judge = judge or _claims_a_role
+    from guard_env import substitution_commands   # imported late: a family reads only the families before it
+    stripped = strip_heredoc_bodies(text)
+    # Each `$( )` or backtick text runs as a command of its own, as judge_shell reads it. A nest too deep to read gives no inner text,
+    # so a claim buried that deep passes: only a forger writes one (rule guard-guards-mistakes-only).
+    for each in substitution_commands(text, stripped, outer=True):
+        for segment in split_segments(each):
+            if not segment.strip():
+                continue
+            tokens = segment_tokens(segment)
+            if tokens is None:
+                return True   # a quote left open: the segment names what the judge looks for and cannot be read, so it is refused
+            if judge(tokens):
+                return True
+            for script in inner_commands(tokens):
+                if depth >= MERGE_NEST_DEPTH or _self_role_hit(script, depth + 1, judge):
+                    return True
+    return False
+
+
+def self_role_hit(stripped: str) -> str:
+    """Return a short label when a Bash or PowerShell call sets the role variable or runs the launcher, else ''. Reads each segment, each `$( )` or
+    backtick text, and each script a `bash -c`, `sh -c` or `eval` hands on, so quoted text, `echo $VAR`, `grep claude-role` and `cat bin/claude-role` are no claim.
+    Fails closed inside the clause: a call that names the variable or the launcher and cannot be read is refused, because the guard-wide crash
+    path fails open. Cost: one substring test per call; a parse only for a call that names the variable or the launcher."""
+    lowered = stripped.lower()
+    if SELF_ROLE_VARIABLE.lower() not in lowered and "claude-role" not in lowered:
+        return ""
+    try:
+        return "a session claims a role" if _self_role_hit(stripped, 0) else ""
+    except Exception:
+        return "a session claims a role"
+
+
+# ---- self-role-claim, child start: a session that holds a role does not start claude (decision session-tiers)
+SELF_ROLE_CHILD_REASON = (
+    "self-role-claim: this session holds a role, and a claude it starts inherits that role, so the child would gain a merge or a "
+    "roadmap push that a cloud child does not have. Do the work in this session, or ask the owner to start the session he wants "
+    "from his own terminal. "
+    "(decision session-tiers, a session with a role does not start a child session)"  # glossary-ok: session-tiers is the decision's file name
+)
+
+
+def _program_word(token: str) -> str:
+    """The lowercase program name of a command word: the base name, with a `.exe` suffix dropped."""
+    word = basename(token.lstrip("(")).lower()
+    return word[:-len(".exe")] if word.endswith(".exe") else word
+
+
+def _starts_claude(tokens) -> bool:
+    """True when one tokenized command starts a claude session: `claude` as a command word (behind a wrapper, a subshell `(` or a PowerShell
+    `&`), or PowerShell `Start-Process` of it. `claude --version` alone starts none. Reads each command word of the segment."""
+    for at in command_indexes(tokens):
+        if tokens[at] in ("&", "."):   # PowerShell's call operator: the program is the next word
+            at += 1
+            if at >= len(tokens):
+                continue
+        word = _program_word(tokens[at])
+        rest = tokens[at + 1:]
+        if word == "claude":
+            if rest != ["--version"]:
+                return True
+        elif word in ("start-process", "saps", "start") and any(_program_word(t) == "claude" for t in rest):
+            return True
+    return False
+
+
+def self_role_child_hit(stripped: str) -> str:
+    """Return a short label when the guard's own environment holds a non-empty CS_SESSION_ROLE and a Bash or PowerShell call starts claude, else ''.
+    The child inherits the variable and its SessionStart hook would write its own role file, so it would gain a role no cloud child has. Fails
+    closed inside the clause: a call that names claude and cannot be read is refused, because the guard-wide crash path fails open.
+    Cost: one environment read per call, and a parse only when the variable is set and the call names claude."""
+    if not os.environ.get(SELF_ROLE_VARIABLE) or "claude" not in stripped.lower():
+        return ""
+    try:
+        return "a role session starts claude" if _self_role_hit(stripped, 0, _starts_claude) else ""
+    except Exception:
+        return "a role session starts claude"
+
+
 # ---- merge --confirm: the checkout it acts in must be a repo the own record names (rule merge-confirm-repo)
 REPO_REASON = (
     "merge-confirm-repo: this session's own record does not prove it may merge in the checkout this command acts in. "
@@ -1190,18 +1331,53 @@ def _merge_target_repo(segments, number: int, cwd: str, ends, repo_dir):
     return git_reads.github_repo(where) if where and os.path.isdir(where) else None
 
 
-def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
+LOCAL_REPO_REASON = (
+    "merge-confirm-repo: the role file recorded for this session does not prove it may merge in the checkout "
+    "this command acts in. A local merge runs only from a session whose own role file names the batch runner for that repo. "
+    "Hand the pull request to the batch runner, or ask the owner. "
+    "(decision merge-confirm-repo, a merge acts only in a repo its own record names)"
+)
+
+
+def local_session_id(session_id: str) -> str:
+    """The session id a local role file may prove the record writer for: the hook payload's own id, else ''. The environment's
+    CLAUDE_CODE_SESSION_ID names no file here, since a file for the env id alone is not this session's. The reader tests the id's shape."""
+    return session_id if isinstance(session_id, str) else ""
+
+
+def _local_role_proves(session_id: str, roles, repo) -> bool:
+    """True when the launcher's role file for this local session names one of `roles` and the repo `repo`. Any failure is False."""
+    try:
+        import session_role
+        record = session_role.own_record(local_session_id(session_id))
+        return bool(record and record["role"] in roles and repo and record.get("repo") == repo)
+    except Exception:
+        return False
+
+
+def repo_proof_hit(stripped: str, cwd: str, transcript: str, session_id: str = "") -> str:
     """Return a short label when a cloud session's `merge --confirm` or `merge --ready` acts in a checkout whose repo no cs-repo tag of the own newest
     get_session record names, else ''. Fails closed inside the clause, like role_proof_hit: an unparseable command, an unreadable
     checkout, no record and a set_session_tags after the record are each a refusal, because the guard-wide crash path fails open.
-    --lane-lint merges nothing and is not judged. Outside the cloud nothing is judged. Cost: none for a call that is no merge confirm;
+    --lane-lint merges nothing and is not judged. Cost: none for a call that is no merge confirm;
     else one parse, one read of the origin and one transcript read.
+
+    A local session is judged on `--confirm` only, by its OWN record (session_role.local_judgement, rules a, b, c): an own file must name
+    batch-runner and the repo the merge acts in, and CS_SESSION_ROLE set with no matching own file refuses. A session with neither is not judged.
 
     A redirection (`2>&1`, `> run.log`) belongs to the shell, not to the merge tool, so the parser reads the segment without them
     (strip_redirections, the quote-aware reader of their shape; a quoted `<` or `>` is text and stays). When the segment no longer
     tokenizes once they are gone (a quote left open), the merge is denied, never skipped."""
     if not is_cloud():
-        return ""
+        if "--confirm" not in stripped:   # the cheap filter: no listing of the role folder for a call that merges nothing
+            return ""
+        try:
+            import session_role
+            if not session_role.local_judgement(session_id)[0]:   # rule (b): no own file and no launcher role, so today's behaviour
+                return ""
+        except Exception:
+            pass   # a reader that cannot run judges the call, so the clause fails closed
+        return "merge --confirm" if _unproved_confirm(stripped, cwd, transcript, 0, session_id) else ""
     return "merge --confirm or --ready" if _unproved_confirm(stripped, cwd, transcript, 0) else ""
 
 
@@ -1209,10 +1385,11 @@ MERGE_NEST_DEPTH = 4  # `bash -c` inside `bash -c` is followed this far; a deepe
 PROVED_FLAGS = ("--confirm", "--ready")  # each pushes to the pull request's branch from the checkout it acts in, so each takes the repo proof
 
 
-def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
+def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int, local_session: str = None) -> bool:
     """True when a `merge --confirm` or `merge --ready` (PROVED_FLAGS) in `text` acts in a checkout the own record does not prove. `text` is the command, or a script a
     segment hands on (`bash -c`, `sh -c`, `eval`: inner_commands, the one reader of those wrappers), which runs in the directory its own
-    segment is in. A `)` or `&` glued to the last word ends the merge's arguments (_command_words), so a merge closing a subshell is read."""
+    segment is in. A `)` or `&` glued to the last word ends the merge's arguments (_command_words), so a merge closing a subshell is read.
+    `local_session` is None for a cloud session. For a local session it is the hook payload's session id (own id; "" is no id): only `--confirm` is judged."""
     ends = []
     segments = split_segments(text, ends)
     for number, segment in enumerate(segments):
@@ -1226,7 +1403,7 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
                     return True
             else:
                 where = dir_before_segment(segments, number, cwd, ends) or ""
-                if any(_unproved_confirm(script, where, transcript, depth + 1) for script in scripts):
+                if any(_unproved_confirm(script, where, transcript, depth + 1, local_session) for script in scripts):
                     return True
         if merge_tool_args(segment) is None:
             continue
@@ -1242,6 +1419,14 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
             if flags.lane_lint or not (flags.confirm or flags.ready):
                 continue
             repo = _merge_target_repo(segments, number, cwd, ends, flags.repo_dir)
+            if local_session is not None:
+                if not flags.confirm:
+                    continue
+                import session_role
+                judged, record = session_role.local_judgement(local_session)
+                if not judged or (record and record["role"] in ROLE_TIERS and repo and record.get("repo") == repo):  # glossary-ok: ROLE_TIERS is the existing name
+                    continue
+                return True
             from override import remote_session_id
             from shared_names import repo_tag_names
             own_id = remote_session_id()
@@ -1266,15 +1451,19 @@ RECORD_REASON = (
 )
 
 
-def _own_tier_proved(transcript: str, tier: str) -> bool:
-    """True when the own newest get_session record lists cs-build:<tier> and no set_session_tags call
-    follows it. Fails closed: no env id, no transcript or any read error is False."""
+def _own_role_proved(transcript: str, role: str, session_id: str = "", root=None) -> bool:
+    """True when the own newest get_session record lists cs-build:<role> and no set_session_tags call
+    follows it. A session with no cloud id is local: it is proved when the launcher's role file for its own id (the hook payload's id,
+    local_session_id) names `role` and the repo of the checkout at `root`. Fails closed: no id, no transcript or any read error is False."""
     try:
         from override import remote_session_id
         own_id = remote_session_id()
-        if own_id and transcript:
+        if not own_id:
+            import git_reads
+            return _local_role_proves(session_id, (role,), git_reads.github_repo(root) if root and os.path.isdir(root) else None)
+        if transcript:
             tags, tagged_after = _own_session_read(transcript, own_id)
-            return tags is not None and not tagged_after and ROLE_TAG_PREFIX + tier in tags
+            return tags is not None and not tagged_after and ROLE_TAG_PREFIX + role in tags
     except Exception:
         pass
     return False
@@ -1343,12 +1532,12 @@ def _push_calls(segment: str, script: str, cwd: str):
                     yield from _push_calls(part, each, inner_cwd)
 
 
-def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb) -> str:
+def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb, session_id: str = "") -> str:
     """Return the matched push when a segment pushes to the checkout's record branch, or to the default
     name `roadmap`, and the own record does not prove the triage tier, else ''. `record_branch_of(root)`
     reads the checkout's branch (lint/layout.py); a read error means the default. `read_verb(subcommand,
     args)` is guard.py's own test for a dry run, which moves nothing. The proof is read only after a push
-    reaches the branch."""
+    reaches the branch. `session_id` is the hook payload's id, which a local session's role file is read for."""
     for segment in split_segments(stripped):
         for args, where, overrides in _push_calls(segment, stripped, cwd):
             if read_verb("push", args):
@@ -1360,7 +1549,7 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
             except Exception:
                 record = DEFAULT_RECORD_BRANCH
             if {record, DEFAULT_RECORD_BRANCH} & set(push_destinations(args, where, overrides)) and (
-                    not _own_tier_proved(transcript, RECORD_WRITER_TIER)):
+                    not _own_role_proved(transcript, RECORD_WRITER_TIER, session_id, root)):  # glossary-ok: RECORD_WRITER_TIER is the existing name
                 return "git push to the record branch"
     return ""
 

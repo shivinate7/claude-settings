@@ -158,8 +158,16 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        the working directory) has a repo (`git_reads.github_repo`) that no cs-repo tag of the
                        session's own newest get_session record names (`repo_tag_names`), or when a
                        set_session_tags follows that record. No record, an unreadable checkout or unparseable
-                       flags is a refusal. --lane-lint is not judged. Outside the cloud nothing is judged.
-                       (merge-confirm-repo)
+                       flags is a refusal. --lane-lint is not judged. A local session is judged on --confirm
+                       by its own role file (hooks/session_role.py local_judgement): the file must name
+                       batch-runner and the repo, and CS_SESSION_ROLE with no matching file refuses. A local
+                       session with neither is not judged. (merge-confirm-repo)
+  self-role-claim      deny. A Bash or PowerShell call that sets CS_SESSION_ROLE or runs bin/claude-role,
+                       also inside `bash -c`, `sh -c` or `eval`: a session does not claim a role. Also a call
+                       that starts claude while the guard's own CS_SESSION_ROLE is non-empty, since the child
+                       inherits the role. Reads through Test-Path, Get-Item or Remove-Item on Env: pass;
+                       `$role = $env:CS_SESSION_ROLE`, `command -v claude-role` and a bare
+                       `CS_SESSION_ROLE=x` are refused (debt self-role-claim-false-alarms). (self-role-claim)
   roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
                        the checkout's record branch (lint/layout.py record_branch) or `roadmap`, except a
                        dry run, unless the session's own get_session record (read
@@ -387,6 +395,16 @@ Other tools, in `judge` order:
                        (`FACT_CLOSE_PLACEHOLDER`, `PR_NUMBER`) or a `__X__` word. A sentence that holds one, a
                        short all-caps word, no args and empty args pass. A bare env var name as the whole value
                        is refused too; an override lifts it for a real one. (workflow-args-shape-check)
+  ci-wait-cap
+                       deny. A claude-code-remote send_later whose message says it waits on CI (the whole word CI,
+                       checks, pipeline, check run, PR run(s), workflow run(s) or GitHub Actions, in any case,
+                       anywhere in the message) and whose wait is more than cap_minutes() in hooks/ci_wait_cap.py:
+                       delay_minutes (a number or a string of digits) over it, or an `at` (ISO-8601; with no offset it
+                       reads in the clock's offset) more than that many minutes after the clock (local_time.clock).
+                       The limit is inclusive. A call with no CI word, or with no delay or `at`, passes. An agent's
+                       call is refused first (agent-no-remote-tools). The reason names send_later, delay_minutes and
+                       the cap. A missing cap file crashes the rule, which fails open and logs. An override lifts it.
+                       (ci-wait-cap-guard)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-bypass
@@ -587,9 +605,9 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
+            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
-            records_page_hit, repo_proof_hit, role_proof_hit,
+            records_page_hit, repo_proof_hit, role_proof_hit, self_role_child_hit, self_role_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
@@ -4646,6 +4664,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
 
+    # 2a1. A session that holds a role and starts claude: the child inherits the role (rule self-role-claim). It runs before the
+    # detached-launch rule so `Start-Process claude` names its own reason. Cost: one environment read per call.
+    matched = self_role_child_hit(stripped)
+    if matched:
+        refuse(tool, "deny", "self-role-claim", SELF_ROLE_CHILD_REASON, matched)
+
     # 2b. A detached launch: a subshell background job, a nohup/setsid wrapper, disown right
     # after a background job, or a bare trailing background job with no pid captured anywhere
     # in the command. Same decision as rule 2, deny, for the same reason: no pid survives to
@@ -4809,14 +4833,20 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "merge-role-proof", ROLE_REASON, matched)
 
     # 6a1. A cloud `merge --confirm` in a checkout whose repo the own get_session record does not name (rule merge-confirm-repo).
-    matched = repo_proof_hit(stripped, cwd, transcript)
+    matched = repo_proof_hit(stripped, cwd, transcript, session_id)
     if matched:
-        refuse(tool, "deny", "merge-confirm-repo", REPO_REASON, matched)
+        refuse(tool, "deny", "merge-confirm-repo", REPO_REASON if is_cloud() else LOCAL_REPO_REASON, matched)
+
+    # 6a1a. A session that sets the role variable or runs the launcher: it would start a child session that claims a role (rule
+    # self-role-claim). Cost: one substring test per call.
+    matched = self_role_hit(stripped)
+    if matched:
+        refuse(tool, "deny", "self-role-claim", SELF_ROLE_REASON, matched)
 
     # 6a2. A push to the record branch from a session its own record does not prove triage (rule
     # roadmap-one-writer). Cost: one `git rev-parse` and one small file read per push, and one
     # transcript read only when the push reaches the record branch.
-    matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb)
+    matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb, session_id)
     if matched:
         refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
 
@@ -6772,6 +6802,63 @@ def workflow_args_hit(tool: str, tool_input: dict) -> str:
     return next((v.strip() for v in values if workflow_args_placeholder(v)), "")
 
 
+# A send_later check-in that waits on CI for longer than the cap (rule ci-wait-cap; decision ci-wait-cap-guard).
+# Mistake: a session sets a CI check-in that wakes after the 1-hour prompt cache ends. Harm: the wake pays a full
+# context rewrite. The cap is cap_minutes() in hooks/ci_wait_cap.py, read on each call and never copied here. The message
+# is plain text, so comment openers and lone quotes in it carry no meaning to the scan. A missing cap file raises, and
+# main() logs the crash and lets the call through: a lost source is never turned into a made-up limit.
+CI_WAIT_TOOL = REMOTE_SERVER + "__send_later"
+CI_WAIT_WORDS = re.compile(
+    r"(?<!\w)(?:ci|checks|pr\s+runs?|workflow\s+runs?|check\s+runs?|pipelines?|github\s+actions)(?!\w)", re.IGNORECASE)
+CI_WAIT_DIGITS = re.compile(r"\d+(?:\.\d+)?")
+CI_WAIT_REASON = ("A check-in that waits on CI may wait at most %d minutes, because under the 1-hour prompt cache a later "
+                  "wake pays a full context rewrite. Set send_later with delay_minutes of %d or less, or an `at` no more "
+                  "than %d minutes ahead, then set the next check-in when this one wakes. "
+                  "(decision ci-wait-cap-guard, a CI check-in stays inside the prompt cache)")
+
+
+def ci_wait_minutes(tool_input: dict):
+    """The wait a send_later call asks for, in minutes: the larger of delay_minutes and the `at` time's distance from
+    the clock. delay_minutes is a number or a string of digits. An `at` with no offset reads in the clock's own offset.
+    None when neither reads: no field, or a value that is not a number or an ISO-8601 time."""
+    waits = []
+    delay = tool_input.get("delay_minutes")
+    if isinstance(delay, str) and CI_WAIT_DIGITS.fullmatch(delay.strip()):
+        waits.append(float(delay))
+    elif isinstance(delay, (int, float)) and not isinstance(delay, bool):
+        waits.append(delay)
+    at = tool_input.get("at")
+    if isinstance(at, str):
+        import local_time  # the one home of the clock, which LOCAL_TIME_NOW replaces in tests
+        from datetime import datetime
+        text = at.strip()
+        try:
+            when = datetime.fromisoformat(text[:-1] + "+00:00" if text[-1:] in ("Z", "z") else text)
+        except ValueError:
+            when = None
+        if when is not None:
+            now = local_time.clock()
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=now.tzinfo)
+            waits.append((when - now).total_seconds() / 60)
+    return max(waits) if waits else None
+
+
+def ci_wait_hit(tool: str, tool_input: dict) -> str:
+    """The refusal reason when this send_later waits on CI past the cap, else "". Reads the whole message."""
+    if tool != CI_WAIT_TOOL:
+        return ""
+    message = tool_input.get("message")
+    if not isinstance(message, str) or not CI_WAIT_WORDS.search(message):
+        return ""
+    wait = ci_wait_minutes(tool_input)
+    if wait is None:
+        return ""
+    import ci_wait_cap  # the one home of the cap
+    cap = ci_wait_cap.cap_minutes()
+    return CI_WAIT_REASON % (cap, cap, cap) if wait > cap else ""
+
+
 def judge(payload) -> None:
     if payload.get("hook_event_name") == "SubagentStop":
         judge_stop(payload)
@@ -6968,6 +7055,11 @@ def judge(payload) -> None:
     stamped = stamp_hit(tool, tool_input)
     if stamped:
         refuse(tool, "deny", "message-time-matches-clock", stamped[1], stamped[0])
+
+    # A check-in that waits on CI past the cap (rule ci-wait-cap). An agent's call was refused at 8b before this point.
+    ci_wait = ci_wait_hit(tool, tool_input)
+    if ci_wait:
+        refuse(tool, "deny", "ci-wait-cap", ci_wait, str(tool_input.get("message"))[:120])
 
     # A written time off the clock: `added` in items, a step's `updatedAt`, a literal `updatedAt` in a command.
     written = written_time_hit(tool, tool_input, cwd)
