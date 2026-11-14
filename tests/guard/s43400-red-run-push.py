@@ -277,9 +277,7 @@ def rr_below_remedy_case():
     for span in names:
         if re.search(r"\bgit push\b", span):
             continue
-        filled = span.replace("<sha>", short)
-        filled = re.sub(r"Red-run: \.\.\.", "Red-run: none: x", filled)
-        filled = re.sub(r"<[^>]*>", "s", filled)
+        filled = _rr_fill(span, short)
         got, reason = decide(_rr_case(filled, RR_BELOW))
         if got != "allow":
             return False, "the printed command `%s`, run in the fixture, is %s, want allow: %s" % (
@@ -329,3 +327,193 @@ RR_REMEDY_LABEL = ("red-run: the refusal of a test commit names only commit and 
 LOG_FAMILY[RR_REMEDY_LABEL] = FAMILY
 # LOG_CHECKS_EXTRA joined LOG_CHECKS in section 40805, so this check joins LOG_CHECKS here, as section 42840 does.
 LOG_CHECKS = LOG_CHECKS + ((RR_REMEDY_LABEL, rr_remedy_case), (RR_BELOW_LABEL, rr_below_remedy_case))
+
+# 12-15. The printed remedy runs for real. Each case copies its fixture under this run's folder and runs the printed git
+# commands there, in order, so the fixture stays as built. The lane's commits are judged by check_red_run over
+# main..HEAD, which holds no main commit: the same range the push judges, less the commits the default base holds.
+RR_MERGEBELOW = os.path.join(RRROOT, "rr-undermerge")  # an untrailered test commit, a merge of main, then a docs commit on top
+RR_REWRITTEN = os.path.join(RRROOT, "rr-rewritten")    # an untrailered test commit pushed, then amended: the branch rewritten since its push
+
+
+def _build_red_run_merge_below_rewritten():
+    _cmk_pushed(RR_MERGEBELOW, RR_BASE)
+    _rr_commit(RR_MERGEBELOW, {RR_TEST: RR_TEST_TEXT}, RR_SUBJECT)
+    _rr_main_test_commit(RR_MERGEBELOW)
+    _rr_run(RR_MERGEBELOW, "merge", "--no-edit", "main")
+    _rr_commit(RR_MERGEBELOW, {"docs/x.md": "# X\n"}, "docs on top of a merge of main")
+
+    _cmk_pushed(RR_REWRITTEN, RR_BASE)
+    _rr_commit(RR_REWRITTEN, {RR_TEST: RR_TEST_TEXT}, RR_SUBJECT)
+    _rr_run(RR_REWRITTEN, "push", "origin", "topic")
+    _rr_run(RR_REWRITTEN, "commit", "-q", "--amend", "-m", "add hooks/test_x.py, reworded")
+
+
+lazy_fixture([RR_MERGEBELOW, RR_REWRITTEN], _build_red_run_merge_below_rewritten)
+
+
+def _rr_copy(where, name):
+    """A copy of a fixture under this run's folder, so a printed remedy runs in the copy and the fixture stays as built."""
+    dest = os.path.join(ROOT, "redrun", "copies", name)
+    shutil.rmtree(dest, ignore_errors=True)
+    shutil.copytree(where, dest, symlinks=True)
+    return dest
+
+
+def _rr_fill(span, short):
+    """One printed span as a shell command: the flagged sha filled in, the Red-run trailer given a value, and each other
+    placeholder a word a shell passes through unchanged."""
+    filled = span.replace("<sha>", short)
+    filled = re.sub(r"Red-run: \.\.\.", "Red-run: none: x", filled)
+    return re.sub(r"<[^>]*>", "s", filled)
+
+
+def _rr_remedy_commands(remedy, short):
+    """The git commands a refusal prints, in order, minus the push, each one filled by _rr_fill."""
+    return [_rr_fill(span, short) for span in re.findall(r"`([^`]*)`", remedy)
+            if "git " in span and not re.search(r"\bgit push\b", span)]
+
+
+def _rr_run_printed(copy, commands):
+    """Run each printed command in order in `copy`. Returns (the command that fails, its output tail), or (None, '')."""
+    env = dict(os.environ, GIT_AUTHOR_NAME="cases", GIT_AUTHOR_EMAIL="cases@example.invalid",
+               GIT_COMMITTER_NAME="cases", GIT_COMMITTER_EMAIL="cases@example.invalid")
+    for command in commands:
+        done = subprocess.run(command, shell=True, cwd=copy, env=env, capture_output=True, text=True)
+        if done.returncode != 0:
+            return command, (done.stdout + done.stderr).strip()[-200:]
+    return None, ""
+
+
+def _rr_lane_judge(copy, main):
+    """(exit code, FAIL lines) from check_red_run over main..HEAD, the lane's commits. Exit 0 is clean; 2 is unknown."""
+    done = subprocess.run([sys.executable, os.path.join(REPO, "lint", "check_red_run.py"), "--base", main, "--root", copy],
+                          capture_output=True, text=True)
+    return done.returncode, [line for line in done.stdout.splitlines() if line.startswith("check_red_run: FAIL")]
+
+
+def _rr_merges(copy, main):
+    """How many merge commits the lane holds above main, or -1 when git cannot read them."""
+    done = run_vcs(copy, "rev-list", "--merges", "--count", main + "..HEAD")
+    return int(done.stdout.strip()) if done.returncode == 0 else -1
+
+
+def _rr_remedy_holds(where, name, remedy, flagged, main):
+    """'' when the commands the remedy prints, run in a copy of `where`, leave the lane's commits judged clean and keep
+    every merge above `main`. Otherwise one line that names the cause."""
+    commands = _rr_remedy_commands(remedy, flagged)
+    if not commands:
+        return "the refusal prints no git command for flagged commit %s: %s" % (flagged, remedy[:120])
+    merges = _rr_merges(where, main)
+    copy = _rr_copy(where, name)
+    failed, output = _rr_run_printed(copy, commands)
+    if failed:
+        return "the printed command `%s` fails in the fixture: %s" % (failed, output)
+    kept = _rr_merges(copy, main)
+    if kept != merges:
+        return "the printed commands drop the merge: %d merge commit(s) above main before, %d after" % (merges, kept)
+    code, fails = _rr_lane_judge(copy, main)
+    if code != 0 or fails:
+        return "after the printed commands, check_red_run still flags: %s" % (fails[0] if fails else "exit %d" % code)
+    return ""
+
+
+RR_MERGE_TIP_LABEL = ("red-run: a flagged commit under a merge at the tip: the refusal prints no git commit --amend, and each "
+                      "printed command, run in the fixture, leaves the lane's commits judged clean")
+LOG_FAMILY[RR_MERGE_TIP_LABEL] = FAMILY
+
+
+def rr_merge_tip_remedy_case():
+    """A flagged commit with a merge of main above it. The refusal must not print an amend: it reaches the merge, not the
+    flagged commit. Each printed command, run in the fixture, must leave the lane's commits judged clean. Why: a Red-run
+    trailer on the merge leaves the flagged commit with none, so the push is refused again."""
+    materialize(RR_LANEMERGE)
+    flagged = run_vcs(RR_LANEMERGE, "rev-parse", "HEAD^1").stdout.strip()[:7]
+    main = run_vcs(RR_LANEMERGE, "rev-parse", "origin/main").stdout.strip()
+    got, reason = decide(_rr_case(VCS + " push", RR_LANEMERGE))
+    if got != "deny" or RR_RULE not in reason:
+        return False, "a push of a flagged commit under a merge at the tip is %s, want deny under %s: %s" % (
+            got, RR_RULE, reason[:100])
+    if flagged not in reason:
+        return False, "the refusal does not name flagged commit %s: %s" % (flagged, reason[:100])
+    remedy = reason.split("Remedy:", 1)[-1]
+    if "git commit --amend" in remedy:
+        return False, "the refusal prints `git commit --amend`, which reaches the merge at the tip, not flagged commit %s" % flagged
+    problem = _rr_remedy_holds(RR_LANEMERGE, "merge-tip", remedy, flagged, main)
+    if problem:
+        return False, problem
+    return True, "the refusal for a flagged commit under a merge at the tip prints no amend, and its printed commands leave the lane clean"
+
+
+RR_MERGE_BELOW_LABEL = ("red-run: a flagged commit below a merge of main and a docs commit: each printed command, run in the "
+                        "fixture, leaves the lane's commits judged clean and keeps the merge")
+LOG_FAMILY[RR_MERGE_BELOW_LABEL] = FAMILY
+
+
+def rr_merge_below_remedy_case():
+    """A flagged commit below a merge, with a docs commit on top. Each printed command, run in the fixture, must leave the
+    lane's commits judged clean, with no main commit flagged, and the merge still in the history. Why: a rebase that does
+    not keep merges drops the merge and replays main's commit under a new sha, so the judge reads that commit as an
+    untrailered test commit."""
+    materialize(RR_MERGEBELOW)
+    flagged = run_vcs(RR_MERGEBELOW, "rev-parse", "HEAD~1^1").stdout.strip()[:7]
+    main = run_vcs(RR_MERGEBELOW, "rev-parse", "origin/main").stdout.strip()
+    got, reason = decide(_rr_case(VCS + " push", RR_MERGEBELOW))
+    if got != "deny" or RR_RULE not in reason:
+        return False, "a push of a flagged commit below a merge is %s, want deny under %s: %s" % (got, RR_RULE, reason[:100])
+    if flagged not in reason:
+        return False, "the refusal does not name flagged commit %s: %s" % (flagged, reason[:100])
+    remedy = reason.split("Remedy:", 1)[-1]
+    problem = _rr_remedy_holds(RR_MERGEBELOW, "merge-below", remedy, flagged, main)
+    if problem:
+        return False, problem
+    return True, "the printed commands below a merge keep the merge and leave the lane clean, with no main commit flagged"
+
+
+RR_BELOW_CONTROL_LABEL = ("red-run: a flagged commit below the tip with no merge: each printed command, run in the fixture, "
+                          "leaves the lane's commits judged clean (the green control for the run)")
+LOG_FAMILY[RR_BELOW_CONTROL_LABEL] = FAMILY
+
+
+def rr_below_control_case():
+    """The green control for the shared run: a linear flagged commit below the tip. Its printed amend and rebase, run in a
+    copy, leave the lane clean and keep no merge. A failure here is in the run itself, not in the remedy."""
+    materialize(RR_BELOW)
+    flagged = run_vcs(RR_BELOW, "rev-parse", "HEAD~1").stdout.strip()[:7]
+    main = run_vcs(RR_BELOW, "rev-parse", "origin/main").stdout.strip()
+    got, reason = decide(_rr_case(VCS + " push", RR_BELOW))
+    if got != "deny" or RR_RULE not in reason:
+        return False, "a push of a flagged commit below the tip is %s, want deny under %s: %s" % (got, RR_RULE, reason[:100])
+    if flagged not in reason:
+        return False, "the refusal does not name flagged commit %s: %s" % (flagged, reason[:100])
+    remedy = reason.split("Remedy:", 1)[-1]
+    problem = _rr_remedy_holds(RR_BELOW, "below-control", remedy, flagged, main)
+    if problem:
+        return False, problem
+    return True, "the printed commands below the tip, run in a copy, leave the lane clean"
+
+
+RR_REWRITTEN_LABEL = ("red-run: a branch rewritten since its push: the refusal says the owner must reword the commits, "
+                      "and prints no git command")
+LOG_FAMILY[RR_REWRITTEN_LABEL] = FAMILY
+
+
+def rr_rewritten_remedy_case():
+    """A flagged commit on a branch rewritten since its push. The refusal says the owner must reword it and prints no git
+    command. Why: a reword would rewrite pushed history, which no session does (RED_RUN_PUSHED_FIX)."""
+    materialize(RR_REWRITTEN)
+    rewritten = run_vcs(RR_REWRITTEN, "merge-base", "--is-ancestor", "origin/topic", "HEAD")
+    if rewritten.returncode != 1:
+        return False, "the fixture is not rewritten: origin/topic is an ancestor of HEAD, so no refusal reads a rewritten branch"
+    got, reason = decide(_rr_case(VCS + " push", RR_REWRITTEN))
+    if got != "deny" or RR_RULE not in reason:
+        return False, "a push of a rewritten branch is %s, want deny under %s: %s" % (got, RR_RULE, reason[:100])
+    remedy = reason.split("Remedy:", 1)[-1]
+    if "owner" not in remedy:
+        return False, "the refusal for a rewritten branch does not say the owner must act: %s" % remedy[:120]
+    if re.search(r"\bgit\b", remedy):
+        return False, "the refusal for a rewritten branch names git, which prints a command: %s" % remedy[:120]
+    return True, "the refusal for a rewritten branch says the owner must reword, and prints no git command"
+
+
+LOG_CHECKS = LOG_CHECKS + ((RR_BELOW_CONTROL_LABEL, rr_below_control_case), (RR_MERGE_TIP_LABEL, rr_merge_tip_remedy_case),
+                           (RR_MERGE_BELOW_LABEL, rr_merge_below_remedy_case), (RR_REWRITTEN_LABEL, rr_rewritten_remedy_case))
