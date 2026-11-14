@@ -1,10 +1,10 @@
 {
  "id": "child-ci-once-per-batch",
  "title": "Child repos run each CI suite once per batch",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "later",
- "lane": "",
+ "lane": "session_013NEJKywpEoc17jtMU3sBr5 (q_max), session_013NEJL1ryqwVS37Dv3V25SS (degen)",
  "owner": "triage",
  "blockedBy": [
   "ci-hygiene-once-per-batch"
@@ -12,5 +12,5 @@
  "why": "R64, owner 16:01 CST Nov 12: \"ill bring other repos in compliance only if there's free time on the runners\". Read 15:52 CST: q_max reruns its 12-shard test tier on push (harness/ci-changes.mjs:8-9, :131-132); degen reruns server and 4 app shards on push.",
  "source": "retrospective 15:59 and 16:02 CST Nov 12; store r64",
  "note": "Ready 22:08 CST Nov 13: owner asked 22:07 CST why the child CI fixes are not ready (relayed by the consultant); main is green and the drain hold lifted at 20:41. The 16:01 CST free-time hold is spent. Item 729 is closed (owner chose a, ruling push-skip-proven-tree). Compliance lanes per decision session-tiers \"Child repos\"; coordinator checks q_max and degen for an active coordinator first. Owner answers 12:14 CST Nov 13: item 722 a (q_max skips the push suite on a proven tree; ruling qmax-skips-push-suite) and item 723 a (degen, after its red-main check; ruling degen-skips-push-suite). Item 729: the owner answered a against the OLD wording (joyous-only skip); the item was rewritten at 12:06 CST (a = shared CI form for every repo, c = joyous-only). Not acted on; he is asked to confirm. Item 724 (q_max test beside checks) rewritten with option c (together only on the batch run); open. Mailaudit #322 closes as not worth it (stood pick 732). Item 729 12:19 CST Nov 13: option a (one shared tree-equal skip for every repo) also covers 722 a and 723 a; if he confirms it q_max and degen use the shared form. The guard flags a as widening a shared tool (step question-form-widens-false-alarm); a carries the widens label and is not recommended until judged.",
- "updatedAt": "2026-11-13T22:08:46-06:00"
+ "updatedAt": "2026-11-13T22:11:45-06:00"
 }
