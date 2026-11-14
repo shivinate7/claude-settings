@@ -75,7 +75,7 @@ guard rule, so the watcher does the waiting and the session is told once.
   scroll past a real one (guard-that-cries-wolf-is-spent). The hook reads the logs from the command itself
   (`named_logs`): the target of `> F`, `>> F`, `&> F`, `>& F`, each `tee` file, and `--log F`. shlex reads
   the command, so a path in quotes or a comment is text. A change of size or mtime on any of them resets the
-  quiet time. A job with no named log, or whose logs stop changing, stalls as before. The redirection is the
+  quiet time. A job with no named log, or whose logs stop changing, stalls as before, unless the CPU time of its process tree advances (the CPU-time rule below). The redirection is the
   signal because it is the act; a declared note can be wrong, and an unnamed file is not read.
   A relative log after a `cd` or `pushd` is joined to its target when the hook builds the wrapper. The same
   tokenizer reads the cd, so a cd in quotes, a comment or a heredoc body is text. Only a cd that surely
@@ -98,7 +98,7 @@ guard rule, so the watcher does the waiting and the session is told once.
   process table with CPU time, and the watcher compares each process to its last reading. Each check also
   reads `/proc/PID/stat` once for the job's shell and once for each process under it, so N processes
   cost N + 1 reads a second (pinned by case 25f in `hooks/test_stall_watch.py`; one `ps` pinned by 25e).
-  Where `/proc` is absent the reads give 0. A fork-polling hang (`while ! mkdir lock; do sleep 1; done`) may read as life from its ended children's reaped time; unmeasured, and no test covers it. On Linux ps gives whole seconds, so a live child under 1/SECS of a core
+  Where `/proc` is absent the reads give 0. A fork-polling hang (`while ! mkdir lock; do sleep 1; done`) may read as life from its ended children's reaped time: one probe of that loop used 0.107 s of child CPU in 40 s, about one tick every 4 s, so it read as life. No test covers it. On Linux ps gives whole seconds, so a live child under 1/SECS of a core
   (0.33% at 300 s) that has not ended may still stall. A job that `exec`s has no child to count.
   Red cases: batch 138 (a silent parent with a busy child, case 25c) and batch 139 build 4 (a serial chain, case 25d).
   Kept as a stall: a child that holds a lock and does nothing, no CPU (the `playwright install` hang, case 4).
