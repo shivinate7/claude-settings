@@ -1045,14 +1045,19 @@ ARCHIVE_SUMMARY = re.compile(r"^merge: \d+ lanes to archive\b")
 CHECK_LINE = "check this lane"  # the fallback's line: a lane to check by hand, never a lane to archive
 READ_ONLY_GIT = {"fetch", "show", "show-ref", "ls-remote", "rev-parse", "log", "cat-file", "ls-tree", "for-each-ref", "merge-base", "diff", "rev-list"}
 
-def roadmap_files(**step):
+def roadmap_files(others=None, **step):
     """origin's roadmap branch for a case: the repo's GitHub name, and step c1 (done unless `step` says otherwise). A `lane` field
-    in `step` names the session that did the step."""
+    in `step` names the session that did the step. `others` maps more step slugs to their fields, each written beside c1; a step
+    in `others` has no Step trailer on main unless a case commits one."""
     fields = dict(roadmap.STEP, order=1, status="done")
     fields.update(step)
-    return {"roadmap/extras.json": json.dumps({"github": "owner/fixture"}), "roadmap/data/steps/c1.json": json.dumps(fields)}
+    files = {"roadmap/extras.json": json.dumps({"github": "owner/fixture"}), "roadmap/data/steps/c1.json": json.dumps(fields)}
+    for slug, more in (others or {}).items():
+        files["roadmap/data/steps/%s.json" % slug] = json.dumps(dict(roadmap.STEP, **more))
+    return files
 
 ROADMAP_BASE = roadmap_files()
+OTHER_DOING_STEP = {"c2": dict(order=2, status="doing", lane="session_a")}  # a step of lane session_a still working, in no merge
 IDLE_LANE = roadmap.session_row("session_a", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1", "cs-repo:owner/fixture",
                                 status_bucket=roadmap.BUCKET_COMPLETED)
 BODY_LANE = roadmap.session_row("session_body", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1", "cs-repo:owner/fixture",
@@ -1455,9 +1460,27 @@ class ConfirmIdleLanes(Env):
         self.assertEqual(self.check_lines(out, err), [], "a lane still running got a check-this-lane line: %r" % (out + err))
 
     def test_no_check_line_while_a_step_is_still_doing_under_the_lane(self):
+        # Another step of the lane, c2, is still doing and no merge carries its Step trailer, so the lane is still working. The
+        # merged step c1 reads done here. The control is test_stale_live_file_falls_back_to_the_merged_steps_lane.
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a", others=OTHER_DOING_STEP), [IDLE_LANE])
+        self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
+        merged = sh(self.other, "git", "log", "--format=%B", "origin/main")
+        self.assertIn("Step: c1", merged, "scope: the merge does not carry the merged step's Step trailer: %r" % merged)
+        self.assertNotIn("Step: c2", merged, "scope: the doing step c2 carries a Step trailer on main, so it is in the merge")
+        self.assertEqual(self.check_lines(out, err), [], "a step still doing under the lane got a check-this-lane line: %r" % (out + err))
+
+    def test_a_merged_step_still_recorded_doing_does_not_hold_its_lane(self):
+        # The merged step's record still reads doing after its merge, and its lane session_a is completed. A step with a Step
+        # trailer on main does not hold its lane, so the lane gets its check line. The control is the case above: a doing step
+        # outside the merge holds the lane.
         rc, out, err = self.stale_merge(roadmap_files(lane="session_a", status="doing"), [IDLE_LANE])
         self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path
-        self.assertEqual(self.check_lines(out, err), [], "a step still doing under the lane got a check-this-lane line: %r" % (out + err))
+        record = json.loads(sh(self.t, "git", "--git-dir", self.bare, "show", "roadmap:roadmap/data/steps/c1.json"))
+        self.assertEqual(record["status"], "doing", "scope: the merged step's record does not read doing: %r" % record)
+        checks = self.check_lines(out, err)
+        self.assertEqual(len(checks), 1, "the merged step still doing held its lane: %d check-this-lane lines, not one: %r" % (len(checks), out + err))
+        self.assertIn("step c1 landed; lane session_a", checks[0], "the check line does not name the merged step and its lane: %r" % checks[0])
+        self.assertFalse([line for line in out if line.startswith("session_a (")], "the lane printed as a lane to archive: %r" % out)
 
     def test_no_check_line_while_an_open_pull_holds_the_lanes_head(self):
         # The lane's session is complete and its step is done, but an open pull request is on its head ref lane/c1.
@@ -1514,10 +1537,10 @@ class ConfirmIdleLanes(Env):
         self.assertTrue(named, "the lane got no hold or unknown line that names it: %r" % (out + err))
 
     def test_a_malformed_keep_list_prints_no_unknown_line_for_a_lane_still_doing(self):
-        # The lane's own step is doing under it, so the lane is still working and needs no keep list. Its keepSessions is malformed,
-        # so the keep list reads unknown. The lane prints no unknown line for it and no check line. The control is
+        # Another step of the lane, c2, is doing under it, so the lane is still working and needs no keep list. Its keepSessions is
+        # malformed, so the keep list reads unknown. The lane prints no unknown line for it and no check line. The control is
         # test_no_check_line_while_a_step_is_still_doing_under_the_lane, with a readable keep list.
-        rc, out, err = self.stale_merge(roadmap_files(lane="session_a", status="doing"), [IDLE_LANE], keep="session_a")
+        rc, out, err = self.stale_merge(roadmap_files(lane="session_a", others=OTHER_DOING_STEP), [IDLE_LANE], keep="session_a")
         self.assert_owed_path(rc, out, err)  # scope: the stale read took the owed path, so the keep list was read there
         unknown = [line for line in out + err if line.startswith("unknown (") and "session_a" in line]
         self.assertEqual(unknown, [], "a lane still doing a step got an unknown line for its keep list: %r" % (out + err))
