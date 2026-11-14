@@ -4682,12 +4682,19 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         self.assertEqual(len(self.model_calls()), 1)
         self.assertEqual(self.git_starts(), 2)
 
-    def test_a_stale_roadmap_ref_is_fetched_at_most_once_per_relayed_question(self):
+    def test_a_stale_roadmap_ref_is_fetched_exactly_once_per_relayed_question(self):
         fixture.without_fetch_head(self.ci)
         self.stop(self.ci, RELAY, answer=tcj.ALLOW)
-        self.assertEqual(len(self.model_calls()), 1)
-        self.assertLessEqual(self.fetch_starts(), 1, "a stale roadmap ref was fetched %d times in one judged question"
-                             % self.fetch_starts())
+        self.assertEqual(len(self.model_calls()), 1, "the relayed question did not reach the model once")
+        self.assertEqual(self.fetch_starts(), 1, "a stale roadmap ref was fetched %d times in one judged question, want 1"
+                         % self.fetch_starts())
+
+    def test_a_fresh_roadmap_ref_is_not_fetched_per_relayed_question(self):
+        self.fresh_ci()
+        self.stop(self.ci, RELAY, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1, "the relayed question did not reach the model once")
+        self.assertEqual(self.fetch_starts(), 0, "a fresh roadmap ref was fetched %d times in one judged question, want 0"
+                         % self.fetch_starts())
 
     def test_an_unvetted_line_elsewhere_in_the_reply_does_not_skip_the_check(self):
         out, _ = self.stop(self.decided, UNVETTED + "\n" + RELAY, answer=REFUSE_APPS)

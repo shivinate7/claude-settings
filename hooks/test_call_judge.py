@@ -1616,11 +1616,18 @@ def case_past_ruling_cost():
     q = run_hook(question_input(box=good_box(), cwd=BARE_REPO), answer=ALLOW)
     check("past ruling cost: a judged question with no roadmap ref runs at most two git processes",
           len(q.calls) == 1 and q.git <= 2, detail(q))
-    # A stale roadmap ref (no roadmap line in FETCH_HEAD): the judged question fetches it at most once.
+    # A stale roadmap ref (no roadmap line in FETCH_HEAD): the judged question fetches it exactly once. A fresh ref
+    # is the control: the same question then fetches nothing.
     fixture.without_fetch_head(CI_REPO)
     s = run_hook(question_input(box=good_box(), cwd=CI_REPO), answer=ALLOW)
-    check("past ruling cost: a stale roadmap ref is fetched at most once per judged question",
-          len(s.calls) == 1 and s.fetches <= 1, "fetches=%d; %s" % (s.fetches, detail(s)))
+    check("past ruling cost: the stale-ref question reaches the model once", len(s.calls) == 1, detail(s))
+    check("past ruling cost: a stale roadmap ref is fetched exactly once per judged question", s.fetches == 1,
+          "fetches=%d; %s" % (s.fetches, detail(s)))
+    fixture.write_fetch_head(CI_REPO)
+    t = run_hook(question_input(box=good_box(), cwd=CI_REPO), answer=ALLOW)
+    check("past ruling cost: the fresh-ref question reaches the model once", len(t.calls) == 1, detail(t))
+    check("past ruling cost: a fresh roadmap ref is fetched by no judged question", t.fetches == 0,
+          "fetches=%d; %s" % (t.fetches, detail(t)))
     fixture.without_fetch_head(CI_REPO)
     fixture.without_fetch_head(BARE_REPO)
     f = run_hook(question_input(box=good_box(problem=None), cwd=CI_REPO), answer=ALLOW)
