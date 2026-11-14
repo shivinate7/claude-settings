@@ -1,0 +1,14 @@
+{
+ "id": "merge-tool-phase-timing",
+ "title": "The merge tool prints a timed progress line per phase, and one run shows where a 28 minute silent merge spent its time",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Sighting (runner 10 read, coordinator 06:47 CST Nov 14, relayed; triage read nothing): `merge 3377 --confirm` started 06:15:53 CST and ran 28 min 35 s with no progress lines after a 2 s silent-undo scan and a merge.py note (n=1). Ready 05:36 to merge 06:44 = 68 min, of which CI 38 min 41 s (run 43590819241, coordinator read). Main push run for #2942 (43593042643) ended 12:33:31Z, 11 min before the merge, so what the last 11 min waited on is unmeasured. The coordinator files this under CI speed, which it calls the owner's top priority (its words; triage did not re-read the ruling). Fix: the tool prints one timed line at the start and end of each phase (scan, wait for main push run, rebase or merge, merge call), so one run shows where the time goes; measure over 5 merges before changing the design. Kin: merge-tool-beats-every-phase (doing; a false STALL during silent phases; sighting n=1 on it) and merge-tool-stale-run-unknown. Cost of the lines: a few printed lines per merge, no new process or file. Fold into merge-tool-beats-every-phase if the lane agrees; that step's heartbeat may already print.",
+ "source": "coordinator 06:47 CST Nov 14, relaying runner 10",
+ "note": "Filed 06:49 CST Nov 14 by triage. Tracker: the coordinator. No lane yet.",
+ "updatedAt": "2026-11-14T06:49:00-06:00"
+}
