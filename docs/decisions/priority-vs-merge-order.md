@@ -2,7 +2,7 @@
 
 ## The ruling
 
-`merge N --confirm --priority-rows FILE` reads the rows of FILE with the standing reader (`priority_row` and `priority_verdict`, the same as `merge --priority-rows FILE`; step `priority-vs-merge-order`). It refuses to merge pull request N when N is not a row's own pull request or branch and some row's pull request reads ok (ready, clean, newest runs green). The refusal names each ready row's slug and pull request. It names no flag that lifts it: the fix is to merge the ready row first, or to take the row out of the hand-off.
+`merge N --confirm --priority-rows FILE` reads the rows of FILE with the standing reader (`priority_row` and `priority_verdict`, the same as `merge --priority-rows FILE`; step `priority-vs-merge-order`). It refuses to merge pull request N when N is not a row's own pull request or branch and some row's pull request reads ok (ready, clean, newest runs green). The refusal names each ready row's slug and pull request. It names no flag that lifts it: the fix is to merge the ready row first, or to take the row out of the handoff.
 
 Built against one case, the #3302 sequence. The owner's top priority, pull request 3302 (row `ci-speed-stack-4`), sat ready while the combined pull request 3314 was the next merge the batch runner made. `--priority-rows` alone only listed the rows, so nothing stopped the lower merge.
 
@@ -13,7 +13,7 @@ The rules:
 - No `--priority-rows` given: `priority: no rows given, not checked` is printed, and the merge goes on as before.
 - A FILE the reader cannot use refuses, because the runner fixes it locally. That is an empty or missing FILE, a FILE with no `priority:` row, and any malformed row: a line that is no `priority:` row, an empty value, more than one target, or a pr that is not `owner/repo#N` (`pr: #3302`). One line says the row cannot be read and is not clear, names the row's slug and the pr it names where it has one, and says nothing was merged. It runs before any read and before the lock. It names no override and no flag that lifts it: the fix is the row. The malformed row is the case that let a ready row go unseen: the check could not tell which row was ready.
 - A well-formed row whose pull request read fails stays unknown and does not block, because a network blip must not stop every merge. Its line says unknown, never clear. The own-row exit above still skips every other row, malformed ones too.
-- The runner's hand-off wiring is the project-ops templates: each merging `--confirm` carries `--priority-rows`, on a file of only the `priority:` rows.
+- The runner's handoff wiring is the project-ops templates: each merging `--confirm` carries `--priority-rows`, on a file of only the `priority:` rows.
 - The check runs before the lock, the claim and any push, so a refusal lands nothing: no merge, no claim on main, no lock held, no ref moved. A draft's `--confirm` is the records step and never merges, so it skips the check.
 - `merge --priority-rows FILE` alone behaves as before, and still stands alone. With a pull request number and `--confirm`, the flag goes with them.
 
