@@ -986,13 +986,17 @@ role_refuse("a lone quote in a comment does not hide the call on the next line",
 # RECFORK on roadmap-fork (its extras name that branch).
 RECORD_RULE = "roadmap-one-writer"
 RECORD_LACKS = ("origin roadmap", "HEAD:roadmap")  # the refusal never names the push it refuses
+# The remedy sends the session to fetch, then run `git merge-base --is-ancestor <commit> origin/<record branch>`,
+# so the owner is asked to push only a commit the record branch lacks. `git branch -r --contains` is not the check:
+# a commit on a lane branch alone would read as already on the record branch.
+RECORD_CARRIES = ("git fetch origin", "git merge-base --is-ancestor", "origin/<record branch>", "ask the owner only when")
 LANE_TRANSCRIPT = role_path("lane")
 TRIAGE_TRANSCRIPT = role_path("triage")
 
 
 def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, **kw):
     """A git push the guard refuses under roadmap-one-writer. The reason names the rule, never the push."""
-    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, lacks=RECORD_LACKS,
+    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, carries=RECORD_CARRIES, lacks=RECORD_LACKS,
        transcript=transcript, env=env, cwd=cwd, **kw)
 
 
