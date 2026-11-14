@@ -191,7 +191,6 @@
 - mods-refresh-cadence-unmeasured: the docs say auto-update runs up to 10 minutes after a session's first message and the new version loads at the next launch; unmeasured on the owner's machines (settings.json marketplace entry) Fix: none — needs the Mac. Until: 2026-11-21
 - mods-session-board-timer-margins: two real-timer margins, within(200) against 100 ms grace, unproven on a slow runner (mods/session-board/session-board.test.mjs) Fix: none — rare and harmless. Until: 2026-11-22
 - moved-kind-path-forgets-numbers: after a kind folder moves, claim ignores old-path numbers and may reuse one (actions/stamp/stamp.mjs) Fix: none — rare and harmless. Until: 2026-11-23
-- mutate-sweep-no-control: `run_mutant` in janitor/mutate_sweep.py has no clean-layout control, so a scaffold that crashes on every case reads as a kill (hooks/mutate_guard.py `run_controls` has one). Fix: step:mutate-sweep-control
 - mutate-tree-paths-uncollided: the `tree_` folders of ruling and decision mutants are not in the path-collision check of `main` (hooks/mutate_guard.py `lay_out`). Fix: step:mutate-tree-collision
 - nesting-risk-unrecorded: nothing prompts a risk record when a repo raises agent spawn depth (settings.json, deleted rule roles-workers-never-spawn)
 - net-error-colon-http-refusal: refusal text ending ': HTTP 5xx (url)', such as a PR title, reads as a network error and retries (merge/merge.py NET_ERROR) Fix: none — rare and harmless. Until: 2026-11-24
