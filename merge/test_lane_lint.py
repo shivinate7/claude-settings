@@ -44,11 +44,18 @@ PIN_NOTE_DRIFT = ("CI pins ste-lint at abc1234 (2026-10-01, .github/workflows/ch
 STUB = '''import json, os, subprocess, sys, time
 LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG__, __SLEEP__, os.getppid()
 DETAILS = __DETAILS__  # step name -> the text after its verdict word; a step not named here reads `stub step`
+WATCH = __WATCH__  # paths, relative to the cwd (the lint tree), whose text this run logs; a path the tree lacks logs null
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
+def watched(path):
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        return f.read()
 detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0
+files = {p: watched(p) for p in WATCH}
 with open(LOG, "a", encoding="utf-8") as f:
-    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached}), file=f)
+    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached, "files": files}), file=f)
 if "--plan" in sys.argv:
     for state, name in STEPS:
         print("would run " + name)
@@ -142,17 +149,18 @@ class CiJobStub:
         self.stub = os.path.join(self.t, "ci-job-stub.py")
         self.step_log = os.path.join(self.t, "ci-job-step.log")
 
-    def write_stub(self, steps, rc, sleep=0, details=None):
+    def write_stub(self, steps, rc, sleep=0, details=None, watch=()):
         """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set.
-        `details` maps a step name to the text its line prints after the verdict word (default `stub step`)."""
+        `details` maps a step name to the text its line prints after the verdict word (default `stub step`). `watch` names paths, relative
+        to the lint tree the stub runs in; each call's log line carries their text under "files", null for a path the tree lacks."""
         text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
         tm.put(self.stub, text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep))
-               .replace("__DETAILS__", repr(details or {})))
+               .replace("__DETAILS__", repr(details or {})).replace("__WATCH__", repr(list(watch))))
         return self.stub
 
-    def use_ci_job(self, steps, rc, details=None):
-        """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`."""
-        self.write_stub(steps, rc, details=details)
+    def use_ci_job(self, steps, rc, details=None, watch=()):
+        """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`. `watch`: see write_stub."""
+        self.write_stub(steps, rc, details=details, watch=watch)
         patch = unittest.mock.patch.object(merge, "CI_JOB", self.stub)
         patch.start()
         self.addCleanup(patch.stop)
@@ -275,7 +283,7 @@ class LaneLint(LaneFixture):
         instead of passing on reads to the end only after the stub's bound."""
         go = os.path.join(self.t, "go")
         text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
-        text = text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(0)).replace("__DETAILS__", "{}")
+        text = text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(0)).replace("__DETAILS__", "{}").replace("__WATCH__", "[]")
         tm.put(self.stub, text.replace("lines = [", PROGRESS.replace("__GO__", repr(go)) + "lines = [", 1))
         harness = os.path.join(self.t, "lane_lint_progress.py")
         tm.put(harness, HARNESS.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(self.stub)))
@@ -3541,6 +3549,160 @@ class LintCheckRollup(unittest.TestCase):
             host = tm.PullsHost([], {live: [tm.batch_run(REQUIRED_CHECK, status="completed", conclusion="success")]})
             with unittest.mock.patch.object(host, "checks", side_effect=merge.Stop("the check runs could not be read")):
                 self.lint_refusal(host, info, "a lane PR whose all-jobs-passed read fails")
+
+
+class MergedLintTree(LaneFixture):
+    """The lint runs in the tree the head merges into main, not the head's own copy: a head branched before main fixed a file lints main's fix
+    (decision lanes-run-no-full-ci-job). HEAD stays the head, so the lint's commits and trailers are the head's, and only the files hold the merge.
+    The lint's copy of a file is read through CiJobStub's `watch`. The controls (a head edit main did not make, a failed base fetch) are green
+    on the old code as well."""
+
+    SHARED = "shared/fixture.txt"  # a file the cases edit on main and on the lane head
+    commit_on = CrossMeasure.commit_on  # the one home of a pushed commit on a branch: CrossMeasure's
+    own_writes = CrossMeasure.own_writes  # the head's pushed commit: CrossMeasure's
+    clash = CrossMeasure.clash  # the merge-tree precondition, read in the second clone: CrossMeasure's
+
+    def shared_file(self, path, text):
+        """Main gains `path` with `text`, and the lane head merges main in. Head and main then hold `text` as their merge base, so a later
+        edit on either side merges rather than conflicts."""
+        self.commit_on("main", {path: text}, "origin/main")
+        self.merge_into_feat("origin/main")
+
+    def main_edits(self, path, text):
+        """Main moves `path` to `text` after the head branched."""
+        self.commit_on("main", {path: text}, "origin/main")
+
+    def main_deletes(self, path):
+        """Main deletes `path` after the head branched."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        tm.sh(o, "git", "rm", "-q", path)
+        tm.sh(o, "git", "commit", "-q", "-m", "main deletes " + path)
+        tm.sh(o, "git", "push", "-q", "origin", "main")
+
+    def listed(self, ref, path):
+        """-> `path` when `ref` holds it, else "". The lane checkout fetches origin first."""
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+        return tm.sh(self.co, "git", "ls-tree", "--name-only", ref, "--", path)
+
+    def file_on(self, ref, path):
+        """-> the text of `path` on origin's branch `ref`, newlines kept. Env.show strips its output, and the lint's copy keeps them."""
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+        return subprocess.run(["git", "-C", self.co, "show", f"origin/{ref}:{path}"], capture_output=True, text=True, check=True).stdout
+
+    def fault_git(self, needle, reply):
+        """Every git call of the run whose argv holds `needle` returns `reply` (rc, text) instead; the others run for real.
+        -> the list the faulted calls are appended to, read after the run."""
+        faulted = []
+        real_sh = merge.sh
+
+        def sh(args, *rest, **kwargs):
+            if any(needle in str(a) for a in args):
+                faulted.append(list(args))
+                return reply
+            return real_sh(args, *rest, **kwargs)
+
+        patch = unittest.mock.patch.object(merge, "sh", sh)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return faulted
+
+    def main_fix_after_branch(self):
+        """Main fixes SHARED after the head branched. -> the head's sha. The head keeps its old copy, and it merges clean with main."""
+        self.shared_file(self.SHARED, "old\n")
+        self.main_edits(self.SHARED, "fixed\n")
+        head = self.head("feat")
+        self.assertEqual(self.file_on("feat", self.SHARED), "old\n", "precondition: the head does not hold the copy it branched with, so the case probes nothing")
+        self.assertEqual(self.file_on("main", self.SHARED), "fixed\n", "precondition: main does not hold its fix, so the case probes nothing")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the head does not merge clean with main, so the case probes nothing")
+        return head
+
+    def test_a_fix_main_made_after_the_head_branched_is_what_the_lint_reads(self):
+        self.main_fix_after_branch()
+        self.use_ci_job(PASSING, 0, watch=(self.SHARED,))
+        rc, text = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(self.lint_calls()[0]["files"][self.SHARED], "fixed\n",
+                         "the lint read the head's old copy of the file, not main's fix: " + text)
+
+    def test_a_ref_target_lints_the_fix_main_made_after_the_head_branched(self):
+        head = self.main_fix_after_branch()
+        self.use_ci_job(PASSING, 0, watch=(self.SHARED,))
+        rc, text = self.lint_run("--lane-lint", head, head=head)
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(self.lint_calls()[0]["files"][self.SHARED], "fixed\n",
+                         "the ref target's lint read the head's old copy, not main's fix: " + text)
+
+    def test_a_head_edit_main_did_not_make_is_what_the_lint_reads(self):  # control: green on the old code
+        self.shared_file(self.SHARED, "old\n")
+        self.own_writes({self.SHARED: "lane\n"})
+        self.assertEqual(self.file_on("main", self.SHARED), "old\n", "precondition: main changed the file, so the case probes nothing")
+        self.assertEqual(self.file_on("feat", self.SHARED), "lane\n", "precondition: the head does not hold its edit, so the case probes nothing")
+        self.use_ci_job(PASSING, 0, watch=(self.SHARED,))
+        rc, text = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(self.lint_calls()[0]["files"][self.SHARED], "lane\n",
+                         "the lint did not read the head's own edit: " + text)
+
+    def test_an_edit_on_each_side_on_different_lines_is_the_merge_the_lint_reads(self):
+        self.shared_file(self.SHARED, "a\nb\nc\n")
+        self.own_writes({self.SHARED: "A\nb\nc\n"})
+        self.main_edits(self.SHARED, "a\nb\nC\n")
+        self.assertEqual(self.file_on("feat", self.SHARED), "A\nb\nc\n", "precondition: the head does not hold its edit, so the case probes nothing")
+        self.assertEqual(self.file_on("main", self.SHARED), "a\nb\nC\n", "precondition: main does not hold its edit, so the case probes nothing")
+        self.assertEqual(self.clash(self.head("feat"), "origin/main"), "clean", "precondition: the two edits conflict, so the case probes nothing")
+        self.use_ci_job(PASSING, 0, watch=(self.SHARED,))
+        rc, text = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(self.lint_calls()[0]["files"][self.SHARED], "A\nb\nC\n",
+                         "the lint did not read the merge of both edits: " + text)
+
+    def test_a_read_tree_that_fails_stops_unknown_naming_the_head_and_base_and_no_reason_lifts_it(self):
+        head = self.main_fix_after_branch()  # the merged tree differs from the head's, so the tree must be read into the lint tree
+        faulted = self.fault_git("read-tree", (1, "error: Entry '%s' not uptodate. Cannot merge." % self.SHARED))
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertTrue(faulted, "scope: no read-tree ran, so the fault probes nothing")
+        self.assertEqual(rc, 1, "a read-tree that failed passed the lane: " + text)
+        self.assertEqual(pass_lines(text), [], "a read-tree that failed printed a PASS line: " + text)
+        self.assertRegex(text, r"(?i)unknown", "a read-tree that failed does not stop as unknown: " + text)
+        self.assertIn(head[:7], text, "the refusal does not name the head: " + text)
+        self.assertRegex(text, r"\bmain\b", "the refusal does not name the base: " + text)
+        self.assertEqual(self.lint_calls(), [], "the lint ran past a read-tree that failed: " + text)
+        rc, text = self.run_lane("--lane-lint", "7", "--lint-unknown-ok", "a reason the lint must not take")
+        self.assertEqual(rc, 1, "--lint-unknown-ok lifted a read-tree that failed: " + text)
+        self.assertEqual(pass_lines(text), [], "--lint-unknown-ok printed a PASS line for a read-tree that failed: " + text)
+        self.assertEqual(self.lint_calls(), [], "the lint ran past a read-tree that failed, with a reason: " + text)
+
+    def test_a_file_main_deleted_is_absent_from_the_copy_the_lint_reads_and_is_not_refused(self):
+        self.shared_file(FLOOR_CHECK, LINT_TREE_FILE_TEXT)  # a file the lint tree's refusal checks: main deletes it, the head keeps it
+        self.main_deletes(FLOOR_CHECK)
+        head = self.head("feat")
+        self.assertEqual(self.file_on("feat", FLOOR_CHECK), LINT_TREE_FILE_TEXT, "precondition: the head does not hold the file main deleted, so the case probes nothing")
+        self.assertEqual(self.listed("origin/main", FLOOR_CHECK), "", "precondition: main still holds the file, so the case probes nothing")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the head does not merge clean with main, so the case probes nothing")
+        self.use_ci_job(PASSING, 0, watch=(FLOOR_CHECK,))
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a file main deleted refused the lint as missing from its tree: " + text)
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
+        self.assertIsNone(runs[0]["files"][FLOOR_CHECK], "the lint read the head's copy of a file main deleted: " + text)
+
+    def test_a_failed_fetch_of_main_stops_unknown_and_never_passes_with_or_without_a_reason(self):  # control: green on the old code
+        self.own_writes({"own-a.txt": "lane 7\n"})
+        faulted = self.fault_git("refs/heads/main:refs/remotes/origin/main", (128, "fatal: unable to access the remote"))
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertTrue(faulted, "scope: the base fetch did not run, so the fault probes nothing")
+        self.assertEqual(rc, 1, "a failed fetch of main passed the lane: " + text)
+        self.assertEqual(pass_lines(text), [], "a failed fetch of main printed a PASS line: " + text)
+        self.assertRegex(text, r"(?i)unknown", "a failed fetch of main does not stop as unknown: " + text)
+        self.assertEqual(self.lint_calls(), [], "the lint ran past a failed fetch of main: " + text)
+        rc, text = self.run_lane("--lane-lint", "7", "--lint-unknown-ok", "a reason the lint must not take")
+        self.assertEqual(rc, 1, "--lint-unknown-ok lifted a failed fetch of main: " + text)
+        self.assertEqual(pass_lines(text), [], "--lint-unknown-ok printed a PASS line for a failed fetch of main: " + text)
+        self.assertEqual(self.lint_calls(), [], "the lint ran past a failed fetch of main, with a reason: " + text)
 
 
 if __name__ == "__main__":
