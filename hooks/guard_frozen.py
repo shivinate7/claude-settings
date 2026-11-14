@@ -1225,6 +1225,7 @@ _REDIRECT_START = re.compile(r"[\d&]*[<>]")
 _REDIRECT_OPERATOR = re.compile(r"[\d&]*[<>]+[&\d-]*|&")
 _CHMOD_FLAGS = re.compile(r"-[Rfvch]+")
 _TRUNCATE_SIZE = re.compile(r"-[co]*s|--size")
+_NO_VALUED = re.compile(r"(?!)")
 _INSTALL_VALUED = re.compile(r"-[mogSt]|--(?:mode|owner|group|suffix|target-directory)")
 _INSTALL_DIRS = re.compile(r"-[^-]*[dt][^-]*|--(?:directory|target-directory)(?:=.*)?")
 
@@ -1264,16 +1265,18 @@ def _non_target_words(raw) -> set:
         return skip
     verb = _name(raw[start])
     if verb == "chmod":
-        for index in range(start + 1, len(raw)):
-            word = _unquoted(raw[index])
-            if word.startswith("--reference"):
-                break   # every operand is a file, no word is a mode
-            if word.startswith("--") or _CHMOD_FLAGS.fullmatch(word) or index in skip:
-                continue
-            skip.add(index)   # the first other word is the mode, `-x` and `-w` included
-            break
+        words = [_unquoted(word) for word in raw]
+        if not any(word.startswith("--reference") for word in words[start + 1:]):   # else every operand is a file
+            for index in range(start + 1, len(raw)):
+                if words[index].startswith("--") or _CHMOD_FLAGS.fullmatch(words[index]) or index in skip:
+                    continue
+                if _plain_operands(raw, index + 1, _NO_VALUED):   # the first other word is the mode, `-x` included
+                    skip.add(index)   # with no file after it, the word may be the file
+                break
     elif verb == "truncate":
-        skip |= {index + 1 for index in range(start + 1, len(raw)) if _TRUNCATE_SIZE.fullmatch(_unquoted(raw[index]))}
+        for index in range(start + 1, len(raw)):
+            if _TRUNCATE_SIZE.fullmatch(_unquoted(raw[index])) and _plain_operands(raw, index + 2, _NO_VALUED):
+                skip.add(index + 1)
     elif verb == "install":
         skip |= {index + 1 for index in range(start + 1, len(raw)) if _unquoted(raw[index]) in ("-m", "--mode")}
         operands = _plain_operands(raw, start + 1, _INSTALL_VALUED)
