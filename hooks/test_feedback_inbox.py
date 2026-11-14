@@ -2404,30 +2404,33 @@ STEP_REL = "roadmap/data/steps/%s.json" % STEP_SLUG
 READ_AS_OF = re.compile(r"read as of (\d{2}:\d{2} (CST|CDT)|an unknown time)")
 
 
-def origin_only_step_repo(name, reachable=True):
+def origin_only_step_repo(name, reachable=True, local=False, stale=True):
     """A repo whose step file sits on origin's roadmap branch only. The local origin/roadmap ref is stale: it holds no
-    step. FETCH_HEAD holds a roadmap fetch 120 s old, so the freshness check is stale. With `reachable` False the origin
-    path names no repo, so the fetch fails and the step is found nowhere."""
+    step, unless `local` puts the step on it too. FETCH_HEAD holds a roadmap fetch, 120 s old when `stale` (past
+    roadmap_ref.MAX_AGE), else written now. With `reachable` False the origin path names no repo, so the fetch fails,
+    and the step is found only where `local` put it."""
     repo = make_repo(name, tracked=("debts/a-task.md",))
     os.makedirs(ORIGINS, exist_ok=True)
     origin = fixture.bare_origin(ORIGINS, name, fixture.step_file(STEP_SLUG, "todo"))
     git(repo, "remote", "add", "origin", origin if reachable else origin + ".gone")
-    fixture.point_ref(repo, fixture.STORE_REF, {"README.md": "stale\n"}, ORIGINS)
+    files = fixture.step_file(STEP_SLUG, "todo") if local else {"README.md": "stale\n"}
+    fixture.point_ref(repo, fixture.STORE_REF, files, ORIGINS)
     fixture.write_fetch_head(repo, "roadmap")
-    head = fixture.fetch_head(repo)
-    stamp = os.stat(head).st_mtime
-    os.utime(head, (stamp - 120, stamp - 120))  # 120 s old: past roadmap_ref.MAX_AGE
+    if stale:
+        head = fixture.fetch_head(repo)
+        stamp = os.stat(head).st_mtime
+        os.utime(head, (stamp - 120, stamp - 120))  # 120 s old: past roadmap_ref.MAX_AGE
     return repo
 
 
-def stop_with_step_home(name, repo):
-    """One Stop, whose one item is a task homed to the step. The turns state predates its `judged` key, so every item
-    counts as judged and the repeat judge, with its roadmap read, does not run: the step home is the only read of the
-    ref. Returns (Proc, the freshness checks the Stop ran)."""
+def stop_with_step_home(name, repo, ids=("fb-0958-12",)):
+    """One Stop, whose items are the tasks `ids`, each homed to the step. The turns state predates its `judged` key, so
+    every item counts as judged and the repeat judge, with its roadmap read, does not run: the step home is the only
+    read of the ref. Returns (Proc, the freshness checks the Stop ran)."""
     spy = os.path.join(ROOT, "fresh-ref-%s.log" % name)
     cfg, sid = new_cfg(), "task-%s" % name
     write_file(os.path.join(cfg, "handoffs", sid + ".inbox.turns"), json.dumps({"seen": 0, "burst": []}))
-    p = homed(cfg, sid, ("- fb-0958-12 [task] -> step:%s" % STEP_SLUG,), cwd=repo,
+    p = homed(cfg, sid, tuple("- %s [task] -> step:%s" % (item_id, STEP_SLUG) for item_id in ids), cwd=repo,
               extra_env={"FRESH_REF_LOG": spy})
     return p, len(read_or_empty(spy).splitlines())
 
@@ -2456,6 +2459,30 @@ def case_task_step_fetch_fails_names_the_read_as_of():
     check("step fetch fails: the Stop runs one freshness check", calls == 1, "%d calls" % calls)
     check("step fetch fails: the block reason says read as of a time", READ_AS_OF.search(reason) is not None,
           reason or p.desc())
+
+
+def case_roadmap_line_once_when_the_fetch_failed_never_when_fresh():
+    """A Stop whose roadmap fetch failed says so once, as a systemMessage line, when no reason or flag carries the note.
+    Two tasks homed to a step on the local ref both pass, so no reason carries the note, and the line says it once,
+    though two reads share it. The same Stop with a fresh roadmap ref says nothing. Red on 46cf97aba5, which writes
+    no such line."""
+    ids = ("fb-0958-12", "fb-0958-13")
+    stale = origin_only_step_repo("step-line-stale", reachable=False, local=True)
+    check("step line: the step is on the local ref, the read the Stop judges",
+          STEP_REL in git(stale, "ls-tree", "-r", "--name-only", fixture.STORE_REF).split("\n"), STEP_REL)
+    p, _calls = stop_with_step_home("step-line-stale", stale, ids=ids)
+    check("step line: both tasks pass, so no reason carries the note", p.code == 0 and block_reason(p) is None,
+          p.desc())
+    msg = (guard_json(p) or {}).get("systemMessage") or ""
+    stale_line = re.compile(r"Feedback guard: roadmap read as of (?:\d{2}:\d{2} (?:CST|CDT)|an unknown time)"
+                            r" \(its fetch failed\)\.")
+    check("step line: a failed fetch says the roadmap read as of a time, exactly once",
+          len(stale_line.findall(msg)) == 1, msg or p.desc())
+    fresh = origin_only_step_repo("step-line-fresh", reachable=False, local=True, stale=False)
+    check("step line fresh: the step is on the local ref, the read the Stop judges",
+          STEP_REL in git(fresh, "ls-tree", "-r", "--name-only", fixture.STORE_REF).split("\n"), STEP_REL)
+    p, _calls = stop_with_step_home("step-line-fresh", fresh, ids=ids)
+    expect_silent("step line fresh: a fresh roadmap ref says nothing, so no line", p)
 
 
 def case_task_missing_step_home_blocks():
@@ -4584,6 +4611,7 @@ CASES = (
     case_task_closed_step_home_passes,
     case_task_step_only_on_origin_is_found_after_the_fetch,
     case_task_step_fetch_fails_names_the_read_as_of,
+    case_roadmap_line_once_when_the_fetch_failed_never_when_fresh,
     case_task_missing_step_home_blocks,
     case_ruling_step_home_still_blocks,
     case_task_backtick_step_home_passes,
