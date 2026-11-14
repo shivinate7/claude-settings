@@ -52,6 +52,16 @@ Two step fields serve the guard, not the page:
 The guard reads them from the lane's local `origin/roadmap`, so a lane fetches it after triage writes a
 grant (decision `agent-model-cap`).
 
+## Step check fields
+
+Two optional step fields tell a lane how its step is proved. The brief tool reads them.
+
+- `done_check`: text of the check the lane can run to prove the step done. Absent or null means unset.
+- `ci_only`: `true` means only batch CI proves the step. Absent or null means unset. Any other value is bad.
+
+A bad value shows in the upkeep row `steps with an unreadable done_check or ci_only`. A bad `done_check` is not
+text, or is blank. Triage writes both fields on the roadmap branch.
+
 ## Records and health
 
 The Records view shows Health, then each listed record kind (decisions, debts, plans): its count, as
@@ -318,6 +328,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   a summary line that gives the held count when there are holds. It exits 1, with no summary line, when every entry is unknown;
 - `Step:` trailers that name no step;
 - `open step waits on a closed unmerged PR`: an open step whose title, why or note waits on PR #N. A wait is a phrase in `WAIT_ON_PULL_PHRASES` in `build.py`. The word `PR` may sit before `#N`. A `#N` followed by `closed` or `merged` is history, not a wait. The row lists the step when `landedPulls` has a row for #N with `merged` false. It skips #N when `landedPulls` has a `merged` true row for #N, or when #N is an open pull. It also skips #N when the head of its `merged` false row is on main (`head_on_main`, as for the landed rows). A PR closed before the 14-day `landedPulls` window is not seen. Each entry is `<step id> (#N)`. The row reads `unknown (the live file has no landedPulls list)` when the live file has no `landedPulls` key. A live read that is unknown, such as no `--live` file, makes the row unknown too. An empty `landedPulls` list reads none. The fix is to name the step slug it waits on in the step's `blockedBy` list (owner, 2026-11-10 13:10 CST);
+- `steps with an unreadable done_check or ci_only`: a step of any status whose `done_check` is not text with a word in it, or whose `ci_only` is set to anything but `true` (section "Step check fields");
 - `done without check`: a `done` step updated on or after the cutoff (`DONE_CHECK_SINCE`, in the build script) that names no Done check. It is also listed when its note, why and ask hold no `Done check green on main:` (any case) with a `#N`, `PR N`, URL or commit hash right after it. Triage's close writes that line, such as `Done check green on main: #1312.` The instruction is in the Triage bullet of the operating model (skill `project-ops`). A `done` step updated before the cutoff is not judged, because the Done check line had not shipped then.
 
 ## Cost
