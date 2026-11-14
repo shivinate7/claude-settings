@@ -17,7 +17,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs, draft_guard_only, eval_if, macos_gate, macos_gate_ok,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
+from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs, draft_guard_only, eval_if, macos_scope_skips, macos_scope_skip_ok,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
                                 push_guard_only, shard_base, yaml_scalar)  # NIGHTLY_SKIP_JOB and PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
 
@@ -168,7 +168,7 @@ def steps_problems(text):
 
 def off_problems(text):
     """Only a shard job may stay off all-jobs-passed. A needed job has no job-level if, except scope (its draft rule),
-    a macOS job (its scope gate, which scope-skips names) and a Windows full shard (the draft guard)."""
+    a macOS job (its scope skip, which scope-skips names) and a Windows full shard (the draft guard)."""
     jobs = all_jobs(text)
     needed, off, problems = split_jobs(text)
     for name in off:
@@ -180,27 +180,49 @@ def off_problems(text):
             if not draft_guard_only(jobs[name]["if"] or ""):
                 problems.append(f"shard {name} is in all-jobs-passed's needs but its job-level if is not the draft guard: "
                                 f"{jobs[name]['if']}")
-        elif name in MACOS_JOBS and macos_gate_ok(name, jobs[name]["if"] or ""):
-            continue  # the gate is true on a PR whose flags are on, so the macOS job stays needed; scope_skips_problems reads its skip
+        elif name in MACOS_JOBS and macos_scope_skip_ok(name, jobs[name]["if"] or ""):
+            continue  # its scope skip is off on a PR whose flags are on, so the macOS job stays needed; scope_skips_problems reads its skip
         elif name != "scope" and jobs[name]["if"] is not None:
             problems.append(f"{name} is needed and keeps a job-level if: all-jobs-passed reads its skip as red, "
                             "so its scope condition belongs in its steps")
     return problems
 
 
+def scope_skips_raw(text):
+    """The scope-skips input of all-jobs-passed's action step as written (comment removed), or None when the job, the step or the
+    input is missing. The one reader of the input: the lint and actions/push-skip/push-skip.py both call it."""
+    block = job_block(text, ALL_JOBS_PASSED_JOB)
+    raw = None
+    for step in step_blocks(steps_part(block)) if block is not None else []:
+        if yaml_scalar(step_key(step, "uses") or "") == ALL_JOBS_PASSED_USES:
+            raw = step_with(step, "scope-skips")
+    return raw
+
+
+def scope_skips_map(text):
+    """The jobs the scope-skips input names, each with its non-empty flag list. Empty when the input is missing, is not JSON or is not
+    one object, and a name whose value is not a non-empty list is left out: the same entries check.sh reads, so nothing is named that
+    all-jobs-passed would not pass."""
+    raw = scope_skips_raw(text)
+    try:
+        got = json.loads(raw) if raw else None
+    except ValueError:
+        return {}
+    if not isinstance(got, dict):
+        return {}
+    return {name: flags for name, flags in got.items() if isinstance(flags, list) and flags}
+
+
 def scope_skips_problems(text):
-    """all-jobs-passed's scope-skips input is the macOS gate (macos_gate, testing/scope_skips.py): one entry per macOS job whose
-    job-level if is its gate, with that gate's flags, and no other job. check.sh passes a skipped job only on such an entry.
-    A file with no gated job needs no input."""
+    """all-jobs-passed's scope-skips input is the macOS scope skip (macos_scope_skips, testing/scope_skips.py): one entry per macOS job whose
+    job-level if is its scope skip, with that skip's flags, and no other job. check.sh passes a skipped job only on such an entry.
+    A file with no scope-skipped job needs no input."""
     block = job_block(text, ALL_JOBS_PASSED_JOB)
     if block is None:
         return [f"no {ALL_JOBS_PASSED_JOB} job in checks.yml"]
-    raw = None
-    for step in step_blocks(steps_part(block)):
-        if yaml_scalar(step_key(step, "uses") or "") == ALL_JOBS_PASSED_USES:
-            raw = step_with(step, "scope-skips")
+    raw = scope_skips_raw(text)
     jobs = all_jobs(text)
-    want = {name: flags for name, flags in macos_gate().items() if name in jobs and macos_gate_ok(name, jobs[name]["if"] or "")}
+    want = {name: flags for name, flags in macos_scope_skips().items() if name in jobs and macos_scope_skip_ok(name, jobs[name]["if"] or "")}
     if raw is None:
         return [f"{ALL_JOBS_PASSED_JOB}'s action step has no scope-skips input: a skipped macOS job reads as red"] if want else []
     try:
@@ -209,9 +231,9 @@ def scope_skips_problems(text):
         return [f"scope-skips is not JSON: {raw!r}"]
     if not isinstance(got, dict) or not all(isinstance(v, list) for v in got.values()):
         return [f"scope-skips is not one object of job: [flag, ...]: {raw!r}"]
-    problems = [f"scope-skips lacks {name}, whose job-level if is a scope gate" for name in sorted(set(want) - set(got))]
-    problems += [f"scope-skips names {name}, which has no scope gate" for name in sorted(set(got) - set(want))]
-    problems += [f"scope-skips lists {got[name]} for {name}, want its gate's flags {list(want[name])}"
+    problems = [f"scope-skips lacks {name}, whose job-level if is a scope skip" for name in sorted(set(want) - set(got))]
+    problems += [f"scope-skips names {name}, which has no scope skip" for name in sorted(set(got) - set(want))]
+    problems += [f"scope-skips lists {got[name]} for {name}, want its scope skip's flags {list(want[name])}"
                  for name in sorted(set(want) & set(got)) if got[name] != list(want[name])]
     return problems
 
