@@ -161,8 +161,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        batch-runner and the repo, and CS_SESSION_ROLE with no matching file refuses. A local
                        session with neither is not judged. (merge-confirm-repo)
   self-role-claim      deny. A Bash or PowerShell call that sets CS_SESSION_ROLE or runs bin/claude-role,
-                       also inside `bash -c`, `sh -c` or `eval`: a session does not start a child session that
-                       claims a role. Reads of the variable or the launcher are not judged. (self-role-claim)
+                       also inside `bash -c`, `sh -c` or `eval`: a session does not claim a role. Also a call
+                       that starts claude while the guard's own CS_SESSION_ROLE is non-empty, since the child
+                       inherits the role. Reads through Test-Path, Get-Item or Remove-Item on Env: pass;
+                       `$role = $env:CS_SESSION_ROLE`, `command -v claude-role` and a bare
+                       `CS_SESSION_ROLE=x` are refused (debt self-role-claim-false-alarms). (self-role-claim)
   roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
                        the checkout's record branch (lint/layout.py record_branch) or `roadmap`, except a
                        dry run, unless the session's own get_session record (read
@@ -590,9 +593,9 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, SELF_ROLE_REASON,
+            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
-            records_page_hit, repo_proof_hit, role_proof_hit, self_role_hit,
+            records_page_hit, repo_proof_hit, role_proof_hit, self_role_child_hit, self_role_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
@@ -4647,6 +4650,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = lsof_pids_reach_kill(call_tokens)
     if matched:
         refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
+
+    # 2a1. A session that holds a role and starts claude: the child inherits the role (rule self-role-claim). It runs before the
+    # detached-launch rule so `Start-Process claude` names its own reason. Cost: one environment read per call.
+    matched = self_role_child_hit(stripped)
+    if matched:
+        refuse(tool, "deny", "self-role-claim", SELF_ROLE_CHILD_REASON, matched)
 
     # 2b. A detached launch: a subshell background job, a nohup/setsid wrapper, disown right
     # after a background job, or a bare trailing background job with no pid captured anywhere

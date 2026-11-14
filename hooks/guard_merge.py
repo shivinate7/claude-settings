@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 from guard_core import (
     SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    dir_before_segment, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    command_indexes, dir_before_segment, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
@@ -1197,7 +1197,9 @@ def _claims_a_role(tokens) -> bool:
     return False
 
 
-def _self_role_hit(text: str, depth: int) -> bool:
+def _self_role_hit(text: str, depth: int, judge=None) -> bool:
+    """True when `judge` (default `_claims_a_role`) is true of any command the text runs, reading the same places each time."""
+    judge = judge or _claims_a_role
     from guard_env import substitution_commands   # imported late: a family reads only the families before it
     stripped = strip_heredoc_bodies(text)
     # Each `$( )` or backtick text runs as a command of its own, as judge_shell reads it. A nest too deep to read gives no inner text,
@@ -1208,11 +1210,11 @@ def _self_role_hit(text: str, depth: int) -> bool:
                 continue
             tokens = segment_tokens(segment)
             if tokens is None:
-                return True   # a quote left open: the segment names the variable or the launcher and cannot be read, so it is refused
-            if _claims_a_role(tokens):
+                return True   # a quote left open: the segment names what the judge looks for and cannot be read, so it is refused
+            if judge(tokens):
                 return True
             for script in inner_commands(tokens):
-                if depth >= MERGE_NEST_DEPTH or _self_role_hit(script, depth + 1):
+                if depth >= MERGE_NEST_DEPTH or _self_role_hit(script, depth + 1, judge):
                     return True
     return False
 
@@ -1229,6 +1231,52 @@ def self_role_hit(stripped: str) -> str:
         return "a session claims a role" if _self_role_hit(stripped, 0) else ""
     except Exception:
         return "a session claims a role"
+
+
+# ---- self-role-claim, child start: a session that holds a role does not start claude (decision session-tiers)
+SELF_ROLE_CHILD_REASON = (
+    "self-role-claim: this session holds a role, and a claude it starts inherits that role, so the child would gain a merge or a "
+    "roadmap push that a cloud child does not have. Do the work in this session, or ask the owner to start the session he wants "
+    "from his own terminal. "
+    "(decision session-tiers, a session with a role does not start a child session)"  # glossary-ok: session-tiers is the decision's file name
+)
+
+
+def _program_word(token: str) -> str:
+    """The lowercase program name of a command word: the base name, with a `.exe` suffix dropped."""
+    word = basename(token.lstrip("(")).lower()
+    return word[:-len(".exe")] if word.endswith(".exe") else word
+
+
+def _starts_claude(tokens) -> bool:
+    """True when one tokenized command starts a claude session: `claude` as a command word (behind a wrapper, a subshell `(` or a PowerShell
+    `&`), or PowerShell `Start-Process` of it. `claude --version` alone starts none. Reads each command word of the segment."""
+    for at in command_indexes(tokens):
+        if tokens[at] in ("&", "."):   # PowerShell's call operator: the program is the next word
+            at += 1
+            if at >= len(tokens):
+                continue
+        word = _program_word(tokens[at])
+        rest = tokens[at + 1:]
+        if word == "claude":
+            if rest != ["--version"]:
+                return True
+        elif word in ("start-process", "saps", "start") and any(_program_word(t) == "claude" for t in rest):
+            return True
+    return False
+
+
+def self_role_child_hit(stripped: str) -> str:
+    """Return a short label when the guard's own environment holds a non-empty CS_SESSION_ROLE and a Bash or PowerShell call starts claude, else ''.
+    The child inherits the variable and its SessionStart hook would write its own role file, so it would gain a role no cloud child has. Fails
+    closed inside the clause: a call that names claude and cannot be read is refused, because the guard-wide crash path fails open.
+    Cost: one environment read per call, and a parse only when the variable is set and the call names claude."""
+    if not os.environ.get(SELF_ROLE_VARIABLE) or "claude" not in stripped.lower():
+        return ""
+    try:
+        return "a role session starts claude" if _self_role_hit(stripped, 0, _starts_claude) else ""
+    except Exception:
+        return "a role session starts claude"
 
 
 # ---- merge --confirm: the checkout it acts in must be a repo the own record names (rule merge-confirm-repo)

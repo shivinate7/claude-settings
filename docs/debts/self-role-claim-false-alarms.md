@@ -1,6 +1,6 @@
-# The self-role-claim guard refuses two reads as claims
+# The self-role-claim guard refuses reads and a no-effect assignment as claims
 
-**What.** Guard rule `self-role-claim` refuses two reads as role claims. `$role = $env:CS_SESSION_ROLE` is refused, because a segment that names `$env:CS_SESSION_ROLE` with any token starting with `=` counts as a claim. `command -v claude-role` is refused as a launcher run. Harm: a session that debugs the launcher is refused on a read, though the rule's own doc says reads pass.
+**What.** Guard rule `self-role-claim` refuses two reads as role claims. It also refuses one assignment that has no effect. `$role = $env:CS_SESSION_ROLE` is refused, because a segment that names `$env:CS_SESSION_ROLE` with any token starting with `=` counts as a claim. `command -v claude-role` is refused as a launcher run. A bare `CS_SESSION_ROLE=triage` line is refused too, though it sets a shell variable no child inherits. Harm: a session that debugs the launcher is refused on a read, though the rule's own doc says reads pass.
 
 **Where.** `hooks/guard_merge.py`, `_claims_a_role`, reached through `self_role_hit`. Its two conditions are the `$env:` variable token with any `=`-leading token, and the launcher as the command word.
 
