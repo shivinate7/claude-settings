@@ -1543,7 +1543,7 @@ class Host:
         One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A newest-first walk of the push group's
         green runs costs one jobs read each, down to the first that is not empty (the newest, when it ran a suite). A failed read is unknown.
         A red verdict also leaves `self.base_facts` for revert_proven, as data the prose cannot carry: `blamed` (the full head shas of the breaking merges), `red` (red runs judged),
-        `others` (red entries without a run, cancelled runs and re-runs in flight beside the red) and `head` (the head sha of the newest run read). Every other verdict leaves it None."""
+        `others` (red entries without a run, cancelled runs and re-runs in flight beside the red), `head` (the head sha of the newest run read) and `own_red` (a red run judged is on that head, so the head's own run failed). Every other verdict leaves it None."""
         self.base_facts = None  # a red verdict sets it below; any other verdict, and any stop, leaves it None
         try:
             if os.path.dirname(ALARM_EVENTS) not in sys.path:
@@ -1643,7 +1643,8 @@ class Host:
         except (Stop, ValueError, KeyError, TypeError, AttributeError, ImportError) as e:
             return "unknown", " ".join(str(e).split())
         if red:
-            self.base_facts = {"blamed": blamed, "red": len(red_runs), "others": len(red) - len(red_runs) + len(cancelled) + len(unknown), "head": base_head}
+            self.base_facts = {"blamed": blamed, "red": len(red_runs), "others": len(red) - len(red_runs) + len(cancelled) + len(unknown), "head": base_head,
+                               "own_red": any(r.get("head_sha") == base_head for r in red_runs)}
             return "red", " | ".join(red + blame + cancelled)
         return ("unknown", " | ".join(unknown + cancelled)) if unknown or cancelled else ("green", "")
 
@@ -3349,13 +3350,13 @@ def pull_number_in_title(line):
 def revert_proven(root, host, base):
     """True when a red base is lifted by a revert already merged with its tree proven (owner ruling own-823-b-revert-merge-lifts-red, decision no-merge-onto-red-main).
     Read from the facts base_state left on the host (`base_facts`), never from its prose. All must hold: exactly one red run, no cancelled run, no re-run in flight
-    and no other red read beside it; exactly one breaking merge, named by its full sha; origin/<base> is the head the runs were read at; that head, or its
+    and no other red read beside it; no red run on the head itself (the revert's own run on the base failed, so its tree is no fix); exactly one breaking merge, named by its full sha; origin/<base> is the head the runs were read at; that head, or its
     second parent when it is a merge commit, says `This reverts commit <the breaking sha>`; the head's tree is the tree of the head of the pull request it names;
     and that pull request head's checks read green (Host.head_state, the one reader). A revert of the revert names another sha, so it never matches. A
     first red names no breaking merge, so it never lifts. Any read that fails is not proven: unknown never reads clear. Skipped runs are no evidence here.
     Cost accepted by the owner: a revert that does not fix the failure reads clear until the next full run."""
     facts = getattr(host, "base_facts", None)
-    if not facts or len(facts["blamed"]) != 1 or facts["red"] != 1 or facts["others"]:
+    if not facts or len(facts["blamed"]) != 1 or facts["red"] != 1 or facts["others"] or facts["own_red"]:
         return False
     sha = facts["blamed"][0]
     try:
@@ -3416,7 +3417,7 @@ def red_base(root, host, base, red_ok=""):
     if broke:  # the revert PR is the batch that carries the fix: its own Drops-lines trailer covers each file the silent-undo check names, and the reason flag lifts no silent-undo finding
         way = (f"Open a revert PR for the breaking merge named above (`git revert -m 1 <commit>` for a merge commit) and merge it with the reason flag {RED_FLAG} \"<reason>\". "
                f"Merges resume at once when that revert is on {base} with its tree proven (the revert's PR checks are green and {base}'s tree is the revert's tree); "
-               f"any other revert waits until its run on main is green, and until then its run is pending and the breaking red stays the newest. "
+               f"any other revert waits until its run on main is green (a green run that ran the suite), and until then its run is pending and the breaking red stays the newest. "
                f"The revert PR needs a Drops-lines trailer for each file the silent-undo check names (a revert of a merge that edits and adds files is flagged \"whole file restored\" and \"file deleted\"), "
                f"and so does a re-land that reverts the revert; the reason flag {RED_FLAG} does not lift that check. "
                f"Or, {carries}")
