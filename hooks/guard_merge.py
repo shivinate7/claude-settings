@@ -1281,7 +1281,7 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int, local_se
                 continue
             repo = _merge_target_repo(segments, number, cwd, ends, flags.repo_dir)
             if local_session is not None:
-                if not flags.confirm or _local_role_proves(local_session, ROLE_TIERS, repo)  # glossary-ok: ROLE_TIERS is the existing name:
+                if not flags.confirm or _local_role_proves(local_session, ROLE_TIERS, repo):  # glossary-ok: ROLE_TIERS is the existing name
                     continue
                 return True
             from override import remote_session_id
