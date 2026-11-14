@@ -61,12 +61,14 @@ The payload must carry an `agent_id`. The main session, reviewers, Explore, and 
 
 ## Where a test-support helper lives
 
-A test-support helper lives in one place: a flat `test_<name>.py` file beside the tests that use it, such as `hooks/test_refusal_note.py` and `hooks/test_mutate_js.py`.
+A test-support helper lives in one place: a flat `_test_<name>.py` file beside the tests that use it, such as `lint/_test_git.py` and `lint/_test_temp.py`.
 
-- The guard's `TEST_BASENAME` reads `test_<name>.py` as a test path. Only a test-author writes it. A builder does not.
-- `check_landed_dirs` refuses a subfolder of a landed folder, because `install.sh` lands only top-level files. A helper in a `test_support/` subfolder of a landed folder is refused.
-- A builder cannot write the flat file, so a builder reports the need and a test-author writes it.
-- The refusal names the flat file as the way out. It accepts no new path form.
+- The guard's `TEST_BASENAME` in `hooks/guard.py` is anchored (`^test_.*\.py`). A leading underscore is not a test path, so a builder writes the helper and a test-author may not.
+- `TEST_FILE` in `lint/test_windows_split.py` and `TEST_PATTERNS` in `.github/scripts/touched-tests.py` do not match it, so it needs no run step in `checks.yml`. A plain `test_<name>.py` helper would fail CiCoverage and run as a script.
+- `check_landed_dirs` accepts a flat file and refuses a subfolder of a landed folder, such as `test_support/`. It accepts no new path form.
+- Roles: the builder writes the helper. The test-author writes the test that imports it.
+- `hooks/test_refusal_note.py` and `hooks/test_mutate_js.py` are real suites with run steps in `checks.yml`, not helpers.
+- Run against `hooks/_test_cost_probe.py` (a scratch file, removed): `guard.py` `is_builder_test_rel` False and `author_path_ok` False; `TEST_FILE` and `TEST_PATTERNS` no match; `check_landed_dirs`, `check_layout`, `check_hook_stubs`, `check_hook_dup_names`, `check_glossary`, `check_record_slugs` all PASS.
 
 ## The shell check
 
