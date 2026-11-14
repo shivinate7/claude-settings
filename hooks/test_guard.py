@@ -365,7 +365,7 @@ MACOS_COMMANDS = ("ps", "lsof", "launchctl")
 MACOS_REACH = {
     ("hooks/guard.py", "_read_memory"): lambda family, session: family == "load-brake",
     ("hooks/guard_rm_var.py", "_rm_real"): lambda family, session: family == "rm-var",
-    ("hooks/proc_env.py", "holds_session_tag"): lambda family, session: session is not None,
+    ("hooks/proc_env.py", "_entries"): lambda family, session: session is not None,
     ("hooks/git_reads.py", "_process_start_ms"): lambda family, session: family in ("kill", "branch-worktree"),
     ("hooks/guard_kill.py", "_process_parents"): lambda family, session: family == "kill",
     ("hooks/guard_kill.py", "_pid_cwd"): lambda family, session: family == "kill",
