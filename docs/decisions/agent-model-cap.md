@@ -88,7 +88,9 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | reviewer | fix verifier | sonnet | xhigh |
 | builder | 3 | opus | high |
 
-Reasons and rulings. Round 1 on a guard or check diff runs Sonnet (owner R9, item 359 a, Nov 10 15:44 CST). A fix verifier runs Sonnet on every PR (owner item 444 a, 2026-11-08 15:04 CST); the merge tool refuses a record that names another model. Round 2 on opus: the step-up refuses it, and no override lifts that. Round 3 on opus: the Opus ceiling refuses it, and the owner's typed override lifts it (2026-11-01 17:25 CST, item 127, pick a). Round 2 effort is set per spawn; the other reviewer rows take the frontmatter's xhigh. The builder's third try runs Opus by the owner's standing grant.
+Reasons and rulings. Round 1 on a guard or check diff runs Sonnet, and round 1 on docs and records stays Haiku (owner, 2026-11-07 14:41 CST, page item 359 a, relayed by the coordinator; also recorded as owner R9, item 359 a, Nov 10 15:44 CST). A fix verifier runs Sonnet on every PR (owner item 444 a, 2026-11-08 15:04 CST); the merge tool refuses a record that names another model. Round 2 on opus: the step-up refuses it, and no override lifts that. Round 3 on opus: the Opus ceiling refuses it, and the owner's typed override lifts it (2026-11-01 17:25 CST, item 127, pick a). Round 2 effort is set per spawn; the other reviewer rows take the frontmatter's xhigh. The builder's third try runs Opus by the owner's standing grant.
+
+**The finding labels.** Each finding in a review round is labelled `blocker`, `should-fix` or `wording`. Only a blocker FAILs the round (owner, 2026-11-07 14:41 CST, page item 359 c, relayed by the coordinator). The merge tool refuses a record whose model is `unknown` (decision `pr-review-record`). The filed ruling text for item 359 c omits that part; the earlier review-rounds PR body relays it, and the owner has not confirmed it.
 
 The Agent prompt judge refuses an audit Explore (a brief that asks it to audit, review, judge, rate or
 compare meaning) unless the call sets model sonnet or opus; haiku or no model refuses. Explore stays a
