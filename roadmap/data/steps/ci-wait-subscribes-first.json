@@ -1,0 +1,14 @@
+{
+ "id": "ci-wait-subscribes-first",
+ "title": "A hook on the ready mark warns when the session has not called subscribe_pr_activity for that PR; rule git-ci-wait-checks-in names the subscription first and keeps one long safety-net check-in",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 21:39 CST Nov 13, in runner 10's chat (relayed by runner 10 and the consultant): \"why are u not setting a watcher and or just polling to be woken? why setting check ins\" and \"send to retrospective that this needs a guard shd it agree\". The retrospective agrees. Incident (consultant's account, unchecked): #3302's run ended 21:33 CST, was read at 21:38, and a rerun followed at about 21:37.",
+ "source": "Consultant 21:41 CST Nov 13, relaying runner 10 relaying the owner.",
+ "note": "Triage 21:41 CST Nov 13: runner 10 opens the lane; the coordinator tracks. Rule git-ci-wait-checks-in today says a session that waits on CI sets a one-time check-in; the fix names the subscription first (subscribe_pr_activity) and keeps one long safety-net check-in. Red case first: a ready mark with no subscription warns; one with a subscription does not. Cry-wolf check before it ships (rule verification-cry-wolf-guard-is-spent): measure how often the ready mark comes in a session that merges without waiting. Related step mailbox-wake-routes names subscribe_pr_activity; not compared. Times and the incident are unchecked.",
+ "updatedAt": "2026-11-13T21:41:25-06:00"
+}

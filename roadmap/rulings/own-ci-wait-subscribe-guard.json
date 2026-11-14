@@ -1,0 +1,10 @@
+{
+  "id": "own-ci-wait-subscribe-guard",
+  "at": "2026-11-13T21:39:00-06:00",
+  "title": "A session waiting on CI subscribes to the PR first; check-ins are the safety net",
+  "ruling": "Owner 21:39 CST Nov 13, in runner 10's chat, relayed by runner 10 and the consultant (triage did not see it): a session should set a watcher or poll to be woken, not set check-ins, and this needs a guard if the retrospective agrees. The retrospective agrees (consultant 21:41 CST). The ruling states a direction, not the guard's exact form; the form is step ci-wait-subscribes-first.",
+  "quote": "why are u not setting a watcher and or just polling to be woken? why setting check ins",
+  "source": "Consultant 21:41 CST Nov 13 (quoting the owner via runner 10); filed by triage.",
+  "status": "open",
+  "step": "ci-wait-subscribes-first"
+}
