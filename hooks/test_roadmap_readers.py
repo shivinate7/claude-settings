@@ -18,6 +18,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -111,7 +112,7 @@ class RulingsReadTests(unittest.TestCase):
     def test_a_roadmap_line_behind_the_ref_says_read_as_of_when_the_fetch_fails(self):
         # fresh_ref reads the clock once. Pinned at NOW, the line is 30 s old: fresh by age, so only its sha can make
         # the read stale, and the failed fetch is then named.
-        clock = mock.Mock(time=mock.Mock(return_value=NOW))
+        clock = mock.Mock(wraps=time, time=mock.Mock(return_value=NOW))  # any other time.* call still runs for real
         with mock.patch.object(roadmap_ref, "time", clock):
             hit, said = self.failed_fetch_read("behind", behind_head)
         self.assertIsNone(hit, "control: a store with no superseding ruling gave a hit: %r" % (hit,))
