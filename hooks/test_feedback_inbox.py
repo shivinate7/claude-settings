@@ -369,14 +369,16 @@ WIN_CMDLINE_MAX = 32000
 
 def git(where, *args, env=None, stdin=None):
     """Runs git in `where` with the fixture identity. Returns its stdout; raises when git fails, or when
-    the command line is over WIN_CMDLINE_MAX. Long path lists go on stdin, not in args."""
+    the command line is over WIN_CMDLINE_MAX. Long path lists go on stdin, not in args. It has no time
+    limit: a fixed one fails a slow Windows runner (put_ref's hash-object over 250 files), and the CI job cap
+    is the hang guard."""
     argv = ["git", *GIT_ID, "-C", where, *args]
     line = subprocess.list2cmdline(argv)
     if len(line) > WIN_CMDLINE_MAX:
         check("git: %s command line fits the Windows limit" % args[0], False,
               "%d chars, limit %d" % (len(line), WIN_CMDLINE_MAX))
         raise RuntimeError("git %s: command line of %d chars" % (args[0], len(line)))
-    cp = subprocess.run(argv, capture_output=True, timeout=30, env=env, input=stdin)
+    cp = subprocess.run(argv, capture_output=True, env=env, input=stdin)
     if cp.returncode != 0:
         raise RuntimeError("git %s: %s" % (" ".join(args), cp.stderr.decode("utf-8", "replace")))
     return cp.stdout.decode("utf-8", "replace")
