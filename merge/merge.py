@@ -999,7 +999,7 @@ class Host:
         self.quota_note(split_headers(raw[0])[0])
         return c, raw[0] if asked else split_headers(raw[0])[1]
 
-    hold_off = False  # merge sets it around its pull request read: that read's low reply arms no hold, because a pause before the PUT lets the PR turn BLOCKED or BEHIND unseen
+    hold_off = False  # merge sets it around its pull request read, and confirm around the batch brake read: that read's low reply arms no hold, because a pause before the PUT lets the PR turn BLOCKED or BEHIND, or a batch go ready, unseen
     quota_until = None  # the epoch a low quota resets at, set by quota_note; the next gh call waits for it
 
     def quota_note(self, headers):
@@ -1900,11 +1900,11 @@ class Host:
         # protection merges it. So read the pull request right before the PUT; blocked or behind is a proven refusal, and no PUT is sent. Clean, unstable and the rest go on.
         taken = self.take_base or self.base  # confirm sets take_base to the base it read under the lock; with none, the last pr() read. The PUT lands on whatever base the PR has now
         self.quota_pause()  # a hold armed by an earlier call is served here, before the read the PUT relies on
-        self.hold_off = True
+        outer_hold_off, self.hold_off = self.hold_off, True
         try:
             p = self.pr(n)
         finally:
-            self.hold_off = False
+            self.hold_off = outer_hold_off
         if p["base"] != taken:
             return None, f"#{n} base changed from {taken} to {p['base']} after the take, so its checks and lock were for the old base. No merge call was sent."
         state_now = p["merge_state"]
@@ -4105,6 +4105,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 c, names = 1, ""
             rule_files = [x for x in names.split("\0") if x.lower() in RULE_FILES or x.lower().startswith(RULE_PREFIX)] if c == 0 else None
             lanes, dropped = lane_tips(wt, base_ref, sha) if m.get("deleteBranch") else ([], set())  # read before the merge: after it the lane tips are on the base
+            host.quota_pause()  # a hold armed by an earlier call is served before the brake read: a hold armed inside it would pause up to 900 s between the brake and the PUT
+            outer_hold_off, host.hold_off = host.hold_off, True  # the brake read's low reply arms no hold; a low reply on the PUT still arms one for the next call
             try:  # again right before the PUT: a batch that went ready during the waits is refused, and its claim reverted as for a refused PUT
                 busy = batch_refusal(host, n, base, sha)
             except NetStop:  # a network error is not a refusal: the claim stays
@@ -4112,6 +4114,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             except Stop as e:  # a failed read: unknown, unless GitHub refused it
                 unknown_unless_denied(e, "the batch read before the merge failed")
                 busy = str(e)
+            finally:
+                host.hold_off = outer_hold_off
             if busy:
                 fail(busy)
             host.commit_message = lift_message(lifts)
