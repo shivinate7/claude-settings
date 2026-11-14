@@ -1,14 +1,14 @@
 {
  "id": "runner-ready-mark-check-in",
- "title": "A runner sets a one-time check-in at each ready mark, so a green ready run does not wait unmerged after a gap in its own turns",
+ "title": "Runner 10's handoff says to set a one-time check-in at each ready mark; no new tool",
  "status": "ready",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
  "owner": "triage",
  "blockedBy": [],
- "why": "Debt named by runner 10 (09:07 CST Nov 14, relayed; triage read nothing): after a gap with no event, a green ready run waits unmerged; on #3238 it waited 17 min. Earlier sample on the record: #3377, green 06:15 CST to merge call 06:44 (that gap was inside the merge tool, not idle), and runner 10's own session idle 05:41 to 06:03 CST (coordinator 06:47, relayed). Mistake it would stop: a runner has no turn between \"ready marked\" and \"CI ends\", and the CI end sends no wake for a green run (decision ci-wait-reads-run-status: only a red run posts a comment). Fix (runner 10's): a one-time check-in set at each ready mark, naming the one outside event (that ready run), firing once, written to no local file, no long-lived process; the root rule git-ci-wait-checks-in already allows it (\"sets a one-time check-in when it starts to wait\"). So this may be a rule in the runner's handoff or brief only, not a new tool. Cost: one check-in per ready mark. Measure: wait from green to merge call over the next 5 merges (so far 17 min on #3238, n=1). Ask the coordinator whether runner 10 already does this in its handoff.",
+ "why": "Debt named by runner 10 (09:07 CST Nov 14, relayed): after a gap with no event, a green ready run waited unmerged. Case: #3238, ready run 43604213305 green since 08:48:39 CST, merged 09:06:14: 17 min, because runner 10 had no wake after 08:30 (its own account, logged in its handoff; n=1). Rescoped 09:17 CST Nov 14 from the coordinator (09:08, relayed): root rule git-ci-wait-checks-in already says a session that waits on CI sets a one-time check-in when it starts to wait, so this is runner 10 not following an existing rule, not a missing rule. A handoff line is the right size unless the same miss recurs. The coordinator does not know whether runner 10 sets a check-in per ready mark and is asking it. Earlier samples on the record that are not this miss: #3377 (green 06:15 to merge call 06:44 was inside the merge tool) and runner 10's session idle 05:41 to 06:03. If it recurs: a guard needs an incident (the miss recurred) and its cost; a candidate is the merge tool printing \"ready run green N min, not merged\" at the next call; not built, unmeasured. Done when: runner 10's handoff carries the line and no green ready run waits over 10 min across the next 5 merges (a count to take from the merge log; unmeasured now).",
  "source": "runner 10 09:07 CST Nov 14, relayed",
  "note": "Filed 09:14 CST Nov 14 by triage. Tracker: the coordinator. No lane yet.",
- "updatedAt": "2026-11-14T09:14:00-06:00"
+ "updatedAt": "2026-11-14T09:17:00-06:00"
 }
