@@ -228,7 +228,7 @@ def main():
         fail(
             "file(s) in a subfolder of a landed folder: install.sh's land_dir lands only "
             "top-level files, so they never reach ~/.claude there. A test helper goes in a flat "
-            "test_<name>.py file beside its tests, not in a subfolder: %s" % ", ".join(nested)
+            "test_<name>.py file beside its tests; a test-author writes it, and a builder reports the need: %s" % ", ".join(nested)
         )
 
     check_install_sh(read(INSTALL_SH_PATH), manifest_dirs)

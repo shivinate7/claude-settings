@@ -65,6 +65,7 @@ A test-support helper lives in one place: a flat `test_<name>.py` file beside th
 
 - The guard's `TEST_BASENAME` reads `test_<name>.py` as a test path. Only a test-author writes it. A builder does not.
 - `check_landed_dirs` refuses a subfolder of a landed folder, because `install.sh` lands only top-level files. A helper in a `test_support/` subfolder of a landed folder is refused.
+- A builder cannot write the flat file, so a builder reports the need and a test-author writes it.
 - The refusal names the flat file as the way out. It accepts no new path form.
 
 ## The shell check
