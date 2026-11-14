@@ -942,26 +942,33 @@ add("wait-until: the helper, then one command, is allowed under run_in_backgroun
 # from guard_stream, the one home of them. A form is tried with its optional `[...]` part and without it.
 WAIT_SAMPLES = {"PID": "12345", "SECS": "500", "TIME": WAIT_UNTIL_TIME, "T": WAIT_UNTIL_TIME}
 REMEDY_CONSTANTS = ("WAITER_REASON", "LIVE_STREAM_REASON", "PATTERN_POLLER_REASON")
+# A placeholder that is not an upper-case name: the check-timeout remedy names its run as `verdict <cmd>`.
+REMEDY_WORD_SAMPLES = {"<cmd>": CHECK_TIMEOUT_LINT}
 
 
 def remedy_forms(reason):
-    """The command forms a remedy names in backticks, each placeholder filled from WAIT_SAMPLES. A placeholder
-    with no sample is kept as `<NAME>`, so the check names it."""
+    """The command forms a remedy names in backticks, each placeholder filled from WAIT_SAMPLES or
+    REMEDY_WORD_SAMPLES. A placeholder with no sample is kept as `<NAME>`, so the check names it."""
     forms = []
     for span in re.findall(r"`([^`]+)`", reason):
         for form in (re.sub(r"[\[\]]", "", span), re.sub(r"\s*\[[^\]]*\]", "", span)):
-            words = [WAIT_SAMPLES.get(w, "<%s>" % w) if re.fullmatch(r"[A-Z][A-Z_]*", w) else w
-                     for w in form.split()]
+            words = [WAIT_SAMPLES.get(w, "<%s>" % w) if re.fullmatch(r"[A-Z][A-Z_]*", w)
+                     else REMEDY_WORD_SAMPLES.get(w, w) for w in form.split()]
             forms.append(" ".join(words))
     return list(dict.fromkeys(forms))
 
 
-def remedy_refusal(form):
-    """'' when the guard allows `form` in the foreground and under run_in_background, else what it refused."""
-    for background in (False, True):
+def remedy_refusal(form, limit=None):
+    """'' when the guard allows `form`, else what it refused. The foreground and the background are both tried,
+    unless a `limit` is given: the form is then judged under that time limit in the background only. A remedy that
+    says to run a lane lint in the background is judged there, since a foreground call is refused at any limit."""
+    for background in ((True,) if limit is not None else (False, True)):
         tool_input = {"command": form}
         if background:
             tool_input["run_in_background"] = True
+        if limit is not None:
+            tool_input["timeout"] = limit
+            tool_input["description"] = TAIL_BG_UNTIL
         got, reason = decide({"raw": None, "tool": "Bash", "cwd": NOGIT, "session": None,
                               "env_path": None, "tool_input": tool_input})
         if got != "allow":
@@ -969,11 +976,20 @@ def remedy_refusal(form):
     return ""
 
 
-def remedy_check(constant):
+def remedy_check(constant, trigger=None, limit=None):
     """A log check: the remedy named by `constant` names at least one command form, every form is a placeholder
-    the check can fill, and the guard allows every form."""
+    the check can fill, and the guard allows every form. `trigger` is (rule, tool_input) for a call that the rule
+    refuses: the guard must refuse it before the remedy is read, so a rule not yet built fails by its own cause.
+    `limit` judges every form under that time limit, in the background (see remedy_refusal)."""
     def check():
-        import guard_stream  # the one home of the waiter-family remedies (hooks/guard_stream.py)
+        import guard_stream  # the one home of the remedies (hooks/guard_stream.py)
+        if trigger is not None:
+            rule, tool_input = trigger
+            got, reason = decide({"raw": None, "tool": "Bash", "cwd": NOGIT, "session": None,
+                                  "env_path": None, "tool_input": dict(tool_input)})
+            if got != "deny" or rule not in reason:
+                return False, ("the guard does not refuse %s under run_in_background with rule %s, so no %s is "
+                               "printed to read" % (tool_input["command"], rule, constant))
         reason = getattr(guard_stream, constant, None)
         if not isinstance(reason, str):
             return False, "guard_stream has no %s to read the remedy from" % constant
@@ -983,7 +999,7 @@ def remedy_check(constant):
         unfilled = [f for f in forms if "<" in f]
         if unfilled:
             return False, "%s names a placeholder the check cannot fill: %s" % (constant, unfilled[0])
-        refused = [m for m in (remedy_refusal(f) for f in forms) if m]
+        refused = [m for m in (remedy_refusal(f, limit) for f in forms) if m]
         if refused:
             return False, "%s names a form the guard refuses: %s" % (constant, refused[0])
         return True, "%s names %d command forms, and the guard allows each" % (constant, len(forms))
