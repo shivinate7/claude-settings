@@ -1778,6 +1778,8 @@ def case_lane_box_is_refused():
     check("lane box: the refusal says to keep working or end the turn", LANE_ROUTE.search(reason) is not None, reason[-200:])
     check("lane box: the refusal names no box tool", bool(reason) and "AskUserQuestion" not in reason, reason[-200:])
     check("lane box: a lane's box makes no model call", len(r.calls) == 0, detail(r))
+    check("lane box: the refusal ends with the lane offer line, so the hook carries the transcript",
+          reason.rstrip().endswith(override.offer("lane-question-box", lane=True).strip()), reason[-240:])
     check("lane box: one deny line is logged", r.log.count("\tdeny\t") == 1, detail(r))
 
 
