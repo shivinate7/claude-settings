@@ -232,7 +232,9 @@ job_cap() {
 }
 # cost <label> <jobs reads> <contents reads> <python3 starts> [cap-end runs woken]: what the last t case did. The api reads that
 # are neither jobs nor contents are the workflows list and, per woken cap-end run, one pulls read and one comments read of
-# its pull request; each woken run posts once. No file is left in its TMPDIR, so a cache it made is gone.
+# its pull request; each woken run posts once. No file is left in its TMPDIR, so a cache it made is gone. Every alarm that reaches
+# the empty-run walk starts python3 once for the rule-events list. Each green push run the walk reads adds one jobs read and one
+# python3 start (clear_rule.py --empty-run).
 cost() {
   local total j c p other left pulls comments posts w="${5:-0}"
   total="$(wc -l < "$tmp/reads")"
@@ -538,7 +540,7 @@ runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-over push 4712)"
 jobs_of 4712 scope-guard:cancelled:40
 workflow_at 4712 scope-guard:37
 t alarm job-over-its-cap-names-the-job-the-cap-and-the-run "" "" "$(capmsg 4712 scope-guard 40 37)" "actions/runs/4712/jobs"
-cost over-cap-red-reads-one-jobs-list-and-one-workflow-file-and-starts-no-python 1 1 0 1
+cost over-cap-red-reads-one-jobs-list-and-one-workflow-file-and-starts-one-python 1 1 1 1
 runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-mixed push 4715)"
 jobs_of 4715 build:success:10 scope-guard:cancelled:40
 workflow_at 4715 build:20 scope-guard:37
@@ -590,13 +592,13 @@ jobs_of 5201 checks:success
 jobs_of 5200 scope-guard:cancelled:40
 workflow_at 5200 scope-guard:37
 t alarm older-cancelled-cap-end-under-a-newer-green-run-opens-the-cap-alarm "" "" "$(capmsg 5200 scope-guard 40 37)"
-cost older-cancelled-cap-end-under-a-newer-green-run-reads-its-jobs-and-workflow-once 1 1 0 1
+cost older-cancelled-cap-end-under-a-newer-green-run-reads-its-jobs-and-workflow-once 2 1 2 1
 runs_are "$(gh_run ci success 2026-01-02 https://runs/newer-green-5211 push 5211)" "$(gh_run ci cancelled 2026-01-01 https://runs/older-under-cap-5210 push 5210)"
 jobs_of 5211 checks:success
 jobs_of 5210 scope-guard:cancelled:2
 workflow_at 5210 scope-guard:37
 t green older-cancelled-under-its-cap-under-a-newer-green-run-stays-quiet "" "" ""
-cost older-cancelled-under-its-cap-under-a-newer-green-run-reads-its-jobs-and-workflow-once 1 1 0
+cost older-cancelled-under-its-cap-under-a-newer-green-run-reads-its-jobs-and-workflow-once 2 1 2
 # Two cancelled runs in the window: the older is over its cap and the newer is under it. The alarm names the older run.
 runs_are "$(gh_run ci cancelled 2026-01-01 https://runs/two-older-over-cap-5220 push 5220)" "$(gh_run ci cancelled 2026-01-02 https://runs/two-newer-under-cap-5221 push 5221)"
 jobs_of 5220 scope-guard:cancelled:40
@@ -604,7 +606,7 @@ jobs_of 5221 scope-guard:cancelled:2
 workflow_at 5220 scope-guard:37
 workflow_at 5221 scope-guard:37
 t alarm two-cancelled-runs-the-older-over-its-cap-names-the-older-run "" "" "$(capmsg 5220 scope-guard 40 37)"
-cost two-cancelled-runs-each-read-their-jobs-and-workflow-once 2 2 0 1
+cost two-cancelled-runs-each-read-their-jobs-and-workflow-once 2 2 1 1
 # A full run window of 100 runs: the oldest is a cancelled cap end and the 99 newer ones succeeded. The cap end still opens the alarm.
 window=(); for i in $(seq 1 99); do window+=("$(gh_run ci success 2026-01-02 "https://runs/window-green-$i" push $((5300 + i)))"); done
 runs_are "$(gh_run ci cancelled 2026-01-01 https://runs/window-oldest-cap-5300 push 5300)" "${window[@]}"
@@ -612,7 +614,7 @@ jobs_of 5399 checks:success
 jobs_of 5300 scope-guard:cancelled:40
 workflow_at 5300 scope-guard:37
 t alarm full-run-window-oldest-cancelled-cap-end-opens-the-cap-alarm "" "" "$(capmsg 5300 scope-guard 40 37)"
-cost full-run-window-oldest-cancelled-cap-end-reads-its-jobs-and-workflow-once 1 1 0 1
+cost full-run-window-oldest-cancelled-cap-end-reads-its-jobs-and-workflow-once 2 1 2 1
 # A failure run whose only red job was cancelled at its cap is red by its conclusion. Its cap end wakes the run, and the red issue
 # names no cap end. Only the issue is pinned here, not the verdict.
 runs_are "$(gh_run ci failure 2026-01-02 https://runs/fail-cap-4740 push 4740)"
@@ -707,15 +709,15 @@ runs_are "$(gh_run ci failure 2026-01-01 https://runs/stale-cap-7010 push 7010)"
 jobs_of 7011 checks:success
 jobs_of 7010 scope-guard:cancelled:40
 workflow_at 7010 scope-guard:37
-t alarm failure-run-not-newest-with-a-cap-end-wakes-the-pr "" "" "$(capmsg 7010 scope-guard 40 37)" "actions/runs/7010/jobs"
+t alarm failure-run-not-newest-with-a-cap-end-wakes-the-pr "" "" "$(capmsg 7010 scope-guard 40 37)" "actions/runs/7010/jobs actions/runs/7011/jobs"
 woke failure-run-not-newest-cap-end-wakes-for-that-run 7010
-cost failure-run-not-newest-cap-end-reads-its-jobs-and-workflow-once 1 1 0 1
+cost failure-run-not-newest-cap-end-reads-its-jobs-and-workflow-once 2 1 2 1
 stale_window=(); for i in $(seq 1 99); do stale_window+=("$(gh_run ci success 2026-01-02 "https://runs/stale-window-green-$i" push $((7100 + i)))"); done
 runs_are "$(gh_run ci failure 2026-01-01 https://runs/stale-window-oldest-7100 push 7100)" "${stale_window[@]}"
 jobs_of 7199 checks:success
 jobs_of 7100 scope-guard:cancelled:40
 workflow_at 7100 scope-guard:37
-t alarm failure-run-not-newest-in-a-full-window-wakes-the-pr "" "" "$(capmsg 7100 scope-guard 40 37)" "actions/runs/7100/jobs"
+t alarm failure-run-not-newest-in-a-full-window-wakes-the-pr "" "" "$(capmsg 7100 scope-guard 40 37)" "actions/runs/7100/jobs actions/runs/7199/jobs"
 woke failure-run-not-newest-in-a-full-window-wakes-for-that-run 7100
 # A cap end in an earlier attempt of a failure run that a newer run of its group supersedes wakes the PR for that run. The newest
 # attempt holds no cap end; the attempts endpoint does. The control has the same shape with that attempt under its cap, and stays quiet.
@@ -724,7 +726,7 @@ jobs_of 7201 checks:success
 attempt_jobs_of 7200 1 scope-guard:cancelled:40
 jobs_of 7200 checks:failure scope-guard:success
 workflow_at 7200 checks scope-guard:37
-t alarm failure-run-not-newest-cap-end-in-attempt-1-wakes-the-pr "" "" "$(capmsg 7200 scope-guard 40 37 ', attempt 1')" "actions/runs/7200/jobs"
+t alarm failure-run-not-newest-cap-end-in-attempt-1-wakes-the-pr "" "" "$(capmsg 7200 scope-guard 40 37 ', attempt 1')" "actions/runs/7200/jobs actions/runs/7201/jobs"
 count_is failure-run-not-newest-cap-end-in-attempt-1-reads-attempt-1-jobs-once "actions/runs/7200/attempts/1/jobs" 1
 runs_are "$(gh_run ci success 2026-01-02 https://runs/stale-retry-under-green-7221 push 7221)" "$(gh_run ci failure 2026-01-01 https://runs/stale-retry-under-red-7220 push 7220 completed 2)"
 jobs_of 7221 checks:success
@@ -749,7 +751,7 @@ count_is failure-run-not-newest-with-a-cap-job-under-its-cap-reads-its-jobs-once
 # unread jobs may hold a cap end.
 runs_are "$(gh_run ci success 2026-01-02 https://runs/stale-unread-green-7211 push 7211)" "$(gh_run ci failure 2026-01-01 https://runs/stale-unread-red-7210 push 7210)"
 jobs_of 7211 checks:success
-t unknown failure-run-not-newest-with-an-unreadable-jobs-read-is-unknown-not-green "api *actions/runs/7210/jobs*" "" "" "actions/runs/7210/jobs"
+t unknown failure-run-not-newest-with-an-unreadable-jobs-read-is-unknown-not-green "api *actions/runs/7210/jobs*" "" "" "actions/runs/7210/jobs actions/runs/7211/jobs"
 # A re-run in flight is the group's newest run: its status is in_progress or queued and its attempt is above 1. The group is
 # UNKNOWN (main's judged rule, merge/merge.py base_state), so the alarm reads unknown with a warning and writes no issue. It never
 # reads green, and never falls back to an older run. A first attempt still in progress waits its turn, so the older run is judged (1d).
@@ -761,7 +763,7 @@ runs_are "$(gh_run ci cancelled 2026-01-01 https://runs/rerun-cap-4910 push 4910
 jobs_of 4910 scope-guard:cancelled:40
 workflow_at 4910 scope-guard:37
 t alarm rerun-queued-does-not-hide-an-older-cap-end "" "" "$(capmsg 4910 scope-guard 40 37)"
-cost rerun-queued-does-not-hide-an-older-cap-end-reads-its-jobs-and-workflow-once 1 1 0 1
+cost rerun-queued-does-not-hide-an-older-cap-end-reads-its-jobs-and-workflow-once 1 1 1 1
 runs_are "$(gh_run ci success 2026-01-01 https://runs/rerun-green-4920 push 4920)" "$(gh_run ci null 2026-01-02 https://runs/rerun-4921 push 4921 in_progress 2)"
 jobs_of 4920 checks:success
 t unknown rerun-in-flight-is-not-green-from-an-older-green-run "" "" ""
@@ -803,7 +805,7 @@ jobs_of 4951 checks:success scope-guard:success
 workflow_at 4950 checks scope-guard:37
 workflow_at 4951 checks scope-guard:37
 t alarm failure-run-cleared-by-a-newer-green-with-a-cap-end-wakes-the-pr "" "" "$(capmsg 4950 scope-guard 40 37)" "actions/runs/4950/jobs actions/runs/4951/jobs"
-cost cleared-run-with-a-cap-end-reads-each-jobs-list-once-and-each-workflow-file-once 2 2 2 1
+cost cleared-run-with-a-cap-end-reads-each-jobs-list-once-and-each-workflow-file-once 2 2 3 1
 count_is cleared-run-reads-its-jobs-once "actions/runs/4950/jobs" 1
 count_is clearing-run-reads-its-jobs-once "actions/runs/4951/jobs" 1
 # A cleared failure run's cap end wakes when another run is red too: the title stays "CI red on", and the red issue names no cap end.
@@ -829,7 +831,7 @@ jobs_of 4953 checks:success scope-guard:success
 workflow_at 4952 checks scope-guard:37
 workflow_at 4953 checks scope-guard:37
 t green failure-run-cleared-by-a-newer-green-with-its-cap-end-under-the-cap-is-quiet "" "" ""
-cost failure-run-cleared-by-a-newer-green-with-its-cap-end-under-the-cap-reads-its-workflow-file 2 2 2
+cost failure-run-cleared-by-a-newer-green-with-its-cap-end-under-the-cap-reads-its-workflow-file 2 2 3
 
 # A cap end in an earlier attempt of a failure run that a newer green run clears still opens the cap-only alarm. The newest
 # attempt of the failed run does not hold that cap end; the attempts endpoint does. The control has the same shape with the
@@ -874,23 +876,24 @@ workflow_at 5140 checks scope-guard:37
 t unknown cleared-failure-run-with-attempt-1-unread-is-unknown-not-green "api *attempts/1/jobs*" "" ""
 
 # Reads per judged run, counted in the call log (the reads the alarm made, not the text of its description). One jobs read per
-# judged run. A failed run with a red job and no clear candidate starts no python3. A run cleared by a candidate reads the
-# candidate's jobs once and its workflow file once, and starts clear_rule.py twice (the red-stays step, then the clear step).
+# judged run. Every alarm that reaches the walk starts python3 once for the rule-events list, so a failed run with a red job and no
+# clear candidate starts that one python3 and nothing else. A run cleared by a candidate reads the candidate's jobs once and its
+# workflow file once, and starts clear_rule.py twice more (the red-stays step, then the clear step).
 runs_are "$(gh_run ci failure 2026-01-02 https://runs/count-red-4960 push 4960)"
 jobs_of 4960 checks:failure
 t red one-judged-failed-run-reads-its-jobs-once "" "" "" "actions/runs/4960/jobs"
-cost one-judged-failed-run-reads-its-jobs-once-and-starts-no-python 1 0 0
+cost one-judged-failed-run-reads-its-jobs-once-and-starts-one-python 1 0 1
 runs_are "$(gh_run ci failure 2026-01-02 https://runs/count-capped-4963 push 4963)"
 jobs_of 4963 scope-guard:cancelled:40
 workflow_at 4963 scope-guard:37
 t red one-judged-failed-run-with-a-cap-end-reads-its-jobs-and-workflow-once "" "" "" "actions/runs/4963/jobs"
 woke one-judged-failed-run-with-a-cap-end-wakes-for-the-cap-end 4963
-cost one-judged-failed-run-with-a-cap-end-reads-one-workflow-file-and-starts-no-python 1 1 0 1
+cost one-judged-failed-run-with-a-cap-end-reads-one-workflow-file-and-starts-one-python 1 1 1 1
 runs_are "$(gh_run ci success 2026-01-02 https://runs/count-green-4962 schedule 4962)" "$(gh_run ci failure 2026-01-01 https://runs/count-red-4961 push 4961)"
 jobs_of 4961 checks:failure
 jobs_of 4962 checks:success
 t green one-red-run-cleared-by-a-candidate-reads-each-jobs-list-once "" "" "" "actions/runs/4961/jobs actions/runs/4962/jobs"
-cost one-red-run-cleared-by-a-candidate-reads-one-workflow-file-and-starts-python-twice 2 1 2
+cost one-red-run-cleared-by-a-candidate-reads-one-workflow-file-and-starts-python-three-times 2 1 3
 
 # A cap end with no red run wakes its pull request once, through wake.sh, and opens no issue. The pull request is PR 7 merged
 # into main, and it holds no comments unless a case says so.
