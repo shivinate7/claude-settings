@@ -387,6 +387,14 @@ Other tools, in `judge` order:
                        (`FACT_CLOSE_PLACEHOLDER`, `PR_NUMBER`) or a `__X__` word. A sentence that holds one, a
                        short all-caps word, no args and empty args pass. A bare env var name as the whole value
                        is refused too; an override lifts it for a real one. (workflow-args-shape-check)
+  ci-wait-cap
+                       deny. A claude-code-remote send_later whose message says it waits on CI (the whole word CI or
+                       checks, or PR run or workflow run, in any case, anywhere in the message) and whose wait is more
+                       than cap_minutes() in hooks/ci_wait_cap.py: delay_minutes over it, or an `at` (ISO-8601 with an
+                       offset) more than that many minutes after the clock (local_time.clock). The limit is inclusive.
+                       A call with no CI word, or with no delay or `at`, passes. An agent's call is refused first
+                       (agent-no-remote-tools). The reason names send_later, delay_minutes and the cap. A missing cap
+                       file crashes the rule, which fails open and logs. An override lifts it. (ci-wait-cap-guard)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-bypass
@@ -6772,6 +6780,55 @@ def workflow_args_hit(tool: str, tool_input: dict) -> str:
     return next((v.strip() for v in values if workflow_args_placeholder(v)), "")
 
 
+# A send_later check-in that waits on CI for longer than the cap (rule ci-wait-cap; decision ci-wait-cap-guard).
+# Mistake: a session sets a CI check-in that wakes after the 1-hour prompt cache ends. Harm: the wake pays a full
+# context rewrite. The cap is cap_minutes() in hooks/ci_wait_cap.py, read on each call and never copied here. The message
+# is plain text, so comment openers and lone quotes in it carry no meaning to the scan. A missing cap file raises, and
+# main() logs the crash and lets the call through: a lost source is never turned into a made-up limit.
+CI_WAIT_TOOL = REMOTE_SERVER + "__send_later"
+CI_WAIT_WORDS = re.compile(r"(?<!\w)(?:ci|checks|pr\s+run|workflow\s+run)(?!\w)", re.IGNORECASE)
+CI_WAIT_REASON = ("A check-in that waits on CI may wait at most %d minutes, because under the 1-hour prompt cache a later "
+                  "wake pays a full context rewrite. Set send_later with delay_minutes of %d or less, or an `at` no more "
+                  "than %d minutes ahead, then set the next check-in when this one wakes. "
+                  "(decision ci-wait-cap-guard, a CI check-in stays inside the prompt cache)")
+
+
+def ci_wait_minutes(tool_input: dict):
+    """The wait a send_later call asks for, in minutes: the larger of delay_minutes and the `at` time's distance from
+    the clock. None when neither reads: no field, a non-number, or an `at` with no offset."""
+    waits = []
+    delay = tool_input.get("delay_minutes")
+    if isinstance(delay, (int, float)) and not isinstance(delay, bool):
+        waits.append(delay)
+    at = tool_input.get("at")
+    if isinstance(at, str):
+        import local_time  # the one home of the clock, which LOCAL_TIME_NOW replaces in tests
+        from datetime import datetime
+        text = at.strip()
+        try:
+            when = datetime.fromisoformat(text[:-1] + "+00:00" if text[-1:] in ("Z", "z") else text)
+        except ValueError:
+            when = None
+        if when is not None and when.tzinfo is not None:
+            waits.append((when - local_time.clock()).total_seconds() / 60)
+    return max(waits) if waits else None
+
+
+def ci_wait_hit(tool: str, tool_input: dict) -> str:
+    """The refusal reason when this send_later waits on CI past the cap, else "". Reads the whole message."""
+    if tool != CI_WAIT_TOOL:
+        return ""
+    message = tool_input.get("message")
+    if not isinstance(message, str) or not CI_WAIT_WORDS.search(message):
+        return ""
+    wait = ci_wait_minutes(tool_input)
+    if wait is None:
+        return ""
+    import ci_wait_cap  # the one home of the cap
+    cap = ci_wait_cap.cap_minutes()
+    return CI_WAIT_REASON % (cap, cap, cap) if wait > cap else ""
+
+
 def judge(payload) -> None:
     if payload.get("hook_event_name") == "SubagentStop":
         judge_stop(payload)
@@ -6968,6 +7025,11 @@ def judge(payload) -> None:
     stamped = stamp_hit(tool, tool_input)
     if stamped:
         refuse(tool, "deny", "message-time-matches-clock", stamped[1], stamped[0])
+
+    # A check-in that waits on CI past the cap (rule ci-wait-cap). An agent's call was refused at 8b before this point.
+    ci_wait = ci_wait_hit(tool, tool_input)
+    if ci_wait:
+        refuse(tool, "deny", "ci-wait-cap", ci_wait, str(tool_input.get("message"))[:120])
 
     # A written time off the clock: `added` in items, a step's `updatedAt`, a literal `updatedAt` in a command.
     written = written_time_hit(tool, tool_input, cwd)
