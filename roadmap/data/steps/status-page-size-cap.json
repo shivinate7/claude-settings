@@ -1,0 +1,14 @@
+{
+ "id": "status-page-size-cap",
+ "title": "The waiting page file stays under the 16 MB cap as each republish adds rows",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Measured 17:41 CST Nov 14 (triage fork, from the 17:38 CST build in the scratchpad: live2.json and page2.html): the page is 14,131,165 bytes at version 117 (14.0 MB at version 116; +0.13 MB in one republish) against a 16 MB cap. By part: designData 9.06 MB (64%; 74 designs as HTML strings, the largest 350 KB; these change only when a design is added); the roadmap block 4.66 MB (33%): steps 3.47 MB (2063 steps; note 1.85 MB, why 0.75 MB, ask 0.22 MB, title 0.17 MB) plus the live rows 1.10 MB (557 pulls 130 KB, 2167 sessions 499 KB, 831 items 127 KB, 2012 landedPulls 227 KB in the live file); the rest 0.3 MB. Growth per republish comes from the block (steps notes and why text grow with each filing), not designData. The cap and the 15 MB mark: unmeasured where the page fails at 16 MB (the cap is the artifact limit, not read here). Proposed cuts (not applied, none read by the owner as far as triage knows; unmeasured what he reads): (a) done steps leave the block (740 done, 2 done-obsolete, 42 folded, 3 dropped; the record on the roadmap branch keeps them); (b) landed rows older than 14 days; (c) closed items out of the block; (d) designData entries for closed items (74 designs; he viewed them; the page is their only copy unless the design files live elsewhere: unread). Cuts (a) to (c) lose nothing he reads on the Status tab only if the tab does not list done steps: unread. First act of a lane: read what the Status tab draws from done steps and landed rows, then red then green: the build refuses a block that takes the page past 15 MB (with a line naming the biggest part). Ask the owner only about a cut that removes something he reads (d is the candidate).",
+ "source": "triage fork 17:4x CST Nov 14 (measured; owner ask: none yet)",
+ "note": "Filed 17:41 CST Nov 14 by triage fork. Tracker: the coordinator. Not started.",
+ "updatedAt": "2026-11-14T17:41:00-06:00"
+}
