@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prose contract for the waiting page's close: skills/waiting-page/SKILL.md, "Route and close" and "Read the answers".
+"""Prose contract for the page's close: skills/waiting-page/SKILL.md, "Route and close" and "Read the answers".
 
     python3 -m unittest skills/waiting-page/test_skill_close_keeps_answer.py
 
