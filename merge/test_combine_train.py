@@ -14,12 +14,14 @@ The contract these cases read (the tool's own output; the labels are exact):
   clock: a callable returning seconds, injected for tests; the tool never reads the real clock for a number.
   queue FILE: {"prs": [{"number": N, "head": SHA}, ...] in priority order,
                "batches": [{"name": B, "state": "in-ci" | "next-in-line" | "queued", "members": [N, ...]}, ...]}
-  line 1: a header that names the readings used, no push, and dry. It does not begin with "batch".
+  line 1: a header that names the readings used ((a) to (f)), no push, and dry. It does not begin with "batch".
   per batch: a line that begins `batch NAME` and names its members as #N tokens in order. Then these
     lines, each starting at the line's beginning: `members in: N`, `members left out: N`,
-    `clash rate: N/M` (or `clash rate: n/a (reason)`), `dry rounds: N`, `dry-round minutes: X`,
-    `lint minutes: X`, `CI minutes: X`. A left-out member names its PR number and its conflicting paths.
+    `clash rate: N/M` (or `clash rate: n/a (reason)`), N the members left out, M the pairs tried (a merge with main is no pair),
+    `dry rounds: N`, `dry-round minutes: X`, `lint minutes: X` (`unknown` when the lint cannot finish), `CI minutes: X`.
+    A left-out member names its PR number and its conflicting paths; a member that clashes with main reads `(clash with main)`.
   a fast check with no home: `unknown (fast-checks-before-ready not landed)`.
+  a git that is not on PATH: exit 2, one `unknown` line that names git, no traceback.
   exit: 0 ok, 1 something left out or a failed check, 2 unknown or cannot run.
 """
 import ast
@@ -49,7 +51,7 @@ READY = ["STE lint", "split guard", "cost pins", "scaffold", "debt retire", "ope
 GIT_WRAPPERS = {"merge_tree", "conflicting_files", "ci_job_run"}  # the merge.py names the tool may reach
 NO_HOME = "unknown (fast-checks-before-ready not landed)"
 SIX = ["members in", "members left out", "clash rate", "dry-round minutes", "lint minutes", "CI minutes"]
-PASS_WORD = re.compile(r"(?<!not a )(?<!not )(?<!no )\bpass(?:es|ed)?\b", re.I)  # a claim of pass, not "not a pass"
+PASS_WORD = re.compile(r"(?<!not a )(?<!not )(?<!no )\b(?:pass(?:es|ed)?|ok)\b", re.I)  # a claim of pass ("pass", "passed", "ok"), not "not a pass" or "not ok"
 
 os.environ.update(LC_ALL="C", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull,
                   GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
@@ -182,6 +184,18 @@ def add_pr(root, number, edits):
     git_ok(root, "add", "-A")
     git_ok(root, "commit", "-q", "-m", "pr %d" % number)
     return git_ok(root, "rev-parse", "HEAD").strip()
+
+
+def advance_main(root, edits):
+    """A commit on the seed's main (the repo `root` was cloned from), then a fetch: origin/main moves, and root's own main does not.
+    -> the new origin/main sha."""
+    seed = git_ok(root, "config", "--get", "remote.origin.url").strip()
+    for path, text in edits.items():
+        write(seed, path, text)
+    git_ok(seed, "add", "-A")
+    git_ok(seed, "commit", "-q", "-m", "main moves")
+    git_ok(root, "fetch", "-q", "origin")
+    return git_ok(root, "rev-parse", "origin/main").strip()
 
 
 def queue_file(prs, batches):
@@ -326,6 +340,15 @@ class Controls(unittest.TestCase):
                          "merge.py imports the tool, so the tool could alter a merge verdict")
 
 
+    def test_control_pass_reader_sees_the_tool_pass_word_ok(self):
+        self.assertTrue(claims_pass("batch Q (queued, folded): #3\nround 1, leading tip #3: fast checks ok"),
+                        "claims_pass does not read 'fast checks ok' as a pass claim, so the no-pass asserts miss the tool's pass wording")
+
+    def test_control_pass_reader_skips_not_ok(self):
+        self.assertEqual(claims_pass("round 1, leading tip #3: fast checks not ok"), [],
+                         "claims_pass reads 'not ok' as a pass claim")
+
+
 class NoPushNoReadyNoMerge(unittest.TestCase):
     def test_full_run_makes_no_git_push_and_no_gh_pr_ready_or_pr_merge_call(self):
         root = make_repo({"README.md": "x\n"}, checks=READY)
@@ -430,7 +453,7 @@ class SixNumbers(unittest.TestCase):
         self.assertEqual([c for c in ci if "--lint" in c], [], "no --lint: the tool must not run the lint")
         rc, out, err, ci = run_tool(queue, root, lint=True, clock=ticking_clock())
         lint = value(batch_blocks(out)[1]["Q"], "lint minutes") or ""
-        self.assertFalse(lint.startswith("n/a (not run)"), "--lint: lint minutes must be measured or unknown, not not-run: %r" % lint)
+        self.assertIsNotNone(number_of(lint), "--lint on a passing lint: lint minutes must be a measured number, got %r" % lint)
         self.assertEqual(len([c for c in ci if "--lint" in c]), 1, "--lint: one lint call for the one batch, on its final tree")
 
     def test_header_line_names_the_readings_no_push_and_dry(self):
@@ -481,6 +504,43 @@ class FastChecks(unittest.TestCase):
         self.assertEqual(rc, 1, "a failed fast check must exit 1")
 
 
+class LintMinutes(unittest.TestCase):
+    def test_lint_that_cannot_finish_prints_unknown_not_an_elapsed_time(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        heads = [(3, add_pr(root, 3, {"f3.txt": "3\n"})), (4, add_pr(root, 4, {"f4.txt": "4\n"}))]
+        queue = queue_file(heads, [("Q", "queued", [3, 4])])
+        rc, out, err, ci = run_tool(queue, root, mode="unknown", lint=True, clock=ticking_clock(step=0.001))
+        order, blocks = batch_blocks(out)
+        self.assertEqual(order, ["Q"], "one queued batch must print one batch line, got %r" % order)
+        lint = value(blocks["Q"], "lint minutes") or ""
+        self.assertTrue(lint.startswith("unknown"),
+                        "a lint that cannot finish is unmeasured: its minutes must print unknown, not an elapsed time: %r" % lint)
+
+
+class MissingGit(unittest.TestCase):
+    """A git that is not on PATH is a run that cannot start: exit 2, and one unknown line that names git, with no traceback."""
+
+    def _run_without_git(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        heads = [(3, add_pr(root, 3, {"f3.txt": "3\n"}))]
+        queue = queue_file(heads, [("Q", "queued", [3])])
+        env = dict(os.environ, PATH=scratch("no-git-"))  # an empty folder on PATH: no git
+        return subprocess.run([sys.executable, TOOL, "--queue", queue, "--root", root], capture_output=True, text=True, env=env)
+
+    def test_missing_git_exits_2(self):
+        r = self._run_without_git()
+        self.assertEqual(r.returncode, 2, "a git that cannot start is cannot-run: exit 2, got %d" % r.returncode)
+
+    def test_missing_git_prints_no_traceback(self):
+        r = self._run_without_git()
+        self.assertNotIn("Traceback", r.stderr, "a missing git escapes as a Python traceback; it must print one unknown line")
+
+    def test_missing_git_refusal_is_one_unknown_line_naming_git(self):
+        r = self._run_without_git()
+        refusal = [line for line in r.stdout.splitlines() if line.startswith("unknown") and "git" in line]
+        self.assertTrue(refusal, "a missing git must print one unknown line that names git: stdout %r" % r.stdout)
+
+
 class ClashLeavesByName(unittest.TestCase):
     def test_clashing_member_leaves_by_name_with_its_conflicting_path(self):
         root = make_repo({"x.txt": "line a\n"}, checks=READY)
@@ -493,6 +553,81 @@ class ClashLeavesByName(unittest.TestCase):
         self.assertEqual(number_of(value(block, "members left out")), 1, "one of the two clashing members must be left out")
         named = [line for line in block if re.search(r"#2\b", line) and "x.txt" in line]
         self.assertTrue(named, "the left-out member must be named by PR number (#2) with its conflicting path (x.txt): %r" % block)
+
+
+class RetryBranch(unittest.TestCase):
+    """A later side of several members that clashes as a group is retried one member at a time, so only the clashing member leaves.
+    This reaches the retry branch of Fold.pair: deleting that branch turns this case red."""
+
+    def test_clashing_group_retries_each_member_and_only_the_clashing_one_leaves(self):
+        root = make_repo({"x.txt": "line a\n", "README.md": "x\n"}, checks=READY)
+        heads = [(1, add_pr(root, 1, {"x.txt": "line 1\n"})),
+                 (2, add_pr(root, 2, {"f2.txt": "2\n"})),
+                 (3, add_pr(root, 3, {"x.txt": "line 3\n"})),
+                 (4, add_pr(root, 4, {"f4.txt": "4\n"}))]
+        queue = queue_file(heads, [("Q", "queued", [1, 2, 3, 4])])
+        rc, out, err, ci = run_tool(queue, root, clock=ticking_clock())
+        order, blocks = batch_blocks(out)
+        self.assertEqual(order, ["Q"], "one queued batch must print one batch line, got %r" % order)
+        block = blocks["Q"]
+        self.assertEqual(header_members(block), [1, 2, 4],
+                         "the group #3 #4 clashes with #1 #2 on #3, so its retry must keep #4 and leave #3: the batch must fold to #1 #2 #4")
+        self.assertEqual(number_of(value(block, "members left out")), 1, "one member leaves: only the clashing #3, not the group")
+        named = [line for line in block if re.search(r"left out #3\b", line) and "x.txt" in line]
+        self.assertTrue(named, "the left-out #3 must name its conflicting path x.txt: %r" % block)
+
+
+class ClashRate(unittest.TestCase):
+    def test_clash_rate_is_members_left_out_over_pairs_tried(self):
+        root = make_repo({"x.txt": "line a\n", "README.md": "x\n"}, checks=READY)
+        heads = [(1, add_pr(root, 1, {"x.txt": "line 1\n"})),
+                 (2, add_pr(root, 2, {"x.txt": "line 2\n"})),
+                 (3, add_pr(root, 3, {"x.txt": "line 3\n"})),
+                 (4, add_pr(root, 4, {"f4.txt": "4\n"}))]
+        queue = queue_file(heads, [("Q", "queued", [1, 2, 3, 4])])
+        rc, out, err, ci = run_tool(queue, root, clock=ticking_clock())
+        order, blocks = batch_blocks(out)
+        self.assertEqual(order, ["Q"], "one queued batch must print one batch line, got %r" % order)
+        block = blocks["Q"]
+        self.assertEqual(number_of(value(block, "members left out")), 2, "#2 and #3 clash with #1, so 2 members are left out")
+        self.assertEqual(value(block, "clash rate"), "2/5",
+                         "the clash rate must be members left out over pairs tried (2 of 5), not every conflicting merge (3)")
+
+
+class MainClash(unittest.TestCase):
+    """Each queued member is merge-tested against origin/main before it pairs (reading f). A member that clashes with main leaves by name,
+    with its paths and `(clash with main)`, and its merges with main are no pair tried. origin/main moves after the PRs are cut, so
+    a tool that read root's own main would not see the clash."""
+
+    def _main_moved_past_pr1(self):
+        root = make_repo({"x.txt": "line a\n", "README.md": "x\n"}, checks=READY)
+        heads = [(1, add_pr(root, 1, {"x.txt": "line b\n"})),
+                 (2, add_pr(root, 2, {"f2.txt": "2\n"})),
+                 (3, add_pr(root, 3, {"f3.txt": "3\n"}))]
+        advance_main(root, {"x.txt": "line m\n"})
+        return root, queue_file(heads, [("Q", "queued", [1, 2, 3])])
+
+    def test_member_that_clashes_with_main_leaves_by_name_with_its_path(self):
+        root, queue = self._main_moved_past_pr1()
+        rc, out, err, ci = run_tool(queue, root, clock=ticking_clock())
+        order, blocks = batch_blocks(out)
+        self.assertEqual(order, ["Q"], "one queued batch must print one batch line, got %r" % order)
+        named = [line for line in blocks["Q"] if re.search(r"left out #1\b", line) and "x.txt" in line and "(clash with main)" in line]
+        self.assertTrue(named, "#1 clashes with main on x.txt: it must leave by name with its path and (clash with main): %r" % blocks["Q"])
+
+    def test_merges_with_main_are_not_pairs_tried(self):
+        root, queue = self._main_moved_past_pr1()
+        rc, out, err, ci = run_tool(queue, root, clock=ticking_clock())
+        order, blocks = batch_blocks(out)
+        self.assertEqual(order, ["Q"], "one queued batch must print one batch line, got %r" % order)
+        self.assertEqual(value(blocks["Q"], "clash rate"), "0/1",
+                         "the only pair tried is #2 with #3, and it is clean: the merge of #1 with main must not count as a pair")
+
+    def test_header_names_reading_f(self):
+        root, queue = self._main_moved_past_pr1()
+        rc, out, err, ci = run_tool(queue, root, clock=ticking_clock())
+        header = (out.splitlines() or [""])[0]
+        self.assertIn("(f)", header, "the header must name reading (f), the test of each member against main: %r" % header)
 
 
 class ExitCodes(unittest.TestCase):
