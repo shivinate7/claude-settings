@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the push skip decision, which lets a push to main skip the checks its tree already passed.
 
-The decision's one home is the shared action actions/push-skip (push-skip.py beside its action.yml). Child repos pin that action,
+The decision's one home is the shared action actions/push-skip (push-skip.py beside its action.yml). Child repos pin that action by SHA today and are ruled to follow @stable (restart-plan R44),
 and this repo's checks.yml calls it. Until the lift moves the script, the copy at .github/scripts/push-skip.py answers.
 
 The contract these cases pin. A change to any of it changes these cases first.
