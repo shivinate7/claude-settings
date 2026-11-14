@@ -1,0 +1,10 @@
+{
+ "id": "own-835-b-into-a",
+ "at": "2026-11-14T14:56:00-06:00",
+ "title": "Combined PR 3406 gets its own fresh review chain; then PR 3388 carries one source PR by tree.",
+ "ruling": "Owner, page item 835 (pick-review-carry-by-tree), in chat to the consultant at 14:56 CST Nov 14, as the consultant relayed it at 14:58: \"835 approved b into a\". Consultant's reading, not the owner's own words to triage: option b now (combined PR #3406 gets one fresh review chain and lane lint on its own head, then one CI run and one merge); then option a (#3388 carries a review log and lane lint to a replacement PR whose tree is byte-identical, one source PR, and goes to runner 10 for merge). Option c (carry many members) is not chosen. Process and rule effect: the #3388 carry covers one source PR only, so it does not carry #3406.",
+ "quote": "835 approved b into a",
+ "source": "consultant to triage, 14:58 CST Nov 14 (relayed owner chat of 14:56); page item pick-review-carry-by-tree closed at 14:58 CST. Not read by triage from the owner directly.",
+ "status": "open",
+ "step": "review-carries-by-tree"
+}
