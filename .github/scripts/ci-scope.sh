@@ -7,8 +7,7 @@
 #   checks_macos gates both checks-macos and checks-macos-b.
 #   checks_windows_rest_2 repeats checks_windows_rest's value (R62). No job reads it: checks-windows-rest-2 runs every step on a ready pull_request, so the output is kept only for the tests that derive it.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event.
-# Everything is true on push, schedule and dispatch, on a ready pull request from a `batch-` branch (the integration PR: its run is the
-# all-flags run that the push skip reads, .github/scripts/push-skip.py), on an unreadable diff, on a change to this
+# Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
 # BASE_SHA, HEAD_REF.
 set -u
@@ -118,9 +117,6 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
 else
   on=" $ALL "
 fi
-# A pull request from a `batch-` branch is the integration PR: every flag on, whatever its diff touches, so its run is the all-flags run
-# the push skip relies on. Every other head keeps the flags of its diff. A draft PR skips every job through the draft test, not scope.
-[ "${EVENT:-}" = pull_request ] && case "${HEAD_REF:-}" in batch-*) on=" $ALL " ;; esac
 # checks_guard: the checks-guard job runs the guard suite, which needs both flags (the old step if). The playwright-setup arm above also sets it directly.
 case "$on" in *" code "*) case "$on" in *" guard "*) on="$on checks_guard " ;; esac ;; esac
 echo "CI scope: event=${EVENT:-} range=${range:-none} on=$on"
