@@ -43,6 +43,10 @@ file is missing or unreadable; its readAt is not an ISO time, has no time zone, 
 old or is more than FUTURE_MINUTES ahead; it has no sessions list; the repo's GitHub name cannot be read;
 or a session row or pull row has the wrong shape.
 
+The upkeep row "blocked with no open blocker" names each blocked step whose blockedBy is missing, null, empty or names only done or folded steps.
+A blocker naming no step reads `<id> (unknown blocker <x>)` when no other blocker is open. An open blocker keeps the step
+unlisted. A blockedBy that is not a list of ids reads `<id> (blockedBy unreadable)`.
+
 The upkeep list also holds two rows for the stale-ready report (step triage-stale-ready-report): "ready todo
 steps" (each todo step whose note holds the sentence "Ready.", not gated on live phases) and "draft PRs over
 STALE_DRAFT_HOURS h with no live lane" (each draft pull row whose optional createdAt, GitHub's created_at, is
@@ -193,7 +197,11 @@ FUTURE_MINUTES = 5
 # `ready` reads as todo.
 TODO_STATUS = ("todo", "ready")
 LIVE_STATUS = ("doing", "active")
-KNOWN_STATUS = TODO_STATUS + ("queued", "blocked", "folded") + LIVE_STATUS + ("done",)
+BLOCKED_STATUS = "blocked"
+FOLDED_STATUS = "folded"
+# A finished step holds no one: done, or folded into another step.
+FINISHED_STATUS = ("done", FOLDED_STATUS)
+KNOWN_STATUS = TODO_STATUS + ("queued", BLOCKED_STATUS) + LIVE_STATUS + FINISHED_STATUS
 # The statuses the stale and empty rows read: blocked and folded steps wait on purpose, so they are never listed.
 LISTED_STATUS = TODO_STATUS + ("queued",) + LIVE_STATUS
 TOP = 5
@@ -1324,6 +1332,28 @@ def unlaned(open_, marks, work):
     return out
 
 
+def unblocked(open_, steps):
+    """Entries for each blocked step that no open step holds. A blocker is open when its step is not finished, so a
+    done or folded blocker is finished. A blocker naming no step does not hold the step; it is named when no other
+    blocker is open. A missing or null blockedBy holds nothing, so the entry is the id. A blockedBy that is not a list
+    of ids reads `<id> (blockedBy unreadable)`."""
+    out = []
+    for k, d in open_:
+        if d.get("status") != BLOCKED_STATUS:
+            continue
+        ids = d.get("blockedBy")
+        if ids is None:
+            ids = []
+        if not isinstance(ids, list) or not all(isinstance(b, str) for b in ids):
+            out.append("%s (blockedBy unreadable)" % k)
+        elif any(b in steps and steps[b].get("status") not in FINISHED_STATUS for b in ids):
+            continue
+        else:
+            unknown = [b for b in ids if b not in steps]
+            out.append("%s (unknown blocker %s)" % (k, " ".join(unknown)) if unknown else k)
+    return out
+
+
 def open_steps(steps):
     """(id, step) for each step not done, in step order."""
     return sorted(((k, d) for k, d in steps.items() if d.get("status") != "done"),
@@ -1863,6 +1893,7 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
     rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days in a live phase" % STALE_DAYS, stale),
             ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
             ("in progress with no live lane or open PR", unlaned(open_, marks, work)),
+            ("blocked with no open blocker", unblocked(open_, steps)),
             ("ready todo steps", ready),
             ("draft PRs over %d h with no live lane" % STALE_DRAFT_HOURS, stale_drafts(work)),
             ("dated claims to re-check before a lane starts", dated_claims(open_, now.date())),
