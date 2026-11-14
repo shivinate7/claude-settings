@@ -206,8 +206,9 @@ def planned_nightly_skip(text):
 
 class MacOnceByBatchRollup(unittest.TestCase):
     """R61 on the one required check: the push guard keeps each macOS job needed, the rollup still needs every job, and the
-    nightly gate is an off-rollup job that is not a shard. The first and third cases fail on the old rules; the rest are
-    controls that already hold, and they keep the allowance narrow."""
+    nightly gate is an off-rollup job that is not a shard. Each case is a control that holds on the old rules and on the landed
+    file: the subject is built from the planned gate, with one known line swapped and asserted present, and the allowance stays
+    narrow. The planned gate with its scope-skips entry is ScopeSkipsWiring's case."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
@@ -236,16 +237,23 @@ class MacOnceByBatchRollup(unittest.TestCase):
         self.assertEqual(scope_if_problems(planned), [])
 
     def test_a_macos_job_whose_if_skips_a_ready_pr_is_flagged(self):
-        # Control: an if that is false on a ready PR still makes its job off the rollup, and is named as a non-shard.
-        planned = planned_mac_push_guard(self.text).replace(PUSH_GUARD_IF, "    if: ${{ github.event_name == 'push' }}\n", 1)
-        self.assertTrue(off_problems(planned), "an if false on a ready PR passes the rollup rules")
+        # Control: an if that is false on a ready PR still makes its job off the rollup, and is named as a non-shard. The subject is
+        # the planned file, with shell-macos's gate line swapped for a push-only if. The gate line is asserted present first, so a
+        # landed gate cannot turn the swap into a no-op.
+        planned = scope_skips.planned_scope_gate(self.text)
+        gate = "    if: ${{ " + scope_skips.gate_expr("shell-macos") + " }}\n"
+        self.assertEqual(planned.count(gate), 1, "shell-macos's planned gate line is not in the planned file: this case must follow it")
+        swapped = planned.replace(gate, "    if: ${{ github.event_name == 'push' }}\n", 1)
+        self.assertTrue(off_problems(swapped), "an if false on a ready PR passes the rollup rules")
 
-    def test_a_macos_job_level_if_that_reads_a_flag_is_flagged(self):
-        # Control: a job-level if that reads a scope flag is refused when scope-skips does not name the job. This fixture has no
-        # scope-skips input, so the gate is unlisted; ScopeSkipsWiring holds the listed case.
-        planned = planned_mac_push_guard(self.text).replace(
-            PUSH_GUARD_IF, "    if: ${{ needs.scope.outputs.checks_macos == 'true' }}\n", 1)
-        self.assertTrue(off_problems(planned) or needs_problems(planned), "a flag-reading job-level if passes the rollup rules")
+    def test_a_flag_reading_job_level_if_on_a_job_scope_skips_does_not_name_is_flagged(self):
+        # Control: a job-level if that reads a scope flag is refused on a job that scope-skips does not name. The subject is
+        # checks-hooks, which is no macOS job, so no gate or entry of the planned file covers it.
+        planned = scope_skips.planned_scope_gate(self.text)
+        anchor = "  checks-hooks:\n"
+        self.assertEqual(planned.count(anchor), 1, "checks-hooks' header changed: this case must follow it")
+        text = planned.replace(anchor, anchor + "    if: ${{ needs.scope.outputs.checks_macos == 'true' }}\n", 1)
+        self.assertTrue(off_problems(text) or needs_problems(text), "a flag-reading job-level if on an unnamed job passes the rollup rules")
 
 
 # The macOS gate (testing/scope_skips.py). A pull_request starts a macOS job only when one of its own flags is "true", and
