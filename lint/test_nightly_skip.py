@@ -140,6 +140,20 @@ class NightlySkip(unittest.TestCase):
         self.assertIn("unknown", text.lower(), "with no runs read and no token the gate must say unknown")
 
 
+class NightlySkipJobWiring(unittest.TestCase):
+    """The skip job is an ancestor of every job through scope. A job-level `if` skips it on a pull request or a push,
+    and a skipped ancestor skips every job behind scope, so all-jobs-passed fails on every PR run."""
+
+    def test_skip_job_has_no_job_level_if(self):
+        text = open(os.path.join(ROOT, WORKFLOW), encoding="utf-8").read()
+        start = text.index("\n  nightly-skip:\n")
+        end = text.index("\n  # ", start + 1)
+        job = text[start:end]
+        header = job.split("    steps:", 1)[0]
+        self.assertNotIn("\n    if:", header,
+                         "nightly-skip must run on every event: a skipped job it leaves behind skips scope's descendants")
+
+
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 

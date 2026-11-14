@@ -16,8 +16,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, all_jobs, eval_if, push_guard_only,  # noqa: E402  the one home of the scope condition and scalar parsers
-                                schedule_only, shard_base, yaml_scalar)
+from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, all_jobs, eval_if, push_guard_only,  # noqa: E402  the one home of the scope condition and scalar parsers
+                                shard_base, yaml_scalar)
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
 
 ALL_JOBS_PASSED_USES = "$/actions/all-jobs-passed"
@@ -166,13 +166,11 @@ def steps_problems(text):
 
 
 def off_problems(text):
-    """Only a shard job, and the schedule-only nightly skip job, may stay off all-jobs-passed. A needed job has no job-level if,
+    """Only a shard job may stay off all-jobs-passed. A needed job has no job-level if,
     except scope (its draft rule) and a macOS job (the push guard)."""
     jobs = all_jobs(text)
     needed, off, problems = split_jobs(text)
     for name in off:
-        if name == NIGHTLY_SKIP_JOB and schedule_only(jobs[name]["if"]):  # R61 part 3: the skip job runs on a schedule only
-            continue
         if not shard_base(name):
             problems.append(f"{name} is off all-jobs-passed but is not a shard: its job-level if skips it on a PR")
     for name in needed:

@@ -1578,13 +1578,14 @@ def macos_push_guard_problems(text):
 
 
 def skip_job_problems(text):
-    """R61 part 3: the nightly gate is a schedule-only job on ubuntu. It reads no flag and needs no other job."""
+    """R61 part 3: the nightly gate is an ubuntu job with no job-level if, so it runs on every event: a skipped gate would skip every
+    job behind scope, since a skipped ancestor skips a job whose own if holds no status function. It reads no flag and needs no other job."""
     nightly_skip = all_jobs(text).get(NIGHTLY_SKIP_JOB)
     if nightly_skip is None:
         return [f"no {NIGHTLY_SKIP_JOB} job: a scheduled run has no gate to read"]
     problems = []
-    if nightly_skip["if"] is None or not schedule_only(nightly_skip["if"]):
-        problems.append(f"{NIGHTLY_SKIP_JOB} if is {nightly_skip['if']}, want a schedule-only condition")
+    if nightly_skip["if"] is not None:
+        problems.append(f"{NIGHTLY_SKIP_JOB} if is {nightly_skip['if']}, want none: a skipped gate skips every job behind scope")
     if not (nightly_skip["os"] or "").startswith("ubuntu"):
         problems.append(f"{NIGHTLY_SKIP_JOB} runs on {nightly_skip['os']}, want ubuntu")
     return problems
@@ -1696,8 +1697,8 @@ class MacOnceByBatch(unittest.TestCase):
         # Named failure: checks-macos still runs a guard shard, or checks-macos-b still runs a guard step.
         self.assertEqual(macos_slice_problems(self.text), [])
 
-    def test_the_nightly_skip_is_a_schedule_only_ubuntu_job(self):
-        # Named failure: no gate job, or one that also runs on a push or a pull request, so the gate reads on every run.
+    def test_the_nightly_skip_is_an_ubuntu_job_with_no_job_level_if(self):
+        # Named failure: no gate job, or one with a job-level if, so it is skipped on a pull request and every job behind scope skips.
         self.assertEqual(skip_job_problems(self.text), [])
 
     def test_the_nightly_skip_holds_a_timeout_read_only_permissions_and_a_skip_output(self):
@@ -1727,11 +1728,11 @@ class MacOnceByBatch(unittest.TestCase):
                 self.assertTrue(job_check_problems(name, all_jobs(job_text(name, if_))[name]), label)
 
     def test_checker_sees_the_nightly_skip_defects(self):
-        # The control: a schedule-only ubuntu gate with its timeout, read-only permissions and skip output passes, and so does
+        # The control: an ubuntu gate with no job-level if, its timeout, read-only permissions and skip output passes, and so does
         # a scope that waits on it. Each defect below is flagged, and only the named defect.
         # Trailing comments on the if, the cap, the permissions and the outputs headers, and a # inside a quoted step, read as
         # text or as a comment as YAML does: none of them changes the answer.
-        nightly_skip = ("  nightly-skip:\n    if: ${{ github.event_name == 'schedule' }}  # the 03:17 run only\n    runs-on: ubuntu-latest\n"
+        nightly_skip = ("  nightly-skip:\n    runs-on: ubuntu-latest\n"
                 "    timeout-minutes: 5  # the cap\n    permissions:  # read-only\n      actions: read  # reads runs\n      contents: read\n"
                 "    outputs:  # the gate's answer\n      skip: ${{ steps.decide.outputs.skip }}\n"
                 "    steps:\n      - id: gate\n        run: echo \"skip=false # not a comment\" >> \"$GITHUB_OUTPUT\"\n")
@@ -1744,7 +1745,8 @@ class MacOnceByBatch(unittest.TestCase):
         # The control, with !cancelled() as the status function: it passes too.
         self.assertEqual(scope_skip_problems("jobs:\n" + scope.replace("always()", "!cancelled()") + nightly_skip), [])
         skip_bad = {
-            "the gate runs on a push": nightly_skip.replace("github.event_name == 'schedule'", "github.event_name != 'pull_request'"),
+            "the gate skips on a pull request": nightly_skip.replace(
+                "    runs-on:", "    if: ${{ github.event_name == 'schedule' }}  # the 03:17 run only\n    runs-on:", 1),
             "the gate on macOS": nightly_skip.replace("ubuntu-latest", "macos-latest"),
         }
         for label, text in skip_bad.items():
