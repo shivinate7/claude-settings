@@ -1245,11 +1245,11 @@ class CostTests(unittest.TestCase):
                          "the one child is the shell probe for a trailing backslash; got %r" % log.argvs)
         self.assertEqual(left, [])
 
-    def test_one_watcher_is_started_in_the_foreground_per_background_call(self):
+    def test_the_rewritten_command_carries_one_watch_pid_flag_per_background_call(self):
         rc, text, log, left = self.hook_in_process("sleep 1")
         cmd = json.loads(text)["hookSpecificOutput"]["updatedInput"]["command"]
         self.assertEqual(cmd.count("--watch-pid"), 1,
-                         "one watcher per background call; the rewrite starts %d" % cmd.count("--watch-pid"))
+                         "one --watch-pid flag per background call; the rewrite carries %d" % cmd.count("--watch-pid"))
 
     def test_the_watch_reads_ps_at_most_about_once_a_second_on_a_fake_clock(self):
         clock = cost_probe.FakeClock(start=1000.0, cap=5000)
