@@ -1,0 +1,14 @@
+{
+ "id": "nightly-dead-job-cleanup",
+ "title": "The dead nightly job and the text that still calls the nightly live are removed",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Source (coordinator 16:04 CST Nov 14, from the #3353 lane's read; triage read none): on main 04045f7d1425, .github/workflows/checks.yml has 0 hits for `schedule:` and `cron`; `on:` holds push, pull_request and workflow_dispatch; the word \"schedule\" stays on 15 lines in job ifs, steps and comments. Change: remove the nightly-skip job, keep nightly-skip.py, fix the stale schedule comments, and fix the decisions that still call the nightly live (push-skip-on-proven-tree lines 10 and 23; test-strategy-reset has a run-time snapshot, 05:01 CST Nov 13, which stays as a dated snapshot unless its text says \"is\"). Queued, not started: start when the ready queue is short (coordinator). Follows step drop-nightly-schedule (done, #3353). Whether removing the job moves a guard or check verdict is unread; if it does, it is a guard change with round 3.",
+ "source": "coordinator 16:04 CST Nov 14 (from the #3353 lane)",
+ "note": "Filed 16:05 CST Nov 14 by triage. Tracker: the coordinator. Not started. Start when the ready queue is short.",
+ "updatedAt": "2026-11-14T16:05:00-06:00"
+}
