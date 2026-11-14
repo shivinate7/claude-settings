@@ -19,10 +19,11 @@ def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=
         env=ROLE_ENV, session_id=target, message=message, carries=carries, lacks=lacks)
 
 
-def step_allow(name, transcript, message, target=ROLE_OTHER):
-    """A send_message the guard lets through silently."""
+def step_allow(name, transcript, message, target=ROLE_OTHER, env_path=fake_gh_path(ARCHCLOSED)):
+    """A send_message the guard lets through silently. A brief that names a step also reads the open pull requests
+    (lane-step-dup-pr), so the default is a stand-in tool that holds none open."""
     add("lane-one-topic: " + name, "allow", tool=SEND_MESSAGE, cwd=NOGIT, silent=True, transcript=transcript,
-        env=ROLE_ENV, session_id=target, message=message)
+        env=ROLE_ENV, session_id=target, message=message, env_path=env_path)
 
 
 # Refused: the brief's topic differs from the lane's. Each brief names the lane's own step, so a match on the step
@@ -74,7 +75,7 @@ step_allow("a marker on line two is not the first line, so the brief is not judg
            role_path("step-topic-lane"), "Status: PR #12 merged.\nLane brief: icon-a. Topic: colors.")
 # Passes: one lane, one topic, many steps. A new step on the lane's own topic is allowed.
 step_allow("a brief for a new step on the lane's own topic is allowed: one lane, one topic",
-           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.")
+           role_path("step-topic-lane-listed"), "Lane brief: icon-b. Topic: icons.")
 step_allow("a brief for the lane's own step on its own topic is allowed",
            role_path("step-topic-lane"), "Lane brief: icon-a. Topic: icons.")
 # Passes: an older lane with two cs-step tags and no topic is judged by its steps: the second step is one of them.
@@ -82,15 +83,15 @@ step_allow("an older lane with two cs-step tags: a brief naming its second step 
            role_path("step-old-lane"), "Lane brief: icon-b. Topic: icons.")
 # Passes: a lane that create_session started on topic icons, with a new step on that topic, in both result shapes.
 step_allow("a brief for a new step on topic icons to a lane that create_session started (JSON result) is allowed",
-           role_path("step-create-json"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
+           role_path("step-create-json-listed"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
 step_allow("a brief for a new step on topic icons to a lane that create_session started (plain result) is allowed",
-           role_path("step-create-text"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
+           role_path("step-create-text-listed"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
 # Passes: a brief to a target that is no lane is not judged, whatever its topic line says.
 step_allow("a brief with topic colors to a target that is no lane (cs-build:triage) is allowed",
-           role_path("step-triage"), "Lane brief: icon-b. Topic: colors.")
+           role_path("step-triage-listed"), "Lane brief: icon-b. Topic: colors.")
 # Passes: the newest record decides. A lane read, then a newer triage read, makes the target no lane.
 step_allow("the newest record decides: a lane read, then a newer triage read, lets a brief through",
-           role_path("step-lane-then-triage"), "Lane brief: icon-b. Topic: colors.")
+           role_path("step-lane-then-triage-listed"), "Lane brief: icon-b. Topic: colors.")
 # Refused: the target's tags were set after its newest record, so the record is stale. The steer re-reads the record
 # with get_session. It never tells the sender to start a new lane, for a topic lane or a lane with no topic.
 step_refuse("a brief for topic icons, after set_session_tags on a topic lane, is refused: re-read the record with get_session",
@@ -101,7 +102,7 @@ step_refuse("a brief for topic icons, after set_session_tags on a lane with no t
             carries=("get_session",), lacks=("new lane",))
 # A create_session result shaped {"session_id": ...} is a record too: the brief is judged against the lane's topic.
 step_allow("a create_session result shaped session_id counts as the record: a brief for its own topic icons passes",
-           role_path("step-create-session-id"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
+           role_path("step-create-session-id-listed"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
 # The refusal must be the topic's, not the no-record one: a reader that misses the record refuses every brief here.
 step_refuse("a create_session result shaped session_id counts as the record: a brief for topic colors is refused",
             role_path("step-create-session-id"), "Lane brief: icon-b. Topic: colors.", target=ROLE_NEW,
