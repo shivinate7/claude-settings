@@ -453,7 +453,7 @@ def lift_message(lifts):
 
 def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None):
     """The shared silent-undo lint (lint/check_silent_undo.py), run on the branch before anything is pushed.
-    A finding refuses. An unreadable history refuses too, unless the run has the reason flag
+    A finding refuses, except a lane undo line: it is report-only, printed and left out of the verdict. An unreadable history refuses too, unless the run has the reason flag
     --undo-check-unknown-ok "<reason>", which Claude may type with a reason: that is the way out when the check cannot run (octopus merge,
     git older than 2.38, shallow clone). A lift is logged and returns its reason, for record_lift; it does not excuse a finding.
     An Unknown that carries findings (an octopus merge the check could not read, beside a note it saw revived) refuses as Dropped,
@@ -492,15 +492,23 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_h
         res = UNDO_MEMO[key] = e
     if isinstance(res, Exception):  # an Unknown; the scanner is never asked for its class here
         e = res
-        if e.problems:  # an octopus merge the check could not read, and a finding it made anyway: the flag lifts only the first
+        fails = undo.failing(e.problems)  # a report-only line never forces a refusal
+        for p in e.problems:
+            if p not in fails:
+                say("merge: " + p)
+        if fails:  # an octopus merge the check could not read, and a finding it made anyway: the flag lifts only the first
             for n in e.notes:
                 say("merge: " + n)
-            raise Dropped("the branch silently undoes earlier work:\n  " + "\n  ".join(e.problems) + f"\nThe check also could not read the whole history: {e}\nPut the work back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message. {UNDO_FLAG} does not lift a finding. {UNDO_CITE}")
+            raise Dropped("the branch silently undoes earlier work:\n  " + "\n  ".join(fails) + f"\nThe check also could not read the whole history: {e}\nPut the work back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message. {UNDO_FLAG} does not lift a finding. {UNDO_CITE}")
         if unknown_ok.strip():
             say(f"merge: silent-undo check UNKNOWN ({e}). {UNDO_FLAG}, reason: {unknown_ok.strip()}")
             return unknown_ok.strip()
         raise Liftable(f"silent-undo check could not read the history: {e}\nIf the cause is known, run again with the reason flag {UNDO_FLAG} \"<reason>\". {UNDO_CITE}")
     problems, notes = res
+    for p in problems:
+        if p.startswith(undo.REPORT_ONLY):
+            say("merge: " + p)
+    problems = undo.failing(problems)
     for n in notes:
         say("merge: " + n)
     if problems:
