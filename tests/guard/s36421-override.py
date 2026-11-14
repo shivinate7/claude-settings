@@ -397,6 +397,42 @@ def op_spawn(config, session, seconds, spawn=None, agent_id=None, cwd=NOGIT, env
                    env=env)
 
 
+# THE TURN FILE (ruling own-761-d, 14:21 CST Nov 13). A plain Opus ask with no length grants the owner's turn: a file
+# in state/override/opus-turn, backstopped at 2h, that the owner's next typed prompt removes. The guard child runs no model,
+# so these stories write the file in its shape at the instant the ask would write it.
+OP_TURN_FOLDER = "opus-turn"  # the plain-ask turn file's folder, beside the timed Opus file
+OP_TURN_BACKSTOP = 2 * 3600  # the `until` a turn file carries, from its grant
+
+
+def op_turn_path(config, session):
+    return os.path.join(config, "state", "override", OP_TURN_FOLDER, session + ".json")
+
+
+def op_write_turn(config, session, seconds, role=None, body=None):
+    """The turn file the plain ask writes at OV_T0 + seconds, for role (None: every role). `body` writes those bytes
+    instead, for a file the guard cannot read."""
+    if body is not None:
+        write(op_turn_path(config, session), body)
+        return
+    write(op_turn_path(config, session), json.dumps({"kind": "opus-turn", "role": role,
+                                                     "until": ov_clock(seconds + OP_TURN_BACKSTOP)}))
+
+
+def op_hook_type(config, session, prompt, seconds):
+    """The owner types `prompt` at OV_T0 + seconds into the prompt hook itself, as Claude Code runs it, so the hook's own
+    removal of a turn file runs. Returns '' when the hook ran, else why it did not."""
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = config
+    env["LOCAL_TIME_NOW"] = ov_clock(seconds)
+    payload = json.dumps({"hook_event_name": "UserPromptSubmit", "session_id": session, "prompt": prompt,
+                          "cwd": os.path.dirname(GUARD)})
+    run = subprocess.run([sys.executable, os.path.join(os.path.dirname(GUARD), "local_time.py")], input=payload,
+                         capture_output=True, text=True, env=env, timeout=60)
+    if run.returncode == 0:
+        return ""
+    return "local_time.py raised: %s" % run.stderr.strip()[-120:]
+
+
 def op_timed_check():
     """`opus 2h`: an Opus spawn is refused with no override, then goes through for the session and its agents
     until the override ends, and is refused again at the end instant."""
@@ -563,6 +599,65 @@ def op_lifts_nothing_else_check():
     return True, "%d other refusals stood under an Opus override; it left a typed override unspent" % len(acts)
 
 
+def op_turn_check():
+    """A turn file lifts an Opus spawn in the owner's turn, never an agent's own spawn, and the owner's next typed prompt
+    ends it. Each step is a guard call, and the hook's removal runs between the two halves."""
+    config, session, rule = ov_config("opus-turn"), "op-turn", "agent-model-cap"
+    ok, why = ov_story([("with no override", lambda: op_spawn(config, session, 0), "deny", rule)])
+    if not ok:
+        return False, why
+    op_write_turn(config, session, 0)
+    ok, why = ov_story([
+        ("the owner's spawn in its turn", lambda: op_spawn(config, session, 60), "allow", rule),
+        ("an agent's own spawn under the same turn", lambda: op_spawn(config, session, 120, agent_id=OV_AGENT),
+         "deny", rule),
+    ])
+    if not ok:
+        return False, why
+    note = op_hook_type(config, session, "thanks, carry on", 180)
+    ok, why = ov_story([
+        ("a spawn after the owner's next typed prompt", lambda: op_spawn(config, session, 240), "deny", rule),
+    ], note)
+    if not ok:
+        return False, why
+    return True, "refused with no override, went through in the owner's turn, not for an agent, and ended at the next prompt"
+
+
+def op_turn_corrupt_check():
+    """An unreadable turn file is no override: the Opus spawn is refused, and the guard logs one opus-unread line for the
+    session."""
+    config, session, rule = ov_config("opus-turn-corrupt"), "op-turn-corrupt", "agent-model-cap"
+    op_write_turn(config, session, 0, body='{"kind": "opus-turn", "role": ')
+    ok, why = ov_story([("a spawn under an unreadable turn file", lambda: op_spawn(config, session, 60), "deny", rule)])
+    if not ok:
+        return False, why
+    try:
+        with open(os.path.join(config, "guard.log"), encoding="utf-8") as handle:
+            lines = [l for l in handle.read().splitlines() if l.strip()]
+    except OSError:
+        lines = []
+    if not any("opus-unread" in l.split("\t") and session in l.split("\t") for l in lines):
+        return False, "the refused spawn wrote %r, want one opus-unread line for the session" % lines
+    return True, "an unreadable turn file is no override, and the refusal logs opus-unread"
+
+
+def op_turn_lifts_nothing_else_check():
+    """Under a turn file every other refusal and ask stands, the settings-write ask of agent-model-cap included (the
+    existing check op_lifts_nothing_else_check holds the same list under a typed `opus 2h`)."""
+    config, session = ov_config("opus-turn-only"), "op-turn-only"
+    acts = [OvAct(*act) for act in op_other_acts(config, session)]
+    for act in acts:
+        problem = ov_want(*ov_act_call(act, config, session, 0), act.want, act.first or act.rule)
+        if problem:
+            return False, "%s with no override: %s" % (act.label, problem)
+    op_write_turn(config, session, 0)
+    for act in acts:
+        problem = ov_want(*ov_act_call(act, config, session, 60), act.want, act.rule)
+        if problem:
+            return False, "%s under a turn file: %s" % (act.label, problem)
+    return True, "%d other refusals stood under a turn file" % len(acts)
+
+
 def op_corrupt_check():
     """An Opus override file the guard cannot read, or one of another shape, is no override."""
     config, rule = ov_config("opus-corrupt"), "agent-model-cap"
@@ -621,6 +716,10 @@ for _label, _check in (
     ("opus override: every other refusal and ask stands under it", op_lifts_nothing_else_check),
     ("opus override: an unreadable or misshapen override file is no override", op_corrupt_check),
     ("opus override: the grant, each lift and the end each write one log line", op_log_check),
+    ("opus override: a turn file lifts an Opus spawn in the owner's turn, not an agent's, and ends at the next prompt",
+     op_turn_check),
+    ("opus override: an unreadable turn file is no override and logs opus-unread", op_turn_corrupt_check),
+    ("opus override: a turn file lifts no other refusal, the settings-write ask included", op_turn_lifts_nothing_else_check),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
 

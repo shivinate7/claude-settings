@@ -134,10 +134,12 @@ def override_line(result):
         return "Override: ended."
     if kind == "opus-off":
         return "Opus override: ended."
-    if kind == "opus":
+    if kind in ("opus", "opus-turn"):
         roles = " and ".join(result[2]) if isinstance(result[2], list) else result[2]  # one role, or a list of 2 or more
         who = "%s spawns" % roles if roles else "spawns"
-        return "Opus override: the model-cap refusal is lifted for Opus %s until %s." % (who, central_hhmm(until))
+        # a turn grant (a plain ask with no length) names no clock time: the owner's next prompt ends it
+        end = " until %s" % central_hhmm(until) if kind == "opus" else "; it ends at the owner's next message"
+        return "Opus override: the model-cap refusal is lifted for Opus %s%s." % (who, end)
     if kind == "once":
         return "Override: one act, ends at %s if unused." % central_hhmm(until)
     return "Override: until %s" % central_hhmm(until)
@@ -351,12 +353,20 @@ def grant_override(raw, at):
     role named means every role (decision owner-override). A prompt neither grants goes last to
     override.grant_override_ask, the plain override ask (`yes override that`): one model call, only for an owner
     prompt that holds the whole word `override` outside code spans and passes its gates, none otherwise. It also gives
-    the result of a first-word `override` prompt that grant() deferred because its rest holds a length. At most one
-    judge call per prompt. Those calls are why the settings.json row has "timeout": 30. Any failure is one stderr
-    line, no override."""
+    the result of a first-word `override` prompt that grant() deferred because its rest holds a length. At most two
+    judge calls per prompt (an Opus no, then the override ask, for a prompt with both words). Those calls are why the
+    settings.json row has "timeout": 30. A prompt no route granted, and a typed `opus off`, ends a pending one-act
+    override (override.end_once; owner, item 601). Every typed prompt, first of all, ends the turn grant of a plain Opus
+    ask with no length (override.end_turn; ruling own-761-d), in its own try, except `opus off`, which _grant_opus ends and reports. Any failure is one stderr line, no override."""
     try:
         hook = json.loads(raw.decode("utf-8"))
         import override
+        try:  # a typed prompt ends the last plain Opus ask's turn before any grant; a failure here never stops the grants
+            if isinstance(hook, dict) and not override.is_opus_off(hook.get("prompt")):  # `opus off` removes the turn file itself (_grant_opus), with its receipt
+                override.end_turn(hook.get("session_id"), hook.get("prompt"), at,
+                                  transcript=hook.get("transcript_path"), source=hook.get("source"))
+        except Exception as e:
+            print("local_time: opus turn end: %s" % e, file=sys.stderr)
         result = override.grant(hook.get("session_id"), hook.get("prompt"), at,
                                 transcript=hook.get("transcript_path"), source=hook.get("source"))
         if result is None:
@@ -367,6 +377,9 @@ def grant_override(raw, at):
             result = override.grant_override_ask(hook.get("session_id"), hook.get("prompt"), at,
                                                  transcript=hook.get("transcript_path"),
                                                  source=hook.get("source"))
+        if result is None or result[0] == "opus-off":  # a typed prompt that grants nothing, `opus off` too, ends a pending one-act override
+            override.end_once(hook.get("session_id"), hook.get("prompt"), at,
+                              transcript=hook.get("transcript_path"), source=hook.get("source"))
         if result:
             print(override_line(result))
     except (ValueError, AttributeError):
