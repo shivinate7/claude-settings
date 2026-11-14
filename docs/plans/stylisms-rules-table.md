@@ -2,6 +2,8 @@
 
 Read-only table. No rule changes in this pull request. The owner signed the six changes (ruling `own-807-a`). A later lane edits the style file.
 
+Refuter: refuter opus, 2026-11-13, PARTIAL (5 findings, all fixed in the revision after head 15ec179ea8: guard.log scope, a recorded sighting for the estimate rule, settings.json line cites, rulings homes named, one summary line per verdict)
+
 - Roadmap step: `stylisms-rules-table`. Ruling `own-795-a-stylisms-table` (owner, 21:39 CST Nov 13, waiting-page item 795, pick a).
 - Base: origin/main 309fa5ed5. Written: 21:42 CST Nov 13. Revised: 23:26 CST Nov 13.
 
@@ -11,7 +13,7 @@ Read-only table. No rule changes in this pull request. The owner signed the six 
 - Verdicts: **23 keep, 6 change, 0 drop** (29 total). Owner ruling `own-800-stylisms-two-keeps` (22:24 CST Nov 13) turned two rows to keep: `style-offer-screen-takeover` and `style-press-has-link`. Owner ruling `own-807-a` (22:28 CST Nov 13, via triage) signed the six changes. The 23 keeps stand as the table's verdicts.
 - Prior audit: restart-plan R41 (owner 13:36 CST Nov 11, "r41 yes on all") found the output style "in the right folders" and earning "their place": a placement check. R44 part 3 sends the content (are its rules still right) to R35's review, which the owner signs. This table is that review's rule-by-rule read.
 - The file is 92 lines and 1144 words. Four rules hold 40% of the words: `style-question-form` 210, `output-never-hand-off-doable-step` 116, `style-hand-off-runs-as-is` 67, `style-hand-off-irreversible` 61 (454 of 1144; the sum of those four counts).
-- Cloud limits: no `guard.log` here, so no rule's fire rate is measured. Every "unmeasured" below means that. Mechanism and size are read from `lint/rule_mechanisms.json` and the file.
+- Cloud limits: this session's `guard.log` holds 8 lines, all from this one session, so no rule's fire rate is measured. Every "unmeasured" below means that. Mechanism and size are read from `lint/rule_mechanisms.json` and the file.
 
 ## Gold standard, used in every row
 
@@ -47,17 +49,21 @@ Mechanism words in the Evidence column come from `lint/rule_mechanisms.json` (gu
 | `style-press-has-link` | A press step carries a link | keep | Guard: `press-link` (reads words; misses verbs outside its list). Applies only on the waiting page; `skills/waiting-page/SKILL.md` already names press and links (8 matching lines by grep). | Keep in the style file with its guard (owner ruling own-800-stylisms-two-keeps, 22:24 CST Nov 13). |
 | `style-command-in-item` | Command sits in the item's `command` field | change | Guard: `command-in-item`. `skills/waiting-page/SKILL.md` line 127 already defines the `command` field `{powershell, mac}`. Same home problem. Decision `act-in-place` (line 8) says this rule holds the text; the move changes that pointer. | Move to the waiting-page skill; keep the guard. |
 | `style-table-gold-column` | Comparison table has a gold-standard column | keep | Code in `hooks/reply_judge.py` finds a table and sends it to the judge. Judge rule. | Keep. |
-| `style-time-central-24h` | Times in US Central, 24-hour, with zone | keep | Hook `hooks/local_time.py` is on main and wired in `settings.json` (lines 359 and 370). The rule map entry says the hook is "not yet on main"; that is stale. The hook gives the clock; no check reads the reply's zone. | Keep. Rule map entry needs its own fix (not in this pull request). |
-| `style-no-unmeasured-estimate` | No time estimate without a measured range | keep | Judgment. Unmeasured. | Keep. |
+| `style-time-central-24h` | Times in US Central, 24-hour, with zone | keep | Hook `hooks/local_time.py` is on main and wired as a hook command in `settings.json` (the `local_time.py` entries; line numbers move). The rule map entry says the hook is "not yet on main"; that is stale. The hook gives the clock; no check reads the reply's zone. | Keep. Rule map entry needs its own fix (not in this pull request). |
+| `style-no-unmeasured-estimate` | No time estimate without a measured range | keep | Judgment. Debt `measured-time-table` (docs/debts/measured-time-table.md) records that no table of measured times exists to cite; note `estimate-rule-may-be-checkable` in docs/debts/notes.md is open. Fire rate unmeasured. | Keep. |
 | `style-status-is-report` | Status question gets the report shape | keep | Judgment. Root `reports-order-of-labels` holds the shape; this rule holds the trigger. | Keep. |
 | `style-offer-override-line` | Offer a refusal's override line as a ready answer | keep | Judgment. Unmeasured. | Keep. |
 | `style-wrong-session-one-line` | Wrong session named: one line, then route | keep | Judgment. Root `speak-one-name-per-thing` cites this mark by id, so it is the one home. | Keep. |
 
+## Rulings and where they live
+
+The owner's answers `own-795-a`, `own-800` and `own-807-a` sit on the waiting page (items 795, 800, 807) in the answers store. They are not yet in a record on main. Cite their homes before this table merges (rule `output-answer-has-a-home`).
+
 ## Counts
 
-- keep: 23
+- keep: 23 (the rule stays as written)
 - change: 6 (`style-plain-words`, `style-question-form`, `style-question-inside-box`, `style-hand-off-cleanup`, `style-hand-off-one-shell`, `style-command-in-item`)
-- drop: 0
+- drop: 0 (no rule leaves the file outright)
 
 If the six changes stand: 29 marks become 25 (three merges into other rules, one move to the waiting-page skill). Word effect is unmeasured.
 
