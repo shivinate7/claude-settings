@@ -217,6 +217,21 @@ class Layout(unittest.TestCase):
         self.assertEqual(done.returncode, 2, done.stdout)
         self.assertIn("layout: unknown", done.stdout)
 
+    def test_a_bad_rolled_out_mark_still_reads_the_waiting_copy(self):
+        """A "rolled-out" that is not JSON true or false: the waiting copy reads its folder under either mark, so the copy
+        on the record branch is present. The valid mark is the control. The layout group stops at the mark before it
+        reaches the copy, so this reads waiting_copy in process."""
+        probes = load_probes()
+        url = "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx"
+        for label, mark in (("valid", True), ("bad", "yes")):
+            with self.subTest(mark=label):
+                repo = Repo(self).write(EXTRAS, json.dumps({"kinds": {}, "waiting-page": url, "rolled-out": mark}))
+                repo.commit("base").branch(layout.record_branch(repo.root)).write("waiting/items/a.json", '{"id": "a"}\n')
+                repo.commit("waiting copy").git("checkout", "-q", "-")
+                read = probes.waiting_copy(repo.root)
+                self.assertIsNotNone(read, "the repo names a waiting page, so its copy is read")
+                self.assertEqual(read, "present", "the copy is on the record branch, read under a %s mark" % label)
+
 
 SHOOT = '{"baseUrl": "http://localhost:5173", "routes": ["/", "/b"]}'
 

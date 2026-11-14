@@ -342,11 +342,11 @@ def no_items_problem(block, inbox, homes_line=""):
 def kind_homes(layout, root, kind):
     """The paths under `root` that may hold a `kind` item's home: each HOME_KINDS layout key the
     repo has, as its layout path and its base path, that exist. The check and the block text both use it."""
-    known, base = layout.kinds(root), layout.layout()["kinds"]
+    base = layout.layout()["kinds"]
     homes = []
     for key in HOME_KINDS[kind]:
-        if key in known:
-            homes += [layout.path(root, key)] + ([base[key]["path"].strip("/")] if key in base else [])
+        if key in base:  # a kind only the extras file names is unreadable under a bad mark, so it adds no home
+            homes += list(layout.folders_any_mark(root, key)) + [base[key]["path"].strip("/")]
     return [h for h in dict.fromkeys(homes) if os.path.exists(os.path.join(root, *h.split("/")))]
 
 
@@ -376,7 +376,7 @@ def waiting_copy(layout, root):
     (Homes.filed_numbers) and the export check (export_check). Raises layout.LayoutError."""
     branch = layout.record_branch(root)
     waiting = [e for e in layout.artifacts(root) if e["role"] == layout.WAITING_ROLE]
-    return branch, (waiting[0]["export"] if waiting else layout.path(root, "waiting-data")).strip("/")
+    return branch, (waiting[0]["export"] if waiting else layout.folder_any_mark(root, "waiting-data")).strip("/")
 
 
 def session_repo(session_id):
@@ -1107,27 +1107,28 @@ def line_candidates(path, prefix):
 def backlog_candidates(root):
     """[(ref, label, text)] from the layout's backlog files in the working tree: one per debt file
     (its title and opening text), one per non-blank line of the todo and notes files. A missing or
-    unreadable file is skipped."""
+    unreadable file is skipped. Under a bad "rolled-out" mark each kind reads at either place
+    (layout.folders_any_mark); an item that reads the same at both places goes in once."""
     import layout  # lint/layout.py, the one home of where each kind lives
-    out, known = [], layout.kinds(root)
-    where = {key: os.path.join(root, *layout.path(root, key).split("/")) for key in HOME_KINDS["task"]
-             if key in known}
+    out = []
+    where = {key: [os.path.join(root, *f.split("/")) for f in layout.folders_any_mark(root, key)]
+             for key in HOME_KINDS["task"]}
+    notes = set(where["debt-notes"])
     for key, prefix in (("todo", "todo"), ("debts", "debt"), ("debt-notes", "note")):
-        try:
-            if key not in where:
+        for place in where[key]:
+            try:
+                if os.path.isdir(place):
+                    for name in sorted(os.listdir(place)):
+                        path = os.path.join(place, name)
+                        if name.endswith(".md") and path not in notes and os.path.isfile(path):
+                            with open(path, encoding="utf-8", errors="replace") as f:
+                                text = squash(f.read(4 * REPEAT_CUT).lstrip("# "))
+                            out.append(("debt:" + name[:-len(".md")], squash(text, 60), text))
+                elif os.path.isfile(place):
+                    out += line_candidates(place, prefix)
+            except OSError:
                 continue
-            if os.path.isdir(where[key]):
-                for name in sorted(os.listdir(where[key])):
-                    path = os.path.join(where[key], name)
-                    if name.endswith(".md") and path != where.get("debt-notes") and os.path.isfile(path):
-                        with open(path, encoding="utf-8", errors="replace") as f:
-                            text = squash(f.read(4 * REPEAT_CUT).lstrip("# "))
-                        out.append(("debt:" + name[:-len(".md")], squash(text, 60), text))
-            elif os.path.isfile(where[key]):
-                out += line_candidates(where[key], prefix)
-        except OSError:
-            continue
-    return out
+    return list(dict.fromkeys(out))
 
 
 def inbox_candidates(blocks, sid, skip=()):
@@ -1366,7 +1367,7 @@ def export_check(cwd, transcript_path, session_id):
         if not wrote:
             return None, None
         newest = max(wrote)
-        waiting = [e for e in layout.artifacts(root) if e["role"] == layout.WAITING_ROLE]
+        waiting = [e for e in layout.artifacts(root, exports=False) if e["role"] == layout.WAITING_ROLE]
         if _cleared(exports, results, newest, waiting[0]["id"] if waiting else ""):
             return None, None
         branch, folder = waiting_copy(layout, root)

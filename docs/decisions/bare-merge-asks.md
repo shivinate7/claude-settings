@@ -4,7 +4,7 @@
 
 Orchestrator call (lane bare-gh-merge-ask); the owner may rule otherwise. Guard rule id `bare-merge`, verdict ask. It runs after the merge-checks guard, so a refusal still wins and the ask never turns a main refusal into an ask.
 
-- The rule fires on a `gh pr merge` segment when the stamp config of the working tree holds a `merge` key.
+- The rule fires on a `gh pr merge` segment, and on a green `mcp__github__merge_pull_request` or `mcp__github__enable_pr_auto_merge` call, when the stamp config of the working tree holds a `merge` key. The MCP forms come from the coordinator's relay of form parity, lane mcp-tools-in-guard-matcher.
 - `uses_merge_tool` in `hooks/guard_merge.py` starts at the call's folder (a leading `cd` target, else the payload cwd). It walks up to the nearest folder that holds `.git` (folder or file) and reads `.github/stamp.json` there. A call from a subfolder reads the repo's stamp. It tries the cwd as written and with symlinks resolved.
 - No `.git` above the folder allows. A missing, unreadable, invalid or non-object file allows, silently.
 - Quoted text, heredoc bodies and comments that name a merge are text, as in merge-checks.

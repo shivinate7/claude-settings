@@ -5,6 +5,10 @@ FAMILY = "owner-judge"   # the family the cases after this section have always r
 # --------------------------------------------------------------------------- the runner
 
 
+# The stderr of the last guard run decide() made. A case that asserts a note on stderr reads it here.
+LAST_RUN = {}
+
+
 def decide(case):
     """Return (decision, reason) for one case."""
     materialize_for(case)
@@ -83,6 +87,7 @@ def decide(case):
         if not limit:
             raise
         return "slow", "still judging after %s s, over the %s s limit" % (limit + 1, limit)
+    LAST_RUN["stderr"] = result.stderr
     elapsed = time.monotonic() - started
     if case.get("max_seconds") and elapsed > case["max_seconds"]:
         return "slow", "judged in %.2f s, over the %s s limit" % (elapsed, case["max_seconds"])

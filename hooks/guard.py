@@ -128,7 +128,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        network remote: `main` alone, and `main` with a lane-named branch. An
                        agent-named destination in the same push is push-agent-branch's, which refuses.
                        A remote the shell has not expanded counts as one. The remote's HEAD is not
-                       read. A dry run passes.
+                       read. A dry run passes. The MCP push_files, create_or_update_file and delete_file tools
+                       ask when their `branch` is main or master.
   push-stray-branch    ask. An implied push (bare, `HEAD`, `@`, or a colon-less refspec naming the
                        current branch) that writes a name other than the branch's upstream. It is silent
                        when the clone holds `refs/remotes/<remote>/<name>`. It asks only with an
@@ -148,7 +149,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        command words, also inside wrappers, `bash -c` and `$(...)`, so quoted text and a
                        heredoc body pass. (process-args-guard)
   merge-checks         deny. A merge while the head has a check pending or red, while another
-                       ready PR on the base runs CI, or when the read could not run. `--auto` too.
+                       ready PR on the base runs CI, or when the read could not run. `--auto` too, and the MCP
+                       merge_pull_request and enable_pr_auto_merge tools.
+                       The same two MCP tools ask (bare-merge) on a green head in a repo that uses the merge tool.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
                        record (read from the transcript) does not show in its cs-build tags.
   merge-confirm-repo   deny. In a cloud session, a merge-tool call with --confirm whose checkout (the -C or
@@ -214,7 +217,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
                        mcp__claude-code-remote__send_message tool pass. An override lifts it.
-  draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
+  draft-pr             deny. A `gh pr create` without `--draft`, or an MCP create_pull_request without
+                       draft true. (draft-until-reviewed)
   gh-write-cloud       deny. In a cloud session, a gh write: `gh pr` create, merge, comment, edit, close, review or
                        ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
                        or input flag and no method. Judged per segment from the command word. A read, `gh api` with an
@@ -223,6 +227,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        command without --undo) while its head's records page is stale, or when that read cannot run, in
                        a repo that uses the merge tool. A base that is not the default branch, a head holding a
                        Record-claim, a head behind the base, and a current page pass. (records-index-at-merge)
+  pr-review-record     deny. A marked review log posted with a wrong or hand-typed head or number, as a comment
+                       or as an MCP add_issue_comment or update_issue_comment (the update finds its pull request from the comment).
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        A merge's own page at MERGE_HEAD passes: MERGE_HEAD is on the base's first-parent
                        line, or the lane is stacked on a base that main has not merged.
@@ -582,6 +588,7 @@ while True:
             cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_verdict,
             rm_delete_hit, SUBST_OPEN, _in_group,
         )
+        from guard_push_delete import names_default_branch
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
@@ -589,7 +596,8 @@ while True:
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
-            undrafted_pr_create, uses_merge_tool, ready_page_hit,
+            undrafted_pr_create, uses_merge_tool, ready_page_hit, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_log_hit, review_form_hit, review_note, pr_call_target, ansi_c_decoded,
+            FILE_WRITE_TOOLS, UPDATE_COMMENT_TOOL, comment_pull_request,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -1667,6 +1675,7 @@ SHORT_FLAGS = {
                    m="value", p="value", r="value", R="value", T="value"),
     "edit": dict(b="text", F="file", t="title", B="value", m="value", R="value"),
     "merge": dict(b="text", F="file", t="title", A="value", R="value"),
+    "comment": dict(b="text", F="file", R="value"),
 }
 
 
@@ -1851,6 +1860,131 @@ def message_texts(segment: str, raw: str, where: str, before: int, titles: bool 
     if "<<" in segment:
         texts.extend(own_heredoc_bodies(segment, raw, before))
     return call is not None, texts, ""
+
+
+# ---- a review log posted as a comment (rule pr-review-record; the judge is guard_merge.review_log_hit)
+GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
+_COMMENTS_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/issues/(\d+)/comments/?")
+_COMMENT_EDIT_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/issues/comments/(\d+)/?")   # a comment edited in place, by comment id
+PR_COMMENT_VALUE_FLAGS = {"-b", "--body", "-F", "--body-file", "-R", "--repo"}
+_CAT_BODY = re.compile(r"\$\(\s*cat\s+([^|;&<>()]+?)\s*\)")
+
+
+def _comment_target(args):
+    """Return (selector, repo) of a `gh pr comment` call: its first positional word ('' for the current branch) and its repo flag."""
+    return pr_call_target(args, PR_COMMENT_VALUE_FLAGS)
+
+
+def _cat_file(text: str) -> str:
+    """Return the file a body of exactly `$(cat FILE)` reads, else ''. The shell fills the body from it."""
+    found = _CAT_BODY.fullmatch(text.strip())
+    if not found:
+        return ""
+    try:
+        words = shlex.split(found.group(1))
+    except ValueError:
+        return ""
+    return words[0] if len(words) == 1 else ""
+
+
+def _piped_cat_file(previous) -> str:
+    """Return the file the segment `previous` (`cat FILE`, piped into the post) reads, else ''."""
+    try:
+        words = shlex.split(previous) if previous else []
+    except ValueError:
+        return ""
+    return words[1] if len(words) == 2 and words[0] == "cat" and not words[1].startswith("-") else ""
+
+
+def _api_post_bodies(args, routes=_COMMENTS_ROUTE):
+    """Return (repo, number, texts, files, stdin) for a `gh api repos/O/R/issues/<n>/comments` call, else None; `routes`
+    names another route to read (the edit route returns the comment id as `number`). A `body` field
+    is text for -f and --raw-field, and for -F and --field text too unless it starts with `@`, which names a file (`@-` is stdin)."""
+    route = next((a for a in args if routes.fullmatch(a)), None)
+    if route is None or args[:1] != ["api"]:
+        return None
+    repo, number = routes.fullmatch(route).groups()
+    texts, files, stdin, index = [], [], False, 1
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        flag, equals, glued = arg.partition("=")
+        value = None
+        if arg in GH_API_FIELD_FLAGS:
+            value = args[index] if index < len(args) else ""
+            index += 1
+            typed = arg in ("-F", "--field")
+        elif flag in ("--field", "--raw-field") and equals:
+            value, typed = glued, flag == "--field"
+        elif re.match(r"^-[fF][^-]", arg):
+            value, typed = arg[2:], arg[1] == "F"
+        if value is None:
+            continue
+        key, _, text = value.partition("=")
+        if key != "body":
+            continue
+        if typed and text.startswith("@"):
+            if text == "@-":
+                stdin = True
+            else:
+                files.append(text[1:])
+        else:
+            texts.append(text)
+    return repo, int(number), texts, files, stdin
+
+
+def review_post_hit(segment: str, raw: str, where: str, before: int, previous: str = ""):
+    """Return (matched, reason) when this segment posts a review log the guard must refuse, else None. Judges `gh pr comment` and `gh issue comment`
+    (--body, -b, --body-file, -F) and `gh api repos/O/R/issues/<n>/comments` (-f, -F, --field, --raw-field `body=`, `body=@file`),
+    each with the bodies of the heredocs its own header holds. A body of exactly `$(cat FILE)`, and a stdin body piped from
+    `cat FILE` (`previous` is the segment piped in), are read from FILE. A file that cannot be read allows, with a note. No body
+    whose first line is the marker: no read."""
+    rest = gh_call_of(ansi_c_decoded(segment))   # bash sends a `$'...'` body decoded
+    if rest is None:
+        return None
+    form_only = False
+    if rest[:2] in (["pr", "comment"], ["issue", "comment"]):   # an issue comment reaches the same pull request
+        args = rest[2:]
+        selector, repo = _comment_target(args)
+        texts, files, stdin = message_sources(args, "comment")
+    elif rest[:1] == ["api"]:
+        posted = _api_post_bodies(rest)
+        if posted is None:
+            posted = _api_post_bodies(rest, _COMMENT_EDIT_ROUTE)
+            form_only = posted is not None   # an edit names a comment, not a pull request: judge its form, read no head
+        if posted is None:
+            return None
+        repo, selector, texts, files, stdin = posted
+        selector = str(selector)
+    else:
+        return None
+    texts, files = list(texts), list(files)
+    for text in list(texts):
+        named = _cat_file(text)
+        if named:
+            texts.remove(text)
+            files.append(named)
+    judged_stdin = False
+    if "<<" in segment and "--input" not in rest:
+        heredocs = own_heredoc_bodies(segment, raw, before)
+        texts.extend(heredocs)
+        judged_stdin = bool(heredocs)
+    if stdin and not judged_stdin:
+        piped = _piped_cat_file(previous)
+        if piped:
+            files.append(piped)
+            judged_stdin = True
+    for name in files:
+        try:
+            with open(os.path.normpath(_absolute(name, where)), encoding="utf-8", errors="replace") as handle:
+                texts.append(handle.read(MESSAGE_FILE_MAX))
+        except Exception:
+            review_note("the body file " + name + " could not be read")
+    if stdin and not judged_stdin:
+        review_note("the body comes from stdin and cannot be read")
+    if form_only:
+        return review_form_hit(texts)
+    return review_log_hit(texts, repo, selector, where)
 
 
 def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
@@ -4819,6 +4953,16 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
             refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
 
+    # 6b2. A review log posted as a comment with a hand-typed head or number (rule pr-review-record).
+    # Cost: one pull request read per post that holds the record marker, none for any other command.
+    for index, (segment, before) in enumerate(zip(segments, heredoc_offsets(segments, ends, stripped == raw))):
+        piped = segments[index - 1] if index and ends[index - 1] == "|" else ""
+        posted = None
+        if segment.strip():
+            posted = review_post_hit(segment, raw, cite_where, before, piped)
+        if posted:
+            refuse(tool, "deny", "pr-review-record", posted[1], posted[0])
+
     # 6c. A lane commit of the generated records page (decision records-index-at-merge).
     matched = records_page_hit(stripped, cwd)
     if matched:
@@ -6943,13 +7087,23 @@ def judge(payload) -> None:
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "merge tool " + verdict)
+        # As `gh pr merge` does: a green merge in a repo that uses the merge tool asks. A deny above wins.
+        if uses_merge_tool(cwd):
+            refuse(tool, "ask", "bare-merge", BARE_MERGE_REASON, "merge tool bare merge")
+
+    # A file write through the host's tools pushes a commit to the branch it names. Every one of them requires `branch`
+    # in its schema, so a call with none fails at the host and is not judged here.
+    if tool in FILE_WRITE_TOOLS:
+        branch = tool_input.get("branch")
+        if isinstance(branch, str) and names_default_branch(branch.strip()):
+            refuse(tool, "ask", "push-main", PUSH_MAIN_REASON, tool + " to " + branch.strip())
 
     # The MCP update tool marks a pull request ready with draft false (rule records-page-ready).
     if tool == "mcp__github__update_pull_request":
         refuse_ready_page(tool, tool_input, "", cwd)
 
     # The MCP create tool carries its own `draft` field.
-    if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
+    if tool == CREATE_PR_TOOL and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
 
     # A SendMessage addressed to a cloud session id (rule sendmessage-session-id).
@@ -6957,6 +7111,28 @@ def judge(payload) -> None:
         target = tool_input.get("to")
         if isinstance(target, str) and target.startswith("session_"):
             refuse(tool, "deny", "sendmessage-session-id", SENDMESSAGE_REASON, target[:120])
+    # A review log posted through the MCP comment tool (rule pr-review-record). One pull request read per marked post.
+    if tool == REVIEW_COMMENT_TOOL:
+        owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "issue_number"))
+        repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
+        number = str(number) if isinstance(number, (int, str)) and not isinstance(number, bool) else ""
+        if number.isdigit():
+            posted = review_log_hit([tool_input.get("body")], repo, number, cwd)
+            if posted:
+                refuse(tool, "deny", "pr-review-record", posted[1], posted[0])
+        elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:  # glossary-ok: the marker <!-- review-record --> is a kept name
+            review_note("the call names no pull request number")
+
+    # The update tool names a comment, not a pull request. Its one comment read runs only once a marked body parses.
+    if tool == UPDATE_COMMENT_TOOL:
+        owner, name, comment_id = (tool_input.get(k) for k in ("owner", "repo", "comment_id"))
+        repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
+        if isinstance(comment_id, int) and not isinstance(comment_id, bool):
+            edited = review_log_hit([tool_input.get("body")], repo, comment_pull_request(comment_id), cwd)
+            if edited:
+                refuse(tool, "deny", "pr-review-record", edited[1], edited[0])
+        elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:  # glossary-ok: the marker <!-- review-record --> is a kept name
+            review_note("the call names no comment id")
 
     # A send_message whose header stamp is off the clock (rule message-time-matches-clock).
     stamped = stamp_hit(tool, tool_input)

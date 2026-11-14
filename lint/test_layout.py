@@ -81,6 +81,13 @@ class Tree(unittest.TestCase):
         self.tree = tempfile.mkdtemp(prefix="layout_", dir=RUN_FOLDER)
         self.addCleanup(tracked_tree.rm_tree, self.tree)
 
+    def fn(self, name):
+        """The lint/layout.py name `name` (a function or a constant) of self.layout, or a failed case that says it is missing (not built yet)."""
+        found = getattr(self.layout, name, None)
+        if found is None:
+            self.fail("lint/layout.py has no %s yet" % name)
+        return found
+
     def put(self, rel, text="# Record\n"):
         path = os.path.join(self.tree, *rel.split("/"))
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -89,6 +96,15 @@ class Tree(unittest.TestCase):
 
     def roll_out(self, kinds=None):
         self.put(EXTRAS, json.dumps({"kinds": kinds or {}, "rolled-out": True}))
+
+    def origin(self, url, worktree=False):
+        """A repo whose origin is `url`, read from git's config file as git writes it."""
+        common = os.path.join(self.tree, "main.git") if worktree else os.path.join(self.tree, ".git")
+        self.put(os.path.relpath(os.path.join(common, "config"), self.tree).replace(os.sep, "/"),
+                 '[core]\n\tbare = false\n[remote "origin"]\n\turl = %s\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n' % url)
+        if worktree:  # a linked worktree: .git is a file naming its git dir, which names the common dir
+            self.put("main.git/worktrees/lane/commondir", "../..\n")
+            self.put(".git", "gitdir: %s\n" % os.path.join(self.tree, "main.git", "worktrees", "lane"))
 
 
 class LayoutFile(Tree):
@@ -171,15 +187,6 @@ class LayoutFile(Tree):
                 self.roll_out({"x": {"path": bad}})
                 with self.assertRaises(self.layout.LayoutError):
                     self.layout.kinds(self.tree)
-
-    def origin(self, url, worktree=False):
-        """A repo whose origin is `url`, read from git's config file as git writes it."""
-        common = os.path.join(self.tree, "main.git") if worktree else os.path.join(self.tree, ".git")
-        self.put(os.path.relpath(os.path.join(common, "config"), self.tree).replace(os.sep, "/"),
-                 '[core]\n\tbare = false\n[remote "origin"]\n\turl = %s\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n' % url)
-        if worktree:  # a linked worktree: .git is a file naming its git dir, which names the common dir
-            self.put("main.git/worktrees/lane/commondir", "../..\n")
-            self.put(".git", "gitdir: %s\n" % os.path.join(self.tree, "main.git", "worktrees", "lane"))
 
     def test_todo_sits_at_docs_todo_in_a_repo_with_no_entry(self):
         self.origin("https://github.com/shivinate7/degen.git")
@@ -812,10 +819,11 @@ class Registry(Tree):
         super().setUp()
         self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
 
-    def registry(self, entries, key=None):
+    def registry(self, entries, key=None, extra=None):
         data = {"kinds": {}, "artifacts": entries}
         if key is not None:
             data["waiting-page"] = key
+        data.update(extra or {})
         self.put(EXTRAS, json.dumps(data))
 
     def page_entry(self, **changes):
@@ -836,6 +844,26 @@ class Registry(Tree):
             return self.artifacts()
         except self.layout.LayoutError as err:
             self.fail("%s was refused: %s" % (what, err))
+
+    def read_reader(self, name, *args):
+        """A layout reader of the fixture repo, by name. A refusal fails the case with the reader's name and its cause, never as a crash."""
+        try:
+            return self.fn(name)(self.tree, *args)
+        except self.layout.LayoutError as err:
+            self.fail("%s was refused: %s" % (name, err))
+
+    def waiting_readings(self, mark):
+        """The waiting page, the page-URL checks and the mockup home of the fixture repo, with its waiting-page entry and
+        "rolled-out" set to `mark`. The mark is read back first, so a case that reads a mark it did not write fails by name."""
+        self.registry([self.page_entry()], extra={"rolled-out": mark})
+        with open(os.path.join(self.tree, *EXTRAS.split("/")), encoding="utf-8") as handle:
+            held = json.load(handle)
+        self.assertEqual(held.get("rolled-out", "absent"), mark, "the fixture does not hold the mark")  # the scope first
+        self.assertNotIn("export", held["artifacts"][0], "the waiting-page entry has an export key, so the mark is not read through it")
+        return {"page": self.read_reader("waiting_page"),
+                "own_url": self.read_reader("is_waiting_page_url", self.PAGE),
+                "other_url": self.read_reader("is_waiting_page_url", "https://claude.ai/artifact/zzz999"),
+                "homes": [str(h) for h in self.read_reader("mockup_homes")]}
 
     def artifacts(self):
         self.assertTrue(hasattr(self.layout, "artifacts"), "layout.artifacts(root) is absent: the artifacts registry is not read")
@@ -872,6 +900,62 @@ class Registry(Tree):
     def test_a_queue_page_entry_is_not_the_waiting_page(self):
         self.registry([self.queue_entry()])
         self.assertEqual(self.layout.waiting_page(self.tree), "unknown", "a queue-page entry was read as the waiting page")
+
+    def test_the_waiting_keys_read_whatever_the_rolled_out_mark_is(self):
+        """A "rolled-out" that is not JSON true or false does not stop the waiting keys: waiting_page(), is_waiting_page_url()
+        and mockup_homes() give what a valid mark gives. The waiting-page entry has no export key, so its export folder is
+        read through the mark, the path that raises. The valid marks are the controls."""
+        control = self.waiting_readings(True)
+        self.assertEqual(control["page"], self.PAGE, "the control (a valid mark) did not read the waiting page")
+        self.assertIs(control["own_url"], True, "the control (a valid mark) did not name the page by its url")
+        self.assertIs(control["other_url"], False, "the control (a valid mark) named another artifact as the page")
+        self.assertEqual(control["homes"], [os.path.join(self.tree, "docs", "design")], "the control (a valid mark) gave another mockup home")
+        self.assertEqual(self.waiting_readings(False), control, "a valid false mark reads the waiting keys differently")
+        for mark in ("true", "false", 1, None):
+            with self.subTest(mark=mark):
+                got = self.waiting_readings(mark)
+                self.assertEqual(got["page"], control["page"], "waiting_page() reads another page under the mark")
+                self.assertEqual(got["own_url"], control["own_url"], "is_waiting_page_url() does not name the page under the mark")
+                self.assertEqual(got["other_url"], control["other_url"], "is_waiting_page_url() names another artifact under the mark")
+                self.assertEqual(got["homes"], control["homes"], "mockup_homes() reads another folder under the mark")
+
+    def test_a_bad_mark_gives_the_refusal_sentence_for_a_mockup_outside_the_design_folder(self):
+        """A "rolled-out" that is not JSON true or false: mockup_home_problem() of a design `file` outside the design folder
+        gives the sentence a valid mark gives, not a raise. A file inside the design folder gives None under each mark. The
+        valid mark is the control."""
+        outside, inside = "/Users/x/mock.png", os.path.join(self.tree, "docs", "design", "mock.png")
+        self.waiting_readings(True)
+        control = self.read_reader("mockup_home_problem", outside)
+        self.assertIsInstance(control, str, "the control (a valid mark) gave no refusal for a file outside the design folder")
+        self.assertIsNone(self.read_reader("mockup_home_problem", inside), "the control (a valid mark) refused a file inside the design folder")
+        for mark in ("yes", "true", 1, None):
+            with self.subTest(mark=mark):
+                self.waiting_readings(mark)
+                problem = self.read_reader("mockup_home_problem", outside)
+                self.assertEqual(problem, control, "the refusal sentence under the bad mark differs from the one under a valid mark")
+                self.assertNotIn(self.tree, problem, "the refusal sentence holds an absolute path of the repo")
+                self.assertIsNone(self.read_reader("mockup_home_problem", inside), "a file inside the design folder was refused under the bad mark")
+
+    def test_set_page_under_a_bad_mark_writes_the_page_and_keeps_the_mark(self):
+        """A "rolled-out" that is not JSON true or false, with a waiting-page entry that has no export key: set_waiting_page()
+        writes the new URL into that entry and leaves the mark as it was. The valid mark is the control. The entry is read for
+        its id only, so no folder is read through the mark."""
+        new = "https://claude.ai/artifact/newpg02"
+        for mark in (True, "yes", "true", 1, None):
+            with self.subTest(mark=mark):
+                self.registry([self.page_entry()], extra={"rolled-out": mark})
+                with open(os.path.join(self.tree, *EXTRAS.split("/")), encoding="utf-8") as handle:
+                    held = json.load(handle)
+                self.assertEqual(json.dumps(held.get("rolled-out", "absent")), json.dumps(mark), "the fixture does not hold the mark")  # the scope first
+                try:
+                    wrote = self.layout.set_waiting_page(self.tree, new)  # glossary-ok: the layout module's own function name
+                except self.layout.LayoutError as err:
+                    self.fail("set_waiting_page was refused under the mark %s: %s" % (json.dumps(mark), err))
+                with open(os.path.join(self.tree, *EXTRAS.split("/")), encoding="utf-8") as handle:
+                    after = json.load(handle)
+                self.assertIs(wrote, True, "set_waiting_page did not report that it wrote the page")
+                self.assertEqual(after["artifacts"][0]["url"], new, "the waiting-page entry's url was not written")
+                self.assertEqual(json.dumps(after.get("rolled-out", "absent")), json.dumps(mark), "set_waiting_page changed the mark")
 
     def test_a_waiting_page_role_entry_whose_url_is_not_an_artifact_link_is_an_error(self):
         self.registry([self.page_entry(url="https://example.com/x")])
@@ -1104,10 +1188,31 @@ class RolledOutMark(Tree):
         self.assertTrue(self.layout.rolled_out(self.tree))
         self.assertEqual(self.layout.path(self.tree, "decisions"), "docs/decisions")
 
-    def test_mark_false_or_not_true_is_not_rolled_out(self):
-        for mark in (False, "true", 1):
-            self.put(EXTRAS, json.dumps({"kinds": {}, "rolled-out": mark}))
-            self.assertFalse(self.layout.rolled_out(self.tree), mark)
+    def test_mark_false_is_not_rolled_out(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, "rolled-out": False}))
+        self.assertFalse(self.layout.rolled_out(self.tree))
+
+    def test_mark_true_false_and_absent_read_as_the_layout_says(self):
+        """The controls beside the unreadable marks: JSON true keeps docs/decisions; JSON false and no key keep decisions."""
+        for data, want in (({"kinds": {}, "rolled-out": True}, "docs/decisions"),
+                           ({"kinds": {}, "rolled-out": False}, "decisions"),
+                           ({"kinds": {}}, "decisions")):
+            with self.subTest(data=data):
+                self.put(EXTRAS, json.dumps(data))
+                self.assertEqual(self.layout.path(self.tree, "decisions"), want)
+
+    def test_a_mark_that_is_not_json_true_or_false_raises(self):
+        """A "rolled-out" that is a string, a number or null raises LayoutError from rolled_out() and path(). It never reads as
+        legacy, which would send the decision check to decisions/ and miss docs/decisions."""
+        for mark in ("true", "false", 1, None):
+            with self.subTest(mark=mark):
+                self.put(EXTRAS, json.dumps({"kinds": {}, "rolled-out": mark}))
+                with open(os.path.join(self.tree, *EXTRAS.split("/")), encoding="utf-8") as handle:
+                    self.assertEqual(json.load(handle).get("rolled-out", "absent"), mark, "the fixture does not hold the mark")  # the scope first
+                with self.assertRaises(self.layout.LayoutError):
+                    self.layout.rolled_out(self.tree)
+                with self.assertRaises(self.layout.LayoutError):
+                    self.layout.path(self.tree, "decisions")
 
     def test_other_keys_read_without_the_mark(self):
         self.put(EXTRAS, json.dumps({"kinds": {}, "kind": "ios", "visibility": "private"}))
@@ -1116,6 +1221,28 @@ class RolledOutMark(Tree):
 
     def test_the_layout_repo_itself_is_marked(self):
         self.assertTrue(self.layout.rolled_out(REPO))
+
+    def bad_mark(self):
+        """Extras whose "rolled-out" is the string "true": unreadable, so neither rolled out nor legacy. Scope first: rolled_out() raises."""
+        self.put(EXTRAS, json.dumps({"kinds": {}, "rolled-out": "true"}))
+        with self.assertRaises(self.layout.RolledOutMarkError, msg="the fixture's mark reads as a valid mark"):
+            self.layout.rolled_out(self.tree)
+
+    def test_a_bad_mark_raises_for_a_record_check_and_any_mark_reads_both_homes(self):
+        """A record check (no any_mark) fails closed under a bad mark. The feedback guard and the waiting copy pass any_mark=True
+        and read both homes of the kind: the layout path and the legacy path."""
+        self.bad_mark()
+        with self.assertRaises(self.layout.RolledOutMarkError, msg="candidates() picked a folder under a bad mark instead of raising"):
+            self.layout.candidates(self.tree, "decisions")
+        self.assertCountEqual(self.layout.candidates(self.tree, "decisions", any_mark=True), ("docs/decisions", "decisions"),
+                              "any_mark=True does not read both homes of decisions under a bad mark")
+
+    def test_a_bad_mark_in_a_legacy_repo_any_mark_reads_the_place_legacy_repos_keeps(self):
+        """Under a bad mark, a repo with a legacy-repos entry gets the one place that entry keeps, not the layout path."""
+        self.origin("https://github.com/shivinate7/home")  # legacy-repos keeps home's todo at records
+        self.bad_mark()
+        self.assertEqual(self.layout.candidates(self.tree, "todo", any_mark=True), ("records",),
+                         "any_mark=True does not read the legacy-repos place of todo under a bad mark")
 
 
 class RepoKindAndCaution(Tree):
@@ -1576,12 +1703,6 @@ class MockupHomes(Tree):
         self.home = os.path.join(self.tree, "home")
         os.makedirs(self.home)
 
-    def fn(self, name):
-        found = getattr(self.layout, name, None)
-        if found is None:
-            self.fail("lint/layout.py has no %s yet" % name)
-        return found
-
     def judge(self, file, home=None):
         return self.fn("mockup_home_problem")(self.tree, file, home=self.home if home is None else home)
 
@@ -1657,6 +1778,29 @@ class MockupHomes(Tree):
 
     def test_the_design_folder_itself_is_refused(self):
         self.refuses("docs/design")
+
+
+class MdUnder(Tree):
+    """layout.md_under(rel, folder): a path is in the folder when it ends in .md and sits under the folder at any depth, the scope that
+    lint/check_ruling_kind.py reads. A folder given with or without a trailing slash is the same folder. Only whole path parts match."""
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+
+    def test_an_md_file_under_the_folder_is_in_at_any_depth(self):
+        md_under = self.fn("md_under")
+        for folder in ("docs/decisions", "docs/decisions/"):
+            with self.subTest(folder=folder):
+                self.assertTrue(md_under("docs/decisions/a.md", folder))
+                self.assertTrue(md_under("docs/decisions/sub/a.md", folder))
+
+    def test_anything_else_is_out(self):
+        md_under = self.fn("md_under")
+        for rel in ("docs/decisions/a.txt", "docs/decisionsx/a.md", "docs/decisions.md", "docs/debts/a.md", "decisions/a.md",
+                    "a/docs/decisions/a.md"):
+            with self.subTest(rel=rel):
+                self.assertFalse(md_under(rel, "docs/decisions"))
 
 
 if __name__ == "__main__":

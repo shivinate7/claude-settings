@@ -13,6 +13,7 @@ Sources:
 | Push | Outcome | Rule id |
 |---|---|---|
 | A destination named `main` or `master` (`main`, `HEAD:main`, `x:refs/heads/main`, a bare push that resolves there), on a network remote | ask | `push-main` |
+| MCP `push_files`, `create_or_update_file` or `delete_file` whose `branch` is `main` or `master` (`refs/heads/` prefix too) | ask | `push-main` |
 | An implied destination (bare push, `HEAD`, `@`, or the current branch's own name) that differs from the branch's upstream, on the upstream's remote, and does not yet exist there | ask | `push-stray-branch` |
 | A destination (implied, a colon-less refspec, or after the colon) named like an agent-worktree branch (`agent-<hex>`, `claude/agent-<hex>`, `worktree-agent-<hex>`), with or without an upstream | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-agent-branch` |
 | A push that names `main` and an agent-worktree branch together (`git push origin main HEAD:agent-<hex>`, `git push origin main agent-<hex>`) | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-agent-branch` |
@@ -20,6 +21,7 @@ Sources:
 | Every branch (`--all`, `--branches`, or a glob refspec such as `refs/heads/*:refs/heads/*`), to a network remote, when it would update main or master there, when a local agent-worktree branch is among the branches it sends, or when a glob or the branch list cannot be read. The agent-checkout `--all` and `--branches` row above takes precedence | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-all-main` (kind `all-agent` for an agent branch sent; a failed read is kind `all`) |
 | Any other plain push | allow | |
 
+- Code: `names_default_branch` in `hooks/guard_push_delete.py` judges the push; `hooks/guard.py` judges the MCP file writes.
 - Item 207 a, `push-main`: main moves only by pull request (`git-main-only-by-pr`). The names are
   literal, `main` and `master`. The remote's HEAD is not read. It asks only for a network remote
   (https, http, ssh, git, or `host:path`). A remote with no URL, or a local path or `file://`
@@ -27,6 +29,8 @@ Sources:
   the shell has not yet expanded, such as `"$REMOTE"` or `$(...)`, counts as a network remote. A double-quoted one with a space inside is blanked
   first, so it stays silent (note push-main-quoted-substitution). Source:
   page item 410 pick a, relayed by the coordinator 2026-11-08 10:03 CST, after a push-main ask on a fixture repo.
+  The MCP forms come from the coordinator's relay of form parity, lane mcp-tools-in-guard-matcher, and read their `branch`
+  the same way, with no network-remote test, since the call names no remote.
 - Item 206 a, `push-stray-branch`: `git push origin HEAD` writes the local branch's name, not its
   upstream. Measured 2026-11-03: local `mylocal` tracking `origin/lane/x` made a new remote branch
   `mylocal`.
@@ -104,6 +108,7 @@ Cost: no new long-lived process or file. The reads run per push, in the guard's 
   - A glob refspec: config 1, for-each-ref 2, rev-parse 2, symbolic-ref 1, diff 3, rev-list 1. The second
     `for-each-ref` runs under the same condition.
   - Nothing contacts the remote. No `ls-remote`, `fetch` or `push` runs.
+- An MCP file write's `branch` reads nothing new: it is a literal. `record_push_cost_case` has no MCP file-write case.
 - Added by the other pushes' reads: a literal destination of main or master reads the remote's URL with
   one `config`. A HEAD push or a bare push adds one `symbolic-ref` and one `config`. A refspec push such
   as `origin lane/foo` adds one `symbolic-ref`. One whose destination differs from its upstream adds one
@@ -125,3 +130,4 @@ Risk: incident (banchi, 2026-09-12).
 
 Kind: process
 Home: hooks/guard_push_delete.py
+Home: hooks/guard.py

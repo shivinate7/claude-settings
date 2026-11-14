@@ -1016,6 +1016,15 @@ push_case("main, HEAD:main from a feature branch asks", "origin HEAD:main", "ask
 push_case("main, a push of main from a feature branch asks", "origin main", "ask", rule=PUSH_MAIN_RULE)
 push_case("main, a full ref to refs/heads/main asks", "origin x:refs/heads/main", "ask", rule=PUSH_MAIN_RULE)
 push_case("master, a push to master asks", "origin master", "ask", rule=PUSH_MAIN_RULE)
+# A space beside a refspec name is no branch. git's ref-name check refuses " main" and "main ", so no push of either reaches
+# main, and the guard allows each. names_default_branch does not strip: it compares the name as given, so an escaped space,
+# which the reader keeps in the name, is not a default name and allows. The only strip is the MCP call site (hooks/guard.py,
+# `branch.strip()` before names_default_branch), which takes a branch argument, not a refspec. A quoted space never reaches
+# the name: push_text blanks quoted text, so the two quoted forms are controls that allow already.
+push_case("a refspec with an escaped leading space allows, git refuses that ref", "origin \\ main", "allow")
+push_case("a refspec with an escaped trailing space allows, git refuses that ref", "origin main\\ ", "allow")
+push_case('a quoted refspec " main" allows, its text is blanked before the reader', 'origin " main"', "allow")
+push_case('a quoted refspec "main " allows, its text is blanked before the reader', 'origin "main "', "allow")
 push_case("main, a second refspec that reaches main asks", "origin HEAD:push-guard-asks HEAD:main", "ask",
           rule=PUSH_MAIN_RULE)
 # On a lane checkout with local main equal to origin/main, --all and --branches are silent: neither push writes main.
@@ -1036,6 +1045,30 @@ sh("push: main, a bare push under push.default current on main asks",
    VCS + " -c push.default=current push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
 sh("push: main, a bare push under push.default upstream from a branch tracking main asks",
    VCS + " push", "ask", PUSH_MAIN_RULE, cwd=PUSHUP)
+
+# The host's file-write tools push too. A write to main or master asks, as the shell push does (rule push-main); a write to a
+# feature branch is silent. Each call names its branch in its input, so no repo is read.
+PUSH_MAIN_TOOLS = (
+    ("mcp__github__push_files", {"files": [{"path": "f.txt", "content": "x"}], "message": "x"}),
+    ("mcp__github__create_or_update_file", {"path": "f.txt", "content": "x", "message": "x"}),
+    ("mcp__github__delete_file", {"path": "f.txt", "message": "x"}),
+)
+for _tool, _fields in PUSH_MAIN_TOOLS:
+    for _branch in ("main", "master"):
+        add("push-main: %s to %s asks" % (_tool, _branch), "ask", PUSH_MAIN_RULE, tool=_tool, cwd=NOGIT,
+            owner="y", repo="x", branch=_branch, **_fields)
+    add("push-main: %s to a feature branch is silent" % _tool, "allow", silent=True, tool=_tool, cwd=NOGIT,
+        owner="y", repo="x", branch="feat", **_fields)
+# A full ref names the same branch as the bare name: the shell form strips refs/heads/ before it reads main or master.
+for _tool in ("mcp__github__push_files", "mcp__github__create_or_update_file"):
+    for _branch in ("refs/heads/main", "refs/heads/master"):
+        add("push-main: %s to %s asks" % (_tool, _branch), "ask", PUSH_MAIN_RULE, tool=_tool, cwd=NOGIT,
+            owner="y", repo="x", branch=_branch, **dict(PUSH_MAIN_TOOLS)[_tool])
+    add("push-main: %s to refs/heads/feat is silent" % _tool, "allow", silent=True, tool=_tool, cwd=NOGIT,
+        owner="y", repo="x", branch="refs/heads/feat", **dict(PUSH_MAIN_TOOLS)[_tool])
+# The MCP call with a branch named " main" still asks. The MCP side is judged apart from the shell's strip above.
+add('push-main: mcp__github__push_files to " main" still asks', "ask", PUSH_MAIN_RULE, tool="mcp__github__push_files",
+    cwd=NOGIT, owner="y", repo="x", branch=" main", **dict(PUSH_MAIN_TOOLS)["mcp__github__push_files"])
 
 # ASK, rule push-main, judged on the remote the push names. A network remote still asks: an scp-form origin, a
 # network URL named on the command line, and a `-C` into a repo whose origin is a network URL. The https

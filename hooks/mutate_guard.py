@@ -407,10 +407,10 @@ MUTATIONS = [
      "guard", 'the long force flag'),
     # push-main and push-stray-branch (owner rulings 207 a and 206 a).
     ("push-main: a colon-less main is not a destination",
-     '            elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                # A local origin makes main() empty; the other refspecs are still read for agent and stray.\n                if main():\n                    to_main = True',
+     '            elif names_default_branch(source):\n                # A local origin makes main() empty; the other refspecs are still read for agent and stray.\n                if main():\n                    to_main = True',
      '            elif False:\n                if main():\n                    to_main = True', "guard", 'a push of main from a feature branch asks'),
     ("push-main: a refspec target of main is not a destination",
-     '                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK and main():\n                    to_main = True',
+     '                if names_default_branch(target) and main():\n                    to_main = True',
      '                if False:\n                    to_main = True', "guard", 'HEAD:main from a feature branch asks'),
     ("push-main: a main refspec ends the read on a local origin",
      '                if main():\n                    to_main = True\n            elif source in ("HEAD", "@")',
@@ -3667,7 +3667,7 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_stream.py": ["stream"],
     "hooks/guard_push_delete.py": ["push-delete"],
     "hooks/guard_branch_worktree.py": ["branch-worktree"],
-    "hooks/guard_merge.py": ["merge"],
+    "hooks/guard_merge.py": ["merge", "review-log"],
     "hooks/guard_mask_script.py": ["mask-script"],
     "hooks/guard_argv.py": ["argv"],
     # hooks/guard.py holds the rules that no guard_<x>.py module owns. A mutant of it meets six families that read those rules.

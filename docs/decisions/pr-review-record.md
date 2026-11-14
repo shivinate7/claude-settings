@@ -1,10 +1,10 @@
-# A pull request carries its review record on the PR
+# A pull request carries its review log on the PR
 
 ## The ruling
 
 Owner, 2026-11-01 04:26 CST, waiting-page item 113 a. Source: the brief. The waiting page is not in this repo.
 
-- Each PR carries a review record.
+- Each PR carries a review log.
 - The batch runner finds reviewed, green PRs itself.
 - No merge message.
 - Owner, 2026-11-08 06:08 CST, item 396 a: a fourth review round for the builder-probe fix (step `builder-probe-false-alarm`).
@@ -102,15 +102,43 @@ The review a changed head owes. The first three bullets are the owner's ruling o
 
 Counted as real `gh` calls, one call per page of a list read. Most reads fit one page of 100.
 
-- `merge --reviewed` makes two list reads per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
+- `merge --reviewed` makes two list reads per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review logs. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
 - The lane-lint comment (record `lanes-run-no-full-ci-job`) rides the same list read, so `--reviewed` makes no extra call for it. The batch runner's join adds one paged read of that list. `merge --lane-lint <pr>` adds one POST on a PASS, and, for a lane PR (never a batch integration PR), one read of the head's check runs, which judges the draft's Windows and macOS runs (`merge --batch-build` adds the same one read per lane, on a new build and on `--ready`).
 - Each ready PR that has a record adds four reads when no ruleset names a check: the check runs, the commit statuses, main's ruleset (`rules/branches/main`, one read when no ruleset applies) and the branch protection (required checks mode `protection`). When main's ruleset names a check, the branch protection read goes, so three. A draft, and a PR with no record, add none.
 - One ready PR with a record: six calls while no ruleset names a check (the pull list, the comments, the check runs, the commit statuses, main's ruleset, the branch protection). Five once main's ruleset names the check. With a pinned `merge.requiredChecks` list: the same count, because the one protection compare moves to the start of the run and the per-PR protection read goes. No test pins the pinned count.
-- `merge <pr> --review-record`: one PR read, one read of the PR's earlier review records (restart refusal needs them on every record), plus one read per page of 100 changed files. Three reads for a PR of 100 files or fewer. The earlier-records read is one paged read of the repo's issue comments since the PR opened, so the three reads hold while those comments fit one page. The tests `ReviewGuardCost` and `ReviewGuardHostFiles` pin them. `--fix-check` adds no read of its own: it reuses the earlier-records read. When the newest earlier record holds a PASS Fix check line, it also reads the `--head` commit, and makes one compare when that commit has two parents. When the first parent is not the reviewed head, it also walks the commits between them (`clean_merges_after`, costed below). For a merge after the fixed head, it adds one `merge_state` (four `git rev-parse` starts and one `git merge-tree --write-tree` start, which writes the merged tree's objects to the object store). A conflicted merge adds a second merge-tree (two more `git rev-parse` starts and one `git merge-tree` start) and one `git diff-tree` start. It writes no comment or file of its own.
+- `merge <pr> --review-record`: one PR read, one read of the PR's earlier review logs (restart refusal needs them on every record), plus one read per page of 100 changed files. Three reads for a PR of 100 files or fewer. The earlier-records read is one paged read of the repo's issue comments since the PR opened, so the three reads hold while those comments fit one page. The tests `ReviewGuardCost` and `ReviewGuardHostFiles` pin them. `--fix-check` adds no read of its own: it reuses the earlier-records read. When the newest earlier record holds a PASS Fix check line, it also reads the `--head` commit, and makes one compare when that commit has two parents. When the first parent is not the reviewed head, it also walks the commits between them (`clean_merges_after`, costed below). For a merge after the fixed head, it adds one `merge_state` (four `git rev-parse` starts and one `git merge-tree --write-tree` start, which writes the merged tree's objects to the object store). A conflicted merge adds a second merge-tree (two more `git rev-parse` starts and one `git merge-tree` start) and one `git diff-tree` start. For Kind `docs-only` it also makes one local layout read, no new `gh` call. It writes no comment or file of its own. <!-- glossary-ok: the review log row of GLOSSARY.md keeps the flag --review-record -->
+
 - The clean-merge survival check runs at each `merge --reviewed` run and each lane Stop that claims a PASS, for each PR whose newest record is stale. Per commit walked: one commit read. Per merge commit: one compare, four `git rev-parse` starts (`merge_state` and `merge_tree` each check both parents) and one `git merge-tree --write-tree` start, which writes the merged tree's objects to the object store. At most one `git fetch origin` of the branch heads a run, only when a parent is missing. Count per run unmeasured.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
 - The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the six calls for one ready PR.
+
+## The guard
+
+Rule `pr-review-record`, in `hooks/guard.py` (PreToolUse).
+
+- The mistake: a lane typed the Head by hand on PR #1475 (export scan false alarms) at 15:10 CST, 2026-11-07. The review log named a head that was not the live one, so the batch runner read it as stale.
+- The second mistake: the review logs on PR #1502 (report guard names CI state after a push) and PR #1535 (guard asks before a lane PR goes ready) had prose after the CI line, so `parse_review` returned None and a lane fixed each by hand. The harm: `merge --reviewed` cannot read such a review log, so the merge stalls.
+- A body that opens with the marker must be the render output as it is. Or it is the render output, a line exactly `---`, then a footer, with no text between the CI line and `---`.
+- The post judge, `review_log_hit` in `hooks/guard_merge.py`, checks that form. Then it checks the review log's `PR:` against the target and its `Head:` against the live head. An MCP edit reaches it too, with the PR its comment sits on. The shell edit judge, `review_form_hit` in the same file, checks that form alone, with no read. Both judges' form refusals name that form.
+- It judges a post, or an edit, of a comment whose body starts with the marker, as its first line (`parse_review` reads it so): `mcp__github__add_issue_comment`, `mcp__github__update_issue_comment` (an edit; its PR is the one the comment sits on), `gh pr comment` and `gh issue comment` (`--body`, `-b`, `--body-file`, `-F`) and `gh api repos/O/R/issues/<n>/comments` (`-f`, `-F`, `--field`, `--raw-field` with `body=` or `body=@file`). A heredoc body counts. A `$'...'` body is decoded first, as bash sends it (`ansi_c_decoded` in `hooks/guard_merge.py`, read only by this judge). A body of exactly `$(cat FILE)`, and a stdin body piped from `cat FILE`, are read from FILE. `--input` bodies are not read.
+- It refuses unless the body parses (`parse_review`), its `PR:` equals the target PR, and its `Head:` equals the PR's live head. The refusal prints the render command for the live head, `merge <pr> --review-record --head <live sha> ...`. <!-- glossary-ok: the review log row of GLOSSARY.md keeps the flag --review-record -->
+- A malformed marked body is refused before any read.
+- It fails open. A network blip must not block every post. Each case below allows the call and prints one line on stderr, `review log: not checked, <why>`:
+  - the merge tool cannot be loaded;
+  - the live head cannot be read, for example a branch with no single open pull request, or a comment an MCP edit names when its read fails;
+  - a body file cannot be read;
+  - a body on stdin that no `cat FILE` supplies;
+  - an MCP post names no pull request number;
+  - an MCP edit names no integer comment id.
+- The cost: one PR read for a post that names a PR number. Two (the open-PR list, then the PR) for a post that names no number or names a branch. Two for a marked edit (its comment, then its PR). None for any other comment or edit, which includes prose that names the marker below its first line. No file, no process, no log line. The tests pin each count.
+- A shell edit by comment id (`gh api -X PATCH repos/O/R/issues/comments/<id>`) is judged for form only, by `review_form_hit`: its route names a comment, not a PR, and it makes no read. The guard does not read these, on a post or on a PATCH:
+  - the head on a shell edit, so a review log edited in place by PATCH can still carry a hand-typed head;
+  - a body held in a shell variable (`--body "$BODY"`);
+  - a body from `$(printf ...)` or `$(echo ...)`, since only a body of exactly `$(cat FILE)` is read;
+  - a stdin body that is neither a heredoc nor piped from `cat FILE`;
+  - a `gh api --input` body;
+  - a body sent to a full-URL endpoint, `gh api https://api.github.com/repos/...`.
 
 ## The limits
 
@@ -121,11 +149,11 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
   - `agents/*.md` is not on the list. Only its `tools` lines are a guard, and a path cannot tell those apart from prompt text.
   - It refuses Kind `docs-only` when any path, an old path included, is not a doc. A doc is a `.md` file under `docs/`, or the root `README.md`. Case is ignored. The path is not stripped, so a stray space makes it a non-doc. Any other file may steer behaviour, such as a skill, an agent file, a hook prompt, a `.claude/rules` file or a nested README. The check treats it as a rule under decision `docs-only-prs-skip-review` (a docs-only change touches no rule, guard, check or product code), and fails closed. Such a PR takes Kind `normal` with one round 1 review. It refuses Kind `delete-only` when a path adds lines, or is added, renamed or copied. A file that only loses lines passes, because delete-only "only deletes and adds nothing" (record `hold-unsafe-after-round-3`).
   - Guard or check `yes` stays allowed with no hit, because a guard can live outside those paths.
-- The path check runs only when `--review-record` writes a record. `merge --reviewed` still trusts a record posted by hand. A read there would add one call per PR.
+- The path and Kind checks run only when `--review-record` prints a record. `merge --reviewed` still trusts a record posted by hand. A read there would add one call per PR.
 - In another repo, a change under `hooks/`, `lint/`, `bin/`, `actions/`, `.github/`, `merge/` or `githooks/`, or to a root `settings.json`, must say Guard or check `yes`. It then owes the net-value test only after a failed round 3. A `.claude/settings.json` or `.claude/hooks/` path is not on the list.
-- Kind, Guard or check, and docs-only are the lane's own claims. The path check above tests only the cases it lists. The tool does not tell a record that files an owner ruling from other docs. Kind `normal` stays the lane's claim. Guards stop mistakes, not attackers (record `guard-guards-mistakes-only`).
+- It refuses Kind `docs-only` when a path is an added, modified, renamed or copied `.md` under the decisions folder (`layout.path`), that is, a decision record. A decision record removed or renamed out of the folder is not counted. The folder is read once from the checkout's layout, and an unreadable layout stops the review log. Kind, Guard or check, and docs-only are the lane's own claims. The path check above tests only the cases it lists. The tool does not tell a record that files an owner ruling from other docs. Kind `normal` stays the lane's claim. Guards stop mistakes, not attackers (record `guard-guards-mistakes-only`). The check fixes a gap rather than filing it as a note, by the coordinator's order of 2026-11-07 13:20 CST, decision `pr-ledger` (every open PR has one next act).
 - Open: until the cutover (decision `all-repos-switch-together`), an integration PR has no record of its own. After it, each lane PR carries its own record and no integration PR exists.
-- A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
+- A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`). The lane fixes the defect and posts a new review log for the new head, before the batch runner batches it. The fix push makes the old record stale.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
 - One fix verifier per record. A fix after a FAIL fix verifier gets the fresh full review in The review a changed head owes, not a fix verifier. After a PASS fix verifier, a further fix verifier over a new head is accepted (owner item 741). A clean merge of main takes none. `--fix-check` checks in this order:
   - HEAD must be the Head of the newest earlier record on the PR. Otherwise it refuses (exit 2).
