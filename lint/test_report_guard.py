@@ -5771,7 +5771,8 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
     # Owner ruling 2026-11-13 18:24 CST (own-700-a-labels-then-count): a label after a dash counts in colon form.
     def test_mg_red_guard_label_done_guard_after_dash_blocks(self):
-        self.assert_blocked(mg_report("none", done="> **Done** BUILT #1183 — guard: hooks/x.py refuses Y"))
+        self.assert_blocked(mg_report(
+            "none", done="> **Done** BUILT the lint fix — guard: future briefs run it first"))
 
     def test_mg_green_guard_label_backticked_pr_ref_passes(self):
         self.assert_allowed(mg_report("Guard: built as `#2077`."))
@@ -5821,6 +5822,39 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
     def test_mg_red_guard_r3_underscore_label_blocks(self):
         self.assert_blocked(mg_report("_Guard:_ future briefs run the check."))
+
+    # Owner ruling 2026-11-13 18:24 CST (own-700-a-labels-then-count): emphasis may wrap "Missing guard", so a bold,
+    # italic or underscore "Missing guard:" label counts too. Each red has no ref after its label; each green has one.
+    def test_mg_red_bold_missing_guard_colon_inside_blocks(self):
+        self.assert_blocked(mg_report("**Missing guard:** none yet."))
+
+    def test_mg_red_bold_missing_guard_colon_outside_blocks(self):
+        self.assert_blocked(mg_report("**Missing guard**: none yet."))
+
+    def test_mg_red_italic_missing_guard_label_blocks(self):
+        self.assert_blocked(mg_report("*Missing guard:* none yet."))
+
+    def test_mg_red_underscore_missing_guard_label_blocks(self):
+        self.assert_blocked(mg_report("_Missing guard_: none yet."))
+
+    def test_mg_red_bold_bullet_missing_guard_label_blocks(self):
+        self.assert_blocked("%s\n> **Deviations**\n> - **Missing guard:** none yet.\n> **Next** none" % MG_DONE)
+
+    def test_mg_green_bold_missing_guard_colon_inside_with_step_passes(self):
+        self.assert_allowed(mg_report("**Missing guard:** step:lint-precheck."))
+
+    def test_mg_green_bold_missing_guard_colon_outside_with_pr_passes(self):
+        self.assert_allowed(mg_report("**Missing guard**: built in PR #2881."))
+
+    def test_mg_green_italic_missing_guard_label_with_step_passes(self):
+        self.assert_allowed(mg_report("*Missing guard:* step:lint-precheck."))
+
+    def test_mg_green_underscore_missing_guard_label_with_pr_passes(self):
+        self.assert_allowed(mg_report("_Missing guard_: built in PR #2881."))
+
+    def test_mg_green_bold_bullet_missing_guard_label_with_step_passes(self):
+        self.assert_allowed(
+            "%s\n> **Deviations**\n> - **Missing guard:** step:lint-precheck.\n> **Next** none" % MG_DONE)
 
     # Green: a debt word that a negator does not reach (3 words before, 2 after) still counts. A PR #N or a /pull/N
     # ref counts with any digits. Each case follows the admission, so only its debt or ref clears it.
@@ -5902,6 +5936,19 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
     def test_mg_green_guard_label_after_hyphen_with_step_passes(self):
         self.assert_allowed(mg_report("The builders broke the check - Guard: step:lint-precheck."))
+
+    # An en dash or a double hyphen before the label counts the same way: the colon form after a mid-sentence break.
+    def test_mg_red_guard_label_after_en_dash_blocks(self):
+        self.assert_blocked(mg_report("The builder broke the check – Guard: run it first."))
+
+    def test_mg_red_guard_label_after_double_dash_blocks(self):
+        self.assert_blocked(mg_report("The builder broke the check -- Guard: run it first."))
+
+    def test_mg_green_guard_label_after_en_dash_with_step_passes(self):
+        self.assert_allowed(mg_report("The builder broke the check – Guard: step:lint-precheck."))
+
+    def test_mg_green_guard_label_after_double_dash_with_step_passes(self):
+        self.assert_allowed(mg_report("The builder broke the check -- Guard: step:lint-precheck."))
 
     # A ref after a mid-line label counts, with a ref before the label on the same line.
     def test_mg_green_guard_label_after_comma_ref_before_and_after_passes(self):
