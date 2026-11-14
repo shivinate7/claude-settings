@@ -37,6 +37,9 @@ const mk = (id, n, over = {}) => ({ ...DECISION, id, n, title: "Question " + n, 
 const LONG = "A long context that runs past three lines on a phone. ".repeat(8);
 // Later than the sends these cases use (the latest is LA_AT, 2026-10-29T19:05Z). An item added then is new, not seen, so its parts stay unfolded.
 const ASKED_AFTER_SEND = "2026-10-30T00:00:00Z";
+// The page's clock for every case that loads a closed line. A closed line ages out after LINE_AGE_H hours, so these cases set their
+// closed times from this fixed now and never from the real clock, which would age the fixtures out on a later day.
+const AP_NOW = "2026-11-09T18:00:00Z";
 
 // Runs in the page before its script. Collections are maps of id to data; listeners fire on change.
 // dbExtra is more database content ({collection: {id: data}}), such as the roadmap's own steps and
@@ -2729,7 +2732,7 @@ test("Answered section: a sunk card whose saved answer has a restored draft keep
 // section's own count holds it, so the rail's Answered row must match that count.
 test("answered-rail: with only a closed line, the rail has an Answered row that counts it, as the section does", async (t) => {
   const open1 = mk("rail-closed-open", 1, { added: NEW_ADDED });
-  const page = await open(t, { items: [open1], rawItems: { [AP_CLOSED.id]: AP_CLOSED } }); if (!page) return;
+  const page = await open(t, { items: [open1], rawItems: { [AP_CLOSED.id]: AP_CLOSED }, clock: AP_NOW }); if (!page) return;
   await mustHave(page, `#rail #c-${open1.id}`, `the rail chip of the open No. ${open1.n}`);
   await mustHave(page, `#tier-answered #line-${AP_CLOSED.n}`, `the line of the closed No. ${AP_CLOSED.n} in the Answered section`);
   const railRow = page.locator('#rail a.ov-head[href="#tier-answered"]');
@@ -2740,7 +2743,7 @@ test("answered-rail: with only a closed line, the rail has an Answered row that 
 
 test("answered-rail: a closed line and an answered item both count in the rail's Answered row, as in the section", async (t) => {
   const ans = mk("rail-closed-ans", 1, { added: at(5) }), open1 = mk("rail-closed-open2", 2, { added: NEW_ADDED });
-  const page = await open(t, { items: [ans, open1], answers: answerOf(ans), rawItems: { [AP_CLOSED.id]: AP_CLOSED } }); if (!page) return;
+  const page = await open(t, { items: [ans, open1], answers: answerOf(ans), rawItems: { [AP_CLOSED.id]: AP_CLOSED }, clock: AP_NOW }); if (!page) return;
   await mustHave(page, `#rail #c-${open1.id}`, `the rail chip of the open No. ${open1.n}`);
   await mustHave(page, `#tier-answered #item-${ans.id}`, `the card of the answered No. ${ans.n} in the Answered section`);
   await mustHave(page, `#tier-answered #line-${AP_CLOSED.n}`, `the line of the closed No. ${AP_CLOSED.n} in the Answered section`);
@@ -4073,7 +4076,7 @@ test("ask-phase-out: the read asks list is labelled Read asks, each row says Mar
 });
 
 test("ask-phase-out: a closed item with a closed time shows as one line in the Answered section, with its home, its short reply and Mark read", async (t) => {
-  const page = await open(t, { items: [AP_OPEN, AP_CLOSED] }); if (!page) return;
+  const page = await open(t, { items: [AP_OPEN, AP_CLOSED], clock: AP_NOW }); if (!page) return;
   await mustHave(page, "#tier-answered", `an Answered section for No. ${AP_CLOSED.n}, a closed item with a closed time`);
   await mustHave(page, `#tier-answered #line-${AP_CLOSED.n}`, `one line of No. ${AP_CLOSED.n} in the Answered section`);
   const line = page.locator(`#tier-answered #line-${AP_CLOSED.n}`);
@@ -4085,7 +4088,7 @@ test("ask-phase-out: a closed item with a closed time shows as one line in the A
 });
 
 test("ask-phase-out: Mark read on a closed item's line writes dismissed with update on items, sets and deletes nothing, and the line has no Mark read after the press", async (t) => {
-  const page = await open(t, { items: [AP_OPEN, AP_CLOSED] }); if (!page) return;
+  const page = await open(t, { items: [AP_OPEN, AP_CLOSED], clock: AP_NOW }); if (!page) return;
   await mustHave(page, `#tier-answered #line-${AP_CLOSED.n}`, `one line of No. ${AP_CLOSED.n}`);
   const press = await needButton(page.locator(`#tier-answered #line-${AP_CLOSED.n}`), new RegExp(`^Mark read: No\\. ${AP_CLOSED.n},`), `Mark read on the line of No. ${AP_CLOSED.n}`);
   await press.click();
@@ -4100,7 +4103,7 @@ test("ask-phase-out: Mark read on a closed item's line writes dismissed with upd
 });
 
 test("ask-phase-out: a closed line marked read leaves the Answered list on reload, and sits behind Show read items", async (t) => {
-  const page = await open(t, { items: [AP_OPEN, AP_CLOSED], keepItems: true }); if (!page) return;
+  const page = await open(t, { items: [AP_OPEN, AP_CLOSED], keepItems: true, clock: AP_NOW }); if (!page) return;
   // Setup: before Mark read, the line of No. 70 is in the Answered list.
   await mustHave(page, `#tier-answered #line-${AP_CLOSED.n}`, `the line of No. ${AP_CLOSED.n} in the Answered section before Mark read`);
   const press = await needButton(page.locator(`#tier-answered #line-${AP_CLOSED.n}`), new RegExp(`^Mark read: No\\. ${AP_CLOSED.n},`), `Mark read on the line of No. ${AP_CLOSED.n}`);
@@ -4121,7 +4124,7 @@ test("ask-phase-out: a closed line marked read leaves the Answered list on reloa
 });
 
 test("ask-phase-out: Mark read on a closed item's line leaves a Marked read. line in its place this visit, with Mark unread", async (t) => {
-  const page = await open(t, { items: [AP_OPEN, AP_CLOSED] }); if (!page) return;
+  const page = await open(t, { items: [AP_OPEN, AP_CLOSED], clock: AP_NOW }); if (!page) return;
   const press = await needButton(page.locator(`#tier-answered #line-${AP_CLOSED.n}`), new RegExp(`^Mark read: No\\. ${AP_CLOSED.n},`), `Mark read on the line of No. ${AP_CLOSED.n}`);
   await press.click();
   await apWaitUpdates(page, "items", 1);
@@ -4139,7 +4142,7 @@ test("ask-phase-out: Mark read on a closed item's line leaves a Marked read. lin
 });
 
 test("ask-phase-out: Mark read on a closed item's line moves focus to its Marked read line, and the Answered sub-line says a marked line stays until the next load", async (t) => {
-  const page = await open(t, { items: [AP_OPEN, AP_CLOSED] }); if (!page) return;
+  const page = await open(t, { items: [AP_OPEN, AP_CLOSED], clock: AP_NOW }); if (!page) return;
   // Scope first: the press is the Mark read button of the line of No. 70, and no other element.
   const press = await needButton(page.locator(`#tier-answered #line-${AP_CLOSED.n}`), new RegExp(`^Mark read: No\\. ${AP_CLOSED.n},`), `Mark read on the line of No. ${AP_CLOSED.n}`);
   assert.equal(await press.evaluate((b, n) => { const l = b.closest("article"); return !!l && l.id === "line-" + n; }, AP_CLOSED.n), true, `the Mark read press is not on the line of No. ${AP_CLOSED.n}`);
@@ -4155,7 +4158,7 @@ test("ask-phase-out: Mark read on a closed item's line moves focus to its Marked
 });
 
 test("ask-phase-out: a read item sits under Show read items, and Mark unread on it writes dismissed null with update", async (t) => {
-  const page = await open(t, { items: [AP_OPEN, AP_READ] }); if (!page) return;
+  const page = await open(t, { items: [AP_OPEN, AP_READ], clock: AP_NOW }); if (!page) return;
   const fold = page.getByRole("button", { name: /Show \d+ read items?/ });
   assert.equal(await fold.count(), 1, `no Show read items fold: No. ${AP_READ.n}, a read item, is not behind one button`);
   await fold.click();
@@ -4216,7 +4219,7 @@ test("ask-phase-out: control: a filing-pending answer keeps today's card, with C
 });
 
 test("ask-phase-out: control: no Mark all control is drawn with a routed ask and a closed item", async (t) => {
-  const page = await open(t, { items: [AP_OPEN, AP_CLOSED], dbExtra: { asks: { [AP_ASK.id]: AP_ASK } }, storage: RPL_SEEN }); if (!page) return;
+  const page = await open(t, { items: [AP_OPEN, AP_CLOSED], dbExtra: { asks: { [AP_ASK.id]: AP_ASK } }, storage: RPL_SEEN, clock: AP_NOW }); if (!page) return;
   assert.equal(await page.getByRole("button", { name: /Mark all/i }).count(), 0, "a Mark all control is drawn");
 });
 
@@ -4296,7 +4299,7 @@ test("ask-phase-out: a read item that a session gives waits is counted in the An
 
 // ---------------------------------------------------------------- ask-phase-out: the line head, the read list's Mark unread, the rail's order
 test("ask-phase-out: Mark unread in the read asks list is quiet, as it is in the read items list", async (t) => {
-  const page = await open(t, { items: [AP_OPEN, AP_READ], dbExtra: { asks: { [DIS_KEEP.id]: DIS_KEEP, [DIS_HIDDEN.id]: DIS_HIDDEN } }, storage: RPL_NEW }); if (!page) return;
+  const page = await open(t, { items: [AP_OPEN, AP_READ], dbExtra: { asks: { [DIS_KEEP.id]: DIS_KEEP, [DIS_HIDDEN.id]: DIS_HIDDEN } }, storage: RPL_NEW, clock: AP_NOW }); if (!page) return;
   await shownBox(page, DIS_KEEP.text, DIS_SHOWN);
   await mustHave(page, "#askDismissed", "Show read asks unfold");
   await page.click("#askDismissed");
@@ -4313,7 +4316,7 @@ test("ask-phase-out: Mark unread in the read asks list is quiet, as it is in the
 
 for (const width of [768, 1280]) {
   test(`ask-phase-out: a long closed title at ${width} px is cut with an ellipsis, on one row with its number and home`, async (t) => {
-    const page = await open(t, { items: [AP_OPEN, AP_LONG], viewport: { width, height: 900 } }); if (!page) return;
+    const page = await open(t, { items: [AP_OPEN, AP_LONG], viewport: { width, height: 900 }, clock: AP_NOW }); if (!page) return;
     await mustHave(page, "#line-77 .fhead", "the head of the long-title line");
     await mustHave(page, "#line-77 .fno", "the number of the long-title line");
     await mustHave(page, "#line-77 .ftext", "the title of the long-title line");
@@ -4346,7 +4349,7 @@ test("ask-phase-out: the home pill of a line keeps its whole text at 768 and 128
   const causes = [];
   for (const width of [768, 1280]) {
     const at = `at ${width} px`;
-    const page = await open(t, { items: [AP_OPEN, AP_LONG, AP_CLOSED, AP_LONG_HOME], storage: RPL_NEW, viewport: { width, height: 900 } }); if (!page) return;
+    const page = await open(t, { items: [AP_OPEN, AP_LONG, AP_CLOSED, AP_LONG_HOME], storage: RPL_NEW, viewport: { width, height: 900 }, clock: AP_NOW }); if (!page) return;
     await mustHave(page, `#line-${AP_CLOSED.n} .hometag`, `the home pill of No. ${AP_CLOSED.n} ${at}`);
     await mustHave(page, `#line-${AP_LONG.n} .hometag`, `the home pill of No. ${AP_LONG.n} ${at}`);
     // The scope comes first: the New reply mark and the home pill of the long-title row with a home are drawn before they are measured.
@@ -4374,7 +4377,7 @@ test("ask-phase-out: at 521 to 701 px a long title beside the New reply mark kee
   const causes = [];
   for (const width of [521, 600, 640, 650, 700, 701]) {
     const at = `at ${width} px`;
-    const page = await open(t, { items: [AP_OPEN, row], storage: RPL_NEW, viewport: { width, height: 900 } }); if (!page) return;
+    const page = await open(t, { items: [AP_OPEN, row], storage: RPL_NEW, viewport: { width, height: 900 }, clock: AP_NOW }); if (!page) return;
     // The scope comes first: the mark, the head's parts and Show answer are drawn before any of them is measured.
     await mustHave(page, `#line-${row.n} .fhead .newmark`, `the New reply mark on No. ${row.n} ${at}`);
     assert.equal((await page.textContent(`#line-${row.n} .fhead .newmark`)).trim(), "New reply", `the mark on No. ${row.n} ${at} does not read New reply`);
@@ -4402,7 +4405,7 @@ test("ask-phase-out: at 521 to 701 px a long title beside the New reply mark kee
 
 test("ask-phase-out: the rail's Answered row follows the Answered section's order, newest answer first", async (t) => {
   const sent = { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" };
-  const page = await open(t, { items: [DECISION, TASK, AP_CLOSED, AP_NEWER], answers: { [TASK.id]: sent } }); if (!page) return;
+  const page = await open(t, { items: [DECISION, TASK, AP_CLOSED, AP_NEWER], answers: { [TASK.id]: sent }, clock: AP_NOW }); if (!page) return;
   await mustHave(page, "#line-78", "the newer closed line");
   await mustHave(page, "#tier-answered", "the Answered section");
   await mustHave(page, '#rail a.ov-head[href="#tier-answered"]', "the Answered row of the rail");
@@ -4415,6 +4418,112 @@ test("ask-phase-out: the rail's Answered row follows the Answered section's orde
   const secN = r.sec.map((x) => (x === "item-" + TASK.id ? TASK.n : x));
   assert.deepEqual(secN, [AP_NEWER.n, AP_CLOSED.n, TASK.n], "the Answered section is not newest first: " + JSON.stringify(secN));
   assert.deepEqual(r.rail, secN, "the rail's Answered row " + JSON.stringify(r.rail) + " is not in the section's order " + JSON.stringify(secN));
+});
+
+// ---------------------------------------------------------------- answered-lines-age-out: a closed line ages out to read (step answered-lines-age-out)
+// Ruling: a closed item stays one line in Answered until its closed time is older than the age, a top-level `const LINE_AGE_H`
+// (a number of hours) in page.html. Past the age it reads as read at load, so it sits behind Show N read items, as a line read at
+// load does. A reply later than the close brings it back, however old the close. The page writes nothing for it: no set, no
+// update, no delete, and no session writes dismissed. Every time here is set from AP_NOW, the fixed clock above, so an age is exact.
+const agoIso = (ms) => new Date(Date.parse(AP_NOW) - ms).toISOString();
+const DAY_MS = 864e5, MIN_MS = 6e4;
+// 30 days before the load is past any age the owner picks.
+const agedLine = (id, n, over = {}) => mk(id, n, { status: "closed", closed: agoIso(30 * DAY_MS), home: "step:answered-lines-age-out", reply: "Filed as step answered-lines-age-out.", ...over });
+const AGE_AGED = agedLine("age-aged", 80);
+// Closed a minute before the load: well inside any age.
+const AGE_YOUNG = mk("age-young", 81, { status: "closed", closed: agoIso(MIN_MS), home: "step:answered-lines-age-out", reply: "Filed a minute before the load." });
+// Closed 30 days before the load and replied an hour after that: the reply is later than the close, so the line stays.
+const AGE_REPLIED = agedLine("age-replied", 82, { replied: agoIso(30 * DAY_MS - 36e5) });
+
+test("answered-lines-age-out: a closed line older than the age leaves Answered for Show read items; a younger line and a line with a later reply stay, and the page writes nothing", async (t) => {
+  const page = await open(t, { items: [AP_OPEN, AGE_AGED, AGE_YOUNG, AGE_REPLIED], clock: AP_NOW }); if (!page) return;
+  // Scope first: the two lines that must draw are in Answered, so the absence of the aged line below means something.
+  await mustHave(page, `#tier-answered #line-${AGE_YOUNG.n}`, `the younger line of No. ${AGE_YOUNG.n} in Answered`);
+  await mustHave(page, `#tier-answered #line-${AGE_REPLIED.n}`, `the line of No. ${AGE_REPLIED.n}, replied after it closed, in Answered`);
+  await frameWait(page, 3);
+  assert.deepEqual(await apBad(page, "items"), [], "the page set or deleted an item at load");
+  assert.deepEqual(await apWrites(page, "items"), [], "the page updated an item at load, with no press");
+  assert.equal(await page.locator(`#tier-answered #line-${AGE_AGED.n}`).count(), 0, `the line of No. ${AGE_AGED.n}, closed 30 days before the load, still draws in Answered`);
+  await mustHave(page, "#readItems", "the Show read items fold, which holds the aged line");
+  await page.click("#readItems");
+  await mustHave(page, `#readItemList #line-${AGE_AGED.n}`, `the aged line of No. ${AGE_AGED.n} in the read items list`);
+});
+
+test("answered-lines-age-out: twelve aged lines sit behind Show 12 read items, and none draws in Answered", async (t) => {
+  const FULL = Array.from({ length: 12 }, (_, i) => agedLine("age-full-" + i, 100 + i));
+  const page = await open(t, { items: [AP_OPEN, ...FULL], clock: AP_NOW }); if (!page) return;
+  // Scope first: the Answered section is drawn, with the fold that holds the twelve lines.
+  await mustHave(page, "#tier-answered", "the Answered section, which holds the aged lines behind its fold");
+  assert.equal(await page.locator('#tier-answered article[id^="line-"]').count(), 0, "twelve aged lines still draw as lines in Answered");
+  await mustHave(page, "#tier-answered p.allread", "the All read. line, since no line is left in Answered");
+  await mustHave(page, "#readItems", "the Show read items fold for the twelve aged lines");
+  const foldWords = ((await page.locator("#readItems").textContent()) || "").replace(/\s+/g, " ");
+  assert.ok(foldWords.includes("Show 12 read items"), `the fold reads ${JSON.stringify(foldWords)}, not Show 12 read items`);
+  await page.click("#readItems");
+  assert.equal(await page.locator('#readItemList article[id^="line-"]').count(), 12, "the read items list does not hold all twelve aged lines");
+});
+
+test("answered-lines-age-out: a line a minute under the age draws in Answered, and one a minute over it sits behind Show read items", async (t) => {
+  // The first page holds a line 30 days old. Code with no age-out fails here by that line, never by a missing constant; the edge is read only after it.
+  const first = await open(t, { items: [AP_OPEN, AGE_AGED], clock: AP_NOW }); if (!first) return;
+  await mustHave(first, "#tier-answered", "the Answered section of the first page");
+  assert.equal(await first.locator(`#tier-answered #line-${AGE_AGED.n}`).count(), 0, `the line of No. ${AGE_AGED.n}, closed 30 days before the load, still draws in Answered`);
+  const ageH = await first.evaluate(() => (typeof LINE_AGE_H === "number" ? LINE_AGE_H : null));
+  assert.equal(typeof ageH, "number", "page.html has no top-level number LINE_AGE_H, the one age constant");
+  const UNDER = mk("age-under", 83, { status: "closed", closed: agoIso(ageH * 36e5 - MIN_MS), home: "step:answered-lines-age-out", reply: "Closed a minute under the age." });
+  const OVER = mk("age-over", 84, { status: "closed", closed: agoIso(ageH * 36e5 + MIN_MS), home: "step:answered-lines-age-out", reply: "Closed a minute over the age." });
+  const page = await open(t, { items: [AP_OPEN, UNDER, OVER], clock: AP_NOW }); if (!page) return;
+  await mustHave(page, "#tier-answered", "the Answered section of the edge page");
+  await mustHave(page, `#tier-answered #line-${UNDER.n}`, `the line of No. ${UNDER.n}, a minute under the age, in Answered`);
+  assert.equal(await page.locator(`#tier-answered #line-${OVER.n}`).count(), 0, `the line of No. ${OVER.n}, a minute over the age, still draws in Answered`);
+  await mustHave(page, "#readItems", "the Show read items fold, which holds the line a minute over the age");
+  await page.click("#readItems");
+  await mustHave(page, `#readItemList #line-${OVER.n}`, `the line of No. ${OVER.n} in the read items list`);
+});
+
+test("answered-lines-age-out: a line Mark unread wrote (dismissed null) is the owner's mark, never aged out: it draws in Answered at the next load, with Mark read", async (t) => {
+  const page = await open(t, { items: [AP_OPEN, AGE_AGED], keepItems: true, clock: AP_NOW }); if (!page) return;
+  await mustHave(page, "#readItems", "Show read items fold, which holds the aged line before Mark unread");
+  await page.click("#readItems");
+  const unread = await needButton(page.locator("#readItemList"), new RegExp(`^Mark unread: No\\. ${AGE_AGED.n},`), `Mark unread on the aged line of No. ${AGE_AGED.n}`);
+  const before = (await apWrites(page, "items")).length;
+  await unread.click();
+  await apWaitUpdates(page, "items", before + 1);
+  const ups = (await apWrites(page, "items")).slice(before);
+  assert.equal(ups.length, 1, `Mark unread made ${ups.length} update writes on items, not one, so the reload below would not hold the mark`);
+  assert.deepEqual(ups[0].body, { dismissed: null }, `Mark unread wrote ${JSON.stringify(ups[0].body)}, not dismissed: null`);
+  await page.reload();
+  await page.waitForFunction("state.items.length > 0");
+  await mustHave(page, `#item-${AP_OPEN.id}`, `the open task ${AP_OPEN.id} after the reload`);
+  await mustHave(page, "#tier-answered", "the Answered section after the reload");
+  await mustHave(page, `#tier-answered #line-${AGE_AGED.n}`, `line of No. ${AGE_AGED.n}, marked unread, in Answered after the reload`);
+  await needButton(page.locator(`#tier-answered #line-${AGE_AGED.n}`), new RegExp(`^Mark read: No\\. ${AGE_AGED.n},`), `Mark read on the line of No. ${AGE_AGED.n}`);
+});
+
+test("answered-lines-age-out: the read items list is newest first by max(read, closed), so an aged line sorts by when it closed", async (t) => {
+  // OLDER has the higher No., so a sort by No. alone puts it first and gets it wrong. DISMISSED was read 30 days before the load, after it closed.
+  const OLDER = agedLine("age-order-old", 85, { closed: agoIso(31 * DAY_MS) });
+  const NEWER = agedLine("age-order-new", 86, { closed: agoIso(29 * DAY_MS) });
+  const DISMISSED = mk("age-order-read", 87, { status: "closed", closed: agoIso(31 * DAY_MS), dismissed: agoIso(30 * DAY_MS), home: "step:answered-lines-age-out", reply: "Read by the owner." });
+  const page = await open(t, { items: [AP_OPEN, OLDER, NEWER, DISMISSED], clock: AP_NOW }); if (!page) return;
+  await mustHave(page, "#readItems", "Show read items fold, which holds the three read lines");
+  await page.click("#readItems");
+  await mustHave(page, "#readItemList", "read items list");
+  const label = await page.getAttribute("#readItemList", "aria-label");
+  assert.match(label || "", /newest first/, `the read items list is labelled ${JSON.stringify(label)}, not newest first`);
+  const order = await page.locator('#readItemList article[id^="line-"]').evaluateAll((els) => els.map((e) => e.id));
+  assert.deepEqual(order, [`line-${NEWER.n}`, `line-${DISMISSED.n}`, `line-${OLDER.n}`], `the read items list is ${JSON.stringify(order)}, not newest by max(read, closed)`);
+});
+
+test("answered-lines-age-out: a reply earlier than the close does not pin an old line: it ages out to read", async (t) => {
+  // Replied 31 days before the load, so a day before the close: the reply is earlier than the close and does not keep the line.
+  const EARLY = agedLine("age-early-reply", 88, { replied: agoIso(31 * DAY_MS) });
+  const page = await open(t, { items: [AP_OPEN, EARLY], clock: AP_NOW }); if (!page) return;
+  await mustHave(page, "#tier-answered", "Answered section, which holds the aged line behind its fold");
+  assert.equal(await page.locator(`#tier-answered #line-${EARLY.n}`).count(), 0, `the line of No. ${EARLY.n}, replied before it closed, still draws in Answered`);
+  await mustHave(page, "#readItems", "Show read items fold, which holds the line of No. " + EARLY.n);
+  await page.click("#readItems");
+  await mustHave(page, `#readItemList #line-${EARLY.n}`, `line of No. ${EARLY.n} in the read items list`);
 });
 
 // ---------------------------------------------------------------- the ask stack: Add to list, one Send, one Undo for the batch

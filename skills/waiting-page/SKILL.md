@@ -61,7 +61,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   - `arbiter: true` marks a ruling: an item the arbiter decided (decision `session-tiers`, Arbiter, "On the page").
     The arbiter hands each ruling to the writer. The writer writes it closed, with the item's `status` `closed`,
     `home` the ruling's record id, `recommended` (old name `pick`) the ruled option's key, `why`, and `ruled` (an ISO time). It cites the ruling.
-    The page shows it in "Arbiter rulings", newest first, with one Overturn button. Every other closed item with a `closed` time stays as one line in "Answered" until the owner marks it read. A closed item with no `closed` time counts as read and stays hidden.
+    The page shows it in "Arbiter rulings", newest first, with one Overturn button. Every other closed item with a `closed` time stays as one line in "Answered" until the owner marks it read or it ages out. A closed item with no `closed` time counts as read and stays hidden.
     A ruling is never in a tier and never counts as open. It keeps `owner`, `n`, `title` and `options`:
     the card names the ruled option from `options`. Write a ruling only on a page that `stale_pages.py` reports
     current (see "Update a repo's pages"). An older page hides closed items, so the ruling would not show.
@@ -151,8 +151,9 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     takes the busy-lane path. The card shows "waits on lane <slug>" in its top row. The item stays open until the receiver
     reports the act done, and then the owning session closes it and deletes `answers/<id>` (see "Route and close", the busy-lane path).
   - `closed` (an ISO UTC time with a trailing `Z`) is when the item closed. The session that closes the item writes it in the same `update` as `status: "closed"`
-    (step 2 of "Route and close"; the writer does the same for a chat answer). The page shows a closed item that has a `closed` time as one line in "Answered" until the owner marks it read.
+    (step 2 of "Route and close"; the writer does the same for a chat answer). The page shows a closed item that has a `closed` time as one line in "Answered" until the owner marks it read or it ages out.
     A closed item with no `closed` time counts as read, so the page never shows it.
+    A closed line older than a set age (`LINE_AGE_H` in `page.html`) at page load also counts as read, page-side with no write; a `replied` later than `closed` brings it back.
   - `dismissed` (an ISO time, or `null`) is the owner's read mark. Only the page writes it, at the owner's press, with `update`: Mark read writes the time, and Mark unread writes `null`
     (the runtime has no field delete). No session writes `dismissed`. A session changes a closed item, or any item the owner may have marked, only with `update`, never `set`:
     `set` drops `closed` and `dismissed`, and the item then counts as read and leaves the page. A `replied` time later than `dismissed` brings the line back.
