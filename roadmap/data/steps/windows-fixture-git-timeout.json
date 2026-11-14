@@ -1,0 +1,14 @@
+{
+ "id": "windows-fixture-git-timeout",
+ "title": "Test case_repeat_cap_keeps_the_open_roadmap_steps no longer depends on wall-clock",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL2fQrGQZ3iSJ51Ue88",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 21:57 CST Nov 13: the test hit TimeoutExpired on a fixture `git -C` call (run 43548842234, attempt 1, head 81eaca3ad313); it passed on attempt 2. Rate reported: 1 in 2 runs there, 0 in 4 on main (unchecked by triage).",
+ "source": "Coordinator 21:58 CST Nov 13 (relayed); grant: owner 21:56 CST via the consultant (triage did not see it).",
+ "note": "Coordinator 21:57 CST Nov 13 (21:58): lane started, session_013NEJL2fQrGQZ3iSJ51Ue88. Task: make the test independent of wall-clock. Tracker: the coordinator. Path: alone or as a combined member; runner 10 decides. Done check: merged, and a test or a measured-bound table shows no wall-clock dependence.",
+ "updatedAt": "2026-11-13T21:57:47-06:00"
+}
