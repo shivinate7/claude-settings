@@ -1986,7 +1986,7 @@ class LintTools(Job):
                  "          paths: |\n            a/\n            b/\n\n") % ZIZMOR
         rc, lines, out, argv = self.run_with_stub_pipx(block)
         self.assertIsNotNone(argv, "pipx was never called, so the action did not run zizmor\n" + out)
-        self.assertEqual(argv, ["run", "zizmor==1.30.1", "a/", "b/"],
+        self.assertEqual(argv, ["run", "zizmor==1.32.0", "a/", "b/"],
                          "with: paths: | over two lines reached pipx as its marker, not as the two paths\n" + out)
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
 

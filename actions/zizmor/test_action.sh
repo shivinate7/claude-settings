@@ -29,7 +29,7 @@ trap 'rm -rf "$work"' EXIT
 RUN_SH="$here/run.sh"
 ACTION_YML="$here/action.yml"
 CHECKS="$root/.github/workflows/checks.yml"
-PIN="zizmor==1.30.1"
+PIN="zizmor==1.32.0"
 bad=0
 rc=0
 
