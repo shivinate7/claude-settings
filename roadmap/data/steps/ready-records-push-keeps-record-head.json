@@ -1,14 +1,14 @@
 {
  "id": "ready-records-push-keeps-record-head",
  "title": "The review record's head check ignores a head whose only change since the recorded head is docs/records.md pushed by the merge tool's own --ready",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1k9L6aaoYwt9rkang",
  "owner": "triage",
  "blockedBy": [],
  "why": "The merge tool's `merge --ready` pushes a records-page commit, which moves the head and makes the review record read stale. Each PR then needs a fix verifier over a records-only commit. Cases today: #3302 at 81eaca3ad313 and #3269 at b4078a223be3d3e625399969b3a817a869256d7f (coordinator 21:07 CST).",
  "source": "Coordinator 21:07 CST Nov 13; the cases are its word, unchecked by triage.",
- "note": "Triage 21:07 CST Nov 13: checked for a cover. No step names this exactly. Near: records-page-before-ready (doing: one CI run per merge, the records page rebuilt before the ready run), fix-check-records-carry (doing: a FAIL on a records-only diff carries), fix-check-after-main-merge (done). The lane may fold into records-page-before-ready if its fix already moves the push before the record. Fix to propose: the record head check ignores a head whose only change since the recorded head is docs/records.md pushed by the tool itself; red case first. Tracker the coordinator; path alone via runner 10.",
- "updatedAt": "2026-11-13T21:07:40-06:00"
+ "note": "Triage 21:07 CST Nov 13: checked for a cover. No step names this exactly. Near: records-page-before-ready (doing: one CI run per merge, the records page rebuilt before the ready run), fix-check-records-carry (doing: a FAIL on a records-only diff carries), fix-check-after-main-merge (done). The lane may fold into records-page-before-ready if its fix already moves the push before the record. Fix to propose: the record head check ignores a head whose only change since the recorded head is docs/records.md pushed by the tool itself; red case first. Tracker the coordinator; path alone via runner 10. Coordinator 21:08 CST Nov 13 (21:08): goes in lane merge-tool-audit-fixes (session_013NEJL1k9L6aaoYwt9rkang) with the consultant's item 6 (21:07): a record and lint PASS carry over a records-only or claim-only commit (lint_carried, merge.py about 3775). Triage did not check the code. Overlaps step merge-claim-only-head-skips-run.",
+ "updatedAt": "2026-11-13T21:08:22-06:00"
 }
