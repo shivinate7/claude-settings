@@ -49,8 +49,8 @@
                           carry_source, lint_carried). Trees are compared, never head shas. The carried record reads as it reads at its own Head: held stays
                           held and a failed fix check stays open; its why says `carried from #M by tree`. #M may be closed. Every reader takes the same
                           carry: `--reviewed`, `--release-check`, the join's lint check, and the fix check of `--review-record`.
-                          Cost: for a PR that names a source and has no record or lint of its own, one read of issue M's comments (only when the repo-wide
-                          read lacks them) and two commit reads. A read that cannot run reads unknown, never done.
+                          Cost: for a PR that names a source and has no record or lint of its own, one paged read of issue M's comments (once a run)
+                          and two commit reads. A read that cannot run reads unknown, never done.
   merge --reviewed --root DIR [--root DIR ...]
                           the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, then that repo's lines.
                           Each lane merges on its own, so a block names no batch to open or build. The base is the root's
@@ -1156,23 +1156,25 @@ class Host:
         records, lints = {}, {}
         for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
             sort_comment(c, records, lints)
-        self.comment_rows = (records, lints)  # the last read, which source_comments serves a named source from
+        self.comment_rows = (records, lints)  # the last read, which source_comments takes the parts of a source from
         return records, lints
 
     def source_comments(self, m):
-        """-> (records, lints) of issue `m`, in issue_comments' shapes ({m: [...]} keys, so each is the list for `m`): the comments a replacement pull
-        request carries from its source (step review-carries-by-tree). They come from the last issue_comments read when it holds any of `m`'s; else one
-        paged read of issues/<m>/comments, since the source may be closed and older than that read's `since`. Read once a run per `m`. A failed
-        read is a Stop: the caller reads it as unknown, never as no carry. Cost: at most one paged read per named source."""
-        seen = getattr(self, "comment_rows", None)
-        if seen and (m in seen[0] or m in seen[1]):
-            return seen
+        """-> (records, lints) of issue `m`, in issue_comments' shapes ({m: [...]}, so each holds the list for `m`, oldest first): the comments a
+        replacement pull request carries from its source (step review-carries-by-tree). Always one paged read of issues/<m>/comments, once a run per
+        `m`: the repo-wide issue_comments read is windowed by `since`, so what it holds of `m` is a part of `m`'s list and never the whole. A comment
+        of `m` that the last repo-wide read holds and the issue's own read lacks goes first, so it can never be newer than the issue's list. The
+        issue's own list holds every such comment on GitHub, so this is a bandaid for a host that serves the two reads apart. A failed read is a
+        Stop: the caller reads it as unknown, never as no carry. Cost: one paged read per named source."""
         cache = self.__dict__.setdefault("source_rows", {})
         if m not in cache:
             records, lints = {}, {}
             for c in self.pages(f"issues/{m}/comments"):
                 sort_comment(c, records, lints, m)
-            cache[m] = (records, lints)
+            window = getattr(self, "comment_rows", None) or ({}, {})
+            own = (records.get(m, []), lints.get(m, []))
+            cache[m] = ({m: [r for r in window[0].get(m, []) if r not in own[0]] + own[0]},
+                        {m: [b for b in window[1].get(m, []) if b not in own[1]] + own[1]})
         return cache[m]
 
     def review_records(self, since):
@@ -3790,7 +3792,7 @@ def clean_merges_after(h, head, live, base=None, claims=None):
         sha = parents[0]
     return sha == head  # the head after the last commit the walk may read: REVIEW_MERGE_WALK commits reach it, one more does not
 
-REPLACES_LINE = re.compile(r"(?im)^[ \t]*(?:Replaces|Carries)[ \t]+#(\d+)[ \t]*$")  # a body line that names the source of a replacement pull request
+REPLACES_LINE = re.compile(r"(?im)^[ \t]*(?:Replaces|Carries)[ \t]+#(\d+)[ \t\r]*$")  # a body line that names the source of a replacement pull request
 
 def replaces_source(n, body):
     """-> the number of the pull request that the body of pull request `n` names as its source, or None. The source is the one number on a
@@ -3814,7 +3816,7 @@ def carry_source(h, m, live):
     """-> (rec, row) of the newest review record on pull request `m` when it carries to the live head `live` of the pull request that names `m` as its
     source, else None: rec is the parsed record and row its (body, created_at, updated_at). It carries only when its own `PR:` line names `m` and the
     tree of its Head equals the tree of `live` (same_tree); a different tree, an unparsable newest record and a record for another number carry
-    nothing. A failed read raises Stop. Cost: Host.source_comments, which reads issue `m` once only when the repo-wide read lacks it, then two commit reads."""
+    nothing. A failed read raises Stop. Cost: Host.source_comments, which reads issue `m` once a run, then two commit reads."""
     rows = h.source_comments(m)[0].get(m)
     rec = parse_review(rows[-1][0]) if rows else None
     if not rec or rec["n"] != m or not same_tree(h, rec["head"], live):
@@ -3822,8 +3824,8 @@ def carry_source(h, m, live):
     return rec, rows[-1]
 
 def restart_remedies(h, n, last, head):
-    """-> the remedies the refusal of a restarting review record prints, in order. `last` is the newest parsed earlier record on pull request `n`
-    (None when none parses) and `head` the head the new record reviews. Carry by tree comes first when the tree of that record's Head equals the tree
+    """-> the remedies the refusal of a restarting review record prints, in order. `last` is the newest earlier record on pull request `n`, parsed
+    (None when it does not parse, as the fix check reads it) and `head` the head the new record reviews. Carry by tree comes first when the tree of that record's Head equals the tree
     of `head`: a new pull request whose body says `Replaces #n` takes the record and the lane lint by tree (carry_source). When the trees differ and
     that record has no failed fix check, a fix verifier on the delta comes next. A new branch with a new PR is always the last resort. A tree read that
     cannot run offers neither, and says so. Cost: two commit reads (same_tree) when a record exists."""
@@ -3835,7 +3837,7 @@ def restart_remedies(h, n, last, head):
     if match:
         steps.append(f"First, carry by tree: this head holds the tree the earlier record reviewed, so open a new PR for it whose body has the line `Replaces #{n}`; the record and the lane lint carry to it.")
     elif match is False and not (last["fix"] and last["fix"][3] != "PASS"):
-        steps.append(f"First, a fix verifier on the delta: post the earlier rounds again with --fix-check {last['head']}:reviewer:{review_round_model(REVIEW_FIX_ROW)}:PASS, after a reviewer has read only the diff since that head.")
+        steps.append(f"First, a fix verifier on the delta: post the earlier rounds again, with --fix-check {last['head']}:reviewer:{review_round_model(REVIEW_FIX_ROW)}:PASS, after a reviewer has read only the diff since that head.")
     return unknown + " ".join(steps + ["A new branch with a new PR is the last resort."])
 
 REVIEW_SURVIVAL_UNKNOWN = "whether only clean merges of main follow the reviewed head is unknown"  # the why of a stale record whose clean-merge read could not run
@@ -4704,7 +4706,7 @@ def main(argv, host=None, lock=None, hosts=None):
             # a new record may not lower the top round an earlier record holds, and below REVIEW_LAST_ROUND it may not repeat that top round without a fix verifier of its own (a head moved after the last round posts rounds 1..REVIEW_LAST_ROUND again, and a granted round past it is above)
             if earlier_top and (new_top < earlier_top or (new_top == earlier_top and new_top < REVIEW_LAST_ROUND and not a.fix_check)):
                 print(f"merge: this record restarts the review: it has the same or fewer rounds than an earlier record on this pull request, stops below round {REVIEW_LAST_ROUND}, and has no fix verifier. "
-                      + restart_remedies(h, a.pr, next((e for e in reversed(earlier) if e), None), a.head) + " " + REVIEW_CITE, file=sys.stderr)
+                      + restart_remedies(h, a.pr, earlier[-1], a.head) + " " + REVIEW_CITE, file=sys.stderr)
                 return 2
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
                 last = earlier[-1] if earlier else None
