@@ -961,16 +961,25 @@ def page_form_problem(text, items, homes, pages, session):
 
 
 def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox="", session=None):
-    out, seen = [], {}
+    out, seen, copies, k = [], {}, {}, {}
+    for n, b in enumerate(blocks):
+        copies.setdefault((b["stamp"], norm(b["text"])), []).append(n)
     for n, b in enumerate(blocks):
         text = norm(b["text"])
-        seen[text] = seen.get(text, 0) + 1
-        if not b["items"] and n in burst:
+        # A heading repeated with the same stamp and quote is one message: an item under any copy covers it,
+        # the first copy reports it once, and every copy takes the first copy's place among distinct messages (k).
+        same = copies[(b["stamp"], text)]
+        if n == same[0]:
+            seen[text] = seen.get(text, 0) + 1
+            k[same[0]] = seen[text]
+        k[n] = k[same[0]]
+        if n == same[0] and any(i in burst for i in same) and not any(blocks[i]["items"] for i in same):
             out.append(no_items_problem(b, inbox, homes.homes_line() if homes is not None else ""))
         grant = is_grant(text)
-        for found in (answer_problem(b, text, seen[text], homes, pages),
-                      grant_problem(b, text, [item(ln) for ln in b["items"]]),
-                      page_form_problem(text, [item(ln) for ln in b["items"]], homes, pages, session)):
+        merged = [item(ln) for i in same for ln in blocks[i]["items"]]
+        for found in (answer_problem(b, text, k[n], homes, pages),
+                      grant_problem(b, text, merged) if n == same[0] else None,
+                      page_form_problem(text, merged, homes, pages, session) if n == same[0] else None):
             if found:
                 out.append(found)
         for ln in b["items"]:
@@ -980,11 +989,11 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox="", sessio
             elif not it[2]:
                 out.append("%s needs `[kind] -> home`, kind one of %s" % (it[0], ", ".join(KINDS)))
             elif it[1].startswith("[page]"):
-                found = None if it[3] else page_problem(it[0], it[1], text, seen[text], b["stamp"], pages, homes)
+                found = None if it[3] else page_problem(it[0], it[1], text, k[n], b["stamp"], pages, homes)
                 if found:
                     out.append(found)
             elif it[1].startswith("[repo]"):
-                found = None if it[3] else repo_problem(it[0], it[1], text, seen[text], b["stamp"], pages)
+                found = None if it[3] else repo_problem(it[0], it[1], text, k[n], b["stamp"], pages)
                 if found:
                     out.append(found)
             elif homes is not None and it[1].startswith(("[ruling]", "[task]")):

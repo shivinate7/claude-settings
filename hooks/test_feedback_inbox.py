@@ -81,6 +81,9 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     at later turn ends until it is jotted. The guard keeps its turn state beside the inbox, in
     <session_id>.inbox.turns. With no state file, every captured message counts as this turn's.
   - stop_hook_active true: exit 0, nothing on stdout. It still counts the turn's messages.
+  - A repeated heading is one message. Two blocks with the same stamp and the same text count as
+    one: an item under either copy counts, and a block's reason names the message once. The same
+    text under another stamp, or other text under the same stamp, is another message.
   - No inbox, or an empty inbox: nothing on stdout.
   - A block is {"decision": "block", "reason": ...}. The reason names each offending id, or the
     message by its Central stamp or the start of its text. Offences: a burst message with no
@@ -1060,6 +1063,222 @@ def case_guard_router_home_names_the_tracked_ruling_homes():
           "router.md is not a tracked ruling home" in reason, reason)
     check("router home: the reason names a ruling home path the fixture repo has",
           FIXTURE_RULING_HOME in reason, reason)
+
+
+# --------------------------------------------------------------------------- repeated heading cases
+
+DUP_STAMP = "2026-11-10 16:16 CST (UTC-06:00)"
+DUP_LATER = "2026-11-10 16:18 CST (UTC-06:00)"  # a second message, under another stamp
+DUP_TEXT = ("Two notes for the handoff:\n"
+            "the heading came out twice,\n"
+            "and the item went under the second copy.")
+DUP_OTHER = "A different note\nwith its own second line\nand a third line."
+DUP_ITEM = "- fb-1616-1 [note] -> noted"
+DUP_GRANT = "You have my go-ahead to merge the batch."  # a grant word and an act word: a message that needs a home
+DUP_NOT_A_GRANT_ITEM = "- fb-1616-2 [note] -> not-a-grant"
+DUP_PAGE_ANSWER_ITEM = "- fb-1616-3 [page] -> page:143"  # the page item a chat answer "143 b" is for
+DUP_NOT_PAGE_FORM_ITEM = "- fb-1616-4 [note] -> not-page-form"
+DUP_PAGE_ITEM = "- fb-1616-6 [page] -> page:98"  # sent by DUP_PAGE_SEND, which names 98
+DUP_REPO_ITEM = "- fb-1616-7 [repo] -> repo:acme/widgets"  # sent by DUP_REPO_SEND, which names the repo
+DUP_PAGE_SEND = "Ruling on page item 98: a"
+DUP_REPO_SEND = "Filed the rename in `acme/widgets`"
+
+
+def dup_copies(first_items=(), second_items=(), text=DUP_TEXT):
+    """One message written twice under the same heading and quote. Each copy holds the items under it."""
+    return (render_block(text, header=DUP_STAMP, items=first_items)
+            + render_block(text, header=DUP_STAMP, items=second_items))
+
+
+def case_guard_repeated_heading_item_under_second_copy_passes():
+    """The item is under the second copy. The first copy is the same message, so it needs no item."""
+    cfg, sid = new_cfg(), "dup-second"
+    write_file(inbox_of(cfg, sid), dup_copies(second_items=(DUP_ITEM,)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    expect_silent("dup heading: an item under the second copy passes silently", guard(cfg, sid))
+
+
+def case_guard_repeated_heading_item_under_first_copy_passes():
+    """The item is under the first copy. The second copy is the same message, so it needs no item."""
+    cfg, sid = new_cfg(), "dup-first"
+    write_file(inbox_of(cfg, sid), dup_copies(first_items=(DUP_ITEM,)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    expect_silent("dup heading: an item under the first copy passes silently", guard(cfg, sid))
+
+
+def case_guard_repeated_heading_with_no_items_is_one_message():
+    """Two copies and no items: one message, so the reason names it once."""
+    cfg, sid = new_cfg(), "dup-none"
+    write_file(inbox_of(cfg, sid), dup_copies())
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    p = guard(cfg, sid)
+    expect_block("dup heading: two copies with no items", p)
+    reason = block_reason(p) or ""
+    check("dup heading: the reason names the one message once", reason.count("has no items") == 1, reason)
+
+
+def case_guard_repeated_heading_second_copy_clears_the_next_stop():
+    """The first Stop blocks on the copy with no items. The item then goes under a second copy of the
+    same heading and quote, and the next Stop passes without a second block."""
+    cfg, sid = new_cfg(), "dup-stop"
+    write_file(inbox_of(cfg, sid), render_block(DUP_TEXT, header=DUP_STAMP))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    expect_block("dup stop: the copy with no items blocks at the first Stop", guard(cfg, sid))
+    append_file(inbox_of(cfg, sid), render_block(DUP_TEXT, header=DUP_STAMP, items=(DUP_ITEM,)))
+    expect_silent("dup stop: the next Stop passes once the second copy holds the item", guard(cfg, sid))
+
+
+def case_guard_same_heading_different_quote_is_two_messages():
+    """Control: the same stamp over other text is another message. Its item does not cover the first."""
+    cfg, sid = new_cfg(), "dup-quote"
+    write_file(inbox_of(cfg, sid),
+               render_block(DUP_TEXT, header=DUP_STAMP)
+               + render_block(DUP_OTHER, header=DUP_STAMP, items=(DUP_ITEM,)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    p = guard(cfg, sid)
+    expect_block("dup quote: the same stamp over other text blocks", p)
+    reason = block_reason(p) or ""
+    check("dup quote: the reason names the first message, which has no items",
+          "Two notes for the handoff" in reason, reason)
+
+
+def case_guard_same_quote_different_stamp_is_two_messages():
+    """Control: the same text at another stamp is another message. Its item does not cover the first."""
+    cfg, sid = new_cfg(), "dup-stamp"
+    write_file(inbox_of(cfg, sid),
+               render_block(DUP_TEXT, header=DUP_STAMP)
+               + render_block(DUP_TEXT, header=DUP_LATER, items=(DUP_ITEM,)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    p = guard(cfg, sid)
+    expect_block("dup stamp: the same text at another stamp blocks", p)
+    reason = block_reason(p) or ""
+    check("dup stamp: the reason names the first stamp, which has no items", DUP_STAMP in reason, reason)
+
+
+def case_guard_repeated_grant_item_under_second_copy_passes():
+    """A grant repeated under one heading and quote, with its not-a-grant item under the second copy. The first copy
+    is the same message, so the item gives it a home too."""
+    cfg, sid = new_cfg(), "dup-grant-second"
+    write_file(inbox_of(cfg, sid), dup_copies(second_items=(DUP_NOT_A_GRANT_ITEM,), text=DUP_GRANT))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    expect_silent("dup grant: a not-a-grant item under the second copy passes silently", guard(cfg, sid))
+
+
+def case_guard_repeated_grant_item_under_first_copy_passes():
+    """The same grant with its not-a-grant item under the first copy. The second copy is the same message."""
+    cfg, sid = new_cfg(), "dup-grant-first"
+    write_file(inbox_of(cfg, sid), dup_copies(first_items=(DUP_NOT_A_GRANT_ITEM,), text=DUP_GRANT))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    expect_silent("dup grant: a not-a-grant item under the first copy passes silently", guard(cfg, sid))
+
+
+def dup_page_comment_run(cfg, sid, first_items=(), second_items=()):
+    """Two copies of one waiting-page comment under one heading, the items under each copy, this session as the page
+    writer, and the guard run at a Stop in the claude-settings repo. Returns (root, Proc)."""
+    root = claude_settings_repo()
+    comment = PAGE_COMMENT.format(url=PAGE_CODE_URL, wake=ASKED_WAKE)
+    write_file(inbox_of(cfg, sid), render_block(comment, header=DUP_STAMP, items=first_items)
+               + render_block(comment, header=DUP_STAMP, items=second_items))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    write_transcript(cfg, sid, writer_records(sid))
+    return root, guard(cfg, sid, cwd=root, transcript=transcript_of(cfg, sid))
+
+
+def case_page_form_repeated_comment_not_page_form_under_second_copy_passes():
+    """A waiting-page comment repeated under one heading, with its `[note] -> not-page-form` opt-out under the
+    second copy. The first copy is the same comment, so the opt-out covers it."""
+    cfg, sid = new_cfg(), "dup-pform-second"
+    root, p = dup_page_comment_run(cfg, sid, second_items=(DUP_NOT_PAGE_FORM_ITEM,))
+    name = "dup page form: the not-page-form opt-out under the second copy"
+    if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, ASKED_WAKE), SCOPE_IN):
+        expect_silent(name + " passes silently", p)
+
+
+def case_page_form_repeated_comment_not_page_form_under_first_copy_passes():
+    """The same repeated comment, with the opt-out under the first copy. The second copy is the same comment."""
+    cfg, sid = new_cfg(), "dup-pform-first"
+    root, p = dup_page_comment_run(cfg, sid, first_items=(DUP_NOT_PAGE_FORM_ITEM,))
+    name = "dup page form: the not-page-form opt-out under the first copy"
+    if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, ASKED_WAKE), SCOPE_IN):
+        expect_silent(name + " passes silently", p)
+
+
+def case_chat_answer_repeated_heading_with_page_item_under_second_copy_is_not_blocked():
+    """Control: the chat answer "143 b" repeated under one heading, its page item under the second copy, and a send
+    naming 143 after the owner's record. The send proves the answer, so no copy is blocked."""
+    cfg, sid = new_cfg(), "dup-answer"
+    repo = waiting_repo()
+    write_file(inbox_of(cfg, sid), dup_copies(second_items=(DUP_PAGE_ANSWER_ITEM,), text="143 b"))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    write_transcript(cfg, sid, [owner_rec("143 b"), send_rec("Ruling on page 143: b")])
+    p = guard(cfg, sid, cwd=repo, transcript=transcript_of(cfg, sid))
+    check("dup answer control: a repeated chat answer with its send is not blocked", block_reason(p) is None, p.desc())
+
+
+def dup_send_run(cfg, sid, first_items=(), second_items=(), text=DUP_TEXT, send=None):
+    """Two copies of one message under one heading and quote, the items under each copy. The transcript holds the
+    owner's one record of the message and, when `send` is given, that send after it. Returns the guard's Proc."""
+    write_file(inbox_of(cfg, sid), dup_copies(first_items, second_items, text=text))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    write_transcript(cfg, sid, [owner_rec(text), said_rec("Noted.")] + ([send] if send else []))
+    return guard(cfg, sid, transcript=transcript_of(cfg, sid))
+
+
+def case_dup_page_item_under_second_copy_blocks_without_a_send():
+    """One owner record, no send, and a [page] item under the second copy of a repeated heading. The item belongs to
+    the message, so its send check runs and blocks. On the head the second copy's index is 2, the transcript has one
+    owner record, and the check stands down."""
+    p = dup_send_run(new_cfg(), "dup-send-page-second", second_items=(DUP_PAGE_ITEM,))
+    expect_block("dup send: a page item under the second copy blocks for the missing send", p, named=("fb-1616-6",))
+
+
+def case_dup_repo_item_under_second_copy_blocks_without_a_send():
+    """One owner record, no send, and a [repo] item under the second copy of a repeated heading. Its send check
+    runs and blocks, as the same item under the first copy does."""
+    p = dup_send_run(new_cfg(), "dup-send-repo-second", second_items=(DUP_REPO_ITEM,))
+    expect_block("dup send: a repo item under the second copy blocks for the missing send", p, named=("fb-1616-7",))
+
+
+def case_dup_grant_page_item_under_second_copy_blocks_without_a_send():
+    """A grant with its [page] item under the second copy of a repeated heading, one owner record, no send. The grant
+    has a home in the item, so the block is the page item's missing send."""
+    p = dup_send_run(new_cfg(), "dup-send-grant-second", second_items=(DUP_PAGE_ITEM,), text=DUP_GRANT)
+    expect_block("dup send: a grant with its page item under the second copy blocks for the missing send", p,
+                 named=("fb-1616-6",))
+
+
+def case_dup_page_item_under_first_copy_blocks_without_a_send():
+    """Control: the same [page] item under the first copy blocks for the missing send, with the same record and no send."""
+    p = dup_send_run(new_cfg(), "dup-send-page-first", first_items=(DUP_PAGE_ITEM,))
+    expect_block("dup send control: a page item under the first copy blocks for the missing send", p,
+                 named=("fb-1616-6",))
+
+
+def case_dup_repo_item_under_first_copy_blocks_without_a_send():
+    """Control: the same [repo] item under the first copy blocks for the missing send."""
+    p = dup_send_run(new_cfg(), "dup-send-repo-first", first_items=(DUP_REPO_ITEM,))
+    expect_block("dup send control: a repo item under the first copy blocks for the missing send", p,
+                 named=("fb-1616-7",))
+
+
+def case_dup_grant_page_item_under_first_copy_blocks_without_a_send():
+    """Control: the grant with its [page] item under the first copy blocks for the missing send."""
+    p = dup_send_run(new_cfg(), "dup-send-grant-first", first_items=(DUP_PAGE_ITEM,), text=DUP_GRANT)
+    expect_block("dup send control: a grant with its page item under the first copy blocks for the missing send", p,
+                 named=("fb-1616-6",))
+
+
+def case_dup_items_under_either_copy_are_not_blocked_once_sent():
+    """Control: each item under the second copy, with its send after the owner's record, is not blocked. The head
+    passes this only because the second copy's send check stands down, so the case asserts no block alone."""
+    for label, kwargs, send in (
+            ("a page item", {"second_items": (DUP_PAGE_ITEM,)}, send_rec(DUP_PAGE_SEND)),
+            ("a repo item", {"second_items": (DUP_REPO_ITEM,)}, send_rec(DUP_REPO_SEND)),
+            ("a grant with its page item", {"second_items": (DUP_PAGE_ITEM,), "text": DUP_GRANT},
+             send_rec(DUP_PAGE_SEND))):
+        p = dup_send_run(new_cfg(), "dup-send-sent", send=send, **kwargs)
+        check("dup send control: %s under the second copy, with its send, is not blocked" % label,
+              block_reason(p) is None, p.desc())
 
 
 # --------------------------------------------------------------------------- page cases
@@ -4367,6 +4586,24 @@ CASES = (
     case_guard_apple_tv_burst_names_where_items_go,
     case_guard_burst_heading_after_a_jotted_message_names_its_line,
     case_guard_router_home_names_the_tracked_ruling_homes,
+    case_guard_repeated_heading_item_under_second_copy_passes,
+    case_guard_repeated_heading_item_under_first_copy_passes,
+    case_guard_repeated_heading_with_no_items_is_one_message,
+    case_guard_repeated_heading_second_copy_clears_the_next_stop,
+    case_guard_same_heading_different_quote_is_two_messages,
+    case_guard_same_quote_different_stamp_is_two_messages,
+    case_guard_repeated_grant_item_under_second_copy_passes,
+    case_guard_repeated_grant_item_under_first_copy_passes,
+    case_page_form_repeated_comment_not_page_form_under_second_copy_passes,
+    case_page_form_repeated_comment_not_page_form_under_first_copy_passes,
+    case_chat_answer_repeated_heading_with_page_item_under_second_copy_is_not_blocked,
+    case_dup_page_item_under_second_copy_blocks_without_a_send,
+    case_dup_repo_item_under_second_copy_blocks_without_a_send,
+    case_dup_grant_page_item_under_second_copy_blocks_without_a_send,
+    case_dup_page_item_under_first_copy_blocks_without_a_send,
+    case_dup_repo_item_under_first_copy_blocks_without_a_send,
+    case_dup_grant_page_item_under_first_copy_blocks_without_a_send,
+    case_dup_items_under_either_copy_are_not_blocked_once_sent,
     case_page_send_message_proof_passes,
     case_page_sendmessage_proof_passes,
     case_page_send_with_error_result_does_not_count,
