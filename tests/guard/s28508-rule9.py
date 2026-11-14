@@ -511,6 +511,486 @@ add("brief-claim: an empty brief is allowed", "allow", tool="Agent", prompt="", 
     model="sonnet")
 
 
+# ---- A brief that orders a read-only agent to write a file (rule brief-write-needs-writer, step
+# brief-write-needs-writer). An Agent or Task brief to a read-only type (READ_ONLY in hooks/agent_brief.py: Explore,
+# Plan, refuter, reviewer, design-reviewer, claude-code-guide) is refused when it orders a file write: a save, a create
+# of a file, a tee, a redirect into a path, or the Write tool. The refusal names a remedy: a writer role, or a report of
+# the text. A writer role told to write passes. A read-only agent told to report or read passes, and so does one told
+# never to write. Prose with no file as its object passes, and so does a word that holds a command name inside it
+# ("committee" holds tee). Failure classes: a false deny (a read-only brief that reports, reads or forbids a write, or a
+# writer role's brief), a false allow (a save, create, tee, redirect or Write-tool order to a read-only type, in any case,
+# under a plugin prefix, on line 30 of a brief, after a lone apostrophe or a comment opener). Each deny is red on today's
+# code, where no rule reads a brief for a write. Selector: MUTATE_ONLY=brief-write-needs-writer: runs these cases alone.
+from agent_brief import READ_ONLY  # noqa: E402  the one home of the read-only roles, as the SubagentStart hook reads them
+WRITE_BRIEF = "brief-write-needs-writer"
+WRITE_CANONICAL = "Write the findings to audit.md."
+WRITE_REMEDY = (("record-writer", "builder", "test-author"), "report")   # the refusal names a writer role, or a report
+WRITE_LONG = LONG_BRIEF + "\n" + WRITE_CANONICAL                          # the order sits on line 30 of the brief
+# Each read-only type is given the canonical order. Explore carries the remedy pin, so the other types take the rest.
+add("brief-write-needs-writer: Explore brief that says write the findings to audit.md is denied", "deny",
+    WRITE_BRIEF, tool="Agent", prompt=WRITE_CANONICAL, subagent_type="Explore", carries=WRITE_REMEDY)
+for _role in sorted(READ_ONLY - {"Explore"}):
+    add("brief-write-needs-writer: %s brief that says write the findings to audit.md is denied" % _role, "deny",
+        WRITE_BRIEF, tool="Agent", prompt=WRITE_CANONICAL, subagent_type=_role)
+# The phrasings a mistaken brief uses to order a write. Each is an Explore brief, the type a mistake most often names.
+WRITE_ORDERS = (
+    ("save", "Save the findings to `docs/audit.md`."),
+    ("create a file", "Create a file named audit.md with the findings."),
+    ("tee", "Pipe the findings through `tee audit.md` to keep them."),
+    ("redirect", "Redirect the output: `cat findings.txt > audit.md`."),
+    ("the Write tool", "Use the Write tool to put the findings in audit.md."),
+    ("a redirect in a fence", "Run this first:\n```\necho \"$FINDINGS\" > audit.md\n```"),
+    ("a tee on a line led by $", "Then run:\n$ cat findings.txt | tee audit.md"),
+    ("save as", "Save your findings as audit.md."),
+    ("a path written into", "Write your findings into `docs/audit.md`."),
+    ("a lone apostrophe before the order", "It's late. Write the findings to audit.md."),
+    ("a hash inside the span", "Save the findings to `docs/audit.md#findings`."),
+    ("a comment opener after the order", "Write the findings to audit.md // summary only."),
+)
+for _name, _prompt in WRITE_ORDERS:
+    add("brief-write-needs-writer: Explore brief that orders a write by %s is denied" % _name, "deny",
+        WRITE_BRIEF, tool="Agent", prompt=_prompt, subagent_type="Explore")
+add("brief-write-needs-writer: explore in lower case, with a write order, is denied", "deny",
+    WRITE_BRIEF, tool="Agent", prompt=WRITE_CANONICAL, subagent_type="explore")
+add("brief-write-needs-writer: a plugin-prefixed reviewer with a write order is denied", "deny",
+    WRITE_BRIEF, tool="Agent", prompt=WRITE_CANONICAL, subagent_type="my-plugin:reviewer")
+add("brief-write-needs-writer: a Task spawn of Explore with a write order is denied", "deny",
+    WRITE_BRIEF, tool="Task", prompt=WRITE_CANONICAL, subagent_type="Explore")
+add("brief-write-needs-writer: a write order on line 30 of a long Explore brief is denied", "deny",
+    WRITE_BRIEF, tool="Agent", prompt=WRITE_LONG, subagent_type="Explore")
+# Controls: a writer role told to write passes, on the model its role table names (builder sonnet; test-author and
+# record-writer haiku). A brief with the general-purpose role, or with no role, is no read-only type, so it passes.
+for _role, _model, _prompt in (
+        ("builder", "sonnet", WRITE_CANONICAL),
+        ("test-author", "haiku", "Save the findings to `docs/audit.md`."),
+        ("record-writer", "haiku", "Create a file named docs/audit.md with the findings.")):
+    add("brief-write-needs-writer: %s brief that orders a write is allowed" % _role, "allow",
+        tool="Agent", prompt=_prompt, subagent_type=_role, model=_model)
+add("brief-write-needs-writer: general-purpose brief that orders a write is allowed", "allow",
+    tool="Agent", prompt=WRITE_CANONICAL, subagent_type="general-purpose")
+add("brief-write-needs-writer: Agent brief with no role that orders a write is allowed", "allow",
+    tool="Agent", prompt=WRITE_CANONICAL)
+# Controls: every read-only type told to report, to read, or never to write passes.
+READ_ONLY_CONTROLS = (
+    ("report", "Report the findings in your reply."),
+    ("read and report", "Read audit.md and report what it says."),
+    ("a ban on writing", "Never write a file. Report the findings in your reply."),
+)
+for _role in sorted(READ_ONLY):
+    for _name, _prompt in READ_ONLY_CONTROLS:
+        add("brief-write-needs-writer: %s brief that says %s is allowed" % (_role, _name), "allow",
+            tool="Agent", prompt=_prompt, subagent_type=_role)
+# Controls: prose with no file as the object of a write, a negated order, and a word that holds a command name all
+# pass. Each is a false alarm that a plain word match would raise.
+WRITE_PROSE = (
+    ("a prose write-up", "Write up the findings in your reply."),
+    ("a prose create of a list", "Create a list of the findings in your reply."),
+    ("a word that holds tee", "Check the committee notes and report them."),
+    ("a later save by the record-writer", "Report the findings. The record-writer saves them to audit.md later."),
+    ("a save idiom", "Save time: skip the full suite and report what you read."),
+    ("a negated save", "Do not save anything to disk; report the text."),
+    ("a negated tee", "Don't pipe the output to tee; report it."),
+)
+for _name, _prompt in WRITE_PROSE:
+    add("brief-write-needs-writer: Explore brief with %s is allowed" % _name, "allow",
+        tool="Agent", prompt=_prompt, subagent_type="Explore")
+add("brief-write-needs-writer: Explore brief with an empty prompt is allowed", "allow",
+    tool="Agent", prompt="", subagent_type="Explore")
+# Bypasses and false alarms in the brief-write reader. A bypass is an order the reader lets through: a file named
+# with no path, an article before the file, a verb the reader has no word for (put, redirect, call the Write tool),
+# a path in quotes or bold, a save led by "So", a save in a later clause. Each is denied for an Explore brief, in the
+# Agent and the Workflow form. Its same-shape controls pass: the same order to a builder, and its reply twin, which
+# names no file. A false alarm is prose with a path after a write verb, or a command span whose `>` is no redirect.
+# Each is allowed for an Explore brief, in both forms. Failure classes: a bypass the reader passes, a control a writer
+# role or a reply must keep, and a false deny on a read-only brief.
+WRITE_BYPASS = (
+    ("a file named with no path", "Write the findings to a file.", "Write the findings to your reply."),
+    ("a new file named with no path", "Write your findings to a new file.", "Write your findings to your reply."),
+    ("a markdown file named with no path", "Save the findings to a markdown file.", "Save the findings in your reply."),
+    ("a path after an article", "Write the findings to the file docs/audit.md.",
+     "Write the findings to the lead in your reply."),
+    ("a put into a path", "Put the findings in docs/audit.md.", "Put the findings in your reply."),
+    ("a redirect in prose", "Redirect the output to audit.md.", "Report the output in your reply."),
+    ("a tee in prose", "Pipe the findings through tee audit.md.", "Report the findings in your reply."),
+    ("a Write tool call", "Call the Write tool on audit.md.", "Call the lead on the findings, then report."),
+    ("a redirect target in quotes", "Run `printf x > 'audit.md'` and report.", "Run `printf x` and report."),
+    ("a path in double quotes", 'Write the findings to "audit.md".', 'Write the findings to "the lead".'),
+    ("a path in bold", "Write the findings to **audit.md**.", "Write the findings to **the lead**."),
+    ("a save led by So", "So save the findings to audit.md.", "So report the findings to the lead."),
+    ("a save in a later clause", "Read the spec. When done save the findings to audit.md.",
+     "Read the spec. When done report the findings in your reply."),
+)
+for _name, _order, _reply in WRITE_BYPASS:
+    add("brief-write-needs-writer: Explore brief that orders a write by %s is denied" % _name, "deny",
+        WRITE_BRIEF, tool="Agent", prompt=_order, subagent_type="Explore")
+    add("brief-write-needs-writer: Workflow Explore agent that orders a write by %s is denied" % _name, "deny",
+        WRITE_BRIEF, tool="Workflow", script=_step_flow(json.dumps(_order), "agentType: 'Explore'"))
+    add("brief-write-needs-writer: builder brief with the order by %s is allowed" % _name, "allow",
+        tool="Agent", prompt=_order, subagent_type="builder", model="sonnet")
+    add("brief-write-needs-writer: Workflow builder agent with the order by %s is allowed" % _name, "allow",
+        tool="Workflow", script=_step_flow(json.dumps(_order), "agentType: 'builder', model: 'sonnet'"))
+    add("brief-write-needs-writer: Explore brief with the reply twin of the order by %s is allowed" % _name, "allow",
+        tool="Agent", prompt=_reply, subagent_type="Explore")
+WRITE_FALSE_ALARMS = (
+    ("a table of rules in a repo file", "Make a table of the rules in hooks/guard.py."),
+    ("a reply list of rules in a repo file", "Create a list in your reply of the rules in hooks/guard.py."),
+    ("a reply that cites a repo file", "Write your findings to the lead, citing each rule in hooks/guard.py."),
+    ("a ban on changes to a repo file", "Make no changes to hooks/guard.py. Report only."),
+    ("a ban on writing to a file", "Write nothing to audit.md. Report the findings."),
+    ("a write-up that names a path", "Write-up goes to docs/audit.md, which the record-writer owns."),
+    ("a verdict written as PASS or FAIL", "Write the verdict as PASS/FAIL for the round."),
+    ("a count comparison in a span", "Check that `count > 0` holds, then report."),
+)
+for _name, _prompt in WRITE_FALSE_ALARMS:
+    add("brief-write-needs-writer: Explore brief with %s is allowed" % _name, "allow",
+        tool="Agent", prompt=_prompt, subagent_type="Explore")
+    add("brief-write-needs-writer: Workflow Explore agent with %s is allowed" % _name, "allow",
+        tool="Workflow", script=_step_flow(json.dumps(_prompt), "agentType: 'Explore'"))
+# The reader's holes, pinned both ways, in the Agent and the Workflow form. A false alarm is a read-only brief that
+# names a repo file as what it reports on, plans or compares, with no write in it: it must be allowed. Its control is
+# the same shape with the object sent to a file, which the same read-only role is denied for. A bypass is a write
+# order the reader has no word for (add, record, generate, output, draft, log, update), or a lead-in it does not take
+# (remember, "job is to", "be sure to", should). It must be denied for an Explore brief. Its control is the same order
+# to a builder, a writer role, which is allowed. Failure classes: a false deny on a read-only brief, a bypass the reader
+# passes, and a control a writer role or a read-only role must keep.
+WRITE_FALSE_ALARM_PAIRS = (
+    ("reviewer", "Make sure the rule in docs/decisions/x.md matches the code.",
+     "Make sure the rule is saved to docs/decisions/x.md."),
+    ("reviewer", "Make sure the guard in hooks/guard.py refuses it.",
+     "Make sure the verdict is saved to hooks/guard.py."),
+    ("reviewer", "Make a table listing each rule in hooks/guard.py.",
+     "Make a table listing each rule and save it to audit.md."),
+    ("reviewer", "Write a summary listing the flaws in hooks/guard.py.",
+     "Write a summary listing the flaws to audit.md."),
+    ("reviewer", "Create a list naming each caller in hooks/guard.py.",
+     "Create a list naming each caller and save it to audit.md."),
+    ("reviewer", "Write a report describing each gap in docs/x.md.",
+     "Write a report describing each gap to docs/x.md."),
+    ("reviewer", "Write the callers in hooks/guard.py as a list.",
+     "Write the callers to audit.md as a list."),
+    ("reviewer", "Write what you find in hooks/guard.py in your reply.",
+     "Write what you find to audit.md in your reply."),
+    ("Plan", "Make a plan to add a rule to hooks/guard.py.",
+     "Make a plan and save it to plan.md."),
+    ("Plan", "Write a plan to add a test to tests/guard/a.py.",
+     "Write a plan and save it to plan.md."),
+    ("Plan", "Create a plan to move the check to hooks/guard.py.",
+     "Create a plan and save it to plan.md."),
+    ("reviewer", "Write each finding as file, line, what is wrong.",
+     "Write each finding to audit.md as file, line, what is wrong."),
+    ("reviewer", "Write each finding as file:line plus the failing input.",
+     "Write each finding to audit.md plus the failing input."),
+    ("reviewer", "Write what you found in the file in your reply.",
+     "Write what you found to audit.md in your reply."),
+    ("reviewer", "Check whether `age > max_age` holds.",
+     "Check whether `echo x > audit.md` holds."),
+    ("reviewer", "Check that `len(x) > limit` is true.",
+     "Check that `echo x > audit.md` is true."),
+    ("reviewer", "Write the report in the same shape as docs/report.md.",
+     "Write the report in the same shape and save it to docs/report.md."),
+    ("reviewer", "Make the summary as short as README.md.",
+     "Make the summary and save it to README.md."),
+)
+for _role, _prompt, _order in WRITE_FALSE_ALARM_PAIRS:
+    add("brief-write-needs-writer: false alarm, %s brief, %r, is allowed" % (_role, _prompt), "allow",
+        tool="Agent", prompt=_prompt, subagent_type=_role)
+    add("brief-write-needs-writer: false alarm, Workflow %s agent, %r, is allowed" % (_role, _prompt), "allow",
+        tool="Workflow", script=_step_flow(json.dumps(_prompt), "agentType: '%s'" % _role))
+    add("brief-write-needs-writer: control, %s brief, %r, is denied" % (_role, _order), "deny",
+        WRITE_BRIEF, tool="Agent", prompt=_order, subagent_type=_role)
+    add("brief-write-needs-writer: control, Workflow %s agent, %r, is denied" % (_role, _order), "deny",
+        WRITE_BRIEF, tool="Workflow", script=_step_flow(json.dumps(_order), "agentType: '%s'" % _role))
+WRITE_BYPASS_ORDERS = (
+    "Add your findings to docs/audit.md.",
+    "Record your findings in docs/audit.md.",
+    "Generate a report in docs/audit.md.",
+    "Output the findings to out.txt.",
+    "Draft the plan in plan.md.",
+    "Log each finding to ~/x.md.",
+    "Update docs/audit.md with the findings.",
+    "Remember to write the findings to docs/audit.md.",
+    "Your job is to save the findings to docs/audit.md.",
+    "Be sure to write the findings to notes.md.",
+    "The agent should write the findings to notes.md.",
+)
+for _order in WRITE_BYPASS_ORDERS:
+    add("brief-write-needs-writer: bypass, Explore brief, %r, is denied" % _order, "deny", WRITE_BRIEF,
+        tool="Agent", prompt=_order, subagent_type="Explore")
+    add("brief-write-needs-writer: bypass, Workflow Explore agent, %r, is denied" % _order, "deny", WRITE_BRIEF,
+        tool="Workflow", script=_step_flow(json.dumps(_order), "agentType: 'Explore'"))
+    add("brief-write-needs-writer: control, builder brief, %r, is allowed" % _order, "allow",
+        tool="Agent", prompt=_order, subagent_type="builder", model="sonnet")
+    add("brief-write-needs-writer: control, Workflow builder agent, %r, is allowed" % _order, "allow",
+        tool="Workflow", script=_step_flow(json.dumps(_order), "agentType: 'builder', model: 'sonnet'"))
+# Five debts in the brief-write reader (decision brief-write-needs-writer). Each debt's slug is in its case names. Its
+# red cases fail on today's reader; its controls pass today and must keep passing.
+# brief-write-phrasing-misses: a write phrasing the reader has no word for. Its negated and quoted forms pass.
+PHRASING_MISSES = (
+    ("write a report at a path", "Write a report at docs/review.md."),
+    ("write the report with a colon before the path", "Write the report: docs/review.md."),
+    ("create a file with a report", "Create docs/review.md with your report."),
+    ("an unfenced redirect in prose", "Then run cat findings.txt > audit.md and report."),
+)
+PHRASING_CONTROLS = (
+    ("a negated write a report", "Do not write a report at docs/review.md."),
+    ("a negated write the report", "Do not write the report: docs/review.md."),
+    ("a negated create with a report", "Do not create docs/review.md with your report."),
+    ("a negated unfenced redirect", "Do not run cat findings.txt > audit.md; report it."),
+    ("a quoted write a report", "Quote the phrase `write a report at docs/review.md` as text."),
+    ("a quoted create with a report", "Quote the phrase `create docs/review.md with your report` as text."),
+)
+for _name, _prompt in PHRASING_MISSES:
+    add("brief-write-needs-writer: brief-write-phrasing-misses: Explore brief that orders a write by %s is denied"
+        % _name, "deny", WRITE_BRIEF, tool="Agent", prompt=_prompt, subagent_type="Explore")
+    add("brief-write-needs-writer: brief-write-phrasing-misses: Workflow Explore agent that orders a write by %s is "
+        "denied" % _name, "deny", WRITE_BRIEF, tool="Workflow", script=_step_flow(json.dumps(_prompt), "agentType: 'Explore'"))
+for _name, _prompt in PHRASING_CONTROLS:
+    add("brief-write-needs-writer: brief-write-phrasing-misses control: Explore brief with %s is allowed" % _name,
+        "allow", tool="Agent", prompt=_prompt, subagent_type="Explore")
+    add("brief-write-needs-writer: brief-write-phrasing-misses control: Workflow Explore agent with %s is allowed" % _name,
+        "allow", tool="Workflow", script=_step_flow(json.dumps(_prompt), "agentType: 'Explore'"))
+# brief-write-long-line-cost: one 36 KB line of whole sentences, so the order ends a sentence. The verdicts are the short
+# brief's: deny with the order, allow without it. No clock judges the cost. The count checks after these cases take the
+# reader's work from the characters it slices out of the line, and find that count bounded (decision brief-write-needs-writer).
+LONG_FILLER = "Write, add, make, log and record each note; put it in the list and save the rest. "
+LONG_LINE = LONG_FILLER * (36000 // len(LONG_FILLER))
+add("brief-write-needs-writer: brief-write-long-line-cost: a 36 KB one-line Explore brief that orders a write is denied",
+    "deny", WRITE_BRIEF, tool="Agent", prompt=LONG_LINE + WRITE_CANONICAL, subagent_type="Explore")
+add("brief-write-needs-writer: brief-write-long-line-cost: a 36 KB one-line Explore brief with no order is allowed",
+    "allow", tool="Agent", prompt=LONG_LINE, subagent_type="Explore")
+# The count checks. The line is a str that counts the characters of each slice taken from it. A reader that slices the
+# whole prefix and suffix at each verb grows with the square of the line (about 4x when the line doubles). A reader that
+# slices a 400-char window before each verb grows with the line (about 2x), and stays within four windows a verb. The
+# filler holds seven write verbs (write, add, make, log, record, put, save) in each repeat.
+LONG_LINE_VERBS = ("write", "add", "make", "log", "record", "put", "save")
+LONG_LINE_PER_VERB = 4 * 400
+
+
+class _SlicedText(str):
+    """A line that counts the characters each slice of it returns."""
+
+    sliced = 0
+
+    def __getitem__(self, key):
+        part = str.__getitem__(self, key)
+        self.sliced += len(part)
+        return part
+
+
+def _chars_sliced(guard, line):
+    """The characters _brief_write_orders slices out of `line` while it reads the line."""
+    text = _SlicedText(line)
+    guard._brief_write_orders(text)
+    return text.sliced
+
+
+def long_line_growth_check():
+    """Doubling the line less than triples the characters the reader slices out of it."""
+    guard = _load_guard_module()
+    half = _chars_sliced(guard, LONG_FILLER * (18000 // len(LONG_FILLER)))
+    full = _chars_sliced(guard, LONG_LINE)
+    if not half:
+        return False, "the reader sliced no characters from an 18 KB one-line brief, so there is no count to bound"
+    if full > 2.5 * half:
+        return False, ("the reader sliced %d characters from a 36 KB line and %d from half of it: its reads grow faster "
+                       "than the line" % (full, half))
+    return True, ("the reader sliced %d characters from a 36 KB line and %d from half of it: its reads grow with the line"
+                  % (full, half))
+
+
+def long_line_bound_check():
+    """The reader slices no more than four 400-char windows for each write verb in a 36 KB line."""
+    guard = _load_guard_module()
+    verbs = (36000 // len(LONG_FILLER)) * len(LONG_LINE_VERBS)
+    full = _chars_sliced(guard, LONG_LINE)
+    if full > LONG_LINE_PER_VERB * verbs:
+        return False, ("the reader sliced %d characters for %d write verbs: more than %d a verb"
+                       % (full, verbs, LONG_LINE_PER_VERB))
+    return True, ("the reader sliced %d characters for %d write verbs: within %d a verb"
+                  % (full, verbs, LONG_LINE_PER_VERB))
+
+
+for _label, _check in (
+        ("brief-write-needs-writer: brief-write-long-line-cost: the reader's slices of a 36 KB line grow with the line",
+         long_line_growth_check),
+        ("brief-write-needs-writer: brief-write-long-line-cost: the reader's slices stay within four windows a write verb",
+         long_line_bound_check)):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    FIXTURELESS_CHECKS.add(_check)  # it loads the guard and builds no fixture
+# brief-write-quoted-span-cost: each write verb is tested against every backtick span on its line (the `quoted` test in
+# _brief_write_orders), so the tests grow with the square of the line. The count is the generator steps guard.py takes
+# while it reads a line of repeats of "write `a` ". A bound on the ratio of two lengths is a count, never a clock.
+QUOTED_LINE = "write `a` "
+
+
+def quoted_span_steps(guard, line):
+    """The generator steps guard.py takes while _brief_write_orders reads `line`."""
+    guard_file = guard._brief_write_orders.__code__.co_filename
+    steps = [0]
+
+    def count(frame, event, arg):
+        if event == "call" and frame.f_code.co_name == "<genexpr>" and frame.f_code.co_filename == guard_file:
+            steps[0] += 1
+
+    sys.setprofile(count)
+    try:
+        guard._brief_write_orders(line)
+    finally:
+        sys.setprofile(None)
+    return steps[0]
+
+
+def quoted_span_growth_check():
+    """Doubling the repeats of a quoted span less than triples the generator steps that read the line."""
+    guard = _load_guard_module()
+    half = quoted_span_steps(guard, QUOTED_LINE * 400)
+    full = quoted_span_steps(guard, QUOTED_LINE * 800)
+    if not half:
+        return False, "the reader took no generator step on a 4 KB line of quoted spans, so there is no count to bound"
+    if full > 2.5 * half:
+        return False, ("the reader took %d generator steps on an 8 KB line of quoted spans and %d on a 4 KB one: its span "
+                       "tests grow faster than the line" % (full, half))
+    return True, ("the reader took %d generator steps on an 8 KB line and %d on a 4 KB one: its span tests grow with the line"
+                  % (full, half))
+
+
+LOG_CHECKS_EXTRA.append(("brief-write-needs-writer: brief-write-quoted-span-cost: the reader's span tests grow with the line",
+                         quoted_span_growth_check))
+FIXTURELESS_CHECKS.add(quoted_span_growth_check)  # it loads the guard and builds no fixture
+add("brief-write-needs-writer: brief-write-quoted-span-cost: Explore brief of 4 KB repeats of a quoted span is allowed",
+    "allow", tool="Agent", prompt=QUOTED_LINE * 400, subagent_type="Explore")
+# brief-write-tool-negator: a negator before "the Write tool" passes, and a test named for the tool passes. A use of the
+# tool to save a file still refuses.
+add("brief-write-needs-writer: brief-write-tool-negator: Explore brief that says you may not use the Write tool is allowed",
+    "allow", tool="Agent", prompt="You may not use the Write tool; report in your reply.", subagent_type="Explore")
+add("brief-write-needs-writer: brief-write-tool-negator: Explore brief that says you will not use the Write tool is allowed",
+    "allow", tool="Agent", prompt="You will not use the Write tool.", subagent_type="Explore")
+add("brief-write-needs-writer: brief-write-tool-negator: Explore brief that runs a test named the write tool test is allowed",
+    "allow", tool="Agent", prompt="Run the write tool test in tests/guard/s28508-rule9.py.", subagent_type="Explore")
+add("brief-write-needs-writer: brief-write-tool-negator control: Explore brief that uses the Write tool to save a path is denied",
+    "deny", WRITE_BRIEF, tool="Agent", prompt="Use the Write tool to save docs/a.md", subagent_type="Explore")
+# A bare may or will is no negator: a fix that counts them as one would pass these.
+add("brief-write-needs-writer: brief-write-tool-negator control: Explore brief that may use the Write tool to save a path is denied",
+    "deny", WRITE_BRIEF, tool="Agent", prompt="You may use the Write tool to save docs/a.md.", subagent_type="Explore")
+add("brief-write-needs-writer: brief-write-tool-negator control: Explore brief that will use the Write tool to save a path is denied",
+    "deny", WRITE_BRIEF, tool="Agent", prompt="You will use the Write tool to save docs/a.md.", subagent_type="Explore")
+# brief-write-dotted-word-path: a comparison whose right side is a dotted word is no redirect target. A redirect to a path
+# in a command span still refuses.
+add("brief-write-needs-writer: brief-write-dotted-word-path: Explore brief that keeps a comparison on a dotted word is allowed",
+    "allow", tool="Agent", prompt="Check that the guard keeps `count > total.length` as a comparison.",
+    subagent_type="Explore")
+add("brief-write-needs-writer: brief-write-dotted-word-path control: Explore brief that redirects a span to out.txt is denied",
+    "deny", WRITE_BRIEF, tool="Agent", prompt="Run `echo x > out.txt` and report.", subagent_type="Explore")
+add("brief-write-needs-writer: brief-write-dotted-word-path control: Explore brief that redirects a span to a bare path is denied",
+    "deny", WRITE_BRIEF, tool="Agent", prompt="Run `> docs/a.md` and report.", subagent_type="Explore")
+# A comparison in prose names no target, so a fix that reads ">" in prose must still pass it.
+add("brief-write-needs-writer: brief-write-dotted-word-path control: Explore brief that reports a comparison in prose is allowed",
+    "allow", tool="Agent", prompt="Report whether score > limit holds for each case.", subagent_type="Explore")
+# brief-write-comma-prohibit: a comma inside a negated clause keeps the negator's window. A comma clause with no negator
+# still refuses.
+add("brief-write-needs-writer: brief-write-comma-prohibit: Explore brief that says do not, under any circumstances, write to "
+    "a path is allowed", "allow", tool="Agent", prompt="Do not, under any circumstances, write to docs/audit.md.",
+    subagent_type="Explore")
+add("brief-write-needs-writer: brief-write-comma-prohibit control: Explore brief with an unnegated comma clause that orders a "
+    "write is denied", "deny", WRITE_BRIEF, tool="Agent",
+    prompt="Under any circumstances, write the findings to docs/audit.md.", subagent_type="Explore")
+# A negator before a comma does not cover an order after it: "do not skip" negates the skip, not the write.
+add("brief-write-needs-writer: brief-write-comma-prohibit control: Explore brief that says do not skip the spec, then writes "
+    "a path is denied", "deny", WRITE_BRIEF, tool="Agent",
+    prompt="Do not skip the spec, write the findings to docs/audit.md.", subagent_type="Explore")
+
+
+# A write order whose destination sits past its first verb is still an order when a later verb's reach holds it. The
+# reach is the characters after a write verb that its object and destination may span (BRIEF_WRITE_REACH, 800). Eight
+# repeats of this sentence put " to docs/review.md." 536 characters after the first verb and 67 after the last, with no
+# clause break before the destination. The control is the same repeats with no destination, so it passes for lack of a
+# destination, not for the repeats.
+WRITE_REACH_SENTENCE = "Write a report that lists each finding seen while reading the code"
+add("brief-write-needs-writer: a write order whose destination is 536 chars past its first verb and 67 past its last is denied",
+    "deny",
+    WRITE_BRIEF, tool="Agent", prompt=" ".join([WRITE_REACH_SENTENCE] * 8) + " to docs/review.md.",
+    subagent_type="Explore")
+add("brief-write-needs-writer: the same eight repeats with no destination is allowed", "allow",
+    tool="Agent", prompt=" ".join([WRITE_REACH_SENTENCE] * 8) + ".", subagent_type="Explore")
+# A destination whose extension BRIEF_WRITE_EXTENSIONS does not list reads as no path, so the order to write it passes.
+for _ext in ("notes", "markdown", "text", "out", "ipynb"):
+    add("brief-write-needs-writer: an order to write review.%s is denied" % _ext, "deny", WRITE_BRIEF,
+        tool="Agent", prompt="Write your findings to review.%s." % _ext, subagent_type="Explore")
+# A comparison whose right side is a dotted word names no destination. `log` is on BRIEF_WRITE_EXTENSIONS, so the reader
+# takes self.log for a file and refuses the comparison; the count case is the control that a dotted word passes.
+add("brief-write-needs-writer: a comparison `count > total.length` is allowed", "allow", tool="Agent",
+    prompt="`count > total.length`", subagent_type="Explore")
+add("brief-write-needs-writer: a comparison `size > self.log` is allowed", "allow", tool="Agent",
+    prompt="`size > self.log`", subagent_type="Explore")
+# A tool's results are no tool use. "Use the Write tool results to save docs/x.md." orders a save to docs/x.md.
+add("brief-write-needs-writer: the Write tool results named before a save order is denied", "deny", WRITE_BRIEF,
+    tool="Agent", prompt="Use the Write tool results to save docs/x.md.", subagent_type="Explore")
+# The two orders above in a Workflow agent. Their Agent forms are the brief-write-tool-negator and the
+# brief-write-comma-prohibit cases above, so these pin the Workflow form of the same text.
+add("brief-write-needs-writer: Workflow Explore agent that runs the write tool test in a file is allowed", "allow",
+    tool="Workflow",
+    script=_step_flow(json.dumps("Run the write tool test in tests/guard/s28508-rule9.py."), "agentType: 'Explore'"))
+add("brief-write-needs-writer: Workflow Explore agent that says do not, under any circumstances, write to a path is allowed",
+    "allow", tool="Workflow",
+    script=_step_flow(json.dumps("Do not, under any circumstances, write to docs/audit.md."), "agentType: 'Explore'"))
+
+
+# ---- Markup, comparisons and quoted text in prose (decision brief-write-needs-writer, the prose redirect). A `>` that
+# closes a tag, a comparison whose right side holds a slash, and text in quotes name no file to write.
+add("brief-write-needs-writer: prose markup: Explore brief with <Button variant=\"primary\">Save</Button> is allowed",
+    "allow", tool="Agent", prompt='Check <Button variant="primary">Save</Button> reads well.', subagent_type="Explore")
+add("brief-write-needs-writer: prose markup: Explore brief with <a href=\"https://x.io/a\">Docs</a> is allowed",
+    "allow", tool="Agent", prompt='<a href="https://x.io/a">Docs</a>', subagent_type="Explore")
+add("brief-write-needs-writer: prose comparison: Explore brief with if latency > budget/2 is allowed", "allow",
+    tool="Agent", prompt="Check that if latency > budget/2 holds.", subagent_type="Explore")
+add("brief-write-needs-writer: prose redirect control: Explore brief with cat v > audit.md is denied", "deny",
+    WRITE_BRIEF, tool="Agent", prompt="cat v > audit.md", subagent_type="Explore")
+# A quote mark that pairs with no other is text, and a real redirect after it still refuses. A second apostrophe after
+# the redirect must not pair with the first and hide it. A comment opener inside quotes opens nothing.
+add("brief-write-needs-writer: lone quote: Explore brief with <p>Don't</p> then a prose redirect is denied", "deny",
+    WRITE_BRIEF, tool="Agent", prompt="Check <p>Don't</p>. Then run cat v > audit.md", subagent_type="Explore")
+add("brief-write-needs-writer: lone quote: Explore brief with a prose redirect between two apostrophes is denied", "deny",
+    WRITE_BRIEF, tool="Agent", prompt="Check <p>Don't</p>. Then run cat v > audit.md, and it's done.",
+    subagent_type="Explore")
+add("brief-write-needs-writer: comment opener in quotes: Explore brief with a // in quotes then a prose redirect is denied",
+    "deny", WRITE_BRIEF, tool="Agent", prompt='Say "a // b" then run cat v > audit.md', subagent_type="Explore")
+add("brief-write-needs-writer: comment opener in quotes: Explore brief with a /* in quotes then a prose redirect is denied",
+    "deny", WRITE_BRIEF, tool="Agent", prompt='Say "a /* b" then run cat v > audit.md', subagent_type="Explore")
+# A receiver's attribute after a comparison is no file: `size > self.log` passes (decision brief-write-needs-writer).
+# Each receiver below is read as an attribute, so a reader that drops one of them refuses its comparison.
+add("brief-write-needs-writer: receiver attribute: Explore brief with size > self.log in prose is allowed", "allow",
+    tool="Agent", prompt="Check that size > self.log holds.", subagent_type="Explore")
+add("brief-write-needs-writer: receiver attribute: Explore brief with size > this.count in prose is allowed", "allow",
+    tool="Agent", prompt="Check that size > this.count holds.", subagent_type="Explore")
+add("brief-write-needs-writer: receiver attribute: Explore brief with size > this.log in prose is allowed", "allow",
+    tool="Agent", prompt="Check that size > this.log holds.", subagent_type="Explore")
+add("brief-write-needs-writer: receiver attribute: Explore brief with size > cls.log in prose is allowed", "allow",
+    tool="Agent", prompt="Check that size > cls.log holds.", subagent_type="Explore")
+# The reach is 800 characters after a write verb (BRIEF_WRITE_REACH). A destination whose path ends inside it is read, and
+# one whose first word starts past it is not, with no clause mark between them (decision brief-write-needs-writer, Limits).
+# The mark after the destination makes a reach that searched past 800 for a clause end read it, so it is the kill case.
+add("brief-write-needs-writer: reach edge: a destination whose path ends 798 chars after its verb is denied", "deny",
+    WRITE_BRIEF, tool="Agent", prompt="Write " + "zeta " * 157 + "to docs/a.md.", subagent_type="Explore")
+add("brief-write-needs-writer: reach edge: a destination that starts 801 chars after its verb is allowed (documented limit)",
+    "allow", tool="Agent", prompt="Write " + "zeta " * 160 + "to docs/a.md.", subagent_type="Explore")
+# Mutant kills. Each case is green on this code and turns red under one mutant of the reader (a scratch copy with one
+# change, the selector in its name). The allow cases are passes the decision records: a compose verb's "at" with four
+# words before it, or an object after "on", reads as a topic; a tool's results are a noun; a colon needs an output noun
+# before it; a `>` at a line start is a quote mark.
+add("brief-write-needs-writer: at word cap: Explore brief, Write the full review report at docs/review.md, is allowed",
+    "allow", tool="Agent", prompt="Write the full review report at docs/review.md", subagent_type="Explore")
+add("brief-write-needs-writer: at stop words: Explore brief, Write notes on gaps at docs/gaps.md, is allowed",
+    "allow", tool="Agent", prompt="Write notes on gaps at docs/gaps.md", subagent_type="Explore")
+add("brief-write-needs-writer: Write tool noun: Explore brief, Use the Write tool results to read the spec, is allowed",
+    "allow", tool="Agent", prompt="Use the Write tool results to read the spec", subagent_type="Explore")
+add("brief-write-needs-writer: won't negator: Explore brief, You won't use the Write tool to save docs/a.md., is allowed",
+    "allow", tool="Agent", prompt="You won't use the Write tool to save docs/a.md.", subagent_type="Explore")
+add("brief-write-needs-writer: colon noun: Explore brief, Make the change: hooks/guard.py, is allowed",
+    "allow", tool="Agent", prompt="Make the change: hooks/guard.py", subagent_type="Explore")
+add("brief-write-needs-writer: line-start quote: Explore brief, > docs/x.md holds the audit notes., is allowed",
+    "allow", tool="Agent", prompt="> docs/x.md holds the audit notes.", subagent_type="Explore")
+
+
 # ---- A spawn's brief that orders a discard of the working tree (rule brief-destructive-git, rule
 # shared-trees-no-destructive-git). An Agent, Task or Workflow brief is denied when a command span in it is one that
 # shared_tree_match reads as a discard: a backtick span, a fenced line, or a line led by "$ ". A negation before the
@@ -734,6 +1214,40 @@ add("brief-destructive-git: control, a never over an earlier span still covers t
 add("brief-destructive-git: control, builder brief that says `git reset --hard origin/main` is refused is denied", "deny",
     BRIEF_DESTRUCTIVE, tool="Agent", prompt="Confirm `git reset --hard origin/main` is refused.",
     subagent_type="builder", model="sonnet")
+
+
+# A comma aside inside a negator's clause. "No, really, run a reset" is an order, so the negator must not cover it.
+# "Do not, under any circumstances, run a reset" is a prohibition, so the same aside keeps its negator. Each order pins
+# the reader's side of the comma split, and each prohibition pins the other side. The no-span case reads no command, so
+# it passes whatever the scan does with a span, and it pins that prose with no span stays unread.
+add("brief-destructive-git: a negator with a comma aside, No, read the files, and run a reset, is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="No, read the files, and run `git reset --hard origin/main`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a negator with two comma asides, No, really, run a reset, is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="No, really, run `git reset --hard`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a prohibition with a comma aside, Do not, under any circumstances, run a reset, is allowed",
+    "allow", tool="Agent", prompt="Do not, under any circumstances, run `git reset --hard`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a prohibition with a comma aside and a span, Never, ever, run a reset, is allowed",
+    "allow", tool="Agent", prompt="Never, ever, run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a prohibition with a comma aside and no span, Never, ever, run git reset --hard, is allowed",
+    "allow", tool="Agent", prompt="Never, ever, run git reset --hard", subagent_type="builder", model="sonnet")
+# An order after a colon starts a new clause, so the prohibition before the colon does not cover it. This case pins that
+# an order after "Do not, at any time, skip it:" is denied. Debt brief-discard-colon-window (a window that crosses a
+# colon) covers the form without an aside, where "Do not skip it: run ..." passes.
+add("brief-destructive-git: colon ends a prohibition: builder brief, do not, at any time, skip it: run a reset, is denied",
+    "deny", BRIEF_DESTRUCTIVE, tool="Agent", prompt="Do not, at any time, skip it: run `git reset --hard`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: never forget to run: builder brief, never, ever, forget to run a reset, is denied",
+    "deny", BRIEF_DESTRUCTIVE, tool="Agent", prompt="Never, ever, forget to run `git reset --hard`",
+    subagent_type="builder", model="sonnet")
+# A prohibition whose aside is at any time or at all keeps its negator's window (the closed list in decision
+# brief-destructive-git). Each is green on this code and turns red under one mutant that drops the aside from the list.
+add("brief-destructive-git: aside at any time: builder brief, do not, at any time, run a reset, is allowed", "allow",
+    tool="Agent", prompt="Do not, at any time, run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: aside at all: builder brief, do not, at all, run a reset, is allowed", "allow",
+    tool="Agent", prompt="Do not, at all, run `git reset --hard`.", subagent_type="builder", model="sonnet")
 
 
 # The owner's override lifts this refusal the way it lifts an Opus spawn's (decision owner-override): a one-act override

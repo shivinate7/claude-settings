@@ -3316,6 +3316,23 @@ MUTATIONS = [
      "                if match and match[1] not in BRIEF_DESTRUCTIVE_SKIP",
      "                if False and match and match[1] not in BRIEF_DESTRUCTIVE_SKIP",
      "guard", "brief-destructive-git: builder brief that orders `git reset --hard origin/main` is denied"),
+    # Rule brief-write-needs-writer: the check reads no brief for a write, so an ordered write passes.
+    ("brief-write: the check judges no read-only role, so a write order to Explore passes",
+     "or role not in read_only:\n            continue\n        for command, before, covered in _brief_commands(prompt):\n"
+     "            if not covered and not BRIEF_DESTRUCTIVE_CASE_DATA",
+     "or True:\n            continue\n        for command, before, covered in _brief_commands(prompt):\n"
+     "            if not covered and not BRIEF_DESTRUCTIVE_CASE_DATA",
+     "guard", "brief-write-needs-writer: Explore brief that says write the findings to audit.md is denied"),
+    ("brief-write: the command reading finds no tee or redirect",
+     "            if not _brief_write_target_ok(match.group(1)):\n                return command",
+     "            if False:\n                return command",
+     "guard", "brief-write-needs-writer: Explore brief that orders a write by tee is denied"),
+    ("brief-write: a writer role is judged too",
+     " or role not in read_only:\n            continue\n        for command, before, covered in _brief_commands(prompt):\n"
+     "            if not covered and not BRIEF_DESTRUCTIVE_CASE_DATA",
+     ":\n            continue\n        for command, before, covered in _brief_commands(prompt):\n"
+     "            if not covered and not BRIEF_DESTRUCTIVE_CASE_DATA",
+     "guard", "brief-write-needs-writer: builder brief that orders a write is allowed"),
     # Rule brief-claim-has-probe: one mutant per edge the cases pin.
     ("brief-claim: the check never fires, so an unprobed claim about main passes",
      '    return brief_claim_gaps(tool_input.get("prompt"))',
