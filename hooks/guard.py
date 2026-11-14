@@ -101,6 +101,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        stage's, and a filter can cut verdict's FAIL line.
   background-end       deny. A background command with no end note. (background-needs-end-note)
   check-tail           deny. A named check piped into tail or head. (background-check-through-verdict)
+  check-timeout        deny. A `merge --lane-lint` run in the foreground, or in the background under a
+                       time limit below its bound. (background-check-through-verdict)
   playwright-browsers-path, playwright-install
                        deny. (playwright-browsers-path, playwright-install-once)
   rm-var-unguarded     deny. A recursive delete under an unguarded variable.
@@ -368,6 +370,11 @@ Other tools, in `judge` order:
                        `model` or no `source_url`; a value that is not text, or is empty or only whitespace once
                        stripped, counts as missing. A call with no lane tag passes. The deny reason names both
                        fields. Runs after lane-repo-tag. An override lifts it. (agent-model-cap)
+  lane-title-slug      deny. A `create_session` call with a lane tag (as for lane-effort-pin) whose `title` does
+                       not open, after leading blanks, with LANE_TITLE_OPENING (shared_names), cut from the
+                       form LANE_TITLE_FORM the deny reason prints: `Lane <branch slug>:`. A missing, empty or
+                       non-text title is refused. A call with no lane tag passes. Runs after lane-start-settings.
+                       An override lifts it. (agent-model-cap)
   load-brake           deny. On a local session, a lane-start call, an agent's shell or file write, or a lane
                        session's own shell or file write, when the machine is busy (lane starts only) or full. A
                        lane session is one whose own newest get_session record carries `cs-build:lane` and no other
@@ -608,9 +615,9 @@ while True:
         from guard_argv import PROCESS_ARGS_REASON, process_args_hit
         _loading = "guard_stream"
         from guard_stream import (
-            BACKGROUND_END_REASON, CHECK_TAIL_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
+            BACKGROUND_END_REASON, CHECK_TAIL_REASON, CHECK_TIMEOUT_TEMPLATE, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
             NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, UV_VALUE_FLAGS, VERDICT_PIPE_REASON, WAITER_REASON,
-            background_end_hit, check_tail_hit, live_stream_hit, ln_descends_hit,
+            background_end_hit, check_tail_hit, check_timeout_hit, check_timeout_limit_text, live_stream_hit, ln_descends_hit,
             loop_condition_polls_a_pattern, narrated_tail_hit, verdict_pipe_hit, waiter_verdict,
         )
         _loading = "guard_rm_var"
@@ -2917,7 +2924,7 @@ AGENT_NO_REMOTE_REASON = (
     "that. Finish your own work and put the request in your report so that session can act on it. "
     "(decision lanes-start-as-agents, an agent is not a lane)"
 )
-from shared_names import LANE_TAG, grant_line_holds_words  # noqa: E402  the one home of the lane tag and the Grant reader, shared with guard_merge
+from shared_names import LANE_TAG, LANE_TITLE_EXAMPLE_OPENING, LANE_TITLE_FORM, LANE_TITLE_OPENING, grant_line_holds_words  # noqa: E402  the one home of the lane tag, the lane title form and the Grant reader, shared with guard_merge
 LANE_EFFORT_REASON = (
     "A lane starts with the effort field set to `%s` and the whole brief as its prompt. The prompt's "
     "first non-blank line is `Grant: <the grant>, <time>`, the owner's grant that starts this lane. Set the "
@@ -2934,6 +2941,14 @@ LANE_START_SETTINGS_REASON = (
     "A lane's start names `model` and `source_url`. With no repo a lane has nothing to work in; with no "
     "model it starts on the coordinator's model, not the model its row in decision agent-model-cap names. Pass "
     "`model` (the model that row names) and `source_url` (the repo) on create_session."
+)
+# A template: %s is the title form, LANE_TITLE_FORM, so the remedy and the check read one string.
+LANE_TITLE_REASON = (
+    "A lane's title opens with `%s`, where the slug is the lane's branch slug, then the task: for example "
+    "`%s fix the thing`. The slug is lower-case letters and digits joined by single hyphens, so a branch with an "
+    "underscore or a capital needs those changed in the title. The owner's session list shows that title, so it "
+    "tells him which branch a lane runs. Set `title` on create_session (decision agent-model-cap, The lane title)."
+    % (LANE_TITLE_FORM, LANE_TITLE_EXAMPLE_OPENING)
 )
 # A repo tag with no origin to compare to: the full form, one owner and one name.
 FULL_REPO_TAG = re.compile(r"[^/\s]+/[^/\s]+")
@@ -3112,6 +3127,20 @@ def lane_start_settings_hit(tool: str, tool_input) -> str:
     missing = [k for k in ("model", "source_url")
                if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]
     return ", ".join(missing)
+
+
+def lane_title_hit(tool: str, tool_input) -> str:
+    """The title of a lane `create_session` call that does not open with LANE_TITLE_FORM, as "(none)" when it is not
+    text or is empty, else its first 80 characters; "" when it opens right. The opening is read by
+    LANE_TITLE_OPENING, after leading blanks. A lane tag is judged as in lane_effort_hit; a call with no lane tag, and
+    start_session (which has no tags), is not judged."""
+    if not is_lane_create_session(tool, tool_input):
+        return ""
+    title = tool_input.get("title")
+    text = title.strip() if isinstance(title, str) else ""
+    if LANE_TITLE_OPENING.match(text):
+        return ""
+    return text[:80] or "(none)"
 
 
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
@@ -4403,7 +4432,8 @@ def refuse_ready_page(tool: str, tool_input: dict, command: str, where: str) -> 
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", agent: bool = False,
-                background: bool = False, description: str = "", payload=None) -> None:
+                background: bool = False, description: str = "", payload=None,
+                timeout_ms=None) -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
     PENDING_ASK.clear()
     stripped = strip_heredoc_bodies(raw)
@@ -4652,6 +4682,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = check_tail_hit(stripped, background)
     if matched:
         refuse(tool, "deny", "check-tail", CHECK_TAIL_REASON, matched)
+    matched = check_timeout_hit(stripped, background, timeout_ms)
+    if matched:
+        refuse(tool, "deny", "check-timeout", CHECK_TIMEOUT_TEMPLATE % check_timeout_limit_text(), matched)
     matched = background_end_hit(split_segments(stripped), background, description)
     if matched:
         refuse(tool, "deny", "background-end", BACKGROUND_END_REASON, matched)
@@ -6859,6 +6892,12 @@ def judge(payload) -> None:
     if lane_missing:
         refuse(tool, "deny", "lane-start-settings", LANE_START_SETTINGS_REASON, lane_missing)
 
+    # 9b2d. The lane title: a lane's title opens with `Lane <branch slug>:`. After the start settings, so a call
+    # that breaks both reads the settings first. An override lifts it.
+    lane_title = lane_title_hit(tool, tool_input)
+    if lane_title:
+        refuse(tool, "deny", "lane-title-slug", LANE_TITLE_REASON, lane_title)
+
     # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
     # The override lifts the above-row refusal and never the no-model one (never_lifted).
     # An unread table or agent folder passes and logs one line. Opus is judged at 9d.
@@ -7015,7 +7054,7 @@ def judge(payload) -> None:
                         transcript if isinstance(transcript, str) else "",
                         bool(payload.get("agent_id") or payload.get("agent_type")),
                         tool_input.get("run_in_background") is True,
-                        tool_input.get("description") or "", payload)
+                        tool_input.get("description") or "", payload, tool_input.get("timeout"))
             segments = split_segments(strip_heredoc_bodies(command))
             matched = next((hit for seg in segments if (hit := sim_bypass_hit(seg))), "")
             if matched:

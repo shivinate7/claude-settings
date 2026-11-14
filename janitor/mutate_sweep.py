@@ -271,7 +271,7 @@ MUTATIONS = [
      '    own_lock = False\n'
      '    if entry.get("locked_reason") is not None:\n'
      '        holder = entry.get("locked_reason") or "locked"\n'
-     '        stale_agent_lock = stale_agent_lock_verdict(holder)\n'
+     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock)\n'
      '        if stale_agent_lock is not True:\n'
      '            own_lock = (own_lock_rule and own_agent_lock_verdict(holder) is True\n'
      '                        and (not fast or batch is not None)\n'
@@ -297,7 +297,7 @@ MUTATIONS = [
      '    own_lock = False\n'
      '    if entry.get("locked_reason") is not None:\n'
      '        holder = entry.get("locked_reason") or "locked"\n'
-     '        stale_agent_lock = stale_agent_lock_verdict(holder)\n'
+     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock)\n'
      '        if stale_agent_lock is not True:\n'
      '            own_lock = (own_lock_rule and own_agent_lock_verdict(holder) is True\n'
      '                        and (not fast or batch is not None)\n'
@@ -314,6 +314,17 @@ MUTATIONS = [
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}',
      "test_refusal_unreadable_subject_worktree",
      "posix"),
+    # only_on="linux": AgentEndDeadHostLockTests is skipped off Linux (the live lock's start ticks are
+    # read from /proc), so this suite's case cannot prove this mutant on Windows or macOS.
+    # The finish gate on a live-form lock whose host is dead (decision when-a-worktree-may-be-removed,
+    # the finished-agent section). The ungated verdict frees such a lock with no proof of the finish,
+    # and a general sweep reaps the tree with a shell the agent may have left inside.
+    ("finish gate: a dead host's live lock frees its tree with no finish proof (ungated verdict)",
+     "sweep",
+     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock)\n',
+     '        stale_agent_lock = stale_agent_lock_verdict(holder)\n',
+     "test_a_dead_host_live_lock_with_no_stop_row_keeps_the_tree",
+     "linux"),
 
     # ---- the keep rule, both directions (plan, "Phase 2") ----
     ("keep rule: the ancestry test never proves a branch empty",
@@ -662,6 +673,16 @@ MUTATIONS = [
      'AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")',
      'AGENT_ID = re.compile(r"^.{1,64}$")',
      "test_an_unsafe_or_unknown_agent_id_names_nothing"),
+    # only_on="linux": the proving case is in AgentEndDeadHostLockTests, skipped off Linux (/proc).
+    # `_restore_cut_short` reads the finish proof for a locked tree: a cut-short removal under a dead
+    # host's lock is written back only when the agent is proven finished. Passing False reads every
+    # such tree as unproven, so the half-removed tree is never restored and stays dirty.
+    ("cut-short restore: a finished dead-host tree is not restored (the finish proof is read as absent)",
+     "sweep",
+     '            entry.get("locked_reason") or "", bool(entry.get("finished"))) is not True):\n',
+     '            entry.get("locked_reason") or "", False) is not True):\n',
+     "test_a_cut_short_finished_dead_host_tree_is_restored_by_the_next_end",
+     "linux"),
     # `decide_listener`'s own three refusals, same shape as the branch/worktree refusals
     # above: each one is a keep this sweep must never lose, proven by mutating it out and
     # watching a REAL fixture listener (janitor/test_sweep.py's ListenerDecisionTests, a real
@@ -1448,7 +1469,7 @@ def mutation_parts(entry):
     fifth field the same way hooks/mutate_guard.py's mutation_parts does: a mutation with no
     required case name is as unproven as one that dies wrong, so it is refused outright.
 
-    `only_on` is a SIXTH, optional field: "posix" or "windows", for a mutation whose one
+    `only_on` is a SIXTH, optional field: "posix", "windows" or "linux", for a mutation whose one
     proving case cannot be driven on the other platform. Absent on every other entry, which
     runs everywhere as before. Same shape as hooks/mutate_guard.py's own `only_on`."""
     if len(entry) not in (5, 6):
