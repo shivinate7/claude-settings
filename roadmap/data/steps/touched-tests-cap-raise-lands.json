@@ -1,7 +1,7 @@
 {
  "id": "touched-tests-cap-raise-lands",
  "title": "The lane-touched-tests run cap raise (PR #3279, 10 to 30 minutes) reaches main, so a long touched-test list stops cancelling lane lint",
- "status": "ready",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Lane brief-from-step 00:41 CST Nov 14 (relayed) and triage REST read 00:41: PR #3261 cancelled at the 10-minute cap on Windows in \"Run the touched tests\" on both attempts of run 43564835961 (9:47 and 9:48), after three earlier cancels in \"Run the touched PowerShell tests\"; the coordinator said to file a step if the re-run cancels again. PR #3279 (cap to 30 min, stopgap) is an open draft, mergeable clean, head d2ec69cf206, on the coordinator's leave-out list of #3363, which is closed unmerged.",
  "source": "Lane message 00:41 CST and coordinator 00:26 CST Nov 14 (relayed); PR #3279 and #3363 read by triage through the GitHub API. Related: lane-touched-tests-cap-cancels and lane-touched-tests-windows-cap (both folded); decision ci-job-caps (a job that ends at its cap with no red step is re-capped).",
- "note": "Triage 00:41 CST Nov 14: #3279 has no fold carrying it. It goes to a batch (runner 10 chooses the fold) or is rebuilt on main, then lane lint on #3261 re-runs. Why it was left out of #3363 is unread: the PR text says the leave-list members conflict with each other or with main, and #3279 reads mergeable clean now. A lane builds nothing new; this is a merge-queue step, with a review record already behind #3279 (R9). Not started; the coordinator or runner 10 places it.",
- "updatedAt": "2026-11-14T00:41:20-06:00"
+ "note": "Triage 00:41 CST Nov 14: #3279 has no fold carrying it. It goes to a batch (runner 10 chooses the fold) or is rebuilt on main, then lane lint on #3261 re-runs. Why it was left out of #3363 is unread: the PR text says the leave-list members conflict with each other or with main, and #3279 reads mergeable clean now. A lane builds nothing new; this is a merge-queue step, with a review record already behind #3279 (R9). Not started; the coordinator or runner 10 places it. DONE 02:13 CST Nov 14: PR #3279 (raise the lane-touched-tests run cap to 30 min, stopgap) merged at 02:09 CST Nov 14 (REST: merged_at 2026-11-14T08:09:18Z, 4 commits, 2 files, +6 -5; merged_by the owner account). Runner 10 gives main 15e889991aef. The merge tool printed two prose-judge notes for a lane: docs/debts/windows-shards-outgrow-caps.md lines 3 and 6 have unbacked cites. The PR body names debt-for-owner lines at docs/debts/notes.md:2021 and :2026 that still say this job has a 60 min cap.",
+ "updatedAt": "2026-11-14T02:13:00-06:00"
 }
