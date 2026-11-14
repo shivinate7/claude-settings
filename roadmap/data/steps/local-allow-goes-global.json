@@ -1,14 +1,14 @@
 {
  "id": "local-allow-goes-global",
  "title": "A session that writes an allow rule to settings.local.json is asked whether it belongs in the shared settings.json",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL2mJoAeFDsLisvHPEE",
  "owner": "triage",
  "blockedBy": [],
  "why": "Owner asks whether sessions add permission allowances to local settings when they should be global.",
  "source": "Consultant 20:20 CST Nov 13, from the owner's chat 20:16; unmeasured, since cloud sessions' local files are not readable from there.",
- "note": "Filed 20:17 CST Nov 13. Owner 20:16 CST Nov 13 (relayed): sessions may add allowances locally that should be global. Unmeasured: how often it happens. Fix: when a session writes an allow rule to settings.local.json, a guard asks whether it belongs in the shared settings.json and routes it to a lane PR. A guard; the lane measures first (read settings.local.json files that are readable), then test-author red case, builder, reviewer. Needs a lane.",
- "updatedAt": "2026-11-13T20:17:22-06:00"
+ "note": "Filed 20:17 CST Nov 13. Owner 20:16 CST Nov 13 (relayed): sessions may add allowances locally that should be global. Unmeasured: how often it happens. Fix: when a session writes an allow rule to settings.local.json, a guard asks whether it belongs in the shared settings.json and routes it to a lane PR. A guard; the lane measures first (read settings.local.json files that are readable), then test-author red case, builder, reviewer. Needs a lane. Lane started 20:18 CST Nov 13 (coordinator): session_013NEJL2mJoAeFDsLisvHPEE (Sonnet, medium; searches open PRs for a duplicate first).",
+ "updatedAt": "2026-11-13T20:19:05-06:00"
 }

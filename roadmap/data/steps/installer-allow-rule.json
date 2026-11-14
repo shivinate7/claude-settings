@@ -1,14 +1,14 @@
 {
  "id": "installer-allow-rule",
  "title": "One shared allow entry lets every session run the session-start installer mid-session",
- "status": "doing",
+ "status": "folded",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "session_013NEJL3YNCiqjptXwDXqVrt",
+ "lane": "",
  "owner": "triage",
  "blockedBy": [],
  "why": "The auto-mode classifier refused a mid-session reinstall in the coordinator and runner 10 at 20:12-20:13; both kept the old copy.",
  "source": "Coordinator 20:17 CST Nov 13, from the owner's chat 20:16 relayed by the consultant (unverified by the coordinator and by triage).",
- "note": "Filed 20:18 CST Nov 13. Owner ruling a (ruling own-reinstall-allow-a): one autoMode.allow entry in the shared settings.json, everywhere, for exactly the session-start installer command and the install.sh and install.ps1 forms, never in settings.local.json. Lane installer-allow-rule (session_013NEJL3YNCiqjptXwDXqVrt, Sonnet, medium; red test first; guard or check: yes) started 20:17 CST. Search found no earlier step or open PR (coordinator 20:17). It joins the combined PR only after its own lane lint passes. Folded in: step reinstall-from-stable-allow (triage's duplicate of the same ask).",
- "updatedAt": "2026-11-13T20:18:12-06:00"
+ "note": "Filed 20:18 CST Nov 13. Owner ruling a (ruling own-reinstall-allow-a): one autoMode.allow entry in the shared settings.json, everywhere, for exactly the session-start installer command and the install.sh and install.ps1 forms, never in settings.local.json. Lane installer-allow-rule (session_013NEJL3YNCiqjptXwDXqVrt, Sonnet, medium; red test first; guard or check: yes) started 20:17 CST. Search found no earlier step or open PR (coordinator 20:17). It joins the combined PR only after its own lane lint passes. Folded in: step reinstall-from-stable-allow (triage's duplicate of the same ask). Triage 20:19 CST Nov 13: duplicate; the coordinator renamed the lane's tag to reinstall-from-stable-allow. Folded there.",
+ "updatedAt": "2026-11-13T20:19:05-06:00"
 }

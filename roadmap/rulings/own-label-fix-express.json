@@ -1,0 +1,10 @@
+{
+  "id": "own-label-fix-express",
+  "at": "2026-11-13T20:18:00-06:00",
+  "title": "The widening-label fix comes at express speed, top of the build order",
+  "ruling": "Owner 20:18 CST Nov 13, relayed by the consultant (chat; triage did not see it), about step question-form-widens-label: express speed, top of the build order. The coordinator started its lane 20:18 CST.",
+  "quote": "ensure this fix comes express speed please",
+  "source": "Consultant 20:21 CST Nov 13 (quoting the owner's chat 20:18 CST); filed by triage.",
+  "status": "open",
+  "step": "question-form-widens-label"
+}
