@@ -43,6 +43,7 @@ LT_BADJSON = lt_config("badjson", {LT_SID + ".json": '{"session": '})
 LT_WRONGREPO = lt_config("wrongrepo", {LT_SID + ".json": lt_role(LT_SID, "triage", repo="x/y")})
 LT_BADSID = lt_config("badsid", {"ltbad.json": lt_role("ltbad", "triage")})
 LT_CLEAR = lt_config("clear", {LT_SID + ".json": lt_role(LT_SID, "triage")})
+LT_OTHERENV = lt_config("otherenv", {LT_OTHER + ".json": lt_role(LT_OTHER, "triage")})
 LT_ROLEFILE = os.path.join(LT_TRIAGE, "state", "session-roles", LT_SID + ".json")
 LT_FOLDER = os.path.join(LT_TRIAGE, "state", "session-roles")
 LT_PUSH = VCS + " push origin roadmap"
@@ -50,19 +51,23 @@ LT_LACKS = ("origin roadmap", "HEAD:roadmap")
 
 
 # RED. Cause: the old guard reads no role file for a local session, so a local triage push to roadmap is refused.
-# Both ids are present and equal here (the hook's session_id and the Bash env CLAUDE_CODE_SESSION_ID), the one shape that passes.
+# The hook's session_id names the file. The Bash env CLAUDE_CODE_SESSION_ID is set to the same id, as in a usual local session.
 add("local-tier: a triage file for this session and repo lets a local push to roadmap through", "allow",
     tool="Bash", command=LT_PUSH, cwd=PUSHSSH, session=LT_SID, env={"CLAUDE_CODE_SESSION_ID": LT_SID},
     config=LT_TRIAGE, silent=True, windows=True)
 
-# CONTROLS, green on the old code: the file is not read unless both ids are present and equal. Absent ids and unequal ids are
-# both refused, so the file of this session is never used on a guess about who is asking.
+# CONTROL, green on the old code: with no hook session_id, no file is read, so a guess about who is asking reads nothing.
 add("local-tier: a triage file is not read when neither the hook id nor the env id is set", "deny", rule=RECORD_RULE,
     tool="Bash", command=LT_PUSH, cwd=PUSHSSH, config=LT_TRIAGE, env={"CLAUDE_CODE_SESSION_ID": None}, lacks=LT_LACKS,
     windows=True)
-add("local-tier: a triage file is refused when the hook id and the env id differ", "deny", rule=RECORD_RULE,
+# RED on 34345f092. Cause: the guard reads the role file only when the hook's session_id equals the env id, so this push is refused.
+add("local-tier: a triage file for the hook's session id lets a roadmap push through when the env id differs", "allow",
     tool="Bash", command=LT_PUSH, cwd=PUSHSSH, session=LT_SID, env={"CLAUDE_CODE_SESSION_ID": LT_OTHER},
-    config=LT_TRIAGE, lacks=LT_LACKS)
+    config=LT_TRIAGE, silent=True, windows=True)
+# CONTROL, green on 34345f092: a file named for the env id alone is not this session's, so the push stays refused.
+add("local-tier: a triage file for the env id alone does not prove a roadmap push for the hook's session", "deny", rule=RECORD_RULE,
+    tool="Bash", command=LT_PUSH, cwd=PUSHSSH, session=LT_SID, env={"CLAUDE_CODE_SESSION_ID": LT_OTHER},
+    config=LT_OTHERENV, lacks=LT_LACKS, windows=True)
 
 # CONTROLS, green on the old code. Each is a refusal the old guard already gives, which the build must keep.
 add("local-tier: a local push to roadmap with no role file is refused", "deny", rule=RECORD_RULE,
@@ -122,12 +127,10 @@ sh("local-tier: the folder's path in text with a lone quote passes",
 # A local `merge <pr> --confirm` is judged by the session's OWN role file, and by CS_SESSION_ROLE when the launcher started it.
 # An own file must name batch-runner and the merge's repo (a null repo refuses). No own file is today's behaviour, even with other
 # sessions' files in the folder, and the same when the session has no id. Rule (c): CS_SESSION_ROLE set with no own file, or an own
-# file whose role differs, refuses: the hook failed to bind the session. The reds below fail on the builder's head, which refuses
-# every local confirm while any role file exists and never reads CS_SESSION_ROLE.
+# file whose role differs, refuses: the hook failed to bind the session. The rule (c) cases below pin it.
 LT_HEAD = "1234567890abcdef1234567890abcdef12345678"  # a lowercase full sha, as the merge tool's parser takes it
 LT_CONFIRM = "~/.claude/bin/merge 7 --confirm --head " + LT_HEAD
 LT_LINGER = lt_config("linger", {LT_OTHER + ".json": lt_role(LT_OTHER, "triage")})
-LT_OTHERENV = lt_config("otherenv", {LT_OTHER + ".json": lt_role(LT_OTHER, "triage")})
 LT_BATCH_WRONG = lt_config("batchwrong", {LT_SID + ".json": lt_role(LT_SID, "batch-runner", repo="x/y")})
 LT_BATCH_NULL = lt_config("batchnull", {LT_SID + ".json": json.dumps({"session": LT_SID, "role": "batch-runner", "repo": None})})
 LT_IDS = {"CLAUDE_CODE_SESSION_ID": LT_SID}
@@ -156,6 +159,13 @@ add("local-tier: unequal ids leave the session with no own file, so its confirm 
     tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env={"CLAUDE_CODE_SESSION_ID": LT_OTHER},
     config=LT_OTHERENV, silent=True)
 
+# CONTROL, green on 34345f092: the hook's session_id names the own file, so an env id that differs does not lift the refusal.
+add("local-tier: a triage file for the hook's session id refuses a confirm when the env id differs", "deny", rule="merge-confirm-repo",
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID, env={"CLAUDE_CODE_SESSION_ID": LT_OTHER}, config=LT_TRIAGE)
+# CONTROL, green on 34345f092, rule (c): CS_SESSION_ROLE is set and the session has no id at all, so the hook could not bind it: refuse.
+add("local-tier: a launcher session with CS_SESSION_ROLE and no id at all refuses the confirm", "deny", rule="merge-confirm-repo",
+    tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=None,
+    env={"CLAUDE_CODE_SESSION_ID": None, "CS_SESSION_ROLE": "batch-runner"}, config=LT_EMPTY)
 # RED, rule (c): the launcher set CS_SESSION_ROLE, and no own file exists, so the hook failed to bind and the confirm refuses.
 add("local-tier: a launcher session with CS_SESSION_ROLE and no own file refuses the confirm", "deny",
     rule="merge-confirm-repo", tool="Bash", command=LT_CONFIRM, cwd=PUSHSSH, session=LT_SID,
