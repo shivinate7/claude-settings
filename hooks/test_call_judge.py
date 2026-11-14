@@ -1543,7 +1543,9 @@ def case_widening_still_widens_names_the_same_items():
 
 # The widening sentence names a change that makes the shared tool accept what it refused before. The one-rule carve-out
 # holds only for a change that keeps what the tool accepts the same or narrows it. Each sentence that carries the list
-# of three items names all three, one check per item. The reply judge's file pins the same wording.
+# of three items names all three, one check per item: the widening sentence (the one that names a change for every repo,
+# whatever it says about repos), the every-repo carve-out and the tighten-and-also sentence. The reply judge's file pins
+# the same wording.
 ACCEPT_REFUSED = (("accept what it refused before",), ("widen",))
 CARVE_OUT_CONDITION = "same or narrow"
 
@@ -1570,10 +1572,10 @@ def case_widening_carve_out_keeps_the_same_or_narrow_condition():
 
 
 def case_widening_each_list_sentence_names_all_three_items():
-    # Case 21: each sentence that carries the list names all three items, one check per item: the sentence that names a
-    # change that makes the tool accept what it refused before, the every-repo carve-out, and the tighten-and-also sentence.
+    # Case 21: each sentence that carries the list names all three items, one check per item: the widening sentence, the
+    # every-repo carve-out, and the tighten-and-also sentence.
     region = set_prompt_region()
-    for role, groups in (("accepts-refused", ACCEPT_REFUSED), ("carve-out", NOT_WIDENING_ONE_CHANGE),
+    for role, groups in (("widening", WHATEVER_REPOS), ("carve-out", NOT_WIDENING_ONE_CHANGE),
                          ("tighten-and-also", TIGHTEN_AND_ADDS)):
         hits = sentences_with(region, *groups)
         for item in STILL_WIDENING_ITEMS:
