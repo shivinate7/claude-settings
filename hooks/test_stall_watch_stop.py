@@ -2976,5 +2976,23 @@ def fast_lsof_busy_holder_still_spares_job():
     return problems
 
 
+@case
+def CI94_cloud_red_comment_voids_the_checkin():
+    """CI94. the red line the ci-done comment posts (actions/ci-done-comment/comment.sh, read from its own dry
+    run, not copied) is a red verdict: after a check-in it re-opens the wait, so it blocks. Control: the check-in
+    without the red line passes"""
+    if os.name != "posix" or not shutil.which("bash") or not shutil.which("jq"):
+        raise Skip("needs bash and jq to run the comment emitter")
+    emitter = os.path.join(os.path.dirname(os.path.dirname(MODULE)), "actions", "ci-done-comment", "comment.sh")
+    env = dict(os.environ, CI_DONE_DRY="1", SHA=CI_SHA, RUN_URL="https://example.invalid/run/1",
+               NEEDS=json.dumps({"lint": {"result": "failure"}}))
+    proc = subprocess.run(["bash", emitter], env=env, capture_output=True, text=True, timeout=30)
+    line = next((l for l in proc.stdout.splitlines() if l.startswith("CI ")), "")
+    if not line:
+        return ["scope: the emitter printed no CI line: %r %r" % (proc.stdout[:120], proc.stderr[:120])]
+    items = [ready(), checkin(SEND_LATER), prompt(proc.stdout)]
+    return expect_block(items) + ["control: " + p for p in expect_silent(items[:2])]
+
+
 if __name__ == "__main__":
     sys.exit(run_cases(CASES))
