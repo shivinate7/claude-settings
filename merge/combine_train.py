@@ -18,7 +18,7 @@ is not built as a rule. The header line names the readings:
   (c) dry rounds ignore a move of main (the newest main joins at the final build, which is not this tool's).
   (d) the fast checks run once per round, on the round's leading tip, and once for a batch that needs no round. A later round's tips hold the
       earlier ones, so the last round checks the whole batch. Their home is merge.readyChecks in .github/stamp.json on origin/main, run through
-      `bin/ci-job checks --step NAME ... --base origin/main` (merge.ci_job_run). The tool re-implements none of them.
+      one `bin/ci-job JOB --step NAME ... --base origin/main` per job (merge.ready_job_groups, merge.ci_job_run). The tool re-implements none of them.
   (e) with --lint, one `bin/ci-job checks --lint` run on each folded batch's final tree.
   (f) before any pairing, each queued member is merge-tested against origin/main in DIR. A member that clashes with main leaves by name with its
       paths and `(clash with main)`. A merge with main is no pair tried, and a main clash is not in the clash rate's numerator.
@@ -26,7 +26,7 @@ is not built as a rule. The header line names the readings:
 The clash rate is the members a pair clash left out, over the pairs tried (a group merge and each retry of its members are each a pair).
 A number the tool did not measure prints `unknown` or `n/a (reason)`, never 0 and never a guess.
 Exit: 0 ok, 1 a member left out or a check failed, 2 something unknown or a run that could not start (a git that is not on PATH included).
-Cost: per fold, one `git merge-tree` start per member (against main) and per pair tried and one `git commit-tree` start per merge; per round, one ci-job run when the checks have a home;
+Cost: per fold, one `git merge-tree` start per member (against main) and per pair tried and one `git commit-tree` start per merge; per round, one ci-job run per job of the checks when they have a home;
 with --lint, one more ci-job run per batch. One temporary worktree per batch. Nothing is logged or left running.
 """
 import argparse
@@ -237,7 +237,7 @@ class Checks:
             self.wt = None
 
     def run(self, tip, label):
-        """Run the fast checks on `tip`, and add one line for them to the fold's lines (printed after the round lines)."""
+        """Run the fast checks on `tip`, one ci-job run per job (merge.ready_job_groups), and add one line for them to the fold's lines (printed after the round lines)."""
         f = self.fold
         if self.steps is None:
             if not self.stopped:
@@ -251,8 +251,14 @@ class Checks:
         if wt is None:
             self.stopped = True
             return
-        args = ["checks", "--pinned", *[a for s in self.steps for a in ("--step", s)], "--base", BASE]
-        state, lines, log, _ = merge.ci_job_run(wt, *args)
+        states, lines, log = [], [], []
+        for job, group in merge.ready_job_groups(self.steps).items():
+            args = [job, "--pinned", *[a for _, bare in group for a in ("--step", bare)], "--base", BASE]
+            job_state, job_lines, job_log, _ = merge.ci_job_run(wt, *args)
+            states.append(job_state)
+            lines += job_lines
+            log += job_log
+        state = "fail" if "fail" in states else "unknown" if "unknown" in states else "pass"
         where = f"{label}, leading tip {tag(tip.members)}"
         if state == "pass":
             f.lines.append(f"{where}: fast checks ok" + (f" (skipped: {', '.join(lines)})" if lines else ""))
