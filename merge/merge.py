@@ -33,8 +33,8 @@
                           unless HEAD is the Head of the newest earlier record on the PR, read from the PR's issue comments since the PR opened, and that record
                           has no Fix check line or a PASS one (owner item 741); after a PASS one, when SHA is a merge commit (a fix after a merge of main), that record reads done and SHA's first
                           parent is HEAD and its second parent is on the base, with no edit beyond git's own merge (a merge that conflicts may edit its conflicted paths only).
-                          The fix check's MODEL must be sonnet (exit 2 otherwise), and a reviewer's round 2 and up must equal its round row's model.
-                          Round 1 takes its row's model (the `1 guard` row with --guard yes, else the `1 other` row), or `unknown`; a round 1 model
+                          The fix check's MODEL must be sonnet (exit 2 otherwise), and a reviewer's later rounds must equal their round row's model.
+                          The first round takes its row's model (the `1 guard` row with --guard yes, else the `1 other` row), or `unknown`; a first-round model
                           below its row prints with a stderr flag and is not refused.
                           A review log stays done when the live head differs from its Head only by clean merges of main: each
                           commit after Head is a merge with two parents, its second parent on main and its tree `git merge-tree --write-tree` of them.
