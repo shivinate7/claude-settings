@@ -63,6 +63,10 @@ The handoff holds these sections, in this order:
 - Next steps.
 - Files and commands: the files and commands that matter.
 
+A hold, freeze or "waiting" line in any section carries `Ends: <the event that ends it>` in the
+same line, such as `Held: no merges. Ends: the owner lifts the freeze.` When that event happens,
+lift the hold in the same turn.
+
 The marker line below is the one list of the required sections. The guard refuses a write that
 drops one, and the Stop hook names one that is missing. Each sits under its own `## ` heading.
 "Rulings with NO HOME YET" is conditional and not in the list.
