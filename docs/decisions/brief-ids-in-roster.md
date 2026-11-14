@@ -16,9 +16,12 @@ Rule `brief-ids-in-roster` in `hooks/guard.py` refuses a lane brief that names a
 ## Known holes
 
 - Quoted-id escape: a refused Claude can wrap the same id in backticks and pass. By design, for incident quotes. The refusal's reason does not name the escape.
-- An id of another shape (no digit after `session_`) is not read.
+- An id of another shape is not read. That covers no digit after `session_`, and a space in place of the underscore.
+- An id glued to a word by an underscore is not read, as in `runner_session_013...`. A `_` just before `session_` stops the scan.
+- A brief opener written as `1. Lane brief:` or `+ Lane brief:` is not read. Only markdown marks may come before the opener, so a digit or `+` stops the read.
 - A brief opener on a line other than the first is read here, but `lane-one-topic` (`brief_hit`) reads line one only. Step `brief-reader-one-home` follows.
 - A `send_message` to a wrong target with no id in its text passes. The target (`session_id`) is not judged.
+- A false alarm: a file name or prose such as `session_2026-11-14.md` or `session_1` is refused as an id. Quote the id itself, with a backtick or a double quote on each side of it, to lift the refusal. A quote around the whole file name does not count, since the id ends before the dash.
 
 Protected by the `brief-ids-in-roster:` cases in `tests/guard/s43200-brief-ids-in-roster.py`, red before the rule read every bare id.
 
