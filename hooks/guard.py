@@ -164,7 +164,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        from the transcript) shows the tag cs-build:triage with no set_session_tags after
                        it. No record, no transcript or no env id is a refusal. An override lifts it.
   trust-card-in-build  deny. A call to either tool that opens the owner's trust card, or an update_trigger call with
-                       `ask_owner` true (an owner-approval card), unless the session's own
+                       `ask_owner` set (any value but absent, null or false; an owner-approval card), unless the session's own
                        get_session record (read from the transcript) proves no cs-build tag. No record,
                        no transcript or no env id is a refusal.
   lane-closes-after-records
