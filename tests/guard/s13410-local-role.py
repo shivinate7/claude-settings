@@ -242,7 +242,7 @@ for _cmd in (
 # A launcher session starts a child `claude` (self-role-claim, decision session-tiers). The guard's own environment holds
 # CS_SESSION_ROLE, the launcher's role, and the child inherits it, so its SessionStart hook would give the child that role.
 # While the variable is set, a call that starts claude is denied in every form below. The text of these calls names neither
-# the variable nor the launcher, so the old guard, which reads only the text, allows each one: RED on 93df5839b. Each form takes
+# the variable nor the launcher, so a guard that reads only the text allows each one; each case fails until the deny covers its form. Each form takes
 # one role, cycled over all three, so a fix that keys on two of them is caught.
 SELF_START_BASH = (
     'claude -p "x"',
@@ -270,7 +270,7 @@ for _j, _cmd in enumerate(SELF_START_PS):
         env={"CS_SESSION_ROLE": _role}, windows=True)
 
 # CONTROLS, with the variable set: text that names claude, and a call that reads or checks it, starts no session, so each stays
-# allowed. `claude --version` is not a session start (the owner's ruling). The last three are the scanner controls: a comment,
+# allowed. `claude --version` only prints the version and starts no session, so it stays allowed. The last three are the scanner controls: a comment,
 # a `#` inside a quoted string, and a lone quote in text.
 for _cmd in (
     "echo claude",
