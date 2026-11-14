@@ -2652,7 +2652,8 @@ READY_CI_RUN_MARGIN_SECONDS = 300  # a ci-job run's own start-up and wrap-up, ov
 
 def ready_ci_run_seconds(checks):
     """The backstop of one ready ci-job run, in place of LINT_SECONDS: each of the `merge.readyChecks` `checks` may take READY_CI_STEP_SECONDS, plus the margin.
-    Computed from the list the run is given, so one more check moves it, and no copy of the count can go stale."""
+    Computed from the list the run is given, so one more check moves it, and no copy of the count can go stale.
+    Every ci-job call gets the count of the whole list, not of its own job's steps (decided): looser, so no valid job run turns red. Not read from run history, which a cold runner or a new check would outrun."""
     return len(checks) * READY_CI_STEP_SECONDS + READY_CI_RUN_MARGIN_SECONDS
 
 READY_CLASH_SECONDS = 480  # clash_verdict: its merge read and its cross_measure together
@@ -3853,7 +3854,7 @@ def pre_ready_rows(wt, n, base, checks, pre):
     Cost: one ci-job run per job, one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees.
     A bounded check adds one thread; a check that outran its bound may linger until process exit, and a git or gh child it started may outlive the process."""
     rows, states, lines, log = [], [], [], []
-    run_bound = globals().get("READY_CI_RUN_SECONDS") or ready_ci_run_seconds(checks)  # globals(), not the name: the module attribute is computed on demand (__getattr__)
+    run_bound = ready_ci_run_seconds(checks)
     for job, group in ready_job_groups(checks).items():
         raw = []
         args = [job, "--pinned", *[a for _, bare in group for a in ("--step", bare)], "--base", f"origin/{base}"]
@@ -4369,18 +4370,10 @@ def review_round_model(n):
 
 def __getattr__(name):
     """REVIEW_FIX_GUARD_MODEL, the model every fix verifier runs (owner item 444 a; decision pr-review-record): the round row's fallback in the
-    guard, read on use so this file holds no copy and does not load the guard at import. The checks read review_round_model, which also reads the record's row.
-    READY_CI_RUN_SECONDS: ready_ci_run_seconds of the `merge.readyChecks` of this repo's own stamp config, read when asked, never held as a number that could go stale.
-    The pre-ready run does not read it: pre_ready_rows computes the bound from the checks it is given. A value set in this module's namespace (a patch, a hand override) replaces that bound."""
+    guard, read on use so this file holds no copy and does not load the guard at import. The checks read review_round_model, which also reads the record's row."""
     if name == "REVIEW_FIX_GUARD_MODEL":
         import guard as hook_guard
         return hook_guard.ROLE_ROUND_FALLBACK[(REVIEW_ROLES[0], REVIEW_FIX_ROW, "other")]
-    if name == "READY_CI_RUN_SECONDS":
-        try:
-            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", DEFAULT_CONFIG), encoding="utf-8") as f:
-                return ready_ci_run_seconds(json.load(f)["merge"]["readyChecks"])
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 def grant_valid(cite):
