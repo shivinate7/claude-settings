@@ -1,14 +1,14 @@
 {
  "id": "push-rollup-skipped-reads",
  "title": "A main push run whose all-jobs-passed and ci-done jobs show skipped is read as green by the merge tool and the red-main read, or the reason is named",
- "status": "ready",
+ "status": "done-obsolete",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
  "owner": "triage",
  "blockedBy": [],
- "why": "Sighting (runner 11, 09:17 CST Nov 14, relayed by itself; triage read nothing): degen main push run 974 for 25cfef0e2 completed success, with all-jobs-passed and ci-done both showing \"skipped\"; the reason is unread. Risk: a rollup job that shows skipped may be read as not green by the red-main read (rule git-red-main-reverts: main's newest finished run) or as unknown by the lane lint (draft_run_state reads a skipped touched job as unknown). Unmeasured; no wrong merge seen. First act of a lane: read the degen workflow's `if:` on those two jobs and what base-red reads for a skipped rollup; reproduce, red then green: a push run with a skipped rollup and green legs reads green (or the reason is printed). Kin: red-gate-reads-suite-run, base-red-reads-gate, push-skip-proven-tree. If it is only degen's own workflow, the fix is in degen. A check change, so round 3 applies if a verdict changes.",
+ "why": "Sighting (runner 11, 09:17 CST Nov 14, relayed by itself; triage read nothing): degen main push run 974 for 25cfef0e2 completed success, with all-jobs-passed and ci-done both showing \"skipped\"; the reason is unread. Risk: a rollup job that shows skipped may be read as not green by the red-main read (rule git-red-main-reverts: main's newest finished run) or as unknown by the lane lint (draft_run_state reads a skipped touched job as unknown). Unmeasured; no wrong merge seen. First act of a lane: read the degen workflow's `if:` on those two jobs and what base-red reads for a skipped rollup; reproduce, red then green: a push run with a skipped rollup and green legs reads green (or the reason is printed). Kin: red-gate-reads-suite-run, base-red-reads-gate, push-skip-proven-tree. If it is only degen's own workflow, the fix is in degen. A check change, so round 3 applies if a verdict changes. ANSWERED 09:38 CST Nov 14 (runner 11 09:18, with the coordinator's REST read of degen checks.yml on main, 09:18; relayed; triage read neither): the skip is by design. In degen's checks.yml, all-jobs-passed has `if: always() && github.event_name == 'pull_request' && !draft` and ci-done has `if: !cancelled() && github.event_name == 'pull_request' && !draft`, so both skip on every push. Base-red read, from the code of merge/merge.py at 60db33f88 (runner 11, not tested): a skipped job row maps to bucket \"skipping\" (CONCLUSION_BUCKET), not red and not unknown; the all-skipped red (NO_CHECK_RAN) needs every check skipped, and run 974 had 16 jobs with success; so by the code run 974 reads green. Unproven: the tool never read run 974 (runner 11 merged #710 before it existed) and the classify step that sums the rows was not read in full. Closed as done-obsolete: the worry (a rollup that skips on a push reads red or unknown) is answered by the code read, not by a test. Reopen if the base-red read ever takes a green push run with skipped rollups as unknown or red.",
  "source": "runner 11 09:17 CST Nov 14",
  "note": "Filed 09:35 CST Nov 14 by triage. Tracker: the coordinator. No lane yet.",
- "updatedAt": "2026-11-14T09:35:00-06:00"
+ "updatedAt": "2026-11-14T09:38:00-06:00"
 }
