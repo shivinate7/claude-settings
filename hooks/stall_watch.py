@@ -6,7 +6,7 @@ Modes:
   300 seconds with no new output. The job keeps running. For a background call with an agent_id
   in the payload (17 lowercase hex), it puts the agent marker ahead of the wrapper.
 - --stop: At Stop, lists each open background job whose output file did not change for
-  the quiet age.
+  the quiet age, and blocks a Stop while a CI wait has no check-in.
 
 Hook: stall_watch.py --hook
   PreToolUse hook. For a Bash call with run_in_background true, it returns updatedInput only
@@ -83,6 +83,25 @@ Stop: stall_watch.py --stop
   and it closes as a shell does. It is not listed while a tool_use in the read window has no tool_result, read from
   the last 64 KB of a quiet agent's transcript, widened to hold a whole last record. Cost: one stat per
   running agent, one tail read per quiet agent. Any error, or stop_hook_active true, prints nothing and exits 0. No posix check.
+  CI-wait check: the same Stop run reads the transcript once more, one record at a time. The newest
+  ready call (`gh pr ready <N>` in Bash or PowerShell, outside quotes, heredoc bodies and `#` comments, not
+  --undo; or MCP update_pull_request with draft false) opens a wait. An --undo, or draft true, closes the wait on its PR. A `gh` global flag before `pr`
+  (`gh -R o/r pr ready 5`) is skipped. A later user or queued message with a
+  `CI green|cancelled on <sha>` line closes it; a `CI unknown` line leaves it open. A merge or close that
+  names the waited PR number closes it (bin/merge N, merge N, gh pr merge N, gh pr close N in Bash or
+  PowerShell, same scanner rules; MCP merge_pull_request with that pullNumber). The ready call's PR and a
+  merge's are read alike (pr_ref): the first all-digit word or the N of a /pull/N URL, with each flag and its
+  value (CI_VALUE_FLAGS: -R o/r, -C /repo, --body "x", --body-file f, --subject "Fix", --comment x,
+  --session lane) skipped; with no number, the first non-dash word (a branch) is the PR named. A gh pr merge or close with no
+  PR word, only flags and their values, closes any open wait; so does one whose PR word is a $var, an unknown
+  number. A bin/merge with no PR word, or a $var one, gives no event. A gh pr merge with --auto or
+  --disable-auto closes nothing, and an MCP merge with no pullNumber closes none. A wait
+  whose ready call named no number (bare gh pr ready, or a $var) closes on a merge or close of any PR. A
+  `CI red` line keeps it open and voids the check-ins before it. A later send_later, create_trigger,
+  CronCreate or ScheduleWakeup call covers it, unless its tool_result has is_error true. An open wait with no check-in prints
+  {"decision": "block", "reason": ...} naming the PR (the systemMessage of any stale job rides in the same
+  line). Rule git-ci-wait-checks-in. Cost: one more read of the transcript at Stop, zero process starts, zero
+  files written, zero timers, no network. Any error prints nothing.
   A shell job about to be listed is dropped when a process under it burns CPU, the watcher's rule (posix with
   lsof only). The job has no pid at Stop, so its processes are the ones that hold its output file as stdout or
   stderr. Two ps reads 1.5 s apart, only when a quiet shell job has such a process. The job shell's own time
@@ -836,6 +855,185 @@ def stopped_ids(content):
     m = STOPPED.match(msg) if isinstance(msg, str) else None
     return [m.group(1)] if m else []
 
+# "finished" is the word actions/ci-done-comment/comment.sh puts in its red line; test CI94 runs that script, so the pattern follows it.
+CI_VERDICT = re.compile(r"^CI (?:finished )?(green|red|cancelled|unknown) on \S", re.M)
+CI_KEYS = (b"ready", b"pull_request", b"merge", b"send_later", b"create_trigger", b"CronCreate",
+           b"ScheduleWakeup", b"CI ", b"close", b'"is_error":true', b'"is_error": true')
+CI_CHECKIN_TOOLS = ("send_later", "create_trigger", "CronCreate", "ScheduleWakeup")
+CI_SEGMENT = re.compile(r"[;&|\n]+")
+PR_NUMBER = re.compile(r"[0-9]+\Z")
+PR_URL = re.compile(r"/pull/([0-9]+)")
+CI_VALUE_FLAGS = frozenset(("-R", "--repo", "--hostname", "-C", "--session", "-b", "--body", "-F", "--body-file",
+                            "-t", "--subject", "-A", "--author-email", "--match-head-commit", "-c", "--comment"))
+CI_REMEDY = ("Set a one-time send_later check-in for this wait (rule git-ci-wait-checks-in), then stop. "
+             "Set the next one after each red CI verdict, wider apart.")
+
+
+def unquoted(command):
+    """The command with quoted text, `#` comments and heredoc bodies dropped, so only shell words remain.
+    A quote with no closer is a plain character (an apostrophe in a word), so it hides nothing after it."""
+    text = strip_heredoc_bodies(command)
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c in "'\"":
+            j = i + 1
+            while j < n and text[j] != c:
+                j += 2 if (c == '"' and text[j] == "\\") else 1
+            if j < n:
+                out.append(c + c)
+                i = j + 1
+                continue
+        elif c == "\\":
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        elif c == "#" and (not out or out[-1][-1] in " \t\n;&|("):
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def shell_calls(command):
+    """The word lists of each simple command in a shell command line, quoted text and comments gone."""
+    return [seg.split() for seg in CI_SEGMENT.split(unquoted(command)) if seg.strip()]
+
+
+def pr_ref(words):
+    """The PR a ready, merge or close call names: its first all-digit word, or the number in a /pull/<N> URL.
+    A flag and the value it takes (CI_VALUE_FLAGS: -R o/r, -C /repo, --body "x", --session lane) are skipped.
+    With no number, its first non-dash word (a branch name), which matches no numbered wait. '' when the
+    call names no PR: only flags, or a PR word that is a shell variable or empty quotes, whose number is
+    unknown. A call with no PR word is bare."""
+    words = list(flag_free(words))
+    for w in words:
+        if PR_NUMBER.match(w):
+            return w
+        m = PR_URL.search(w)
+        if m:
+            return m.group(1)
+    return next((w for w in words if not w.startswith(("$", "'", '"'))), "")
+
+
+def flag_free(words):
+    """The words with each flag and the value it takes dropped. A flag in --name=value form is one word."""
+    skip = False
+    for w in words:
+        if skip:
+            skip = False
+        elif w.startswith("-"):
+            skip = w in CI_VALUE_FLAGS
+        else:
+            yield w
+
+
+def gh_pr_call(words):
+    """('ready'|'merge'|'close', the words after it) for a `gh pr <sub>` call, global flags such as
+    `-R o/r` before `pr` skipped; None for any other call."""
+    if not words or words[0] != "gh":
+        return None
+    rest = list(words[1:])
+    i = 0
+    while i < len(rest) and rest[i].startswith("-"):
+        i += 2 if rest[i] in CI_VALUE_FLAGS else 1
+    if rest[i:i + 1] == ["pr"] and rest[i + 1:i + 2] and rest[i + 1] in ("ready", "merge", "close"):
+        return rest[i + 1], rest[i + 2:]
+    return None
+
+
+def ci_events(rec):
+    """The CI-wait events one transcript record holds, in order: ('ready', pr), ('checkin', call id),
+    ('failed', call id), ('merge', pr), ('mergeany',), ('verdict', word). A user or queued message holds a
+    verdict line; only an assistant call holds the rest. A tool result is no message, so a verdict it prints
+    is not one, but its error flag voids the check-in it answers. ('merge', pr) is a merge or close that names
+    pr (pr_ref); ('mergeany',) is a gh pr merge or close that names no PR at all, only flags, which aims at
+    the current branch's PR."""
+    kind = rec.get("type")
+    if kind == "attachment":
+        att = rec.get("attachment")
+        text = att.get("prompt") if isinstance(att, dict) and att.get("type") == "queued_command" else None
+        return [("verdict", m.group(1)) for m in CI_VERDICT.finditer(text)] if isinstance(text, str) else []
+    content = rec["message"]["content"]
+    if kind == "user":
+        failed = [("failed", b.get("tool_use_id")) for b in (content if isinstance(content, list) else ())
+                  if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error") is True]
+        if failed or "toolUseResult" in rec:
+            return failed
+        if isinstance(content, list):
+            content = "\n".join(b["text"] for b in content if isinstance(b, dict) and b.get("type") == "text"
+                                and isinstance(b.get("text"), str))
+        return [("verdict", m.group(1)) for m in CI_VERDICT.finditer(content)] if isinstance(content, str) else []
+    events = []
+    for b in content if kind == "assistant" and isinstance(content, list) else ():
+        if not (isinstance(b, dict) and b.get("type") == "tool_use" and isinstance(b.get("input"), dict)):
+            continue
+        name, inp = str(b.get("name")), b["input"]
+        tool = name.rsplit("__", 1)[-1]
+        if tool in CI_CHECKIN_TOOLS:
+            events.append(("checkin", b.get("id")))
+        elif tool == "merge_pull_request":
+            if inp.get("pullNumber"):
+                events.append(("merge", str(inp["pullNumber"])))
+        elif tool == "update_pull_request" and inp.get("draft") is False:
+            events.append(("ready", str(inp.get("pullNumber") or "")))
+        elif tool == "update_pull_request" and inp.get("draft") is True:
+            events.append(("undo", str(inp.get("pullNumber") or "")))
+        elif isinstance(inp.get("command"), str) and name in ("Bash", "PowerShell"):
+            for words in shell_calls(inp["command"]):
+                gh = gh_pr_call(words)
+                if gh and gh[0] == "ready":
+                    events.append(("undo" if "--undo" in gh[1] else "ready", pr_ref(gh[1])))
+                elif gh:
+                    # --auto only queues the merge and --disable-auto drops it: neither has merged anything
+                    if not {"--auto", "--disable-auto"} & set(gh[1]):
+                        pr = pr_ref(gh[1])
+                        events.append(("merge", pr) if pr else ("mergeany",))
+                elif words[0] == "merge" or words[0].replace("\\", "/").endswith("bin/merge"):
+                    pr = pr_ref(words[1:])
+                    if pr:
+                        events.append(("merge", pr))
+    return events
+
+
+def open_ci_wait(transcript):
+    """The PR of a CI wait that is open with no check-in, as a string ('' when the call named none), or
+    None. The newest ready call opens a wait. A green or cancelled verdict closes it; an unknown verdict
+    leaves it open. A merge or close closes a numbered wait only when it names that PR, or is a gh pr merge
+    or close that names no PR at all; it closes a wait whose ready call named no number (bare, a branch or
+    a $var) when it names any PR or none. An undo (gh pr ready --undo, or MCP draft true) closes the wait on
+    its PR the same way. A
+    red verdict keeps it open and voids the check-ins before it. A check-in after the anchor
+    covers it, unless its result was an error. One streamed read, records in file order."""
+    wait = None  # [pr, ids of the check-ins since the anchor]
+    with open(transcript, "rb") as f:
+        for line in f:
+            if not any(k in line for k in CI_KEYS):
+                continue
+            try:
+                events = ci_events(json.loads(line))
+            except Exception:  # a bad or half-written line is skipped
+                continue
+            for ev in events:
+                if ev[0] == "ready":
+                    wait = [ev[1], set()]
+                elif wait is None:
+                    continue
+                elif ev[0] == "checkin":
+                    wait[1].add(ev[1])
+                elif ev[0] == "failed":
+                    wait[1].discard(ev[1])
+                elif ev[0] == "mergeany" or (ev[0] in ("merge", "undo") and (not wait[0].isdigit() or wait[0] == ev[1])):
+                    wait = None  # a wait that names no number (bare, a branch, a $var) closes on any PR
+                elif ev[0] == "verdict":
+                    if ev[1] == "red":
+                        wait[1].clear()
+                    elif ev[1] != "unknown":
+                        wait = None
+    return wait[0] if wait and not wait[1] else None
+
 
 TRANSCRIPT_AGENT_ID = re.compile(r"[\w-]+\Z")  # an id safe to put in a transcript file name
 TAIL_BYTES = 64 * 1024  # the first read of an agent transcript's end; it doubles to hold the last record
@@ -892,12 +1090,23 @@ def open_call(path, size):
 
 
 def stop():
-    if not TASK_NOTIFICATION_TAG:  # every finished job would look open: say nothing
-        return 0
     try:
         call = json.load(sys.stdin)
         if call.get("stop_hook_active") is True:
             return 0
+    except Exception:  # guard-hooks-fail-closed: a failed check prints nothing and does not block
+        return 0
+    out = {}
+    try:
+        pr = open_ci_wait(call["transcript_path"])
+        if pr is not None:
+            out["decision"] = "block"
+            out["reason"] = "PR %s is marked ready and no check-in is set (decision ci-wait-reads-run-status). %s" % (pr or "(this branch)", CI_REMEDY)
+    except Exception:
+        pass
+    try:
+        if not TASK_NOTIFICATION_TAG:  # every finished job would look open: list none
+            raise ValueError("no task-notification tag")
         now = float(os.environ.get("STALL_WATCH_NOW") or time.time())
         quiet = float(os.environ.get("STALL_WATCH_QUIET") or DEFAULT_QUIET)
         base = os.environ.get("STALL_WATCH_OUTPUT_BASE")
@@ -950,9 +1159,11 @@ def stop():
             head = "Background jobs still running and quiet: stop it or tell the owner."
             if "| until: " in "".join(rows):
                 head += " Say whether each until condition is met."
-            print(json.dumps({"systemMessage": "\n".join([head] + rows)}))
+            out["systemMessage"] = "\n".join([head] + rows)
     except Exception:  # guard-hooks-fail-closed: a failed check prints nothing and does not block
         pass
+    if out:
+        print(json.dumps(out))
     return 0
 
 
