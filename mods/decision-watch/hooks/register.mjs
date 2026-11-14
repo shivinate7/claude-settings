@@ -5,7 +5,9 @@
 //
 // turn.complete returns next(e) after at most SEEN_WAIT_MS (500 ms), for the "STOP seen" line. The lookup and
 //               the judging run in the background, one judge at a time. An agent turn (agentId set) is skipped,
-//               and so is a turn with isAborted or a reason other than "answer" (a SKIP line is logged). The
+//               and so is a turn with isAborted or a reason other than "answer" (a SKIP line is logged). A turn whose
+//               derived transcript path misses still goes to the script, which looks for the transcript by session
+//               id and says the one UNKNOWN per session when it finds none (decision decision-watch-finds-transcript). The
 //               app's sec-default mod reroutes every classic.* event past user mods, so a classic.Stop
 //               handler never ran; turn.* events pass. The event carries no transcript path, so the judge
 //               finds it the way /dw does (deriveStop), from the session id read on each turn.
@@ -48,7 +50,7 @@ export function register(on) {
       let stop = lastStop;
       if (!stop) {
         const d = await deriveStop($);
-        if (!d.found) throw new Error("no turn seen yet and no transcript found for this session");
+        // A derived path that misses still goes to the script, which looks by session id.
         stop = d.stop;
       }
       lines.push(`stop input: session ${stop.session_id}`);
@@ -79,10 +81,8 @@ export function register(on) {
           return;
         }
         await log($, `STOP seen ${d.stop.session_id}`);
-        if (!d.found) {
-          void log($, `SKIP no transcript ${d.stop.session_id} | ${d.stop.transcript_path}`);
-          return;
-        }
+        // The scan by session id lives in the script only (decision decision-watch-finds-transcript), so a miss is handed on.
+        if (!d.found) void log($, `derived transcript path missed, the script looks by session id ${d.stop.session_id} | ${d.stop.transcript_path}`);
         lastStop = d.stop;
         if (busy) {
           void log($, `SKIP busy ${d.stop.session_id}`);
@@ -150,7 +150,8 @@ async function dwRun($, stop, extra, who) {
     // The mod's own timer frees the slot if the host does not stop the child. It does not kill the child.
     deadline($.process.run([py, "-I", `${cfg}/hooks/decision_watch.py`, ...extra], {
       stdin: asciiJson(stop),
-      env: { CLAUDE_CONFIG_DIR: stateDir(cfg, who), DW_REAL_CONFIG_DIR: cfg },
+      // DW_EXPLICIT marks a /dw the owner asked for: the script shows each miss and keeps no once-per-session mark.
+      env: { CLAUDE_CONFIG_DIR: stateDir(cfg, who), DW_REAL_CONFIG_DIR: cfg, ...(who === "dw" ? { DW_EXPLICIT: "1" } : {}) },
       timeoutMs: PY_MS,
     }), PY_MS + 1000);
   let r;

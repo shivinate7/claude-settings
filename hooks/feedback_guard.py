@@ -62,6 +62,13 @@ a turn end in these cases:
     Cost: one rev-parse and one `grep` of the copy's items, in the git of the Stop
     process, once per Stop that holds an open page item with a proved send and no read-back. The read-back
     uses the transcript the send check read. No file written;
+  - input-needed-closed-item (the reader lives here, the refusal in lint/report_guard.py). Homes.item_statuses gives
+    each item number's status from the same waiting copy read as filed_numbers: one `git grep`, once per Stop, never
+    a second reader. read_back_statuses gives the status that a same-turn ArtifactData read of collection `items`
+    returned, and a read-back showing the item open skips the copy for it. Incident: a coordinator listed items 214,
+    381, 383 and 222 to the owner as open, and all four were closed (roadmap step input-needed-reads-page-status).
+    Cost: no read of its own. The one git grep runs only in a Stop whose Input Needed cites a page item, in a repo
+    that names a waiting page. No file written;
   - page-chat-answer-lands. An owner block whose whole text is a chat answer to a page item
     (ANSWER: `<n> <letter>` with letters a to h, as `143 b`, `143b`, `143: b` or `143 b.`, an optional
     parenthetical, answers separated by commas or lines), in a repo whose extras name a waiting page
@@ -118,7 +125,7 @@ a turn end in these cases:
     meta/page get names the hook's session id or the id the remote env names (override.remote_session_id). A
     writer named there decides alone. Only when none is named does an interpreter run of export_page.py
     (EXPORT_RUN) before the write make this session the writer. A session that is not the writer, or whose
-    writer cannot be told, passes with no note: receipts and answers are not its to export. Incident: the waiting/ copy of
+    writer cannot be told, passes with no note: the page's data, receipts included, is not its to export. Incident: the waiting/ copy of
     the roadmap went stale from 06:41 to 19:04 CST on Nov 5 while the page took items 261 to 271. Harm: a lost
     or moved page then loses those items (decision waiting-data-in-repo). The reason names export_page.py and
     the waiting-page skill section "Keep a copy in the repo". A transcript that cannot be read passes. A
@@ -399,6 +406,7 @@ class Homes:
         self.worked_in = worked_in  # the folder the inbox's sidecar binds: where the session worked
         self._tops = None  # the repo tops of worked_in and cwd, read once per Stop
         self._filed = None  # (numbers or None, branch, folder), read once per Stop
+        self._statuses = {}  # item number (digit string) -> status, filled by the same read as _filed
         self._top = None  # (the cwd's repo top or None,), read once per Stop
         self._templated = {}  # (branch, slug) -> whether the step file holds TEMPLATE_DIR, read once per Stop
 
@@ -624,7 +632,7 @@ class Homes:
             if ln.startswith(prefix):
                 path, _, text = ln[len(prefix):].partition(":")
                 files.setdefault(path, []).append(text)
-        numbers = set()
+        numbers, statuses = set(), {}
         for lines in files.values():
             try:
                 found = json.loads("\n".join(lines))
@@ -635,11 +643,24 @@ class Homes:
                 return self._filed
             v = found.get("n")
             if isinstance(v, int) and not isinstance(v, bool):
-                numbers.add(str(v))
+                key = str(v)
             elif isinstance(v, str) and v.isdigit():
-                numbers.add(str(int(v)))
+                key = str(int(v))
+            else:
+                continue
+            numbers.add(key)
+            status = found.get("status")
+            statuses[key] = status if isinstance(status, str) else "open"  # absent reads open, as the page reads it
+        self._statuses = statuses
         self._filed = (numbers, branch, folder)
         return self._filed
+
+    def item_statuses(self):
+        """(statuses, branch, folder): item number (digit string) -> status ("open", "closed") for each item the
+        waiting copy holds. The same read as filed_numbers, never a second one. `statuses` is None under the same
+        conditions as `numbers` there; `skip_filing` says why when the copy was unreadable."""
+        numbers, branch, folder = self.filed_numbers()
+        return (None if numbers is None else self._statuses), branch, folder
 
     def homes_line(self):
         """`ruling -> <homes>; task -> <homes>; question -> answered; ...` for every kind in KINDS. The file homes
@@ -699,10 +720,13 @@ class Pages:
                     self.owners.append((i, norm(text)))
         return not self.unread
 
-    def is_writer(self, session_id):
-        """True when the transcript's newest meta/page get names `session_id` as the page writer. False when it
-        names another, none, or the transcript cannot be read: the writer is not known, so the session is not it."""
-        return bool(session_id) and self._load() and _transcript.page_writer_id(self.records) == session_id
+    def is_writer(self, session_id, repo=None):
+        """True when `_transcript.page_writer` names `session_id`: the newest meta/page get's writer, else the one session
+        tagged cs-build:triage and cs-repo:<repo> in this turn's records (the pick guard reads the same function over
+        the same turn). With no `repo`, only a meta/page get can name it. False when it names another, none, or the transcript cannot be read: the writer is
+        not known, so the session is not it."""
+        return bool(session_id) and self._load() and _transcript.page_writer(
+            self.records, repo, _transcript.records_after_last_human(self.records)) == session_id
 
     def stand_down(self, label, why):
         self.skip.setdefault(label, [])
@@ -782,6 +806,28 @@ def _returns_n(result, n):
     are read as the page-note capture reads them (local_time._documents)."""
     return (isinstance(result, dict) and result.get("is_error") is not True
             and any(_is_n(data.get("n"), n) for _, data in local_time._documents(result.get("content"))))
+
+
+def read_back_statuses(records, homes):
+    """{item number (digit string): status} from the ArtifactData get, list or query reads of collection `items` of
+    the waiting page (Homes.reads_waiting_page) in `records`, whose result is no error. The newest read of an item
+    wins. A document with no status field reads open. The report guard's closed-item check passes it one turn."""
+    results = {b["tool_use_id"]: b for r in records if r.get("type") == "user"
+               for b in _transcript.tool_results(r) if isinstance(b.get("tool_use_id"), str)}
+    found = {}
+    for r in records:
+        if r.get("type") != "assistant":
+            continue
+        for use in _transcript.tool_uses(r):
+            result = results.get(use.get("id"))
+            if (not _reads_items(use) or not isinstance(result, dict) or result.get("is_error") is True
+                    or not homes.reads_waiting_page([use["input"].get("url")])):
+                continue
+            for _, data in local_time._documents(result.get("content")):
+                n, status = data.get("n"), data.get("status")
+                if isinstance(n, int) and not isinstance(n, bool) or isinstance(n, str) and n.isdigit():
+                    found[str(int(n))] = status if isinstance(status, str) else "open"
+    return found
 
 
 def page_problem(item_id, rest, text, k, stamp, pages, homes=None):
@@ -939,7 +985,7 @@ def page_form_problem(text, items, homes, pages, session):
     if wake.startswith((SAVED_WAKE, UNDONE_WAKE)) and "(" not in wake.partition("Items:")[2]:
         return None  # a plain save or an undo: no owner words to route
     scope = homes.page_form_scope(banner.group(1))
-    if scope is None or not pages.is_writer(session):
+    if scope is None or not pages.is_writer(session, repo=SETTINGS_REPO.lower()):  # page_form_scope proved the cwd repo is this one
         return None
     try:
         for it in items:
@@ -1293,6 +1339,32 @@ def _exported_write(inp, collections):
     return any(c in collections for c in named) or (not named and verb == "batch")
 
 
+class _LazyCollections:
+    """The waiting page's collection list, read by the first collection name a write is tested against. A transcript
+    with no ArtifactData write reads nothing, so a checkout with no skills/waiting-page folder gives no note on a turn
+    that wrote no page. With no folder there is no list: the one collection `items` is the fallback
+    (layout.WAITING_FALLBACK), so a stale items write still blocks as on main, and a write of any other collection
+    sets `unread_hit` (the caller says "not checked") instead of passing as clear."""
+
+    def __init__(self, layout):
+        self._layout = layout
+        self._names = None
+        self.error = ""
+        self.unread_hit = False
+
+    def __contains__(self, name):
+        if self._names is None:
+            try:
+                self._names = self._layout.WAITING_COLLECTIONS
+            except self._layout.LayoutError as e:
+                self.error = " ".join(str(e).split()) or type(e).__name__
+                self._names = self._layout.WAITING_FALLBACK
+        found = name in self._names
+        if not found and self.error:
+            self.unread_hit = True
+        return found
+
+
 def _scan_transcript(records, collections):
     """(writes, exports, results) of the non-sidechain records. `writes` is [(epoch, id, url)] for each
     ArtifactData write of an exported collection; `exports` is [(epoch, id)] for each shell call naming
@@ -1346,9 +1418,12 @@ def export_check(cwd, transcript_path, session_id):
         import layout
     except (OSError, TypeError, ValueError, ImportError):
         return None, None  # no transcript to read (a hook run with none is normal), or no layout
-    writes, exports, results = _scan_transcript(records, layout.WAITING_COLLECTIONS)
+    collections = _LazyCollections(layout)
+    writes, exports, results = _scan_transcript(records, collections)
     writes = [w for w in writes if w[1] in results and not results[w[1]][0]]
     if not writes:
+        if collections.unread_hit:  # no skill folder, so a write of another collection was not told from the list
+            return None, FAIL_OPEN_EXPORT % collections.error
         return None, None  # nothing is read from the repo before a write is found
     writer = _transcript.page_writer_id(records)
     if writer:
@@ -1356,7 +1431,7 @@ def export_check(cwd, transcript_path, session_id):
     else:
         is_writer = any(e[0] < max(w[0] for w in writes) for e in exports)
     if not is_writer:
-        return None, None  # receipts and answers are not this session's to export
+        return None, None  # the page's data, receipts included, is not this session's to export
     try:
         root = Homes(cwd)._cwd_root()
         if root is None:

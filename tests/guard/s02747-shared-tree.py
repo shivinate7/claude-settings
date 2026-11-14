@@ -1183,6 +1183,61 @@ for _name, _command in (
 ):
     sh("guard-command-position: pinned, %s allowed" % _name, _command, "allow", cwd=NOGIT)
 
+# WRAPPER FLAGS BEFORE git, JUDGED IN A REPO. An allow is the same verdict whether the guard judged the call or
+# crashed on it, so these checks read guard.log too: a crash logs a guard-crash row and then allows. The scope
+# comes first: a known deny must log a deny row in the same folder, or the empty log proves nothing. The checks
+# register in s21304 with LOG_CHECKS_EXTRA, which does not exist yet at this point in the load.
+WRAPPER_CRASH_LABEL = "wrapper-flags-crash log: %s in a repo is allowed and logs no guard-crash row"
+WRAPPER_CRASH_COMMANDS = (
+    "timeout -s KILL 60 " + VCS + " status",
+    "env -u X " + VCS + " status",
+    "nice -n 5 " + VCS + " status",
+    "env -C /tmp " + VCS + " status",
+)
+
+
+def _judged_in(config, command):
+    """The case `decide` judges: the Bash call `command` in GITMAIN, its guard.log in the folder `config`."""
+    return {"raw": None, "tool": "Bash", "cwd": GITMAIN, "session": None, "env_path": None, "config": config,
+            "agent_id": None, "process_cwd": None, "temp": None, "tool_input": {"command": command}}
+
+
+def _log_rows(folder):
+    """Every row of the guard.log in `folder`, each split on its tabs. Empty when the guard wrote none."""
+    path = os.path.join(folder, "guard.log")
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as handle:
+        return [line.rstrip("\n").split("\t") for line in handle if line.strip()]
+
+
+def wrapper_crash_log_case(command):
+    """`command` is a status form with a value flag in front of git. It is allowed in a repo, and its guard.log
+    holds no guard-crash row. The known deny runs first, in its own folder, to show the log is written there."""
+    if os.name == "nt" and "/tmp" in command:
+        return lambda: (SKIP, "skipped: /tmp is a POSIX folder, so the Windows verdict of this form is not measured")
+    folder = os.path.join(ROOT, "wrapcrash-" + re.sub(r"[^a-z]+", "-", command.lower()).strip("-"))
+
+    def check():
+        scope = os.path.join(folder, "scope")
+        subject = os.path.join(folder, "subject")
+        for path in (scope, subject):
+            shutil.rmtree(path, ignore_errors=True)
+            os.makedirs(path)
+        got, reason = decide(_judged_in(scope, VCS + " checkout HEAD -- f.txt"))
+        if got != "deny" or not any(row[2:3] == ["deny"] for row in _log_rows(scope)):
+            return False, "scope: the known deny gave %s and logged no deny row in its folder (%s)" % (got, reason[:90])
+        got, reason = decide(_judged_in(subject, command))
+        if got != "allow":
+            return False, "%s: want allow, got %s (%s)" % (command, got, reason[:120])
+        crashes = [row for row in _log_rows(subject) if row[2:4] == ["crash", "guard-crash"]]
+        if crashes:
+            return False, "%s: the guard logged a crash: %s" % (command, " ".join(crashes[0][4:5])[:120])
+        return True, "allowed, and no guard-crash row logged"
+
+    return check
+
+
 # SUBSTITUTION. The shell runs a command inside `$( )` or backticks, in any word, assignment, double-quoted
 # text, commit message or unquoted heredoc body, so each form denies the reset as the plain reset does.
 for _name, _command in (

@@ -8,10 +8,10 @@ import re
 
 import guard_core
 from guard_core import (
-    HEREDOC_HEADER, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT, SCRIPT_HEADERS,
-    PowerShellScript, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
-    dir_before_segment, heredoc_delimiter, interpreter_bodies, is_powershell, nested_script, norm, resolve_command,
-    segment_tokens, split_segments, strip_heredoc_bodies,
+    GIT_OPT_WITH_VALUE, HEREDOC_HEADER, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT,
+    SCRIPT_HEADERS, PowerShellScript, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally,
+    basename, dir_before_segment, heredoc_delimiter, interpreter_bodies, is_powershell, long_flag_abbrev,
+    command_indexes, inner_commands, nested_script, norm, resolve_command, segment_tokens, split_segments, strip_heredoc_bodies,
 )
 from guard_env import _quoted_words, _substitutions, script_spots
 
@@ -214,11 +214,24 @@ def is_project_config(path: str, cwd: str) -> bool:
 #
 # The list holds the PowerShell cmdlets (`Set-Content`, `Out-File`, `Add-Content`, `Remove-Item`) as
 # well as the POSIX commands. Matching folds case, as PowerShell does.
-MUTATING_COMMAND = (
-    r"\b(?i:rm|mv|cp|chmod|truncate|tee|install|ln"
+# `sc`, `ac`, `cpi` and `ni` are PowerShell aliases that are also ordinary words (`grep -n ac`, `diff ni`), so
+# they count only as the segment's own command (`_ALIAS_COMMAND`), never as a word anywhere in it.
+_ALIAS_COMMAND = r"(?i:sc|ac|cpi|ni)"
+_MUTATING_ANYWHERE = (
+    r"(?i:rm|mv|cp|chmod|truncate|tee|install|ln"
     r"|set-content|add-content|clear-content|out-file|new-item|remove-item|move-item|copy-item"
-    r"|rename-item|set-itemproperty|ri|rd|rmdir|del|erase|move|copy|ren)\b"
+    r"|rename-item|set-itemproperty|ri|rd|rmdir|del|erase|move|copy|ren)"
 )
+# The full list, for a command already in command position and for a quick hint.
+MUTATING_COMMAND = r"\b(?:" + _MUTATING_ANYWHERE + "|" + _ALIAS_COMMAND + r")\b"
+_MUTATING_ANYWHERE_RE = r"\b" + _MUTATING_ANYWHERE + r"\b"
+# Where an alias is a command: first in the segment, or the first word of a `{`, `(` or `$(` block, or after a
+# dot-source (`.`) or call (`&`) word. In `grep -n ac F` or `diff ni F` it is only a word.
+# An assignment (`$f = ni`), a cast (`[void] ni`), a closing paren (`param($p) ni`) and `return ni` leave it in
+# command position. `_COMMAND_POSITION` is the text before such a command, for the alias and for `_lead_command`.
+_COMMAND_POSITION = (r"(?:^\s*|[{()]\s*|\]\s*|(?:^|\s)[.&]\s+|(?i:\breturn)\s+"
+                     r"|\$[\w:.]+(?:\[[^\]]*\])?\s*[-+*]?=\s*)")
+_ALIAS_POSITION = _COMMAND_POSITION + _ALIAS_COMMAND + r"\b"
 
 
 # A command that hands its arguments to another program, so a mutating word in them may run.
@@ -277,7 +290,13 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
         return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
-    if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
+    if re.search(_MUTATING_ANYWHERE_RE + r"[^\n;|&]*" + target, cmd):
+        return True
+    # No command given: an alias writes only as the segment's own command (through a wrapper such as `env`
+    # too) or where `_ALIAS_POSITION` reads it as one.
+    name = _segment_command(cmd.split())[0]
+    if re.search(_ALIAS_POSITION + r"[^\n;|&]*" + target, cmd) or (
+            re.fullmatch(_ALIAS_COMMAND, name) and re.search(r"\b" + _ALIAS_COMMAND + r"\b[^\n;|&]*" + target, cmd)):
         return True
     if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
         return True
@@ -755,6 +774,7 @@ _UNSAFE_MARK = re.compile(r"""`|\\["']|\$['"(]|[<>]\(|<#""")
 # PowerShell reads these as quote marks. They end or open a quote that the scanner does not see.
 _SMART_QUOTES = frozenset(PS_DOUBLE_QUOTES + PS_SINGLE_QUOTES)
 _GROUP_MARK = re.compile(r"[&(){}]")
+_STATEMENT_END = re.compile(r"[;|\n]")
 _FD_DUP = re.compile(r"\d*>&\d*|&>")
 _COMMAND_WORD_HOLDS = re.compile(r"""['"$`(){}\[\]!&]""")
 # A command that can run stored text, or rename what a printer is, makes no text data (review r2
@@ -940,13 +960,101 @@ def _cp_start(raw) -> int:
     return start if start is not None and _name(raw[start]) == "cp" else -1
 
 
-def _copy_reads(raw, predicate, cwd):
-    """The indexes of the words of a `cp` segment that are only read, else an empty set."""
-    words = [_unquoted(word) for word in raw]
-    start = _cp_start(raw)
-    if start < 0:
+# The PowerShell twins of `cp` and of a write of text. `Copy-Item SRC DEST` writes only DEST. `Add-Content`
+# and `Set-Content PATH TEXT...` write only PATH: a quoted word after it is the text written. Only the
+# switches below and plain positional words are read; any other parameter (`-Destination`, `-Value`,
+# `-Path`) or a redirect fails closed to a hit, as `-Destination` does for `cp`.
+_PS_COPY = frozenset(("copy-item", "copy", "cpi", "cp"))
+_PS_CONTENT = frozenset(("add-content", "set-content", "ac", "sc"))
+# The parameters that take no value. Any parameter not known to take a value or none may take the next word.
+_PS_SWITCH_FLAGS = ("recurse", "force", "container", "passthru", "verbose", "confirm", "whatif", "nonewline",
+                    "append", "noclobber", "debug")
+_PS_SWITCH = re.compile(r"-(?i:" + "|".join(_PS_SWITCH_FLAGS) + ")")
+
+
+def _is_folder(target, cwd) -> bool:
+    """True when a copy's destination is a folder: a trailing slash, or a folder that exists."""
+    try:
+        return target.endswith(("/", "\\")) or os.path.isdir(_expanded(target, cwd))
+    except (OSError, ValueError):
+        return False
+
+
+def _only_read(operands, words, target, predicate, cwd, is_folder=False):
+    """The copy operands (indexes into `words`) that are only read. A copy into a folder (`is_folder`, a
+    trailing slash, or a folder that exists) writes `FOLDER/<each source's name>`, so a source whose
+    name that folder path makes a hit is written, not read."""
+    if not (is_folder or _is_folder(target, cwd)):
+        return set(operands)
+    head = target.rstrip("/\\")
+    return {i for i in operands
+            if not predicate(head + "/" + re.split(r"[/\\]", words[i].rstrip("/\\"))[-1], cwd)}
+
+
+def _outside_quotes(word: str) -> str:
+    """The word with each quoted span removed, so a comma inside quotes is text and one outside is syntax."""
+    return re.sub(r"'[^']*'|\"[^\"]*\"", "", _straight(word))
+
+
+def _comma_joined(words, raw, index, start) -> bool:
+    """True when the word at `index` belongs to a comma list: it ends with a comma, starts with one, or
+    follows a word that ends with one. Only a comma outside quotes joins (`"a.md", "b"` joins, `"a,b"`
+    is one path)."""
+    here = _outside_quotes(raw[index])
+    return here.endswith(",") or (index > start + 1 and (
+        here.startswith(",") or _outside_quotes(raw[index - 1]).endswith(",")))
+
+
+def _ps_reads(name, raw, words, start, predicate, cwd, plain):
+    """`_copy_reads` for a PowerShell `Copy-Item` (its sources) or `Add-Content` / `Set-Content` (the
+    quoted text after the path): the indexes of the words that are only read or only text. A `;`, `|` or
+    newline outside quotes means the segment holds a second statement the split missed: none is read."""
+    if _GROUP_MARK.search(_FD_DUP.sub("", plain)) or _STATEMENT_END.search(plain):
         return set()
-    operands, target, index, shown = [], None, start + 1, ""
+    operands = []
+    for index in range(start + 1, len(words)):
+        word = words[index]
+        if ">" in word or "<" in word or (word.startswith("-") and not _PS_SWITCH.fullmatch(word)):
+            return set()
+        if not _PS_SWITCH.fullmatch(word):
+            operands.append(index)
+    if name in _PS_CONTENT:
+        # A comma list is one argument: in a path slot it names several paths (`a.md, 'b'` writes both), so no
+        # word is text; after the path slots it is the text written. A copy's comma list is judged below.
+        arguments = []
+        for at, index in enumerate(operands):
+            if at and (_outside_quotes(raw[operands[at - 1]]).endswith(",") or raw[index].startswith(",")):
+                arguments[-1].append(index)
+            else:
+                arguments.append([index])
+        paths = _PATH_POSITIONS[name]
+        if any(len(argument) > 1 for argument in arguments[:paths]):
+            return set()
+        return {i for argument in arguments[paths:] for i in argument if _has_quote(raw[i])}
+    if len(operands) < 2:
+        return set()
+    target = words[operands[-1]]
+    if "," in target or _comma_joined(words, raw, operands[-1], start):
+        return set()
+    if _CP_DEST_UNSAFE.search(target) or predicate(target, cwd) or predicate(target.rstrip("/\\") + "/_", cwd):
+        return set()
+    return _only_read(operands[:-1], words, target, predicate, cwd)
+
+
+def _copy_reads(raw, predicate, cwd, plain=""):
+    """The indexes of the words of a `cp` segment that are only read, else an empty set. `plain` is the
+    segment's text outside quotes, for the PowerShell twins (`_ps_reads`)."""
+    words = [_unquoted(word) for word in raw]
+    start = resolve_command(tuple(raw))
+    if start is None:
+        return set()
+    name = _name(raw[start])
+    # `cp` is read by the Bash parser below in both shells: its flags (`-t`, `-l`) are Bash's.
+    if (name in _PS_COPY and name != "cp") or name in _PS_CONTENT:
+        return _ps_reads(name, raw, words, start, predicate, cwd, plain)
+    if name != "cp":
+        return set()
+    operands, target, index, shown, is_folder = [], None, start + 1, "", False
     while index < len(words):
         word = words[index]
         if _NULL_REDIRECT.fullmatch(word):
@@ -970,15 +1078,15 @@ def _copy_reads(raw, predicate, cwd):
                 name.startswith(word[2:].split("=")[0]) for name in _CP_LINK_LONG):
             return set()
         if _CP_TARGET.fullmatch(word):
-            target, index = (words[index + 1] if index + 1 < len(words) else None), index + 2
+            target, index, is_folder = (words[index + 1] if index + 1 < len(words) else None), index + 2, True
             if target is None:
                 return set()
             shown = raw[index - 1]
             continue
         if word.startswith("--target-directory="):
-            target, shown = word.split("=", 1)[1], ""
+            target, shown, is_folder = word.split("=", 1)[1], "", True
         elif word.startswith("-t") and len(word) > 2 and word[1] != "-":
-            target, shown = word[2:], ""
+            target, shown, is_folder = word[2:], "", True
         elif _CP_FLAGS.fullmatch(word):
             pass
         elif word.startswith("-") or ">" in word or "<" in word:
@@ -995,7 +1103,7 @@ def _copy_reads(raw, predicate, cwd):
         return set()
     if predicate(target, cwd) or predicate(target.rstrip("/\\") + "/_", cwd):
         return set()
-    return set(operands)
+    return _only_read(operands, words, target, predicate, cwd, is_folder)
 
 
 def _cp_link_source(raw, holds, cwd) -> str:
@@ -1055,13 +1163,14 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 
 
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
-                     command_position=False, predicate_command=False, script_data=False) -> str:
+                     command_position=False, predicate_command=False, script_data=False, listed=None) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
     when that folder cannot be told. `predicate_command` also hands `predicate` the segment's command
     name as a third argument (`''` when none). `script_data` reads the script of a `python -c` or a
-    `node -e` as data, for a caller that reads its shell spots on its own (`shell_write_hit`)."""
+    `node -e` as data, for a caller that reads its shell spots on its own (`shell_write_hit`). `listed` holds the
+    folders a listing piped into the text may be, so `$_` may name a file in one (`_pipe_variable_hit`)."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
@@ -1074,19 +1183,40 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                if command_position else parsed)
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
+    # A copy or a written text is read through PowerShell's own quotes: a smart quote is a quote there, so the
+    # straightened text is what PowerShell sees. Only a printer's data stays closed by a smart quote.
+    straight = [_scan(_straight(segment)) for segment in segments]
+    reading_closed = any(unsafe or _runs_stored_text(segment, words, plain)
+                         for segment, words, (unsafe, plain) in zip(segments, parsed, straight))
+    # The reads come from the same straightened text, so a copy or a written text is cut where PowerShell cuts it.
+    # An index into those words is an index into the segment's words only when they are the ones judged below.
+    read_words = [[_typed(word, segment) for word in _quoted_words(_straight(segment))]
+                  if is_powershell(segment) else words for segment, words in zip(segments, parsed)]
+    read_scripts = ([[_typed(word, segment) for word in _quoted_words(_straight(segment), True)]
+                     if is_powershell(segment) else words for segment, words in zip(segments, scripts)]
+                    if command_position else read_words)
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
     inner = []
+    carry, carry_depth = None, 0
     for number, raw in enumerate(parsed):
         linked = _cp_link_source(raw, holds, cwd)
         if linked:
             return linked
-        data = set() if closed else _copy_reads(raw, predicate, cwd)
+        data = set() if reading_closed else _copy_reads(read_words[number], predicate, cwd, straight[number][1])
+        from_reads = bool(data)
+        if from_reads:
+            raw = read_words[number]
         found = None if closed or not script_data else _inline_script_at([_unquoted(word) for word in raw])
         if found:
             data.add(found[1])
             # the shell still runs a substitution in a double-quoted script word
             inner += [text for text, _ in _substitutions(raw[found[1]])[0][:-1]]
+        powershell = is_powershell(segments[number])
+        at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
+        # A `( )` group outside the command's path slots is judged as a command of its own, below.
+        groups = _ps_inner_groups(raw, at) if powershell else []
+        grouped = {index: span[0] for span, _inner in groups for index in span}
         if kinds[number] in ("printer", "message"):
             last = number
             while last + 1 < len(kinds) and ends[last] == "|":
@@ -1098,7 +1228,12 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 data = data | _data_words(kinds[number], raw)
         words, shown, script = [], [], []
         for index, word in enumerate(raw):
-            if index in data:
+            if index in grouped:
+                if grouped[index] == index:   # the group is one argument of the outer command
+                    words.append('""')
+                    shown.append('""')
+                    script.append('""')
+            elif index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
                 shown.append('""')
                 script.append('""')
@@ -1111,30 +1246,67 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             else:
                 # An unquoted `)` or backtick glued to the path (`( echo > F)`, `$(... > F)`) is not
                 # part of it. A quoted word ends in its quote, so it is never cut here.
+                closing = ")" * (len(word) - len(word.rstrip(")"))) if word.rstrip(")`") else ""
                 word = _typed(word.rstrip(")`") or word, word)   # keeps the PowerShell type of the word
                 pieces = _words_of(word) if _has_quote(word) else [word]
                 # `_words_of` cuts a quote's text at a paren but not at a backtick: a `bash -c` script that
                 # holds a backtick substitution ends its path word with one.
                 pieces = [_typed(piece.rstrip("`") or piece, piece) for piece in pieces]
                 words.extend(pieces)
-                shown.extend(pieces)
-                kept = scripts[number][index]
+                # The text keeps a closing paren: `param($p) ni F` runs `ni` as a command after the paren
+                # (`_ALIAS_POSITION`); the judged word is still the path without it.
+                shown.extend(pieces[:-1] + [pieces[-1] + closing] if closing and pieces else pieces)
+                kept = (read_scripts if from_reads else scripts)[number][index]
                 script.extend(_words_of(kept) if _has_quote(kept) else [kept])
         text = " ".join(shown)
-        at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
-        for nested in _powershell_scripts_of(segments[number]):
+        scripts_run = _powershell_scripts_of(segments[number])
+        for nested in scripts_run:
             # a script pwsh, `cmd /c` or iex runs is PowerShell text: judge it by PowerShell's rules too
             hit = _shell_write_hit(nested, at, predicate, holds, follow_cd, command_position, predicate_command)
             if hit:
                 return hit
+        command_args = _segment_command(script) if command_position else ()
+        if command_args and not _mutates_as_command(*command_args):
+            command_args = _lead_command(segments[number]) or command_args
+        if command_args and scripts_run and command_args[0] in _PS_SHELLS:
+            # the script this shell runs was judged above by PowerShell's own rules; only a redirect on the shell is left
+            command_args = ("", ())
+        current = listed
+        if command_position and powershell:
+            # A command inside a scriptblock is a command of its own; `ls | % { Set-Content $_ x }` writes
+            # each listed file, so a write whose target is `$_` is judged as the folder listed. A pipe inside
+            # the block splits it into segments: the listing holds until the block's brace closes.
+            blocks, delta = _ps_blocks(segments[number])
+            here = _listed_folder(parsed, ends, number)
+            current = here or (carry if carry_depth > 0 else None) or listed
+            carry, carry_depth = (here, delta) if here else (carry, carry_depth + delta)
+            for block in blocks:
+                hit = _shell_write_hit(block, at, predicate, holds, follow_cd, command_position,
+                                       predicate_command, listed=current)
+                if hit:
+                    return hit
+        for _span, group_text in groups:
+            hit = _shell_write_hit(_typed(group_text, segments[number]), at, predicate, holds, follow_cd,
+                                   command_position, predicate_command, listed=current)
+            if hit:
+                return hit
+        pipe_hit = _pipe_variable_hit(command_args, current, at, predicate, holds) if current is not None else ""
+        if pipe_hit:
+            return pipe_hit
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
-            if not word or word in (">", ">>"):
+            if not word or word in (">", ">>", '""'):   # '""' stands for data or a `cp` source, never a path
                 continue
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ())):
-                return word
+            # A PowerShell comma joins paths into one argument: each piece is a path of its own.
+            pieces = [word] + ([piece for piece in word.split(",") if piece] if powershell and "," in word else [])
+            if powershell and word.endswith((")", "}")):
+                pieces.append(word.rstrip(")}"))   # the paren or brace that closes the command's group
+            for piece in pieces:
+                if (predicate(piece, at, verb) if predicate_command else predicate(piece, at)) and \
+                        writes_to(piece, text, *command_args):
+                    return piece
     for text in inner:
         hit = _shell_write_hit(text, cwd, predicate, holds, follow_cd, command_position)
         if hit:
@@ -1142,6 +1314,285 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     return ""
 
 
+_LISTERS = frozenset(("ls", "dir", "gci", "get-childitem"))
+# A stage between a listing and the block that passes each listed item on unchanged or in part.
+_LIST_FILTERS = frozenset(("where-object", "where", "?", "select-object", "select", "sort-object", "sort"))
+# `$_` or `$PSItem` as a path word: bare, with a member (`$_.FullName`), in parentheses, in a `$(...)`, or bound
+# to a parameter by a colon (`-Path:$_`).
+# A member may be called (`$_.FullName.ToString()`), and the variable may be braced (`${_}`).
+_PIPE_VARIABLE = re.compile(
+    r"(?:-\w+:)?\(*(?:\$\(+)?(?:\$(?:_|psitem)|\$\{(?:_|psitem)\})(?:\.\w+(?:\([^()]*\))?)*\)*", re.IGNORECASE)
+# The common parameters that take a value, with their aliases. The word after one is its value, never a path.
+_PS_COMMON_VALUE_FLAGS = ("erroraction", "warningaction", "informationaction", "errorvariable", "warningvariable",
+                          "informationvariable", "outvariable", "outbuffer", "pipelinevariable", "progressaction",
+                          "ea", "wa", "infa", "ev", "wv", "iv", "ov", "ob", "pv", "proga")
+# What a `Get-ChildItem` parameter takes: a value that is the listed folder, a value that only filters it, or
+# nothing. Matching is by prefix, as PowerShell does.
+_LIST_PATH_FLAGS = ("path", "literalpath")
+_LIST_FILTER_FLAGS = ("filter", "include", "exclude", "depth", "attributes")
+_LIST_SWITCH_FLAGS = ("name", "directory", "file", "hidden", "readonly", "system", "followsymlink") + _PS_SWITCH_FLAGS
+
+
+def _flag_is(name: str, full_names, shortest: int = 1) -> bool:
+    """True when the parameter `name` (no dash) is a prefix of one of `full_names`, as PowerShell abbreviates."""
+    return len(name) >= shortest and any(full.startswith(name) for full in full_names)
+
+
+def _listed_folder(parsed, ends, number):
+    """The folders a listing (`ls`, `dir`, `gci`, `Get-ChildItem`) may hand to segment `number` through a pipe
+    (`_listed_path`), else None. A `Where-Object` or `Select-Object` stage between them passes the listing on."""
+    stage = number - 1
+    while stage >= 0 and ends[stage] == "|":
+        words = [_unquoted(word) for word in parsed[stage]]
+        command, rest = _segment_command(words)
+        if command in _LISTERS:
+            return _listed_path(rest)
+        if command not in _LIST_FILTERS:
+            return None
+        stage -= 1
+    return None
+
+
+def _listed_path(rest) -> tuple:
+    """The folders a listing's arguments may name: the `-Path` value, else the first plain word, else `.`. A
+    filtering parameter's value (`-Filter *.py`) is no folder. The word after a parameter not known to take a
+    value or none may be its value or the folder, so each reading gives a folder (`-New v hooks`: `v`, `hooks`)."""
+    plain, index, sure, maybe = [], 0, False, False
+    while index < len(rest):
+        word = rest[index]
+        if not word.startswith("-"):
+            if not sure:
+                plain.append(word)
+                sure = not maybe
+            maybe = False
+        else:
+            maybe = False
+            name, colon, value = word[1:].partition(":")
+            name = name.lower()
+            if _flag_is(name, _LIST_PATH_FLAGS):
+                if colon and value:
+                    return (value,)
+                if index + 1 < len(rest):
+                    return (rest[index + 1],)
+            elif not colon and _flag_is(name, _LIST_FILTER_FLAGS + _PS_COMMON_VALUE_FLAGS, 2):
+                index += 1   # its value filters the listing; it is no folder
+            elif not colon and not _flag_is(name, _LIST_SWITCH_FLAGS):
+                maybe = True
+        index += 1
+    return tuple(plain) + (() if sure else (".",))
+
+
+# What a mutating command's parameters take, for `_pipe_variable_hit`: the path it writes (or the destination
+# of a copy), the path a copy reads, a value that is neither a path nor written (a filter, text), or nothing.
+_PS_TARGET_FLAGS = ("path", "literalpath", "destination", "name", "newname", "target", "filepath", "pspath")
+_PS_VALUE_FLAGS = ("include", "exclude", "filter", "inputobject", "value", "itemtype", "encoding", "stream",
+                   "credential", "width", "depth", "attributes") + _PS_COMMON_VALUE_FLAGS
+# How many plain words these take as paths. The words after them are text or a type: a content command's value,
+# `Out-File`'s encoding, `New-Item`'s type or value (its second word is the Name, so it is a path). A command
+# not listed takes every plain word as a path (`Remove-Item`).
+_PATH_POSITIONS = {**dict.fromkeys(_PS_CONTENT | {"out-file"}, 1), "new-item": 2, "ni": 2}
+
+
+def _ps_argument_slots(command, rest):
+    """The `(role, word)` pairs of a PowerShell command's arguments. A role is `write` (a path the command
+    writes), `source` (the path a copy reads) or `destination` (where a copy writes). A value of a filtering or
+    text parameter has no role and is left out, and so is a switch. Where PowerShell would bind a word by
+    position, the command's own order decides it. A parameter not known to take a value or none may take the
+    plain word after it, or not: that word, and each word after it, gets every role some reading gives it, so
+    a word may come twice."""
+    copies = command in _PS_COPY
+    # A path parameter given by name takes the place of a positional path, so the plain words that are left
+    # are values (`Add-Content -Path docs/list.txt $_.Name` writes `$_.Name` into the file).
+    named = sum(1 for word in rest if word.startswith("-") and len(word) > 1
+                and _flag_is(word[1:].partition(":")[0].lower(), _PS_TARGET_FLAGS))
+    limit = _PATH_POSITIONS.get(command)
+    # `fewest` counts the plain words before this one that are positional in every reading, `most` those that
+    # are in some reading. `maybe` marks a word an unknown parameter may take as its value.
+    slots, fewest, most, index, maybe = [], 0, 0, 0, False
+    while index < len(rest):
+        word = rest[index]
+        if word.startswith("-") and len(word) > 1:
+            name, colon, value = word[1:].partition(":")
+            name = name.lower()
+            target = _flag_is(name, _PS_TARGET_FLAGS)
+            takes_value = target or _flag_is(name, _PS_VALUE_FLAGS, 2)
+            unknown = not takes_value and not _flag_is(name, _PS_SWITCH_FLAGS)
+            if not colon and takes_value and index + 1 < len(rest):
+                value = rest[index + 1]
+                index += 1
+            if value and target:
+                if copies and _flag_is(name, ("path", "literalpath")):
+                    role = "source"
+                elif copies and _flag_is(name, ("destination",)):
+                    role = "destination"
+                else:
+                    role = "write"
+                slots.append((role, value))
+            maybe = unknown and not colon
+        else:
+            if copies:
+                taken = {role for role, _word in slots}
+                if "source" not in taken and fewest == 0:
+                    slots.append(("source", word))
+                if "source" in taken or most > 0:
+                    slots.append(("destination", word))
+            elif limit is None or fewest + named < limit:
+                slots.append(("write", word))
+            fewest += 0 if maybe else 1
+            most += 1
+            maybe = False
+        index += 1
+    return slots
+
+
+def _pipe_variable_hit(command_args, folders, at, predicate, holds) -> str:
+    """The word that is the pipeline variable (`$_`, `$PSItem`) as a path the command writes into a place that
+    `predicate` accepts, else ''. `folders` are the folders the listing the variable comes from may be
+    (`_listed_path`): a write of `$_` lands on a path in one, so it counts when `holds(folder, at)` for any. A
+    copy's source is only read; it is written when the destination is a folder, as `FOLDER/<listed name>`, so
+    it counts when that path is accepted for any name a listing holds."""
+    command, rest = command_args if command_args else ("", ())
+    if not _mutates_as_command(command, rest):
+        return ""
+    slots = _ps_argument_slots(command, rest)
+    for folder in folders:
+        hit = _listed_hit(slots, folder, at, predicate, holds)
+        if hit:
+            return hit
+    return ""
+
+
+def _listed_hit(slots, folder, at, predicate, holds) -> str:
+    """`_pipe_variable_hit` for one listed folder."""
+    for role, word in slots:
+        if role != "source" and _PIPE_VARIABLE.fullmatch(word) and holds(folder, at):
+            return word
+    sources = [word for role, word in slots if role == "source" and _PIPE_VARIABLE.fullmatch(word)]
+    destinations = [word for role, word in slots if role == "destination"]
+    if sources and destinations and _is_folder(destinations[0], at):
+        try:
+            names = os.listdir(_expanded(folder, at))
+        except (OSError, ValueError):
+            return sources[0] if holds(folder, at) else ""
+        head = destinations[0].rstrip("/\\")
+        if any(predicate(head + "/" + name, at) for name in names):
+            return sources[0]
+    return ""
+
+
+# What may stand before a PowerShell command's name in its word: casts and the parens they open (`[void](`).
+_PS_COMMAND_LEAD = re.compile(r"(?:\[[^\]]*\]|[$@]?\()*")
+_PS_GROUP_OPEN = re.compile(r"[$@]?\(")
+
+
+def _ps_inner_groups(raw, at):
+    """The `( )` groups among a PowerShell segment's arguments that fill no path slot of its command, as
+    (indexes into `raw`, the text inside the group). A path in such a group is read or written by the group's
+    own commands, not by the outer one: `Set-Content docs/a.md (Get-Content hooks/test_x.py)` writes only
+    docs/a.md. A group in a path slot (`Set-Content (Get-Item P) x`) names the target, so it is none of these.
+    A shape this does not read (an unclosed group, a command name it does not know, a comma list) gives none,
+    so every word stays judged as part of the outer command. `at` is the folder the segment runs in."""
+    plain = [_outside_quotes(word) for word in raw]
+    start = 1 if plain and (plain[0].lower() == "return" or re.fullmatch(r"(?:\[[^\]]*\])+", plain[0])) else 0
+    if start >= len(raw):
+        return []
+    lead = _PS_COMMAND_LEAD.match(plain[start]).group()
+    name = plain[start][len(lead):]
+    if not re.fullmatch(r"[A-Za-z][\w-]*", name):
+        return []
+    base = depth = lead.count("(")
+    rest, spans, index = [], [], start + 1
+    while index < len(raw):
+        first = index
+        opens = depth == base and _PS_GROUP_OPEN.match(plain[index])
+        depth += plain[index].count("(") - plain[index].count(")")
+        while opens and depth > base and index + 1 < len(raw):
+            index += 1
+            depth += plain[index].count("(") - plain[index].count(")")
+        if depth != base and (opens or depth > base):
+            return []   # an unclosed group, or a word that opens one mid-word
+        if opens:
+            # A comma joins the group to the argument beside it, so it may be a path of that argument.
+            if (first > start + 1 and plain[first - 1].endswith(",")) or plain[index].endswith(","):
+                return []
+            spans.append(range(first, index + 1))
+            rest.append("\0" + str(len(spans) - 1))
+        else:
+            rest.append(_unquoted(raw[index]))
+        if depth < base:
+            break   # the paren that closes the command's own group ends its arguments
+        index += 1
+    slots = _ps_argument_slots(name.lower(), rest)
+    targets = {word for role, word in slots if role != "source"}
+    # A copy into a folder (or, with no destination, into `at`) writes FOLDER/<source name>, so its source
+    # names a target too. A destination that is a group may be a folder.
+    destinations = [word for role, word in slots if role == "destination"]
+    if name.lower() in _PS_COPY and (not destinations or any(
+            word.startswith("\0") or _is_folder(word, at) for word in destinations)):
+        targets |= {word for role, word in slots}
+    groups = []
+    for number, span in enumerate(spans):
+        if "\0" + str(number) in targets:
+            continue
+        text = _straight(" ".join(raw[i] for i in span))
+        inner = text[_PS_GROUP_OPEN.match(text).end():]
+        groups.append((span, inner[:-1] if inner.endswith(")") else inner))
+    return groups
+
+
+def _lead_command(segment):
+    """(command, words after it) for the first mutating command a segment holds at a command position past its
+    first word (`[void] New-Item x`, `[void](New-Item x)`, `return Set-Content x y`), else None. It reads the
+    segment text: text inside quotes or a here-string holds no command. A position is the text
+    `_COMMAND_POSITION` reads, so this and the alias rule share one idea of where a command starts."""
+    text = _straight(segment)
+    masked = re.sub(r"@(['\"])[ \t]*\r?\n.*?\r?\n[ \t]*\1@|'[^']*'|\"[^\"]*\"",
+                    lambda quoted: "Q" * len(quoted.group()), text, flags=re.DOTALL)
+    for match in re.finditer(r"[^\s(){}\[\];]+", masked):
+        if not re.search(_COMMAND_POSITION + r"\Z", masked[:match.start()]):
+            continue
+        command, rest = _segment_command([_unquoted(word) for word in _quoted_words(text[match.start():])])
+        if _mutates_as_command(command, rest):
+            return command, rest
+    return None
+
+
+def _ps_blocks(segment: str):
+    """(the text inside each top-level `{ ... }` of a PowerShell segment, its brace balance: opens less closes).
+    Quoted text and here-strings are skipped, so a brace in a string is no block. An unclosed brace gives
+    its rest."""
+    text, out, depth, start, quote, index, balance = _straight(segment), [], 0, 0, "", 0, 0
+    while index < len(text):
+        char = text[index]
+        if quote:
+            if char == "`" and quote == '"':
+                index += 1
+            elif char == quote:
+                quote = ""
+        elif char == "@" and re.match(r"@['\"][ \t]*\r?\n", text[index:]):
+            # a here-string body is text up to its closing `'@` or `"@` at a line start
+            close = re.compile(r"\n[ \t]*" + text[index + 1] + "@").search(text, index)
+            index = close.end() - 1 if close else len(text)
+        elif char in "'\"":
+            quote = char
+        elif char == "{":
+            balance += 1
+            if depth == 0:
+                start = index + 1
+            depth += 1
+        elif char == "}":
+            balance -= 1
+            if depth:
+                depth -= 1
+                if depth == 0:
+                    out.append(text[start:index])
+        index += 1
+    if depth:
+        out.append(text[start:])
+    return out, balance
+
+
+_PS_SHELLS = frozenset(("pwsh", "powershell", "cmd"))
 _PS_LAUNCHER = re.compile(r"pwsh|powershell|cmd|iex|invoke-expression", re.IGNORECASE)
 
 
@@ -1162,11 +1613,19 @@ def _powershell_scripts_of(segment: str) -> list:
 
 
 def _segment_command(words):
-    """(resolved command name, plain words after it) of a segment, for `writes_to`'s command position."""
+    """(resolved command name, plain words after it) of a segment, for `writes_to`'s command position.
+    `env -S STRING` runs STRING, with the words after it appended: that command is the one read."""
+    inner = guard_core._env_split_string(tuple(words))
+    tokens = segment_tokens(inner) if inner else None
+    if tokens:
+        return _segment_command(tokens)
     index = resolve_command(tuple(words))
     if index is None:
         index = next((i for i, word in enumerate(words) if not _ASSIGNMENT.match(word)), len(words))
-    command = _name(words[index]) if index < len(words) else ""
+    # A subshell or group opener glued to the verb (`(sed -i ...)`, `{ sed -i ...; }`) is not part of its name.
+    while index < len(words) and words[index] in ("(", "{"):
+        index += 1
+    command = _name(words[index].lstrip("({") or words[index]) if index < len(words) else ""
     return command, [word for word in words[index + 1:] if word]
 
 
@@ -1857,6 +2316,322 @@ def _interpreter_write_hit(raw: str, cwd: str, predicate, script_files: bool = F
             if hit:
                 return hit
     return _script_file_hit(raw, cwd, predicate) if script_files else ""
+
+
+# ------------------------------------------------------------------ a patch `git apply` writes
+#
+# `git apply` writes each file the patch's headers name, which the shell text never does. The guard reads
+# those names the way `git apply --numstat` does (`-p` strips leading folders, `--directory` prepends one,
+# both sides of a rename or copy count) and hands each to the caller's predicate. The patch comes from a
+# file argument, a `<` file, a heredoc or here-string on stdin, or a `cat <<EOF |` heredoc piped in. A patch
+# the guard cannot read in full (missing, a folder, over `_SCRIPT_READ_LIMIT`, or fed by any other
+# pipe) is unknown and stays allowed. `--check`, `--stat`, `--numstat` and `--summary` write nothing.
+_APPLY_QUIET_FLAGS = (("--check", "--ch"), ("--stat", "--st"), ("--numstat", "--nu"), ("--summary", "--su"))
+_APPLY_VALUE_FLAGS = (("--directory", "--di"), ("--include", "--inc"), ("--exclude", "--ex"),
+                      ("--whitespace", "--wh"), ("--build-fake-ancestor", "--bu"))
+_APPLY_REDIRECT = re.compile(r"^(?:\d*|&)(<<<|<<-?|<|>>|>)(.*)$", re.S)
+_HUNK_HEADER = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
+_C_ESCAPES = {"a": 7, "b": 8, "f": 12, "n": 10, "r": 13, "t": 9, "v": 11}
+
+
+def _c_unquote(text: str):
+    """(value, length read) of the C-quoted name that starts `text` (git quotes odd names so), else (None, 0)."""
+    out, at = bytearray(), 1
+    while at < len(text):
+        char = text[at]
+        if char == '"':
+            return out.decode("utf-8", "replace"), at + 1
+        if char == "\\" and at + 1 < len(text):
+            octal = re.match(r"[0-7]{1,3}", text[at + 1:])
+            if octal:
+                out.append(int(octal.group(), 8) & 255)
+                at += 1 + len(octal.group())
+            else:
+                out += bytes([_C_ESCAPES[text[at + 1]]]) if text[at + 1] in _C_ESCAPES else text[at + 1].encode()
+                at += 2
+            continue
+        out += char.encode()
+        at += 1
+    return None, 0
+
+
+def _strip_leading(name: str, count: int):
+    """`name` without its first `count` folders (git's `-p`), else None when it has fewer."""
+    for _ in range(count):
+        cut = name.find("/")
+        if cut < 0:
+            return None
+        name = name[cut:].lstrip("/")
+    return name or None
+
+
+def _header_names(rest: str, strip: int) -> list:
+    """The names a `---` or `+++` header line names (the text after its marker). A name ends at a tab; a plain
+    `diff -u` header may carry a timestamp after a space, so the first word counts too. `/dev/null` is no name."""
+    if rest.startswith('"'):
+        value, _ = _c_unquote(rest)
+        found = [value] if value else []
+    else:
+        head = rest.split("\t")[0].rstrip()
+        found = [head, head.split(" ")[0]]
+    return [name for name in (_strip_leading(each, strip) for each in found if each and each != "/dev/null") if name]
+
+
+def _diff_git_names(rest: str, strip: int) -> list:
+    """The two names of a `diff --git A B` line (the text after `diff --git `). Git cuts the line in half when
+    both names are the same; any other cut with a space in a name is no reading this guard can make."""
+    names = []
+    if rest.startswith('"'):
+        first, used = _c_unquote(rest)
+        tail = rest[used:].lstrip(" ")
+        second = _c_unquote(tail)[0] if tail.startswith('"') else tail
+        names = [first, second]
+    elif rest.count(" ") == 1:
+        names = rest.split(" ")
+    elif len(rest) % 2 == 1 and rest[len(rest) // 2] == " ":
+        names = [rest[:len(rest) // 2], rest[len(rest) // 2 + 1:]]
+    return [name for name in (_strip_leading(each, strip) for each in names if each and each != "/dev/null") if name]
+
+
+def _patch_names(text: str, strip: int) -> list:
+    """Every file name the headers of a patch name, in order, each once. A hunk's lines are counted off by the
+    sizes its `@@` header states, so a removed line that reads `-- x` is no `---` header."""
+    names, old_left, new_left = [], 0, 0
+    for line in text.split("\n"):
+        line = line.rstrip("\r")
+        if old_left > 0 or new_left > 0:
+            if line.startswith("-"):
+                old_left -= 1
+            elif line.startswith("+"):
+                new_left -= 1
+            elif not line.startswith("\\"):
+                old_left, new_left = old_left - 1, new_left - 1
+            continue
+        hunk = _HUNK_HEADER.match(line)
+        if hunk:
+            old_left, new_left = (1 if size is None else int(size) for size in hunk.groups())
+        elif line.startswith("diff --git "):
+            names += _diff_git_names(line[11:], strip)
+        elif line.startswith(("--- ", "+++ ")):
+            names += _header_names(line[4:], strip)
+        elif line.startswith(("rename from ", "rename to ", "copy from ", "copy to ")):
+            names += _header_names(line.split(" ", 2)[2], 0)
+    return list(dict.fromkeys(names))
+
+
+def _apply_root(where: str) -> str:
+    """The top folder of the repository `where` is in, else `where`: the patch's names count from there."""
+    here = where
+    while here and here != os.path.dirname(here):
+        if os.path.exists(os.path.join(here, ".git")):
+            return here
+        here = os.path.dirname(here)
+    return where
+
+
+def _heredoc_bodies_of(raw: str, segment: str) -> list:
+    """The body of each heredoc whose header line holds `segment`, read both ways `_split_heredocs` walks."""
+    found = []
+    for reading in (False, True):
+        for _quote, body, header in _split_heredocs(raw, reading)[1]:
+            if segment.strip() in header and body not in found:
+                found.append(body)
+    return found
+
+
+def _apply_call(tokens, index: int, at: str):
+    """(the folder the call runs in, its arguments after `apply`) for the `git` word at `index`, else None when the
+    subcommand is no `apply` or a `-C` value cannot be told. Git's own options come first; `-C` moves the folder."""
+    cursor = index + 1
+    while cursor < len(tokens):
+        token = tokens[cursor]
+        if token == "-C" and cursor + 1 < len(tokens):
+            at = _script_path(tokens[cursor + 1], at)
+            if not at:
+                return None
+            cursor += 2
+        elif token in GIT_OPT_WITH_VALUE:
+            cursor += 2
+        elif token.startswith("-"):
+            cursor += 1
+        else:
+            break
+    if cursor < len(tokens) and tokens[cursor].lower() == "apply":
+        return at, list(tokens[cursor + 1:])
+    return None
+
+
+def _apply_options(words):
+    """(strip, directory prefix, writes nothing, patch files, stdin file, here-strings, reads a heredoc) of the
+    arguments of one `git apply`. A redirect is no patch file; the file after `<` is stdin."""
+    strip, prefix, apply_flag, quiet, heredoc, ended = 1, "", False, False, False, False
+    files, stdin_file, here_strings = [], "", []
+    index = 0
+    while index < len(words):
+        word = words[index]
+        index += 1
+        redirect = _APPLY_REDIRECT.match(word)
+        if redirect:
+            operator, value = redirect.groups()
+            if not value and index < len(words):
+                value = words[index]
+                index += 1
+            if operator == "<":
+                stdin_file = value
+            elif operator == "<<<":
+                here_strings.append(value)
+            elif operator.startswith("<<"):
+                heredoc = True
+        elif ended:   # after `--` every word is a file name, but a redirect (matched above) is still a redirect
+            files.append(word)
+        elif word == "--":
+            ended = True
+        elif word.startswith("--"):
+            name, glued, value = word.partition("=")
+            if long_flag_abbrev(name, "--apply", "--ap"):
+                apply_flag = True
+            elif any(long_flag_abbrev(name, full, short) for full, short in _APPLY_QUIET_FLAGS):
+                quiet = True
+            elif any(long_flag_abbrev(name, full, short) for full, short in _APPLY_VALUE_FLAGS):
+                if not glued and index < len(words):
+                    value = words[index]
+                    index += 1
+                if long_flag_abbrev(name, "--directory", "--di"):
+                    prefix = value
+        elif word == "-" or not word.startswith("-"):
+            files.append(word)
+        else:
+            for at, char in enumerate(word[1:], 1):   # a short cluster: `-Rv`, `-p1`, `-p 1`
+                if char in "pC":
+                    value = word[at + 1:]
+                    if not value and index < len(words):
+                        value = words[index]
+                        index += 1
+                    if char == "p" and value.isdigit():
+                        strip = int(value)
+                    break
+    return strip, prefix, quiet and not apply_flag, files, stdin_file, here_strings, heredoc
+
+
+_ESCAPE_PAIR = re.compile(r"\\(.)", re.S)
+
+
+def _printed_text(tokens) -> str:
+    """The text an `echo` or `printf` command in `tokens` prints, else '': its words up to the first redirect, with
+    the `\\n`-style escapes of `echo -e` and `printf` read. A `printf` format with no `%b` or `%s` is the text itself."""
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) not in ("echo", "printf"):
+        return ""
+    words = []
+    for word in tokens[index + 1:]:
+        if _APPLY_REDIRECT.match(word):
+            break
+        words.append(word)
+    while words and re.match(r"^-[a-zA-Z]+$", words[0]):
+        words.pop(0)
+    if basename(tokens[index]) == "printf" and len(words) > 1 and re.search(r"%[bs]", words[0]):
+        words = words[1:]
+    return _ESCAPE_PAIR.sub(lambda m: {"n": "\n", "t": "\t", "\\": "\\"}.get(m.group(1), m.group(0)), "".join(words))
+
+
+def _written_patch_texts(raw, segments, ends, number, path, cwd) -> list:
+    """The text each earlier segment of this command writes to `path`: a heredoc body (`_heredoc_scripts`), or the
+    text an `echo` or `printf` prints into it with a redirect or through a pipe into `tee`. A patch that this command
+    writes and then applies is not on disk when the guard reads the command, so its headers are read from here."""
+    texts = [body for made, body in _heredoc_scripts(raw, segments, ends, cwd).get(path, ()) if made < number]
+    for made in range(number):
+        match = _HEREDOC_TARGET.search(segments[made])
+        if not match or "<<" in segments[made]:
+            continue
+        target = next(group for group in match.groups() if group)
+        if _script_path(target, dir_before_segment(segments, made, cwd, ends) or cwd) != path:
+            continue
+        feed = made - 1 if made > 0 and ends[made - 1] == "|" and not _printed_text(segment_tokens(segments[made])) else made
+        text = _printed_text(segment_tokens(segments[feed]))
+        if text:
+            texts.append(text)
+    return texts
+
+
+def _apply_patch_texts(raw, segments, ends, number, at, files, stdin_file, here_strings, heredoc, cwd=""):
+    """The text of each patch one `git apply` reads, as far as the guard can read it."""
+    texts = []
+    stdin = not files or "-" in files
+    for name in files:
+        if name != "-":
+            path = _script_path(name, at)
+            texts.append(_read_script(path))
+            if path:
+                texts += [(text, False) for text in _written_patch_texts(raw, segments, ends, number, path, cwd or at)]
+    if stdin and stdin_file:
+        texts.append(_read_script(_script_path(stdin_file, at)))
+    if stdin:
+        texts += [(text, False) for text in here_strings]
+        owner = number
+        if not heredoc:
+            # `cat <<EOF | git apply`: the heredoc belongs to the first command of the pipeline.
+            while owner > 0 and ends[owner - 1] == "|":
+                owner -= 1
+            cat = segment_tokens(segments[owner]) if owner != number else None
+            index = resolve_command(cat) if cat else None
+            if index is None or basename(cat[index]) != "cat" or "<<" not in segments[owner]:
+                owner = None
+        if owner is not None:
+            texts += [(body, False) for body in _heredoc_bodies_of(raw, segments[owner])]
+    return [text for text, cut in texts if text and not cut]
+
+
+def git_apply_hit(raw: str, cwd: str, predicate) -> str:
+    """The first file a `git apply` in `raw` writes that `predicate(path, folder)` accepts, else ''. The names come
+    from `_patch_names`. A crash of the scan reads as no hit: it must never skip the rules after it."""
+    try:
+        return _git_apply_hit(raw, cwd, predicate)
+    except Exception:
+        return ""
+
+
+def _git_apply_hit(raw: str, cwd: str, predicate, depth: int = 0) -> str:
+    if "apply" not in raw:
+        return ""
+    # Read the command as `_shell_write_hit` does: each `$VAR` is its earlier assignment (an unknown one stays as
+    # written, so its patch cannot be read and stays allowed), each subshell `(git apply p)` is a command start
+    # (`command_indexes`), and each script a shell, `eval` or runner starts (`inner_commands`) is read in turn.
+    raw = _resolve_vars(raw)
+    ends = []
+    segments = split_segments(_strip_heredoc_bodies_unconditionally(raw), ends)
+    for number, segment in enumerate(segments):
+        tokens = segment_tokens(segment) if "apply" in segment else None
+        if not tokens:
+            continue
+        at = dir_before_segment(segments, number, cwd, ends) or cwd
+        if depth < _APPLY_NEST_LIMIT:
+            for text in inner_commands(tokens):
+                hit = _git_apply_hit(str(text), at, predicate, depth + 1)
+                if hit:
+                    return hit
+        for index in command_indexes(tokens):
+            if basename(guard_core.GLUED_OPEN.sub("", tokens[index])) not in ("git", "git.exe"):
+                continue
+            call = _apply_call(tokens, index, at)
+            if not call:
+                continue
+            where, words = call
+            # a subshell's closing paren is glued to its last word: `(git apply p)`
+            if words and index == 0 and guard_core.GLUED_OPEN.match(tokens[0]):
+                words[-1] = words[-1].rstrip(")") or words[-1]
+            strip, prefix, quiet, *sources = _apply_options(words)
+            if quiet:
+                continue
+            # The names count from the repository's top folder; a patch run outside one counts from the folder.
+            for text in _apply_patch_texts(raw, segments, ends, number, where, *sources, cwd=cwd):
+                for name in _patch_names(text, strip):
+                    name = prefix.rstrip("/") + "/" + name if prefix else name
+                    if any(predicate(name, base) for base in dict.fromkeys((_apply_root(where), where))):
+                        return name
+    return ""
+
+
+_APPLY_NEST_LIMIT = 4   # `bash -c "bash -c '...'"` is read this deep, then left allowed
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the

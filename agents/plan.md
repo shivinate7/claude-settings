@@ -34,3 +34,5 @@ Before the final report, stop every Monitor and background task you started with
 
 Report once. Start with the point. Write plainly (rule output-write-in-ste). Report in under 25
 lines unless the brief names another cap.
+
+Keep your prose to what the reader needs, with no narration; reasoning and tool inputs are never cut.

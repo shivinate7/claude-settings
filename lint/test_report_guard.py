@@ -2245,6 +2245,10 @@ class SameTurnWriter:
 
     DELIVERED = '{"status":"delivered"}'  # a cloud send_message result whose send reached its session
     NOT_DELIVERED = '{"status":"queued"}'  # a result that reads as not delivered
+    LIST_SESSIONS = "mcp__claude-code-remote__list_sessions"  # a session list; its result shape is assumed
+    GET_SESSION = "mcp__claude-code-remote__get_session"
+    ORIGIN = "https://github.com/fixture-owner/fixture-repo"  # the origin make_repo writes when a case reads the tag
+    REPO_NAME = "fixture-owner/fixture-repo"  # layout.repo_name of ORIGIN
 
     def call(self, name, input_, result=None, side=False, is_error=False, tool_use_result=None):
         """The records one tool call leaves: the call, and its result when one is given. is_error sets the
@@ -2278,6 +2282,26 @@ class SameTurnWriter:
                                           "url": self.PAGE},
                          result=json.dumps({"writer": writer, "url": self.PAGE}))
 
+    def session_tags(self, role, repo=REPO_NAME):
+        """The tags a session of `role` (triage or lane) carries for `repo`."""
+        return ["cs-build:" + role, "cs-repo:" + repo]
+
+    def listing(self, sessions, has_more=False):
+        """A list_sessions call and result over (session_id, tags) pairs: the transcript's tag read of a session list.
+        `has_more` marks a page that does not hold the whole list."""
+        page = {"sessions": [{"id": sid, "tags": list(tags)} for sid, tags in sessions]}
+        if has_more:
+            page["has_more"] = True
+        return self.call(self.LIST_SESSIONS, {}, result=json.dumps(page))
+
+    def session_record(self, session_id, tags, wrapped=False):
+        """A get_session call and result naming `session_id` with `tags`. `wrapped` gives the record the wrapper the
+        harness puts round another session's record (hooks/own_session.py reads it)."""
+        body = json.dumps({"ccr": {"id": session_id, "tags": list(tags)}})
+        if wrapped:
+            body = '<other-session nonce="ab12cd" untrusted="true">\nSession record:\n%s\n</other-session nonce="ab12cd">' % body
+        return self.call(self.GET_SESSION, {"session_id": session_id}, result=body)
+
 
 class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
     """Every question for the owner reaches the page writer in the turn it is asked. A question is an
@@ -2309,11 +2333,15 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         os.makedirs(self.home)
         self.repo = self.make_repo("repo")
 
-    def make_repo(self, name, page=True, writer=NO_KEY):
+    def make_repo(self, name, page=True, writer=NO_KEY, origin=None):
         """A repo whose extras file names the waiting page (when page is true). `writer` sets its
-        "page-writer" key to that JSON value (None, "" or a non-string included); NO_KEY leaves it out."""
+        "page-writer" key to that JSON value (None, "" or a non-string included); NO_KEY leaves it out. `origin`, a
+        GitHub URL, writes the origin remote that the tag read names the repo by."""
         repo = os.path.join(self.run_dir, name)
         os.makedirs(os.path.join(repo, ".git"))
+        if origin:
+            with open(os.path.join(repo, ".git", "config"), "w", encoding="utf-8") as f:
+                f.write('[remote "origin"]\n\turl = %s\n' % origin)
         if page:
             os.makedirs(os.path.join(repo, ".claude"))
             keys = {"kinds": {}, "waiting-page": self.PAGE}
@@ -2321,6 +2349,12 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                 keys["page-writer"] = writer
             with open(os.path.join(repo, ".claude", "layout-extras.json"), "w") as f:
                 json.dump(keys, f)
+        return repo
+
+    def tag_repo(self, name):
+        """A repo whose origin names REPO_NAME, so the tag read names it. Its scope is checked first."""
+        repo = self.make_repo(name, origin=self.ORIGIN)
+        self.assertEqual(RG.layout.repo_name(repo), self.REPO_NAME, "scope: the repo's origin does not name the fixture repo")
         return repo
 
     def extras_key(self, repo):
@@ -2598,32 +2632,32 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
 
     # Owner-facing turn with no meta/page read: the layout's "page-writer" key is the writer.
 
-    def test_qm_layout_writer_green_send_to_the_key_id_passes(self):
-        # Catches: a send to the layout key's writer refused when the transcript holds no meta/page read, so a
-        # cloud session that never reads meta/page is blocked for a question it sent to the real writer. The send
-        # carries a delivered result, so only the key's writer id decides.
-        bare = self.make_repo("bare_key")
-        keyed = self.make_repo("keyed_key", writer=self.WRITER)
-        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+    def test_qm_tag_writer_green_send_to_the_tagged_id_passes(self):
+        # Catches: a send to the triage session the transcript's tag read names refused when the transcript holds no
+        # meta/page read, so a cloud session that never reads meta/page is blocked for a question it sent to the real
+        # writer. The send carries a delivered result, so only the tagged id decides.
+        repo = self.tag_repo("tag_repo")
+        listing = self.listing([(self.WRITER, self.session_tags("triage"))])
         for label, send in (("session_id", self.send(session_id=self.WRITER, result=self.DELIVERED)),
                             ("to", self.send(to=self.WRITER, result=self.DELIVERED))):
             with self.subTest(field=label):
-                records = [human("decide"), *send, assistant_text(self.reply(self.PICK))]
-                self.assert_blocked(self.stop(records, repo=bare), "Pick guard", "the page writer is not known to this session")
-                self.assertIsNone(self.stop(records, repo=keyed), "a send to the layout key's writer id was refused")
+                records = [human("decide"), *listing, *send, assistant_text(self.reply(self.PICK))]
+                self.assertIsNone(self.stop(records, repo=repo), "a send to the triage session the tag names was refused")
+                bare = [human("decide"), *send, assistant_text(self.reply(self.PICK))]
+                self.assert_blocked(self.stop(bare, repo=repo), "Pick guard", "the page writer is not known to this session")
 
-    def test_qm_layout_writer_green_ack_from_the_key_writer_keeps_the_turn(self):
-        # Catches: the layout writer's ack after a send starting a new turn, which hides the send and blocks the question.
-        bare = self.make_repo("bare_key")
-        keyed = self.make_repo("keyed_key", writer=self.WRITER)
-        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+    def test_qm_tag_writer_green_ack_from_the_tagged_writer_keeps_the_turn(self):
+        # Catches: the tagged writer's ack after a send starting a new turn, which hides the send and blocks the question.
+        repo = self.tag_repo("tag_repo")
+        listing = self.listing([(self.WRITER, self.session_tags("triage"))])
         ack = peer_msg("got it", from_session=self.WRITER)
         for label, send in (("session_id", self.send(session_id=self.WRITER, result=self.DELIVERED)),
                             ("to", self.send(to=self.WRITER, result=self.DELIVERED))):
             with self.subTest(field=label):
-                records = [human("decide"), *send, ack, assistant_text(self.reply(["Close q_max #969?"]))]
-                self.assert_blocked(self.stop(records, repo=bare), "Pick guard", "the page writer is not known to this session")
-                self.assertIsNone(self.stop(records, repo=keyed), "the layout writer's ack after a send started a new turn")
+                records = [human("decide"), *listing, *send, ack, assistant_text(self.reply(["Close q_max #969?"]))]
+                self.assertIsNone(self.stop(records, repo=repo), "the tagged writer's ack after a send started a new turn")
+                bare = [human("decide"), *send, ack, assistant_text(self.reply(["Close q_max #969?"]))]
+                self.assert_blocked(self.stop(bare, repo=repo), "Pick guard", "the page writer is not known to this session")
 
     def test_qm_layout_writer_red_send_to_another_id_blocks(self):
         # Catches: a send to a session that is not the layout key's writer passing because the key is set.
@@ -2695,64 +2729,63 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                         repo=keyed)
         self.assert_blocked(out, "Lane pick guard")
 
-    def test_qm_layout_writer_red_key_send_errored_by_is_error_blocks(self):
-        # Catches: a send to the layout key's writer whose result has is_error counted as the send, so the question
-        # reached no one and the guard passed. The result text reads delivered, so only the error flag decides.
-        keyed = self.make_repo("keyed_key", writer=self.WRITER)
-        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+    def test_qm_tag_writer_red_send_errored_by_is_error_blocks(self):
+        # Catches: a send to the tagged writer whose result has is_error counted as the send, so the question reached no
+        # one and the guard passed. The result text reads delivered, so only the error flag decides.
+        repo = self.tag_repo("tag_repo")
+        listing = self.listing([(self.WRITER, self.session_tags("triage"))])
         for label, send in (("session_id", self.send(session_id=self.WRITER, result=self.DELIVERED, is_error=True)),
                             ("to", self.send(to=self.WRITER, result=self.DELIVERED, is_error=True))):
             with self.subTest(field=label):
-                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                out = self.stop([human("decide"), *listing, *send, assistant_text(self.reply(self.PICK))], repo=repo)
                 self.assert_blocked(out, "Pick guard", "the page writer is session " + self.WRITER)
 
-    def test_qm_layout_writer_red_key_send_errored_by_success_false_blocks(self):
-        # Catches: a send to the layout key's writer whose record says toolUseResult success false (a failed local
-        # SendMessage, with no is_error flag) counted as the send. The result text reads delivered, so only the
-        # success flag decides.
-        keyed = self.make_repo("keyed_key", writer=self.WRITER)
-        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+    def test_qm_tag_writer_red_send_errored_by_success_false_blocks(self):
+        # Catches: a send to the tagged writer whose record says toolUseResult success false (a failed local SendMessage,
+        # with no is_error flag) counted as the send. The result text reads delivered, so only the success flag decides.
+        repo = self.tag_repo("tag_repo")
+        listing = self.listing([(self.WRITER, self.session_tags("triage"))])
         failed = {"success": False, "message": "fixture: the send did not reach its session"}
         for label, send in (("session_id", self.send(session_id=self.WRITER, result=self.DELIVERED,
                                                      tool_use_result=failed)),
                             ("to", self.send(to=self.WRITER, result=self.DELIVERED, tool_use_result=failed))):
             with self.subTest(field=label):
-                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                out = self.stop([human("decide"), *listing, *send, assistant_text(self.reply(self.PICK))], repo=repo)
                 self.assert_blocked(out, "Pick guard", "the page writer is session " + self.WRITER)
 
-    def test_qm_layout_writer_red_key_send_without_a_result_blocks(self):
-        # Catches: a send to the layout key's writer with no result record in the transcript counted as delivered.
-        keyed = self.make_repo("keyed_key", writer=self.WRITER)
-        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+    def test_qm_tag_writer_red_send_without_a_result_blocks(self):
+        # Catches: a send to the tagged writer with no result record in the transcript counted as delivered.
+        repo = self.tag_repo("tag_repo")
+        listing = self.listing([(self.WRITER, self.session_tags("triage"))])
         for label, send in (("session_id", self.send(session_id=self.WRITER)), ("to", self.send(to=self.WRITER))):
             with self.subTest(field=label):
-                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                out = self.stop([human("decide"), *listing, *send, assistant_text(self.reply(self.PICK))], repo=repo)
                 self.assert_blocked(out, "Pick guard", "the page writer is session " + self.WRITER)
 
-    def test_qm_layout_writer_red_key_send_not_delivered_blocks(self):
-        # Catches: a send to the layout key's writer whose result reads as not delivered counted as the send when no
-        # error flag is set. Only the result text decides here.
-        keyed = self.make_repo("keyed_key", writer=self.WRITER)
-        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+    def test_qm_tag_writer_red_send_not_delivered_blocks(self):
+        # Catches: a send to the tagged writer whose result reads as not delivered counted as the send when no error flag
+        # is set. Only the result text decides here.
+        repo = self.tag_repo("tag_repo")
+        listing = self.listing([(self.WRITER, self.session_tags("triage"))])
         for label, send in (("session_id", self.send(session_id=self.WRITER, result=self.NOT_DELIVERED)),
                             ("to", self.send(to=self.WRITER, result=self.NOT_DELIVERED))):
             with self.subTest(field=label):
-                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                out = self.stop([human("decide"), *listing, *send, assistant_text(self.reply(self.PICK))], repo=repo)
                 self.assert_blocked(out, "Pick guard", "the page writer is session " + self.WRITER)
 
-    def test_qm_layout_writer_green_succeeded_send_counts_past_a_later_errored_resend(self):
-        # Catches: a failed resend to the layout key's writer later in the turn hiding a delivered send to it. The
-        # sends pair by tool_use id, so the delivered one counts, and the writer's ack after them keeps the turn.
-        keyed = self.make_repo("keyed_key", writer=self.WRITER)
-        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+    def test_qm_tag_writer_green_succeeded_send_counts_past_a_later_errored_resend(self):
+        # Catches: a failed resend to the tagged writer later in the turn hiding a delivered send to it. The sends pair
+        # by tool_use id, so the delivered one counts, and the writer's ack after them keeps the turn.
+        repo = self.tag_repo("tag_repo")
+        listing = self.listing([(self.WRITER, self.session_tags("triage"))])
         ack = peer_msg("got it", from_session=self.WRITER)
         for label, target in (("session_id", {"session_id": self.WRITER}), ("to", {"to": self.WRITER})):
             with self.subTest(field=label):
-                records = [human("decide"), *self.send(result=self.DELIVERED, **target),
+                records = [human("decide"), *listing, *self.send(result=self.DELIVERED, **target),
                            *self.send(result=self.DELIVERED, is_error=True, **target), ack,
                            assistant_text(self.reply(["Close q_max #969?"]))]
-                self.assertIsNone(self.stop(records, repo=keyed),
-                                  "a delivered send to the layout key's writer was not counted past a later failed resend")
+                self.assertIsNone(self.stop(records, repo=repo),
+                                  "a delivered send to the tagged writer was not counted past a later failed resend")
 
     def test_qm_layout_writer_green_transcript_path_failed_send_keeps_main_verdict(self):
         # Catches: the failed-send rule leaking into the transcript path. A meta/page read names the writer, so a send
@@ -4748,10 +4781,9 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
 
 
 
-class AnsweredNeedsSourceTests(unittest.TestCase):
-    """The answered verdict, in report_guard.py's Stop hook. On any turn, each reply line that holds the
-    whole word "answered" must cite a source, outside code spans and fences. Incident F188 (decision
-    answered-needs-source)."""
+class StopVerdictMixin:
+    """The Stop-hook verdict helpers: run report_guard.py on a one-turn transcript and read its block. One home for
+    the reply-check suites (AnsweredNeedsSourceTests, MainClaimTests)."""
 
     def hook(self, reply, landed=False, stop_hook_active=False):
         records = [human("ask the owner")]
@@ -4777,6 +4809,33 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
     def assert_allowed(self, reply, **kw):
         out = self.verdict(reply, **kw)
         self.assertIsNone(out, "%r was blocked: %s" % (reply, out and out.get("reason")))
+
+    # Cost: regex only, plus one read of hooks/guard.py. report_guard reads its stamp id there once per run, at
+    # load (hooks_dirs), so no other file opens. The probe is builtins.open, the pattern
+    # test_repo_colour.py uses. The guard runs in this process, so the watch can see its opens.
+
+    def guard_opens(self, reply):
+        """Run report_guard.py's main here and return (its stdout, every path it opened, the transcript path)."""
+        import _transcript  # noqa: F401  imported before the watch, so its own load is not counted
+        import layout  # noqa: F401
+        import local_time  # noqa: F401
+        hook = self.hook(reply)
+        opened, real_open = [], open
+
+        def watch(path, mode="r", *args, **kwargs):
+            opened.append(str(path))
+            return real_open(path, mode, *args, **kwargs)
+        out = io.StringIO()
+        with mock.patch("builtins.open", watch), mock.patch("sys.stdin", io.StringIO(json.dumps(hook))), \
+                contextlib.redirect_stdout(out):
+            runpy.run_path(REPORT_GUARD, run_name="__main__")
+        return out.getvalue().strip(), opened, hook["transcript_path"]
+
+
+class AnsweredNeedsSourceTests(StopVerdictMixin, unittest.TestCase):
+    """The answered verdict, in report_guard.py's Stop hook. On any turn, each reply line that holds the
+    whole word "answered" must cite a source, outside code spans and fences. Incident F188 (decision
+    answered-needs-source)."""
 
     # Red: each case below fails until the verdict exists.
 
@@ -5015,27 +5074,6 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         # Catches: the check blocks a rewrite, which this guard leaves quiet today.
         self.assert_allowed("Answered: no permission rule can lift it.", stop_hook_active=True)
 
-    # Cost: regex only, plus one read of hooks/guard.py. report_guard reads its stamp id there once per run, at
-    # load (hooks_dirs), so no other file opens. The probe is builtins.open, the pattern
-    # test_repo_colour.py uses. The guard runs in this process, so the watch can see its opens.
-
-    def guard_opens(self, reply):
-        """Run report_guard.py's main here and return (its stdout, every path it opened, the transcript path)."""
-        import _transcript  # noqa: F401  imported before the watch, so its own load is not counted
-        import layout  # noqa: F401
-        import local_time  # noqa: F401
-        hook = self.hook(reply)
-        opened, real_open = [], open
-
-        def watch(path, mode="r", *args, **kwargs):
-            opened.append(str(path))
-            return real_open(path, mode, *args, **kwargs)
-        out = io.StringIO()
-        with mock.patch("builtins.open", watch), mock.patch("sys.stdin", io.StringIO(json.dumps(hook))), \
-                contextlib.redirect_stdout(out):
-            runpy.run_path(REPORT_GUARD, run_name="__main__")
-        return out.getvalue().strip(), opened, hook["transcript_path"]
-
     def test_an_cost_no_word_opens_only_transcript_and_guard_py(self):
         # Catches: the check reads a file, such as a glossary or a record, even when the reply has no "answered".
         for reply in ("Lane 4 is still running.", "The owner answers in chat.", "The lane is answering now."):
@@ -5049,6 +5087,399 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         out, opened, transcript = self.guard_opens("Answered: no permission rule can lift it.")
         self.assertEqual((json.loads(out) if out else {}).get("decision"), "block", out)
         self.assertEqual(set(opened), {transcript, GUARD_PY})
+
+
+class MainClaimTests(StopVerdictMixin, unittest.TestCase):
+    """The main-claim verdict, in report_guard.py's Stop hook (rule claim-vs-main-needs-read). Incident: a "not worse
+    than main" claim went out with no read of main behind it.
+
+    The contract the builder codes against, pinned here:
+    - `main_claim_problem(text)` in lint/report_guard.py returns a refusal string, or '' when no line is refused. It is
+      wired like `answered_problem`: the Stop hook runs it on any turn, landed or not, and joins its refusal with the
+      other reasons in one block. A rewrite after a missing-report block is checked once, as in rewrite_problems.
+    - A claim line is a prose line as `_prose_lines` yields it: outside fences, not ending in `?`, with any blockquote
+      marker removed. Any case. Emphasis marks (`*`), and underscores (`_`, `__`) that wrap a word, are removed before
+      matching, so "**not worse** than main", "_not a regression_" and "__No regression__" are forms; the refusal still
+      lists the line as written. A snake_case name ("no_regression_test") keeps its underscores and is no form. The
+      forms: "not a regression", "no regression" or "no regressions" (each counts with no other word on the line), and
+      "not worse than main", "same as main", "main's
+      own", "already on main", "pre-existing on main", "matches main", "regression from main" or "regressions from
+      main", "worse than main". "The" may stand before main ("worse than the main"), and "branch" may follow it ("the
+      main branch"). A hyphen joins no words, so "not-worse-than-main" and "bug-same as main" are no form.
+    - The word `main` is read only when no `.` plus a letter and no `(` follows it: "matches main.py" and "same as
+      main()" are no claim.
+    - "main's own" is a claim only when a copula (is, are, was, were, be) comes right before it, or a clause mark (`.`,
+      `,`, `;`, `:`), a closing paren `)` or bracket `]`, a closing quote, a dash (—, –), a spaced hyphen (`-` or
+      `--`, with spaces) or the line end follows it. So "main's own CI is green" is no claim. "The layout is main's
+      own.", "The layout: main's own.", "The glitch (main's own) predates this lane." and "The glitch — main's own —
+      predates this lane." are claims.
+    - A hedge word on the line exempts it: "unmeasured", "unknown" or "not read", as whole words.
+    - A cite of a main read on the same line: a path with a line (file.ext:123), origin/main, main@<sha>, `git show
+      main:` or `git show origin/main:`, a commit hash next to the word main, or "main screenshot" or "main's
+      screenshot" with a path or URL. A hash is six to forty hex characters with at least one letter a-f and one
+      digit, so "20261112" and "deadbeef" are no hash. A source inside an inline code span counts. The list is closed:
+      a bare "main", a path or file name with no line, a time, an item number and a `#<n>` PR ref are no cite.
+    - Code spans: a span that holds only `main` is read as the word, so "not worse than `main`" is a claim. Any other
+      span is blanked, so a claim that sits only inside one is exempt: "The check refuses `not worse than main`" is a
+      mention.
+    - Exempt: a question line, a line inside a ``` or ~~~ fence, and the noun "regression test(s)", "regression
+      suite(s)" or "regression testing" (a test count, not a claim). "No regression in the layout." and "No
+      regressions in the layout." stay refused.
+    - Scanning: a lone apostrophe or double quote opens no span or phrase, a code span pairs only within its own line,
+      and a fence marker opens a fence only at the start of a line.
+
+    Each case runs the Stop hook as a subprocess, so a red is an assert on the verdict: the claim line is not refused.
+    No case calls main_claim_problem directly, so a missing name is never the red. Each refusal sits beside a passing
+    twin in the same test, and the refusal is asserted first, so the twin cannot pass on an empty fixture.
+    """
+
+    CLAIM = "The filter is not worse than main."
+    CLAIM_FORMS = (
+        "The filter is not a regression from main.",
+        "No regression from main on the filter.",
+        "The filter is not worse than main.",
+        "The filter is the same as main.",
+        "The open-Duo layout is main's own.",
+        "The filter was already on main.",
+        "The bug is pre-existing on main.",
+        "The header matches main.",
+        "This is a regression from main.",
+        "The filter is worse than main.",
+    )
+    BARE_FORMS = ("Not a regression.", "No regression.")
+    LINE_SHAPES = (
+        "Same as main.",
+        "> **Done** OTHER the filter is not worse than main.",
+        "**The filter is not worse than main.**",
+        "- The filter is not worse than main.",
+    )
+    HEDGED = (
+        "The filter is not worse than main, unmeasured.",
+        "The filter is not worse than main; unknown.",
+        "The filter is not worse than main; main was not read.",
+    )
+    NOT_A_HEDGE = "The filter is not worse than main; not ready to merge."
+    QUESTIONS = ("Is the filter not worse than main?", "Not a regression from main?")
+    MENTIONS = (
+        "```\nThe filter is not worse than main.\n```",
+        "~~~\nThe open-Duo layout is main's own.\n~~~",
+        "The check refuses `not worse than main` lines.",
+        "The check refuses ``not worse than main`` lines.",
+    )
+    HYPHENED = ("The branch not-worse-than-main is ready.", "The lane regression-from-main is open.",
+                "bug-same as main")
+    NOUN_USES = ("No regression tests were added.", "No regression suite was changed.", "Not a regression test.",
+                 "No regression testing was needed.")
+    NAME_PAIRS = (  # (no claim, its refused twin): main as a file name or a call is no claim
+        ("The glob matches main.py.", "The glob matches main."),
+        ("The workflow matches main.yml.", "The workflow matches main."),
+        ("The entry point is the same as main() in cli.py.", "The entry point is the same as main."),
+    )
+    OWN_TWINS = (  # refused; "main's own CI is green." passes
+        "The layout is main's own.", "The layout: main's own.",
+        "Layout main's own, see notes.",  # no copula: only the comma after "own" makes the claim
+        "Layout main's own: yes.",  # no copula: only the colon after "own" makes the claim
+        "Layout main's own",  # no copula, no mark: only the line end makes the claim
+        "The layout is main's own and unchanged.",  # the copula alone: no clause mark follows "own"
+        "The layout is main's own",  # the copula with the line end
+    )
+    BYPASS_PAIRS = (  # (a claim, its cited twin): a bypass of a claim form is refused, and the cite passes it
+        ("The filter is not worse than `main`.", "The filter is not worse than `main`; see lint/x.py:12."),
+        ("The layout is **not worse** than main.", "The layout is **not worse** than main; see lint/x.py:12."),
+        ("No regressions from main on the filter.", "No regressions from main on the filter; see lint/x.py:12."),
+        ("The filter is not worse than the main branch.",
+         "The filter is not worse than the main branch; see lint/x.py:12."),
+    )
+    OWN_CLOSER_PAIRS = (  # (a claim, its cited twin): a closer after "main's own" makes the claim
+        ("The glitch (main's own) predates this lane.",
+         "The glitch (main's own) predates this lane; see lint/report_guard.py:12."),
+        ("The glitch — main's own — predates this lane.",
+         "The glitch — main's own — predates this lane; see lint/report_guard.py:12."),
+        ("The glitch [main's own] predates this lane.",  # a closing bracket
+         "The glitch [main's own] predates this lane; see lint/report_guard.py:12."),
+        ("The glitch – main's own – predates this lane.",  # an en dash
+         "The glitch – main's own – predates this lane; see lint/report_guard.py:12."),
+        ('The glitch "main\'s own" predates this lane.',  # a straight closing double quote
+         'The glitch "main\'s own" predates this lane; see lint/report_guard.py:12.'),
+        ("The glitch 'main's own' predates this lane.",  # a straight closing single quote
+         "The glitch 'main's own' predates this lane; see lint/report_guard.py:12."),
+        ("The glitch “main's own” predates this lane.",  # a curly closing double quote
+         "The glitch “main's own” predates this lane; see lint/report_guard.py:12."),
+        ("The glitch ‘main’s own’ predates this lane.",  # a curly closing single quote
+         "The glitch ‘main’s own’ predates this lane; see lint/report_guard.py:12."),
+        ("The glitch - main's own - predates this lane.",  # a spaced hyphen
+         "The glitch - main's own - predates this lane; see lint/report_guard.py:12."),
+        ("The glitch -- main's own -- predates this lane.",  # a spaced double hyphen
+         "The glitch -- main's own -- predates this lane; see lint/report_guard.py:12."),
+    )
+    OWN_CLOSER_NO_CLAIM = (
+        "The glitch (main's own CI) is green.", "main's own CI is green.",
+        "The glitch [main's own CI] is green.", 'The glitch "main\'s own CI" is green.',
+    )
+    UNDERSCORE_PAIRS = (  # (a claim, its cited twin): underscore emphasis is stripped like `*`
+        ("This is _not a regression_.", "This is _not a regression_; see lint/report_guard.py:12."),
+        ("__No regression__.", "__No regression__; see lint/report_guard.py:12."),
+        ("The _pre-existing on main_ flag is set.",
+         "The _pre-existing on main_ flag is set; see lint/report_guard.py:12."),
+    )
+    # No claim: _ joins words. Stripping every underscore would make "pre_existing on main" a claim ("preexisting").
+    SNAKE_NAMES = ("The no_regression_test is green.", "The no_regression_flag is set.",
+                   "The pre_existing on main flag is set.", "The not_a_regression flag is set.")
+    NOUN_TWINS = ("No regression in the layout.", "No regressions in the layout.")  # both refused
+    CITES = (
+        "The filter is not worse than main; see lint/report_guard.py:123.",
+        "The filter is not worse than main; see report_guard.py:123.",
+        "The filter is not worse than main; origin/main has it.",
+        "The filter is not worse than main@36807ad19.",
+        "The filter is not worse than main at 36807ad19.",
+        "same as main per 36807ad19 on main",  # the hash is a cite when "on main" follows it
+        "The filter is not worse than main; git show main:lint/report_guard.py read it.",
+        "Same as main per `git show origin/main:lint/report_guard.py`.",
+        "The filter is not worse than the main screenshot at docs/shots/filter.png.",
+        "The filter is not worse than main's screenshot at "
+        "https://github.com/shivinate7/claude-settings/blob/main/docs/shots/filter.png.",
+    )
+    NO_CITE = (
+        "The filter is not worse than main, we checked it.",
+        "The filter is not worse than main, see lint/report_guard.py.",
+        "The filter is not worse than main, see report_guard.py.",
+        "The filter is not worse than main's screenshot.",
+        "The filter is not worse than main, item 143 at 17:25 CST.",
+        "The filter is not worse than main, PR #1008.",
+        "same as main per 36807ad19.",  # the twin of the cited line in CITES, without "on main"
+    )
+    SCANNER = (
+        "Don't worry: the layout is main's own.",
+        "<p>Don't</p> is main's own, not a regression.",
+        'Set 9" wide; the layout is not worse than main.',
+    )
+    SCANNER_TWIN = "<p>Don't</p> is main's own, per lint/report_guard.py:12."
+    COMMENT_OPENERS = (
+        "// The filter is not worse than main.",
+        "# The filter is not worse than main.",
+        "/* The filter is not worse than main.",
+    )
+    REPLAY = "The open-Duo layout in the Downloads filter is main's own, not a regression."
+
+    def stop_verdict(self, records, sid, active):
+        """The Stop verdict on `records` for session `sid`. `active` is stop_hook_active, so True is a rewrite."""
+        path = write_transcript(records, tempfile.mkdtemp(dir=RUN_FOLDER))
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": active, "session_id": sid}
+        run = run_guard(REPORT_GUARD, hook)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def landed_records(self, reply):
+        return [human("do the task"), tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                assistant_text(reply)]
+
+    # Red: each case below fails until the verdict exists.
+
+    def test_mc_red_each_claim_form_is_refused(self):
+        # Catches: a claim form the check does not read, or one that needs a second word on its line.
+        for line in self.CLAIM_FORMS + self.BARE_FORMS:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_mc_red_line_shapes_are_refused(self):
+        # Catches: a claim read only in plain text, not in a capital, a blockquote, a bold line or a bullet.
+        for line in self.LINE_SHAPES:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line.lstrip("> "))
+
+    def test_mc_red_landed_and_unlanded_turns_refuse(self):
+        # Catches: the check runs on one kind of turn only, or a claim on a Done line passes.
+        for landed, reply in ((False, self.CLAIM), (True, self.CLAIM + "\n\n" + GOOD_REPORT)):
+            with self.subTest(landed=landed):
+                self.assert_blocked(reply, self.CLAIM, landed=landed)
+        done = "> **Done** OTHER the filter is not worse than main.\n> **Next** Unstarted: none"
+        self.assert_blocked(done, "**Done** OTHER the filter is not worse than main.", landed=True)
+        self.assert_allowed(done.replace("main.", "main at 36807ad19."), landed=True)
+
+    def test_mc_red_joins_a_missing_report_in_one_block(self):
+        # Catches: the claim line is dropped when the report is missing, or is sent as a second block.
+        cited = "The filter is not worse than main at 36807ad19."
+        self.assert_blocked(self.CLAIM + "\n\nAll done.", "Report-shape guard", self.CLAIM, landed=True)
+        out = self.verdict(cited + "\n\nAll done.", landed=True)
+        self.assertNotIn(cited, out["reason"], "a cited claim line was listed as refused")
+
+    def test_mc_red_joins_an_answered_refusal_in_one_block(self):
+        # Catches: the claim line is dropped when another reply check refuses the same reply.
+        answered = "Answered: no permission rule can lift it."
+        self.assert_blocked(answered + "\n" + self.CLAIM, answered, self.CLAIM)
+
+    def test_mc_red_rewrite_after_missing_report_refuses_the_claim_once(self):
+        # Catches: a rewrite is not checked for a claim line, or a second rewrite is checked again, or a rewrite with
+        # no refusal before it is checked at all.
+        sid = uuid.uuid4().hex
+        first = self.stop_verdict(self.landed_records("All done."), sid, active=False)
+        self.assertIn("does not end with the report", first["reason"])
+        rewrite = "> **Done** BUILT abc123\n> **Next** Unstarted: none\n\n" + self.CLAIM
+        out = self.stop_verdict(self.landed_records(rewrite), sid, active=True)
+        self.assertIsNotNone(out, "the rewrite's claim line was not refused")
+        self.assertIn(self.CLAIM, out["reason"])
+        self.assertIsNone(self.stop_verdict(self.landed_records(rewrite), sid, active=True),
+                          "a second rewrite was checked again")
+        self.assertIsNone(self.stop_verdict(self.landed_records(rewrite), uuid.uuid4().hex, active=True),
+                          "a rewrite with no refusal before it was checked")
+
+    def test_mc_red_a_hedge_on_the_line_exempts_it(self):
+        # Catches: a hedged claim is refused, or "not ready" is read as the hedge "not read".
+        self.assert_blocked(self.CLAIM, self.CLAIM)
+        for line in self.HEDGED:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+        self.assert_blocked(self.NOT_A_HEDGE, self.NOT_A_HEDGE)
+
+    def test_mc_red_the_cite_list_is_closed(self):
+        # Catches: a bare "main", a path or file name with no line, a main screenshot with no path or URL, a time,
+        # item or PR ref, or a hash with no "on main" beside it is read as a read of main.
+        for line in self.NO_CITE:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+        # Catches: a cite kind the check does not read.
+        for line in self.CITES:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_mc_red_a_question_line_is_exempt(self):
+        # Catches: a question about main is read as a claim.
+        self.assert_blocked(self.CLAIM, self.CLAIM)
+        for line in self.QUESTIONS:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_mc_red_a_fence_or_code_span_mention_is_exempt(self):
+        # Catches: a claim inside a fence or an inline code span is read as a claim.
+        self.assert_blocked(self.CLAIM, self.CLAIM)
+        for reply in self.MENTIONS:
+            with self.subTest(reply=reply):
+                self.assert_allowed(reply)
+
+    def test_mc_red_a_hyphen_joined_name_is_no_form(self):
+        # Catches: a hyphen-joined name such as not-worse-than-main, or a word after a hyphen (bug-same as main), is
+        # read as the phrase. The bare "same as main" is refused beside it, so the hyphen is the only difference.
+        self.assert_blocked(self.CLAIM, self.CLAIM)
+        self.assert_blocked("same as main", "same as main")
+        for line in self.HYPHENED:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_mc_red_the_incident_replay_is_refused(self):
+        # Incident: "main's own, not a regression" went out with no read of main. The cited twin passes.
+        self.assert_blocked(self.REPLAY, self.REPLAY)
+        self.assert_allowed(self.REPLAY + " Read per `git show origin/main:lint/report_guard.py`.")
+
+    def test_mc_red_a_lone_quote_or_apostrophe_hides_no_claim(self):
+        # Catches: a lone apostrophe or double quote opens a phrase or a span that hides the claim after it.
+        for line in self.SCANNER:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+        self.assert_allowed(self.SCANNER_TWIN)
+
+    def test_mc_red_a_comment_opener_hides_no_claim(self):
+        # Catches: a line that opens with //, # or /* is read as a comment, not as prose.
+        for line in self.COMMENT_OPENERS:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_mc_red_quotes_and_spans_do_not_pair_across_lines(self):
+        # Catches: a quote or a backtick that opens on one line hides a claim on the next line.
+        self.assert_blocked('He said "no.\n' + self.CLAIM, self.CLAIM)
+        self.assert_blocked("The `layout\n" + self.CLAIM + "\nfilter` is done.", self.CLAIM)
+
+    def test_mc_red_only_the_claim_forms_count(self):
+        # Catches: any "main" or any "regression" word is read as a claim.
+        self.assert_blocked(self.CLAIM, self.CLAIM)
+        for line in ("The filter matches the plan.", "The lane runs on main.", "The regression suite passed.",
+                     "The main branch has the filter."):
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_mc_red_a_long_reply_lists_every_form_once(self):
+        # Catches: a long reply lists only some of its claim lines, or an empty reply is refused.
+        lines = ["Lane %d: %s" % (i, line) for i in range(4) for line in self.CLAIM_FORMS + self.BARE_FORMS]
+        self.assert_blocked("\n".join(lines), *lines)
+        self.assert_allowed("")
+
+    def test_mc_red_the_regression_test_noun_is_exempt(self):
+        # Catches: "regression test(s)", "regression suite(s)" or "regression testing" is read as a claim, a false alarm
+        # on a test count. Also: "No regressions in the layout." is a claim, as the singular is, so the plural must not
+        # slip past the noun exemption.
+        # The refused twins stay first, so the exemption is the only difference between each twin and its pass.
+        for twin in self.NOUN_TWINS:
+            with self.subTest(line=twin):
+                self.assert_blocked(twin, twin)
+        for line in self.NOUN_USES:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_mc_red_main_as_a_file_or_call_name_is_no_claim(self):
+        # Catches: "main" before a file extension (main.py) or a call (main()) is read as the branch, a false alarm.
+        for line, twin in self.NAME_PAIRS:
+            with self.subTest(line=line):
+                self.assert_blocked(twin, twin)
+                self.assert_allowed(line)
+
+    def test_mc_red_main_s_own_before_a_noun_is_no_claim(self):
+        # Catches: "main's own" before a noun ("main's own CI") is read as the claim form, a false alarm. The refused
+        # twins show the form stays a claim after a copula, before a clause mark, or at the line end.
+        for twin in self.OWN_TWINS:
+            with self.subTest(twin=twin):
+                self.assert_blocked(twin, twin)
+                self.assert_allowed("main's own CI is green.")
+
+    def test_mc_red_main_s_own_before_a_closer_is_a_claim(self):
+        # Catches: "main's own" before a closing paren, bracket, quote, dash or spaced hyphen is read as no claim, so a
+        # claim in brackets, quotes or between dashes passes. Each refusal's cited twin passes, so the cite is the only
+        # difference. "main's own CI" stays no claim, in brackets, quotes or at the start of a line.
+        for line, twin in self.OWN_CLOSER_PAIRS:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+                self.assert_allowed(twin)
+        for line in self.OWN_CLOSER_NO_CLAIM:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_mc_red_a_bypass_of_a_claim_form_is_refused(self):
+        # Catches: a code span round `main`, emphasis marks, a plural, or "the main branch" hides the claim form. The
+        # cited twin passes, so the cite is the only difference.
+        for line, twin in self.BYPASS_PAIRS:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+                self.assert_allowed(twin)
+
+    def test_mc_red_underscore_emphasis_is_stripped_like_star(self):
+        # Catches: underscore emphasis ("_not a regression_", "__No regression__") hides the claim form, as `*` does
+        # not. Each refusal's cited twin passes. A snake_case name keeps its underscores, so it is no claim, even where
+        # stripping every underscore would make it one ("pre_existing on main").
+        for line, twin in self.UNDERSCORE_PAIRS:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+                self.assert_allowed(twin)
+        for line in self.SNAKE_NAMES:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_mc_red_a_hash_needs_a_digit_and_a_letter(self):
+        # Catches: a pure-digit string (a date such as 20261112) or a letters-only string (deadbeef) is read as a commit
+        # hash next to main, so the claim is cited. The hash with a digit and a letter beside it passes.
+        self.assert_blocked("same as main at 20261112", "same as main at 20261112")
+        self.assert_blocked("same as main at deadbeef", "same as main at deadbeef")
+        self.assert_allowed("same as main at 3f9a1c2")
+
+    # Cost: the claim check reads the reply and nothing else. The guard opens only the transcript and its own file.
+
+    def test_mc_cost_a_claim_line_opens_only_transcript_and_guard_py(self):
+        # Catches: the check reads a file, such as a glossary or a record, for a claim line or for a reply without one.
+        out, opened, transcript = self.guard_opens(self.CLAIM)
+        self.assertEqual((json.loads(out) if out else {}).get("decision"), "block", "the claim line was not refused")
+        self.assertEqual(set(opened), {transcript, GUARD_PY})
+        for reply in ("The filter matches the plan.", "The lane runs on main."):
+            with self.subTest(reply=reply):
+                out, opened, transcript = self.guard_opens(reply)
+                self.assertEqual(out, "")
+                self.assertEqual(set(opened), {transcript, GUARD_PY})
 
 
 class PendingRefusalTests(unittest.TestCase):

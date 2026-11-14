@@ -951,6 +951,26 @@ sh("frozen shell: pwsh-c-text-mode, the PowerShell tool's smart-quoted config se
 sh("frozen shell: pwsh-c-text-mode, a Bash echo of an escaped quote with no PowerShell is allowed "
    "[pwsh-c-text-mode green]",
    "echo \"a \\\" b\"", "allow", cwd=NOGIT)
+# An ASCII apostrophe inside smart-quoted text pairs with a later `'`, so the text reads as one quoted string
+# and the Set-Content after it goes unseen. The config settings write after the pair still DENIES.
+sh("frozen shell: PowerShell tool, an apostrophe inside smart quotes pairs with a later quote, then a "
+   "Set-Content onto the config settings, denies [pwsh-followups red]",
+   "Set-Content docs/a.md “it's”; Set-Content -Path " + CFG_SETTINGS + " -Value 'y'", "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
+# The same apostrophe pair ahead of a Remove-Item or a positional Set-Content of the config
+# settings, each path in smart quotes. Each DENIES on the frozen path. The control after them is a docs path.
+sh("frozen shell: PowerShell tool, an apostrophe inside smart quotes, then Remove-Item of the config settings "
+   "in smart quotes, denies [pwsh-followups red]",
+   "Set-Content docs/a.md “it's”; Remove-Item " + SMART_CFG_SETTINGS, "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, an apostrophe inside smart quotes, then a positional Set-Content of the config "
+   "settings in smart quotes, denies [pwsh-followups red]",
+   "Set-Content docs/a.md “it's”; Set-Content " + SMART_CFG_SETTINGS + " v", "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, an apostrophe inside smart quotes, then a Set-Content of a docs file, "
+   "is allowed [pwsh-followups green]",
+   "Set-Content docs/a.md “it's”; Set-Content docs/b.md v", "allow", tool="PowerShell", cwd=NOGIT)
+
 # NESTED-SCRIPT PINS. `_shell_write_hit` judges the PowerShell text that `cmd /c` or `iex` runs by PowerShell's
 # rules, through `_powershell_scripts_of`. Each DENIES on that step alone. The `cmd /c` text is quoted: a bare `&`
 # in Bash backgrounds the first command, and detached-launch denies that before the write is read.
@@ -1052,6 +1072,94 @@ sh("frozen pin: echo naming a settings copy allows [cap-ask-fix r2 pin]",
    "echo \"cp a " + CFG_SETTINGS + "\"", "allow", cwd=NOGIT)
 sh("frozen pin: gh pr create --title naming the global CLAUDE.md allows [cap-ask-fix r2 pin]",
    "gh pr create --draft --title \"Update " + CFG_CLAUDEMD + "\" --body \"notes\"", "allow", cwd=NOGIT)
+# PWSH-R3, frozen. A comma list is one PowerShell argument, so the frozen path after the first comma is a write.
+sh("frozen shell: PowerShell tool, Set-Content of a docs file and the config settings in one comma list, "
+   "denies [pwsh-r3 red]",
+   "Set-Content docs/a.md, '" + CFG_SETTINGS + "' x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+# The alias names below are arguments or text, not commands, so each ALLOWS. Each names the frozen settings file.
+sh("frozen pin: grep -n with ac as its pattern, on the frozen settings file, allows [pwsh-r3 red]",
+   "grep -n ac " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen pin: git log --grep with sc as its pattern, on the frozen settings file, allows [pwsh-r3 red]",
+   VCS + " log --grep sc -- " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen pin: diff with ni as a file name, against the frozen settings file, allows [pwsh-r3 red]",
+   "diff ni " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen pin: PowerShell tool, Write-Host of ac and the frozen settings file, allows [pwsh-r3 red]",
+   'Write-Host "ac ' + CFG_SETTINGS + '"', "allow", tool="PowerShell", cwd=NOGIT)
+# An alias that is the only command in a block, a subexpression, or a dot-sourced call is a command, so each
+# write below DENIES. The Bash form runs the same alias inside pwsh -c.
+sh("frozen shell: PowerShell tool, ac in a subexpression that is the only command, onto the config settings "
+   "denies [pwsh-r3 red]",
+   "Write-Output $(ac " + CFG_SETTINGS + " x)", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, ac in a ForEach-Object block, onto the config settings denies [pwsh-r3 red]",
+   "ForEach-Object { ac " + CFG_SETTINGS + " 'x' }", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, sc in a % block fed by a pipe, onto the config settings denies [pwsh-r3 red]",
+   "1 | % { sc " + CFG_SETTINGS + " $_ }", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, sc as the only command in parentheses, onto the config settings denies "
+   "[pwsh-r3 red]",
+   "(sc " + CFG_SETTINGS + " x)", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, a dot-sourced sc onto the config settings denies [pwsh-r3 red]",
+   ". sc " + CFG_SETTINGS + " x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: pwsh -c, sc in a % block fed by a pipe, onto the config settings denies [pwsh-r3 red]",
+   "pwsh -c \"1 | % { sc " + CFG_SETTINGS + " 'x' }\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen pin: PowerShell tool, ac in a ForEach-Object block over a docs file, allows [pwsh-r3 green]",
+   "ForEach-Object { ac docs/a.md 'x' }", "allow", tool="PowerShell", cwd=NOGIT)
+# A comma list of copy SOURCES reads each source, so a frozen source in it is a read. A frozen DESTINATION
+# still denies.
+sh("frozen pin: PowerShell tool, Copy-Item of the frozen settings and a docs file as sources, to scratch, "
+   "allows [pwsh-r3 green]",
+   "Copy-Item " + CFG_SETTINGS + ", docs/a.md /tmp/x", "allow", tool="PowerShell", cwd=NOGIT)
+sh("frozen pin: PowerShell tool, Copy-Item of a docs file and the frozen settings as sources, to a folder, "
+   "allows [pwsh-r3 red]",
+   "Copy-Item docs/a.md, " + CFG_SETTINGS + " /tmp/d/", "allow", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, Copy-Item of a docs file onto the frozen settings denies [pwsh-r3 green]",
+   "Copy-Item docs/a.md " + CFG_SETTINGS, "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+# An UNQUOTED comma joins two paths into one PowerShell argument, so the frozen path after the comma is a write.
+sh("frozen shell: PowerShell tool, Set-Content of a docs file and the frozen settings joined by an unquoted "
+   "comma, denies [pwsh-r3 red]",
+   "Set-Content docs/a.md," + CFG_SETTINGS + " x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, Set-Content -Path with a docs file and the frozen settings joined by an "
+   "unquoted comma, denies [pwsh-r3 red]",
+   "Set-Content -Path docs/a.md," + CFG_SETTINGS + " -Value x", "deny", "frozen-path", tool="PowerShell",
+   cwd=NOGIT)
+sh("frozen shell: PowerShell tool, Set-Content of a docs file, a space, then the frozen settings after an "
+   "unquoted comma, denies [pwsh-r3 red]",
+   "Set-Content docs/a.md ," + CFG_SETTINGS + " x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+# L1: ni and ac write whatever their position: inside a % block, a try block, a function body, an assignment
+# or a cast to void. Each write below DENIES onto the frozen settings.
+sh("frozen shell: PowerShell tool, ni in a % block over a range, assigned to $null, onto the config settings "
+   "denies [pwsh-r3 red]",
+   "1..2 | % { $null = ni " + CFG_SETTINGS + " -Force }", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, ac in a try block assigned to $null, onto the config settings denies "
+   "[pwsh-r3 red]",
+   "try { $null = ac " + CFG_SETTINGS + " x } catch {}", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, ni in a function body, onto the config settings denies [pwsh-r3 red]",
+   "function w { param($p) ni " + CFG_SETTINGS + " -Force }", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, ni assigned to a variable, onto the config settings denies [pwsh-r3 red]",
+   "$f=ni " + CFG_SETTINGS, "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, ni cast to void, onto the config settings denies [pwsh-r3 red]",
+   "[void] ni " + CFG_SETTINGS, "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+# Frozen: a comma after a quoted word joins it to the next word, so a frozen path in quotes
+# after that comma is a write. The last row is the allow twin: both paths are non-frozen.
+sh("frozen shell: PowerShell tool, Set-Content of a quoted docs file, a comma, then the config settings in quotes, "
+   "denies [pwsh-r3-limits red]",
+   'Set-Content "docs/a.md", "' + CFG_SETTINGS + '" x', "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, Add-Content of a quoted docs file, a comma, then the config settings in quotes, "
+   "denies [pwsh-r3-limits red]",
+   'Add-Content "docs/a.md", "' + CFG_SETTINGS + '" x', "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen pin: PowerShell tool, Set-Content of two quoted docs files joined by a comma, allows "
+   "[pwsh-r3-limits green]",
+   'Set-Content "docs/a.md", "docs/b.md" x', "allow", tool="PowerShell", cwd=NOGIT)
+# Frozen, the group gap: a frozen path inside a `( )` group is a read of that group's command,
+# so it is no write target of the outer command. The pins write the frozen path through the group, so they stay denied.
+sh("frozen allow: PowerShell tool, Set-Content into a backup file whose value is a group that reads the config "
+   "settings is allowed [pwsh-r3-limits r2 red]",
+   "Set-Content backup.json (Get-Content " + CFG_SETTINGS + ")", "allow", tool="PowerShell", cwd=NOGIT)
+sh("frozen allow: PowerShell tool, Copy-Item of a group that reads the config settings into a backup file is "
+   "allowed [pwsh-r3-limits r2 red]",
+   "Copy-Item (Get-Item " + CFG_SETTINGS + ") backup.json", "allow", tool="PowerShell", cwd=NOGIT)
+sh("frozen pin: PowerShell tool, Set-Content whose -Path is a group that gets the config settings denies "
+   "[pwsh-r3-limits r2 green]",
+   "Set-Content (Get-Item " + CFG_SETTINGS + ") x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
 
 # A FROZEN PATH HELD IN A SHELL VARIABLE, written by a script that a `python -c` or `node -e` runs. The guard
 # expands `$F` in the command text, so the script's own text names the frozen hook, and the write denies. The

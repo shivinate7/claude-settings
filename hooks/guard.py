@@ -7,6 +7,8 @@ Modes:
 - SubagentStop: When a builder, test-author or record-writer stops, judges its whole diff
   against its role, for example a builder that changed a test path. A builder's offence
   is refused at its first stop; any other role's offence is logged for the reviewer.
+- PostToolUse: After a builder's Bash or PowerShell call, reads git status once and refuses
+  the call's result when a test path changed.
 
 Claude Code runs this script before each matched tool call. The script reads one
 JSON object on stdin and answers on stdout.
@@ -64,7 +66,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   pointer-edit         deny. A Write, Edit, MultiEdit or NotebookEdit whose target is one of the
                        pointer checkout's own files. The pointer's `.git`, a linked worktree under
                        `.claude/worktrees/` or elsewhere, a target outside it, an unreadable or
-                       missing pointer and the read tools pass. A shell write is not judged. The
+                       missing pointer and the read tools pass. A Bash write (redirect, `tee`, `sed -i`, `cp`, a python or node
+                       script) is judged by the same predicate. The
                        reason names the EnterWorktree tool. An override lifts a direct pointer path. A
                        config-dir spelling of a pointer file is frozen (never_lifted calls is_frozen
                        per target), so no override lifts it, as with frozen-path. It spawns no git.
@@ -487,6 +490,7 @@ The model judges (hooks/call_judge.py, hooks/prose_judge.py, hooks/sendmessage_s
 refuse() too, so an override lifts them.
 """
 
+import bisect
 import difflib
 import importlib
 import importlib.machinery
@@ -568,7 +572,8 @@ while True:
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
             checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, STASH_READ_ACTIONS, in_any_session_scratchpad, stash_action, stash_takes_the_stack, subject_state, under_session_scratchpad,
-            scratchpad_clear_writer, scratchpad_folder_writer, scratchpad_record_writer, scratchpad_writer_of,
+            scratchpad_clear_writer, scratchpad_copier_of, scratchpad_folder_writer, scratchpad_holder_of,
+            scratchpad_record_writer, scratchpad_writer_of,
             SCRATCHPAD_GLOB_MAGIC, expand_shell_braces,
         )
         _loading = "guard_pointer"
@@ -594,7 +599,7 @@ while True:
         _loading = "guard_frozen"
         from guard_frozen import (
             FROZEN_REASON, MUTATING_COMMAND, _holds_frozen, _resolve_vars, _shell_write_hit, interpreter_may_write,
-            interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit, shell_write_hit,
+            git_apply_hit, interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit, shell_write_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
         _loading = "guard_env"
@@ -613,10 +618,11 @@ while True:
         from guard_argv import PROCESS_ARGS_REASON, process_args_hit
         _loading = "guard_stream"
         from guard_stream import (
-            BACKGROUND_END_REASON, CHECK_TAIL_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
-            NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, UV_VALUE_FLAGS, VERDICT_PIPE_REASON, WAITER_REASON,
-            background_end_hit, check_tail_hit, live_stream_hit, ln_descends_hit,
-            loop_condition_polls_a_pattern, narrated_tail_hit, verdict_pipe_hit, waiter_verdict,
+            BACKGROUND_END_REASON, CHECK_TAIL_REASON, LANE_LINT_TIMEOUT_REASON, LIVE_STREAM_REASON,
+            LN_DESCENDS_REASON, NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, UV_VALUE_FLAGS, VERDICT_PIPE_REASON,
+            WAITER_REASON, background_end_hit, check_tail_hit, lane_lint_bound_ms, lane_lint_timeout_hit,
+            live_stream_hit, ln_descends_hit, loop_condition_polls_a_pattern, narrated_tail_hit, verdict_pipe_hit,
+            waiter_verdict,
         )
         _loading = "guard_rm_var"
         from guard_rm_var import (
@@ -2471,12 +2477,30 @@ def builder_test_path(path: str, cwd: str) -> bool:
 def builder_shell_test_hit(raw: str, stripped: str, cwd: str, tool) -> str:
     """The test path a builder's shell command writes, else ''. Two readings: the plain forms (a
     redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, and the
-    python or node script a heredoc body, `-c` / `-e` or a script file run by name holds, on the raw
-    command (this is the one caller that reads script files). `tool` is the
+    python or node script a heredoc body, `-c` / `-e` or a script file run by name holds, and the files a
+    `git apply` patch names (`git_apply_hit`), on the raw command (this is the one caller that reads
+    script files and patches). `tool` is the
     call's tool: it sets which shell's rules read the text."""
     POWERSHELL_CALL[0] = tool == "PowerShell"
     return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True, command_position=True)
-            or interpreter_write_hit(raw, cwd, builder_test_path, script_files=True))
+            or interpreter_write_hit(raw, cwd, builder_test_path, script_files=True)
+            or git_apply_hit(raw, cwd, builder_test_path))
+
+
+def pointer_file_path(path: str, cwd: str) -> bool:
+    """True when `path` is one of the pointer checkout's own files, by the shape pointer_edit_hit reads."""
+    return bool(pointer_edit_hit([path], cwd))
+
+
+def pointer_shell_hit(raw: str, stripped: str, cwd: str, tool) -> str:
+    """The pointer checkout file a shell command writes, else ''. The same two readings as
+    builder_shell_test_hit (the plain write forms on the heredoc-stripped command, a python or node
+    script on the raw one), judged by the Edit tools' own predicate, so the two paths never disagree."""
+    if not pointer_checkout():
+        return ""
+    POWERSHELL_CALL[0] = tool == "PowerShell"
+    return (_shell_write_hit(stripped, cwd, pointer_file_path, follow_cd=True, command_position=True)
+            or interpreter_write_hit(raw, cwd, pointer_file_path))
 
 
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
@@ -2853,14 +2877,27 @@ def diff_rule(role: str) -> str:
             DESIGNER_ROLE: "designer-diff"}.get(role, "builder-diff")
 
 
+# The undo route of a builder's test change, shared by the diff refusal and the shell-write block.
+BUILDER_UNDO_ROUTE = (
+    "Undo it: restore each test file you changed to its text at HEAD, and delete each test file "
+    "you added. "
+)
+
+
+# The merge step of a builder's test conflict, shared by the diff refusal and the shell-write block.
+BUILDER_MERGE_ABORT_ROUTE = (
+    "If a merge is in progress and the refusal is about a test conflict, run `git merge --abort` "
+    "and report it, so the orchestrator hands the whole merge to a test-author. "
+)
+
+
 def builder_diff_reason() -> str:
     """The refusal text for a builder's test change. It names no path: it gives the undo route."""
     return (
         BUILDER_TEST_REASON + " The guard refuses a test change you made, at commit, push and stop. "
-        "Undo it: restore each test file you changed to its text at HEAD, and delete each test file "
-        "you added. If a commit of yours holds the change, stop and report it. "
-        "If a merge is in progress and the refusal is about a test conflict, run `git merge --abort` "
-        "and report it, so the orchestrator hands the whole merge to a test-author. "
+        + BUILDER_UNDO_ROUTE +
+        "If a commit of yours holds the change, stop and report it. "
+        + BUILDER_MERGE_ABORT_ROUTE +
         "This refusal is final: never write the files another way. (decision builders-cannot-edit-tests)"
     )
 
@@ -2907,6 +2944,104 @@ def judge_stop(payload) -> None:
         sys.exit(0)
     elif found or noted:
         record("SubagentStop", "noted", diff_rule(role), found or noted[0])
+
+
+def builder_shell_write_reason(merging: bool = False) -> str:
+    """The block text for a test change a builder's shell call left in its worktree. It names no path.
+    `merging`: a merge is in progress (MERGE_HEAD), so the merge-abort step is named."""
+    return (
+        BUILDER_TEST_REASON + " Your shell call left a test change in your worktree. " + BUILDER_UNDO_ROUTE
+        + "If you cannot undo it yourself, stop and report, so the orchestrator hands the paths to a test-author. "
+        + (BUILDER_MERGE_ABORT_ROUTE if merging else "")
+        + "This refusal is final: never write the files another way. (decision builders-cannot-edit-tests)"
+    )
+
+
+# The two-letter `git status --porcelain` codes of a path a merge left unmerged.
+UNMERGED_CODES = ("DD", "AU", "UD", "UA", "DU", "AA", "UU")
+
+
+# The git-dir entries of a merge, rebase or cherry-pick that stopped on a conflict. Each brings the other
+# side's files into the worktree, so git status lists them as changed though the builder wrote none.
+# REVERT_HEAD, SQUASH_MSG and MERGE_MSG are left out: those stops are not judged as incoming here.
+BUILDER_CONFLICT_STATES = ("MERGE_HEAD", "rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD")
+
+
+def conflict_states(where: str) -> tuple:
+    """The BUILDER_CONFLICT_STATES present in the git dir of the checkout at or above `where`: file reads, no git
+    call. Empty on any read failure, so the caller judges the call as outside a stop."""
+    root = _checkout_root_by_stat(os.path.abspath(where))
+    gitdir = _git_dir_by_file(root) if root else ""
+    if not gitdir:
+        return ()
+    return tuple(name for name in BUILDER_CONFLICT_STATES if os.path.exists(os.path.join(gitdir, name)))
+
+
+def status_entries(raw: str):
+    """(code, path) for each path a `git status --porcelain -z` answer names. A rename or copy names both
+    ends, each with the entry's code: the old path is a change too, so a test moved out of a test path counts."""
+    records = raw.split("\0")
+    entries, index = [], 0
+    while index < len(records):
+        entry = records[index]
+        index += 1
+        if len(entry) < 4:
+            continue
+        entries.append((entry[:2], entry[3:]))
+        if entry[0] in "RC" or entry[1] in "RC":
+            if index < len(records) and records[index]:
+                entries.append((entry[:2], records[index]))
+            index += 1
+    return entries
+
+
+def status_paths(raw: str):
+    """The paths a `git status --porcelain -z` answer names (see `status_entries`)."""
+    return [path for _code, path in status_entries(raw)]
+
+
+def unmerged_test_path(raw: str) -> str:
+    """The first test path a `git status --porcelain -z` answer lists as unmerged, else ''."""
+    return next((path for code, path in status_entries(raw)
+                 if code in UNMERGED_CODES and is_builder_test_rel(path)), "")
+
+
+def judge_shell_write(payload) -> None:
+    """PostToolUse, a builder's Bash or PowerShell call (rule `builder-bash-test-write`). The PreToolUse shell
+    check reads command text, so a script that computes its paths passes it. This reads the result: one
+    `git status --porcelain` in the call's cwd, each changed path tested with `is_builder_test_rel`. A hit blocks
+    the call's result, with the undo route. A status git cannot answer logs `builder-bash-test-write-unread`
+    and allows. In a stopped merge, rebase or cherry-pick (`conflict_states`) with no unmerged test path, the hit
+    logs `builder-bash-test-write-merging`, noted, and allows. Any other session, and any other tool, returns
+    before a git call."""
+    if agent_role(payload) != BUILDER_ROLE:
+        return
+    tool = payload.get("tool_name", "") or ""
+    if tool not in ("Bash", "PowerShell"):
+        return
+    where = payload.get("cwd", "") or os.getcwd() or ""
+    # -z: paths arrive unquoted, so a name with a space or a non-ASCII letter is read as written.
+    # --untracked-files=all: a new folder is listed by its files, so a test inside it is seen.
+    answer = guard_core._git(where, "status", "--porcelain", "-z", "--untracked-files=all") if where else None
+    if answer is None or answer.returncode != 0:
+        record(tool, "noted", "builder-bash-test-write-unread", where)
+        return
+    found = next((rel for rel in status_paths(answer.stdout) if is_builder_test_rel(rel)), "")
+    if not found:
+        return
+    # Every read runs before the deny row, so no read failure can log a deny without its block.
+    states = conflict_states(where)
+    if states and not unmerged_test_path(answer.stdout):
+        # The test path came in with the other side of a stopped merge, rebase or cherry-pick. The merge-aware
+        # commit and stop check (own_changes) judges that change.
+        record(tool, "noted", "builder-bash-test-write-merging", states[0] + " " + found)
+        return
+    # A role guard stays outside every override (decision owner-override): a block is final.
+    guard_core.set_override_veto(lambda: True)
+    record(tool, "deny", "builder-bash-test-write", found)
+    print(json.dumps({"decision": "block", "reason": "builder-bash-test-write: "
+                      + builder_shell_write_reason("MERGE_HEAD" in states)}))
+    sys.exit(0)
 
 
 SPAWN_TOOLS = ("Agent", "Task")
@@ -3485,6 +3620,14 @@ BRIEF_DESTRUCTIVE_NEXT_TO = ("avoid", "without")   # a negator only as the word 
 BRIEF_DESTRUCTIVE_RUN_VERBS = ("run", "use", "call", "execute", "type")
 BRIEF_DESTRUCTIVE_NOT = re.compile(r"\b(?:do|must|should|can)\s+not\b", re.IGNORECASE)
 BRIEF_DESTRUCTIVE_LIST_COMMA = re.compile(r"\x00\s*,\s*(?:(?:and|or|nor)\s+)*(?=\x00|$)", re.IGNORECASE)
+BRIEF_DESTRUCTIVE_ASIDES = (   # the closed list of asides a negator may carry between two commas; any other phrase is an order
+    "under any circumstances", "in any case", "in any event", "at any time", "for any reason", "at all", "ever")
+# the aside keeps the window only when the order comes next: a run verb, or the end of the text before the order
+# ("Do not, at any time, skip it: run" and "Never, ever, forget to run" are orders after the aside)
+BRIEF_DESTRUCTIVE_NEGATOR_COMMA = re.compile(
+    r"(?<![\w'-])(never|no|don't|(?:do|must|should|can)\s+not|shouldn't|mustn't|can't|cannot)\s*,\s*(?:%s)\s*,"
+    r"(?=\s*(?:(?:%s)(?![\w'-])|$))"
+    % ("|".join(BRIEF_DESTRUCTIVE_ASIDES), "|".join(BRIEF_DESTRUCTIVE_RUN_VERBS)), re.IGNORECASE)
 BRIEF_DESTRUCTIVE_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 BRIEF_DESTRUCTIVE_SKIP = ("branch-delete", "worktree-remove", "worktree-prune")
 BRIEF_DESTRUCTIVE_REASON = (
@@ -3545,11 +3688,13 @@ def _brief_prohibits(before: str) -> bool:
     count only as the word directly before it."""
     # an earlier span reads as one word, so "Never run `a` or `b`" keeps its negation for `b`
     # a comma after a span, with only "or"/"and" before the next span, continues the list and drops the earlier spans
-    # from the negator's window; a comma before plain words ends the clause
+    # from the negator's window; a comma before plain words ends the clause, but a negator, a comma, an aside and a
+    # second comma ("Do not, under any circumstances, write") keep the window when the order comes next
     # a span becomes a NUL, which no prose word holds, so "fix, `git reset`" is no list; a NUL already in the brief
     # reads as a space first, so it cannot pose as a span
     spans = BRIEF_DESTRUCTIVE_SPAN.sub("\x00", before.replace("\x00", " "))
     listed = BRIEF_DESTRUCTIVE_LIST_COMMA.sub("", spans)
+    listed = BRIEF_DESTRUCTIVE_NEGATOR_COMMA.sub(r"\1", listed)
     words = _brief_words(re.split(r"[;.,]", listed)[-1])
     return any(word in BRIEF_DESTRUCTIVE_NEGATORS for word in words[-4:]) \
         or bool(words) and words[-1] in BRIEF_DESTRUCTIVE_NEXT_TO
@@ -3599,6 +3744,281 @@ def brief_destructive_hit(tool: str, tool_input) -> str:
                 if match and match[1] not in BRIEF_DESTRUCTIVE_SKIP \
                         and not (target is not None and in_any_session_scratchpad(shell_abs(target, None) or target)):
                     return command
+    return ""
+
+
+# A READ-ONLY AGENT'S BRIEF MUST NOT ORDER A FILE WRITE (rule brief-write-needs-writer). A read-only role (READ_ONLY in
+# hooks/agent_brief.py, plugin prefix dropped, as brief_destructive_hit reads it) has no write tool, so a brief that tells
+# it to write a file makes it write by a shell redirect or stall. The rule judges the spawns this file's brief rules judge
+# (_brief_spawns, so a Workflow agent() call counts) and only a read-only role: a writing role, the default role and a
+# spawn with no role pass. The rule fires on every spawn, so each reading asks for a precise shape, and a false alarm
+# costs more than a missed odd phrasing. Two readings, both pure text:
+#   - command-shaped parts (_brief_commands): a `tee` or a redirect whose target is path-shaped (_brief_write_path). A
+#     comparison ("count > 0", "age > max_age") names no path, so it passes. A quoted `>` is text, but a quoted target
+#     ("> 'a.md'") is read. /dev/null and a target under any session scratchpad pass.
+#   - prose lines outside a fence, emphasis and quote marks gone, one clause at a time. A clause ends at a sentence mark,
+#     a comma, "and", "then" or "but". A write verb counts only when nothing but lead-in words (please, then, so, when
+#     done, you must) or a wrapper (remember to, be sure to, make sure to, your job is to, the agent should) sits before
+#     it in its clause. The first destination word after the verb decides: it must lead to a path-shaped word, or to a
+#     determiner and "file" ("to a markdown file"). Compose verbs (write, create, make) send their output only by to,
+#     into, onto, as, named or called, so a first "in" names what the output is about ("Write a report on each gap in
+#     docs/x.md"). Place verbs (put, place, save, store, dump, append, redirect, add, record, log, output, draft,
+#     generate) also take in, inside, at and under. A task names a code change with add, update, record and log ("Task:
+#     add a flag to hooks/guard.py"), and a Plan or refuter brief carries the task word for word, so these four count
+#     only when their object is the agent's own output: "your" or "finding(s)" before the destination ("Add your
+#     findings to a.md"), or after "with" in "update <path> with". "make sure" and "ensure" are wrappers: inside one, a
+#     passive ("is saved to a.md") orders a write. Also "create a file", a `tee <path>` in prose, and a call or use of
+#     the Write tool. Compose verbs also take "at" ("Write a report at docs/review.md"), a colon after a short object that
+#     names the output ("Write the report: docs/review.md"), and "<path> with your <report>" ("Create docs/review.md with
+#     your report"); a redirect in prose outside a span ("run cat v > audit.md") counts. A verb reads 400 chars before it
+#     and 800 after it (BRIEF_WRITE_WINDOW, BRIEF_WRITE_REACH), so one long line costs time in proportion to its length.
+# Passes: a negator before the verb in its clause (_brief_prohibits) or between the verb and its destination, a "Must
+# deny:" or "Add a case:" line, and a negating heading's cover. The forms this reader misses are the Limits in decision
+# brief-write-needs-writer. The override lifts it. Cost: pure text work inside the one guard call. No process, no file.
+BRIEF_WRITE_VERB = re.compile(
+    r"(?<![\w-])(?<!\w[./])(write|create|make|put|place|save|store|dump|append|redirect|add|record|log|output|draft"
+    r"|generate|update)(?![\w-]|[./]\w)", re.IGNORECASE)
+BRIEF_WRITE_COMPOSE = ("write", "create", "make")
+BRIEF_WRITE_CHANGE = ("add", "update", "record", "log")
+BRIEF_WRITE_OWN = re.compile(r"(?<![\w-])(?:your|findings?)(?![\w-])", re.IGNORECASE)
+BRIEF_WRITE_PLACE_ONLY = ("in", "inside", "at", "under")
+BRIEF_WRITE_DEST = re.compile(r"(?<![\w-])(to|into|onto|in|inside|at|under|as|named|called)(?![\w-])", re.IGNORECASE)
+BRIEF_WRITE_FILE_NOUN = re.compile(r"\s+(?:(?:the|a|an|your|this|new)\s+)+(?:[\w-]+\s+){0,2}?file(?![\w'-])", re.IGNORECASE)
+BRIEF_WRITE_TOKEN = re.compile(r"\s+(?:(?:the|a|an|your|this|new)\s+)*(`?[\w~./#-]+)", re.IGNORECASE)
+BRIEF_WRITE_UPDATE = re.compile(r"\s+(?:the\s+)?(`?[\w~./#-]+`?)\s+with(?![\w-])", re.IGNORECASE)
+BRIEF_WRITE_SURE = re.compile(r"\s+sure(?![\w-])", re.IGNORECASE)
+BRIEF_WRITE_ENSURE = re.compile(
+    r"(?<![\w-])(?:make\s+sure|be\s+sure|ensure)\s+[^.!?;:,]{0,200}?(?<![\w-])(?:is|are|gets?|be)\s+(?:saved|written|stored"
+    r"|dumped|appended|put|placed|output|generated|drafted|redirected)(?![\w-])", re.IGNORECASE)
+BRIEF_WRITE_WRAPPER = re.compile(
+    r"(?<![\w-])(?:(?:remember|be\s+sure|make\s+sure)\s+to|(?:your|the)\s+(?:job|task)\s+is\s+to"
+    r"|the\s+agent\s+(?:should|must|will|needs?\s+to))(?![\w-])", re.IGNORECASE)
+BRIEF_WRITE_REST_END = re.compile(r"[.!?;:](?=\s|$)|,(?=\s|$)|\b(?:and|then|but)\b", re.IGNORECASE)
+BRIEF_WRITE_WINDOW = 400   # chars of text before a verb that a clause can use; a longer run is read as its last 400
+BRIEF_WRITE_REACH = 800    # chars after a verb that its object and destination can span
+BRIEF_WRITE_COLON_NOUN = re.compile(
+    r"(?<![\w-])(?:report|findings?|review|audit|summary|verdict|notes|results?|analysis|answer|output|plan)(?![\w-])",
+    re.IGNORECASE)
+BRIEF_WRITE_AT_NOT = frozenset(("of", "about", "for", "on", "with", "from", "by", "that", "which"))
+BRIEF_WRITE_WITH_VERBS = ("update", "create", "write")
+BRIEF_WRITE_MAY_NOT = re.compile(r"(?<![\w-])(?:(?:may|will)\s+(?:not|never)|won['’]t)(?![\w-])", re.IGNORECASE)
+BRIEF_WRITE_EXTENSIONS = frozenset((
+    "md mdx txt rst adoc json jsonl yaml yml toml ini cfg conf env log csv tsv html htm css scss js jsx ts tsx mjs cjs py "
+    "pyi sh bash zsh ps1 bat cmd go rs java kt swift c h cpp hpp cs rb php sql xml lock diff patch png jpg jpeg gif svg "
+    "pdf docx xlsx pptx zip gz tar notes markdown text out ipynb").split())
+BRIEF_WRITE_RECEIVERS = ("self", "this", "cls")   # `self.log` after a `>` is an attribute compared, not a file
+BRIEF_WRITE_FILE = re.compile(r"\b(?:create|write|make|touch)\s+(?:a|an|the|new)\s+(?:new\s+)?file\b", re.IGNORECASE)
+BRIEF_WRITE_TOOL = re.compile(
+    r"(?<![\w-])(?:use|call|invoke|run)\s+(?:the\s+)?write\s+tool\b(?!\s+(?:tests?|cases?|specs?|checks?|guard|rule|hook"
+    r"|names?)\b)", re.IGNORECASE)
+BRIEF_WRITE_TOOL_NOUN = re.compile(r"\s+(?:output|docs?|results?)\b", re.IGNORECASE)
+BRIEF_WRITE_PROSE_TEE = re.compile(r"(?<![\w-])tee\s+(?:-\w+\s+)*(`?[\w~./#-]+)", re.IGNORECASE)
+BRIEF_WRITE_LEAD = frozenset((
+    "please", "now", "you", "must", "should", "will", "can", "to", "just", "always", "finally", "also", "then", "are",
+    "need", "needs", "have", "has", "may", "do", "first", "next", "and", "-", "*", "+", "so", "when", "whenever", "once",
+    "done", "after", "afterwards", "finished", "ready", "if", "needed", "later", "otherwise", "instead"))
+BRIEF_WRITE_BOUNDARY = re.compile(r"[.!?:;,]\s|\band\b|\bthen\b|\balso\b|\bfirst\b|\bnext\b|\bbut\b|`", re.IGNORECASE)
+BRIEF_WRITE_NEGATORS = frozenset(BRIEF_DESTRUCTIVE_NEGATORS + ("not", "nothing", "none", "neither", "nor", "nowhere", "without"))
+BRIEF_WRITE_WORD_PAIRS = frozenset((
+    "and/or", "yes/no", "pass/fail", "true/false", "read/write", "input/output", "in/out", "on/off", "either/or", "y/n"))
+BRIEF_WRITE_TEE = re.compile(r"(?<![\w-])tee\s+(?:-\w+\s+)*([^\s|;&<>-][^\s|;&<>]*)")
+BRIEF_WRITE_REDIRECT = re.compile(r"(?<![\w&>=-])\d?>>?\s*(?![&=])([^\s&|;<>]+)")   # a `<` ends the word, as in a shell
+BRIEF_WRITE_QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
+# In prose a quote mark between word characters is text ("Don't", "it's"), as BRIEF_WRITE_MARKS reads it, so two
+# apostrophes do not pair over a redirect. A shell opens a quote after any character, so command text keeps the form above.
+BRIEF_WRITE_PROSE_QUOTED = re.compile(r"(?<!\w)\"[^\"]*\"(?!\w)|(?<!\w)'[^']*'(?!\w)")
+BRIEF_WRITE_DIVIDED = re.compile(r"[\w.]+(?:/\d+(?:\.\d+)?)+")   # `budget/2` after a prose `>`: a sum divided, no file
+BRIEF_WRITE_MARKS = re.compile(r"\*+|(?<!\w)[\"']|[\"'](?!\w)")
+BRIEF_WRITE_REASON = (
+    "The brief tells a read-only agent to write a file. That role has no write tool, so it writes by a shell redirect "
+    "or stalls. Name a writer role (record-writer, builder or test-author) for the write, or have the agent report "
+    "the text in its reply and let the session save it. "
+    "(decision brief-write-needs-writer, a read-only agent's brief orders no file write)"
+)
+
+
+def _brief_write_target_ok(target: str) -> bool:
+    """True for a redirect or tee target that is no repo write: a word that is no path or is an attribute of self, this or
+    cls (a comparison's right side), /dev/null, or a path under any session scratchpad."""
+    target = target.strip("`\"'")
+    attribute = re.fullmatch(r"(\w+)\.\w+", target)   # `self.log`: an attribute of a receiver, so a comparison's right side
+    return not _brief_write_path(target) or bool(attribute) and attribute.group(1) in BRIEF_WRITE_RECEIVERS \
+        or target == "/dev/null" or (target.startswith("/") and in_any_session_scratchpad(target))
+
+
+def _brief_write_path(token: str) -> bool:
+    """True when a word is path-shaped: it ends in a file extension from BRIEF_WRITE_EXTENSIONS (a dotted name such as
+    `total.length` is no file), starts with `~/` or `./`, or holds a slash that is no word pair (PASS/FAIL, and/or)."""
+    token = token.strip("`").rstrip(".,)")
+    dotted = re.search(r"\.([A-Za-z]\w{0,7})(?:#|$)", token)
+    if dotted and dotted.group(1).lower() in BRIEF_WRITE_EXTENSIONS \
+            or (token.startswith(("~/", "./")) and len(token) > 2):
+        return True
+    parts = [part for part in token.split("/") if part]
+    return "/" in token and bool(parts) and not all(part.isupper() for part in parts) \
+        and token.lower() not in BRIEF_WRITE_WORD_PAIRS
+
+
+def _brief_write_command(command: str) -> str:
+    """The write a command-shaped part makes into a path: its tee or redirect text, or "". A `>`, `|`, `;` or `&` inside
+    quotes is text, so it starts no redirect, but a quoted target is read."""
+    bare = BRIEF_WRITE_QUOTED.sub(lambda quoted: re.sub(r"[>|;&]", "\x01", quoted.group(0)), command)
+    for pattern in (BRIEF_WRITE_TEE, BRIEF_WRITE_REDIRECT):
+        for match in pattern.finditer(bare):
+            if not _brief_write_target_ok(match.group(1)):
+                return command
+    return ""
+
+
+def _brief_write_leads(before: str) -> bool:
+    """True when only lead-in words and wrappers sit between the start of the clause and the verb that ends `before`."""
+    bounds = list(BRIEF_WRITE_BOUNDARY.finditer(before))
+    clause = BRIEF_WRITE_WRAPPER.sub(" ", before[bounds[-1].end():] if bounds else before)
+    return all(word in BRIEF_WRITE_LEAD for word in _brief_words(clause))
+
+
+def _brief_write_object(rest: str, compose: bool, quoted: bool = False) -> bool:
+    """True when the first destination word in the clause after a write verb leads to a path or to "a file", with no
+    negator before it. A compose verb's first "in", "inside" or "under" names a topic, not a destination; its "at" does
+    too when a word such as "of", "about" or an -ing word sits before it, or when the verb is quoted."""
+    match = BRIEF_WRITE_DEST.search(rest)
+    if not match:
+        return False
+    before = _brief_words(rest[:match.start()])
+    if any(word in BRIEF_WRITE_NEGATORS for word in before):
+        return False
+    word = match.group(1).lower()
+    if compose and (word in BRIEF_WRITE_PLACE_ONLY and word != "at" or word == "at" and (
+            quoted or len(before) > 3 or any(w in BRIEF_WRITE_AT_NOT or w.endswith("ing") for w in before))):
+        return False
+    after = rest[match.end():]
+    token = BRIEF_WRITE_TOKEN.match(after)
+    return bool(BRIEF_WRITE_FILE_NOUN.match(after)) or bool(token) and _brief_write_path(token.group(1))
+
+
+def _brief_write_colon(text: str, verb: re.Match, rest: str) -> bool:
+    """True for "Write the report: docs/review.md": a short object that names the agent's own output, then a colon
+    and a path-shaped word."""
+    colon = verb.end() + len(rest)
+    if text[colon:colon + 1] != ":" or len(rest.split()) > 4 or not BRIEF_WRITE_COLON_NOUN.search(rest) \
+            or any(word in BRIEF_WRITE_NEGATORS for word in _brief_words(rest)):
+        return False
+    token = BRIEF_WRITE_TOKEN.match(text, colon + 1)
+    return bool(token) and _brief_write_path(token.group(1))
+
+
+def _brief_write_in_span(starts: list, spans: list, at: int) -> bool:
+    """True when `at` falls inside one of `spans` (sorted, apart, `starts` their first chars). A binary search, so a line
+    with many verbs and many spans costs time in proportion to its length."""
+    found = bisect.bisect_right(starts, at) - 1
+    return found >= 0 and at < spans[found][1]
+
+
+def _brief_write_orders(text: str) -> bool:
+    """True when one prose line, marks removed, orders a file write: a write verb in command form with a file
+    destination, a passive write inside "make sure", "create a file", a `tee <path>`, or the Write tool. Only the
+    BRIEF_WRITE_WINDOW chars before a verb and the BRIEF_WRITE_REACH chars after it are read, so a long line costs
+    time in proportion to its length."""
+    spans = [span.span() for span in BRIEF_DESTRUCTIVE_SPAN.finditer(text)]   # command text, read by _brief_write_command
+    starts = [start for start, _ in spans]
+    for verb in BRIEF_WRITE_VERB.finditer(text):
+        name, before = verb.group(1).lower(), text[max(0, verb.start() - BRIEF_WRITE_WINDOW):verb.start()]
+        end = BRIEF_WRITE_REST_END.search(text, verb.end(), verb.end() + BRIEF_WRITE_REACH)
+        rest = text[verb.end():end.start() if end else verb.end() + BRIEF_WRITE_REACH]
+        if name == "make" and BRIEF_WRITE_SURE.match(rest) or not _brief_write_leads(before) or _brief_prohibits(before):
+            continue
+        quoted = _brief_write_in_span(starts, spans, verb.start())   # a phrase quoted in a span is text
+        if name in BRIEF_WRITE_WITH_VERBS and not quoted:
+            target = BRIEF_WRITE_UPDATE.match(rest)
+            if target and _brief_write_path(target.group(1)) and BRIEF_WRITE_OWN.search(rest[target.end():]):
+                return True
+        if name == "update":
+            continue
+        if name in BRIEF_WRITE_CHANGE:
+            dest = BRIEF_WRITE_DEST.search(rest)
+            if dest and BRIEF_WRITE_OWN.search(rest[:dest.start()]) and _brief_write_object(rest, False):
+                return True
+        elif _brief_write_object(rest, name in BRIEF_WRITE_COMPOSE, quoted) \
+                or not quoted and name not in BRIEF_WRITE_CHANGE and _brief_write_colon(text, verb, rest):
+            return True
+    for match in BRIEF_WRITE_ENSURE.finditer(text):
+        before = text[max(0, match.start() - BRIEF_WRITE_WINDOW):match.start()]
+        if _brief_write_leads(before) and not _brief_prohibits(before) \
+                and _brief_write_object(BRIEF_WRITE_REST_END.split(text[match.end():match.end() + BRIEF_WRITE_REACH], 1)[0], False):
+            return True
+    for pattern in (BRIEF_WRITE_FILE, BRIEF_WRITE_TOOL, BRIEF_WRITE_PROSE_TEE):
+        for match in pattern.finditer(text):
+            before = text[max(0, match.start() - BRIEF_WRITE_WINDOW):match.start()]
+            if pattern is BRIEF_WRITE_PROSE_TEE:
+                ordered = _brief_write_path(match.group(1)) and not _brief_prohibits(before) \
+                    and not _brief_write_in_span(starts, spans, match.start())
+            elif pattern is BRIEF_WRITE_FILE:
+                ordered = _brief_write_leads(before) and not _brief_prohibits(before)
+            else:   # a "may not", "will not" or "won't" before the tool is a ban; a bare "may" or "will" is not
+                ordered = not _brief_prohibits(BRIEF_WRITE_MAY_NOT.sub("never", before))
+                if ordered and BRIEF_WRITE_TOOL_NOUN.match(text, match.end()):   # "Write tool results": a noun, unless a save order follows
+                    end = BRIEF_WRITE_REST_END.search(text, match.end(), match.end() + BRIEF_WRITE_REACH)
+                    rest = text[match.end():end.start() if end else match.end() + BRIEF_WRITE_REACH]
+                    ordered = bool(BRIEF_WRITE_VERB.search(rest)) and any(_brief_write_path(word) for word in rest.split())
+            if ordered:
+                return True
+    return False
+
+
+def _brief_write_prose_redirect(line: str) -> bool:
+    """True when a prose line, outside backtick spans and quotes, redirects a command's output into a path ("run cat
+    v > audit.md"). A `>` at the line start is a quote mark, and a comparison names no path: `> budget/2` divides."""
+    bare = BRIEF_DESTRUCTIVE_SPAN.sub(lambda span: " " * len(span.group(0)), line)
+    bare = BRIEF_WRITE_PROSE_QUOTED.sub(lambda quoted: " " * len(quoted.group(0)), bare)
+    for match in BRIEF_WRITE_REDIRECT.finditer(bare):
+        before = bare[max(0, match.start() - BRIEF_WRITE_WINDOW):match.start()]
+        if before.strip() and re.search(r"[A-Za-z]", match.group(1)) and not _brief_write_target_ok(match.group(1)) \
+                and not BRIEF_WRITE_DIVIDED.fullmatch(match.group(1).rstrip(".,)")) \
+                and not _brief_prohibits(re.sub(r"(?<=\w)\.(?=\w)", "_", before)):   # a dot in a name ends no clause
+            return True
+    return False
+
+
+def _brief_write_prose(prompt: str) -> str:
+    """The first prose line that orders a file write, or "". Fenced lines and lines led by `$ ` are command text, read
+    by _brief_write_command; a part under a negating heading is covered."""
+    fenced, covered, cover_indent = False, False, -1
+    for line in prompt.replace("\x00", " ").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```") and not BRIEF_DESTRUCTIVE_INLINE.match(stripped):
+            fenced = not fenced
+            continue
+        if fenced or not stripped:
+            continue
+        bullet = bool(BRIEF_DESTRUCTIVE_BULLET.match(line))
+        indent = len(line) - len(line.lstrip())
+        if _brief_heading(line):
+            covered, cover_indent = True, (indent if bullet else -1)
+            continue
+        if not bullet or indent <= cover_indent:
+            covered = False
+        if covered or stripped.startswith("$ ") or BRIEF_DESTRUCTIVE_CASE_DATA.search(line):
+            continue
+        if _brief_write_orders(BRIEF_WRITE_MARKS.sub("", line)) or _brief_write_prose_redirect(line):
+            return stripped
+    return ""
+
+
+def brief_write_hit(tool: str, tool_input) -> str:
+    """The first line of a read-only agent's brief that orders a file write, or ""."""
+    read_only = {role.lower() for role in READ_ONLY}
+    for spawn in _brief_spawns(tool, tool_input):
+        prompt = spawn.get("prompt")
+        role = role_key(spawn.get("subagent_type")).rsplit(":", 1)[-1]
+        if not isinstance(prompt, str) or role not in read_only:
+            continue
+        for command, before, covered in _brief_commands(prompt):
+            if not covered and not BRIEF_DESTRUCTIVE_CASE_DATA.search(before) and not _brief_prohibits(before):
+                if _brief_write_command(command):
+                    return command
+        found = _brief_write_prose(prompt)
+        if found:
+            return found
     return ""
 
 
@@ -4430,7 +4850,7 @@ def refuse_ready_page(tool: str, tool_input: dict, command: str, where: str) -> 
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", agent: bool = False,
-                background: bool = False, description: str = "", payload=None) -> None:
+                background: bool = False, description: str = "", payload=None, timeout=None) -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
     PENDING_ASK.clear()
     stripped = strip_heredoc_bodies(raw)
@@ -4679,6 +5099,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = check_tail_hit(stripped, background)
     if matched:
         refuse(tool, "deny", "check-tail", CHECK_TAIL_REASON, matched)
+    matched = lane_lint_timeout_hit(stripped, background, timeout)
+    if matched:
+        bound_ms = lane_lint_bound_ms()
+        refuse(tool, "deny", "lane-lint-timeout", LANE_LINT_TIMEOUT_REASON % (bound_ms, bound_ms // 1000), matched)
     matched = background_end_hit(split_segments(stripped), background, description)
     if matched:
         refuse(tool, "deny", "background-end", BACKGROUND_END_REASON, matched)
@@ -4848,6 +5272,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = shell_write_hit(raw, cwd, is_frozen, _holds_frozen)
     if matched:
         refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)
+
+    # 7a. A shell write into the pointer checkout's own files: the Edit tools' rule 0, for a Bash write
+    # (a redirect, `tee`, `sed -i`, `cp`, a python script). Same predicate, same reason.
+    matched = pointer_shell_hit(raw, stripped, cwd, tool)
+    if matched:
+        refuse(tool, "deny", "pointer-edit", POINTER_EDIT_REASON, "shell write target in the pointer checkout: " + matched)
 
     # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
     matched = project_config_shell_hit(stripped, cwd)
@@ -5562,19 +5992,34 @@ def _checkout_root_by_stat(folder: str) -> str:
     return ""
 
 
+def _git_dir_by_file(root: str) -> str:
+    """The per-worktree git directory of the checkout at ROOT, read from files alone, else ''. A `.git`
+    folder is its own; a `.git` file names `gitdir: <dir>`, relative to ROOT or absolute. No git is
+    spawned. An unreadable or undecodable `.git` file is ''."""
+    dot = os.path.join(root, ".git")
+    if os.path.isdir(dot):
+        return dot
+    try:
+        with open(dot, encoding="utf-8") as handle:
+            first = handle.readline(4096).strip()
+    except (OSError, ValueError):  # ValueError: UnicodeDecodeError, or a NUL in the path
+        return ""
+    if not first.startswith("gitdir:"):
+        return ""
+    return os.path.join(root, first[len("gitdir:"):].strip())
+
+
 def _git_common_dir(root: str) -> str:
     """The git common directory of the checkout at ROOT, read from files alone, else ''. A `.git`
-    folder is its own; a `.git` file names `gitdir: <dir>`, and `<dir>/commondir` names the common
-    one, relative to `<dir>`. No git is spawned."""
+    folder is its own; a `.git` file names `gitdir: <dir>` (`_git_dir_by_file`), and `<dir>/commondir`
+    names the common one, relative to `<dir>`. No git is spawned."""
     dot = os.path.join(root, ".git")
     try:
         if os.path.isdir(dot):
             return os.path.realpath(dot)
-        with open(dot, encoding="utf-8") as handle:
-            first = handle.readline(4096).strip()
-        if not first.startswith("gitdir:"):
+        git_dir = _git_dir_by_file(root)
+        if not git_dir:
             return ""
-        git_dir = os.path.join(root, first[len("gitdir:"):].strip())
         try:
             with open(os.path.join(git_dir, "commondir"), encoding="utf-8") as handle:
                 git_dir = os.path.join(git_dir, handle.readline(4096).strip())
@@ -6074,7 +6519,8 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # Rule scratchpad-owner (decision scratchpad-owner). Every agent of a session shares the session's
 # scratchpad, so one agent can run a script another agent left there. A call from an agent that writes a
 # file in the scratchpad records the agent as its writer (`scratchpad_record_writer`); a shell call from an
-# agent that runs a scratchpad file another agent recorded is refused, and so is a write over such a file. A call
+# agent that runs a scratchpad file another agent recorded is refused, and so is a write over such a file, unless
+# the caller copied it (`scratchpad_holder_of`). A call
 # with no `agent_id`, a file with no record, an agent's own file and a read pass. The text gate (`SCRATCHPAD_WORD`) keeps a call that names no scratchpad from
 # touching the disk: a path that reaches the scratchpad by a symlink is the ceiling, and passes.
 SCRATCHPAD_WORD = "scratchpad"
@@ -6167,14 +6613,14 @@ def scratchpad_copies(command: str, cwd: str):
 
 
 def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
-    """(agent, session, the scratchpad files this call writes, those of them a remover verb names, the `mv`
-    destinations with the source each one moves): the Write family's targets and the shell write targets
+    """(agent, session, the scratchpad files this call writes, those of them a remover verb names, the `cp` and
+    `mv` destinations with the source each one takes, the `cp` destinations among them): the Write family's targets and the shell write targets
     `_shell_write_hit` reads, and the destination of each `cp` and `mv`. `agent` is '' for a call with no
     `agent_id`. Only a call that names a scratchpad reaches the disk; any other call gets no files."""
     agent, session = scratchpad_agent(payload), session_id_of(payload)
-    files, removed, moved = [], set(), {}
+    files, removed, moved, copied = [], set(), {}, set()
     if not session:
-        return agent, session, files, removed, moved
+        return agent, session, files, removed, moved, copied
     try:
         if tool in WRITE_TOOLS:
             for target in write_targets(tool_input):
@@ -6184,7 +6630,7 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
         elif tool in SHELL_TOOLS:
             command = str(tool_input.get("command", "") or "")
             if SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd:
-                return agent, session, files, removed, moved
+                return agent, session, files, removed, moved, copied
             command, found = strip_heredoc_bodies(command), {}
 
             def in_scratchpad(word, at, verb=None):
@@ -6203,8 +6649,8 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
                 files.append(found[hit][0])
                 if found[hit][1]:
                     removed.add(found[hit][0])
-            # A `cp` or `mv` destination is a file this call writes. An `mv` is judged as a removal above, and its
-            # destination is recorded too: it carries the record of its source.
+            # A `cp` or `mv` destination is a file this call writes. An `mv` is judged as a removal above. Each
+            # destination carries the record of its source: a copy of a file is no read of it.
             for verb, source, dest, into in scratchpad_copies(_resolve_vars(command), cwd):
                 # The folder an `mv` moves into loses nothing, so it is not walked as a removal; its sources are.
                 # It is no written file either: the new entry `dest` is, so the folder takes no record of its own.
@@ -6215,11 +6661,12 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
                     if dest not in files:
                         files.append(dest)
                     removed.discard(dest)   # written here, though a later `mv` names it as its source
-                    if verb == "mv":
-                        moved[dest] = source
+                    moved[dest] = source
+                    if verb == "cp":
+                        copied.add(dest)
     except Exception:
         pass   # a file that cannot be read is not judged and not recorded, never a failed call
-    return agent, session, files, removed, moved
+    return agent, session, files, removed, moved, copied
 
 
 def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> None:
@@ -6227,11 +6674,13 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     file it writes: the file is its own now. An agent's call records the agent as the writer of each file it
     writes, and is refused when a file's record named another agent. A refused write moves no record; an owner
     override that lifts the refusal moves it (`refuse`'s `on_lift`), because an approved write lands. A file an
-    `rm` names is judged but not recorded. A `cp` destination is the caller's file; an `mv` destination carries
-    the record of its source, or the caller's when the source lies outside the scratchpad. A first write, a
-    rewrite of its own file and a file that no longer exists pass (`scratchpad_writer_of`). Run once the call's
-    other rules passed."""
-    agent, session, files, removed, moved = scratchpad_writes(payload, tool, tool_input, cwd)
+    `rm` names is judged but not recorded. A `cp` or `mv` destination carries the record of its source: a copy
+    of another agent's file is no read of it. The caller's record goes on a destination whose source lies
+    outside the scratchpad, and on a `cp` destination whose source has no record. A copy of another agent's file
+    also records its copier: only a run reads the writer, and a write over the file or a removal reads the holder,
+    the copier else the writer (`scratchpad_holder_of`). A first write, a rewrite of its own file and a file that
+    no longer exists pass. Run once the call's other rules passed."""
+    agent, session, files, removed, moved, copied = scratchpad_writes(payload, tool, tool_input, cwd)
     after = {}   # the writer each recorded file gets, read before any record changes
 
     def writer_after(full, seen=()):
@@ -6240,22 +6689,35 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
         if full in moved and under_session_scratchpad(moved[full], session):
             source = moved[full]
             if source not in files or source in removed:   # a removed source is only moved: its record stays
-                return scratchpad_writer_of(source, session)
+                return scratchpad_writer_of(source, session) or (agent if full in copied else "")
             return agent if source in seen else writer_after(source, seen + (full,))
         return agent
 
+    def copier_after(full, seen=()):
+        # The agent that copied a file whose writer is another agent. A copy carries the writer of its source and
+        # names the copier, who may write over it and remove it. An `mv` of such a copy keeps its copier.
+        if full in copied:
+            return agent if after[full] != agent else ""
+        source = moved.get(full)
+        if not source or not under_session_scratchpad(source, session):
+            return ""
+        if source in files and source not in removed:
+            return "" if source in seen else copier_after(source, seen + (full,))
+        return scratchpad_copier_of(source, session)
+
     for full in files:
         after[full] = writer_after(full)
+    copiers = {full: copier_after(full) for full in files}
     if not agent:
         for full in files:
-            if full in moved and under_session_scratchpad(moved[full], session):
-                scratchpad_record_writer(full, session, after[full])
+            if full in moved and full not in copied and under_session_scratchpad(moved[full], session):
+                scratchpad_record_writer(full, session, after[full], copiers[full])
             else:
                 scratchpad_clear_writer(full, session)
         return
     taken, reason = "", SCRATCHPAD_OVERWRITE_REASON
     for full in files:
-        writer = scratchpad_writer_of(full, session)
+        writer = scratchpad_holder_of(full, session)
         if writer and writer != agent and not taken:
             taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
         elif full in removed and not taken:
@@ -6269,7 +6731,7 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     def record_writers():
         for full in files:
             if full not in removed:
-                scratchpad_record_writer(full, session, after[full])
+                scratchpad_record_writer(full, session, after[full], copiers[full])
 
     if taken:
         # A refused write lands nothing, so the record stays with the first writer; an override that lifts it moves it.
@@ -6770,6 +7232,9 @@ def judge(payload) -> None:
     if payload.get("hook_event_name") == "SubagentStop":
         judge_stop(payload)
         return
+    if payload.get("hook_event_name") == "PostToolUse":
+        judge_shell_write(payload)
+        return
     tool = payload.get("tool_name", "") or ""
     tool_input = payload.get("tool_input", {}) or {}
     if not isinstance(tool_input, dict):
@@ -6935,6 +7400,11 @@ def judge(payload) -> None:
     if ordered:
         refuse(tool, "deny", "brief-destructive-git", BRIEF_DESTRUCTIVE_REASON, ordered[:120])
 
+    # 9e3. A read-only agent's brief that orders a file write (rule brief-write-needs-writer). An override lifts it.
+    ordered = brief_write_hit(tool, tool_input)
+    if ordered:
+        refuse(tool, "deny", "brief-write-needs-writer", BRIEF_WRITE_REASON, ordered[:120])
+
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
     if tool in MERGE_TOOLS:
         owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "pullNumber"))
@@ -7048,7 +7518,7 @@ def judge(payload) -> None:
                         transcript if isinstance(transcript, str) else "",
                         bool(payload.get("agent_id") or payload.get("agent_type")),
                         tool_input.get("run_in_background") is True,
-                        tool_input.get("description") or "", payload)
+                        tool_input.get("description") or "", payload, tool_input.get("timeout"))
             segments = split_segments(strip_heredoc_bodies(command))
             matched = next((hit for seg in segments if (hit := sim_bypass_hit(seg))), "")
             if matched:

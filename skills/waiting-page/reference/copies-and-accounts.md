@@ -14,7 +14,7 @@ never runs it. There is one path: the record branch's own worktree. Never write 
 1. Check out the record branch in its own worktree (`roadmap`; the repo's extras file may name another).
    Name the copy folder: take the path `python3 ~/.claude/lint/layout.py path <repo root> waiting-data` prints,
    and use that path inside the worktree.
-2. Fetch each of the five collections: `items`, `answers`, `groups`, `asks` and `meta`. Use
+2. Fetch each of the six collections: `items`, `answers`, `groups`, `asks`, `meta` and `receipts`. Use
    `ArtifactData list <collection>` with `out_dir` set to one new folder, and `query.limit` 1000.
    Follow `next_cursor` until it is empty. A list call that errors, or that ends with a cursor still
    pending, stops the run: touch no `.complete` file and run no export. A missed cursor page deletes docs
@@ -59,7 +59,7 @@ Each claude.ai artifact a repo holds is one entry in the `artifacts` key of its 
 `account`. A role other than `waiting-page` also has `collections`, the collections to export. An empty list
 (`"collections": []`) makes a page-only entry: its page and files export, and no database does. `id` is a slug of
 32 characters or fewer. `account` is a plain label such as `work`, never an email. The role `waiting-page` marks
-the repo's waiting page. Its default collections are the five above, and its export folder is the waiting-data
+the repo's waiting page. Its default collections are the six above, and its export folder is the waiting-data
 folder. Any other artifact exports to `artifacts/<id>/`. The old `waiting-page` key stays the fallback when no entry
 has that role.
 

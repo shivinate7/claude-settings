@@ -265,6 +265,10 @@ SHOOT_REACH_BAD = (
         ("a list", []), ("an object", {}),
     )]
 )
+# touchWidths values bin/shoot refuses (lint/test_shoot.mjs, TOUCH_WIDTHS_BAD, which holds more). A copy of six,
+# because that suite is Node and this one is Python: the same reason as SHOOT_REACH_BAD.
+SHOOT_TOUCH_BAD = [("a string", "1440"), ("false", False), ("the number 0", 0), ("a list holding a fraction", [1.5]),
+                   ("a list holding a string", ["390"]), ("a list holding 0", [0])]
 
 
 class Design(unittest.TestCase):
@@ -309,6 +313,11 @@ class Design(unittest.TestCase):
                     '{"baseUrl": "http://h", "routes": ["/"], "themes": ["sepia"]}', '{"baseUrl": "http://h", "routes": []}'):
             self.assert_gap(bad)
 
+    def test_a_bad_touch_widths_is_a_gap(self):
+        for label, value in SHOOT_TOUCH_BAD:
+            with self.subTest(label):
+                self.assert_gap(shoot_json(touchWidths=value), "touchWidths")
+
     def test_a_malformed_steps_localstorage_or_https_flag_is_a_gap(self):
         for label, route, config, key in SHOOT_REACH_BAD:
             with self.subTest(label):
@@ -329,6 +338,16 @@ class Design(unittest.TestCase):
                 self.assertIn("screens named: pass - 4 route(s)", out)
                 self.assertIn("screenshot command: pass - the shared shoot reads", out)
                 self.assertTrue(out.startswith("design: in shape"), out)
+
+    def test_a_touch_widths_shoot_takes_is_in_shape(self):
+        for label, config in (("a list of one width", shoot_json(touchWidths=[390])), ("an empty list", shoot_json(touchWidths=[])),
+                              ("null", shoot_json(touchWidths=None)), ("unset", shoot_json())):
+            with self.subTest(label):
+                repo = Repo(self).write("src/App.tsx").write(".claude/shoot.json", config).write("src/tokens.css")
+                repo.write("ios/Tokens.swift", "// Generated from src/tokens.css. Do not edit.\n")
+                code, out = repo.run("design")
+                self.assertEqual(code, 0, out)
+                self.assertIn("screens named: pass", out)
 
     def test_token_paths_tests_and_generated(self):
         repo = Repo(self).write("a.tsx").write(".claude/shoot.json", SHOOT)

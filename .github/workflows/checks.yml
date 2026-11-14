@@ -296,11 +296,17 @@ jobs:
       - name: Stop-hook triage hold suite
         run: python3 lint/test_report_guard_stalled.py
 
+      - name: Stop-hook closed-item cite suite
+        run: python3 lint/test_report_guard_closed_item.py
+
       - name: Stop-hook question route suite
         run: python3 lint/test_report_guard_route.py
 
       - name: Stop-hook page writer suite
         run: python3 lint/test_report_guard_page_writer.py
+
+      - name: Stop-hook page writer tag suite
+        run: python3 lint/test_page_writer_tag.py
 
       - name: Stop-hook stamped copy suite
         run: python3 lint/test_report_guard_stamped.py
@@ -526,6 +532,9 @@ jobs:
       - name: Waiting page park relay prose suite
         run: python3 skills/waiting-page/test_skill_park_relay.py
 
+      - name: Waiting page asks wake prose suite
+        run: python3 skills/waiting-page/test_asks_wake.py
+
       - name: Artifact cite fixture suite
         run: python3 lint/test_check_artifact_cites.py
 
@@ -534,6 +543,9 @@ jobs:
 
       - name: Roadmap builder fixture suite
         run: python3 skills/roadmap/test_build.py
+
+      - name: Roadmap live-file publisher fixture suite
+        run: python3 skills/roadmap/test_publish_live.py
 
       - name: Layout readers hold no record path
         run: python3 lint/check_layout.py
@@ -620,6 +632,12 @@ jobs:
 
       - name: Agent and skill model floor fixture suite
         run: python3 lint/test_check_agent_models.py
+
+      - name: Agent terse line
+        run: python3 lint/check_agent_terse_line.py
+
+      - name: Agent terse line fixture suite
+        run: python3 lint/test_check_agent_terse_line.py
 
       - name: Agent push form fixture suite
         run: python3 lint/test_agent_push_form.py

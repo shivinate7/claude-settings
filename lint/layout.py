@@ -12,7 +12,8 @@ The "waiting-page" key holds the URL of the repo's waiting page (`waiting_page()
 the registry entry whose role is "waiting-page";
 "waiting-page-colour" (#rrggbb) and "waiting-page-icon" (an .svg or .png path in the repo) are its
 branding (`waiting_page_colour()`, `waiting_page_icon()`, read by lint/repo_colour.py). "page-writer" is the session id
-of the page's writer (`page_writer_key()`, read by the pick guard in lint/report_guard.py). The "record-branch" key
+of a page writer (`page_writer_key()`). It goes stale when triage gets a new session, so no guard reads it: the pick
+guard and the owner-feedback check name the writer by its triage tag (`_transcript.page_writer`). The "record-branch" key
 names the branch of the record in a fork worktree (`record_branch()`); with no key it is "roadmap".
 `set_waiting_page()` writes the "waiting-page" key once, for triage; it never writes "rolled-out".
 
@@ -272,13 +273,35 @@ WAITING_ROLE = "waiting-page"  # the role of the registry entry that is the repo
 ARTIFACT_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")  # a slug of 32 characters or fewer, as a record slug is (git-slug-then-claim-number)
 ROLE = re.compile(r"[a-z0-9][a-z0-9-]*")
 COLLECTION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
-WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta")  # what the waiting page's database holds
+WAITING_FALLBACK = ("items",)  # the one collection a checkout with no skills/waiting-page folder still treats as the page's
+
+
+def _waiting_collections():
+    """What the waiting page's database holds. The one home is skills/waiting-page/export_page.py COLLECTIONS, which never
+    imports lint/ (recovery must not depend on the repo it recovers). The skill folder sits at the same place relative to
+    lint/ in the repo and in a ~/.claude install. Lazy: guard.py imports this module on every tool call, and a fixture
+    may copy lint/ without the skill."""
+    folder = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "skills", "waiting-page")
+    sys.path.insert(0, folder)
+    try:
+        import export_page
+    except ImportError as e:
+        raise LayoutError("the waiting page's collection list cannot be read: export_page.py is missing from %s (%s)"
+                          % (os.path.normpath(folder), e)) from e
+    return export_page.COLLECTIONS
+
+
+def __getattr__(name):
+    """PEP 562: `layout.WAITING_COLLECTIONS` reads the list on first use."""
+    if name == "WAITING_COLLECTIONS":
+        return _waiting_collections()
+    raise AttributeError("module %r has no attribute %r" % (__name__, name))
 
 
 def artifacts(root):
     """[{id, url, role, account, collections, export}] from the "artifacts" key of `root`'s extras file, in order; []
     for a repo with no extras file or no key. `collections` and `export` are filled in: the waiting-page role exports
-    the five waiting collections to the waiting-data folder of the record branch, any other role needs its own
+    the waiting collections (`WAITING_COLLECTIONS`) to the waiting-data folder of the record branch, any other role needs its own
     `collections` and exports to `artifacts/<id>/`. A page-only entry (any other role, `"collections": []`) exports its page
     and files and no database; an empty list is refused on the waiting-page role, and a missing key on any other. An entry with `"export": false` (never the waiting-page role) is held and never exported: it needs
     no collections and reads with `export` False and `collections` []. LayoutError, naming the entry by its id, for an email as account, a
@@ -322,7 +345,13 @@ def _registry(root, found, where):
         elif no_export:
             names = []
         elif role == WAITING_ROLE:
-            names = list(WAITING_COLLECTIONS)
+            try:
+                names = list(_waiting_collections())
+            except LayoutError:
+                # No skill folder, so no list. A bare tree must still judge a page write by its items (the page-item
+                # rules read the registry through here), so it reads the one collection `items` and no other. This is
+                # not a copy of the list: a full checkout never reaches it.
+                names = list(WAITING_FALLBACK)
         else:
             raise LayoutError("%s: %s (id %s) has no collections to export" % (where, label, entry_id))
         if no_export:

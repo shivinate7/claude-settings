@@ -3,7 +3,7 @@
 ## The ruling
 
 `lint/check_silent_undo.py` is the one home. CI runs it on each pull request with `--strict`.
-`merge/merge.py` calls it through `undo_check` before it pushes or merges. It reads three things.
+`merge/merge.py` calls it through `undo_check` before it pushes or merges. It reads four things.
 
 - **Reversal.** Landing the branch on upstream puts a file back as an earlier first-parent commit of
   upstream had it: the exact blob, a `-U0` hunk reversed on all but one line, or lines main only added
@@ -15,6 +15,16 @@
   commit added on the branch alone is the branch's. A merge of three or more parents is not read, and the
   check reports it as UNKNOWN only after the other reads finish. The merge tool refuses an UNKNOWN that
   carries a finding, and the reason flag cannot lift it (step notes-union-batch-revival).
+- **Lane undo.** A non-merge commit of the branch undoes an earlier non-merge commit of the same branch. Two shapes only (owner ruling, Cockpit item 167 a, 2026-11-04).
+  - **Put back.** The commit puts a file, or a `-U0` hunk, back to the text the earlier commit's parent held. The earlier commit must have changed six lines or more there. The file counts within one non-blank line, the hunk on all but one line. Off a test path, the file must exist on both sides. Only lines the earlier commit added count, and only while head holds fewer of them than the undoing commit's parent did. So a later restore clears it.
+  - **Lines lost.** On a test path (`is_test_rel`, `hooks/guard.py`), a hunk takes out more lines the earlier commit added than it adds back. Not every one is a rewrite. A line counts only if no copy is left in the whole file at head.
+  - **Renames.** A file git pairs as renamed (50% similar or more) is read across the rename, so a pure move puts nothing back. A file a third commit renames between the two is not read. Merges are not read. A lane of one commit has nothing to read.
+  - **Pick.** The coordinator's 08:48 CST pick was the six-line gate (put back). The lines-lost rule and paired renames came next, then the 40-PR read.
+  - **40-PR read.** `lane_undos` ran over the last 40 merged PRs on main.
+    - Result: 24 of 40 red. 159 findings: 119 lines lost, 17 files put back whole, 23 hunks put back.
+    - Ten sampled reds: five false alarms, where the lane refactored or re-pointed its own test lines. Five were real drops that the lane meant and stated, with no trailer.
+  - **Report-only.** Lane undo ships report-only (coordinator ruling, 2026-11-12 09:35 CST, overriding the 08:48 CST six-line gate). Enforcing ships only if the 40-PR read shows few false reds and each remaining red is a real undo on sample. The re-run read failed that test: 24 of 40 red, 159 findings; 5 of 10 sampled reds false. Findings print, marked report-only. They never change the exit code or the merge refusal. A `Drops-lines` trailer still excuses a lane line.
+  - **Outcome.** It protects a lane from silently undoing its own work. What protects it now: the printed report and the reviewer.
 - **Revived note.** A note the branch deleted is back at head, because a union merge of main put it back
   (decision `notes-merge-union`). The check replays the branch's own commits and counts copies per note.
   A note is its slug, or its whole line when it has no slug form. A rebase leaves no merge, so it is not read
@@ -38,8 +48,8 @@ an unflagged close gets no run read. It starts no long-lived process.
   Claude Code attribution line. Read only the last paragraph left, with the trailer rules above.
 - **Why the body.** A repo that squashes, or writes its reasons in the PR, could not declare a dropped
   line. A session in another repo that uses `bin/merge` asked for this.
-- **Verdict.** When the check finds a dropped line, `bin/merge preview` prints one `BLOCKED: <reason>`
-  line and exits 1. An unreadable history is a plain refusal with no BLOCKED line.
+- **Verdict.** When the lost-line, reversal or revived-note reads find a dropped line, `bin/merge preview` prints one `BLOCKED: <reason>`
+  line and exits 1. A lane undo finding never does. An unreadable history is a plain refusal with no BLOCKED line.
 
 **The window starts at the fork point,** not at the plain merge-base, which moves to main's tip once the
 branch merges main. There is no `--since` time. Reason: a commit-time window let the same shape pass or
@@ -56,7 +66,7 @@ fail by its timestamp, and a commit-count floor read old main work that a branch
 **Required or advisory.** The check is required here, where lanes are short and land through integration
 batches. It is advisory in a repo whose long-lived lanes merge main in and then edit main's lines.
 Advisory means that the check runs and prints its flags. The batch reviewer marks each flag real or
-deliberate, and a real flag stops the merge. It moves to required when a rule separates a deliberate
+deliberate, and a real flag stops the merge. Lane undo flags are report-only in both modes. It moves to required when a rule separates a deliberate
 edit of main's lines from a stale overwrite, with every incident fixture still red.
 
 **The stale green PR.** An older PR overwrites a newer change to the same file. `merge/merge.py` runs the
@@ -64,7 +74,7 @@ check in `confirm`, before the claim and any push. It runs it again after the po
 tip, right before `gh pr merge`. A red at the second run reverts the claim. Unknown refuses too. Two
 changed lines are a new edit, so the reversal dial stays at one line until a measured case says otherwise.
 
-**What is not a loss.**
+**What is not a loss** (the reversal and lost-line reads).
 
 - Whitespace and blank lines.
 - A move, a rename or a reorder: a removed line that the change adds to another file.
@@ -83,6 +93,16 @@ way out that does not depend on the check is the reason flag
 `merge <pr> --confirm --undo-check-unknown-ok "<reason>"`. Claude may type it, with a reason (owner
 ruling, Cockpit item 178 a, 2026-11-03 22:31 CST). Each lift is printed and written to the merge
 commit message as `Reason flag: --undo-check-unknown-ok: <reason>`. It never excuses a finding.
+
+## Keep line
+
+A brief marked `Round 2 of 3` or `Round 3 of 3` names each earlier lane commit to keep, by short sha and subject, on its `Keep:` line.
+
+A reviewer is expected to compare that list with the lane undo findings. No code or agent file enforces it. Section "Required or advisory" says the reviewer marks each flag real or deliberate.
+
+The drop excuse is the existing `Drops-lines:` line, not a Keep line (owner pick a on page item 165, Nov 2 10:52 CST). The owner's never-undo ruling is fb-1041-1 (Nov 2 10:41 CST: builders never undo earlier lane work).
+
+The Keep line is the coordinator's pick of 11:09 CST Nov 12 (step no-undo-brief-rule-sentence), not an owner ruling; its CLAUDE.md rule sentence follows page item 553 (pick a).
 
 Kind: process
 Home: lint/check_silent_undo.py

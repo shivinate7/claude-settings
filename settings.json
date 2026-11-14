@@ -406,6 +406,16 @@
         ]
       },
       {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/guard.py\"; [ -f \"$g\" ] || exit 0; i=$(cat); case $i in ''|*'\"agent_type\":\"builder\"'*|*'\"agent_type\": \"builder\"'*) ;; *) exit 0;; esac; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; printf %s \"$i\" | \"$c\" \"$g\"; exit $?; done; exit 0",
+            "timeout": 30
+          }
+        ]
+      },
+      {
         "matcher": "Bash|mcp__Claude_Code_iOS_Simulator__control",
         "hooks": [
           {

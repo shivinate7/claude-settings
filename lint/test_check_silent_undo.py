@@ -860,6 +860,557 @@ class OwnHistory(MainLineDrop, unittest.TestCase):
             self.assertIn("main added line number %d with a long tail %s" % (i, "x" * 150), got)
 
 
+def assert_finding(case, got, path, undo, earlier):
+    """One FAIL names the path, the undoing commit and the earlier commit it undoes, by their 9-char shas."""
+    case.assertTrue(any(path in p and undo[:9] in p and earlier[:9] in p for p in got),
+                    "no FAIL names %s, undoing %s and earlier %s: %r" % (path, undo[:9], earlier[:9], got))
+
+
+class LaneUndo(unittest.TestCase):
+    """The lane undo read, in its two shapes only. A non-merge lane commit undoes an earlier lane commit when it puts a
+    whole file or a hunk back to its text before that commit (the earlier commit changed six lines or more there), or
+    when it nets a loss of lines the lane added to a test file. A commit that renames a file is read across the rename:
+    the text before it at the old name, the text after it at the new name. Merges are not read here. A lane finding is
+    report-only: it is printed and marked report-only, and it does not set the exit code. Each case asserts the lane's
+    commits before its verdict (P7). Controls are the false alarms: a fix-up, a refactor that keeps lines, a test line
+    replaced by a better one."""
+    CARD = BODY + "function Card() {}\n"  # app.txt as base_repo() leaves it
+    CASE = "".join("card test case line %d\n" % i for i in range(1, 7))  # six lines a lane adds
+    BLOCK = "".join("incident test line %d\n" % i for i in range(1, 50))  # 49 lines: a full-size drop
+    EIGHT = "".join("eight test line %d\n" % i for i in range(1, 9))  # an eight-line block a lane adds
+
+    def setUp(self):
+        self.r = base_repo()
+        self.r.sh("checkout", "-q", "-b", "lane")
+
+    def lane(self):
+        """The lane's commits, oldest first: upstream..head, parents before children."""
+        return self.r.sh("rev-list", "--topo-order", "--reverse", "origin/main..HEAD").split()
+
+    def main_then_lane(self, path, text):
+        """Main gets `path` with `text` and is pushed. The lane is cut again from that main, so it starts holding the file."""
+        r = self.r
+        r.sh("checkout", "-q", "main")
+        r.put(path, text)
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "main adds " + path)
+        r.push()
+        r.sh("checkout", "-q", "-B", "lane", "origin/main")
+
+    def drop_app_lines(self):
+        """The drop shape: A adds a test case to app.txt, and B rewrites app.txt from the old copy, taking it back out."""
+        a = self.r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        b = self.r.commit("B: rewrite app.txt from the old copy", app_txt=self.CARD)
+        return a, b
+
+    def test_a_commit_that_drops_lines_an_earlier_lane_commit_added_is_red(self):
+        r = self.r
+        a, b = self.drop_app_lines()
+        self.assertEqual(self.lane(), [a, b])
+        assert_finding(self, r.verdict(), "app.txt", b, a)
+
+    def main_run(self, *extra, ci=False):
+        """main() on the lane's repo, as the CLI runs it, with the flags in `extra` and env CI set when `ci`. -> (exit code, printed lines)."""
+        with unittest.mock.patch.dict(os.environ), contextlib.redirect_stdout(io.StringIO()) as out:
+            os.environ.pop("CI", None)
+            if ci:
+                os.environ["CI"] = "1"
+            code = C.main(["--repo", self.r.dir, "--upstream", "origin/main", "--head", "HEAD", *extra])
+        return code, out.getvalue().splitlines()
+
+    def assert_report_only(self, lines, path, undo, earlier):
+        """One printed line names the path, the undoing commit and the earlier commit it undoes, and is marked report-only."""
+        named = [x for x in lines if path in x and undo[:9] in x and earlier[:9] in x]
+        self.assertTrue(named, "no printed line names %s, undoing %s and earlier %s: %r" % (path, undo[:9], earlier[:9], lines))
+        self.assertTrue(any("report-only" in x for x in named), "the lane undo line is not marked report-only: %r" % named)
+
+    def test_a_whole_file_put_back_byte_for_byte_to_its_pre_lane_blob_is_red(self):
+        r = self.r
+        pre = r.sh("rev-parse", "HEAD:other.txt")
+        a = r.commit("A: replace other.txt with a whole block", other_txt=self.CASE)
+        b = r.commit("B: put other.txt back", other_txt="other v1\n")
+        self.assertEqual(self.lane(), [a, b])
+        self.assertEqual(r.sh("rev-parse", b + ":other.txt"), pre)  # scope: the same blob as before A
+        assert_finding(self, r.verdict(), "other.txt", b, a)
+
+    def test_a_drop_of_forty_nine_lines_the_size_of_the_incident_is_red(self):
+        r = self.r
+        a = r.commit("A: add 49 lines", app_txt=self.CARD + self.BLOCK)
+        b = r.commit("B: rewrite app.txt from the old copy", app_txt=self.CARD)
+        self.assertEqual(self.lane(), [a, b])
+        assert_finding(self, r.verdict(), "app.txt", b, a)
+
+    def test_a_hunk_put_back_while_another_hunk_of_the_same_commit_stays_is_red(self):
+        r = self.r
+        tail = "export default Card\nexport const version = 2\n"
+        a = r.commit("A: add an eight-line block and two export lines", app_txt=BODY + self.EIGHT + "function Card() {}\n" + tail)
+        b = r.commit("B: take the block out and keep the export lines", app_txt=BODY + "function Card() {}\n" + tail)
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        hunks = [x for x in r.sh("diff", "-U0", a + "^", a, "--", "app.txt").splitlines() if x.startswith("@@")]
+        self.assertEqual(len(hunks), 2, "scope: A makes two hunks, the block and the export lines: %r" % hunks)
+        self.assertIn("export const version = 2", r.sh("show", b + ":app.txt"))  # scope: B keeps A's second hunk
+        self.assertNotIn("eight test line 3", r.sh("show", b + ":app.txt"))  # scope: B takes the block out
+        assert_finding(self, r.verdict(), "app.txt", b, a)
+
+    def test_a_commit_that_adds_five_lines_and_rewords_a_main_line_then_restores_the_file_is_red(self):
+        r = self.r
+        pre = r.sh("rev-parse", "HEAD:app.txt")  # the pre-lane blob
+        new = "".join("lane added line %d\n" % i for i in range(1, 6))
+        a = r.commit("A: add five lines and reword the Card line", app_txt=BODY + "function Card(props) {}\n" + new)
+        b = r.commit("B: restore app.txt to its pre-lane blob", app_txt=self.CARD)
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertEqual(r.sh("rev-parse", b + ":app.txt"), pre)  # scope: B is the pre-lane blob
+        assert_finding(self, r.verdict(), "app.txt", b, a)
+
+    def test_a_lane_line_grown_from_one_to_five_lines_then_restored_whole_is_red(self):
+        r = self.r
+        pre = r.sh("rev-parse", "HEAD:app.txt")  # the pre-lane blob
+        a = r.commit("A: add one lane line", app_txt=self.CARD + "lane line\n")
+        grown = "".join("lane line %d\n" % i for i in range(1, 6))
+        b = r.commit("B: grow the lane line to five lines", app_txt=self.CARD + grown)
+        c = r.commit("C: restore app.txt to its pre-lane blob", app_txt=self.CARD)
+        self.assertEqual(self.lane(), [a, b, c])  # scope: C is the third lane commit
+        self.assertEqual(r.sh("rev-parse", c + ":app.txt"), pre)  # scope: C is the pre-lane blob
+        assert_finding(self, r.verdict(), "app.txt", c, b)
+
+    def test_a_pre_lane_copy_with_one_new_line_undoes_eight_changed_lines_is_red(self):
+        r = self.r
+        e = r.commit("E: replace the body with eight new code lines", app_txt="".join("new code path %d\n" % i for i in range(1, 9)) + "function Card() {}\n")
+        c = r.commit("C: the pre-E copy plus one new line", app_txt=self.CARD + "one new line\n")
+        self.assertEqual(self.lane(), [e, c])
+        assert_finding(self, r.verdict(), "app.txt", c, e)
+
+    def test_an_edit_inside_an_eight_line_block_then_a_restore_of_the_pre_block_file_is_red(self):
+        r = self.r
+        e = r.commit("E: add eight lines", app_txt=self.CARD + self.EIGHT)
+        x = r.commit("X: edit one of the eight", app_txt=self.CARD + self.EIGHT.replace("eight test line 3\n", "eight test line 3 edited\n"))
+        c = r.commit("C: restore the pre-E file", app_txt=self.CARD)
+        self.assertEqual(self.lane(), [e, x, c])  # scope: the restore is the third commit, after one edit
+        assert_finding(self, r.verdict(), "app.txt", c, e)
+
+    def test_a_commit_that_deletes_two_lines_and_rewrites_four_then_restores_main_is_red(self):
+        """A pure delete hunk is no in-place rewrite, so the restore that takes it back is an undo."""
+        main = "".join("card test line %d checks the title\n" % i for i in range(1, 11))
+        lane_text = ("".join("card test line %d checks the title\n" % i for i in (1, 2, 5, 6))
+                     + "".join("card test line %d checks the title  # reviewed\n" % i for i in range(7, 11)))
+        self.main_then_lane("tests/card.txt", main)
+        r = self.r
+        a = r.commit("A: delete two lines and mark four", tests__card_txt=lane_text)
+        b = r.commit("B: put main's text back", tests__card_txt=main)
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        hunks = [x for x in r.sh("diff", "-U0", a + "^", a, "--", "tests/card.txt").splitlines() if x.startswith("@@")]
+        self.assertEqual(len(hunks), 2, "scope: A makes a delete hunk and a rewrite hunk: %r" % hunks)  # scope: two hunks
+        self.assertNotIn("card test line 3 checks the title", r.sh("show", a + ":tests/card.txt").splitlines())  # scope: A deletes line 3
+        self.assertEqual(r.sh("rev-parse", b + ":tests/card.txt"), r.sh("rev-parse", "origin/main:tests/card.txt"))  # scope: B is main's blob
+        assert_finding(self, r.verdict(), "tests/card.txt", b, a)
+
+    def test_a_put_back_of_a_lane_rewrite_that_also_drops_a_later_lane_line_is_red(self):
+        main = "".join("card test line %d checks the title\n" % i for i in range(1, 7))
+        marked = "".join("card test line %d checks the title  # reviewed\n" % i for i in range(1, 7))
+        self.main_then_lane("tests/card.txt", main)
+        r = self.r
+        a = r.commit("A: mark the six card test lines as reviewed", tests__card_txt=marked)
+        lane_line = r.commit("L: add a lane line", tests__card_txt=marked + "card test lane line\n")
+        b = r.commit("B: put main's text back", tests__card_txt=main)
+        self.assertEqual(self.lane(), [a, lane_line, b])  # scope: B is the last lane commit
+        self.assertIn("card test lane line", r.sh("show", lane_line + ":tests/card.txt"))  # scope: L holds the lane line
+        self.assertNotIn("card test lane line", r.sh("show", b + ":tests/card.txt"))  # scope: B drops it
+        got = r.verdict()
+        self.assertTrue(any("tests/card.txt" in p and b[:9] in p for p in got),
+                        "no FAIL names tests/card.txt and undoing %s: %r" % (b[:9], got))
+
+    def test_a_lane_merged_with_no_ff_into_an_integration_branch_is_red(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        b = r.commit("B: drop it", app_txt=self.CARD)
+        r.sh("checkout", "-q", "-B", "integ", "origin/main")
+        r.sh("merge", "--no-ff", "--no-edit", "lane")
+        m = r.sh("rev-parse", "HEAD")
+        self.assertEqual(self.lane(), [a, b, m])  # scope: the lane's commits are off the first-parent line of integ
+        assert_finding(self, r.verdict(), "app.txt", b, a)
+
+    def test_a_drop_of_three_lines_from_an_eight_line_test_block_is_red(self):
+        r = self.r
+        e = r.commit("E: add eight lines to a test", tests__card_txt=self.EIGHT)
+        c = r.commit("C: remove three of the lines", tests__card_txt="".join(self.EIGHT.splitlines(True)[3:]))
+        self.assertEqual(self.lane(), [e, c])
+        assert_finding(self, r.verdict(), "tests/card.txt", c, e)
+
+    def test_a_net_loss_of_one_line_from_an_eight_line_test_block_is_red(self):
+        """A net loss of one line is still a finding: the check has no line-count floor, so a small drop from a test block must not slip through."""
+        r = self.r
+        e = r.commit("E: add eight lines to a test", tests__card_txt=self.EIGHT)
+        c = r.commit("C: remove one of the lines", tests__card_txt=self.EIGHT.replace("eight test line 3\n", ""))
+        self.assertEqual(self.lane(), [e, c])  # scope: C is the second commit
+        self.assertEqual(len(r.sh("show", c + ":tests/card.txt").splitlines()), 7)  # scope: the block goes from 8 lines to 7
+        assert_finding(self, r.verdict(), "tests/card.txt", c, e)
+
+    def test_a_net_loss_of_two_adjacent_lines_from_an_eight_line_test_block_is_red(self):
+        """A net loss of two adjacent lines is still a finding: the check has no line-count floor, so a small drop from a test block must not slip through."""
+        r = self.r
+        e = r.commit("E: add eight lines to a test", tests__card_txt=self.EIGHT)
+        c = r.commit("C: remove two adjacent lines", tests__card_txt=self.EIGHT.replace("eight test line 3\neight test line 4\n", ""))
+        self.assertEqual(self.lane(), [e, c])  # scope: C is the second commit
+        self.assertEqual(len(r.sh("show", c + ":tests/card.txt").splitlines()), 6)  # scope: the block goes from 8 lines to 6
+        assert_finding(self, r.verdict(), "tests/card.txt", c, e)
+
+    def test_a_commit_that_replaces_a_six_line_test_case_with_one_line_is_red(self):
+        r = self.r
+        a = r.commit("A: add a test case", tests__card_txt=self.CASE)
+        b = r.commit("B: replace the case with one line", tests__card_txt="one new line\n")
+        self.assertEqual(self.lane(), [a, b])
+        assert_finding(self, r.verdict(), "tests/card.txt", b, a)
+
+    def test_a_five_line_lane_add_to_a_test_file_then_a_whole_file_restore_is_red(self):
+        """Five lines are under the block size, so the test path rule reads this one, not the whole-file put-back."""
+        kept = "card test kept line\n"
+        self.main_then_lane("tests/card.txt", kept)
+        r = self.r
+        a = r.commit("A: add five test lines", tests__card_txt=kept + "".join("card test added line %d\n" % i for i in range(1, 6)))
+        b = r.commit("B: restore tests/card.txt to main's text", tests__card_txt=kept)
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertEqual(r.sh("rev-parse", b + ":tests/card.txt"), r.sh("rev-parse", "origin/main:tests/card.txt"))  # scope: B is main's blob
+        assert_finding(self, r.verdict(), "tests/card.txt", b, a)
+
+    def test_a_lane_that_deletes_a_test_file_it_added_is_red(self):
+        r = self.r
+        a = r.commit("A: add a test case file", tests__card_txt=self.CASE)
+        r.sh("rm", "-q", "tests/card.txt")
+        b = r.commit("B: delete the test file")
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertNotIn("tests/card.txt", r.sh("ls-tree", "-r", "--name-only", b).split())  # scope: B deletes the file
+        assert_finding(self, r.verdict(), "tests/card.txt", b, a)
+
+    def test_a_drop_with_the_drops_lines_trailer_is_allowed_and_prints_the_note(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        b = r.commit("B: drop it\n\n%s: app.txt -- the owner cut the case" % C.TRAILER, app_txt=self.CARD)
+        self.assertEqual(self.lane(), [a, b])
+        self.assertEqual(r.verdict(), [])
+        self.assertEqual(r.notes, ["ALLOWED app.txt: the owner cut the case"], "the trailer-excused lane drop prints no ALLOWED note")
+
+    def test_a_later_commit_that_restores_the_dropped_lines_is_green(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        b = r.commit("B: drop it", app_txt=self.CARD)
+        c = r.commit("C: restore it", app_txt=self.CARD + self.CASE)
+        self.assertEqual(self.lane(), [a, b, c])
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_fix_that_changes_a_value_the_lane_added_is_green(self):
+        r = self.r
+        a = r.commit("A: add a timeout", app_txt=self.CARD + "timeout = 30\n")
+        b = r.commit("B: fix the value", app_txt=self.CARD + "timeout = 60\n")
+        self.assertEqual(self.lane(), [a, b])
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_fix_that_adds_an_argument_to_a_line_the_lane_added_is_green(self):
+        r = self.r
+        a = r.commit("A: add a call", app_txt=self.CARD + "run(a, b)\n")
+        b = r.commit("B: pass env", app_txt=self.CARD + "run(a, b, env=e)\n")
+        self.assertEqual(self.lane(), [a, b])
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_one_line_reword_of_a_comment_the_lane_added_is_green(self):
+        r = self.r
+        a = r.commit("A: add a comment", app_txt=self.CARD + "# wait for the advisory lock before the first write\n")
+        b = r.commit("B: reword the comment", app_txt=self.CARD + "# wait for the lock before any write\n")
+        self.assertEqual(self.lane(), [a, b])
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_commit_that_removes_a_line_main_had_before_the_lane_is_green(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        b = r.commit("B: remove a line main had", app_txt=BODY.replace("line 5\n", "") + "function Card() {}\n" + self.CASE)
+        self.assertEqual(self.lane(), [a, b])
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_merge_of_main_that_removed_a_line_drops_nothing_the_lane_added_is_green(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        r.sh("checkout", "-q", "main")
+        r.commit("main removes line 5", app_txt=BODY.replace("line 5\n", "") + "function Card() {}\n")
+        r.push()
+        r.sh("checkout", "-q", "lane")
+        r.sh("merge", "-q", "--no-edit", "main")
+        m = r.sh("rev-parse", "HEAD")
+        self.assertEqual(self.lane(), [a, m])  # scope: A, then the merge of main
+        self.assertIn("card test case line 6", r.sh("show", "HEAD:app.txt"))  # scope: the merge keeps the lane's lines
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_lane_of_one_commit_has_no_finding(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        self.assertEqual(self.lane(), [a])
+        self.assertEqual(r.verdict(), [])
+        self.assertEqual(r.notes, [])
+
+    def test_a_five_line_lane_add_then_a_whole_file_restore_is_green_under_the_block_size(self):
+        r = self.r
+        pre = r.sh("rev-parse", "HEAD:app.txt")  # the pre-lane blob
+        a = r.commit("A: add five lane lines", app_txt=self.CARD + "".join("lane line %d\n" % i for i in range(1, 6)))
+        b = r.commit("B: restore app.txt to its pre-lane blob", app_txt=self.CARD)
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertEqual(r.sh("rev-parse", b + ":app.txt"), pre)  # scope: B is the pre-lane blob
+        self.assertEqual(r.verdict(), [], "five changed lines are under BLOCK_LINES (6): the whole-file restore is no undo")
+
+    def test_a_reflow_of_two_test_lines_into_one_with_a_word_changed_is_green(self):
+        r = self.r
+        a = r.commit("A: add two test assertions", tests__card_txt="assert card renders the title\nassert card renders the footer\n")
+        b = r.commit("B: join them into one line and change a word", tests__card_txt="assert card renders the title and footer\n")
+        self.assertEqual(self.lane(), [a, b])  # scope: B reflows A's two lines into one
+        self.assertEqual(r.sh("show", b + ":tests/card.txt"), "assert card renders the title and footer")  # scope: the one line B holds
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_test_line_replaced_one_for_one_by_a_better_line_is_green(self):
+        r = self.r
+        three = "assert card renders the title\nassert card renders the footer\nassert card renders the price\n"
+        a = r.commit("A: add three test assertions", tests__card_txt=three)
+        b = r.commit("B: make the footer assertion stronger", tests__card_txt=three.replace("renders the footer\n", "renders the footer and its link\n"))
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertEqual(len(r.sh("show", b + ":tests/card.txt").splitlines()), 3)  # scope: still three lines, one replaced
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_lane_that_adds_more_test_lines_to_its_own_test_file_is_green(self):
+        r = self.r
+        a = r.commit("A: add a test case", tests__card_txt=self.CASE)
+        b = r.commit("B: add two more test lines", tests__card_txt=self.CASE + "card test extra line one\ncard test extra line two\n")
+        self.assertEqual(self.lane(), [a, b])  # scope: B only adds
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_lane_that_removes_a_test_line_main_had_is_green(self):
+        main = "".join("card test line %d checks the title\n" % i for i in range(1, 4))
+        self.main_then_lane("tests/card.txt", main)
+        r = self.r
+        a = r.commit("A: add a test case", tests__card_txt=main + self.CASE)
+        b = r.commit("B: remove a line main had", tests__card_txt=main.replace("card test line 2 checks the title\n", "") + self.CASE)
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertNotIn("card test line 2 checks the title", r.sh("show", b + ":tests/card.txt"))  # scope: B drops main's line 2
+        self.assertIn("card test case line 6", r.sh("show", b + ":tests/card.txt"))  # scope: B keeps the lane's lines
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_refactor_that_keeps_the_lane_lines_is_green(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        b = r.commit("B: rename Card to Widget", app_txt=BODY + "function Widget() {}\n" + self.CASE)
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertIn("card test case line 6", r.sh("show", b + ":app.txt"))  # scope: B keeps the lane's lines
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_hunk_edited_in_place_is_a_fix_up_not_a_put_back_is_green(self):
+        r = self.r
+        a = r.commit("A: add an eight-line block", app_txt=self.CARD + self.EIGHT)
+        edited = (self.EIGHT.replace("eight test line 2\n", "eight test line two\n")
+                  .replace("eight test line 5\n", "eight test line five\n")
+                  .replace("eight test line 7\n", "eight test line seven\n"))
+        b = r.commit("B: reword three lines of the block", app_txt=self.CARD + edited)
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertEqual(sum(x != y for x, y in zip(self.EIGHT.splitlines(), edited.splitlines())), 3)  # scope: B changes three lines
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_lane_that_creates_and_then_deletes_a_non_test_file_is_green(self):
+        r = self.r
+        a = r.commit("A: add a scratch file", scratch_txt=self.CASE)
+        r.sh("rm", "-q", "scratch.txt")
+        b = r.commit("B: delete the scratch file")
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertNotIn("scratch.txt", r.sh("ls-tree", "-r", "--name-only", b).split())  # scope: B deletes the file
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_lane_that_cuts_a_block_out_of_a_non_test_file_it_created_is_green(self):
+        """E creates the file, so no text of it is before E. Taking E's block back out, with a later line kept, is the lane
+        editing its own new file, not a put back. Only a test file is read at the hunk level here."""
+        r = self.r
+        e = r.commit("E: add a notes file with an eight-line block", cards_txt=self.EIGHT)
+        m = r.commit("M: add a kept line under the block", cards_txt=self.EIGHT + "kept line\n")
+        c = r.commit("C: take the block back out", cards_txt="kept line\n")
+        self.assertEqual(self.lane(), [e, m, c])  # scope: C is the third lane commit
+        self.assertNotIn("cards.txt", r.sh("ls-tree", "-r", "--name-only", e + "^").split())  # scope: E's parent lacks the file
+        self.assertNotIn("eight test line 3", r.sh("show", c + ":cards.txt"))  # scope: C takes the block out
+        self.assertIn("kept line", r.sh("show", c + ":cards.txt"))  # scope: C keeps M's line
+        self.assertEqual(r.verdict(), [], "a non-test file the lane created is not read as a hunk put back")
+
+    def test_a_pure_git_mv_of_a_test_file_an_earlier_lane_commit_edited_is_green(self):
+        """A rename with the content unchanged moves the lines; it puts none back. A edits the test file, B only moves it."""
+        kept = "card test kept line\n"
+        self.main_then_lane("tests/card.txt", kept)
+        r = self.r
+        a = r.commit("A: add a block of test lines", tests__card_txt=kept + self.BLOCK)
+        r.sh("mv", "tests/card.txt", "tests/card_moved.txt")
+        b = r.commit("B: rename the test file, content unchanged")
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertIn("R100", r.sh("show", "--format=", "-M", "--name-status", b))  # scope: B is a pure rename
+        self.assertEqual(r.sh("rev-parse", b + ":tests/card_moved.txt"), r.sh("rev-parse", a + ":tests/card.txt"))  # scope: same blob
+        self.assertEqual(r.verdict(), [], "a pure git mv of a test file an earlier lane commit edited is read as a put back")
+
+    def test_a_pure_git_mv_of_a_non_test_file_an_earlier_lane_commit_edited_is_green(self):  # control
+        r = self.r
+        a = r.commit("A: add a block to app.txt", app_txt=self.CARD + self.BLOCK)
+        r.sh("mv", "app.txt", "app_moved.txt")
+        b = r.commit("B: rename app.txt, content unchanged")
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertIn("R100", r.sh("show", "--format=", "-M", "--name-status", b))  # scope: B is a pure rename
+        self.assertEqual(r.verdict(), [], "a pure git mv of a non-test file is read as a put back")
+
+    def test_a_lane_undo_finding_names_the_drops_lines_trailer_that_excuses_it(self):
+        """One finding line names the trailer that excuses it, so a lane that hits the finding adds that one line and retries once."""
+        a, b = self.drop_app_lines()
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        found = [p for p in self.r.verdict() if "app.txt" in p and b[:9] in p]
+        self.assertTrue(found, "scope: the lane reads a finding on app.txt that undoes B")
+        self.assertIn(C.TRAILER, found[0], "the finding does not name the trailer that excuses it: %r" % found[0])
+        self.assertNotIn("\n", found[0], "the finding is not one line: %r" % found[0])
+
+    def test_a_pure_rename_then_a_drop_of_three_main_lines_is_green(self):
+        """A pure move adds no line, so the three lines B drops were main's, not lines the lane added."""
+        main = "".join("card kept line %d\n" % i for i in range(1, 11))
+        self.main_then_lane("tests/card.txt", main)
+        r = self.r
+        r.sh("mv", "tests/card.txt", "tests/card_renamed.txt")
+        a = r.commit("A: rename the test file, content unchanged")
+        b = r.commit("B: drop three main lines", tests__card_renamed_txt="".join(main.splitlines(True)[3:]))
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertEqual(r.sh("rev-parse", a + ":tests/card_renamed.txt"), r.sh("rev-parse", "origin/main:tests/card.txt"))  # scope: A is a pure move of main's blob
+        self.assertNotIn("card kept line 1", r.sh("show", b + ":tests/card_renamed.txt").splitlines())  # scope: B drops main's first three lines
+        self.assertEqual(r.verdict(), [], "a pure rename makes main's lines count as lane-added, so dropping three of them reads as a lane undo")
+
+    def test_a_rename_that_appends_one_line_to_an_edited_test_file_is_green(self):
+        """B renames the file and appends one line. It drops nothing, so the old path's lines moved and are not put back there."""
+        kept = "card test kept line\n"
+        self.main_then_lane("tests/card.txt", kept)
+        r = self.r
+        a = r.commit("A: add eight test lines", tests__card_txt=kept + self.EIGHT)
+        r.sh("mv", "tests/card.txt", "tests/card_renamed.txt")
+        b = r.commit("B: rename the test file and add one line", tests__card_renamed_txt=kept + self.EIGHT + "card test appended line\n")
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertNotIn("tests/card.txt", r.sh("ls-tree", "-r", "--name-only", b).split())  # scope: B moves the file off the old path
+        self.assertEqual(r.sh("show", b + ":tests/card_renamed.txt").splitlines()[:-1], r.sh("show", a + ":tests/card.txt").splitlines())  # scope: B keeps every line A holds and appends one
+        self.assertEqual(r.verdict(), [], "a rename that appends one line drops nothing, so the old path is not read as put back")
+
+    def test_a_lane_that_deletes_the_eight_lines_it_added_to_a_test_file_is_report_only(self):
+        """Control for the moved-lines case: the same eight lines taken out of the file, not moved within it, are a lane undo
+        finding. It is printed and marked report-only, and the run exits 0."""
+        r = self.r
+        kept = "".join("card kept line %d\n" % i for i in range(1, 21))
+        self.main_then_lane("tests/card.txt", kept)
+        k = kept.splitlines(True)
+        a = r.commit("A: add eight lines inside the kept text", tests__card_txt="".join(k[:10]) + self.EIGHT + "".join(k[10:]))
+        b = r.commit("B: delete the eight lines", tests__card_txt=kept)
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertNotIn("eight test line 1", r.sh("show", b + ":tests/card.txt").splitlines())  # scope: B deletes the eight lines
+        self.assertEqual(r.sh("show", b + ":tests/card.txt").splitlines(), kept.splitlines())  # scope: B holds main's text only
+        assert_finding(self, r.verdict(), "tests/card.txt", b, a)
+        code, lines = self.main_run()
+        with self.subTest("printed and marked report-only"):
+            self.assert_report_only(lines, "tests/card.txt", b, a)
+        with self.subTest("exit 0"):
+            self.assertEqual(code, 0, "a lane undo finding alone exits %d: %r" % (code, lines))
+
+    def test_a_lane_that_moves_its_eight_test_lines_within_the_file_is_green(self):
+        """A line counts as lost only when it is gone from the whole file. B moves the lane's eight lines to the end of the file, so each one is still there."""
+        r = self.r
+        kept = "".join("card kept line %d\n" % i for i in range(1, 21))
+        self.main_then_lane("tests/card.txt", kept)
+        k = kept.splitlines(True)
+        a = r.commit("A: add eight lines inside the kept text", tests__card_txt="".join(k[:10]) + self.EIGHT + "".join(k[10:]))
+        b = r.commit("B: move the eight lines to the end of the file", tests__card_txt=kept + self.EIGHT)
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertNotEqual(r.sh("show", b + ":tests/card.txt"), r.sh("show", a + ":tests/card.txt"))  # scope: B moves the block, so the text changes
+        self.assertEqual(sorted(r.sh("show", b + ":tests/card.txt").splitlines()), sorted(r.sh("show", a + ":tests/card.txt").splitlines()))  # scope: B only reorders A's lines
+        self.assertEqual(r.verdict(), [], "moving the lane's eight lines within the file reads them as lost, though each is still in the file")
+
+    def test_a_lane_that_renames_a_test_file_and_drops_three_of_its_eight_lines_is_report_only(self):
+        """B renames the file and takes three of A's eight lines out of it in one commit. The rename is read across, so the
+        drop is a lane undo finding: printed and marked report-only, and the run exits 0."""
+        r = self.r
+        kept = "card test kept line\n"
+        self.main_then_lane("tests/card.txt", kept)
+        a = r.commit("A: add eight test lines", tests__card_txt=kept + self.EIGHT)
+        r.sh("mv", "tests/card.txt", "tests/card_renamed.txt")
+        b = r.commit("B: rename the test file and drop three of its lines", tests__card_renamed_txt=kept + "".join(self.EIGHT.splitlines(True)[3:]))
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertTrue(r.sh("show", "--format=", "-M", "--name-status", b).startswith("R"), "scope: B renames the file")
+        self.assertNotIn("tests/card.txt", r.sh("ls-tree", "-r", "--name-only", b).split())  # scope: B moves the file off the old path
+        self.assertNotIn("eight test line 1", r.sh("show", b + ":tests/card_renamed.txt").splitlines())  # scope: B drops A's line 1
+        self.assertIn("eight test line 8", r.sh("show", b + ":tests/card_renamed.txt").splitlines())  # scope: B keeps A's line 8
+        assert_finding(self, r.verdict(), "tests/card.txt", b, a)
+        code, lines = self.main_run()
+        with self.subTest("printed and marked report-only"):
+            self.assert_report_only(lines, "tests/card.txt", b, a)
+        with self.subTest("exit 0"):
+            self.assertEqual(code, 0, "a lane undo finding alone exits %d: %r" % (code, lines))
+
+    def test_a_lane_undo_finding_and_a_main_lost_line_in_one_range_exit_1_from_the_main_finding_only(self):
+        """The lane undo finding is report-only. The merge of main in the same range drops a line main added, so main's
+        own reads FAIL and set the exit code, and no lane undo line is among those FAILs."""
+        r = self.r
+        a, b = self.drop_app_lines()
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds a line", app_txt=self.CARD + "added by main\n")
+        r.push()
+        r.sh("checkout", "-q", "lane")
+        r.sh("merge", "-q", "--no-commit", "--no-ff", "origin/main")
+        r.put("app.txt", self.CARD)  # the hand drop: the merge takes main's line back out
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main")
+        m = r.sh("rev-parse", "HEAD")
+        self.assertEqual(self.lane(), [a, b, m])  # scope: the merge is the last lane commit
+        self.assertNotIn("added by main", r.sh("show", "HEAD:app.txt").splitlines())  # scope: the merge drops main's line
+        code, lines = self.main_run()
+        fails = [x for x in lines if "FAIL" in x]
+        with self.subTest("the lost-line finding is a FAIL"):
+            self.assertTrue(any("merge %s drops" % m[:9] in x for x in fails), "no FAIL names the merge %s that drops main's line: %r" % (m[:9], lines))
+        with self.subTest("no lane undo line is a FAIL"):
+            self.assertFalse(any("lane undo" in x for x in fails), "a lane undo finding is printed as a FAIL: %r" % fails)
+        with self.subTest("the lane undo finding is printed and marked report-only"):
+            self.assert_report_only(lines, "app.txt", b, a)
+        with self.subTest("exit 1"):
+            self.assertEqual(code, 1, "the main finding did not exit 1: %r" % lines)
+
+    def test_a_lane_drop_of_test_lines_excused_by_the_drops_lines_trailer_prints_no_lane_line_and_exits_0(self):  # control
+        """The trailer excuses the test-line shape too: the check reads no finding, main prints no lane undo line, and it exits 0."""
+        r = self.r
+        e = r.commit("E: add eight lines to a test", tests__card_txt=self.EIGHT)
+        c = r.commit("C: remove three of the lines\n\n%s: tests/card.txt -- the owner cut three lines" % C.TRAILER,
+                     tests__card_txt="".join(self.EIGHT.splitlines(True)[3:]))
+        self.assertEqual(self.lane(), [e, c])  # scope: C is the second lane commit
+        self.assertEqual(r.verdict(), [], "the trailer excuses the drop, so the check reads no finding")
+        code, lines = self.main_run()
+        self.assertFalse([x for x in lines if "lane undo" in x], "a lane undo line is printed for an excused drop: %r" % lines)
+        self.assertEqual(code, 0, "an excused lane drop exits %d: %r" % (code, lines))
+
+    def test_a_range_that_ends_unknown_with_only_a_lane_undo_finding_exits_by_the_unknown_rule(self):
+        """An octopus merge in the range ends the read UNKNOWN, and the lane undo finding is the only finding the UNKNOWN
+        carries. The finding is printed report-only, and the exit follows the UNKNOWN rule alone: 0 locally, 1 with --strict
+        or env CI."""
+        r = self.r
+        a, b = self.drop_app_lines()
+        r.sh("checkout", "-q", "-b", "x", "origin/main")
+        xc = r.commit("X: add a file", x_txt="x\n")
+        r.sh("checkout", "-q", "-b", "y", "origin/main")
+        yc = r.commit("Y: add a file", y_txt="y\n")
+        r.sh("checkout", "-q", "lane")
+        r.sh("merge", "-q", "--no-edit", "x", "y")
+        m = r.sh("rev-parse", "HEAD")
+        self.assertEqual(len(r.sh("rev-list", "--parents", "-n", "1", m).split()), 4, "scope: M is an octopus merge of three parents")
+        self.assertEqual(sorted(self.lane()), sorted([a, b, xc, yc, m]))  # scope: the lane is A, B, the side commits and M
+        self.assertEqual(self.lane()[-1], m)  # scope: M is the last lane commit
+        code, lines = self.main_run()
+        self.assertTrue(any("UNKNOWN" in x for x in lines), "premise: the read ends UNKNOWN: %r" % lines)
+        self.assertFalse([x for x in lines if "FAIL" in x and "lane undo" not in x],
+                         "premise: the UNKNOWN carries a finding other than the lane undo one: %r" % lines)
+        with self.subTest("the lane undo finding is printed and marked report-only"):
+            self.assert_report_only(lines, "app.txt", b, a)
+        with self.subTest("exit 0 locally"):
+            self.assertEqual(code, 0, "an UNKNOWN that carries only a lane undo finding exits %d locally: %r" % (code, lines))
+        with self.subTest("exit 1 with --strict"):
+            strict, _ = self.main_run("--strict")
+            self.assertEqual(strict, 1, "--strict did not exit 1 on the UNKNOWN")
+        with self.subTest("exit 1 with env CI"):
+            ci, _ = self.main_run(ci=True)
+            self.assertEqual(ci, 1, "env CI did not exit 1 on the UNKNOWN")
+
+
 class IntegrationBase(unittest.TestCase):
     """This repo merges through integration branches. A PR based on `integ` is checked against
     origin/integ, and main's lines are not integ's: a parent that integ lacks can still carry them."""
@@ -1291,6 +1842,23 @@ class Unknown(unittest.TestCase):
         code, out = self.run_main(False, "--strict")
         self.assertEqual(code, 1)
         self.assertIn("UNKNOWN", out)
+
+    def test_a_checkout_without_hooks_is_unknown_and_refused_under_strict(self):
+        """A lane that touches one file twice reaches the test-path rule. A copy of the checker with no hooks/ cannot read
+        hooks/guard.py, so the check says UNKNOWN and exits 1 under --strict. A pin: the current code already does this."""
+        r = base_repo()
+        r.sh("checkout", "-q", "-b", "lane")
+        r.commit("A: add a line", app_txt=BODY + "lane line one\n")
+        r.commit("B: add another line", app_txt=BODY + "lane line one\nlane line two\n")
+        tree = os.path.join(r.tmp.name, "checker")
+        tracked_tree.copy_tracked(tree, "lint")  # the checker and its imports, from lint/ only
+        self.assertFalse(os.path.isdir(os.path.join(tree, "hooks")), "scope: the copy has no hooks/ folder")
+        run = subprocess.run([sys.executable, os.path.join(tree, "lint", "check_silent_undo.py"), "--repo", r.dir, "--strict"],
+                             cwd=r.dir, capture_output=True, text=True, env=dict(ENV, PYTHONDONTWRITEBYTECODE="1"))
+        out = run.stdout + run.stderr
+        self.assertIn("UNKNOWN", out, out)
+        self.assertIn("cannot be read", out, out)  # the cause: the test-path rule, not some other read
+        self.assertEqual(run.returncode, 1, out)
 
 
 class History(unittest.TestCase):

@@ -48,6 +48,16 @@ push_case("a force beside a lease and includes", "--force" + LEASE, "deny")
 push_case("includes alone is not a force, so a plain push allows", "--force-if-includes", "allow")
 push_case("a force while the default branch is trunk, main is ordinary there",
           "--force origin HEAD:main", "deny", cwd=PUSHTRUNK)
+# The short flag to main in a trunk repo denies in Bash, and the PowerShell tool's ASCII form denies too. The
+# smart-quoted destination is the same main once PowerShell reads its quotes, so it denies the same way.
+push_case("the short flag to main, in a trunk repo, denies [pwsh-r3 green]", "-f origin main", "deny",
+          cwd=PUSHTRUNK)
+push_case("the short flag to main from the PowerShell tool, in a trunk repo, denies [pwsh-r3 green]",
+          "-f origin main", "deny", cwd=PUSHTRUNK, tool="PowerShell")
+push_case("the short flag to a smart-quoted main from the PowerShell tool, in a trunk repo, denies "
+          "[pwsh-r3 green]", "-f origin “main”", "deny", cwd=PUSHTRUNK, tool="PowerShell")
+push_case("the short flag to a single smart-quoted main from the PowerShell tool, in a trunk repo, denies "
+          "[pwsh-r3 green]", "-f origin ‘main’", "deny", cwd=PUSHTRUNK, tool="PowerShell")
 push_case("a push option value is not the remote", "--force-with-lease --force-if-includes -o x origin HEAD:trunk",
           "ask", cwd=PUSHTRUNK)
 push_case("a push option value with --push-option is not the remote",
@@ -1014,6 +1024,9 @@ sh("push: agent checkout, HEAD to archive/ of the agent's own branch is silent",
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
 push_case("main, HEAD:main from a feature branch asks", "origin HEAD:main", "ask", rule=PUSH_MAIN_RULE)
 push_case("main, a push of main from a feature branch asks", "origin main", "ask", rule=PUSH_MAIN_RULE)
+# A value-less flag in front of git must not stop the push guard from reading the push: the same push, behind `env -i`.
+push_case("wrapper-flags-crash: env -i in front of a push of main from a feature branch asks", "origin main",
+          "ask", rule=PUSH_MAIN_RULE, word="env -i " + VCS)
 push_case("main, a full ref to refs/heads/main asks", "origin x:refs/heads/main", "ask", rule=PUSH_MAIN_RULE)
 push_case("master, a push to master asks", "origin master", "ask", rule=PUSH_MAIN_RULE)
 push_case("main, a second refspec that reaches main asks", "origin HEAD:push-guard-asks HEAD:main", "ask",

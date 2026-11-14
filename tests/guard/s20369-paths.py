@@ -199,6 +199,21 @@ SA = dict(A, cwd=SCRIPTREPO)   # a test-author, run in SCRIPTREPO
 # A script over guard_frozen's read limit (_SCRIPT_READ_LIMIT, 256 KB). The string runs past the limit, so the
 # cut falls inside it and the read is no parseable python. Anything written before the cut is still read.
 OVER_LIMIT_PAD = "PAD = '" + "x" * (300 * 1024) + "'\n"
+# The patches the git apply cases name, in git's own format. The guard reads the paths each header names, so a
+# patch git cannot parse would test nothing. names_only.patch names a test path in an added line only. empty.patch
+# holds nothing, and dir.patch is a folder, not a readable file.
+PATCH_NEW_TEST = ("diff --git a/tests/x.py b/tests/x.py\nnew file mode 100644\n--- /dev/null\n"
+                  "+++ b/tests/x.py\n@@ -0,0 +1 @@\n+x = 1\n")
+PATCH_MODIFY_TEST_APP = ("diff --git a/src/test_app.py b/src/test_app.py\n--- a/src/test_app.py\n"
+                         "+++ b/src/test_app.py\n@@ -1 +1 @@\n-x = 0\n+x = 1\n")
+PATCH_PRODUCT = ("diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n"
+                 "@@ -1 +1 @@\n-x = 0\n+x = 1\n")
+PATCH_MIXED = PATCH_PRODUCT + PATCH_MODIFY_TEST_APP
+PATCH_NAMES_ONLY = ("diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n"
+                    "@@ -1 +1 @@\n-print('old')\n+print('tests/x.py and src/test_app.py are named, not touched')\n")
+# Over the 256 KB read limit, with product headers only: a patch the guard cannot read in full stays allowed.
+PATCH_OVER_LIMIT = ("diff --git a/src/app.py b/src/app.py\nnew file mode 100644\n--- /dev/null\n"
+                    "+++ b/src/app.py\n@@ -0,0 +1,40000 @@\n" + "+x = 1\n" * 40000)
 
 
 def _build_scriptrepo():
@@ -239,6 +254,14 @@ def _build_scriptrepo():
         # A repo-relative write into tests/: no temp folder, so it stays a test write.
         "tools/gen_rel_tests.js": "const fs = require('fs');\nconst path = require('path');\n"
                                   "fs.writeFileSync(path.join('tests', 'a.test.js'), 'x');\n",
+        "patches/to_tests.patch": PATCH_NEW_TEST,
+        "patches/to_test_app.patch": PATCH_MODIFY_TEST_APP,
+        "patches/mixed.patch": PATCH_MIXED,
+        "patches/product.patch": PATCH_PRODUCT,
+        "patches/names_only.patch": PATCH_NAMES_ONLY,
+        "patches/empty.patch": "",
+        "patches/dir.patch/notes.txt": "a folder named like a patch\n",
+        "patches/over_limit.patch": PATCH_OVER_LIMIT,
     })
     run_vcs(SCRIPTREPO, "worktree", "add", "-q", SCRIPTWT, "-b", "scriptlane")
     os.makedirs(SCRIPTFRESH, exist_ok=True)
@@ -249,7 +272,14 @@ def _build_scriptrepo():
             or not os.path.isfile(os.path.join(SCRIPTWT, "tools", "build.py"))
             # The over-limit cases need a script past the read limit, or they test nothing.
             or os.path.getsize(os.path.join(SCRIPTREPO, "tools", "big_dist_write.py")) <= 256 * 1024
-            or os.path.getsize(os.path.join(SCRIPTREPO, "tools", "big_early_test.py")) <= 256 * 1024):
+            or os.path.getsize(os.path.join(SCRIPTREPO, "tools", "big_early_test.py")) <= 256 * 1024
+            # The git apply cases need each patch in place, the folder read as no file, and the missing one absent.
+            # A patch that a case's own command writes is absent before that command is read.
+            or not os.path.isfile(os.path.join(SCRIPTREPO, "patches", "to_tests.patch"))
+            or not os.path.isdir(os.path.join(SCRIPTREPO, "patches", "dir.patch"))
+            or os.path.exists(os.path.join(SCRIPTREPO, "patches", "missing.patch"))
+            or os.path.exists(os.path.join(SCRIPTREPO, "patches", "p.patch"))
+            or os.path.getsize(os.path.join(SCRIPTREPO, "patches", "over_limit.patch")) <= 256 * 1024):
         sys.exit("fixture setup failed in _build_scriptrepo: %r lacks the scripts the cases name"
                  % SCRIPTREPO)
 
@@ -864,6 +894,126 @@ for _path in MUTATION_TESTS:
         sh("builder-test: shell %s onto %s is refused" % (_form, _path), _command, "deny", rule=BT,
            carries=("test-author",), **BR)
 
+# ---- a builder's `git apply` of a patch file. The guard reads the paths the patch's headers name, so a patch that
+# touches a test path is refused when it is applied, as a shell write to that path is. A flag that only checks or
+# prints writes nothing and stays allowed. A patch that is missing or not a readable file is unknown and stays allowed.
+for _patch in ("patches/to_tests.patch", "patches/to_test_app.patch"):
+    sh("builder-test: git apply of %s, a patch touching a test path, is refused" % _patch,
+       "git apply " + _patch, "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: git apply of a patch touching a product file and a test file is refused",
+   "git apply patches/mixed.patch", "deny", rule=BT, carries=("test-author",), **SB)
+for _flag in ("-R", "--index", "--3way", "--cached"):
+    sh("builder-test: git apply %s of a test patch is refused" % _flag,
+       "git apply %s patches/to_tests.patch" % _flag, "deny", rule=BT, carries=("test-author",), **SB)
+for _flag in ("--check", "--stat", "--numstat"):
+    sh("builder-test: git apply %s of a test patch writes nothing and is allowed" % _flag,
+       "git apply %s patches/to_tests.patch" % _flag, "allow", **SB)
+for _patch in ("patches/product.patch", "patches/names_only.patch", "patches/empty.patch",
+               "patches/missing.patch", "patches/dir.patch"):
+    sh("builder-test: git apply of %s is allowed" % _patch, "git apply " + _patch, "allow", **SB)
+sh("builder-test: git apply of a test patch by the test-author is allowed",
+   "git apply patches/to_tests.patch", "allow", **SA)
+sh("builder-test: git apply of a test patch in a main session is allowed",
+   "git apply patches/to_tests.patch", "allow", cwd=SCRIPTREPO)
+sh("builder-test: an echo that names a git apply of a test patch is allowed",
+   'echo "git apply patches/to_tests.patch"', "allow", **SB)
+sh("builder-test: a trailing comment that names a git apply of a test patch is allowed",
+   "ls  # git apply patches/to_tests.patch", "allow", **SB)
+# A patch fed on stdin, by `-` or by a bare heredoc, names no file the guard can read: its headers are read from the
+# command text. A heredoc that names a test path is refused; one that names only product code stays allowed.
+sh("builder-test: git apply - reading a heredoc patch that touches a test path is refused",
+   "git apply - <<'EOF'\n" + PATCH_NEW_TEST + "EOF", "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: git apply reading a heredoc patch that touches a test path is refused",
+   "git apply <<EOF\n" + PATCH_NEW_TEST + "EOF", "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: git apply - reading a heredoc patch that touches only product code is allowed",
+   "git apply - <<'EOF'\n" + PATCH_PRODUCT + "EOF", "allow", **SB)
+sh("builder-test: git apply reading a heredoc patch that touches only product code is allowed",
+   "git apply <<EOF\n" + PATCH_PRODUCT + "EOF", "allow", **SB)
+sh("builder-test: git apply of an over-limit patch that touches only product code is allowed",
+   "git apply patches/over_limit.patch", "allow", **SB)
+
+# The patches on one line, each newline written as \n, for a printf '%b' that writes them in the command.
+PATCH_NEW_TEST_ESC = PATCH_NEW_TEST.replace("\n", "\\n")
+PATCH_PRODUCT_ESC = PATCH_PRODUCT.replace("\n", "\\n")
+# [apply-same-cmd] A patch that one command writes and the same command applies. patches/p.patch does not exist when the
+# guard reads the command, so the patch's headers are read from the command text, as a heredoc's are. Each write form
+# has a product-only twin, which stays allowed.
+sh("builder-test: [apply-same-cmd red] a heredoc writes a test patch, then git apply reads it, is refused",
+   "cat > patches/p.patch <<'EOF'\n" + PATCH_NEW_TEST + "EOF\ngit apply patches/p.patch", "deny",
+   rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-same-cmd red] a tee writes a test patch, then git apply reads it, is refused",
+   "printf '%b' '" + PATCH_NEW_TEST_ESC + "' | tee patches/p.patch; git apply patches/p.patch", "deny",
+   rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-same-cmd red] a printf redirect writes a test patch, then git apply reads it, is refused",
+   "printf '%b' '" + PATCH_NEW_TEST_ESC + "' > patches/p.patch; git apply patches/p.patch", "deny",
+   rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-same-cmd control] a heredoc writes a product patch, then git apply reads it, is allowed",
+   "cat > patches/p.patch <<'EOF'\n" + PATCH_PRODUCT + "EOF\ngit apply patches/p.patch", "allow", **SB)
+sh("builder-test: [apply-same-cmd control] a tee writes a product patch, then git apply reads it, is allowed",
+   "printf '%b' '" + PATCH_PRODUCT_ESC + "' | tee patches/p.patch; git apply patches/p.patch", "allow", **SB)
+sh("builder-test: [apply-same-cmd control] a printf redirect writes a product patch, then git apply reads it, is allowed",
+   "printf '%b' '" + PATCH_PRODUCT_ESC + "' > patches/p.patch; git apply patches/p.patch", "allow", **SB)
+
+# [apply-dashdash] `--` ends git's options, so the words after it are file names. A heredoc or a here-string after it
+# names stdin, not a file, so its patch text is read as the bare form reads it. The bare here-string is a control.
+sh("builder-test: [apply-dashdash red] git apply -- reading a heredoc patch that touches a test path is refused",
+   "git apply -- <<'EOF'\n" + PATCH_NEW_TEST + "EOF", "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-dashdash red] git apply -- - reading a heredoc patch that touches a test path is refused",
+   "git apply -- - <<'EOF'\n" + PATCH_NEW_TEST + "EOF", "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-dashdash red] git apply -- reading a here-string patch that touches a test path is refused",
+   "git apply -- <<< '" + PATCH_NEW_TEST + "'", "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-dashdash control] git apply reading a here-string patch that touches a test path is refused",
+   "git apply <<< '" + PATCH_NEW_TEST + "'", "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-dashdash control] git apply -- reading a heredoc patch that touches only product code is allowed",
+   "git apply -- <<'EOF'\n" + PATCH_PRODUCT + "EOF", "allow", **SB)
+sh("builder-test: [apply-dashdash control] git apply -- - reading a heredoc patch that touches only product code is allowed",
+   "git apply -- - <<'EOF'\n" + PATCH_PRODUCT + "EOF", "allow", **SB)
+sh("builder-test: [apply-dashdash control] git apply -- reading a here-string patch that touches only product code is allowed",
+   "git apply -- <<< '" + PATCH_PRODUCT + "'", "allow", **SB)
+
+# [apply-scanner] The command is cut at its separators only outside quotes and comments. A `#`, a newline or a lone
+# quote inside a quoted string is text, so the git apply after that string is still read. Each has an echo-only twin.
+sh("builder-test: [apply-scanner red] git apply of a test patch after a # inside quotes is refused",
+   'echo "a # b"; git apply patches/to_tests.patch', "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-scanner red] git apply of a test patch after a multi-line quoted string is refused",
+   'echo "one\n# two\nthree"\ngit apply patches/to_tests.patch', "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-scanner red] git apply of a test patch after a lone quote in quoted text is refused",
+   'echo "Don\'t"; git apply patches/to_tests.patch', "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-scanner control] echo of a # inside quotes, then echo of a test patch, is allowed",
+   'echo "a # b"; echo patches/to_tests.patch', "allow", **SB)
+sh("builder-test: [apply-scanner control] echo of a multi-line quoted string, then echo of a test patch, is allowed",
+   'echo "one\n# two\nthree"\necho patches/to_tests.patch', "allow", **SB)
+sh("builder-test: [apply-scanner control] echo of a lone quote, then echo of a test patch, is allowed",
+   'echo "Don\'t"; echo patches/to_tests.patch', "allow", **SB)
+sh("builder-test: [apply-scanner control] a lone quote in an echo that names a git apply of a test patch is allowed",
+   'echo "Don\'t; git apply patches/to_tests.patch"', "allow", **SB)
+
+# [apply-shell] A `git apply` that a subshell, a `bash -c` or `sh -c` body, or a variable runs, not the bare command at
+# the head of a segment. Each deny form has a product-only twin, which stays allowed, and an echo-only control, where the
+# same words are printed and nothing is applied.
+sh("builder-test: [apply-subshell red] a git apply of a test patch in a subshell is refused",
+   "(git apply patches/to_tests.patch)", "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-subshell control] a git apply of a product patch in a subshell is allowed",
+   "(git apply patches/product.patch)", "allow", **SB)
+sh("builder-test: [apply-subshell control] an echo that holds a subshell git apply of a test patch is allowed",
+   "echo '(git apply patches/to_tests.patch)'", "allow", **SB)
+sh("builder-test: [apply-shell-c red] a bash -c git apply of a test patch is refused",
+   "bash -c 'git apply patches/to_tests.patch'", "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-shell-c red] a sh -c git apply of a test patch is refused",
+   'sh -c "git apply patches/to_tests.patch"', "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-shell-c control] a bash -c git apply of a product patch is allowed",
+   "bash -c 'git apply patches/product.patch'", "allow", **SB)
+sh("builder-test: [apply-shell-c control] a sh -c git apply of a product patch is allowed",
+   'sh -c "git apply patches/product.patch"', "allow", **SB)
+sh("builder-test: [apply-shell-c control] an echo that holds a bash -c git apply of a test patch is allowed",
+   "echo 'bash -c \"git apply patches/to_tests.patch\"'", "allow", **SB)
+sh("builder-test: [apply-var red] a git apply of a test patch named by a variable is refused",
+   'P=patches/to_tests.patch; git apply "$P"', "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-var control] a git apply of a product patch named by a variable is allowed",
+   'P=patches/product.patch; git apply "$P"', "allow", **SB)
+sh("builder-test: [apply-var control] an echo of a git apply of a test patch named by a variable is allowed",
+   'P=patches/to_tests.patch; echo "git apply $P"', "allow", **SB)
+
 # The reads, the writes to product code, the quoted and commented text, and the recovery forms stay allowed.
 SHELL_TEST_ALLOWS = (
     ("cat of tests/x.py", "cat tests/x.py"),
@@ -962,5 +1112,500 @@ sh("builder-test: shell pathlib write to a test under Path.cwd() is refused",
 sh("builder-test: shell open-write to a test under os.getcwd() is refused",
    "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'x.py'), 'w').write('x')\nEOF",
    "deny", rule=BT, carries=("test-author",), **BR)
+
+# PWSH FOLLOWUPS. A builder's write to a test file is refused whatever PowerShell text carries it. `env -S`
+# appends the words after its split string, so `env -S pwsh -c '<script>'` runs `pwsh -c <script>`, and it is
+# refused as the plain form is. Smart quotes name a path only where PowerShell reads them as quotes, so a
+# quoted string that names a test file as text is not a write to that file. Each DENIES on a test-file write
+# and ALLOWS otherwise.
+sh("pwsh-followups: pwsh -c Set-Content onto a test file is refused [pwsh-followups green]",
+   "pwsh -c 'Set-Content hooks/test_x.py x'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: env -S with the whole call in one quoted string, then a Set-Content onto a test file, "
+   "is refused [pwsh-followups green]",
+   "env -S 'pwsh -c \"Set-Content hooks/test_x.py x\"'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: env -S with pwsh unquoted, then -c and a Set-Content onto a test file, "
+   "is refused [pwsh-followups red]",
+   "env -S pwsh -c 'Set-Content hooks/test_x.py x'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: env -S with pwsh glued to the flag, then -c and a Set-Content onto a test file, "
+   "is refused [pwsh-followups red]",
+   "env -Spwsh -c 'Set-Content hooks/test_x.py x'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: pwsh -c Add-Content of a smart-quoted line that names a test file as text "
+   "is allowed [pwsh-followups red]",
+   "pwsh -c 'Add-Content docs/log.md “edited hooks/test_guard.py”'", "allow", **BR)
+sh("pwsh-followups: pwsh -c Copy-Item of a smart-quoted test file as its source is allowed "
+   "[pwsh-followups red]",
+   "pwsh -c 'Copy-Item “hooks/test_x.py” docs/a.md'", "allow", **BR)
+sh("pwsh-followups: PowerShell tool Copy-Item of a smart-quoted test file as its source is allowed "
+   "[pwsh-followups red]",
+   "Copy-Item “hooks/test_x.py” docs/a.md", "allow", tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -c Set-Content of a smart-quoted product file is allowed [pwsh-followups green]",
+   "pwsh -c 'Set-Content “src/app.py” x'", "allow", **BR)
+sh("pwsh-followups: pwsh -c Set-Content of a smart-quoted test file is refused [pwsh-followups green]",
+   "pwsh -c 'Set-Content “hooks/test_x.py” x'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: PowerShell tool Set-Content of a smart-quoted test file is refused "
+   "[pwsh-followups green]",
+   "Set-Content “hooks/test_x.py” x", "deny", rule=BT, carries=("test-author",), tool="PowerShell", **BR)
+
+sh("pwsh-followups: pwsh -c Add-Content of an ASCII-quoted line that names a test file as text is allowed "
+   "[pwsh-followups red]",
+   "pwsh -c 'Add-Content docs/log.md \"edited hooks/test_guard.py\"'", "allow", **BR)
+sh("pwsh-followups: PowerShell tool Add-Content of an ASCII-quoted line that names a test file as text is allowed "
+   "[pwsh-followups red]",
+   'Add-Content docs/log.md "edited hooks/test_guard.py"', "allow", tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -c Copy-Item of an ASCII test file as its source is allowed [pwsh-followups red]",
+   "pwsh -c 'Copy-Item hooks/test_x.py docs/a.md'", "allow", **BR)
+sh("pwsh-followups: PowerShell tool Copy-Item of an ASCII test file as its source is allowed "
+   "[pwsh-followups red]",
+   "Copy-Item hooks/test_x.py docs/a.md", "allow", tool="PowerShell", **BR)
+# An ASCII apostrophe inside smart-quoted text pairs with a later `'`, so the text reads as one quoted string
+# and a Set-Content onto a test file after it goes unseen. Each DENIES on that test-file write.
+sh("pwsh-followups: PowerShell tool, an apostrophe inside smart quotes pairs with a later quote, then a "
+   "Set-Content onto a test file, is refused [pwsh-followups red]",
+   "Set-Content docs/a.md “it's”; Set-Content hooks/test_x.py 'y'", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -c, an apostrophe inside smart quotes pairs with a later quote, then a "
+   "Set-Content onto a test file, is refused [pwsh-followups red]",
+   "pwsh -c \"Set-Content src/app.py “it's”; Set-Content tests/test_app.py 'expected'\"", "deny", rule=BT,
+   carries=("test-author",), **BR)
+# A copy into a folder writes a file that keeps the test's name, so each DENIES as a write to a test file.
+sh("pwsh-followups: PowerShell tool Copy-Item of a test file into a folder is refused [pwsh-followups red]",
+   "Copy-Item hooks/test_x.py docs/", "deny", rule=BT, carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -c Copy-Item of a test file into a folder is refused [pwsh-followups red]",
+   "pwsh -c 'Copy-Item hooks/test_x.py docs/'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: cmd /c copy of a test file into a folder is refused [pwsh-followups red]",
+   "cmd /c copy hooks/test_x.py docs/", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: cp of a test file into a folder is refused [pwsh-followups red]",
+   "cp hooks/test_x.py docs/", "deny", rule=BT, carries=("test-author",), **BR)
+# Aliases and env -S that write a test file as their destination. Each DENIES.
+sh("pwsh-followups: PowerShell alias sc onto a test file is refused [pwsh-followups red]",
+   "sc hooks/test_x.py x", "deny", rule=BT, carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: PowerShell alias ac onto a test file is refused [pwsh-followups red]",
+   "ac hooks/test_x.py y", "deny", rule=BT, carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -c alias cpi onto a test file is refused [pwsh-followups red]",
+   "pwsh -c 'cpi hooks/guard.py hooks/test_x.py'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: env -S tee onto a test file is refused [pwsh-followups red]",
+   "env -S tee hooks/test_x.py", "deny", rule=BT, carries=("test-author",), **BR)
+# Green controls beside the new denies: the same apostrophe pair and the same copy, with a product file, pass.
+sh("pwsh-followups: PowerShell tool, an apostrophe inside smart quotes pairs with a later quote, then a "
+   "Set-Content onto a product file, is allowed [pwsh-followups green]",
+   "Set-Content docs/a.md “it's”; Set-Content src/app.py 'y'", "allow", tool="PowerShell", **BR)
+sh("pwsh-followups: cp of a product file into a folder is allowed [pwsh-followups green]",
+   "cp hooks/guard.py docs/", "allow", **BR)
+sh("pwsh-followups: PowerShell tool Copy-Item of a product file into a folder is allowed [pwsh-followups green]",
+   "Copy-Item hooks/guard.py docs/", "allow", tool="PowerShell", **BR)
+# An ASCII apostrophe inside smart-quoted text joins two statements into one segment, and a later
+# write whose path is quoted (ASCII or smart, in PowerShell or in pwsh -c) reads as text. Each DENIES on that
+# test-file write. The allow controls beside them are the same shape with a product file.
+sh("pwsh-followups: PowerShell tool, an apostrophe inside smart quotes, then Add-Content onto an "
+   "ASCII-double-quoted test file, is refused [pwsh-followups red]",
+   "Set-Content docs/a.md “it's”; Add-Content \"hooks/test_x.py\" v", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: PowerShell tool, an apostrophe inside smart quotes, then Set-Content onto an "
+   "ASCII-double-quoted test file, is refused [pwsh-followups red]",
+   "Set-Content docs/a.md “it's”; Set-Content \"hooks/test_x.py\" v", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: PowerShell tool, an apostrophe inside smart quotes, then Set-Content onto a "
+   "single-quoted test file, is refused [pwsh-followups red]",
+   "Set-Content docs/a.md “it's”; Set-Content 'hooks/test_x.py' v", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: PowerShell tool, an apostrophe inside smart quotes, then Set-Content onto a "
+   "smart-quoted test file, is refused [pwsh-followups red]",
+   "Set-Content docs/a.md “it's”; Set-Content “hooks/test_x.py” v", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: PowerShell tool, an apostrophe inside smart quotes, then Add-Content onto a bare "
+   "test file after a Copy-Item, is refused [pwsh-followups red]",
+   "Copy-Item docs/a.md “it's”; Add-Content hooks/test_x.py v", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -c, an apostrophe inside smart quotes, then Add-Content onto a single-quoted "
+   "test file, is refused [pwsh-followups red]",
+   "pwsh -c \"Set-Content docs/a.md “it's”; Add-Content 'hooks/test_x.py' v\"", "deny", rule=BT,
+   carries=("test-author",), **BR)
+# Also deny, the same cause: smart-quoted text holding an ASCII apostrophe or a `#` leaves the statement after it
+# unseen. Each DENIES on the test-file write that follows.
+sh("pwsh-followups: PowerShell tool, an apostrophe inside smart quotes after Write-Host, then Set-Content "
+   "onto a test file, is refused [pwsh-followups red]",
+   "Write-Host “it's”; Set-Content hooks/test_x.py v", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **BR)
+sh("pwsh-followups: PowerShell tool, a # inside smart quotes, then Set-Content onto a test file, "
+   "is refused [pwsh-followups red]",
+   "Set-Content docs/a.md “see #3”; Set-Content hooks/test_x.py v", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -Command ni onto a smart-quoted test file, is refused [pwsh-followups red]",
+   "pwsh -Command ni ‘hooks/test_x.py’", "deny", rule=BT, carries=("test-author",), **BR)
+# Green controls beside the new denies: the same shapes onto a product file, which stay allowed.
+sh("pwsh-followups: PowerShell tool, an apostrophe inside smart quotes, then Add-Content onto an "
+   "ASCII-double-quoted product file, is allowed [pwsh-followups green]",
+   "Set-Content docs/a.md “it's”; Add-Content \"src/app.py\" v", "allow", tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -c, an apostrophe inside smart quotes, then Add-Content onto a single-quoted "
+   "product file, is allowed [pwsh-followups green]",
+   "pwsh -c \"Set-Content docs/a.md “it's”; Add-Content 'src/app.py' v\"", "allow", **BR)
+
+# PWSH-R3. A comma list is one PowerShell argument, so the test path after the first comma is a write too.
+# The allow pins below name a test path in a read, a here-string or an escape, and no write follows them.
+sh("pwsh-r3 L1: PowerShell tool, Set-Content of a docs file and a test file in one comma list, is refused "
+   "[pwsh-r3 red]",
+   "Set-Content docs/a.md, 'hooks/test_x.py' x", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **BR)
+sh("pwsh-r3: PowerShell tool, a backtick escape in a double-quoted Write-Host, then a Get-Content of a "
+   "test file, is allowed [pwsh-r3 green]",
+   'Write-Host "line`n" ; Get-Content hooks/test_x.py', "allow", tool="PowerShell", **BR)
+sh("pwsh-r3: PowerShell tool, a single-quoted here-string whose body has an apostrophe and names a test "
+   "file, with nothing after it that writes, is allowed [pwsh-r3 green]",
+   "@'\nit's in hooks/test_x.py\n'@", "allow", tool="PowerShell", **BR)
+sh("pwsh-r3 control: PowerShell tool, Write-Host of a smart-apostrophe line, then Get-Date, is allowed "
+   "[pwsh-r3 green]",
+   "Write-Host it’s done; Get-Date", "allow", tool="PowerShell", **BR)
+sh("pwsh-r3 control: PowerShell tool, a smart-quoted here-string that names a test file with no write, "
+   "is allowed [pwsh-r3 green]",
+   "@“\nedit hooks/test_x.py later\n”@", "allow", tool="PowerShell", **BR)
+# An UNQUOTED comma joins a docs path and a test path into one PowerShell argument, so the test path is a write.
+sh("pwsh-r3 unquoted comma: PowerShell tool, Set-Content of a docs file and a test file joined by a comma, "
+   "is refused [pwsh-r3 green]",
+   "Set-Content docs/a.md,hooks/test_x.py x", "deny", rule=BT, carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-r3 unquoted comma: PowerShell tool, Set-Content -Path with a docs file and a test file joined by a "
+   "comma, is refused [pwsh-r3 green]",
+   "Set-Content -Path docs/a.md,hooks/test_x.py -Value x", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **BR)
+sh("pwsh-r3 unquoted comma: PowerShell tool, Set-Content of a docs file, a space, then a test file after a "
+   "comma, is refused [pwsh-r3 green]",
+   "Set-Content docs/a.md ,hooks/test_x.py x", "deny", rule=BT, carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-r3 unquoted comma control: PowerShell tool, Set-Content of a docs file and a product file joined by "
+   "a comma, is allowed [pwsh-r3 green]",
+   "Set-Content docs/a.md,src/app.py x", "allow", tool="PowerShell", **BR)
+# A mutating command inside a scriptblock is a command, so a test path it writes is refused.
+sh("pwsh-r3 scriptblock: PowerShell tool, Set-Content of a test file inside a ForEach-Object block is refused "
+   "[pwsh-r3 red]",
+   "ForEach-Object { Set-Content hooks/test_x.py x }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **BR)
+sh("pwsh-r3 scriptblock control: PowerShell tool, Set-Content of a product file inside a ForEach-Object block "
+   "is allowed [pwsh-r3 green]",
+   "ForEach-Object { Set-Content src/app.py x }", "allow", tool="PowerShell", **BR)
+# The target is the listing's $_, so the write can land on the test in a folder that holds one: it is refused there.
+sh("pwsh-r3 scriptblock: pwsh -c, a listing of a folder that holds a test, then Set-Content of $_, is refused "
+   "[pwsh-r3 red]",
+   "pwsh -c 'ls | % { Set-Content $_ 1 }'", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 scriptblock control: pwsh -c, a listing of a folder with no test in it, then Set-Content of $_, "
+   "is allowed [pwsh-r3 green]",
+   "pwsh -c 'ls | % { Set-Content $_ 1 }'", "allow", **BR)
+# L2 and L3: `$_` is the target only of a write that names it. A log named as text ALLOWS though the listed
+# folder holds tests. The twins write `$_` itself, so they are REFUSED.
+sh("pwsh-r3 listing: PowerShell tool, Add-Content to log.txt of each name in a hooks listing, is allowed "
+   "[pwsh-r3 red]",
+   "Get-ChildItem hooks | % { Add-Content log.txt $_.Name }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 listing: PowerShell tool, Set-Content -Path log.txt of each name in a hooks listing, is allowed "
+   "[pwsh-r3 red]",
+   "Get-ChildItem hooks | % { Set-Content -Path log.txt -Value $_.Name }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 listing twin: PowerShell tool, Set-Content of $_ from a hooks listing, is refused "
+   "[pwsh-r3 green]",
+   "Get-ChildItem hooks | % { Set-Content $_ x }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 listing: PowerShell tool, a rewrite of each tests file from a tests listing, is refused "
+   "[pwsh-r3 red]",
+   "Get-ChildItem tests | % { (Get-Content $_) -replace 'a','b' | Set-Content $_ }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 listing control: PowerShell tool, the same rewrite over a docs listing with no test, is allowed "
+   "[pwsh-r3 green]",
+   "Get-ChildItem docs | % { (Get-Content $_) -replace 'a','b' | Set-Content $_ }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+# L4: a comma inside quotes is text, so a quoted line that names a test path ALLOWS. The unquoted comma forms
+# DENY, and the Add-Content twin below pins the same verb unquoted.
+sh("pwsh-r3 quoted comma: PowerShell tool, Add-Content to a docs file of a quoted line that names a test and "
+   "ends in a comma, is allowed [pwsh-r3 red]",
+   'Add-Content docs/a.md "Updated hooks/test_x.py,"', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 quoted comma: PowerShell tool, Add-Content to a docs file of a quoted comma then a test path, is "
+   "allowed [pwsh-r3 red]",
+   'Add-Content docs/a.md ",hooks/test_x.py"', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 quoted comma twin: PowerShell tool, Add-Content to a docs file and a test file joined by an unquoted "
+   "comma, is refused [pwsh-r3 green]",
+   "Add-Content docs/a.md,hooks/test_x.py x", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+# L5: text in a here-string, in a double-quoted string or in quotes inside a block is data, so each ALLOWS. Each
+# twin runs the same words as code and is REFUSED.
+sh("pwsh-r3 scanner: PowerShell tool, a here-string with a comment, a quote and a Remove-Item of a test, piped "
+   "to Set-Content of a product file, is allowed [pwsh-r3 red]",
+   "@'\n# it's\nif ($x) { Remove-Item hooks/test_x.py }\n'@ | Set-Content src/c.ps1", "allow",
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 scanner twin: PowerShell tool, an if block that runs Remove-Item of a test is refused "
+   "[pwsh-r3 green]",
+   "if ($x) { Remove-Item hooks/test_x.py }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 scanner: PowerShell tool, a lone apostrophe in a double-quoted string in a block, then a product "
+   "write, is allowed [pwsh-r3 green]",
+   'if ($x) { Write-Host "it\'s done" }; Set-Content src/c.ps1 x', "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 scanner twin: PowerShell tool, a test write after a lone apostrophe in a block's string is refused "
+   "[pwsh-r3 green]",
+   'if ($x) { Write-Host "it\'s" }; Set-Content hooks/test_x.py x', "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 scanner: PowerShell tool, braces and a Remove-Item of a test inside double quotes, is allowed "
+   "[pwsh-r3 green]",
+   'Write-Host "{ Remove-Item hooks/test_x.py }"', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 scanner twin: PowerShell tool, a call block that runs Remove-Item of a test is refused "
+   "[pwsh-r3 green]",
+   "& { Remove-Item hooks/test_x.py }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+# Builder: the comma after a quoted docs path joins it to a quoted test path, so the test path
+# is a write. The last row is the allow twin: both paths are outside the tests.
+sh("pwsh-r3-limits quoted comma: PowerShell tool, Set-Content of a quoted docs file, a comma, then a quoted test "
+   "path, is refused [pwsh-r3-limits red]",
+   'Set-Content "docs/a.md", "hooks/test_x.py" x', "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits quoted comma: PowerShell tool, Add-Content of a quoted docs file, a comma, then a quoted test "
+   "path, is refused [pwsh-r3-limits red]",
+   'Add-Content "docs/a.md", "hooks/test_x.py" x', "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits quoted comma control: PowerShell tool, Set-Content of two quoted docs files joined by a comma, "
+   "is allowed [pwsh-r3-limits green]",
+   'Set-Content "docs/a.md", "docs/b.md" x', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+# A listed `$_` that is a -Path source, an -InputObject value or an -Exclude filter is read or
+# text, never the target, so each of these ALLOWS. The twin writes `$_` as its -Destination and is REFUSED.
+sh("pwsh-r3-limits listing: PowerShell tool, Copy-Item of each listed hooks file as a -Path source into a docs "
+   "list, is allowed [pwsh-r3-limits red]",
+   "gci hooks | % { Copy-Item -Path $_.FullName -Destination docs/list.txt }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing: PowerShell tool, Out-File of each listed hooks file as -InputObject into a docs file, "
+   "is allowed [pwsh-r3-limits red]",
+   "gci hooks | % { Out-File -InputObject $_ docs/x.md }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing: PowerShell tool, Remove-Item of a docs file excluded by each listed name, is allowed "
+   "[pwsh-r3-limits red]",
+   "gci hooks | % { Remove-Item docs/x -Exclude $_.Name }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing twin: PowerShell tool, Copy-Item of a docs file onto each listed FullName, is refused "
+   "[pwsh-r3-limits green]",
+   "gci hooks | % { Copy-Item docs/x -Destination $_.FullName }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+# A pin with no red on the old code: a folder copy of each listed test file writes docs/test_x.py,
+# a test path, so it stays REFUSED. A fix that reads the -Path source must still refuse this folder destination.
+sh("pwsh-r3-limits listing pin: PowerShell tool, Copy-Item of each listed test file into a docs folder, is refused "
+   "[pwsh-r3-limits green]",
+   "gci hooks | % { Copy-Item -Path $_.FullName -Destination docs/ }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+# The listed folder is the one a listing names, through a filter, a Where-Object or Select-Object,
+# a colon-bound -Path:$_, a parenthesized $_, or a quoted $(...). Each hooks listing (it holds a test) is REFUSED.
+# Each docs twin of the same form holds no test and is ALLOWED.
+sh("pwsh-r3-limits listing: PowerShell tool, Set-Content of $_ from a filtered hooks listing, is refused "
+   "[pwsh-r3-limits red]",
+   "gci -Filter *.py hooks | % { Set-Content $_ x }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing: PowerShell tool, Set-Content of $_ after a Where-Object over a hooks listing, is refused "
+   "[pwsh-r3-limits red]",
+   "gci hooks | Where-Object { $_.Name -like '*.py' } | % { Set-Content $_ x }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing: PowerShell tool, Set-Content of $_.FullName after a Select-Object over a hooks listing, "
+   "is refused [pwsh-r3-limits red]",
+   "gci hooks | Select-Object -First 1 | % { Set-Content $_.FullName x }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing: PowerShell tool, Set-Content with a colon-bound -Path:$_ over a hooks listing, is refused "
+   "[pwsh-r3-limits red]",
+   "gci hooks | % { Set-Content -Path:$_ x }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing: PowerShell tool, Set-Content of a parenthesized $_.FullName over a hooks listing, is "
+   "refused [pwsh-r3-limits red]",
+   "gci hooks | % { Set-Content ($_.FullName) x }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing: PowerShell tool, Set-Content of a quoted $(...) of $_.FullName over a hooks listing, is "
+   "refused [pwsh-r3-limits red]",
+   'gci hooks | % { Set-Content "$($_.FullName)" x }', "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing control: PowerShell tool, Set-Content of $_ from a filtered docs listing with no test, "
+   "is allowed [pwsh-r3-limits green]",
+   "gci -Filter *.py docs | % { Set-Content $_ x }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing control: PowerShell tool, Set-Content of $_ after a Where-Object over a docs listing, "
+   "is allowed [pwsh-r3-limits green]",
+   "gci docs | Where-Object { $_.Name -like '*.md' } | % { Set-Content $_ x }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing control: PowerShell tool, Set-Content of $_.FullName after a Select-Object over a docs "
+   "listing, is allowed [pwsh-r3-limits green]",
+   "gci docs | Select-Object -First 1 | % { Set-Content $_.FullName x }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing control: PowerShell tool, Set-Content with -Path:$_ over a docs listing, is allowed "
+   "[pwsh-r3-limits green]",
+   "gci docs | % { Set-Content -Path:$_ x }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing control: PowerShell tool, Set-Content of a parenthesized $_.FullName over a docs listing, "
+   "is allowed [pwsh-r3-limits green]",
+   "gci docs | % { Set-Content ($_.FullName) x }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing control: PowerShell tool, Set-Content of a quoted $(...) of $_.FullName over a docs "
+   "listing, is allowed [pwsh-r3-limits green]",
+   'gci docs | % { Set-Content "$($_.FullName)" x }', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+# The command is the word after a cast, a parenthesis or `return`. Each write of a test path below
+# is REFUSED. Each docs twin of the same write is ALLOWED.
+sh("pwsh-r3-limits command: PowerShell tool, New-Item of a test path under a cast to void, is refused "
+   "[pwsh-r3-limits red]",
+   "[void] New-Item hooks/test_x.py", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits command: PowerShell tool, New-Item of a test path in parentheses under a cast to void, is refused "
+   "[pwsh-r3-limits red]",
+   "[void](New-Item hooks/test_x.py)", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits command: PowerShell tool, Set-Content of a test path after return, is refused "
+   "[pwsh-r3-limits red]",
+   "return Set-Content hooks/test_x.py x", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits command control: PowerShell tool, New-Item of a docs file under a cast to void, is allowed "
+   "[pwsh-r3-limits green]",
+   "[void] New-Item docs/a.md", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits command control: PowerShell tool, Set-Content of a docs file after return, is allowed "
+   "[pwsh-r3-limits green]",
+   "return Set-Content docs/a.md x", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+# A pin: a `#` inside a double-quoted string is text, so the if block after it still runs its
+# Remove-Item, and that test removal is REFUSED. The control removes a docs file and is ALLOWED.
+sh("pwsh-r3-limits scanner: PowerShell tool, a # and a brace inside a double-quoted string, then an if block that "
+   "runs Remove-Item of a test, is refused [pwsh-r3-limits green]",
+   'Write-Host "# {"; if ($x) { Remove-Item hooks/test_x.py }', "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits scanner control: PowerShell tool, the same line with Remove-Item of a docs file, is allowed "
+   "[pwsh-r3-limits green]",
+   'Write-Host "# {"; if ($x) { Remove-Item docs/x }', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+# PWSH-R3-LIMITS listed-target forms. A listed `$_` that is the target of a write is REFUSED, whether `ni` takes it
+# as a name, an -ErrorAction flag comes before it, a `return` sits in front of the command, or it is a braced `${_}`.
+# Each docs twin of the same form has no `$_` target and is ALLOWED. A `$_` that is only the value written into a
+# docs file is no target, so each of those ALLOWS (the -Path docs file is the target).
+sh("pwsh-r3-limits ni: PowerShell tool, ni of docs with each listed hooks file's Name, which creates a docs test "
+   "file, is refused [pwsh-r3-limits red]",
+   "gci hooks | % { ni docs $_.Name }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits ni control: PowerShell tool, ni of docs/x.md over a hooks listing, with no $_ target, is allowed "
+   "[pwsh-r3-limits green]",
+   "gci hooks | % { ni docs x.md }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits remove: PowerShell tool, Remove-Item of docs/x with each listed FullName as a second path, is "
+   "refused [pwsh-r3-limits red]",
+   "gci hooks | % { Remove-Item docs/x $_.FullName }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits remove control: PowerShell tool, Remove-Item of two docs paths over a hooks listing, with no $_ "
+   "target, is allowed [pwsh-r3-limits green]",
+   "gci hooks | % { Remove-Item docs/x docs/y.md }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits remove: PowerShell tool, Remove-Item of each listed FullName after a -ErrorAction flag, is refused "
+   "[pwsh-r3-limits red]",
+   "gci hooks | % { Remove-Item -ErrorAction SilentlyContinue $_.FullName }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits remove control: PowerShell tool, Remove-Item of a docs file after a -ErrorAction flag over a hooks "
+   "listing, is allowed [pwsh-r3-limits green]",
+   "gci hooks | % { Remove-Item -ErrorAction SilentlyContinue docs/x.md }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits copy: PowerShell tool, Copy-Item of each listed FullName after a -ErrorAction flag into a docs "
+   "folder, is refused [pwsh-r3-limits red]",
+   "gci hooks | % { Copy-Item $_.FullName -ErrorAction SilentlyContinue docs/ }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits copy control: PowerShell tool, Copy-Item of a docs file after a -ErrorAction flag into a docs "
+   "folder, over a hooks listing, is allowed [pwsh-r3-limits green]",
+   "gci hooks | % { Copy-Item docs/a.md -ErrorAction SilentlyContinue docs/ }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits set: PowerShell tool, Set-Content of each listed FullName after a -ErrorAction flag, is refused "
+   "[pwsh-r3-limits red]",
+   "gci hooks | % { Set-Content -ErrorAction SilentlyContinue $_.FullName x }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits set control: PowerShell tool, Set-Content of a docs file after a -ErrorAction flag over a hooks "
+   "listing, is allowed [pwsh-r3-limits green]",
+   "gci hooks | % { Set-Content -ErrorAction SilentlyContinue docs/x.md x }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing: PowerShell tool, Set-Content of $_ after a -ErrorAction flag on the listing, is "
+   "refused [pwsh-r3-limits red]",
+   "gci -ErrorAction SilentlyContinue hooks | % { Set-Content $_ x }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing control: PowerShell tool, Set-Content of a docs file after a -ErrorAction flag on the "
+   "listing, is allowed [pwsh-r3-limits green]",
+   "gci -ErrorAction SilentlyContinue hooks | % { Set-Content docs/x.md x }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits cast: PowerShell tool, Set-Content of a parenthesized $_.FullName.ToString() over a hooks "
+   "listing, is refused [pwsh-r3-limits red]",
+   "gci hooks | % { Set-Content ($_.FullName.ToString()) x }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits cast control: PowerShell tool, Set-Content of a parenthesized docs path over a hooks listing, is "
+   "allowed [pwsh-r3-limits green]",
+   'gci hooks | % { Set-Content ("docs/x.md") x }', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits brace: PowerShell tool, Set-Content of a braced ${_} over a hooks listing, is refused "
+   "[pwsh-r3-limits red]",
+   "gci hooks | % { Set-Content ${_} x }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits brace control: PowerShell tool, Set-Content of a quoted docs path over a hooks listing, is allowed "
+   "[pwsh-r3-limits green]",
+   'gci hooks | % { Set-Content "docs/x.md" x }', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits return pin: PowerShell tool, return ni of a test path inside a hooks listing, is refused "
+   "[pwsh-r3-limits green]",
+   "gci hooks | % { return ni hooks/test_x.py }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits return control: PowerShell tool, return ni of a docs file inside a hooks listing, is allowed "
+   "[pwsh-r3-limits green]",
+   "gci hooks | % { return ni docs/x.md }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits value: PowerShell tool, Add-Content of each listed Name as the value of a docs list file, is "
+   "allowed [pwsh-r3-limits red]",
+   "gci hooks | % { Add-Content -Path docs/list.txt $_.Name }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits value control: PowerShell tool, Add-Content of a fixed value to a docs list file over a hooks "
+   "listing, is allowed [pwsh-r3-limits green]",
+   "gci hooks | % { Add-Content -Path docs/list.txt x }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits value: PowerShell tool, Set-Content of each listed file as the value of a docs list file, is "
+   "allowed [pwsh-r3-limits red]",
+   "gci hooks | % { Set-Content -Path docs/list.txt $_ }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits value control: PowerShell tool, Set-Content of a fixed value to a docs list file over a hooks "
+   "listing, is allowed [pwsh-r3-limits green]",
+   "gci hooks | % { Set-Content -Path docs/list.txt x }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+# The unknown-flag gap: a valued flag may take the next word, so a listed `$_` after it can
+# be the write target. -ProgressAction is a common parameter that takes a value; -SomeNewFlag is made up, so the
+# fix cannot rest on a closed list of flags.
+sh("pwsh-r3-limits r2 flag: PowerShell tool, Set-Content of each listed file after -ProgressAction Ignore is "
+   "refused [pwsh-r3-limits r2 red]",
+   "gci hooks | % { Set-Content -ProgressAction Ignore $_ x }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 flag: PowerShell tool, Add-Content of each listed file after -ProgressAction Ignore is "
+   "refused [pwsh-r3-limits r2 red]",
+   "gci hooks | % { Add-Content -ProgressAction Ignore $_ x }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 flag: PowerShell tool, Out-File of each listed file after -ProgressAction Ignore is "
+   "refused [pwsh-r3-limits r2 red]",
+   "gci hooks | % { Out-File -ProgressAction Ignore $_ x }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 flag: PowerShell tool, ni -Type File of docs with each listed Name is refused "
+   "[pwsh-r3-limits r2 red]",
+   "gci hooks | % { ni -Type File docs $_.Name }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 flag: PowerShell tool, Set-Content of each listed file after a -ProgressAction flag on the "
+   "listing is refused [pwsh-r3-limits r2 red]",
+   "gci -ProgressAction Ignore hooks | % { Set-Content $_ x }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 flag: PowerShell tool, Set-Content of each listed file after a made-up valued flag is refused "
+   "[pwsh-r3-limits r2 red]",
+   "gci hooks | % { Set-Content -SomeNewFlag v $_ x }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+# The group gap: a path inside a `( )` group is read by its own command, so it is no write
+# target of the outer command. Each allow row writes a docs file (or a list) and only reads the hooks file.
+sh("pwsh-r3-limits r2 group: PowerShell tool, Set-Content of a docs file whose value is a group that reads a test "
+   "file is allowed [pwsh-r3-limits r2 red]",
+   "Set-Content docs/a.md (Get-Content hooks/test_x.py)", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 group: PowerShell tool, Add-Content of a docs file whose value is a group that reads a test "
+   "file, with gc, is allowed [pwsh-r3-limits r2 red]",
+   "Add-Content docs/a.md (gc hooks/test_x.py)", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 group: PowerShell tool, ni of a docs file with -Value a group that reads a test file is "
+   "allowed [pwsh-r3-limits r2 red]",
+   "ni docs/x.md -Value (gc hooks/test_x.py)", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 group: PowerShell tool, Out-File of a docs file with -InputObject a group that reads a test "
+   "file is allowed [pwsh-r3-limits r2 red]",
+   "Out-File docs/a.md -InputObject (Get-Content hooks/test_x.py)", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 group pin: PowerShell tool, Remove-Item of a test file inside a [void] group is refused "
+   "[pwsh-r3-limits r2 green]",
+   "[void](Remove-Item hooks/test_x.py)", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 group pin: PowerShell tool, rm of a test file inside a return group is refused "
+   "[pwsh-r3-limits r2 green]",
+   "return (rm hooks/test_x.py)", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 group pin: PowerShell tool, New-Item of a test file inside a [void] group is refused "
+   "[pwsh-r3-limits r2 green]",
+   "[void](New-Item -Path hooks -Name test_z.py)", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 group pin: PowerShell tool, Set-Content whose -Path is a group that gets a test file is "
+   "refused [pwsh-r3-limits r2 green]",
+   "Set-Content (Get-Item hooks/test_x.py) x", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+# The copy alias and the comma list: `cp` is the Copy-Item alias, so a listed FullName is the
+# source and a docs folder is the destination. A comma list in a written value is text, not paths.
+sh("pwsh-r3-limits r2 copy: PowerShell tool, cp of each listed FullName to a docs file is allowed "
+   "[pwsh-r3-limits r2 red]",
+   "gci hooks | % { cp $_.FullName docs/x.md }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits r2 list: PowerShell tool, Add-Content of a docs file whose value is a comma list of two test "
+   "paths is allowed [pwsh-r3-limits r2 red]",
+   'Add-Content docs/list.md "hooks/test_x.py", "hooks/test_y.py"', "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
 
 # ---- the diff, judged at commit, push and SubagentStop

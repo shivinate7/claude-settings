@@ -221,71 +221,93 @@ sh("ln: a hard link over a directory name is not symbolic", "ln /opt/tool/x real
 # call with no pipe after it is allowed here.
 # Every backgrounded case names an until note, so background-end decides none of them. sh() takes no
 # run_in_background, so the backgrounded cases use add(), the form the background-end section uses.
+# The merge tool's own bound on a lane-lint run, read from its source and never copied here. The lint waits for
+# one ci-job run (LINT_SECONDS) and then for GitHub to show the pushed head (PUSHED_HEAD_WAIT_MINUTES). A
+# background call needs a tool timeout above their sum, in milliseconds.
+def lane_lint_constant(name):
+    """The integer that `name = <int>` gives at the top level of merge/merge.py. Stops the run when it is not there."""
+    path = os.path.join(REPO, "merge", "merge.py")
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), path)
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets)
+                and isinstance(node.value, ast.Constant) and type(node.value.value) is int):
+            return node.value.value
+    sys.exit("fixture setup failed: merge/merge.py has no integer %s, so the lane-lint bound cannot be read" % name)
+
+
+LANE_LINT_BOUND_MS = (lane_lint_constant("LINT_SECONDS") + lane_lint_constant("PUSHED_HEAD_WAIT_MINUTES") * 60) * 1000
+# A limit well above the bound, for the rows that are not about the bound.
+LANE_LINT_ABOVE_MS = LANE_LINT_BOUND_MS + 60 * 1000
+
+# A background lane-lint with no limit above the bound is refused by rule lane-lint-timeout. The rows below each
+# name another rule, so each one carries a limit above the bound. Without that limit, lane-lint-timeout would refuse
+# the row first, and the row would not test the rule it names.
 TAIL_BG_UNTIL = "Lane lint in the background. until: the lint prints its verdict"
 
 add("check-tail: the incident line, backgrounded, is refused", "deny",
-    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    "check-tail", cwd=NOGIT, run_in_background=True, timeout=LANE_LINT_ABOVE_MS, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8")
 add("check-tail: merge --lane-lint piped to head, backgrounded, is refused", "deny",
-    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    "check-tail", cwd=NOGIT, run_in_background=True, timeout=LANE_LINT_ABOVE_MS, description=TAIL_BG_UNTIL,
     command="merge --lane-lint 7 | head -5")
 add("check-tail: merge.cmd --lane-lint piped to tail, backgrounded, is refused", "deny",
-    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    "check-tail", cwd=NOGIT, run_in_background=True, timeout=LANE_LINT_ABOVE_MS, description=TAIL_BG_UNTIL,
     command="merge.cmd --lane-lint 7 2>&1 | tail -3")
 add("check-tail: the script run through python piped to tail, backgrounded, is refused",
-    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, timeout=LANE_LINT_ABOVE_MS, description=TAIL_BG_UNTIL,
     command="python merge/merge.py --lane-lint 7 2>&1 | tail -3")
 add("check-tail: the launcher run through python piped to head, backgrounded, is refused",
-    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, timeout=LANE_LINT_ABOVE_MS, description=TAIL_BG_UNTIL,
     command="python merge/launch.py --lane-lint 7 | head -3")
 add("check-tail: ci-job checks --lint piped to tail, backgrounded, is refused", "deny",
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tail -20")
 add("check-tail: a quoted # does not hide a roster command after it, backgrounded, is refused",
-    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, timeout=LANE_LINT_ABOVE_MS, description=TAIL_BG_UNTIL,
     command='echo "# lint"; merge --lane-lint 7 | tail -3')
 add("check-tail: a lone apostrophe in quotes does not hide a roster command, backgrounded, is refused",
-    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, timeout=LANE_LINT_ABOVE_MS, description=TAIL_BG_UNTIL,
     command='echo "it\'s up"; merge --lane-lint 7 2>&1 | tail -3')
 add("check-tail: merge --lane-lint through grep -v and tail, backgrounded, is refused", "deny",
-    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    "check-tail", cwd=NOGIT, run_in_background=True, timeout=LANE_LINT_ABOVE_MS, description=TAIL_BG_UNTIL,
     command="merge --lane-lint 1476 2>&1 | grep -v DEBUG | tail -8")
 
 # A pipe out of verdict is refused by verdict-pipe, which runs before check-tail. The same call with
 # no pipe keeps the point these rows had: the verdict form is not a check-tail refusal.
 add("verdict-pipe: the incident line through verdict piped to tail, backgrounded, is refused", "deny",
-    "verdict-pipe", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    "verdict-pipe", cwd=NOGIT, run_in_background=True, timeout=LANE_LINT_ABOVE_MS, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8")
 add("check-tail: the incident line through verdict with no pipe, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    cwd=NOGIT, run_in_background=True, timeout=LANE_LINT_ABOVE_MS, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 1476 2>&1")
 add("verdict-pipe: a python3 verdict wrapper piped to tail, backgrounded, is refused", "deny",
-    "verdict-pipe", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    "verdict-pipe", cwd=NOGIT, run_in_background=True, timeout=LANE_LINT_ABOVE_MS, description=TAIL_BG_UNTIL,
     command="python3 ~/.claude/bin/verdict merge --lane-lint 1476 | tail -3")
 add("check-tail: a python3 verdict wrapper with no pipe, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    cwd=NOGIT, run_in_background=True, timeout=LANE_LINT_ABOVE_MS, description=TAIL_BG_UNTIL,
     command="python3 ~/.claude/bin/verdict merge --lane-lint 1476")
 add("check-tail: wait-pid piped to tail, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/wait-pid 1836 2>&1 | tail -3")
 add("check-tail: output kept in a file, then grep piped to tail, backgrounded, is allowed",
-    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    "allow", cwd=NOGIT, run_in_background=True, timeout=LANE_LINT_ABOVE_MS, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/merge --lane-lint 1476 > /tmp/x/lanelint.log 2>&1; echo \"rc=$?\"; "
             "grep -E '^(PASS|FAIL)' /tmp/x/lanelint.log | tail -15")
 add("check-tail: merge --lane-lint piped to tee, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    cwd=NOGIT, run_in_background=True, timeout=LANE_LINT_ABOVE_MS, description=TAIL_BG_UNTIL,
     command="merge --lane-lint 1476 2>&1 | tee run.out")
 add("check-tail: a tee between the check and grep and tail, backgrounded, is refused", "deny",
-    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    "check-tail", cwd=NOGIT, run_in_background=True, timeout=LANE_LINT_ABOVE_MS, description=TAIL_BG_UNTIL,
     command="merge --lane-lint 1476 2>&1 | tee x | grep FAIL | tail -3")
 add("check-tail: merge --lane-lint through tee and tail, backgrounded, is refused", "deny",
-    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    "check-tail", cwd=NOGIT, run_in_background=True, timeout=LANE_LINT_ABOVE_MS, description=TAIL_BG_UNTIL,
     command="merge --lane-lint 7 2>&1 | tee lint.log | tail -5")
 add("check-tail: ci-job checks --lint through tee and head, backgrounded, is refused", "deny",
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tee lint.log | head -20")
 add("check-tail: merge --lane-lint through tee with nothing after it, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    cwd=NOGIT, run_in_background=True, timeout=LANE_LINT_ABOVE_MS, description=TAIL_BG_UNTIL,
     command="merge --lane-lint 7 2>&1 | tee lint.log")
 add("check-tail: grep naming the script, piped to tail, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
@@ -331,6 +353,196 @@ add("check-tail: uv run --cache-dir then ci-job checks --lint piped to tail, bac
 add("check-tail: pytest with bin/ci-job as an argument piped to tail, backgrounded, is allowed",
     "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="python3 -m pytest hooks/test_guard.py -k bin/ci-job | tail -5")
+
+# --- a background lane-lint run needs a tool timeout above the lint's bound (rule lane-lint-timeout)
+#
+# The lint waits for a ci-job run and for GitHub to show the pushed head, so it can run past the Bash default of
+# 30 minutes. A background run that the default stops gives no verdict (step lane-lint-bg-timeout). The call's own
+# `timeout`, in milliseconds, must be above LANE_LINT_BOUND_MS. A `timeout` wrapper in the command text does not
+# count. A foreground run and the other merge flags are not this rule's. The lint is read through the wrappers,
+# `uv run` and a script run by python, as check_stage reads it.
+LANE_LINT_RULE = "lane-lint-timeout"
+# Five copies of the guard, each with its own merge/ beside it, or none: no merge/ at all; a merge/merge.py whose
+# two constants set a bound of their own; one whose pushed-head wait is text; one whose two waits are both text; and
+# one whose lint wait is a float. The bound of the middle copy is not main's, so a reason that copies main's bound
+# fails on it.
+LANE_LINT_NOMERGE_GUARD = os.path.join(ROOT, "lanelint-nomerge", "hooks", "guard.py")
+LANE_LINT_BOUND_GUARD = os.path.join(ROOT, "lanelint-bound", "hooks", "guard.py")
+LANE_LINT_TEXT_GUARD = os.path.join(ROOT, "lanelint-text", "hooks", "guard.py")
+LANE_LINT_BOTH_TEXT_GUARD = os.path.join(ROOT, "lanelint-bothtext", "hooks", "guard.py")
+LANE_LINT_FLOAT_GUARD = os.path.join(ROOT, "lanelint-float", "hooks", "guard.py")
+LANE_LINT_FIXTURE_SECONDS = 1234
+LANE_LINT_FIXTURE_WAIT_MINUTES = 2
+LANE_LINT_FIXTURE_BOUND_S = LANE_LINT_FIXTURE_SECONDS + LANE_LINT_FIXTURE_WAIT_MINUTES * 60
+LANE_LINT_FIXTURE_BOUND_MS = LANE_LINT_FIXTURE_BOUND_S * 1000
+LANE_LINT_MAIN_BOUND_S = LANE_LINT_BOUND_MS // 1000   # main's bound, read from merge/merge.py above
+
+
+def build_lanelint_copy(guard, merge_text):
+    """A copy of the guard with `merge_text` as the merge/merge.py beside it. None leaves no merge/ folder, so the
+    lint's constants cannot be read there."""
+    folder = os.path.dirname(os.path.dirname(guard))
+    os.makedirs(os.path.join(folder, "hooks"), exist_ok=True)
+    copy_guard_family(os.path.join(folder, "hooks"))
+    if merge_text is not None:
+        write(os.path.join(folder, "merge", "merge.py"), merge_text)
+
+
+def build_lanelint_nomerge():
+    build_lanelint_copy(LANE_LINT_NOMERGE_GUARD, None)
+
+
+def build_lanelint_bound():
+    build_lanelint_copy(LANE_LINT_BOUND_GUARD,
+                        "LINT_SECONDS = %d\nPUSHED_HEAD_WAIT_MINUTES = %d\n"
+                        % (LANE_LINT_FIXTURE_SECONDS, LANE_LINT_FIXTURE_WAIT_MINUTES))
+
+
+def build_lanelint_text():
+    build_lanelint_copy(LANE_LINT_TEXT_GUARD,
+                        'LINT_SECONDS = %d\nPUSHED_HEAD_WAIT_MINUTES = "5"\n' % LANE_LINT_FIXTURE_SECONDS)
+
+
+def build_lanelint_both_text():
+    build_lanelint_copy(LANE_LINT_BOTH_TEXT_GUARD, 'LINT_SECONDS = "1200"\nPUSHED_HEAD_WAIT_MINUTES = "5"\n')
+
+
+def build_lanelint_float():
+    build_lanelint_copy(LANE_LINT_FLOAT_GUARD, "LINT_SECONDS = 1234.5\nPUSHED_HEAD_WAIT_MINUTES = 2\n")
+
+
+lazy_fixture([LANE_LINT_NOMERGE_GUARD], build_lanelint_nomerge)
+lazy_fixture([LANE_LINT_BOUND_GUARD], build_lanelint_bound)
+lazy_fixture([LANE_LINT_TEXT_GUARD], build_lanelint_text)
+lazy_fixture([LANE_LINT_BOTH_TEXT_GUARD], build_lanelint_both_text)
+lazy_fixture([LANE_LINT_FLOAT_GUARD], build_lanelint_float)
+
+
+def lane_lint_bg(name, expected, command, timeout=None, rule=None, guard=None, carries=(), lacks=()):
+    """One background call of `command`, with the call's tool timeout in milliseconds when `timeout` is given."""
+    extra = {} if timeout is None else {"timeout": timeout}
+    add(name, expected, rule, cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL, command=command,
+        guard=guard, carries=carries, lacks=lacks, **extra)
+
+
+# Refused: no limit (the Bash default of 30 minutes), a limit at or below the bound, and a limit written in seconds.
+lane_lint_bg("lane-lint timeout: a background lane-lint with no timeout is refused", "deny",
+             "~/.claude/bin/merge --lane-lint 1476", rule=LANE_LINT_RULE)
+lane_lint_bg("lane-lint timeout: the 30-minute default is refused", "deny",
+             "merge --lane-lint 1476", timeout=1800000, rule=LANE_LINT_RULE)
+lane_lint_bg("lane-lint timeout: a limit equal to the bound is refused", "deny",
+             "merge --lane-lint 1476", timeout=LANE_LINT_BOUND_MS, rule=LANE_LINT_RULE)
+lane_lint_bg("lane-lint timeout: a limit one second under the bound is refused", "deny",
+             "merge --lane-lint 1476", timeout=LANE_LINT_BOUND_MS - 1000, rule=LANE_LINT_RULE)
+lane_lint_bg("lane-lint timeout: a limit written in seconds (7200) is 7.2 s, so it is refused", "deny",
+             "merge --lane-lint 1476", timeout=7200, rule=LANE_LINT_RULE)
+# Allowed: a limit one millisecond above the bound, and a two-hour one.
+lane_lint_bg("lane-lint timeout: a limit one millisecond above the bound is allowed", "allow",
+             "merge --lane-lint 1476", timeout=LANE_LINT_BOUND_MS + 1)
+lane_lint_bg("lane-lint timeout: a two-hour limit is allowed", "allow",
+             "merge --lane-lint 1476", timeout=7200000)
+# Not this rule's: a foreground lint, and the other merge flags and checks, with no limit.
+add("lane-lint timeout: a foreground lane-lint with no timeout is not this rule's", "allow",
+    cwd=NOGIT, command="merge --lane-lint 1476")
+add("lane-lint timeout: a foreground lane-lint at the 30-minute default is not this rule's", "allow",
+    cwd=NOGIT, command="merge --lane-lint 1476", timeout=1800000)
+lane_lint_bg("lane-lint timeout: a background review-record run is not a lane-lint", "allow",
+             "merge --review-record 7")
+lane_lint_bg("lane-lint timeout: a background release-check run is not a lane-lint", "allow",
+             "merge --release-check 7")
+lane_lint_bg("lane-lint timeout: a lane-lint with --confirm is not a check run", "allow",
+             "merge --lane-lint 7 --confirm")
+lane_lint_bg("lane-lint timeout: a background ci-job lint is not this rule's", "allow",
+             "~/.claude/bin/ci-job checks --lint --base origin/main")
+# The lint read through the wrappers, `uv run` and a script run by python, as check_stage reads it: each is refused.
+for _name, _command in (
+    ("merge.cmd", "merge.cmd --lane-lint 7"),
+    ("python3 runs merge/merge.py", "python3 merge/merge.py --lane-lint 7"),
+    ("python runs merge/launch.py", "python merge/launch.py --lane-lint 7"),
+    ("uv run runs merge/merge.py", "uv run merge/merge.py --lane-lint 7"),
+    ("uv run python runs merge/merge.py", "uv run python merge/merge.py --lane-lint 7"),
+    ("a python flag before the script", "python3 -W ignore merge/merge.py --lane-lint 7"),
+    ("env with a variable", "env CI=1 merge --lane-lint 7"),
+    ("after a cd", "cd lanes && merge --lane-lint 7"),
+    ("through verdict", "~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 7"),
+    ("behind a timeout wrapper of its own", "timeout 9000 merge --lane-lint 7"),
+):
+    lane_lint_bg("lane-lint timeout: a background lane-lint " + _name + " with no timeout is refused", "deny",
+                 _command, rule=LANE_LINT_RULE)
+# Quoted text is no run, and a quote or a comment opener in text does not hide a run after it.
+lane_lint_bg("lane-lint timeout: a lane-lint named in echo's quotes is no run", "allow", "echo 'merge --lane-lint 1'")
+lane_lint_bg("lane-lint timeout: a comment opener inside quotes is no run", "allow", 'echo "# merge --lane-lint 1"')
+lane_lint_bg("lane-lint timeout: a lane-lint named in a multi-line quote is no run", "allow",
+             'echo "first line\nmerge --lane-lint 1\nlast line"')
+lane_lint_bg("lane-lint timeout: grep naming the script is no run", "allow", 'grep -n "--lane-lint" merge/merge.py')
+lane_lint_bg("lane-lint timeout: a comment opener before a lane-lint is still refused", "deny",
+             'echo "# lint"; merge --lane-lint 7', rule=LANE_LINT_RULE)
+lane_lint_bg("lane-lint timeout: a lone apostrophe in quotes does not hide a lane-lint", "deny",
+             'echo "it\'s up"; merge --lane-lint 7', rule=LANE_LINT_RULE)
+# Unreadable constants read as unknown, and the rule does not refuse on that: the copy has no merge/ beside it.
+lane_lint_bg("lane-lint timeout: unreadable constants read as unknown, so no timeout is allowed", "allow",
+             "merge --lane-lint 1476", guard=LANE_LINT_NOMERGE_GUARD)
+lane_lint_bg("lane-lint timeout: unreadable constants read as unknown, so the 30-minute default is allowed", "allow",
+             "merge --lane-lint 1476", timeout=1800000, guard=LANE_LINT_NOMERGE_GUARD)
+# The same copy still runs check-tail, so the two allows above reach the guard that reads the lint, not a dead copy.
+lane_lint_bg("lane-lint timeout: the copy without merge/ still refuses a lane-lint piped to tail", "deny",
+             "merge --lane-lint 1476 | tail -8", rule="check-tail", guard=LANE_LINT_NOMERGE_GUARD)
+
+# A copy's own constants set its bound: a limit equal to that bound is refused, and one millisecond above it is allowed.
+lane_lint_bg("lane-lint timeout: a copy whose own constants set the bound refuses a limit equal to it", "deny",
+             "merge --lane-lint 1476", timeout=LANE_LINT_FIXTURE_BOUND_MS, rule=LANE_LINT_RULE,
+             guard=LANE_LINT_BOUND_GUARD)
+lane_lint_bg("lane-lint timeout: a copy whose own constants set the bound allows one millisecond above it", "allow",
+             "merge --lane-lint 1476", timeout=LANE_LINT_FIXTURE_BOUND_MS + 1, guard=LANE_LINT_BOUND_GUARD)
+# The reason names the copy's bound, in seconds or in milliseconds, and never main's bound.
+lane_lint_bg("lane-lint timeout: the reason names the bound the copy's merge tool sets", "deny",
+             "merge --lane-lint 1476", rule=LANE_LINT_RULE, guard=LANE_LINT_BOUND_GUARD,
+             carries=str(LANE_LINT_FIXTURE_BOUND_S))
+lane_lint_bg("lane-lint timeout: the reason never copies main's bound", "deny",
+             "merge --lane-lint 1476", rule=LANE_LINT_RULE, guard=LANE_LINT_BOUND_GUARD,
+             lacks=str(LANE_LINT_MAIN_BOUND_S))
+# An unreadable bound does not end the judging of the call: a dev server after the lint is still refused for itself.
+# The copy with no merge/ is the control that shows the server is refused when the bound is unknown.
+add("lane-lint timeout: a copy whose wait is text still judges the dev server after the lint", "deny",
+    "background-end", cwd=NOGIT, run_in_background=True, command="merge --lane-lint 1476; npm run dev",
+    guard=LANE_LINT_TEXT_GUARD, carries=("background-end", "until:"))
+add("lane-lint timeout: a copy with no merge/ judges the dev server after the lint too", "deny",
+    "background-end", cwd=NOGIT, run_in_background=True, command="merge --lane-lint 1476; npm run dev",
+    guard=LANE_LINT_NOMERGE_GUARD, carries=("background-end", "until:"))
+add("lane-lint timeout: a copy whose own bound is cleared judges the dev server after the lint too", "deny",
+    "background-end", cwd=NOGIT, run_in_background=True, command="merge --lane-lint 1476; npm run dev",
+    timeout=LANE_LINT_FIXTURE_BOUND_MS + 1, guard=LANE_LINT_BOUND_GUARD, carries=("background-end", "until:"))
+lane_lint_bg("lane-lint timeout: a copy whose wait is text reads the bound as unknown, so the lint alone is allowed",
+             "allow", "merge --lane-lint 1476", guard=LANE_LINT_TEXT_GUARD)
+# Both waits as text: the bound is a string, not a number, so it reads as unknown. Without the int check the string
+# bound reaches the comparison or the reason, which raises, and the guard fails open and allows a call that a later
+# rule refuses. The dev-server rows below are the ones that show it: the lint's own rows are allowed either way.
+lane_lint_bg("lane-lint timeout: a copy whose waits are both text allows a lint above any plausible limit", "allow",
+             "merge --lane-lint 1476", timeout=7200000, guard=LANE_LINT_BOTH_TEXT_GUARD)
+lane_lint_bg("lane-lint timeout: a copy whose waits are both text still refuses a lint piped to tail", "deny",
+             "merge --lane-lint 1476 | tail -8", rule="check-tail", guard=LANE_LINT_BOTH_TEXT_GUARD)
+add("lane-lint timeout: a copy whose waits are both text judges the dev server after a lint with a limit", "deny",
+    "background-end", cwd=NOGIT, run_in_background=True, command="merge --lane-lint 1476; npm run dev",
+    timeout=7200000, guard=LANE_LINT_BOTH_TEXT_GUARD, carries=("background-end", "until:"))
+add("lane-lint timeout: a copy whose waits are both text judges the dev server after a lint with no limit", "deny",
+    "background-end", cwd=NOGIT, run_in_background=True, command="merge --lane-lint 1476; npm run dev",
+    guard=LANE_LINT_BOTH_TEXT_GUARD, carries=("background-end", "until:"))
+# The limit's type. A float above the bound is allowed, and a float at the bound is refused. A bool or a string is no
+# limit, so it is refused as unset.
+lane_lint_bg("lane-lint timeout: a float limit above the bound is allowed", "allow",
+             "merge --lane-lint 1476", timeout=7200000.0)
+lane_lint_bg("lane-lint timeout: a float limit equal to the bound is refused", "deny",
+             "merge --lane-lint 1476", timeout=float(LANE_LINT_BOUND_MS), rule=LANE_LINT_RULE)
+lane_lint_bg("lane-lint timeout: a bool limit is refused as unset", "deny",
+             "merge --lane-lint 1476", timeout=True, rule=LANE_LINT_RULE)
+lane_lint_bg("lane-lint timeout: a string limit is refused as unset", "deny",
+             "merge --lane-lint 1476", timeout="7200000", rule=LANE_LINT_RULE)
+# A float wait is not an int, so the bound reads as unknown and nothing is refused on it. Without the int check the
+# float is a number bound, and a call with no limit is refused on it.
+lane_lint_bg("lane-lint timeout: a float wait reads the bound as unknown, so a lint with no limit is allowed",
+             "allow", "merge --lane-lint 1476", guard=LANE_LINT_FLOAT_GUARD)
+lane_lint_bg("lane-lint timeout: a copy whose wait is a float allows a lint above any plausible limit", "allow",
+             "merge --lane-lint 1476", timeout=7200000, guard=LANE_LINT_FLOAT_GUARD)
 
 # Wrapper forms in the foreground: each deny reads its check through the wrapper, each allow does not.
 sh("check-tail: uv run python runs the script piped to tail in the foreground is refused",

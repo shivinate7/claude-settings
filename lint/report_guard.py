@@ -41,7 +41,7 @@ holds a qualifying act (`questions-reach-page`: every question goes to the page 
 turn it is asked, no clock). The turn is every record after the last
 incoming message, a peer's included; the ack of a send this turn made to the writer or the parent
 starts no turn. Owner-facing session: a send to
-the page writer (the `writer` in the newest meta/page read, else the repo's extras key `page-writer`), or an ArtifactData set, update or batch under
+the page writer (the `writer` in the newest meta/page read, else the one session tagged cs-build:triage and cs-repo:<repo> in the transcript's get_session or list_sessions records), or an ArtifactData set, update or batch under
 collection items to this repo's page; the question box (main session) counts only in a repo with no page. Lane (own get_session record tagged cs-build:lane, or with a
 parent, and not tagged cs-build:triage, the page writer): a send to @parent, the parent id or the writer; @parent counts only in a lane. A promise or a page link passes nothing. A
 repo with no waiting page gets a systemMessage and no block, unless the session is a lane. This check
@@ -73,6 +73,22 @@ unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, 
 `session_` id or `HH:MM`. A negator in the same clause before the word exempts it, as does `[question] -> answered`. One
 refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too. Risk
 kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
+
+The closed-item check (rule `input-needed-closed-item`, roadmap step input-needed-reads-page-status; incident: a
+coordinator listed items 214, 381, 383 and 222 to the owner as open, and all four were closed): on any turn, landed or
+not, it refuses an Input Needed item that cites a waiting-page item whose status is closed. A cite is "item N", "page
+item N", "page-item N", "Cockpit item N", "item(s) N", "item **N**" or "item N a", and every number of a list after
+the word ("items N, M and K", "N or M", "N/M", "N, M, or K", "N (closed), M", "Items: N, M", an "items:" bullet list)
+and both ends of a range ("N-M"; the middle is not read), outside backticks and quotes; a PR number, "#N" alone, a
+date that opens with a year ("item" before a year-month-day), a bare number and Done or Next text are no cite. The status comes from the waiting copy on
+origin/<record branch>, read through hooks/feedback_guard.py (Homes.item_statuses, the one reader, one `git grep`
+per Stop). An ArtifactData read of collection `items` in the turn after the last incoming message
+(feedback_guard.read_back_statuses) wins for its item: open skips the copy for that item, closed refuses; a read
+before that message does not count. The refusal holds facts only: it names each closed item and says the waiting copy
+(or the page read this turn) shows it closed. A repo with no waiting page runs no check. An unreadable copy (no record
+branch ref, no items folder, an item file that is not a JSON object, a git error) never blocks on its own: a
+systemMessage says the check was not checked, and it rides on a block for any other reason too. Cost: a regex over
+the Input Needed text; only on a cite, the feedback_guard import and its one git grep. No file written.
 
 After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
 may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
@@ -166,7 +182,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender,
+    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_writer, page_writer_id, peer_sender,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 import _clause  # noqa: E402
@@ -576,8 +592,9 @@ def report_shape_ok(text):
 # A ref is `#12`, `PR 12`, a /pull/N or /commit/<sha> URL, or a hex sha of 6 to 40 digits that
 # holds at least one digit (so a plain word like "added" is not a sha).
 DONE_KIND_RE = re.compile(r"\b(?:BUILT|RECORDED|OTHER)\b")
+DONE_HEX = r"\b(?=[0-9a-f]*\d)[0-9a-f]{6,40}\b"
 DONE_REF_RE = re.compile(
-    r"(?:#\d+|\bPRs?\s*#?\d+|/pull/\d+|/commit/[0-9a-f]{6,40}|\b(?=[0-9a-f]*\d)[0-9a-f]{6,40}\b)")
+    r"(?:#\d+|\bPRs?\s*#?\d+|/pull/\d+|/commit/[0-9a-f]{6,40}|" + DONE_HEX + r")")
 BULLET_RE = re.compile(r"^(?:[-*+]|\d+[.)])\s+")
 
 
@@ -729,6 +746,65 @@ def answered_problem(text):
             continue
         bad.append(body)
     return ANSWERED_REASON + "".join("\n- " + b for b in bad) if bad else ""
+
+
+# claim-vs-main-needs-read: a reply line that says how the work compares with main cites a read of main on that line.
+# It extends answered-needs-source: the same line reader (_prose_lines), code-span strip (CODE_SPAN) and hash pattern
+# (DONE_HEX, the hex part of DONE_REF_RE). A claim form is a phrase of whole words; a hyphen joins words into a name,
+# so "not-worse-than-main" is no form. Emphasis marks at word edges (`*`, `**`, `_`, `__`: CANNOT_EMPHASIS_RE) are
+# removed and a code span that holds only `main` is read as the word, so neither hides a form; a snake_case name keeps
+# its underscores. `main` before `.<letter>` or `(` is a file or call name (main.py, main()). "main's own" is a claim
+# only after a copula, or before a clause mark, a closing bracket or quote, a dash or the line end ("main's own CI" is
+# no claim).
+# "regression test(s)", "regression suite(s)" and "regression testing" are nouns for a test count, not a claim. A hedge
+# word on the line exempts it. A cite is one of a closed list, found anywhere on the line with code spans unwrapped.
+_W = r"(?<![\w-])"  # the start of a whole word: no letter, digit, underscore or hyphen before
+_MAIN = r"main(?![\w-])"
+_MAIN_REF = r"(?:the\s+)?" + _MAIN + r"(?!\.[A-Za-z])(?!\()"
+_OWN = r"main['\u2019]s\s+own(?![\w-])"
+MAIN_CLAIM_RE = re.compile(
+    _W + r"(?:not\s+a\s+regression|no\s+regressions?)(?![\w-])(?!\s+(?:testing|tests?|suites?)\b)"
+    r"|" + _W + r"(?:worse\s+than|same\s+as|already\s+on|pre-?existing\s+on|matches|regressions?\s+from)\s+" + _MAIN_REF +
+    r"|" + _W + r"(?:is|are|was|were|be)\s+" + _OWN +
+    r"|" + _W + _OWN + r"(?=\s*(?:[.,;:)\]–—]|$)|[\"'”’](?!\w)|\s+-{1,2}(?:\s|$))", re.I)
+MAIN_HEDGE_RE = re.compile(_W + r"(?:unmeasured|unknown|not\s+read)(?![\w-])", re.I)
+_SHA_LETTER = r"(?=\d*[a-f])"  # a cited hash holds a letter, so a date such as 20261112 is no hash
+_CITE_SHA = _SHA_LETTER + DONE_HEX
+MAIN_CITE_RE = re.compile(
+    r"\b[\w/-]+\.[A-Za-z]\w{0,7}:\d+\b"
+    r"|(?<![\w/-])origin/main(?![\w-])"
+    r"|\bgit\s+show\s+(?:origin/)?main:"
+    r"|" + _W + r"main(?:['\u2019]s)?\s*(?:@|at\s+|commit\s+)?\s*" + _CITE_SHA +
+    r"|" + _CITE_SHA + r"\s+(?:on|of|from|in)\s+" + _MAIN, re.I)
+MAIN_SHOT_RE = re.compile(_W + r"main(?:['\u2019]s)?\s+screenshot(?![\w-])", re.I)
+MAIN_SHOT_SOURCE_RE = re.compile(r"https?://\S+|[\w.-]+/[\w./-]*\.\w+")
+MAIN_CLAIM_REASON = owner_line(
+    "Main-claim guard (rule claim-vs-main-needs-read)",
+    "each line below says how the work compares with main and cites no read of main on the line; "
+    "a hedge word (unmeasured, unknown, not read), a question, a fence and an inline code span are no claim") + " Lines: "
+
+
+def _cites_main_read(kept):
+    """True when `kept` (a line with its code spans unwrapped) holds one of the closed cite forms."""
+    if MAIN_CITE_RE.search(kept):
+        return True
+    return bool(MAIN_SHOT_RE.search(kept) and MAIN_SHOT_SOURCE_RE.search(kept))
+
+
+def main_claim_problem(text):
+    """The refusal for reply lines that claim a state against main with no read of main on the line, else ''."""
+    if not re.search(r"main|regression", text, re.I):
+        return ""
+    bad = []
+    for body in _prose_lines(text):
+        plain = CANNOT_EMPHASIS_RE.sub(
+            "", CODE_SPAN.sub(lambda m: "main" if m.group(2).strip().lower() == "main" else " ", body))
+        if not MAIN_CLAIM_RE.search(plain) or MAIN_HEDGE_RE.search(plain):
+            continue
+        if _cites_main_read(CODE_SPAN.sub(lambda m: m.group(2), body)):
+            continue
+        bad.append(body)
+    return MAIN_CLAIM_REASON + "".join("\n- " + b for b in bad) if bad else ""
 
 
 # reports-done-names-models: a Done item that agents built or reviewed names each one's role
@@ -1194,15 +1270,29 @@ def _is_page_writer(path):
     return session_role_proved(path, PAGE_WRITER_ROLE)
 
 
-def _turn_acts(records, turn, acks):
-    """(main-session tool uses, the send targets of each) in the turn. `turn` ends at the last incoming
-    message; when that message is the ack of a send from a session in `acks`, the turn reaches back past it."""
+def _ack_turn(records, turn, acks):
+    """`turn`, reaching back past its first record when that record is the ack of a send from a session in `acks`."""
     cut = len(records) - len(turn)
     if cut and peer_sender(records[cut - 1]) in acks:
         idx = last_incoming_index(records, acks)
         turn = records if idx is None else records[idx + 1:]
-    uses = [u for r in turn if not r.get("isSidechain") for u in tool_uses(r)]
+    return turn
+
+
+def _turn_acts(records, turn, acks):
+    """(main-session tool uses, the send targets of each) in the turn. `turn` ends at the last incoming
+    message; when that message is the ack of a send from a session in `acks`, the turn reaches back past it."""
+    uses = [u for r in _ack_turn(records, turn, acks) if not r.get("isSidechain") for u in tool_uses(r)]
     return uses, [send_targets(u) for u in uses]
+
+
+def _tag_turn(records, turn):
+    """The records a session tag is read from: `turn`, reaching back past the ack of a send when the turn's last incoming
+    message is a peer's. The writer is not known yet, so the sender is taken as the one whose ack it is; a tag read from
+    before a send to the writer stays in the turn, and a sender that is no writer widens it by that one ack only."""
+    cut = len(records) - len(turn)
+    sender = peer_sender(records[cut - 1]) if cut else None
+    return _ack_turn(records, turn, {sender: {sender}}) if sender else turn
 
 
 def question_problem(records, turn, text, hook):
@@ -1210,24 +1300,43 @@ def question_problem(records, turn, text, hook):
     sentence), judged on `turn`, the records after the last incoming message (questions-reach-page). The
     ack of a send this turn made to the writer or the parent starts no turn.
     Owner-facing: a send to the page writer, or an items write to this repo's page. The writer is the newest
-    meta/page read's; with no such read at all, the layout's `page-writer` (its ack starts no turn either).
-    The key's writer counts only for a send whose own result shows delivery (`delivered_tool_use_ids`); a send
-    with no result, a failed result or a non-delivered one does not. A transcript writer counts on the send alone.
-    A read whose result names no writer keeps the refusal's old text. The question box counts
-    only in a repo with no waiting page. A send to @parent reaches no one there.
-    Lane: a send to the parent or the page writer; a send to @parent counts only in a lane. A session whose own
+    meta/page read's (any turn); with none, the one session its triage tag names for this repo (`_transcript.page_writer`), read
+    from the get_session and list_sessions records of this turn only, and not from a list_sessions page with
+    has_more true (its ack starts no turn either). A tag writer counts only for a send whose own result shows delivery (`delivered_tool_use_ids`); a send with no result,
+    a failed result or a non-delivered one does not. A transcript writer counts on the send alone. With no writer
+    named, or two triage sessions, the refusal says to run list_sessions in its own turn first. The question box
+    counts only in a repo with no waiting page. A send to @parent reaches no one there.
+    Lane: a send to the parent or the page writer (a tag writer's send must be delivered); a send to @parent counts only in a lane. A session whose own
     newest get_session record carries cs-build:triage is the page writer, not a lane, though its record names a
     parent: it is owner-facing, so its items write to this repo's page passes.
     Cost: nothing past the text check when the turn has no question or sends to the writer. Else the own-record
-    import and a transcript read, only in a session with a remote id. A lane reads no layout; an owner-facing
-    turn with no counted send reads the extras file for the writer key (`layout.page_writer_key`) first, when the transcript
-    has no meta/page read, then for the page (`layout.waiting_page`); a send to the key writer returns after the first read."""
+    import and a transcript read, only in a session with a remote id. A session with no meta/page
+    writer reads the repo name (git's config file) and the turn's session records for the tag writer, a lane too; an
+    owner-facing turn with no counted send then reads the waiting page (`layout.waiting_page`); a delivered send to
+    the tag writer returns after the first read."""
     if not (offers_a_pick(text) or asks_a_question(text)):
         return "", ""
     writer = page_writer_id(records)
     acks = {writer: {writer}} if writer else {}
     uses, sends = _turn_acts(records, turn, acks)
     if writer and any(writer in t for t in sends):
+        return "", ""
+    root = repo_root(hook.get("cwd"))
+    tagged = False
+    if not writer and root:
+        # The tag writer is named before the lane branch, so a lane's send to it counts like a send to the parent.
+        writer = page_writer(records, layout.repo_name(root), _tag_turn(records, turn))
+        tagged = bool(writer)
+        if writer:
+            acks[writer] = {writer}
+            uses, sends = _turn_acts(records, turn, acks)
+
+    def reached_tag_writer():
+        # Only the cloud body {"status":"delivered"} counts; the local SendMessage success shape is not measured.
+        delivered = delivered_tool_use_ids(records)
+        return tagged and any(writer in t and u.get("id") in delivered for u, t in zip(uses, sends))
+
+    if reached_tag_writer():
         return "", ""
     _hooks_on_path()
     from override import remote_session_id
@@ -1237,22 +1346,12 @@ def question_problem(records, turn, text, hook):
         if parent:
             acks[parent] = {parent} | PARENT_TARGETS
             uses, sends = _turn_acts(records, turn, acks)
-        wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
-        if any(t & wanted for t in sends):
+        wanted = ({parent} if parent else set()) | ({writer} if writer and not tagged else set()) | PARENT_TARGETS
+        if any(t & wanted for t in sends) or reached_tag_writer():
             return "", ""
         if not _is_page_writer(hook.get("transcript_path")):
             return LANE_REFUSAL, ""
         # The triage session names a parent id in its record but is the page writer: its items write counts too.
-    root = repo_root(hook.get("cwd"))
-    if not writer and root and not page_read_ran(records):
-        writer = layout.page_writer_key(root)
-        if writer:
-            acks[writer] = {writer}
-            uses, sends = _turn_acts(records, turn, acks)
-            # Only the cloud body {"status":"delivered"} counts; the local SendMessage success shape is not measured.
-            delivered = delivered_tool_use_ids(records)
-            if any(writer in t and u.get("id") in delivered for u, t in zip(uses, sends)):
-                return "", ""
     page = layout.waiting_page(root) if root else "unknown"
     here = None if page == "unknown" else page.rstrip("/")
     for u in uses:
@@ -1264,7 +1363,9 @@ def question_problem(records, turn, text, hook):
         # No page: the question is asked in the reply or the box, so the box counts.
         return "", ("" if any(u.get("name") == ASK_TOOL for u in uses) else NO_PAGE_NOTE)
     return OWNER_REFUSAL % (("the page writer is session " + writer) if writer else
-                            "the page writer is not known to this session; the waiting page is " + page), ""
+                            "the page writer is not known to this session; the waiting page is " + page + "; a list_sessions call in this turn "
+                            "with the tags filter cs-build:triage and this repo's cs-repo tag names it, since one page then "
+                            "holds the one triage session"), ""
 
 
 # rewrite-cite-predates-ruling: a sentence that says a decision was rewritten for a ruling. See the module docstring.
@@ -2791,6 +2892,9 @@ def rewrite_problems(hook):
         answered = answered_problem(text)
         if answered:
             reasons.append(answered)
+        claim = main_claim_problem(text)
+        if claim:
+            reasons.append(claim)
         recovered = recovered_problem(records, text) if report_shape_ok(text) else ""
         if recovered:
             reasons.append(recovered)
@@ -3109,6 +3213,137 @@ def triage_hold(hook, records, active):
         return ""
 
 
+# The closed-item check's cite matcher. A cite is the word "item", "items" or "item(s)" (not glued to a word on its
+# left, so "page-item 214" counts; bold may wrap it and its colon, "**Items:**") and the numbers after it on its line:
+# a list joined by comma, "and", "or", "&", "/" or a range dash ("214-216": both ends count, the middle does not), a
+# "(closed)" note after a number, "**214**" and "#214"; the dashes are "-" and the en dash, the words "to" and
+# "through" also join a range, and ";" and "+" also join a list; "item-214" is a cite. "items:" at a line end, or a line that opens with "Items"
+# and ends in a label's colon ("Items waiting on you:", also behind a bullet dash), opens a bullet or numbered list:
+# the number after each marker is a cite, the marker is not, and text may follow the number. Markers nested under a
+# bullet with no number ("- waiting") are that list too; under a numbered bullet they are its own text. A list never crosses a line break, so a
+# bullet under "item 214" is no cite. A number that opens a date (a year first) is no cite. A number after a
+# separator or a marker is a cite only when it is bare: no glued letter or "%" ("3rd", "24h", "5%"), no time or
+# decimal ("10:30"), no small fraction ("11/10"), no count or unit word after it (ITEM_COUNT_WORDS). The number
+# right after the word is not held to that, so "item 1 of 3" cites 1. A second matcher beside
+# skills/roadmap/build.py's is justified only by lists: that one cites the number right after "item".
+ITEM_HEAD_RE = re.compile(r"(?<![A-Za-z0-9_])item(?:s|\(s\))?(?![A-Za-z0-9_])(?:\*\*)?(:)?(?:\*\*)?", re.I)
+ITEM_GAP_RE = re.compile(r"[ \t]*")
+ITEM_HEAD_GAP_RE = re.compile(r"-(?=\d)|[ \t]*")
+ITEM_LIST_EOL_RE = re.compile(r"[ \t]*\n")
+ITEM_LABEL_RE = re.compile(r"[ \t]+[^\n\d:]{1,60}?(?:\*\*)?:(?:\*\*)?[ \t]*\n")
+ITEM_LINE_START_RE = re.compile(r"(?:\A|\n)[ \t]*(?:[-*+][ \t]+)?(?:\*\*)?\Z")
+ITEM_NUM_RE = re.compile(r"\**#?(\d+)\**")
+ITEM_DATE_TAIL_RE = re.compile(r"(?:-\d{1,2}-\d{1,2}|/\d{1,2}/\d{1,4})(?!\d)")
+ITEM_PAREN_RE = re.compile(r"[ \t]*\([^()\n]*\)")
+ITEM_SEP_RE = re.compile(r"[ \t]*,[ \t]*(?:(?:and|or)[ \t]+|&[ \t]*)?|[ \t]*/[ \t]*|[ \t]*[-\u2013][ \t]*"
+                         r"|[ \t]+(?:and|or|to|through)[ \t]+|[ \t]*[&;+][ \t]*", re.I)
+ITEM_COUNT_WORDS = (r"of|more|others?|options?|times|percent|ms|secs?|seconds?|mins?|minutes?|hrs?|hours?|days?|wks?|"
+                    r"weeks?|months?|yrs?|years?|am|pm|a\.m\.|p\.m\.|utc|gmt|[cemp][sd]t|jan(?:uary)?|feb(?:ruary)?|"
+                    r"mar(?:ch)?|apr(?:il)?|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|"
+                    r"dec(?:ember)?|tests?|cases?|files?|lines?|prs?|commits?|lanes?|steps?|runs?|jobs?|rounds?|tries|"
+                    r"agents?|sessions?|mutants?|findings?")
+ITEM_NOT_ITEM_RE = re.compile(r"[A-Za-z%]|-[A-Za-z]|[.:]\d|[ \t]*%|[ \t]+(?:" + ITEM_COUNT_WORDS + r")(?![A-Za-z])", re.I)
+ITEM_FRACTION_RE = re.compile(r"/\d{1,2}(?!\d)")
+CLOSED_ITEM_CHECK = "Closed-item guard (rule input-needed-closed-item)"
+
+
+def _cite_list(body, pos, seen, checked):
+    """Adds to `seen` the numbers of one list that starts at `pos`. `checked`: the first number must be bare too, as
+    a list marker's number must. A small number a non-slash separator reaches, then "/" and a small number, is a
+    fraction ("214 and 11/10"); after a slash ("214/381/383") it is a list. Returns how many numbers it read."""
+    via_slash, found = False, 0
+    while True:
+        num = ITEM_NUM_RE.match(body, pos)
+        if num is None or ITEM_DATE_TAIL_RE.match(body, num.end()):
+            return found
+        if checked and (ITEM_NOT_ITEM_RE.match(body, num.end()) or not via_slash and len(num.group(1)) <= 2
+                        and ITEM_FRACTION_RE.match(body, num.end())):
+            return found
+        found += 1
+        if str(int(num.group(1))) not in seen:
+            seen.append(str(int(num.group(1))))
+        paren = ITEM_PAREN_RE.match(body, num.end())
+        sep = ITEM_SEP_RE.match(body, paren.end() if paren else num.end())
+        if sep is None:
+            return found
+        pos, checked, via_slash = sep.end(), True, "/" in sep.group()
+
+
+def _cite_bullets(body, pos, seen):
+    """Adds to `seen` the numbers of the bullet or numbered list whose first line starts at `pos`. A marker line at the
+    first marker's depth is a list item, and the number after its marker opens a list. A deeper line is the item's
+    own text, except under a list item that holds no number (a label such as "- waiting"): its deeper markers, all at
+    the first one's depth, are the list. A blank line or any other line ends the list."""
+    depth = sub = None
+    label = False
+    for line in body[pos:].split("\n"):
+        mark = LIST_ITEM.match(line)
+        indent = len(line) - len(line.lstrip(" \t"))
+        if mark and indent == (indent if depth is None else depth):
+            depth, sub = indent, None
+            label = not _cite_list(line, ITEM_GAP_RE.match(line, mark.end()).end(), seen, True)
+        elif mark and label and indent > depth and indent == (indent if sub is None else sub):
+            sub = indent
+            _cite_list(line, ITEM_GAP_RE.match(line, mark.end()).end(), seen, True)
+        elif depth is None or indent <= depth or not line.strip():
+            return
+
+
+def cited_items(text):
+    """The page item numbers (digit strings, first cite first, each once) that the Input Needed item cites, with
+    backtick and quote spans left out. Done, Next and the prose above the report are not read."""
+    body = QUOTED_RE.sub(" ", input_needed_section(text))
+    seen = []
+    for head in ITEM_HEAD_RE.finditer(body):
+        if head.group(1):
+            label = ITEM_LIST_EOL_RE.match(body, head.end())
+        elif ITEM_LINE_START_RE.search(body[:head.start()]):
+            label = ITEM_LABEL_RE.match(body, head.end())
+        else:
+            label = None
+        if label:
+            _cite_bullets(body, label.end(), seen)
+        else:
+            _cite_list(body, ITEM_HEAD_GAP_RE.match(body, head.end()).end(), seen, False)
+    return seen
+
+
+def closed_item_problem(hook, turn, text):
+    """(refusal, note) for an Input Needed item that cites a page item the waiting page or its copy shows closed
+    (rule `input-needed-closed-item`). A read of collection `items` in `turn` decides its item; the copy decides the
+    rest, read once through feedback_guard (Homes.item_statuses). A repo with no waiting page gives ('', ''); an
+    unreadable copy gives no refusal and a note that says not checked."""
+    cites = cited_items(text)
+    if not cites:
+        return "", ""
+    _hooks_on_path()
+    import feedback_guard
+    homes = feedback_guard.Homes(hook.get("cwd"))
+    read = {n: s for n, s in feedback_guard.read_back_statuses(turn, homes).items() if n in cites}
+    closed = {n: "the waiting page, read this turn," for n, s in read.items() if s == "closed"}
+    rest = [n for n in cites if n not in read]
+    note = ""
+    if rest:
+        statuses, branch, _folder = homes.item_statuses()
+        if statuses is None:
+            if homes.skip_filing:
+                note = "Closed-item guard: not checked (%s)." % homes.skip_filing
+        else:
+            where = "the waiting copy at origin/%s, as of the last fetch" % branch
+            closed.update({n: where for n in rest if statuses.get(n) == "closed"})
+    if not closed:
+        return "", note
+    nums = sorted(closed, key=int)
+    by_source = {}
+    for n in nums:
+        by_source.setdefault(closed[n], []).append(n)
+    shows = "; ".join("%s shows %s closed" % (src, ("item " if len(ns) == 1 else "items ") + ", ".join(ns))
+                      for src, ns in by_source.items())
+    return owner_line(
+        CLOSED_ITEM_CHECK,
+        "Input Needed cites %s, and %s" % (("item " if len(nums) == 1 else "items ") + ", ".join(nums), shows)), note
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -3212,17 +3447,27 @@ def main():
         pick_reason, note = question_problem(records, turn, text, hook)
     except Exception:
         pass
+    closed_item, closed_note = "", ""
+    try:
+        closed_item, closed_note = closed_item_problem(hook, turn, text)
+    except Exception as err:  # a check that could not run is not checked, never silence and never a block
+        closed_note = "Closed-item guard: not checked (%s)." % type(err).__name__
     review, review_note = "", ""
     try:
         review, review_note = review_record_problem(hook, text)
     except Exception as err:  # a check that could not run is UNKNOWN, never silence and never a block
         review_note = "Review-record guard: UNKNOWN, the check did not run (%s)." % type(err).__name__
-    note = " ".join(filter(None, [note, hand_note, review_note]))
+    note = " ".join(filter(None, [note, hand_note, review_note, closed_note]))
+
+    # The closed-item "not checked" note rides on a block for another reason too, so the owner sees the check did not run.
+    block_note = {"systemMessage": closed_note} if closed_note else {}
+
     relay = []
     if last_human_idx is not None:  # a transcript with no human message never ran the relay and answered checks
         relay = relay_reasons(after, text, hook.get("cwd"))
         try:
             relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
+            relay.append(main_claim_problem(text))
         except Exception:
             pass
     cannot = ""
@@ -3249,6 +3494,7 @@ def main():
         pick.append(hand_off)
         pick.append(cannot)
         pick.append(review)
+        pick.append(closed_item)
         try:
             if report_shape_ok(text):
                 pick.append(recovered_problem(records, text))
@@ -3259,7 +3505,7 @@ def main():
             pick = [r for r in pick if r]
             if pick:
                 reason = " ".join(pick) + " (rule reports-order-of-labels)"
-                finish({"decision": "block", "reason": reason})
+                finish({"decision": "block", "reason": reason, **block_note})
             else:
                 finish({"systemMessage": note} if note else None)
         except Exception:
@@ -3302,6 +3548,8 @@ def main():
         reasons.append(cannot)
     if review:
         reasons.append(review)
+    if closed_item:
+        reasons.append(closed_item)
     try:
         rewrite = rewrite_stamp_problem(text, records[last_human_idx].get("timestamp"), hook.get("cwd"))
         if rewrite:
@@ -3324,7 +3572,7 @@ def main():
         reason = " ".join(reasons) + " (rule reports-order-of-labels)"
         if not shape_ok:
             write_marker(hook, last_human_idx)
-        finish({"decision": "block", "reason": reason})
+        finish({"decision": "block", "reason": reason, **block_note})
     else:
         finish({"systemMessage": note} if note else None)
 

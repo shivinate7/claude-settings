@@ -46,12 +46,16 @@ elif not PD_NODE:
           file=sys.stderr)
 
 
-def pd_repo(name, stamp, origin=None):
+def pd_repo(name, stamp, origin=None, registry=False):
     """A real checkout for one case: the waiting page's layout extras and one commit. `stamp` is the path the
     stamp file holds, or None for no stamp. The stamp resolves as the stamp does: <git common dir>/PD_STAMP.
-    `origin` is a remote URL to add, for a case whose machine home is named by the repo's origin."""
+    `origin` is a remote URL to add, for a case whose machine home is named by the repo's origin. `registry` names the
+    page in the registry form with no `collections` key: the form whose read reaches the collection list (layout.py)."""
     where = os.path.join(ROOT, "pd", name)
-    wp_put(os.path.join(where, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "waiting-page": PQ_URL}))
+    extras = {"kinds": {}, "waiting-page": PQ_URL}
+    if registry:
+        extras = {"kinds": {}, "artifacts": [{"id": "pqpage", "url": PQ_URL, "role": "waiting-page", "account": "fixture"}]}
+    wp_put(os.path.join(where, ".claude", "layout-extras.json"), json.dumps(extras))
     wp_put(os.path.join(where, "README.md"), "a checkout of the waiting-page fixture\n")
     wp_git(where, "init", "-q")
     if origin:
@@ -96,15 +100,16 @@ def pd_body(repo, data, action="set"):
                            "data": with_shown(data)}}
 
 
-def pd_run(name, body):
-    """One guard run on `body`, with a config folder of the case's own. Returns (decision, reason, guard.log rows)."""
+def pd_run(name, body, guard=None):
+    """One guard run on `body`, with a config folder of the case's own. `guard` is the guard file to run, None for
+    this checkout's. Returns (decision, reason, guard.log rows)."""
     folder = os.path.join(ROOT, "pd", "cfg-" + name)
     os.makedirs(folder, exist_ok=True)
     env = dict(os.environ, CLAUDE_CONFIG_DIR=folder, CLAUDE_GUARD_ROOT_PID=str(os.getpid()))
     env.pop("CLAUDE_CODE_REMOTE", None)
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
-    got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True, text=True,
+    got = subprocess.run([sys.executable, guard or GUARD], input=json.dumps(body), capture_output=True, text=True,
                          env=env, timeout=120)
     if got.returncode != 0:
         return "error", "exit %d: %s" % (got.returncode, got.stderr.strip()[:200]), []
@@ -449,6 +454,24 @@ def mh_judged(name, data, action="set", windows=False):
     return decision, reason, calls, rows
 
 
+def mh_refuse_problem(decision, reason, rows):
+    """None when a run denied on rule mockup-home: the reason opens with the rule, names the file field and no
+    forbidden target, and guard.log holds the deny row. Else the one cause, with the run's last guard.log row."""
+    if decision != "deny":
+        last = "\t".join(rows[-1]) if rows else "no guard.log row"
+        return "want deny, got %s: %s; last guard.log row: %s" % (decision, reason[:160], last)
+    if not reason.startswith(MH_RULE + ":"):
+        return "the reason does not open with rule %s: %s" % (MH_RULE, reason[:160])
+    if "file" not in reason.lower():
+        return "the reason does not name the file field: %s" % reason[:160]
+    leak = names_the_target(reason, MH_RULE)
+    if leak:
+        return "the reason names the forbidden target %r" % leak
+    if not any(len(r) == 6 and r[2] == "deny" and r[3] == MH_RULE for r in rows):
+        return "guard.log holds no deny row for %s" % MH_RULE
+    return None
+
+
 def mh_case(label, name, data, want, checker, action="set", windows=False, says=(), not_says=()):
     """One check of rule mockup-home. A deny names the rule and the file field, starts no checker, and logs a deny row
     for the rule. An allow prints nothing and starts `checker` checker calls. A deny's reason holds each `says` text
@@ -458,21 +481,15 @@ def mh_case(label, name, data, want, checker, action="set", windows=False, says=
         if decision != want:  # one cause per failure: a wrong decision is the cause, the rest follow from it
             return False, "want %s, got %s: %s" % (want, decision, reason[:160])
         if want == "deny":
-            if not reason.startswith(MH_RULE + ":"):
-                return False, "the reason does not open with rule %s: %s" % (MH_RULE, reason[:160])
-            if "file" not in reason.lower():
-                return False, "the reason does not name the file field: %s" % reason[:160]
-            leak = names_the_target(reason, MH_RULE)
-            if leak:
-                return False, "the reason names the forbidden target %r" % leak
+            problem = mh_refuse_problem(decision, reason, rows)
+            if problem:
+                return False, problem
             for text in says:
                 if text not in reason:
                     return False, "the reason does not name %r: %s" % (text, reason[:160])
             for text in not_says:
                 if text in reason:
                     return False, "the reason names %r, a home that holds no mockup now: %s" % (text, reason[:160])
-            if not any(len(r) == 6 and r[2] == "deny" and r[3] == MH_RULE for r in rows):
-                return False, "guard.log holds no deny row for %s" % MH_RULE
         if calls != checker:
             return False, "the checker was called %d time(s), want %d" % (calls, checker)
         return True, "%s, as wanted" % want
@@ -513,6 +530,48 @@ mh_case("a design whose file is a folder is denied, since a folder holds no mock
         "mh-folder", pd_item(designs=[mh_design(file="docs/design/item48/")]), "deny", checker=0)
 mh_case("a Windows-form design path inside the design folder is allowed, as it is today",
         "mh-win-design", pd_item(designs=[mh_design(file="docs\\design\\a.html")]), "allow", checker=1)
+
+
+# --------------------------------------------------------------------------- a design's file, with no skill folder
+
+# A checkout with no skill folder (decision waiting-data-in-repo: a tree with lint/ and no skill folder still imports).
+# The page is in the registry form with no `collections` key, so the write's read reaches the collection list, which
+# the skill folder holds. The copy with no folder must still deny what the full checkout denies (rule mockup-home), so
+# the bare check runs the guard from that copy, as a subprocess. Its control runs the same write from this checkout.
+sys.path.insert(0, os.path.join(REPO, "tests", "guard", "support"))
+import bare_tree  # noqa: E402  the copy with no skill folder, one home in tests/guard/support/bare_tree.py
+PD_BARE = []  # the guard file of the copy with no skill folder, made once per run
+
+
+def pd_bare_guard():
+    """The guard of the copy with no skill folder: copied on the first call, then reused in this run."""
+    if not PD_BARE:
+        PD_BARE.append(os.path.join(bare_tree.copy_without_skill(os.path.join(ROOT, "pd", "bare")), "guard.py"))
+    return PD_BARE[0]
+
+
+def mh_registry_check(name, bare):
+    """(ok, text) for one ArtifactData set of a registry page's design whose file sits under the machine home. The
+    scope comes first: the entry has no `collections` key, and a bare run's guard has no skill folder beside it."""
+    def check():
+        repo = pd_repo(name, None, origin=MH_ORIGIN, registry=True)
+        with open(os.path.join(repo, ".claude", "layout-extras.json"), encoding="utf-8") as handle:
+            entry = json.load(handle)["artifacts"][0]
+        if "collections" in entry:
+            return False, "scope: the registry entry holds a collections key, so the read never reaches the list"
+        guard = pd_bare_guard() if bare else None
+        if bare and os.path.exists(os.path.join(os.path.dirname(os.path.dirname(guard)), "skills")):
+            return False, "scope: the copy holds a skills folder"
+        decision, reason, rows = pd_run(name, pd_body(repo, pd_item(designs=[mh_design(file=MH_MACHINE)])), guard=guard)
+        problem = mh_refuse_problem(decision, reason, rows)
+        return (problem is None), (problem or "deny, as wanted")
+    return check
+
+
+LOG_CHECKS_EXTRA.append(("mockup-home: with no skill folder, a registry page's design under the machine home is denied",
+                         mh_registry_check("mh-reg-bare", bare=True)))
+LOG_CHECKS_EXTRA.append(("mockup-home: the same write from the full checkout is denied (control)",
+                         mh_registry_check("mh-reg-full", bare=False)))
 
 
 # --------------------------------------------------------------------------- a pick never widens a shared tool

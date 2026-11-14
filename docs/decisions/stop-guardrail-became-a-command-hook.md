@@ -36,6 +36,7 @@ as below.
   stays quiet at the next Stop. A finding whose evidence moved further is a new incident and is reported
   once more. The cap never applies to an UNKNOWN read, which is always reported again
   (`guard-that-cries-wolf-is-spent`).
+  Narrowed for a failed path once built, by decision `decision-watch-finds-transcript`.
 - **UNKNOWN, never silence.** A harness kill prints nothing, and silence reads as no change. So a timeout,
   a missing `transcript_path`, a git failure, and a model failure or odd answer each print a
   `systemMessage` that says UNKNOWN and names why. None collapses into silence, into ALLOW or into a flag.

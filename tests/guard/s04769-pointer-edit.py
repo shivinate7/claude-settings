@@ -10,7 +10,8 @@ FAMILY = "pointer-edit"
 # worktree of the same clone (nested under the pointer, or elsewhere), and any target outside the
 # pointer. A rules file that is missing, unreadable or names no pointer stands the rule down. Read,
 # Grep, Artifact and ArtifactData are never judged: the gate is WRITE_TOOLS. A shell write into the
-# pointer is out of scope: a note only.
+# pointer is judged too (step pointer-checkout-edit: lane decision-watch-finds-transcript edited the
+# pointer with `sed -i` and a `python3` heredoc, and the guard let both through). See the shell cases below.
 #
 # The targets are plain fixture files, never the pointer's CLAUDE.md or anything under hooks/, lint/ or
 # agents/. frozen-path judges those only for the config-dir spelling, or when the pointer is the live pin
@@ -80,6 +81,45 @@ add("pointer-edit: Artifact with a pointer file as file_path is not a write and 
     tool="Artifact", cwd=PTRMAIN, config=PTRCFG, file_path=PE_TARGET)
 add("pointer-edit: ArtifactData with a pointer file as file_path is not a write and is allowed", "allow",
     tool="ArtifactData", cwd=PTRMAIN, config=PTRCFG, file_path=PE_TARGET)
+
+# THE SHELL WRITES. The same refusal for a Bash write whose target is a pointer file: a redirect, `tee`, `sed -i`,
+# `cp`, or a python heredoc or `-c` script that opens the file for writing. The shell's own directory may be the
+# pointer (a lane's shell resets there) or a path spelled absolute from a worktree.
+add("pointer-edit: a sed -i on a pointer file is refused", "deny", "pointer-edit",
+    cwd=PTRMAIN, config=PTRCFG, command="sed -i 's/base/changed/' f.txt", carries="EnterWorktree")
+add("pointer-edit: a redirect into a pointer file is refused", "deny", "pointer-edit",
+    cwd=PTRMAIN, config=PTRCFG, command="echo changed > " + PE_TARGET, carries="EnterWorktree")
+add("pointer-edit: a tee into a pointer file is refused", "deny", "pointer-edit",
+    cwd=PTRMAIN, config=PTRCFG, command="echo changed | tee " + PE_TARGET, carries="EnterWorktree")
+add("pointer-edit: a python heredoc that writes a pointer file is refused", "deny", "pointer-edit",
+    cwd=PTRMAIN, config=PTRCFG, carries="EnterWorktree",
+    command="python3 - <<'EOF'\nopen('f.txt', 'w').write('changed\\n')\nEOF")
+add("pointer-edit: a python -c that writes a pointer file is refused", "deny", "pointer-edit",
+    cwd=PTRMAIN, config=PTRCFG, carries="EnterWorktree",
+    command="python3 -c \"open('" + PE_TARGET + "', 'w').write('x')\"")
+add("pointer-edit: a cp onto a pointer file is refused", "deny", "pointer-edit",
+    cwd=PTRMAIN, config=PTRCFG, command="cp /dev/null " + PE_TARGET, carries="EnterWorktree")
+add("pointer-edit: the shell refusal names the worktree, never the target", "deny", "pointer-edit",
+    cwd=PTRMAIN, config=PTRCFG, command="sed -i 's/a/b/' f.txt", lacks=("f.txt",))
+add("pointer-edit: a sed -i in a subshell on a pointer file is refused", "deny", "pointer-edit",
+    cwd=PTRMAIN, config=PTRCFG, command="(sed -i 's/base/changed/' " + PE_TARGET + ")", carries="EnterWorktree")
+add("pointer-edit: a sed -i in a group after another command is refused", "deny", "pointer-edit",
+    cwd=PTRMAIN, config=PTRCFG, command="echo ok; { sed -i 's/base/changed/' " + PE_TARGET + "; }",
+    carries="EnterWorktree")
+add("pointer-edit: a cp between two temp files, with the pointer as cwd, is allowed", "allow",
+    cwd=PTRMAIN, config=PTRCFG, command="cp " + PE_TEMP + " " + PE_TEMP + ".bak")
+add("pointer-edit: a sed -i in a linked worktree is allowed", "allow",
+    cwd=PTRNEST, config=PTRCFG, command="sed -i 's/base/changed/' f.txt")
+add("pointer-edit: a redirect into the temp folder, with the pointer as cwd, is allowed", "allow",
+    cwd=PTRMAIN, config=PTRCFG, command="echo x > " + PE_TEMP)
+add("pointer-edit: a read-only command in the pointer is allowed", "allow",
+    cwd=PTRMAIN, config=PTRCFG, command="cat f.txt && grep base f.txt")
+add("pointer-edit: a python heredoc that only reads a pointer file is allowed", "allow",
+    cwd=PTRMAIN, config=PTRCFG, command="python3 - <<'EOF'\nprint(open('f.txt').read())\nEOF")
+add("pointer-edit: a shell write into the pointer's .git is not judged", "allow",
+    cwd=PTRMAIN, config=PTRCFG, command="echo x > " + PE_GITDIR)
+add("pointer-edit: a stood-down rule lets a shell write through", "allow",
+    cwd=PTRMAIN, config=PTRBADCFG, command="echo changed > " + PE_TARGET)
 
 TEMP_DIR = None   # back to the system temp for the sections below
 

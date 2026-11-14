@@ -387,11 +387,14 @@ await test('turn.complete trigger 5: a second turn while a judge runs starts no 
 // A turn that cannot be judged leaves a SKIP line, never silence. skipLogged is registered before the turn that
 // writes the line, and answers true or false so a missing line fails with its own message.
 const skipLogged = (h, ms) => waitLog(h, /^\S+ SKIP /m, ms).then(() => true, () => false)
-// Only the transcript lookup hangs, so the log (which also asks $.fs.exists) still works.
-const slowLookup = h => {
+// Only the transcript lookup answers differently, so the log (which also asks $.fs.exists) still works. `answer` gives
+// that lookup's reply: a promise that never settles (a hung lookup), or false (no transcript).
+const lookupOverride = (h, answer) => {
   const exists = h.$.fs.exists
-  h.$.fs.exists = p => (p === transcriptOf(h) ? new Promise(() => {}) : exists(p))
+  h.$.fs.exists = p => (p === transcriptOf(h) ? answer() : exists(p))
 }
+const slowLookup = h => lookupOverride(h, () => new Promise(() => {}))
+const missingLookup = h => lookupOverride(h, () => false)
 
 await test('turn.complete trigger 6: a transcript lookup slower than its 500 ms bound still writes a SKIP line and judges nothing', async () => {
   const h = await load(host())
@@ -420,6 +423,154 @@ await test('turn.complete trigger 7: a hung transcript lookup holds next(e) unti
   assert.equal(await within(fire(fast, 'turn.complete', turnEvent(), NEXT), 400, 'a fast lookup was held for the full wait'), NEXT)
   assert.match(allLog(fast), /^\S+ STOP seen /m, 'a fast lookup returned with no STOP seen line in the log')
   assert.doesNotMatch(allLog(fast), /SKIP /, `a fast lookup wrote a SKIP line (returned after ${Date.now() - t1} ms)`)
+})
+
+// ---- the transcript fallback (decision decision-watch-finds-transcript). When the mod's own derived path misses, the mod
+// still hands the turn to the script, and the script finds the transcript by session id. The script also owns the
+// once-per-session UNKNOWN, so the mod keeps no seen state of its own.
+
+const FLAG_MODEL = () => ({ isAnswered: true, text: FLAG_REPLY, usage: {} })
+// A cwd whose project folder the app shortens: the mod derives the long name, and the file sits under a stand-in name.
+const LONG_CWD = '/work/' + 'r'.repeat(260)
+const SHORT_FOLDER = 'app-folder-after-truncation'
+// A cwd with one character outside the Basic Multilingual Plane (U+1F600). The mod folds each UTF-16 unit to "-", so the
+// emoji becomes two dashes; the script folds each code point, so it becomes one. The repo does not record the app's rule,
+// so the non-BMP case accepts either fold.
+const NON_BMP_CWD = '/x/\u{1F600}y'
+
+// The script when it looks for the transcript (decision_watch.py): it finds a transcript filed under the session id in any
+// project folder. With none found it prints one UNKNOWN per session. Its mark lives in h.noTranscriptSeen, which the host
+// keeps across a mod reload. A session with no id is never marked, so it is told on every turn.
+// With explicitRuns, a spawn carrying DW_EXPLICIT=1 (a /dw the owner asked for) is told the UNKNOWN on every miss and
+// writes no mark (the explicit-run marker, decision-watch.test.mjs /dw cases below).
+function scriptNoTranscript(h, { explicitRuns = false } = {}) {
+  return (argv, o) => {
+    const stdin = JSON.parse(o.stdin || '{}')
+    if (!argv.includes('--emit-prompt')) return { exitCode: 2, stdout: '', stderr: 'fake python: unknown argv' }
+    if ([...h.files.keys()].some(p => p.endsWith('/' + stdin.session_id + '.jsonl'))) return defaultPython(h, argv, o)
+    h.noTranscriptSeen ??= new Set()
+    const key = `${o.env.CLAUDE_CONFIG_DIR}|${stdin.session_id}`
+    const explicit = explicitRuns && o.env.DW_EXPLICIT === '1'
+    if (!explicit && stdin.session_id && h.noTranscriptSeen.has(key)) return { exitCode: 0, stdout: '', stderr: '' }
+    if (!explicit && stdin.session_id) h.noTranscriptSeen.add(key)
+    return out({ systemMessage: UNKNOWN + `transcript_path is missing or does not exist (tried: ${stdin.transcript_path}), and no transcript was found under session id ${stdin.session_id || '(none given)'}.` })
+  }
+}
+
+// One turn, done once its STOP seen line is written. The judge after it is promise steps only, so one flush drains it.
+const turnDone = async (h, turnId) => {
+  const stopSeen = waitLog(h, /STOP seen/)
+  await fire(h, 'turn.complete', turnEvent({ turnId }), {})
+  await stopSeen
+  await flush()
+}
+
+await test('turn.complete fallback: a transcript the mod path misses is judged by the script, and its FLAG shows', async () => {
+  const h = await load(host({ cwd: LONG_CWD, model: FLAG_MODEL }))
+  missingLookup(h)
+  h.py1 = scriptNoTranscript(h)
+  h.files.set(`${REAL_CFG}/projects/${SHORT_FOLDER}/${SID}.jsonl`, '{}\n')
+  await turnDone(h, 't1')
+  same(emits(h).length, 1, 'script calls asking for a prompt, when the mod path misses')
+  assert.ok(!h.toasts.some(t => t.includes('No transcript found')), `the mod said the turn was not judged: ${JSON.stringify(h.toasts)}`)
+  assert.ok(h.toasts.includes(FLAG), `the script's FLAG did not show: ${JSON.stringify(h.toasts)}`)
+})
+
+await test('/dw fallback: a transcript the mod path misses is judged by the script, and its FLAG shows', async () => {
+  const h = await load(host({ cwd: LONG_CWD, model: FLAG_MODEL }))
+  missingLookup(h)
+  h.py1 = scriptNoTranscript(h)
+  h.files.set(`${REAL_CFG}/projects/${SHORT_FOLDER}/${SID}.jsonl`, '{}\n')
+  const r = await dwRun(h)
+  same(emits(h).length, 1, 'script calls asking for a prompt, when the mod path misses')
+  assert.ok(shown(h, r).includes(FLAG), `the /dw result did not show the FLAG: ${tail(shown(h, r))}`)
+})
+
+await test('turn.complete no transcript anywhere: one UNKNOWN on the first turn, none after it, and none after a mod reload', async () => {
+  const h = host()
+  missingLookup(h)
+  h.py1 = scriptNoTranscript(h)
+  await load(h)
+  await turnDone(h, 't1')
+  same(h.toasts.length, 1, 'notices after the first turn')
+  assert.ok(h.toasts[0].startsWith(UNKNOWN), `the notice is not an UNKNOWN: ${JSON.stringify(h.toasts[0])}`)
+  await turnDone(h, 't2')
+  same(h.toasts.length, 1, 'notices after the second turn of the same session')
+  h.hooks.length = 0 // a mod reload: a new module instance, with the host and the session unchanged
+  await load(h)
+  await turnDone(h, 't3')
+  same(h.toasts.length, 1, 'notices after a mod reload of the same session (the seen mark must live outside the mod)')
+})
+
+// ---- /dw after a missed transcript. A /dw the owner asked for shows the UNKNOWN on every miss. The /dw spawn carries
+// DW_EXPLICIT=1, the explicit-run marker the script reads. The background judge keeps its once-per-session mark in its
+// own state folder, so a /dw neither consumes nor resets it.
+
+await test('/dw twice in one session, transcript missing: both show the UNKNOWN naming the path, each spawn marked explicit', async () => {
+  const h = await load(host())
+  missingLookup(h)
+  h.py1 = scriptNoTranscript(h, { explicitRuns: true })
+  const markers = []
+  const runDw = async () => {
+    const text = shown(h, await dwRun(h))
+    markers.push(emits(h).map(p => p.opts.env.DW_EXPLICIT))
+    h.procs.length = 0
+    return text
+  }
+  const first = await runDw()
+  const second = await runDw()
+  assert.ok(first.includes(UNKNOWN) && first.includes(TRANSCRIPT), `the first /dw did not show the UNKNOWN naming the path: ${tail(first)}`)
+  assert.ok(second.includes(UNKNOWN) && second.includes(TRANSCRIPT), `the second /dw did not show the UNKNOWN naming the path: ${tail(second)}`)
+  same(markers, [['1'], ['1']], 'the explicit-run marker on each /dw spawn')
+})
+
+await test('/dw after the background judge showed its UNKNOWN: /dw still shows the UNKNOWN', async () => {
+  const h = await load(host())
+  missingLookup(h)
+  h.py1 = scriptNoTranscript(h, { explicitRuns: true })
+  await turnDone(h, 't1')
+  same(h.toasts.length, 1, 'background notices after its first turn')
+  assert.ok(h.toasts[0].startsWith(UNKNOWN), `the background notice is not an UNKNOWN: ${JSON.stringify(h.toasts[0])}`)
+  const text = shown(h, await dwRun(h))
+  assert.ok(text.includes(UNKNOWN) && text.includes(TRANSCRIPT), `the /dw after the background UNKNOWN did not show it: ${tail(text)}`)
+})
+
+await test('a /dw UNKNOWN, then the background judge: the background still shows its own UNKNOWN once', async () => {
+  const h = await load(host())
+  missingLookup(h)
+  h.py1 = scriptNoTranscript(h, { explicitRuns: true })
+  const dwText = shown(h, await dwRun(h))
+  assert.ok(dwText.includes(UNKNOWN), `the /dw did not show the UNKNOWN: ${tail(dwText)}`)
+  await turnDone(h, 't1')
+  same(h.toasts.length, 1, 'background notices after the first turn, following a /dw')
+  assert.ok(h.toasts[0].startsWith(UNKNOWN), `the background notice is not an UNKNOWN: ${JSON.stringify(h.toasts[0])}`)
+  await turnDone(h, 't2')
+  same(h.toasts.length, 1, 'background notices after the second turn of the same session')
+})
+
+await test('turn.complete no session id: the UNKNOWN shows on every turn, the mod keeps no mark for an empty id', async () => {
+  const h = host({ sid: '' })
+  await load(h)
+  missingLookup(h)
+  h.py1 = scriptNoTranscript(h)
+  await turnDone(h, 't1')
+  same(h.toasts.length, 1, 'notices after the first turn with no session id')
+  await turnDone(h, 't2')
+  same(h.toasts.length, 2, 'notices after the second turn with no session id')
+})
+
+await test('turn.complete non-BMP cwd: a transcript filed under the other fold of the folder name is judged', async () => {
+  const h = await load(host({ cwd: NON_BMP_CWD, model: FLAG_MODEL }))
+  const modFold = NON_BMP_CWD.replace(/[^A-Za-z0-9]/g, '-')
+  const scriptFold = NON_BMP_CWD.replace(/[^A-Za-z0-9]/gu, '-')
+  assert.notEqual(scriptFold, modFold, 'the two folds are the same, so the case tests nothing')
+  missingLookup(h)
+  h.py1 = scriptNoTranscript(h)
+  h.files.set(`${REAL_CFG}/projects/${scriptFold}/${SID}.jsonl`, '{}\n')
+  await turnDone(h, 't1')
+  same(emits(h).length, 1, 'script calls asking for a prompt, when the mod fold misses')
+  assert.ok(!h.toasts.some(t => t.includes('No transcript found')), `the mod said the turn was not judged: ${JSON.stringify(h.toasts)}`)
+  assert.ok(h.toasts.includes(FLAG), `the script's FLAG did not show: ${JSON.stringify(h.toasts)}`)
 })
 
 // /clear gives the process a new session id with no session.start (SessionEndInput and the session.start note in the
