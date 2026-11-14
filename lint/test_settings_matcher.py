@@ -261,11 +261,12 @@ class Matcher(unittest.TestCase):
                         "no guard matcher covers ArtifactComments: %r" % matchers)
 
     def test_guard_matcher_covers_trust_card_tools(self):
-        # Rule trust-card-in-build refuses these two calls in a cs-build session, so the first guard.py
-        # matcher must fire on both full tool names.
+        # Rule trust-card-in-build refuses these calls in a cs-build session, so the first guard.py
+        # matcher must fire on each full tool name.
         matcher = guard_matchers()[0]
         for tool in ("mcp__claude-code-remote__confirm_repository_trust",
-                     "mcp__claude-code-remote__request_computer_folder"):
+                     "mcp__claude-code-remote__request_computer_folder",
+                     "mcp__claude-code-remote__update_trigger"):
             with self.subTest(tool=tool):
                 self.assertTrue(re.fullmatch(matcher, tool), "the first guard matcher does not cover %s: %r" % (tool, matcher))
 

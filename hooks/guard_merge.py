@@ -1381,7 +1381,7 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
 
 
 TRUST_TOOLS = ("mcp__claude-code-remote__confirm_repository_trust", "mcp__claude-code-remote__request_computer_folder")
-# An owner-approval card: update_trigger with ask_owner true shows the owner a card to allow that exact call.
+# An owner-approval card: update_trigger with ask_owner set (any value but absent, null or false: a server may coerce a string or number) shows the owner a card to allow that exact call.
 OWNER_CARD_TOOL = "mcp__claude-code-remote__update_trigger"
 TRUST_REASON = (
     "trust-card-in-build: this call opens an owner card that blocks every message into the session, and "
@@ -1396,7 +1396,7 @@ def trust_card_hit(tool: str, transcript: str, tool_input=None) -> str:
     """Return the tool name when it opens a trust card and the own record does not prove a plain session (no cs-build
     tag and no parent: a session with a parent is a lane, R13 point 4), else ''. Fails closed: any error in the
     reads is a refusal, because the guard-wide crash path fails open."""
-    owner_card = tool == OWNER_CARD_TOOL and isinstance(tool_input, dict) and tool_input.get("ask_owner") is True
+    owner_card = tool == OWNER_CARD_TOOL and isinstance(tool_input, dict) and tool_input.get("ask_owner") not in (None, False)
     if tool not in TRUST_TOOLS and not owner_card:
         return ""
     try:  # cost: one transcript read, only on a card call

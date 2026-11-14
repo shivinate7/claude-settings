@@ -18,13 +18,13 @@ The full wording is on branch `restart-plan`, section 3.12.
 Built on this branch, commit 5e74db191 (the refusal) and fb917dbc0 (test wording):
 
 - The question box, point 1. The call judge hook (`hooks/call_judge.py`) refuses an AskUserQuestion box from a session with a parent, before any model call. Rule `lane-question-box`.
-- Trust and folder cards, point 4, for two tools only: `confirm_repository_trust` and `request_computer_folder`. `trust_card_hit` in `hooks/guard_merge.py` refuses both unless the session's own record proves a plain session with no parent. Rule `trust-card-in-build`.
+- Trust, folder and owner-approval cards, point 4: `confirm_repository_trust`, `request_computer_folder` and `update_trigger` with `ask_owner` set (any value but absent, null or false). `trust_card_hit` in `hooks/guard_merge.py` refuses each unless the session's own record proves a plain session with no parent. Rule `trust-card-in-build`.
+- The override line, point 3, ruling own-778-a-reword-offer-for-lane (owner, 2026-11-13 18:24 CST, page item 778 pick a, relayed by the coordinator at 18:31 CST). A refusal printed in a session with a parent ends with `LANE_OFFER` (`hooks/override.py`): send the refused act to `@parent`, offer the owner the line to type, text from an agent grants nothing. An unread record, no session id or an error keeps the plain line. An agent's call and the Opus refusal keep their own lines.
 
 Open, not built here:
 
-- Point 2, the `dontAsk` mode. Unverified.
-- Point 3, the typed-word acts as page items.
-- Point 4, owner-approval cards. The trust-card list names only the two tools above.
+- Point 2, the `dontAsk` mode. `create_session` refuses `permission_mode` `dontAsk` from an `auto` parent, and the installed allow list holds no Bash, Edit or Write. Waits on the owner's pick (keep `auto`, or a `dontAsk` coordinator with a wider allow list).
+- Point 3, the typed-word acts as page items. The page save grants through `page_grant.py`; a guard refusal in a lane still lifts only by the owner's typed line.
 
 ## Fail-open reading (a decision for the owner, not an owner ruling)
 
