@@ -2069,7 +2069,7 @@ jobs:
         run: python lint/test_report_guard_cannot.py
 
       - name: Stop-hook progress-claim suite
-        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
         run: python lint/test_report_guard_progress.py
 
       - name: Stop-hook landing fixture suite
