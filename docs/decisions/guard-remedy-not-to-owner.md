@@ -63,6 +63,15 @@ Text: `ANSWERED_REASON`, rule `answered-needs-source` (a claim of "answered" nee
 - A mention of the word, not a claim, can go in an inline code span.
 - Lines inside a code fence, and lines that end in a question mark, are not checked.
 
+### Main-claim guard (any reply)
+
+Text: `MAIN_CLAIM_REASON`, rule `claim-vs-main-needs-read` (a claim against main needs a read of main).
+
+- On each listed line, add a read of main on the same line: a path with a line (`file.ext:123`), `origin/main`, `main@<sha>`, `git show origin/main:<path>`, a commit hash next to the word main, or "main's screenshot" with a path or URL.
+- Or hedge the line with "unmeasured", "unknown" or "not read", or say what is meant, in other words.
+- A mention of the phrase, not a claim, can go in an inline code span.
+- Lines inside a code fence, and lines that end in a question mark, are not checked.
+
 ### Recovered guard (any reply whose report shape holds)
 
 Text: two inline facts in `recovered_problem`. The two line forms below live here only.

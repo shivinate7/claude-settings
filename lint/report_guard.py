@@ -592,8 +592,9 @@ def report_shape_ok(text):
 # A ref is `#12`, `PR 12`, a /pull/N or /commit/<sha> URL, or a hex sha of 6 to 40 digits that
 # holds at least one digit (so a plain word like "added" is not a sha).
 DONE_KIND_RE = re.compile(r"\b(?:BUILT|RECORDED|OTHER)\b")
+DONE_HEX = r"\b(?=[0-9a-f]*\d)[0-9a-f]{6,40}\b"
 DONE_REF_RE = re.compile(
-    r"(?:#\d+|\bPRs?\s*#?\d+|/pull/\d+|/commit/[0-9a-f]{6,40}|\b(?=[0-9a-f]*\d)[0-9a-f]{6,40}\b)")
+    r"(?:#\d+|\bPRs?\s*#?\d+|/pull/\d+|/commit/[0-9a-f]{6,40}|" + DONE_HEX + r")")
 BULLET_RE = re.compile(r"^(?:[-*+]|\d+[.)])\s+")
 
 
@@ -745,6 +746,65 @@ def answered_problem(text):
             continue
         bad.append(body)
     return ANSWERED_REASON + "".join("\n- " + b for b in bad) if bad else ""
+
+
+# claim-vs-main-needs-read: a reply line that says how the work compares with main cites a read of main on that line.
+# It extends answered-needs-source: the same line reader (_prose_lines), code-span strip (CODE_SPAN) and hash pattern
+# (DONE_HEX, the hex part of DONE_REF_RE). A claim form is a phrase of whole words; a hyphen joins words into a name,
+# so "not-worse-than-main" is no form. Emphasis marks at word edges (`*`, `**`, `_`, `__`: CANNOT_EMPHASIS_RE) are
+# removed and a code span that holds only `main` is read as the word, so neither hides a form; a snake_case name keeps
+# its underscores. `main` before `.<letter>` or `(` is a file or call name (main.py, main()). "main's own" is a claim
+# only after a copula, or before a clause mark, a closing bracket or quote, a dash or the line end ("main's own CI" is
+# no claim).
+# "regression test(s)", "regression suite(s)" and "regression testing" are nouns for a test count, not a claim. A hedge
+# word on the line exempts it. A cite is one of a closed list, found anywhere on the line with code spans unwrapped.
+_W = r"(?<![\w-])"  # the start of a whole word: no letter, digit, underscore or hyphen before
+_MAIN = r"main(?![\w-])"
+_MAIN_REF = r"(?:the\s+)?" + _MAIN + r"(?!\.[A-Za-z])(?!\()"
+_OWN = r"main['\u2019]s\s+own(?![\w-])"
+MAIN_CLAIM_RE = re.compile(
+    _W + r"(?:not\s+a\s+regression|no\s+regressions?)(?![\w-])(?!\s+(?:testing|tests?|suites?)\b)"
+    r"|" + _W + r"(?:worse\s+than|same\s+as|already\s+on|pre-?existing\s+on|matches|regressions?\s+from)\s+" + _MAIN_REF +
+    r"|" + _W + r"(?:is|are|was|were|be)\s+" + _OWN +
+    r"|" + _W + _OWN + r"(?=\s*(?:[.,;:)\]–—]|$)|[\"'”’](?!\w)|\s+-{1,2}(?:\s|$))", re.I)
+MAIN_HEDGE_RE = re.compile(_W + r"(?:unmeasured|unknown|not\s+read)(?![\w-])", re.I)
+_SHA_LETTER = r"(?=\d*[a-f])"  # a cited hash holds a letter, so a date such as 20261112 is no hash
+_CITE_SHA = _SHA_LETTER + DONE_HEX
+MAIN_CITE_RE = re.compile(
+    r"\b[\w/-]+\.[A-Za-z]\w{0,7}:\d+\b"
+    r"|(?<![\w/-])origin/main(?![\w-])"
+    r"|\bgit\s+show\s+(?:origin/)?main:"
+    r"|" + _W + r"main(?:['\u2019]s)?\s*(?:@|at\s+|commit\s+)?\s*" + _CITE_SHA +
+    r"|" + _CITE_SHA + r"\s+(?:on|of|from|in)\s+" + _MAIN, re.I)
+MAIN_SHOT_RE = re.compile(_W + r"main(?:['\u2019]s)?\s+screenshot(?![\w-])", re.I)
+MAIN_SHOT_SOURCE_RE = re.compile(r"https?://\S+|[\w.-]+/[\w./-]*\.\w+")
+MAIN_CLAIM_REASON = owner_line(
+    "Main-claim guard (rule claim-vs-main-needs-read)",
+    "each line below says how the work compares with main and cites no read of main on the line; "
+    "a hedge word (unmeasured, unknown, not read), a question, a fence and an inline code span are no claim") + " Lines: "
+
+
+def _cites_main_read(kept):
+    """True when `kept` (a line with its code spans unwrapped) holds one of the closed cite forms."""
+    if MAIN_CITE_RE.search(kept):
+        return True
+    return bool(MAIN_SHOT_RE.search(kept) and MAIN_SHOT_SOURCE_RE.search(kept))
+
+
+def main_claim_problem(text):
+    """The refusal for reply lines that claim a state against main with no read of main on the line, else ''."""
+    if not re.search(r"main|regression", text, re.I):
+        return ""
+    bad = []
+    for body in _prose_lines(text):
+        plain = CANNOT_EMPHASIS_RE.sub(
+            "", CODE_SPAN.sub(lambda m: "main" if m.group(2).strip().lower() == "main" else " ", body))
+        if not MAIN_CLAIM_RE.search(plain) or MAIN_HEDGE_RE.search(plain):
+            continue
+        if _cites_main_read(CODE_SPAN.sub(lambda m: m.group(2), body)):
+            continue
+        bad.append(body)
+    return MAIN_CLAIM_REASON + "".join("\n- " + b for b in bad) if bad else ""
 
 
 # reports-done-names-models: a Done item that agents built or reviewed names each one's role
@@ -2807,6 +2867,9 @@ def rewrite_problems(hook):
         answered = answered_problem(text)
         if answered:
             reasons.append(answered)
+        claim = main_claim_problem(text)
+        if claim:
+            reasons.append(claim)
         recovered = recovered_problem(records, text) if report_shape_ok(text) else ""
         if recovered:
             reasons.append(recovered)
@@ -3379,6 +3442,7 @@ def main():
         relay = relay_reasons(after, text, hook.get("cwd"))
         try:
             relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
+            relay.append(main_claim_problem(text))
         except Exception:
             pass
     cannot = ""
