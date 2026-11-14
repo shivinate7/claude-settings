@@ -131,7 +131,9 @@
                           checks, push the page, ask the host to mark the PR ready) and nothing more. A PR that is ready already is left as it is. It
                           never merges, takes no lock and needs no merge role. A red head or a head that conflicts with the base is not marked ready.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
-                          runs only when that role is recorded for the session (read_merge_role).
+                          runs only when that role is recorded for the session (read_merge_role). A local session reads the role the launcher
+                          (bin/claude-role) recorded in its role file instead: once any role file exists, `--confirm` runs only for a session whose
+                          file names batch-runner. With no role file, a local `--confirm` is as it was.
 
 Git half: the merge lock, the temporary worktree, the claim, the push, the revert, resume, the
 local base branch, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
@@ -4236,11 +4238,19 @@ def role_path():
     return pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")) / "state" / "merge-role.json"
 
 def read_merge_role():
-    """This session's recorded merge role, or None: no session id, no file, unreadable or malformed, another session's, or a tier outside MERGE_ROLES.
+    """This session's recorded merge role, or None: no session id (cloud, else the local CLAUDE_CODE_SESSION_ID with the launcher's file), no file, unreadable or malformed, another session's, or a tier outside MERGE_ROLES.
     Every failure is None, so the check fails closed. An absent id never equals an absent record."""
     sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
     if not sid:
-        return None
+        if os.environ.get("CLAUDE_CODE_REMOTE") == "true":  # a cloud session with no id has no role, whatever file is on disk
+            return None
+        # no cloud id: a local session reads the role the launcher recorded for its own id (hooks/session_role.py, the one reader)
+        try:
+            import session_role
+            role = session_role.own_role(os.environ.get("CLAUDE_CODE_SESSION_ID"))
+        except Exception:
+            return None
+        return role if role in MERGE_ROLES else None
     try:
         data = json.loads(role_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):  # UnicodeDecodeError and JSONDecodeError are ValueErrors
@@ -4249,6 +4259,19 @@ def read_merge_role():
         return None
     role = data.get("role")
     return role if isinstance(role, str) and role in MERGE_ROLES else None  # a list is unhashable: test the type first
+
+LOCAL_ROLE_REFUSAL = "this session may not merge: the launcher recorded no batch-runner role for it. Start the batch runner with `claude-role batch-runner`. Nothing was claimed or pushed. " + ROLE_CITE
+
+def local_role_allows_confirm():
+    """A local session's confirm gate: False when the launcher's role files are in use (hooks/session_role.py roles_in_use) and this session's own
+    file does not name a MERGE_ROLES role (read_merge_role). An absent id, another session's file, a bad file and any other role are each a refusal.
+    With no role file at all nothing is judged and today's local behaviour stands. Fails closed: a reader that cannot load or run is a refusal,
+    since the caller's crash path would otherwise let the confirm through."""
+    try:
+        import session_role  # hooks/session_role.py, on sys.path from the top of this file
+        return not session_role.roles_in_use() or read_merge_role() is not None
+    except Exception:
+        return False
 
 def write_merge_role(tier):
     """Record `tier` as this cloud session's merge role. Refuses outside the cloud, with no session id, or for a tier outside MERGE_ROLES; nothing is written then."""
@@ -4507,6 +4530,8 @@ def main(argv, host=None, lock=None, hosts=None):
             return 0 if ok else 1
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
             raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
+        if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") != "true" and not local_role_allows_confirm():  # a local session the launcher started; before any host read or lock
+            raise Stop(LOCAL_ROLE_REFUSAL)
         if a.confirm and not a.head and read_merge_role() == "batch-runner":  # before the lock, a claim or any write
             raise Stop(BATCH_RUNNER_NEEDS_HEAD)
         c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=a.repo_dir)
