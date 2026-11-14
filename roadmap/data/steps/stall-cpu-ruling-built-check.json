@@ -1,0 +1,14 @@
+{
+ "id": "stall-cpu-ruling-built-check",
+ "title": "Check that the stall watcher's CPU-time reading (ruling own-stall-beat-and-cpu-b) is built and live",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Runner 10 22:21 CST Nov 13: its two false \"failed\" reports on quiet batch builds (batch 138, batch 139 fourth build) were about 13:50 CST, before the owner's 14:09 CST ruling, and it saw none since (unmeasured after 14:09).",
+ "source": "Runner 10 22:21 CST Nov 13 (relayed); ruling own-stall-beat-and-cpu-b; #3272 partial fix.",
+ "note": "Triage 22:22 CST Nov 13: not an owner question. Read whether the watcher reads the CPU time of the job's process tree on main and in the installed copy, and whether a quiet tree with advancing CPU gives no STALL while a quiet tree with no CPU still does (the playwright lock-wait hang). Done check: the read, with the test or the live run named. Files beside #3272's partial fix.",
+ "updatedAt": "2026-11-13T22:22:09-06:00"
+}

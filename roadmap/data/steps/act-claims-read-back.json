@@ -1,0 +1,14 @@
+{
+ "id": "act-claims-read-back",
+ "title": "A report line that says an act happened names its proof, and a check reads that the proof exists",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 22:20 CST Nov 13 (relayed by the consultant, triage did not see it): it should be confirmed when any session says it marked or sent something that it really happened; he thinks it touches something already agreed. Incidents tonight, as the consultant lists them (unchecked): runner 10's stale \"lint PASS isn't on the PR\"; the coordinator reported closures it had not read (19:57); triage relayed a message it never received (21:27).",
+ "source": "Consultant 22:21 CST Nov 13 (quoting the owner); touches global rules verification-verify-against-repo and verification-report-unknown-reads.",
+ "note": "Triage 22:22 CST Nov 13: guard idea, not built. Check as the consultant states it: a report line that says an act happened (sent, filed, marked ready, closed, merged, posted) names its proof (send_message \"delivered\", step id on origin/roadmap, PR state by REST, comment id), and lint/report_guard.py reads that the named home exists; otherwise the line must say \"unconfirmed\". Red case first. The consultant says no mechanism holds those two rules for acts; unchecked by triage. Triage owns one of the three incidents (21:27) and names this as the guard that would have stopped it. Needs a past-ruling and guard-record read, and the false-alarm cost on report_guard.py measured, before any build.",
+ "updatedAt": "2026-11-13T22:22:09-06:00"
+}
