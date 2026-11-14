@@ -940,9 +940,16 @@ def red_run_reason(matched):
     names. A flagged commit that is not the tip (a commit under a merge at the tip included) prints the trailer line
     of `REMEDY` and RED_RUN_BELOW_FIX in place of the amend, which reaches only the tip. A rewritten branch
     (`rewritten`) prints RED_RUN_PUSHED_FIX alone: no command rewrites pushed history."""
-    found, tip, rewritten = matched
+    try:
+        found, tip, rewritten = matched
+        found = [tuple(row) for row in found]
+        if not found or any(len(row) != 3 for row in found):
+            raise ValueError("not a red-run hit")
+    except (TypeError, ValueError):
+        # conflict_markers_hit never builds this shape; the deny check still answers, with the remedy and no rows.
+        found, tip, rewritten = [], "", False
     check_red_run = _red_run_module()
-    rows = ["%s %s: adds lines to %s" % row for row in found[:RED_RUN_SHOWN]]
+    rows = ["%s %s: adds lines to %s" % row for row in found[:RED_RUN_SHOWN]] or ["a pushed test commit"]
     more = " and %d more" % (len(found) - RED_RUN_SHOWN) if len(found) > RED_RUN_SHOWN else ""
     lines = [line.removeprefix("check_red_run: ")[:1].upper() + line.removeprefix("check_red_run: ")[1:]
              for line in check_red_run.REMEDY[:2]]
