@@ -1,0 +1,14 @@
+{
+ "id": "ready-checks-time-bound",
+ "title": "Every check inside `merge --ready` has a time bound that fails loudly with the check's name, and the other merge commands are listed and bounded where a bound cannot turn a slow-but-valid run into a false red",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL1zex2fcg7eMBTeQBx",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Ask (consultant 14:18 CST, relayed by the coordinator 14:25; triage read no code): every check inside `merge --ready` gets a time bound that fails loudly with the check's name; red test first with a hanging stub. List each unbounded call in `merge --reviewed`, the release check, `merge <pr> --confirm` and `merge --lane-lint`, and bound each only where a bound cannot turn a slow-but-valid run into a false red. Lane started 14:18 CST: session_013NEJL1zex2fcg7eMBTeQBx (Sonnet, medium, owner coordinator). It sends the coordinator a `Departs from:` line before it builds bound values, with numbers from its own measure and n. Kin: ready-step-hang-no-timeout (the heartbeat lane edits lint/check_debt_retire.py only), merge-tool-beats-every-phase. Evidence behind the ask: #3400's five stalls (debt-close lint, up to 30 min silent), 90 min of runner 10 time, n=1 PR. A bound that turns a slow-but-valid run into a red is a false alarm: the rule is verification-cry-wolf-guard-is-spent. A bound that changes a verdict makes this a check change: round 3 applies.",
+ "source": "consultant 14:18 CST via coordinator 14:25 CST Nov 14",
+ "note": "Filed 14:18 CST Nov 14 by triage. Lane running. Owner: the coordinator.",
+ "updatedAt": "2026-11-14T14:18:30"
+}
