@@ -55,7 +55,8 @@ def watched(path):
 detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0
 files = {p: watched(p) for p in WATCH}
 with open(LOG, "a", encoding="utf-8") as f:
-    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached, "files": files}), file=f)
+    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached, "files": files,
+                      "status": git("status", "--porcelain"), "first_parent": git("rev-parse", "--verify", "-q", "HEAD^1")}), file=f)
 if "--plan" in sys.argv:
     for state, name in STEPS:
         print("would run " + name)
@@ -108,6 +109,11 @@ jobs:
 
 def pass_lines(text):
     return [line for line in text.splitlines() if line.startswith("PASS:")]
+
+
+def merge_parents(repo, sha):
+    """-> the parent shas of commit `sha`, read in `repo`. A lint tree shares its repo's object store, so `repo` is the clone the lint ran in."""
+    return tm.sh(repo, "git", "rev-list", "--parents", "-n", "1", sha).split()[1:]
 
 
 def rollup_skip_lines(text):
@@ -241,9 +247,15 @@ class LaneFixture(CiJobStub, tm.CloudSession):
             self.fail("argparse refused the command line: " + last)
         return rc, out + err
 
+    def assert_lint_merge(self, lint_head, head, base, repo=None):
+        """The lint's HEAD is the merge commit of origin/<base> (first parent) and the head (second parent): the lint reads the merged files,
+        and the lane's own commits stay in its history. `repo` is the clone the lint ran in; self.co when not given."""
+        self.assertEqual(merge_parents(repo or self.co, lint_head), [self.head(base), head],
+                         "the lint ran on %s, not on the merge of origin/%s and the head %s" % (lint_head[:9], base, head[:9]))
+
     def lint_run(self, *argv, base="main", head=None, cloud=False):
         """Run merge in the lane checkout. -> (rc, stdout and stderr together). The lint must have run once, as
-        `checks --lint --base origin/<base>`, in a detached tree at the head, and that tree must be gone afterwards."""
+        `checks --lint --base origin/<base>`, detached, on the merge of origin/<base> and the head, and that tree must be gone afterwards."""
         head = head or self.head("feat")
         if os.path.exists(self.log):
             os.remove(self.log)
@@ -252,7 +264,7 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
         run = runs[0]
         self.assertEqual(run["argv"], ["checks", "--lint", "--base", "origin/" + base])
-        self.assertEqual(run["head"], head)
+        self.assert_lint_merge(run["head"], head, base)
         self.assertTrue(run["detached"], "the lint ran on a branch, not a detached tree")
         self.assertNotEqual(run["cwd"], os.path.realpath(self.co), "the lint ran in the lane checkout")
         self.assertFalse(os.path.exists(run["cwd"]), "the lint tree is still on disk")
@@ -272,6 +284,11 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         tm.sh(o, "git", "merge", "-q", "--no-ff", "-m", "merge %s into feat" % ref, ref)
         tm.sh(o, "git", "push", "-q", "origin", "feat")
         return self.head("feat")
+
+    def listed(self, ref, path):
+        """-> `path` when `ref` (a rev, such as origin/main) holds it, else "". The lane checkout fetches origin first."""
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+        return tm.sh(self.co, "git", "ls-tree", "--name-only", ref, "--", path)
 
 
 class LaneLint(LaneFixture):
@@ -658,7 +675,7 @@ class LaneLint(LaneFixture):
         self.assertEqual(rc, 0, "lane_lint refused after GitHub showed the pushed head: " + text)
         runs = self.lint_calls()
         self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
-        self.assertEqual(runs[0]["head"], pushed, "the lint ran on a head other than the pushed one")
+        self.assert_lint_merge(runs[0]["head"], pushed, "main")
         self.assertEqual(len(pass_lines(text)), 1, text)
 
     def test_lane_lint_refuses_after_a_bounded_wait_when_github_never_shows_the_pushed_head(self):
@@ -725,7 +742,7 @@ class LaneLint(LaneFixture):
         self.assertEqual(rc, 0, "lane_lint refused the pushed head after GitHub showed an intermediate head first: " + text)
         runs = self.lint_calls()
         self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
-        self.assertEqual(runs[0]["head"], pushed, "the lint ran on a head other than the pushed one")
+        self.assert_lint_merge(runs[0]["head"], pushed, "main")
         self.assertEqual(len(pass_lines(text)), 1, text)
 
     def stop_run(self, proc):
@@ -2118,6 +2135,74 @@ class TouchedTests(LaneFixture):
         self.assertEqual(len(lines), 1, text)
         self.assertTrue(pass_has_counts(lines[0], 1, 0), "the PASS line does not name 1 run and 0 skipped: " + lines[0])
 
+    MOVED = "lint/test_moved.py"  # a test the batch's head changes and main then renames or deletes
+    MOVED_TO = "lint/test_renamed.py"  # where main renames MOVED
+
+    clash = CrossMeasure.clash  # the merge-tree precondition, read in the second clone: CrossMeasure's
+    assert_conflict_line_names = CrossMeasure.assert_conflict_line_names  # the conflict line names the base: CrossMeasure's
+
+    def rename_on(self, branch, start, old, new):
+        """Move `old` to `new` in one commit on `branch`, cut from `start` in the second clone, and push it. -> the commit's sha."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", branch, start)
+        tm.sh(o, "git", "mv", old, new)
+        tm.sh(o, "git", "commit", "-q", "-m", "%s: %s moves to %s" % (branch, old, new))
+        tm.sh(o, "git", "push", "-q", "origin", branch)
+        return tm.sh(o, "git", "rev-parse", "HEAD")
+
+    def remove_on(self, branch, start, path):
+        """Delete `path` in one commit on `branch`, cut from `start` in the second clone, and push it. -> the commit's sha."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", branch, start)
+        tm.sh(o, "git", "rm", "-q", path)
+        tm.sh(o, "git", "commit", "-q", "-m", "%s: %s deleted" % (branch, path))
+        tm.sh(o, "git", "push", "-q", "origin", branch)
+        return tm.sh(o, "git", "rev-parse", "HEAD")
+
+    def batch_changes_moved(self):
+        """main gains MOVED, and the batch's head (PR 7, the integration of lane-m) changes it. -> the head's sha."""
+        self.push_commit("main", {self.MOVED: logged_test(self.touched_log, self.MOVED, "")})
+        self.push_commit("lane-m", {self.MOVED: logged_test(self.touched_log, self.MOVED, "assert True\n")})
+        return self.push_integration(["lane-m"])
+
+    def test_a_touched_test_that_main_renames_is_skipped_with_a_line_that_says_why(self):
+        head = self.batch_changes_moved()
+        self.rename_on("main", "origin/main", self.MOVED, self.MOVED_TO)
+        self.assertEqual(self.listed("origin/main", self.MOVED), "", "precondition: main still holds the test, so the case probes nothing")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the head does not merge clean with main, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.flagged("--lane-lint", "7", "--touched-tests")
+        self.assertEqual(rc, 0, "--touched-tests refused a batch whose touched test main renamed: " + text)
+        self.assertIn("skip %s: the head changes it, but the merge with main no longer has it" % self.MOVED, text.splitlines(),
+                      "the renamed test prints no skip line that says why it is not run: " + text)
+        self.assertEqual(self.touched_lines(), [], "a test the merge no longer holds ran: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+
+    def test_a_touched_test_that_main_deletes_fails_the_conflict_and_runs_no_step(self):
+        head = self.batch_changes_moved()
+        self.remove_on("main", "origin/main", self.MOVED)
+        self.assertEqual(self.clash(head, "origin/main"), "conflict", "precondition: the head merges clean with main, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.flagged("--lane-lint", "7", "--touched-tests")
+        self.assertEqual(rc, 1, "a touched test that main deletes passed the lane: " + text)
+        self.assertEqual(pass_lines(text), [], "a touched test that main deletes printed a PASS line: " + text)
+        self.assert_conflict_line_names(text, "main", "the refusal")
+        self.assertEqual(self.lint_calls(), [], "the lint ran beside a conflict over a touched test: " + text)
+
+    def test_a_touched_test_the_lane_itself_deletes_prints_no_skip_line(self):  # the control
+        self.push_commit("main", {self.MOVED: logged_test(self.touched_log, self.MOVED, "")})
+        self.remove_on("lane-d", "origin/main", self.MOVED)
+        head = self.push_integration(["lane-d"])
+        self.assertEqual(self.listed(head, self.MOVED), "", "precondition: the head still holds the test the lane deleted, so the case probes nothing")
+        self.assertEqual(self.listed("origin/main", self.MOVED), self.MOVED, "precondition: main lacks the test, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.flagged("--lane-lint", "7", "--touched-tests")
+        self.assertEqual(rc, 0, "--touched-tests refused a batch whose lane deleted a test: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        self.assertNotRegex(text, r"skip %s:" % re.escape(self.MOVED), "a test the lane itself deleted prints a skip line: " + text)
+
 
 def real_ci_steps(names=BATCH_CI_STEPS):
     """(name, CI step text) of `names` in checks.yml's checks job, in file order, read by the shared parser."""
@@ -2275,7 +2360,14 @@ class BatchLintFlags(tm.Env):
         text = out.getvalue()
         self.assertEqual(rc, 0, text)
         self.assertEqual(len(pass_lines(text)), 1, text)
-        values = {"github.base_ref": BASE, "github.event.pull_request.head.sha": head}
+        # ci-job gives each step HEAD as its head sha, and the lint's HEAD is the merge commit, so silent undo is passed that commit, not the head.
+        silent = self.stub_calls(script_of(dict(self.found)["Silent undo check"]))
+        self.assertEqual(len(silent), 1, "the silent undo check ran %d times, want once: %s" % (len(silent), text))
+        self.assertIn("--head", silent[0]["argv"], "the silent undo check was given no --head: " + text)
+        lint_head = silent[0]["argv"][silent[0]["argv"].index("--head") + 1]
+        self.assertEqual(merge_parents(self.co, lint_head), [self.head(BASE), head],
+                         "the silent undo check was not passed the merge of origin/%s and the head: %s" % (BASE, text))
+        values = {"github.base_ref": BASE, "github.event.pull_request.head.sha": lint_head}
         for name, ci_step in self.found:
             if name == STE:
                 continue
@@ -2655,6 +2747,10 @@ class LaneLintRepoDir(tm.RepoDirRuns, LaneFixture):
     def b_feat(self):
         return tm.sh(self.b_co, "git", "ls-remote", "origin", "refs/heads/feat").split("\t")[0]
 
+    def b_main(self):
+        """The base tip on the second checkout's own origin, which is not the first checkout's."""
+        return tm.sh(self.b_co, "git", "ls-remote", "origin", "refs/heads/main").split("\t")[0]
+
     def test_without_the_flag_the_lint_cuts_its_worktree_from_the_process_directory(self):
         """A control: with no flag, the process directory is the checkout, and its head is the one linted."""
         self.use_ci_job(PASSING, 0)
@@ -2662,7 +2758,8 @@ class LaneLintRepoDir(tm.RepoDirRuns, LaneFixture):
             os.remove(self.log)
         rc, out, seen = self.run_from(self.b_co, ["--lane-lint", "7"])
         self.assertEqual(rc, 0, out)
-        self.assertEqual([c["head"] for c in self.lint_calls()], [self.b_feat()], "the lint did not run at the process directory's head")
+        self.assertEqual([merge_parents(self.b_co, c["head"]) for c in self.lint_calls()], [[self.b_main(), self.b_feat()]],
+                         "the lint did not run on the merge of main and the process directory's head")
 
     def test_the_lint_cuts_its_worktree_from_the_named_checkout_at_its_head(self):
         self.use_ci_job(PASSING, 0)
@@ -2672,8 +2769,8 @@ class LaneLintRepoDir(tm.RepoDirRuns, LaneFixture):
                     os.remove(self.log)
                 rc, out, seen = self.run_from(self.co, argv)
                 self.assertEqual(rc, 0, out)
-                self.assertEqual([c["head"] for c in self.lint_calls()], [self.b_feat()],
-                                 "the lint did not run at the named checkout's pull request head")
+                self.assertEqual([merge_parents(self.b_co, c["head"]) for c in self.lint_calls()], [[self.b_main(), self.b_feat()]],
+                                 "the lint did not run on the merge of main and the named checkout's pull request head")
 
     def test_the_lint_reads_the_pull_request_through_a_host_in_the_named_checkout(self):
         self.use_ci_job(PASSING, 0)
@@ -3581,11 +3678,6 @@ class MergedLintTree(LaneFixture):
         tm.sh(o, "git", "commit", "-q", "-m", "main deletes " + path)
         tm.sh(o, "git", "push", "-q", "origin", "main")
 
-    def listed(self, ref, path):
-        """-> `path` when `ref` holds it, else "". The lane checkout fetches origin first."""
-        tm.sh(self.co, "git", "fetch", "-q", "origin")
-        return tm.sh(self.co, "git", "ls-tree", "--name-only", ref, "--", path)
-
     def file_on(self, ref, path):
         """-> the text of `path` on origin's branch `ref`, newlines kept. Env.show strips its output, and the lint's copy keeps them."""
         tm.sh(self.co, "git", "fetch", "-q", "origin")
@@ -3658,22 +3750,40 @@ class MergedLintTree(LaneFixture):
         self.assertEqual(self.lint_calls()[0]["files"][self.SHARED], "A\nb\nC\n",
                          "the lint did not read the merge of both edits: " + text)
 
-    def test_a_read_tree_that_fails_stops_unknown_naming_the_head_and_base_and_no_reason_lifts_it(self):
-        head = self.main_fix_after_branch()  # the merged tree differs from the head's, so the tree must be read into the lint tree
-        faulted = self.fault_git("read-tree", (1, "error: Entry '%s' not uptodate. Cannot merge." % self.SHARED))
+    def assert_unknown_stop(self, needle):
+        """The git call `needle` of making the merge commit fails. The lint stops UNKNOWN, naming the head and the base, and no
+        --lint-unknown-ok reason lifts it: no step runs, and no PASS line prints."""
+        head = self.main_fix_after_branch()  # the merged tree differs from the head's, so the merge commit must be made and checked out
+        faulted = self.fault_git(needle, (1, "error: %s failed" % needle))
         self.use_ci_job(PASSING, 0)
         rc, text = self.run_lane("--lane-lint", "7")
-        self.assertTrue(faulted, "scope: no read-tree ran, so the fault probes nothing")
-        self.assertEqual(rc, 1, "a read-tree that failed passed the lane: " + text)
-        self.assertEqual(pass_lines(text), [], "a read-tree that failed printed a PASS line: " + text)
-        self.assertRegex(text, r"(?i)unknown", "a read-tree that failed does not stop as unknown: " + text)
-        self.assertIn(head[:7], text, "the refusal does not name the head: " + text)
+        self.assertTrue(faulted, "scope: no %s ran, so the fault probes nothing" % needle)
+        self.assertEqual(rc, 1, "a %s that failed passed the lane: %s" % (needle, text))
+        self.assertEqual(pass_lines(text), [], "a %s that failed printed a PASS line: %s" % (needle, text))
+        self.assertRegex(text, r"(?i)unknown", "a %s that failed does not stop as unknown: %s" % (needle, text))
+        self.assertIn(head[:9], text, "the refusal does not name the head: " + text)
         self.assertRegex(text, r"\bmain\b", "the refusal does not name the base: " + text)
-        self.assertEqual(self.lint_calls(), [], "the lint ran past a read-tree that failed: " + text)
+        self.assertEqual(self.lint_calls(), [], "the lint ran past a %s that failed: %s" % (needle, text))
         rc, text = self.run_lane("--lane-lint", "7", "--lint-unknown-ok", "a reason the lint must not take")
-        self.assertEqual(rc, 1, "--lint-unknown-ok lifted a read-tree that failed: " + text)
-        self.assertEqual(pass_lines(text), [], "--lint-unknown-ok printed a PASS line for a read-tree that failed: " + text)
-        self.assertEqual(self.lint_calls(), [], "the lint ran past a read-tree that failed, with a reason: " + text)
+        self.assertEqual(rc, 1, "--lint-unknown-ok lifted a %s that failed: %s" % (needle, text))
+        self.assertEqual(pass_lines(text), [], "--lint-unknown-ok printed a PASS line for a %s that failed: %s" % (needle, text))
+        self.assertEqual(self.lint_calls(), [], "the lint ran past a %s that failed, with a reason: %s" % (needle, text))
+
+    def test_a_commit_tree_that_fails_stops_unknown_naming_the_head_and_base_and_no_reason_lifts_it(self):
+        self.assert_unknown_stop("commit-tree")
+
+    def test_a_checkout_that_fails_stops_unknown_naming_the_head_and_base_and_no_reason_lifts_it(self):
+        self.assert_unknown_stop("checkout")
+
+    def test_the_lint_tree_is_clean_and_its_first_parent_is_the_base_tip(self):
+        self.main_fix_after_branch()
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
+        self.assertEqual(runs[0]["status"], "", "the lint tree is not clean, so a step that diffs against HEAD reads more than the lane's changes: " + text)
+        self.assertEqual(runs[0]["first_parent"], self.head("main"), "the lint's first parent is not the base tip: " + text)
 
     def test_a_file_main_deleted_is_absent_from_the_copy_the_lint_reads_and_is_not_refused(self):
         self.shared_file(FLOOR_CHECK, LINT_TREE_FILE_TEXT)  # a file the lint tree's refusal checks: main deletes it, the head keeps it
