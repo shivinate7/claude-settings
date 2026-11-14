@@ -56,8 +56,8 @@ grant (decision `agent-model-cap`).
 
 Two optional step fields tell a lane how its step is proved. The brief tool reads them.
 
-- `done_check`: text of the check the lane can run to prove the step done.
-- `ci_only`: `true` means only batch CI proves the step. Any other value is bad.
+- `done_check`: text of the check the lane can run to prove the step done. Absent or null means unset.
+- `ci_only`: `true` means only batch CI proves the step. Absent or null means unset. Any other value is bad.
 
 A bad value shows in the upkeep row `steps with an unreadable done_check or ci_only`. A bad `done_check` is not
 text, or is blank. Triage writes both fields on the roadmap branch.
