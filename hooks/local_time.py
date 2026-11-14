@@ -5,9 +5,12 @@ Modes:
 - UserPromptSubmit: Tells the session the time in US Central, and saves the owner's message to the
   session's inbox file (decision owner-feedback-inbox).
   A prompt whose first word is `override` also grants a one-act owner override, and the rest is the
-  reason, logged to guard.log. `override <n>[m|h]` and `override off` mean that only as the whole prompt.
+  reason, logged to guard.log. `override` plus a length is timed, with no model call: `15m`, `2 hours` or `4h`, with
+  any words after it, or a bare `15` as the whole rest. `override 15 please` is a reason, unless the model call below
+  says yes: then 15 is minutes. `override off` means that only as the whole prompt. A grant prints one receipt line
+  (override_line).
   A plain typed ask that holds the word `override` may grant one too, after a model call
-  (decision owner-override; hooks/override.py). It prints one more line.
+  (decision owner-override; hooks/override.py). A grant by that ask prints its receipt line the same way.
 - --agent: At SubagentStart, gives the agent the time in US Central as context.
 - --page-note: After an ArtifactData read of one waiting-page answer, saves the owner's note on it to the session's inbox, like a chat message (decision owner-feedback-inbox). It prints no time line.
 
@@ -124,7 +127,8 @@ def central_iso(at, seconds=True):
 
 
 def override_line(result):
-    """The context line for a grant() result: names the override and when it ends, Central time."""
+    """The context line for a grant() result, the one receipt of a grant: `Override: one act, ...` or
+    `Override: until HH:MM <zone>`, Central time. A lift prints nothing: its receipt is the guard.log line."""
     kind, until = result[:2]
     if kind == "off":
         return "Override: ended."
@@ -135,8 +139,8 @@ def override_line(result):
         who = "%s spawns" % roles if roles else "spawns"
         return "Opus override: the model-cap refusal is lifted for Opus %s until %s." % (who, central_hhmm(until))
     if kind == "once":
-        return "Override: the next refused act goes through, once. It ends at %s if unused." % central_hhmm(until)
-    return "Override: every refused act goes through until %s." % central_hhmm(until)
+        return "Override: one act, ends at %s if unused." % central_hhmm(until)
+    return "Override: until %s" % central_hhmm(until)
 
 
 def inbox_paths(session_id):
@@ -338,7 +342,7 @@ def page_note(raw):
 
 
 def grant_override(raw, at):
-    """Owner prompt `override`, `override <reason>`, `override <n>[m|h]`, `override off` or the Opus word
+    """Owner prompt `override`, `override <reason>`, `override <length> [words]`, `override off` or the Opus word
     (`opus <n>[m|h]`, `opus <role> <n>[m|h]`, `opus off`; decision owner-override): grants or ends
     the session's override and prints one line. A prompt no keyword form grants goes to
     override.grant_opus_ask, the plain Opus ask (`send opus judges`): one model call, only for an owner prompt
@@ -353,7 +357,8 @@ def grant_override(raw, at):
     try:
         hook = json.loads(raw.decode("utf-8"))
         import override
-        result = override.grant(hook.get("session_id"), hook.get("prompt"), at)
+        result = override.grant(hook.get("session_id"), hook.get("prompt"), at,
+                                transcript=hook.get("transcript_path"), source=hook.get("source"))
         if result is None:
             result = override.grant_opus_ask(hook.get("session_id"), hook.get("prompt"), at,
                                              transcript=hook.get("transcript_path"),

@@ -1351,8 +1351,10 @@ for _label, _check in (
 # The prompt grammar (decision owner-override, the orchestrator's call on the keyword grammar). A
 # punctuation mark after the word, with a space or the end of the prompt after it, separates it from its
 # reason or its length: `override, yes` is a one-act override and `override, 15m` a timed one. A mark run
-# into a word (`override.py`, `override-15m`) belongs to that word and grants nothing. A word after a
-# length or after `off` grants nothing. `override, off` is covered by ov_grammar_off_mark_check.
+# into a word (`override.py`, `override-15m`) belongs to that word and grants nothing. A word after a length
+# with a unit does not change the grant: `override 15m please` is the timed override, on the fast path with no
+# model call. Only `off` is ambiguous (an intended `off` must never grant), so `override off <word>` grants
+# nothing. `override, off` is covered by ov_grammar_off_mark_check.
 # Each row is one prompt, typed in a session of its own at OV_T0. The grant it leaves is "once", "timed"
 # (with minutes) or None for no file. A one-act grant logs its reason, when it has one.
 OV_GRANT_ROWS = (
@@ -1370,8 +1372,8 @@ OV_GRANT_ROWS = (
     ("override: 15m", "timed", 15, None),
     ("overrides", None, None, None),
     ("override15m", None, None, None),
-    ("override 15m please", None, None, None),
-    ("override, 15m please", None, None, None),
+    ("override 15m please", "timed", 15, None),
+    ("override, 15m please", "timed", 15, None),
     ("please override", None, None, None),
     ("override.py is broken", None, None, None),
     ("override-able", None, None, None),
