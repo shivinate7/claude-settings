@@ -83,6 +83,27 @@ class PhaseBeat(unittest.TestCase):
         time.sleep(0.8)
         self.assertEqual(len(self.lines()), n, "no beat after the run returns")
 
+    def test_the_beat_interval_defaults_to_120_seconds(self):
+        """Cost: one append every 120 s at most. The wait between appends is 120 s when MERGE_HEARTBEAT is unset, empty, not a number or not positive."""
+        real_wait = threading.Event.wait
+        for value in (None, "", "soon", "0", "-5"):
+            waits = []
+
+            def recording_wait(self, timeout=None):
+                if timeout is None:  # Thread.start waits on its own event with no limit
+                    return real_wait(self)
+                waits.append(timeout)
+                return True  # the beat thread ends at once, so no append is made
+            env = {k: v for k, v in os.environ.items() if k != "MERGE_HEARTBEAT"}
+            env["STALL_WATCH_BEAT"] = self.beat
+            if value is not None:
+                env["MERGE_HEARTBEAT"] = value
+            with self.subTest(value=value), mock.patch.dict(os.environ, env, clear=True), \
+                    mock.patch.object(threading.Event, "wait", recording_wait), \
+                    mock.patch.object(merge, "build_parser", silent_phase(0)):
+                run_main()
+            self.assertEqual(waits, [120], "MERGE_HEARTBEAT=%r waited %r" % (value, waits))
+
     def test_watcher_draws_no_stall_in_a_silent_phase(self):
         """A job silent for 6 s with a 2 s quiet window and no CPU: the watcher reads the beat and reports no STALL."""
         log = os.path.join(os.path.dirname(self.beat), "log")

@@ -54,7 +54,8 @@ guard rule, so the watcher does the waiting and the session is told once.
   `merge: still working, Ns` to `STALL_WATCH_BEAT` every `MERGE_HEARTBEAT` seconds (default 120), so a silent
   phase of a batch build draws no STALL (batch 138, batch 139 build 4; `merge/test_merge_beat.py`). It does
   nothing when the variable is unset. Cost: at most one thread a run and at most one append every 120 s, no process, pinned by
-  `test_cost_one_thread_and_one_append_per_beat`. Limit: the thread beats while the main thread waits, so a
+  `test_cost_one_thread_and_one_append_per_beat` (one thread, one append per line) and
+  `test_the_beat_interval_defaults_to_120_seconds` (the 120 s wait when the variable is unset, empty, not a number or not positive). Limit: the thread beats while the main thread waits, so a
   merge run hung in a `gh` or `git` call shows life and draws no STALL. Those calls have no timeout in a real run
   (`SH_TIMEOUT` is set only by the guard's preview reads), so nothing bounds it (note `merge-beat-masks-hung-call`;
   how often it happens is unmeasured). The merge tool's own 60 s scan line goes to stdout, the beat to
