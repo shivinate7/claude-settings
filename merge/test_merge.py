@@ -6233,7 +6233,10 @@ class ConfigFile(Env):
 
 class ReadyChecksRun(unittest.TestCase):
     """The draft step's ready checks run through ci-job with --pinned: a child's pin names a claude-settings commit, so the
-    check runs that commit's harness, never the local copy's. The argv keeps its step names and base as before."""
+    check runs that commit's harness, never the local copy's. The argv keeps its step names and base as before.
+    A declared step that the job's workflow lacks reads its own unknown row and is never sent to ci-job (pre_ready_rows)."""
+
+    DEFAULT_JOBS = {"checks": ["check invariants", "records page"]}  # the jobs ci-job runs here, and the workflow in the tree holds
 
     @classmethod
     def setUpClass(cls):
@@ -6241,19 +6244,63 @@ class ReadyChecksRun(unittest.TestCase):
         cls.run_dir = _test_temp.run_folder()  # test-temp-standard: the plain repo below is made in this run's folder
         cls.addClassCleanup(shutil.rmtree, cls.run_dir, True)
 
-    def ci_job_calls(self, checks):
-        """Runs run_ready_checks on a plain repo, with ci-job stubbed to a pass. -> the argv of each ci-job call."""
+    def plain_tree(self, tree, no_workflow=False):
+        """A plain repo whose one commit holds .github/workflows/checks.yml with the jobs and named steps of `tree` ({job: [step names]}),
+        or no workflow file at all. -> its path, in this run's folder."""
         wt = tempfile.mkdtemp(dir=self.run_dir)
         sh(wt, "git", "init", "-q")
         sh(wt, "git", "checkout", "-q", "-B", "main")
-        put(os.path.join(wt, "a.txt"), "a\n"); sh(wt, "git", "add", "-A"); sh(wt, "git", "commit", "-qm", "a")
-        calls, real = [], merge.sh
+        put(os.path.join(wt, "a.txt"), "a\n")
+        if not no_workflow:
+            put(os.path.join(wt, ".github", "workflows", "checks.yml"), workflow_text("checks", *tree, steps=tree))
+        sh(wt, "git", "add", "-A"); sh(wt, "git", "commit", "-qm", "a")
+        return wt
+
+    def fake_ci_job(self, jobs, failing, calls):
+        """The merge.sh stub for bin/ci-job, answering as bin/ci-job does for a --step run. `jobs` ({job: [step names]}) is what ci-job
+        runs: a job it lacks exits 2 with one unknown line; a --step name the job lacks prints one unknown line and no step runs (exit 2);
+        each other --step name prints PASS, or FAIL when it is in `failing`, and the run exits 1 on a FAIL, else 0. Each ci-job argv is
+        appended to `calls`. Every other command runs for real."""
+        real = merge.sh
         def stub(args, *a, **k):
-            if args[1:2] == [merge.CI_JOB]:
-                calls.append(list(args))
-                return 0, "\n".join("PASS " + c for c in checks)  # a step with no line reads unknown (step_verdicts)
-            return real(args, *a, **k)
-        with unittest.mock.patch.object(merge, "sh", stub):
+            if args[1:2] != [merge.CI_JOB]:
+                return real(args, *a, **k)
+            calls.append(list(args))
+            job = args[2]
+            wanted = [args[i + 1] for i, x in enumerate(args) if x == "--step"]
+            if job not in jobs:
+                return 2, f"unknown  no job {job!r} in .github/workflows/checks.yml"
+            absent = [w for w in wanted if w not in jobs[job]]
+            if absent:
+                return 2, "\n".join(f"unknown         --step {w}: no step of job {job!r} has this name" for w in absent)
+            out = [f"FAIL {w}: boom" if w in failing else f"PASS {w}" for w in wanted]
+            return (1 if any(w in failing for w in wanted) else 0), "\n".join(out)
+        return stub
+
+    def ready_rows(self, checks, jobs, tree=None, failing=(), no_workflow=False):
+        """pre_ready_rows on a plain repo, with ci-job stubbed by fake_ci_job. `jobs` is what ci-job runs and `tree` the workflow in the tree
+        (default: `jobs`). -> (rows, state, the printed verdict lines, the ci-job argv of each run)."""
+        wt = self.plain_tree(jobs if tree is None else tree, no_workflow)
+        calls, printed = [], io.StringIO()
+        with unittest.mock.patch.object(merge, "sh", self.fake_ci_job(jobs, failing, calls)), contextlib.redirect_stdout(printed):
+            rows, (state, _, _) = merge.pre_ready_rows(wt, 7, "main", checks, None)
+        return rows, state, printed.getvalue(), calls
+
+    def ready_refusal(self, checks, jobs, tree=None, failing=(), no_workflow=False):
+        """run_ready_checks on a plain repo, with ci-job stubbed as in ready_rows. -> the Stop it raises, or None on a pass."""
+        wt = self.plain_tree(jobs if tree is None else tree, no_workflow)
+        with unittest.mock.patch.object(merge, "sh", self.fake_ci_job(jobs, failing, [])), contextlib.redirect_stdout(io.StringIO()):
+            try:
+                merge.run_ready_checks(wt, 7, "main", checks)
+            except merge.Stop as e:
+                return e
+        return None
+
+    def ci_job_calls(self, checks):
+        """Runs run_ready_checks on a plain repo whose workflow holds the DEFAULT_JOBS steps, with ci-job stubbed. -> the argv of each ci-job call."""
+        wt = self.plain_tree(self.DEFAULT_JOBS)
+        calls = []
+        with unittest.mock.patch.object(merge, "sh", self.fake_ci_job(self.DEFAULT_JOBS, (), calls)):
             merge.run_ready_checks(wt, 7, "main", checks)
         return calls
 
@@ -6267,6 +6314,102 @@ class ReadyChecksRun(unittest.TestCase):
         self.assertEqual(len(calls), 1, calls)
         argv = [a for a in calls[0][2:] if a != "--pinned"]
         self.assertEqual(argv, ["checks", "--step", "check invariants", "--step", "records page", "--base", "origin/main"], calls[0])
+
+    def test_a_declared_step_the_job_lacks_reads_unknown_by_name_and_the_present_one_still_passes(self):  # case 1
+        checks = ["STE lint", "ghost step"]
+        rows, state, printed, calls = self.ready_rows(checks, {"checks": ["STE lint"]})
+        self.assertEqual([name for _, name, _ in rows], checks, "the rows do not name each declared check once: %s" % rows)  # scope first
+        self.assertEqual([[a for a in c[2:] if a != "--pinned"] for c in calls], [["checks", "--step", "STE lint", "--base", "origin/main"]],
+                         "ci-job was sent a --step name the job lacks, so the present step never reads its own line: %s" % calls)
+        self.assertEqual(rows[0], ("pass", "STE lint", ""), "the present step did not read pass by its own line: %s" % rows)
+        self.assertEqual(rows[1], ("unknown", "ghost step", "not run: no step of job 'checks' has this name"),
+                         "the step the job lacks does not read unknown with its cause: %s" % rows)
+        self.assertIn("unknown ghost step: not run: no step of job 'checks' has this name", printed.splitlines(),
+                      "the printed verdict line for the step the job lacks does not carry its cause: %s" % printed)
+        self.assertEqual(state, "unknown", "a run with a step that did not run read %r, not unknown: %s" % (state, rows))
+        refusal = self.ready_refusal(checks, {"checks": ["STE lint"]})
+        self.assertIsInstance(refusal, merge.Stop, "the ready checks did not refuse a run with a step that did not run: %s" % rows)
+        self.assertNotIsInstance(refusal, merge.LintFail, "a step that did not run refused as a FAIL: %s" % refusal)
+        self.assertIn("are unknown, not a pass", str(refusal), "the refusal does not say the run is unknown: %s" % refusal)
+
+    def test_a_failing_declared_step_stays_a_lint_fail_beside_a_step_the_job_lacks(self):  # case 2
+        checks = ["STE lint", "ghost step"]
+        rows, state, printed, calls = self.ready_rows(checks, {"checks": ["STE lint"]}, failing=("STE lint",))
+        self.assertEqual([name for _, name, _ in rows], checks, "the rows do not name each declared check once: %s" % rows)  # scope first
+        self.assertEqual([[a for a in c[2:] if a != "--pinned"] for c in calls], [["checks", "--step", "STE lint", "--base", "origin/main"]],
+                         "ci-job was sent a --step name the job lacks, so the FAIL of the present step never printed: %s" % calls)
+        self.assertEqual(rows[0], ("fail", "STE lint", "boom"), "the FAIL line of the present step did not read fail: %s" % rows)
+        self.assertEqual(rows[1], ("unknown", "ghost step", "not run: no step of job 'checks' has this name"),
+                         "the step the job lacks does not read unknown with its cause: %s" % rows)
+        self.assertEqual(state, "fail", "a FAIL beside a step that did not run read %r, not fail: %s" % (state, rows))
+        refusal = self.ready_refusal(checks, {"checks": ["STE lint"]}, failing=("STE lint",))
+        self.assertIsInstance(refusal, merge.LintFail, "a FAIL beside a step that did not run did not refuse as a LintFail: %s" % refusal)
+
+    def test_a_qualified_step_the_job_lacks_reads_only_its_own_job(self):  # case 3: the #3412 shape, entry checks-rest:<name> absent from checks-rest
+        checks = ["check invariants", "checks-rest:check invariants"]
+        jobs = {"checks": ["check invariants"], "checks-rest": ["records page"]}
+        rows, state, printed, calls = self.ready_rows(checks, jobs)
+        self.assertEqual([name for _, name, _ in rows], checks, "the rows do not name each declared check once: %s" % rows)  # scope first
+        self.assertEqual(rows[0], ("pass", "check invariants", ""), "the step of job checks did not read pass by its own line: %s" % rows)
+        self.assertEqual(rows[1], ("unknown", "checks-rest:check invariants", "not run: no step of job 'checks-rest' has this name"),
+                         "checks-rest:check invariants read another job's step of that name, not unknown: %s" % rows)
+        self.assertEqual(state, "unknown", "a run with a qualified step its job lacks read %r, not unknown: %s" % (state, rows))
+        self.assertEqual([c[2] for c in calls], ["checks"], "ci-job ran checks-rest, though no declared step of it is in that job: %s" % calls)
+
+    def test_control_every_declared_step_its_job_has_still_passes(self):  # case 4: the green control, bare and qualified entries
+        checks = ["check invariants", "checks-rest:records page"]
+        jobs = {"checks": ["check invariants"], "checks-rest": ["records page"]}
+        rows, state, printed, calls = self.ready_rows(checks, jobs)
+        self.assertEqual([name for _, name, _ in rows], checks, "the rows do not name each declared check once: %s" % rows)  # scope first
+        self.assertEqual(rows, [("pass", "check invariants", ""), ("pass", "checks-rest:records page", "")], "a declared step its job has did not pass: %s" % rows)
+        self.assertEqual(state, "pass", "every declared step passed, yet the run read %r: %s" % (state, rows))
+        self.assertIsNone(self.ready_refusal(checks, jobs), "the ready checks refused a run whose every declared step passed")
+
+    def test_a_job_whose_declared_steps_are_all_absent_runs_no_ci_job(self):  # case 5
+        jobs = {"checks": ["check invariants"], "checks-rest": ["suite"]}
+        with self.subTest("beside a job whose steps are present"):
+            rows, state, printed, calls = self.ready_rows(["check invariants", "checks-rest:ghost step"], jobs)
+            self.assertEqual([name for _, name, _ in rows], ["check invariants", "checks-rest:ghost step"], "the rows do not name each declared check once: %s" % rows)  # scope first
+            self.assertEqual([c[2] for c in calls], ["checks"], "ci-job ran checks-rest, though none of its declared steps is in it: %s" % calls)
+            self.assertEqual(rows[1], ("unknown", "checks-rest:ghost step", "not run: no step of job 'checks-rest' has this name"),
+                             "the absent step of checks-rest does not read unknown with its cause: %s" % rows)
+            self.assertEqual(state, "unknown", "a run whose checks-rest step is absent read %r, not unknown: %s" % (state, rows))
+        with self.subTest("alone"):
+            rows, state, printed, calls = self.ready_rows(["checks-rest:ghost step"], jobs)
+            self.assertEqual([name for _, name, _ in rows], ["checks-rest:ghost step"], "the rows do not name the declared check once: %s" % rows)  # scope first
+            self.assertEqual(calls, [], "ci-job ran for a job none of whose declared steps is in it: %s" % calls)
+            self.assertEqual(rows, [("unknown", "checks-rest:ghost step", "not run: no step of job 'checks-rest' has this name")],
+                             "the absent step does not read unknown with its cause: %s" % rows)
+            self.assertEqual(state, "unknown", "a run with no ci-job call read %r, not unknown: %s" % (state, rows))
+
+    def test_control_a_job_whose_workflow_cannot_be_read_reads_every_declared_check_unknown(self):  # case 6: the guard, green on old and new code
+        with self.subTest("no workflow file in the tree"):
+            checks = ["STE lint", "records page"]
+            rows, state, printed, calls = self.ready_rows(checks, {}, no_workflow=True)
+            self.assertEqual([name for _, name, _ in rows], checks, "the rows do not name each declared check once: %s" % rows)  # scope first
+            self.assertEqual([v for v, _, _ in rows], ["unknown", "unknown"], "a check of a job with no workflow file did not read unknown: %s" % rows)
+            self.assertEqual(state, "unknown", "a job with no workflow file read %r, not unknown: %s" % (state, rows))
+            refusal = self.ready_refusal(checks, {}, no_workflow=True)
+            self.assertIsInstance(refusal, merge.Stop, "the ready checks did not refuse a job with no workflow file: %s" % rows)
+            self.assertNotIsInstance(refusal, merge.LintFail, "a job with no workflow file refused as a FAIL: %s" % refusal)
+        with self.subTest("the job's block is missing from the workflow"):
+            checks = ["checks:STE lint", "checks:records page"]
+            rows, state, printed, calls = self.ready_rows(checks, {"other": ["x"]})
+            self.assertEqual([name for _, name, _ in rows], checks, "the rows do not name each declared check once: %s" % rows)  # scope first
+            self.assertEqual([v for v, _, _ in rows], ["unknown", "unknown"], "a check of a job with no block in the workflow did not read unknown: %s" % rows)
+            self.assertEqual(state, "unknown", "a job with no block in the workflow read %r, not unknown: %s" % (state, rows))
+            refusal = self.ready_refusal(checks, {"other": ["x"]})
+            self.assertIsInstance(refusal, merge.Stop, "the ready checks did not refuse a job with no block in the workflow: %s" % rows)
+            self.assertNotIsInstance(refusal, merge.LintFail, "a job with no block in the workflow refused as a FAIL: %s" % refusal)
+
+    def test_a_declared_step_is_read_from_the_tree_not_the_tools_own_checkout(self):  # case 7: the tool's checks.yml names STE lint, this tree's workflow does not
+        checks = ["fixture-only step", "STE lint"]
+        rows, state, printed, calls = self.ready_rows(checks, {"checks": ["fixture-only step"]})
+        self.assertEqual([name for _, name, _ in rows], checks, "the rows do not name each declared check once: %s" % rows)  # scope first
+        self.assertEqual(rows[1], ("unknown", "STE lint", "not run: no step of job 'checks' has this name"),
+                         "a step this tree's workflow lacks was read from another checkout, not unknown: %s" % rows)
+        self.assertEqual(rows[0], ("pass", "fixture-only step", ""), "the step this tree's workflow names did not pass by its own line: %s" % rows)
+        self.assertEqual(state, "unknown", "a run with a step its tree lacks read %r, not unknown: %s" % (state, rows))
 
 class ClaimSkipped(Env):
     """A base with no stamp kinds: the claim and the numbering check are skipped, and stamp.mjs never runs."""
@@ -8232,11 +8375,16 @@ class ShardSelector(unittest.TestCase):
         self.assertIn("MERGE_SHARD", r.stdout + r.stderr)
         self.assertNotIn("Ran ", r.stdout + r.stderr)
 
-def workflow_text(name, *jobs):
-    """A workflow file whose top-level name is `name`, with one job per id in `jobs`, one step each."""
+def workflow_text(name, *jobs, steps=None):
+    """A workflow file whose top-level name is `name`, with one job per id in `jobs`, one step each. `steps` ({job: [step names]}) names
+    a job's steps instead: one `- name:` step per name, the names bin/ci-job reads."""
     lines = [f"name: {name}", "on: push", "jobs:"]
     for job in jobs:
-        lines += [f"  {job}:", "    runs-on: ubuntu-latest", "    steps:", "      - run: echo ok"]
+        lines += [f"  {job}:", "    runs-on: ubuntu-latest", "    steps:"]
+        if steps and job in steps:
+            lines += [line for step in steps[job] for line in (f"      - name: {step}", "        run: echo ok")]
+        else:
+            lines.append("      - run: echo ok")
     return "\n".join(lines) + "\n"
 
 
@@ -19185,8 +19333,10 @@ class DraftReady(CloudSession):
         return self.heads[n]
 
     def ready_checks_on_main(self):
-        """origin's main names one ready check, so a draft confirm must run it before the ready mark (merge.readyChecks)."""
+        """origin's main names one ready check, so a draft confirm must run it before the ready mark (merge.readyChecks). Main's workflow holds
+        that step, so the check is a declared step its job has, and the lane's head, which branches from main, carries the workflow."""
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], readyChecks=["check invariants"]))))
+        push_base(self, {".github/workflows/checks.yml": workflow_text("checks", "checks", steps={"checks": ["check invariants"]})})
 
     @contextlib.contextmanager
     def ready_check_answers(self, checks_state):
