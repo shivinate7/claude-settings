@@ -4386,9 +4386,19 @@ class GhHalf(Env):
     def test_a_merge_reply_secondary_rate_limit_403_is_retried_then_stops_without_a_revert(self):
         self.merge_reply_is_retried_then_stops(RATE_API_SECONDARY_403, rate=True)
 
+    def spare_is_the_take(self):
+        """The lock's spare is its take expiry, LOCK_TTL_SECONDS, as the rate-wait cases are sized. confirm's two check extensions (UNDO_CHECK_LOCK_SECONDS
+        and debt_check_lock_seconds()) would lift the expiry to about 3900 s from the take, past the end of the 900 s rung, so no rung would need an
+        extension. They are 0 here; their real values are pinned by the event-order cases (confirm_extends_the_lock_for_*_before_each_*_check)."""
+        for name, value in (("UNDO_CHECK_LOCK_SECONDS", 0), ("debt_check_lock_seconds", lambda: 0)):
+            patch = unittest.mock.patch.object(merge, name, value)
+            patch.start()
+            self.addCleanup(patch.stop)
+
     def test_a_rate_wait_past_the_lock_spare_extends_the_lock_and_the_merge_goes_on(self):
         # the take holds the lock LOCK_TTL_SECONDS (1200 s) at any deadline: the 60 s and 300 s waits fit its spare, and the 900 s wait, which starts
         # about 360 s in, must extend it
+        self.spare_is_the_take()
         self.set(merge_replies=[[RATE_API_SECONDARY_403, False]] * 3 + [["", True]])  # three rate-limited merge tries, then the merge lands
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
@@ -4540,6 +4550,7 @@ class GhHalf(Env):
 
     def test_a_lock_that_moves_during_the_first_rate_wait_stops_both_lock_lines(self):
         # The rival takes the lock ref during the first rate wait, so the run's extension for the next wait fails.
+        self.spare_is_the_take()
         def rival():
             if self.paused and self.paused[-1] in RATE_LADDER and not getattr(self, "rival_done", False):
                 self.rival_done = True
@@ -15526,7 +15537,8 @@ class ReviewedList(ReviewEnv):
     def test_one_ready_pr_with_a_record_costs_six_gh_calls(self):
         # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses, main's ruleset (one read of
         # rules/branches/main when no ruleset applies) and the branch protection, which is read second (ruling c, 19:49 CST Nov 11)
-        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
+        # The lint comment is what keeps the join from reading the head's rollup: without it the count is eight (the case below)
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS)), lint_of(7, REVIEW_HEAD)]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "success")]},
                                           count_gh=True)
         self.assertEqual(rc, 0, out + err)
@@ -15534,6 +15546,18 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(host.gh_calls[:4], ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status"])
         self.assertEqual(host.gh_calls[4], "rules/branches/main", "the ruleset read comes before the classic protection")
         self.assertEqual(host.gh_calls[5:], ["branches/main/protection/required_status_checks"])
+
+    def test_a_ready_pr_with_a_record_and_no_lint_comment_reads_the_rollup_first(self):
+        # The same fixture without the lint comment: the join reads the head's rollup (rollup_green: its check runs, then its statuses), head_state
+        # reads the same two again, then the ruleset and the protection. Eight calls
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "success")]},
+                                          count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(host.gh_calls, ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status",
+                                         f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status", "rules/branches/main",
+                                         "branches/main/protection/required_status_checks"],
+                         "a ready pull request with a record and no lint comment must read the head's rollup before its CI state")
 
     def test_a_draft_with_a_record_reads_no_head_checks(self):
         host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS))],
