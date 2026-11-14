@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Three owner items (771, 774, 775) were posted as tasks with options; the page shows no choices for a task, so the owner could not answer.",
  "source": "Owner chat 18:25 CST Nov 13: \"others have no answer choices\"; triage's own fault; the page-render cause is a hypothesis, not read in the page source.",
- "note": "Filed 18:28 CST Nov 13. Guard wanted: hooks/question_form.py (decision question-form) refuses an item with kind task that has options without how and links, or a lint on kind. First read the page template to confirm tasks hide choices. Harm stopped: an owner question the owner cannot answer. Rule building-mistake-names-its-guard. A guard change: test-author red case first. Not started.",
- "updatedAt": "2026-11-13T18:28:04-06:00"
+ "note": "Filed 18:28 CST Nov 13. Guard wanted: hooks/question_form.py (decision question-form) refuses an item with kind task that has options without how and links, or a lint on kind. First read the page template to confirm tasks hide choices. Harm stopped: an owner question the owner cannot answer. Rule building-mistake-names-its-guard. A guard change: test-author red case first. Not started. Second sighting 19:29 CST Nov 13: task items 626 (act-mac-artifact-call-shapes) and 661 (sim-lease-mac-test) carried their paste prompts only in an option's `how`; the page showed no prompt, and the owner answered both \"prompt?\" (19:28 CST). Fixed on the page by putting each prompt in the item's `command` field. Guard scope widened: refuse a task item whose paste prompt is not in `command` (rule style-command-in-item), as well as one that carries choice options without how and links.",
+ "updatedAt": "2026-11-13T19:29:41-06:00"
 }
