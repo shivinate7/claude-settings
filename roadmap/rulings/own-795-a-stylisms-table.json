@@ -1,0 +1,10 @@
+{
+  "id": "own-795-a-stylisms-table",
+  "at": "2026-11-13T21:39:11-06:00",
+  "title": "A lane drafts a rule-by-rule table of shiv-stylisms; the owner signs it before any rule changes",
+  "ruling": "Owner 21:39 CST Nov 13, page item 795, choice a: have a lane draft a table first, each rule with keep, change or drop, the evidence, and a recommendation. His note: he thought an audit was already done somewhere in a plan. Triage found it: restart-plan R41 (owner 13:36 CST Nov 11) judged the output style's placement, not its rules; R44 part 3 (the 23 rules) was folded into the CLAUDE.md scope audit and never reviewed. No rule changes until he signs the table.",
+  "quote": "i thought an audit was already done somewhere in a plan somewhere maybe?",
+  "source": "Page answers/pick-stylisms-rules-review, saved 2026-11-14T03:39:11Z; docs/plans/restart-plan.md lines 773-778 and 735, read by triage; filed by triage.",
+  "status": "open",
+  "step": "stylisms-rules-table"
+}
