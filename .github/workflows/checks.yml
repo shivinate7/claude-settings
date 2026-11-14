@@ -285,6 +285,9 @@ jobs:
       - name: Job runner fixture suite (bin/ci-job)
         run: python3 lint/test_ci_job.py
 
+      - name: Job runner step-bound fixture suite (bin/ci-job --step)
+        run: python3 lint/test_ci_job_bounds.py
+
       - name: Rule mechanization audit
         run: python3 lint/rule_audit.py
 
@@ -858,6 +861,10 @@ jobs:
       - name: Merge tool phase-timing fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_merge_phase_timing.py
+
+      - name: Merge tool ready-check bounds fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_ready_bounds.py
 
       - name: Merge tool stall-watch beat suite
         if: ${{ needs.scope.outputs.code == 'true' }}
