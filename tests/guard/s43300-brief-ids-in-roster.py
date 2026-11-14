@@ -1,4 +1,4 @@
-# section 43200
+# section 43300
 FAMILY = "brief-ids-in-roster"  # the family of the bare-id check on lane briefs and lane starts
 
 # ---- Brief ids. A lane brief or a lane start that names a session id is refused, roster ids included. A brief names a
