@@ -5835,6 +5835,24 @@ class AgentOwnedProcessTests(_AgentEndFixture):
         self.assertIsNotNone(proc.poll(), "AGENT's stop left Office pid %d running, though the later agent never saw it as new"
                              % proc.pid)
 
+    def test_a_solo_office_pid_that_reuses_an_ended_entry_ends_at_its_stop(self):
+        """An ended office entry names no owner. AGENT's stop ends Office pid P, and its record keeps P as a kind "office"
+        entry marked ended. A later solo Excel reuses pid P, so OTHER's Office diff names P, and OTHER's stop ends it:
+        the ended entry does not share P. AGENT's stop is real (SIGTERM ends its child). OTHER's reuse is injected, and
+        send_signal is recorded, not sent, because P is already gone."""
+        self.office_start(self.AGENT, {})
+        proc = self.spawn(None)
+        pid = proc.pid
+        self.office_stop(self.AGENT, {pid: "EXCEL.EXE"})
+        entry = self.entry_for(self.record_of(self.AGENT) or {}, pid)
+        self.assertIsNotNone(entry, "scope: AGENT's record does not list Office pid %d after its stop" % pid)
+        self.assertIs(entry.get("ended"), True, "scope: AGENT's stop did not mark its Office entry for pid %d ended" % pid)
+        self.office_start(self.OTHER, {})
+        with mock.patch.object(sweep, "send_signal", return_value=True):
+            answer = self.office_stop(self.OTHER, {pid: "EXCEL.EXE"})
+        self.assertIn(pid, answer["ended"], "OTHER's stop did not end its solo Office pid %d: AGENT's ended entry for it "
+                      "still counts as shared" % pid)
+
     def test_a_headed_process_of_the_agent_is_reported_and_never_ended(self):
         """Finding 6: a marked process with a display, which a background job's headed app is, is reported in the
         record and never ended at SubagentStop. The display is read from the same exec-time environment as the marker."""
