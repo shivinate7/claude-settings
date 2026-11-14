@@ -8,36 +8,46 @@ A session's own call has passed as an owner ruling. The mistake reached tests an
 found no record. This check reads text, prose, comment or string alike, with no parser. A claim cannot hide
 in a string or after a lone quote.
 
-Time claims. The lead is `owner ruling`, `owner's ruling` or `ruled at`. A connector (`,` `(` `at` `of`) may follow.
-Then comes a time, `H:MM` or `H.MM`, with an optional zone. A date makes it a dated claim: `YYYY-MM-DD` or `Mon D`
-(a comma is optional) before the time. A bare time is refused, whatever the records hold, since no record can
-tell which day it means. A dated claim has a record when one line of a record holds both its date and its time. A
-zone and a leading zero are ignored. A record is a decision record, CLAUDE.md, or a rulings entry's `at`.
+Time claims. The lead is `owner ruling`, `owner's ruling` or `ruled at`. A joiner may follow: `,` `(` `:` `at` `of`
+or `on`. Then comes a time, `H:MM` or `H.MM`, with an optional zone. A date makes it a dated claim. The date is
+`YYYY-MM-DD` or `Mon D`, before the time or after it and its zone. A `T` or `at` may join a date to the time that
+follows. A month is a whole month word or its short form, never the head of a longer word. A house cite, the form
+`<slug> item <digits>`, may sit between the lead and the stamp. It is read as part of the time claim. A bare time is
+refused, whatever the records hold, since no record can tell which day it means. The refusal says to add the date.
+
+Backing. A dated claim has a record when one record line holds both its date and its time. Each record line is read
+joined with its next line, within one file. A zone and a leading zero are ignored. The record lines are those of the
+decision records and CLAUDE.md. A ruling entry's `at` is read alone, as one line.
 
 Id claims. An id is a kebab slug of two or more words. It is read in backticks after `ruling`, after `ruling:`,
-after `owner ruling` or `decision`, or after a capital `Ruling` or `RULING` that starts a line. A lowercase `ruling`
-followed by a word is prose. An id has a record when a decision file stem, a rulings entry `id` or a CLAUDE.md
-rule marker (`<!-- rule:<id> -->`) equals it.
+after `owner ruling`, or after a capital `Ruling` or `RULING` that starts a line. A lowercase `ruling` followed by a
+word is prose. The word `decision` starts no claim. A slug followed by `item <digits>` is a house cite, not an id. An
+id has a record when a decision file stem, a ruling entry's `id` or a CLAUDE.md rule marker (`<!-- rule:<id> -->`)
+equals it.
 
 A claim split across two lines is read joined and reported on its first line. A line that holds `no record: <reason>`
 passes. The reason must be given.
 
 Modes. Files named: every line of each. --brief: the same, for the files of a brief, read whole and never as a
 diff. With neither, the lines the change adds against --base (default origin/main), in every file of the diff.
---rulings-dir reads the rulings from a folder of JSON files. Without it, entries come from lint/ruled_store.py,
+--rulings-dir reads the ruling entries from a folder of JSON files. Without it, entries come from lint/ruled_store.py,
 the folder roadmap/rulings on origin/roadmap of --root. A store that cannot be read exits 2 when a claim is found.
 
 Exit: 0 clear, 1 an unbacked claim, 2 an input that cannot be read (named).
 
 NAMED LIMITS.
-- A record that a change adds in the same diff backs its own claim. A decision that files a ruling needs no
-  second record. The check cannot tell whether the owner said it. It checks that a record exists.
+- Any record line that holds a date and a time backs a claim with that date and time. The line need not be a ruling.
+- A dated claim inside a record backs itself. So does one in a record that the change adds in the same diff.
+- The check cannot tell whether the owner said it. It checks only that a record exists.
+- A house cite with no time passes. The page item it names has no record file to check.
 - An id shaped `fb-<digits>-<digits>` (a feedback item) passes. It has no record file.
 - A claim that wraps from an unchanged line into an added line is read only from the added lines.
-- Only this check reads a brief, run by hand or in CI. No guard reads a brief when a session spawns an agent.
+- CI runs base mode only. A brief is read only when a person or a caller passes it with --brief.
+- No guard reads a brief when a session spawns an agent.
 
-Cost: starts no process in file mode. Base mode starts two git processes (merge-base, diff). It reads the
-records only when a claim is found, and writes nothing.
+Cost: writes nothing. File mode starts no process when it finds no claim, or with --rulings-dir. With a claim, it
+reads the store with two git processes (ls-tree, cat-file --batch), or one when the store folder is absent. Base
+mode starts two git processes (merge-base, diff), plus the same store reads when it finds a claim.
 """
 import argparse
 import bisect
@@ -57,27 +67,42 @@ NAME = "check_ruling_claims"
 # One break between two words of a claim: spaces, or a line end with an optional comment or quote prefix.
 SEP = r"(?:[ \t]+|[ \t]*\r?\n[ \t]*(?:(?:#|//|\*|>|;|--)[ \t]*)?)"
 SEP0 = r"(?:" + SEP + r")?"
-TIME = r"(?<![\d:.])((?:[01]?\d|2[0-3])[:.][0-5]\d)(?!\d)"
+TIME = r"(?<![\d:.])(?P<time>(?:[01]?\d|2[0-3])[:.][0-5]\d)(?!\d)"
+ZONE = r"(?:[ \t]+[A-Z]{2,4}\b)?"
 MONTHS = "jan feb mar apr may jun jul aug sep oct nov dec".split()
-ISO_DATE = r"(\d{4})-(\d{2})-(\d{2})"
-MON_DATE = r"(?i:(" + "|".join(MONTHS) + r")[a-z]*\.?)" + SEP + r"(\d{1,2})(?:st|nd|rd|th)?,?"
-LEAD = r"(?i:\bowner(?:'s|\u2019s)?" + SEP + r"ruling|\bruled" + SEP + r"at)"
-CONNECTOR = r"(?:" + SEP0 + r"(?:,|\(|(?i:at|of)\b))?"
-TIME_CLAIM = re.compile(LEAD + CONNECTOR + SEP0 + r"(?:(?:" + ISO_DATE + r"|" + MON_DATE + r")" + SEP + r")?" +
-                        TIME + r"(?:[ \t]+[A-Z]{2,4}\b)?")
-SLUG = r"`?([a-z][a-z0-9]*(?:-[a-z0-9]+)+)(?![\w-])`?"
+# A month word, short or whole, never the head of a longer word: "decision 14" is not a date.
+MONTH = (r"(?i:\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|"
+         r"sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b\.?)")
+
+
+def date_pattern(tag):
+    """A `YYYY-MM-DD` or `Mon D` date, its groups named with tag: <tag>y <tag>m <tag>d, or <tag>mon <tag>day. The
+    day takes no third digit, so "Nov 2026" is no date."""
+    return (r"(?:(?<!\d)(?P<{0}y>\d{{4}})-(?P<{0}m>\d{{2}})-(?P<{0}d>\d{{2}})(?!\d)|(?P<{0}mon>" + MONTH + r")" + SEP +
+            r"(?P<{0}day>\d{{1,2}})(?!\d)(?:st|nd|rd|th)?,?)").format(tag)
+
+
+LEAD = r"(?P<lead>(?i:\bowner(?:'s|\u2019s)?" + SEP + r"ruling|\bruled" + SEP + r"at))"
+CONNECTOR = r"(?:" + SEP0 + r"(?:,|\(|:|(?i:at|of|on)\b))?"
+SLUG_BODY = r"[a-z][a-z0-9]*(?:-[a-z0-9]+)+"
+# The tail of a house cite, `<slug> item <digits>`: the slug names a page, not a ruling.
+ITEM_TAIL = SEP + r"item" + SEP + r"\d+"
+HOUSE_CITE = r"`?" + SLUG_BODY + r"`?" + ITEM_TAIL + r"(?:" + SEP + r"[a-z]\b)?,?" + SEP
+DATE_TIME_JOIN = r"(?:T|" + SEP + r"(?:(?i:at)" + SEP + r")?)"
+TIME_CLAIM = re.compile(
+    LEAD + CONNECTOR + SEP0 + r"(?:" + HOUSE_CITE + r")?(?P<stamp>(?:" + date_pattern("l") + DATE_TIME_JOIN + r")?" +
+    TIME + ZONE + r"(?:,?" + SEP + r"(?:(?i:on)" + SEP + r")?" + date_pattern("t") + r")?)")
+SLUG = r"`?(" + SLUG_BODY + r")(?![\w-])(?!`?" + ITEM_TAIL + r")`?"
 ID_CLAIMS = (
-    re.compile(r"\bruling:?" + SEP0 + r"`([a-z][a-z0-9]*(?:-[a-z0-9]+)+)`"),
+    re.compile(r"\bruling:?" + SEP0 + r"`(" + SLUG_BODY + r")`(?!" + ITEM_TAIL + r")"),
     re.compile(r"\bruling:" + SEP + SLUG),
     re.compile(r"(?i:\bowner(?:'s|\u2019s)?" + SEP + r"ruling):?" + SEP + SLUG),
-    re.compile(r"(?i:\bdecision):?" + SEP + SLUG),
     re.compile(r"(?m:^)[ \t>*#-]*(?:Ruling|RULING)" + SEP + SLUG),
 )
 FEEDBACK_ID = re.compile(r"^fb-\d+-\d+$")
 NO_RECORD = re.compile(r"\bno record:\s*\S")
 RECORD_TIME = re.compile(r"(?<![\d:.+-])(\d{1,2}):(\d{2})(?!\d)")
-RECORD_ISO = re.compile(ISO_DATE)
-RECORD_MON = re.compile(MON_DATE)
+RECORD_DATE = re.compile(date_pattern("r"))
 MARKER = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
 HUNK = re.compile(r"^@@ -\S+ \+(\d+)")
 
@@ -104,12 +129,12 @@ def clock(text):
     return int(hour), int(minute)
 
 
-def claim_date(m):
-    """(year or None, month, day) of a time claim match, or None when the claim has no date."""
-    if m.group(1):
-        return int(m.group(1)), int(m.group(2)), int(m.group(3))
-    if m.group(4):
-        return None, month_number(m.group(4)), int(m.group(5))
+def found_date(m, tag):
+    """(year or None, month, day) of the date_pattern(tag) groups of match m, or None when they matched nothing."""
+    if m.group(tag + "y"):
+        return int(m.group(tag + "y")), int(m.group(tag + "m")), int(m.group(tag + "d"))
+    if m.group(tag + "mon"):
+        return None, month_number(m.group(tag + "mon")), int(m.group(tag + "day"))
     return None
 
 
@@ -118,9 +143,9 @@ def claims_in(text):
     "bare" (key None: a time with no date) or "id" (key the slug)."""
     found = []
     for m in TIME_CLAIM.finditer(text):
-        date = claim_date(m)
-        kind, key = ("time", (date, clock(m.group(6)))) if date else ("bare", None)
-        found.append((m.start(), m.end(), kind, key, " ".join(m.group().split())))
+        date = found_date(m, "l") or found_date(m, "t")
+        kind, key = ("time", (date, clock(m.group("time")))) if date else ("bare", None)
+        found.append((m.start(), m.end(), kind, key, " ".join((m.group("lead") + " " + m.group("stamp")).split())))
     seen = set()
     for pattern in ID_CLAIMS:
         for m in pattern.finditer(text):
@@ -158,11 +183,17 @@ def refused(lines):
     return out
 
 
-def line_dates_and_times(line):
-    """({(year or None, month, day)}, {(hour, minute)}) of one record line."""
-    dates = {(int(y), int(mo), int(d)) for y, mo, d in RECORD_ISO.findall(line)}
-    dates |= {(None, month_number(mo), int(d)) for mo, d in RECORD_MON.findall(line)}
-    return dates, {(int(h), int(mi)) for h, mi in RECORD_TIME.findall(line)}
+def stamps_of(text):
+    """{((year or None, month, day), (hour, minute))} for each date and time that share a line of text."""
+    dates = {found_date(m, "r") for m in RECORD_DATE.finditer(text)}
+    times = {(int(h), int(mi)) for h, mi in RECORD_TIME.findall(text)}
+    return {(date, time) for date in dates for time in times}
+
+
+def record_stamps(text):
+    """stamps_of each line of a record read joined with its next line, so a stamp that wraps still backs a claim."""
+    lines = text.split("\n")
+    return set().union(*(stamps_of(" ".join(lines[i:i + 2])) for i in range(len(lines))))
 
 
 class Records:
@@ -206,24 +237,21 @@ class Records:
         return entries
 
     def _load(self):
-        stamps, ids, lines = set(), set(), []
+        stamps, ids = set(), set()
         for folder in self._decision_folders():
             for path in glob.glob(os.path.join(folder, "*.md")):
                 ids.add(os.path.splitext(os.path.basename(path))[0])
-                lines += read_text(path).split("\n")
+                stamps |= record_stamps(read_text(path))
         claude = self._claude_md()
         if os.path.isfile(claude):
             text = read_text(claude)
-            lines += text.split("\n")
+            stamps |= record_stamps(text)
             ids.update(MARKER.findall(text))
         for entry in self._entries():
             if isinstance(entry.get("id"), str):
                 ids.add(entry["id"])
             if isinstance(entry.get("at"), str):
-                lines.append(entry["at"])
-        for line in lines:
-            dates, times = line_dates_and_times(line)
-            stamps |= {(date, time) for date in dates for time in times}
+                stamps |= stamps_of(entry["at"])  # one entry's `at` alone: never joined with another entry's
         self._stamps, self._ids = stamps, ids
 
     def backs(self, kind, key):
@@ -299,8 +327,10 @@ def main(argv):
             for n, kind, key, shown in claims:
                 if not records.backs(kind, key):
                     bad = 1
-                    print("%s: FAIL: %s:%d: '%s' names an owner ruling with no record. Cite the record, or add "
-                          "`no record: <reason>` on the line." % (NAME, name, n, shown))
+                    why = ("by a time with no date. Add the date, then cite the record," if kind == "bare" else
+                           "with no record. Cite the record,")
+                    print("%s: FAIL: %s:%d: '%s' names an owner ruling %s or add `no record: <reason>` on the line."
+                          % (NAME, name, n, shown, why))
         print("%s: read %d file(s), %s" % (NAME, len(units), scope))
         return bad
     except Unreadable as err:
