@@ -24,7 +24,7 @@
 # generation such as `npx astro sync`), since a lint step that reads generated files fails on a bare checkout. --lint
 # runs it, in order, only when a later lint step will run; its if: and env read as any step's. An install that fails
 # or is unknown prints unknown, never FAIL (the tree, not the change, is at fault), and each later lint step prints
-# unknown naming it and does not run. Three `uses:` it runs in place, each by its one home: actions/ste-lint as
+# unknown naming it and does not run. Four `uses:` it runs in place, each by its one home: actions/ste-lint as
 # `bin/ste-changed <base>` (shared with the action through actions/ste-lint/run.sh), actions/code-check as its
 # action.yml's command, `python3 code_check.py --base <base>`,
 # and actions/zizmor as its run.sh with the step's `with: paths` in ZIZMOR_PATHS. The first two need a base; zizmor
@@ -32,7 +32,7 @@
 # does. A local uses: (`$/actions/...`, `./actions/...`) runs the repo under test's own code_check.py or run.sh,
 # never another's: missing or failing, it FAILs. A remote uses: (`owner/repo/actions/code-check@ref`) runs the copy
 # beside ci-job, else (code-check, zizmor) the one in the checkout the global rules file names, else the step is
-# unknown and names the paths it looked at. The code-check step's line names
+# unknown and names the paths it looked at. actions/quick-checks runs its quick_checks.py in the three modes, from the copy beside ci-job (a local uses: from the checkout), needs no base, and ignores a pin. The code-check step's line names
 # the code_check.py that ran. When every failure code_check.py reports is a pinned tool that could not start, the
 # step is unknown; any other failure makes it FAIL, its reason naming the tools that could not start.
 # --lint with no --base takes origin/main as CI does and says so
@@ -240,11 +240,12 @@ LINT_CMD = re.compile(r"(?:python3 (?:lint|actions)/[\w./-]+\.py|bin/ste-changed
 INSTALL_CMD = re.compile(r"(?:npm ci|(?:pnpm|yarn) install --(?:frozen-lockfile|immutable)|(?:python3 -m )?pip install(?: -[-\w]+)* -r [^\s|&;`<>$()]+"
                          r"|npx(?: --no-install)? [\w@./-]+ (?:sync|generate))(?: [^|&;`<>$()]*)?")
 RUNNER_UNSET = {"GH_TOKEN", "GITHUB_TOKEN", "ZIZMOR_PATHS"}  # absent from a runner step's env unless its env: or the zizmor with: sets them
-KNOWN_ACTION = re.compile(r"(?:\S*/)?actions/(ste-lint|code-check|zizmor)(?:@\S*)?")
+KNOWN_ACTION = re.compile(r"(?:\S*/)?actions/(ste-lint|code-check|zizmor|quick-checks)(?:@\S*)?")
 SHA_PIN = pin_regex(("code-check", "zizmor"))  # a uses: pinned to a commit of this repo's action
 LOCAL_ACTION = re.compile(r"[$.]/actions/\S+")  # this repo's own action: a check --lint should run
 CODE_CHECK = os.path.join("actions", "code-check", "code_check.py")  # under a checkout of this repo
 ZIZMOR_RUN = os.path.join("actions", "zizmor", "run.sh")  # the one home of the pinned zizmor run
+QUICK_CHECKS = os.path.join("actions", "quick-checks", "quick_checks.py")  # the one home of the starter CI's three checks
 PIN_NOTE = re.compile(r"^%s.+$" % re.escape(PIN_NOTE_MARKER), re.M)  # a whole drift line of bin/ste-changed, marker first
 
 
@@ -345,14 +346,14 @@ def uses(step):
 
 
 def known_action(step):
-    """ste-lint, code-check or zizmor when the step uses one of them, else None."""
+    """ste-lint, code-check, zizmor or quick-checks when the step uses one of them, else None."""
     m = KNOWN_ACTION.fullmatch(uses(step))
     return m.group(1) if m else None
 
 
 def is_lint(step):
     """True when the step's whole run: is fast lint/check commands: each line one lint command, no mutation script.
-    The ste-lint, code-check and zizmor actions count: plan() runs each one's own command for it."""
+    The ste-lint, code-check, zizmor and quick-checks actions count: plan() runs each one's own command for it."""
     if known_action(step):
         return True
     lines = run_lines(step)
@@ -421,6 +422,15 @@ def plan(step, pr, values, top, lint=False, pinned=False):
         # A missing run.sh of a local uses: must FAIL, as in CI; bash alone would exit 127 and read as a missing tool.
         path = slashed(path)  # $BASH: the bash running this script, never a PATH lookup that may find the WSL launcher
         return "run", 'test -f "%s" || { echo "no run.sh at %s" >&2; exit 1; }\n"$BASH" "%s"\n' % (path, path, path), shell_argv(None), env, None
+    if action == "quick-checks":  # the starter CI's three checks: quick_checks.py in each of the action.yml's modes; no base needed
+        if not shell_argv(None):
+            return "unknown", no_shell("bash"), None, None, None
+        if not shutil.which("python3"):
+            return "unknown", "tool missing: python3", None, None, None
+        path, looked = action_file(top, step, QUICK_CHECKS)  # never a pin's tree: the copy beside ci-job or in the checkout under test
+        if not path:
+            return "unknown", "no quick_checks.py: looked for %s" % looked, None, None, None
+        return "run", 'rc=0\nfor mode in links scripts json; do python3 "%s" "$mode" || rc=1; done\nexit "$rc"\n' % slashed(path), shell_argv(None), {}, None
     if action:
         if not pr:
             return "skipped", "a pull-request step: pass --base to run it", None, None, None

@@ -3524,6 +3524,7 @@ RATE_GQL_ALREADY = "GraphQL: API rate limit already exceeded for user ID 3094714
 # The fake gh logs one line per call: METHOD, the route under repos/<owner>/<repo>, the fields sorted, then --paginate or --slurp.
 # A read of the pull request after the merge call carries the suffix "after-merge".
 MERGE_CALL = "PUT pulls/7/merge"
+STARTER_STEP = "Add the starter CI"  # the step of skill project-ops that a no-CI refusal names (skills/project-ops/SKILL.md); test_starter_ci.py checks that step exists
 STATE_READ = "GET pulls/7 after-merge"
 LIST_CALL = "GET pulls "
 CHECKS_CALL = "GET commits/"
@@ -4597,6 +4598,17 @@ class GhHalf(Env):
         self.assertIn("Set merge.requiredChecks to a list", out)
         self.assertEqual(self.head(), before)  # nothing was pushed
         self.assertTrue(self.reverted())  # still the pending record: no claim on the branch
+
+    def test_the_no_checks_refusals_name_the_project_ops_starter_step(self):
+        # A repo with no CI names no required check. Both Stops of required_names (no protection, an empty protection) name the one fix:
+        # the starter CI step of skill project-ops (decision same-check-kinds, plan R17).
+        for contexts, why in ((None, "no branch protection"), ([], "an empty protection list")):
+            with self.subTest(case=why):
+                self.set(contexts=contexts)
+                rc, out = self.go(required="protection")
+                self.assertEqual(rc, 1, out)
+                self.assertIn("project-ops", out, "the refusal for %s names no project-ops step" % why)
+                self.assertIn(STARTER_STEP, out, "the refusal for %s does not name the starter CI step" % why)
 
     def test_head_red_pushes_no_claim(self):
         before = self.head()

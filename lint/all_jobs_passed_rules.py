@@ -18,7 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs, draft_guard_only, eval_if, push_guard_only,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
                                 shard_base, yaml_scalar)  # NIGHTLY_SKIP_JOB and PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py
-from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
+from workflow_steps import drop_comment, job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
 
 ALL_JOBS_PASSED_USES = "$/actions/all-jobs-passed"
 ALL_JOBS_PASSED_IF = "${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}"
@@ -29,6 +29,7 @@ CHECKOUT_PIN = re.compile(r"actions/checkout@[0-9a-f]{40}")
 STEP_KEYS_BARRED = ("if", "continue-on-error")  # either one lets a failed needed job leave the action step green
 REMOTE_ACTION = "shivinate7/claude-settings/actions/all-jobs-passed"  # how a child repo names the shared action
 COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
+READY_TYPE = "ready_for_review"  # GitHub's default pull_request types omit it, so a red draft marked ready reruns nothing
 
 
 def job_key(block, key):
@@ -257,13 +258,64 @@ def child_action_problems(block):
     return problems + step_key_problems(step)
 
 
+def pull_request_types(text):
+    """The `pull_request` trigger of a workflow: None when it has none, else the set of its `types:` (empty when it lists none,
+    as in `on: pull_request` and a bare `pull_request:`). Reads the block, flow and inline forms of the trigger and of types."""
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        m = re.match(r"^on:[ \t]*(.*?)[ \t]*$", line)
+        if not m:
+            continue
+        inline = drop_comment(m.group(1))
+        if inline:  # `on: pull_request`, `on: [pull_request, push]` or a flow map: types only inside a map
+            if not re.search(r"(?<![\w-])pull_request(?![\w-])", inline):
+                return None
+            return set(re.findall(r"[\w-]+", inline.partition("types")[2])) if "types" in inline else set()
+        body = []
+        for ln in lines[i + 1:]:
+            if ln.strip() and not ln.startswith((" ", "#", "\t")):
+                break
+            body.append(ln)
+        for j, ln in enumerate(body):
+            key = re.match(r"^  pull_request:[ \t]*(.*?)[ \t]*$", ln)
+            if not key:
+                continue
+            rest = drop_comment(key.group(1))
+            if rest:
+                return set(re.findall(r"[\w-]+", rest.partition("types")[2])) if "types" in rest else set()
+            types, inside = set(), None
+            for ln2 in body[j + 1:]:
+                if ln2.strip() and not ln2.startswith("    ") and not ln2.startswith("#"):
+                    break
+                t = re.match(r"^    types:[ \t]*(.*?)[ \t]*$", ln2)
+                if t:
+                    value = drop_comment(t.group(1))
+                    types, inside = set(re.findall(r"[\w-]+", value)), not value
+                elif inside and (item := re.match(r"^ {4,}- *(.*?)[ \t]*$", ln2)):
+                    types.add(yaml_scalar(drop_comment(item.group(1))))
+                elif ln2.strip() and not ln2.lstrip().startswith("#"):
+                    inside = False
+            return types
+    return None
+
+
+def child_trigger_problems(text):
+    """A child's pull_request trigger lists ready_for_review: GitHub's default types (opened, synchronize, reopened) never rerun a red
+    draft that is marked ready, so the required check would stay red on a pull request that is ready to merge."""
+    types = pull_request_types(text)
+    if types is None or READY_TYPE in types:
+        return []
+    return [f"the pull_request trigger has no types list with {READY_TYPE}: GitHub's default types omit it, and a red draft marked ready reruns nothing. "
+            f"Write `types: [opened, synchronize, reopened, {READY_TYPE}]` under pull_request"]
+
+
 def child_problems(text):
     """The generic rules for a child repo's workflow that pins the shared action."""
     text = text.replace("\r\n", "\n")  # the readers match on LF line ends
     block = job_block(text, ALL_JOBS_PASSED_JOB)
     if block is None:
         return [f"no {ALL_JOBS_PASSED_JOB} job in the workflow"]
-    return child_if_problems(block) + needs_problems(text) + child_action_problems(block)
+    return child_trigger_problems(text) + child_if_problems(block) + needs_problems(text) + child_action_problems(block)
 
 
 def check_workflow(path):

@@ -70,7 +70,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    A lane run of `merge --lane-lint` goes through `verdict` in the background with a Bash `timeout` above the merge tool's bound
    (`LINT_SECONDS` plus `PUSHED_HEAD_WAIT_MINUTES` times 60, in ms); a shorter limit ends it with no verdict (guard rule `check-timeout`).
    A lane's `merge --lane-lint <pr> --touched-tests` runs each test file the diff touches, once, in the lint worktree, after the lint passes. That catches a test that fails only on that head before the CI run. A ref target posts no comment, so it cannot
-   satisfy the join. A FAIL keeps it a draft. The lint counts a clash between two heads only when both
+   satisfy the join. The integration PR's lint runs the mutation test when the batch touches a mutation test file. A FAIL keeps it a draft. The lint counts a clash between two heads only when both
    merge clean with their base (decision `lanes-run-no-full-ci-job`). A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).

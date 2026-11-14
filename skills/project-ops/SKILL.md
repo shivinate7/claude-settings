@@ -55,17 +55,27 @@ that triage or the batch runner writes for its successor.
    `roadmap-one-writer`, the record branch's one writer). The coordinator starts triage before any other
    session (decision `session-tiers`). Send triage the repo and the branch name. Triage does steps 2 and 3
    in its own worktree, then commits and pushes the branch. The push needs no PR and runs no CI.
-6. **Protect the default branch.** Name the one check the repo's CI reports (the `all-jobs-passed` rollup). Preview, then set, once the
+6. **Add the starter CI.** A repo has no CI if `.github/workflows` holds no workflow file, so no check needs protection: add it for such a repo only. Copy
+   `templates/starter-ci/checks.yml` to `.github/workflows/checks.yml` by a pull request on the repo's default branch. The action
+   `actions/quick-checks` is one step: each relative markdown link resolves, each Python and shell script parses, each JSON file
+   parses; it fetches no URL. The caller writes the jobs, and the template is that caller: a `checks` job holding that step, and the
+   `all-jobs-passed` job that step 7 requires, holding one step that uses `actions/all-jobs-passed`. Both `uses:` lines carry a zero pin.
+   Replace each `shivinate7/claude-settings/actions/...@` pin with the current head of claude-settings main:
+   `git ls-remote https://github.com/shivinate7/claude-settings refs/heads/main` prints it (the 40-hex word, the first column; the
+   same read as `git ls-remote origin refs/heads/<branch>` in `merge/merge.py`). Keep `ready_for_review` in the `pull_request` types.
+   A repo that has CI skips this step; if its rollup is missing, the caller writes an `all-jobs-passed` job with that one step.
+   The `merge` refusals for a repo with no required checks, and `merge --lane-lint` on a head with no workflow file, name this step as the fix.
+7. **Protect the default branch.** Name the one check the repo's CI reports (the `all-jobs-passed` rollup). Preview, then set, once the
    owner confirms the act (it changes the live repo):
    `python3 ~/.claude/skills/project-ops/scripts/protect.py --repo <owner>/<name> --check all-jobs-passed [--branch main]`,
    then the same with `--confirm`. It sets a ruleset on the branch: the one check, deletion and force-push blocked, and the Admin role able to bypass on pull requests only. It refuses any `--check` other than `all-jobs-passed`, and more than one, so no repo starts with none (decision `same-check-kinds`). It never touches classic protection. merge reads the required checks from the ruleset first, then from classic protection, so keep `merge.requiredChecks` at `"protection"`.
-7. **Add the PR template.** If the adopting repo has no `.github/pull_request_template.md`, copy
+8. **Add the PR template.** If the adopting repo has no `.github/pull_request_template.md`, copy
    `templates/pull_request_template.md` to that path. Put it in by a pull request on the repo's default
    branch, never on the record branch. The template holds the two PR-body lines the merge tool reads:
    `Retire-run:` (a debt close with no runnable check) and `Drops-lines:` (lines dropped on purpose).
    The file sits twice on purpose: GitHub reads only the copy under `.github/`, and this skill ships the copy under `templates/`.
    If the file exists, leave it, and report whether it holds both lines.
-8. **Report** the record branch, the files written, the ruleset set, each placeholder the owner must still fill, and whether the PR template was added or already present.
+9. **Report** the record branch, the files written, the starter CI added, the ruleset set, each placeholder the owner must still fill, and whether the PR template was added or present.
 
 ## The roadmap block
 
