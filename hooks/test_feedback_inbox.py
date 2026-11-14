@@ -228,9 +228,7 @@ ROOT = _test_temp.run_folder()
 FAILED = []
 RED_CASES = []
 CASE_COUNT = [0]
-STOP_RUNS = [0]  # the Stop runs this process started, for the fetch case's scope
-FETCH_SPY = os.path.join(ROOT, "fetch-spy.log")  # each fetch a Stop starts is logged here (see PROBE_SOURCE)
-REAL_ORIGIN = ("http://", "https://", "git@", "ssh://")  # a remote URL that reaches the network
+FETCH_SPY = os.path.join(ROOT, fixture.FETCH_SPY)  # each guard install and each refused fetch is logged here
 
 CENTRAL = re.compile(r"Local time: (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) (CDT|CST) \(UTC-0[56]:00\)")
 # The printed line ends with the pointer hooks/local_time.py emits: the constant itself, read from that file, never a
@@ -354,9 +352,8 @@ def guard(cfg, sid, stop_active=False, cwd=None, transcript=None, extra_env=None
     if transcript is not None:
         obj["transcript_path"] = transcript
     log = os.path.join(os.path.dirname(cfg), "model-calls-guard.log")
-    env = dict(fetch_spy_env(), FG_STUB_LOG=log)
+    env = {"FG_STUB_LOG": log, "FETCH_SPY_LOG": FETCH_SPY}
     env.update(extra_env or {})
-    STOP_RUNS[0] += 1
     return run(probe_path(), payload(obj), cfg, args=(HERE, GUARD_PATH), extra_env=env)
 
 
@@ -879,7 +876,7 @@ def homed(cfg, sid, items, handoff_ids=(), cwd=None, text="homes burst"):
     multi-line `text` makes the message a burst."""
     write_file(inbox_of(cfg, sid), render_block(text, items=items))
     write_file(handoff_of(cfg, sid), "# Handoff\n" + "".join("- %s\n" % i for i in handoff_ids))
-    prime_origin(cwd)
+    fixture.prime_origin(cwd)
     return guard(cfg, sid, cwd=cwd)
 
 
@@ -3131,6 +3128,10 @@ ANSWER_NONE = json.dumps({"repeats": []})
 PROBE_SOURCE = r"""import json, os, runpy, subprocess, sys
 sys.path.insert(0, sys.argv[1])
 import decision_watch
+if os.environ.get("FETCH_SPY_LOG"):
+    sys.path.insert(0, os.path.join(sys.argv[1], "..", "lint"))
+    import test_ruled_store
+    test_ruled_store.refuse_real_origin_fetches(os.environ["FETCH_SPY_LOG"])
 
 
 def stub(prompt, model=decision_watch.MODEL, timeout=decision_watch.MODEL_TIMEOUT, shape=None,
@@ -3152,19 +3153,10 @@ def stub(prompt, model=decision_watch.MODEL, timeout=decision_watch.MODEL_TIMEOU
 class CountingPopen(subprocess.Popen):
     def __init__(self, args, *rest, **kwargs):
         argv = args.split() if isinstance(args, str) else [str(a) for a in args]
-        is_git = bool(argv) and argv[0].replace("\\", "/").rsplit("/", 1)[-1].lower() in ("git", "git.exe")
         log = os.environ.get("GIT_START_LOG")
-        if log and is_git:
+        if log and argv and argv[0].replace("\\", "/").rsplit("/", 1)[-1].lower() in ("git", "git.exe"):
             with open(log, "a", encoding="utf-8") as f:
                 f.write(" ".join(argv) + "\n")
-        spy = os.environ.get("FETCH_SPY_LOG")
-        if spy and is_git and "fetch" in argv[1:4]:
-            # A fetch that a Stop starts is refused, never run, and logged with its folder. A run that did not prime
-            # its roadmap ref would otherwise reach the network.
-            where = argv[2] if argv[1:2] == ["-C"] else str(kwargs.get("cwd") or "")
-            with open(spy, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"where": where, "argv": " ".join(argv)}) + "\n")
-            raise OSError("fetch refused by the test probe: prime the roadmap ref before the Stop")
         super().__init__(args, *rest, **kwargs)
 
 
@@ -3228,8 +3220,7 @@ def stop(cfg, sid, cwd, answer=None, error=None, stop_active=False, extra_env=No
     `drop` = (file, line prefix): the stub removes those lines from the file while the model runs."""
     JUDGE_RUNS[0] += 1
     log = os.path.join(os.path.dirname(cfg), "model-calls-%d.log" % JUDGE_RUNS[0])
-    env = dict(extra_env or {}, FG_STUB_LOG=log, **fetch_spy_env())
-    STOP_RUNS[0] += 1
+    env = dict(extra_env or {}, FG_STUB_LOG=log, FETCH_SPY_LOG=FETCH_SPY)
     if answer is not None:
         env["FG_STUB_ANSWER"] = answer
     if error is not None:
@@ -4097,27 +4088,6 @@ def record_step(root, slug):
         return None
 
 
-def fetch_spy_env():
-    """The variable that makes the probe refuse and log a fetch a Stop starts. Every Stop run takes it."""
-    return {"FETCH_SPY_LOG": FETCH_SPY}
-
-
-def remote_origin(root):
-    """The URL of the repo's origin remote, or None when the repo has none."""
-    try:
-        return git(root, "remote", "get-url", "origin").strip()
-    except RuntimeError:
-        return None
-
-
-def prime_origin(root):
-    """Primes the roadmap fetch for one Stop run in a repo that has an origin. A Stop reads origin/roadmap through a
-    fetch unless FETCH_HEAD says it was fetched within roadmap_ref.MAX_AGE, and that window is short, so each run
-    primes its own. A run that is not primed fetches, and the probe refuses the fetch."""
-    if root is not None and remote_origin(root) is not None:
-        fixture.set_fetch_head(root)
-
-
 def page_comment_run(cfg, sid, wake, items, url=PAGE_CODE_URL, cwd=None, writer=None):
     """Captures one page comment through the capture hook, jots its item lines, names `writer` as the page writer
     (this session when None), and runs the guard at its Stop. Returns the guard's Proc."""
@@ -4125,7 +4095,7 @@ def page_comment_run(cfg, sid, wake, items, url=PAGE_CODE_URL, cwd=None, writer=
     for line in items:
         add_item(cfg, sid, line)
     write_transcript(cfg, sid, writer_records(sid if writer is None else writer))
-    prime_origin(cwd)
+    fixture.prime_origin(cwd)
     return guard(cfg, sid, cwd=cwd, transcript=transcript_of(cfg, sid))
 
 
@@ -4397,18 +4367,13 @@ def case_fixture_git_has_no_wall_clock_bound():
 
 def case_stops_never_fetch_from_a_real_origin():
     """A Stop never fetches from a repo whose origin is a real URL. Such a fetch reaches the network, and on some
-    runners it outlives its bound and overwrites the fixture's roadmap ref. The probe logs each fetch a Stop starts,
-    with its folder, and refuses it. This case names each real-origin folder that a Stop fetched."""
+    runners it outlives its bound and overwrites the fixture's roadmap ref. Each Stop runs under the guard in
+    lint/test_ruled_store.py, which refuses and logs such a fetch. The guard's installs are the scope."""
     name = "stops: no Stop fetches from a real origin"
-    check(name + ": scope, the Stops ran", STOP_RUNS[0] > 0, "no Stop ran in this process")
-    fetched = set()
-    for line in read_or_empty(FETCH_SPY).splitlines():
-        rec = json.loads(line)
-        url = remote_origin(rec["where"]) if rec["where"] else None
-        if url and url.startswith(REAL_ORIGIN):
-            fetched.add("%s (origin %s)" % (rec["where"], url))
-    check(name, not fetched,
-          "a Stop fetched a real origin, so its roadmap ref was not primed: %s" % "; ".join(sorted(fetched)))
+    installs, refused = fixture.spy_read(FETCH_SPY)
+    check(name + ": scope, the guard was installed for the Stops", installs > 0, "no guard install was logged")
+    check(name, not refused, "a Stop fetched a real origin, so its roadmap ref was not primed: %s"
+          % "; ".join(sorted({"%s (origin %s)" % (r["refused"], r["origin"]) for r in refused})))
 
 
 CASES = (

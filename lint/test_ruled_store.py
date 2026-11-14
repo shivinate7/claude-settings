@@ -102,6 +102,69 @@ def without_fetch_head(repo):
         os.remove(path)
 
 
+# A fetch of a real origin reaches a network host, and on some runners it outlives its bound and rewrites the fixture's
+# roadmap ref. A case that runs a reader on such a repo primes it, and the guard below refuses any fetch that gets through.
+REAL_ORIGIN = ("http://", "https://", "git@", "ssh://")
+FETCH_SPY = "fetch-spy.log"  # the file, in the run's folder, that names each guard install and each refused fetch
+
+
+def origin_url(repo):
+    """The raw URL of the repo's origin remote, or None when it has none. Not insteadOf-expanded."""
+    answer = _nowindow.run([VCS, "-C", repo, "config", "--get", "remote.origin.url"], capture_output=True, text=True,
+                           env=ENV, timeout=60)
+    url = answer.stdout.strip()
+    return url if answer.returncode == 0 and url else None
+
+
+def real_origin(repo):
+    """True when the repo's origin is a URL that reaches a network host."""
+    url = origin_url(repo)
+    return url is not None and url.startswith(REAL_ORIGIN)
+
+
+def prime_origin(repo):
+    """Primes the roadmap fetch of a repo whose origin is a real URL, so a reader reads origin/roadmap without a fetch.
+    The window is roadmap_ref.MAX_AGE, so each run calls this for its own repo; a repo with a local origin is left as it is."""
+    if repo is not None and real_origin(repo):
+        set_fetch_head(repo)
+
+
+def _log_spy(spy, record):
+    with open(spy, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record) + "\n")
+
+
+def refuse_real_origin_fetches(spy):
+    """Patches the one fetch of origin/roadmap (roadmap_ref.fetch_roadmap) in this process. A fetch of a repo whose origin
+    is a real URL is refused and logged to `spy`, and never runs. Any other fetch runs as it did. The install is logged
+    too, so a case can tell that the guard was in place."""
+    real_fetch = roadmap_ref.fetch_roadmap
+
+    def refused(repo_dir, timeout):
+        if real_origin(repo_dir):
+            _log_spy(spy, {"refused": repo_dir, "origin": origin_url(repo_dir)})
+            raise OSError("fetch refused by the test guard: prime the roadmap ref before the read")
+        return real_fetch(repo_dir, timeout)
+
+    _log_spy(spy, {"install": os.getpid()})
+    roadmap_ref.fetch_roadmap = refused
+
+
+def spy_read(spy):
+    """(installs, refused) from the spy file: how many guards were installed, and each refused fetch as a dict."""
+    installs, refused = 0, []
+    if not os.path.exists(spy):
+        return installs, refused
+    with open(spy, encoding="utf-8") as handle:
+        for line in handle:
+            record = json.loads(line)
+            if "install" in record:
+                installs += 1
+            else:
+                refused.append(record)
+    return installs, refused
+
+
 def ref_sha(repo, ref=STORE_REF):
     return git(repo, "rev-parse", ref)
 

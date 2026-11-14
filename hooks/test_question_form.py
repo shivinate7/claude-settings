@@ -2662,7 +2662,39 @@ def case_judged_mixed_writes_all_returned():
           "doc ids %r: the relative write p4 is read against the process cwd and dropped" % (ids,))
 
 
+def case_past_rulings_reads_the_page_repo_without_a_fetch():
+    """The waiting page's repo has a real origin, and a past-ruling read over it fetches nothing. origin_page_repo
+    primes the repo for this use, so the read takes the fresh path; unprimed, the read would fetch and the guard would
+    refuse the fetch."""
+    import question_form  # the one form check (hooks/question_form.py)
+    spy = os.path.join(RUN_FOLDER, fixture.FETCH_SPY)
+    fn = getattr(question_form, "past_rulings", None)
+    check("page repo past rulings: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.origin_page_repo()
+    installs, _refused = fixture.spy_read(spy)
+    check("page repo past rulings: scope, the guard is installed", installs > 0, "no guard install was logged")
+    fn(tcj.APPS_GOAL, repo)
+    _installs, refused = fixture.spy_read(spy)
+    fetched = [r for r in refused if r["refused"] == repo]
+    check("page repo past rulings: the read fetched no real origin", not fetched,
+          "the read of %s fetched its real origin %s, so its roadmap ref was not primed" % (repo, tcj.PAGE_ORIGIN_URL))
+
+
+def case_no_real_origin_fetch():
+    """No read in this process fetched a real origin. The page's origin is a real URL, and each use primes it
+    (tcj.origin_page_repo); a fetch that gets past the prime is refused and logged by the guard, which is installed
+    in main. The guard's install is the scope, so a dead guard cannot pass."""
+    name = "fetch guard: no read fetched a real origin"
+    installs, refused = fixture.spy_read(os.path.join(RUN_FOLDER, fixture.FETCH_SPY))
+    check(name + ": scope, the guard was installed in this process", installs > 0, "no guard install was logged")
+    check(name, not refused, "a read fetched a real origin, so its roadmap ref was not primed: %s"
+          % "; ".join(sorted({"%s (origin %s)" % (r["refused"], r["origin"]) for r in refused})))
+
+
 def main():
+    fixture.refuse_real_origin_fetches(os.path.join(RUN_FOLDER, fixture.FETCH_SPY))
     for case in (case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
                  case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
                  case_dismissed_reason_keeps_the_generic_remedy_for_other_fields,
@@ -2709,7 +2741,8 @@ def main():
                  case_cross_repo_writer_guard_path, case_cross_repo_writer_page_item_hit,
                  case_cross_repo_writer_call_judge, case_cross_repo_update_checked_with_needs_repo,
                  case_judged_relative_file_path_read_at_cwd, case_judged_absolute_and_empty_are_unchanged,
-                 case_judged_mixed_writes_all_returned):
+                 case_judged_mixed_writes_all_returned, case_past_rulings_reads_the_page_repo_without_a_fetch,
+                 case_no_real_origin_fetch):
         try:
             case()
         except Exception as exc:

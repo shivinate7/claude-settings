@@ -82,6 +82,16 @@ import test_ruled_store as fixture  # noqa: E402  the one home of the FETCH_HEAD
 ROOT = _test_temp.run_folder()
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)
 STUB_DIR = os.path.join(ROOT, "stub")
+# Each hook run goes through this probe, which installs the fetch guard (lint/test_ruled_store.py) before the hook's code.
+FETCH_PROBE = os.path.join(ROOT, "fetch_probe.py")
+FETCH_PROBE_SOURCE = r'''import os, runpy, sys
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
+import test_ruled_store
+test_ruled_store.refuse_real_origin_fetches(os.environ["FETCH_SPY_LOG"])
+sys.argv = [sys.argv[3]]
+runpy.run_path(sys.argv[0], run_name="__main__")
+'''
 FAILED = []
 RUNS = [0]
 SID_A, SID_B = "ses00001", "ses00002"
@@ -176,6 +186,7 @@ def origin_page_repo():
     repo = make_repo("page-origin", page=PAGE_URL)
     if not git(repo, "remote").stdout.strip():
         git(repo, "remote", "add", "origin", PAGE_ORIGIN_URL)
+    fixture.prime_origin(repo)  # each use primes its own read: the freshness window is short, so not once per build
     return repo
 
 
@@ -334,9 +345,24 @@ def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None):
                 "CJ_RECORD": os.path.join(base, "calls.jsonl"), "CJ_ANSWER": answer})
     if model_fail:
         env["CJ_MODEL_FAIL"] = "1"
-    proc = subprocess.run([sys.executable, HOOK], input=stdin_text, capture_output=True, text=True,
+    env["FETCH_SPY_LOG"] = os.path.join(ROOT, fixture.FETCH_SPY)
+    fixture.prime_origin(payload_cwd(stdin_text))  # a hook reads origin/roadmap for the payload's folder
+    if not os.path.exists(FETCH_PROBE):
+        with open(FETCH_PROBE, "w", encoding="utf-8") as f:
+            f.write(FETCH_PROBE_SOURCE)
+    proc = subprocess.run([sys.executable, FETCH_PROBE, os.path.join(HERE, "..", "lint"), HERE, HOOK],
+                          input=stdin_text, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=env, timeout=120)
     return Run(proc, base)
+
+
+def payload_cwd(stdin_text):
+    """The `cwd` of one hook payload, or None when the input is not a JSON object with one."""
+    try:
+        cwd = json.loads(stdin_text).get("cwd")
+    except (ValueError, AttributeError, TypeError):
+        return None
+    return cwd if isinstance(cwd, str) else None
 
 
 def spawn_input(kind="Explore", model="haiku", session=SID_A, agent=None, brief=None):
@@ -1733,6 +1759,30 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
           "Unvetted:" in r.reason(), detail(r))
 
 
+def case_hook_run_on_the_page_origin_fetches_nothing():
+    """A judged question at the waiting page's repo, whose origin is a real URL, reads its roadmap ref without a fetch.
+    The run primes that repo; unprimed, the hook's past-ruling read would fetch, and the guard would refuse the fetch."""
+    spy = os.path.join(ROOT, fixture.FETCH_SPY)
+    repo = origin_page_repo()
+    run_hook(question_input(box=good_box(), cwd=repo), answer=ALLOW)
+    installs, refused = fixture.spy_read(spy)
+    check("page origin hook run: scope, the guard was installed for the hook run", installs > 0,
+          "no guard install was logged")
+    fetched = [r for r in refused if r["refused"] == repo]
+    check("page origin hook run: the read fetched no real origin", not fetched,
+          "the hook read %s, which fetched its real origin %s, so its roadmap ref was not primed" % (repo, PAGE_ORIGIN_URL))
+
+
+def case_no_real_origin_fetch():
+    """No hook run fetched a real origin. A fetch of one reaches the network, and the guard refuses and logs it; the
+    guard's installs are the scope, so a dead guard cannot pass."""
+    name = "fetch guard: no hook run fetched a real origin"
+    installs, refused = fixture.spy_read(os.path.join(ROOT, fixture.FETCH_SPY))
+    check(name + ": scope, the guard was installed for the hook runs", installs > 0, "no guard install was logged")
+    check(name, not refused, "a hook fetched a real origin, so its roadmap ref was not primed: %s"
+          % "; ".join(sorted({"%s (origin %s)" % (r["refused"], r["origin"]) for r in refused})))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -1758,7 +1808,8 @@ def main():
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
-                 case_page_absolute_file_path_is_judged):
+                 case_page_absolute_file_path_is_judged, case_hook_run_on_the_page_origin_fetches_nothing,
+                 case_no_real_origin_fetch):
         try:
             case()
         except Exception as exc:
