@@ -11571,6 +11571,7 @@ class RedMainBrake(Env):
         rc, out, before = self.go([main_run(1751, "success")], {1751: self.EMPTY_PUSH})
         self.refused_because(rc, out, before, "a push group with no run that ran its suites reads green")
         self.assertIn("UNKNOWN", out)
+        self.assertIn(self.no_verdict_cause(1751), out, "main reads UNKNOWN for a cause other than the run that ran no suite")
 
     def test_two_empty_green_runs_above_a_red_push_run_leave_the_red_run_the_verdict(self):
         # the verdict walks past each run that skipped its suites, to the newest run of the group that ran them
@@ -11584,6 +11585,11 @@ class RedMainBrake(Env):
         """`refused`, with the cause in the failure message: a merge that went through means the red-main check read the page as green."""
         self.assertEqual(rc, 1, f"{cause}; the merge went through\n{out}")
         self.refused(rc, out, before)
+
+    @staticmethod
+    def no_verdict_cause(newest_id):
+        """The line Host.base_state (merge.py) prints when no run of the push group on the page ran its suites. `newest_id` is the run it names."""
+        return f"no run of checks in the push group on the page ran its suites, so main has no verdict (newest, run {newest_id}"
 
     # The suites-run verdict (decision no-merge-onto-red-main; owner ruling own-812-a-judge-suite-runs): the push group's verdict is its newest run
     # that ran its suites. A run that skipped its suites is passed over, whatever its push-skip job says. A page with no such run is UNKNOWN.
@@ -11605,6 +11611,7 @@ class RedMainBrake(Env):
         rc, out, before = self.go([main_run(i, "success") for i in ids], jobs)
         self.refused_because(rc, out, before, f"a page of only {shape} reads green, so the push group has a verdict that ran no suite")
         self.assertIn("UNKNOWN", out)
+        self.assertIn(self.no_verdict_cause(ids[0]), out, f"a page of only {shape} reads UNKNOWN for a cause other than the run that ran no suite")
 
     def test_a_page_of_one_live_push_skip_run_is_unknown_not_green(self):
         self.assert_unknown_page([1831], {1831: LIVE_PUSH_SKIP}, "one live push-skip run")
@@ -11620,6 +11627,7 @@ class RedMainBrake(Env):
         rc, out, before = self.go([main_run(1851, "success")], {1851: []})
         self.refused_because(rc, out, before, "a zero-job green push run reads green as the only verdict")
         self.assertIn("UNKNOWN", out)
+        self.assertIn(self.no_verdict_cause(1851), out, "main reads UNKNOWN for a cause other than the run that ran no suite")
 
     # Controls: main already reads these shapes as the ruling says, so they pass before and after the change.
     def test_the_old_defect_shape_over_a_failed_suites_run_refuses_and_names_it(self):
