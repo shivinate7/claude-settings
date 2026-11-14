@@ -309,25 +309,26 @@ def _write_data(entry, cwd=""):
     return data
 
 
-# ------------------------------------------------------------------ a pick never widens a shared tool
+# ------------------------------------------------------------------ a recommended option should not widen a shared tool
 #
 # docs/decisions/uniform-over-variants.md, rule `uniform-pick`, built against a named incident
-# (incident in the record): a repo that differs from a shared format changes to match, so an
-# option marked `widens: true` is never the item's `recommended` (old name `pick`), a str or any key in a list. In the
-# chat box the mark is the words below in an option's label or description, and such an option's label
-# never carries (Recommended). Read at the same ArtifactData call.
-WIDENS_TEXT = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
-WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: the owner ruled that "
-                 "a repo changes to fit a shared tool, never the tool to fit a repo. Make `recommended` (or `pick`, "
-                 "its old name, where the item still uses it) an option where the repo changes to match the "
-                 "shared format, or leave recommended out.")
-CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts: the owner ruled that a "
-                      "repo changes to fit a shared tool, never the tool to fit a repo. Recommend an option "
-                      "where the repo changes to match the shared format, and give the widening option no "
-                      "(Recommended) label.")
-# Older sessions still write these words in chat; the mark keeps refusing them. No card, rule text or
+# (incident in the record): a repo should change to fit the shared tool, rather than the tool change to fit a repo.
+# An option marked `widens: true` should not be the item's `recommended` (old name `pick`), a str or any key in a
+# list. Widening is judged by scope: a change that applies the same way to every repo is not widening. In the chat
+# box the mark is the words below in an option's label or description, and such an option's label does not carry
+# (Recommended). Read at the same ArtifactData call.
+WIDENS_GUIDELINE = "a repo should change to fit the shared tool, rather than the tool change to fit a repo"
+WIDENS_TEXT = "Goes against your ruling: " + WIDENS_GUIDELINE
+WIDENS_REASON = ("A recommended option should not widen what a shared tool accepts: the owner ruled that "
+                 + WIDENS_GUIDELINE + ". Make `recommended` (or `pick`, its old name, where the item still uses it) "
+                 "an option where the repo changes to match the shared format, or leave recommended out.")
+CHAT_WIDENS_REASON = ("A recommended option should not widen what a shared tool accepts: the owner ruled that "
+                      + WIDENS_GUIDELINE + ". Recommend an option where the repo changes to match the shared "
+                      "format, and give the widening option no (Recommended) label.")
+# Older sessions still write these words in chat; the mark keeps matching them. No card, rule text or
 # reason carries them.
-LEGACY_WIDENS_TEXT = "Goes against your uniform ruling (t18)"
+LEGACY_WIDENS_TEXTS = ("Goes against your uniform ruling (t18)",
+                       "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo")
 
 
 def _words_pattern(text):
@@ -335,7 +336,7 @@ def _words_pattern(text):
     return r"\s+".join(re.escape(w) for w in text.split())
 
 
-WIDENS_MARK = re.compile("|".join(_words_pattern(t) for t in (WIDENS_TEXT, LEGACY_WIDENS_TEXT)), re.I)
+WIDENS_MARK = re.compile("|".join(_words_pattern(t) for t in (WIDENS_TEXT,) + LEGACY_WIDENS_TEXTS), re.I)
 RECOMMENDED = re.compile(r"\(Recommended\)", re.I)
 
 
@@ -1724,7 +1725,7 @@ def _chat_question_hit(question, options):
     for o in options:
         label, desc = _option_text(o, "label"), _option_text(o, "description")
         if RECOMMENDED.search(label) and WIDENS_MARK.search(label + " " + desc):
-            return "uniform-pick", "recommended option goes against the uniform ruling"
+            return "uniform-pick", "recommended option widens a shared tool"
     for o in options:
         label, desc = _option_text(o, "label"), _option_text(o, "description")
         links = [{"url": u} for u in CHAT_URL.findall(desc)]

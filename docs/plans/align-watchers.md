@@ -170,7 +170,7 @@ with a rotating cap.
 one record that says why. Recommendation: (b). `sim-lease` already states its own definition.
 
 **Q7. Repo reaper. Decided and done.** The rule says the sweep never runs code a repository supplies.
-Decision uniform-over-variants (a shared tool never grows a per-repo exception; owner, 2026-10-27 12:51
+Decision uniform-over-variants (a shared tool should not grow an exception that fits one repo; owner, 2026-10-27 12:51
 CDT) rules out the npm reaper as a per-repo exception. The reaper is removed, and the rule has no
 exception.
 
