@@ -19,6 +19,7 @@ How the red-main check still sees a test-red main (`no-merge-onto-red-main`):
 Why: every merge to main re-ran suites that a passing PR run had passed on the same tree, which cost Windows and macOS minutes and delayed the next merge. A tree equal to a tested-green tree has no new behaviour to test.
 
 - Risk: accepted (owner reading of 16:03 CST). A red from an untouched suite shows only on a later change that touches it, since a narrowed PR run does not run it and main skips.
+- Risk: `stable.yml` moves `stable` on any green push run of main, and a skipped push run is one. After a narrowed PR run, `stable` can advance with no suite run on main. The proven PR run is the accepted evidence.
 - Risk: a skipped push run is a green push run, so `nightly-skip` may count it. It rests on a passing PR run of the same tree, so the nightly skips on a tree that run proved.
 - Risk: accepted (coordinator, 16:37 CST Nov 13, reviewer-recommended). A skipped push run reads as evidence for the red-main check after a narrowed PR run too. So a revert whose PR run scoped out the broken suite can clear a red main. That suite is never re-run. A revert usually touches the broken paths, so the suite usually runs. Filed as note `push-skip-narrowed-clears-red-main`.
 - Risk: a PR run re-run after a push cannot change that push's decision. The push reads the newest run at push time.

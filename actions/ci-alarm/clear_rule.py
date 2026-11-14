@@ -44,7 +44,7 @@ PASS_OR_QUIET = ("success", "skipped", "neutral", "cancelled")  # a completed jo
 EVENT_TEST = re.compile(r"^github\.event_name\s*==\s*'([^']*)'$")
 EVENT_TEST_REVERSED = re.compile(r"^'([^']*)'\s*==\s*github\.event_name$")
 MATRIX_SUFFIX = re.compile(r"\s+\(.*\)$")
-BOOKKEEPING = ("scope", "push-skip")  # the jobs of a push-group run that run no suite
+BOOKKEEPING = ("scope", "push-skip", "nightly-skip")  # the jobs of a push-group run that run no suite
 EVENTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "events.json")  # event -> group, the one home merge.py and alarm.sh read
 
 
