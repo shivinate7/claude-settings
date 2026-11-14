@@ -11373,13 +11373,13 @@ class RedMainBrake(Env):
     # push-skip skipped the push (success), and scope was skipped with every suite job behind it.
     EMPTY_PUSH = [main_job("push-skip", "success"), main_job("scope", "success"), main_job("checks", "skipped"), main_job("checks-macos", "skipped")]
     DISPATCH_EMPTY = [main_job("scope", "success"), main_job("checks", "skipped"), main_job("checks-macos", "skipped")]  # no push-skip job in a dispatch
-    EVIDENCE_PUSH = [main_job("push-skip", "success"), main_job("scope", "skipped"), main_job("checks", "skipped"), main_job("checks-macos", "skipped")]
-    RAN_PUSH = [main_job("push-skip", "success"), main_job("scope", "success"), main_job("checks", "success", 20), main_job("checks-macos", "success", 30)]
-    RED_PUSH = [main_job("push-skip", "success"), main_job("scope", "success"), main_job("checks", "failure", 20), main_job("checks-macos", "skipped")]
+    EVIDENCE_PUSH = [main_job("nightly-skip", "success"), main_job("push-skip", "success"), main_job("scope", "skipped"), main_job("checks", "skipped"), main_job("checks-macos", "skipped")]
+    RAN_PUSH = [main_job("nightly-skip", "success"), main_job("push-skip", "success"), main_job("scope", "success"), main_job("checks", "success", 20), main_job("checks-macos", "success", 30)]
+    RED_PUSH = [main_job("nightly-skip", "success"), main_job("push-skip", "success"), main_job("scope", "success"), main_job("checks", "failure", 20), main_job("checks-macos", "skipped")]
 
     def forty_job_empty_push(self):
         """A full-size empty push run: push-skip and scope ran, and each of forty suite jobs was skipped."""
-        return [main_job("push-skip", "success"), main_job("scope", "success")] + [main_job(f"job-{i:02d}", "skipped") for i in range(40)]
+        return [main_job("nightly-skip", "success"), main_job("push-skip", "success"), main_job("scope", "success")] + [main_job(f"job-{i:02d}", "skipped") for i in range(40)]
 
     def red_then_empty_green(self, event, n_jobs):
         """A red push run 1700, then a newer green run 1701 of `event` with `n_jobs` and no evidence. -> (rc, out, before) of the merge."""

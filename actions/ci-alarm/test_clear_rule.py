@@ -258,6 +258,12 @@ class EmptyRun(unittest.TestCase):
         self.assertTrue(clear_rule.empty_without_evidence([*self.EMPTY[:2], job("checks", "cancelled")], PUSH))
         self.assertTrue(clear_rule.empty_without_evidence([*self.EMPTY[:2], {"name": "checks", "status": "in_progress", "conclusion": None}], PUSH))
 
+    def test_the_nightly_skip_job_is_bookkeeping_and_makes_no_suite_that_ran(self):
+        # nightly-skip has no job-level if, so it concludes success on every push run of checks.yml.
+        # Named failure: it reads as a suite job that succeeded, and an empty push run reads as a verdict.
+        shape = [job("nightly-skip", "success"), job("push-skip", "success"), job("scope", "success"), job("checks", "skipped")]
+        self.assertTrue(clear_rule.empty_without_evidence(shape, PUSH))
+
     def test_a_push_skip_that_ran_with_scope_success_has_no_evidence(self):
         self.assertTrue(clear_rule.empty_without_evidence([job("push-skip", "success"), job("scope", "success")], PUSH))
 
