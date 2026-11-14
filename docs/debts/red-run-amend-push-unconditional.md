@@ -1,0 +1,6 @@
+# The push chain refuses an amend that a push follows in the same call, even when docs-only
+
+- **What.** The red-run push guard lane (slug red-run-push-guard, PR #3400) covers it. The push chain reads what the amend changes, not only the `--amend` flag: a docs-only amend followed by a push passes, and an amend of a test commit with no Red-run line is refused. Covering cases, in tests/guard/s43400-red-run-push.py: the call named "a commit --amend of a docs-only commit, then a push" (allowed), and the call named "a commit --amend that gives the test commit no Red-run line, then a push" (refused). Frequency unmeasured.
+- **Where.** `hooks/guard_merge.py`: `_note_commit` (its `--amend` branch), with `_commit_test_adds` for the amend's test paths.
+- **Decision.** `red-run-trailer-on-test-commits` (red-run trailer on test commits), item 9 (push time). The red-run push guard lane (slug red-run-push-guard, PR #3400) builds item 9.
+- **Retire.** Close this debt with a Retire-run cite in the PR body (`Retire-run: <slug> -- <passing CI run URL>`) naming a green CI run of the guard suite on the PR head. The covering cases are the calls named "a commit --amend of a docs-only commit, then a push" and "a commit --amend that gives the test commit no Red-run line, then a push" in tests/guard/s43400-red-run-push.py.
