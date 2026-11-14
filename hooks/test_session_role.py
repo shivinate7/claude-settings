@@ -237,5 +237,22 @@ class LocalRoleProof(SessionRoleCase):
             self.assertIs(self.proves(("triage",), "o/r"), False, "a reader that cannot run did not refuse the push with False")
 
 
+class MergeRoleFault(SessionRoleCase):
+    """merge/merge.py read_merge_role: when the local role reader raises, the merge reads no role, and the read does not crash.
+    The case lives here because the mutation run selects the hooks suites for merge/merge.py, not merge/test_merge.py."""
+
+    def test_the_merge_role_read_gives_no_role_when_the_role_reader_raises(self):
+        sys.path.insert(0, os.path.join(HERE, "..", "merge"))
+        import merge as merge_tool  # noqa: E402  merge/merge.py, the merge tool's own reader
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": SID}), \
+                mock.patch.object(session_role, "own_role", side_effect=RuntimeError("injected")):
+            os.environ.pop("CLAUDE_CODE_REMOTE", None)  # a cloud remote would read no local role at all
+            try:
+                role = merge_tool.read_merge_role()
+            except Exception as e:  # a crash in the fallback is a failed assert here, not an error
+                self.fail("a role reader that raised crashed the merge's role read: %r" % (e,))
+        self.assertIsNone(role, "a role reader that raised gave the merge a role")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
