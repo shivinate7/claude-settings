@@ -60,8 +60,10 @@ Inbox: <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.inbox.md, outside git. Format:
 
 Repeat flag (decision owner-feedback-inbox, "Repeats"): the Stop guard judges each new item with one
   model call per Stop, `decision_watch.invoke_model` (model claude-haiku-5-5, timeout 45 s, effort
-  None). A match appends ` repeats <ref>` to the item's line in the inbox. The block reason names it,
-  or systemMessage does when stop_hook_active. Judged ids are kept in the turn state file under
+  None). A match appends ` repeats <ref>` to the item's line in the inbox. systemMessage names it, one
+  line per mark, and a mark never blocks: it is a note the session merges or drops, so a guess never
+  stops a turn. A candidate on the item's own
+  home is dropped for that item. Judged ids are kept in the turn state file under
   `judged`. Candidates come from the repo of the payload cwd: the step at refs/remotes/origin/roadmap,
   the layout's backlog files in the working tree, and older inboxes whose sidecar `<sid>.inbox.repo`
   names the repo. Capture writes that sidecar once, in a repo. The repeat cases stub the model call
@@ -3122,9 +3124,23 @@ ANSWER_NONE = json.dumps({"repeats": []})
 # up subprocess.Popen when it runs, so a subclass installed here sees every start. Each git start
 # appends its argv to GIT_START_LOG when that variable is set. Python does the logging, so the count
 # is the same on every OS.
-PROBE_SOURCE = r"""import json, os, runpy, subprocess, sys
+PROBE_SOURCE = r"""import json, os, re, runpy, subprocess, sys
 sys.path.insert(0, sys.argv[1])
 import decision_watch
+
+
+# FG_STUB_PICK is a JSON list of [item id, phrase]. The answer names, for each pair, the first candidate line of
+# the prompt whose text holds the phrase, so a case names a candidate by its words, not by its ref.
+def pick(prompt):
+    part = prompt.split("\nCANDIDATES\n", 1)[1] if "\nCANDIDATES\n" in prompt else ""
+    repeats = []
+    for item_id, phrase in json.loads(os.environ["FG_STUB_PICK"]):
+        for ln in part.split("\n"):
+            m = re.match(r"\[(.+?)\] (.*)$", ln)
+            if m and phrase in m.group(2):
+                repeats.append({"id": item_id, "ref": m.group(1)})
+                break
+    return {"repeats": repeats}
 
 
 def stub(prompt, model=decision_watch.MODEL, timeout=decision_watch.MODEL_TIMEOUT, shape=None,
@@ -3140,6 +3156,8 @@ def stub(prompt, model=decision_watch.MODEL, timeout=decision_watch.MODEL_TIMEOU
             f.write("\n".join(kept))
     if os.environ.get("FG_STUB_ERROR"):
         return None, os.environ["FG_STUB_ERROR"]
+    if os.environ.get("FG_STUB_PICK"):
+        return pick(prompt), None
     return json.loads(os.environ.get("FG_STUB_ANSWER", '{"repeats": []}')), None
 
 
@@ -3207,10 +3225,11 @@ def repeat_answer(*item_ids):
     return json.dumps({"repeats": [{"id": i, "ref": REPEAT_REF} for i in item_ids]})
 
 
-def stop(cfg, sid, cwd, answer=None, error=None, stop_active=False, extra_env=None, drop=None):
+def stop(cfg, sid, cwd, answer=None, error=None, stop_active=False, extra_env=None, drop=None, pick=None):
     """One Stop of the guard, run the way the Stop hook runs it, with the model stubbed by the probe.
     Returns (Proc, calls). Each call is a dict the stub logged: prompt, model, timeout, effort.
-    `drop` = (file, line prefix): the stub removes those lines from the file while the model runs."""
+    `drop` = (file, line prefix): the stub removes those lines from the file while the model runs.
+    `pick` = [[item id, phrase], ...]: the stub names each item the candidate whose text holds the phrase."""
     JUDGE_RUNS[0] += 1
     log = os.path.join(os.path.dirname(cfg), "model-calls-%d.log" % JUDGE_RUNS[0])
     env = dict(extra_env or {}, FG_STUB_LOG=log)
@@ -3220,6 +3239,8 @@ def stop(cfg, sid, cwd, answer=None, error=None, stop_active=False, extra_env=No
         env["FG_STUB_ERROR"] = error
     if drop is not None:
         env["FG_STUB_DROP"] = json.dumps(list(drop))
+    if pick is not None:
+        env["FG_STUB_PICK"] = json.dumps(pick)
     obj = {"hook_event_name": "Stop", "session_id": sid, "stop_hook_active": stop_active, "cwd": cwd}
     p = run(probe_path(), payload(obj), cfg, args=(HERE, GUARD_PATH), extra_env=env)
     return p, [json.loads(ln) for ln in read_or_empty(log).splitlines()]
@@ -3261,10 +3282,10 @@ def sidecar_of(cfg, sid):
     return os.path.join(cfg, sidecar_rel(sid))
 
 
-def write_old_inbox(cfg, sid, text, sidecar=None):
-    """Another session's inbox: one block of `text`, with one jotted item. `sidecar` (a repo path),
+def write_old_inbox(cfg, sid, text, sidecar=None, header=BLOCK_HEADER):
+    """Another session's inbox: one block of `text` under `header`, with one jotted item. `sidecar` (a repo path),
     when given, writes the session's sidecar the way capture does on its first save."""
-    write_file(inbox_of(cfg, sid), render_block(text, items=("- fb-0812-1 [note] -> noted",)))
+    write_file(inbox_of(cfg, sid), render_block(text, header=header, items=("- fb-0812-1 [note] -> noted",)))
     if sidecar is not None:
         write_file(sidecar_of(cfg, sid), sidecar)
 
@@ -3314,9 +3335,10 @@ def in_a_repo(path):
     return cp.returncode == 0
 
 
-def case_repeat_roadmap_step_marks_the_item_and_blocks():
+def case_repeat_roadmap_step_marks_the_item_and_tells_the_owner():
     """The owner says `carousel`; the step says `wheel`. The model names the step for the item. The
-    item line gains the mark, and the block names it. The mark keeps the line well formed."""
+    item line gains the mark, systemMessage names it, and the mark blocks nothing, because a mark is a note
+    the session merges or drops. The mark keeps the line well formed."""
     root = repeat_repo("repeat-roadmap", step=True)
     cfg, sid = new_cfg(), "repeat-roadmap"
     check("roadmap: the message is saved", ran_central(capture(cfg, sid, MSG_ONE, cwd=root)))
@@ -3330,10 +3352,12 @@ def case_repeat_roadmap_step_marks_the_item_and_blocks():
           MSG_ONE.split("\n")[0] in prompt and ITEM_ID in prompt, prompt[-300:])
     check("roadmap: the item line gains the mark", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE + MARKED,
           inbox_line(cfg, sid, ITEM_ID))
+    out = guard_json(p) or {}
+    check("roadmap: the mark blocks nothing", not is_block(out), p.desc())
+    check("roadmap: systemMessage names the item and the ref",
+          "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in str(out.get("systemMessage", "")), p.desc())
     reason = block_reason(p) or ""
-    check("roadmap: the block reason names the item and the ref",
-          "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in reason, p.desc())
-    check("roadmap: no reason calls the item malformed", "malformed" not in reason, reason)
+    check("roadmap: no block reason calls the item malformed", "malformed" not in reason, reason)
 
 
 def case_repeat_stop_hook_active_marks_and_tells_the_owner():
@@ -3442,10 +3466,11 @@ def case_repeat_model_error_fails_open_and_is_not_retried():
 
 def case_repeat_old_inboxes_bind_by_sidecar_and_capture_writes_it_once():
     """An older inbox is a candidate only with a sidecar that names this repo. Capture writes this
-    session's sidecar once, inside a repo, and never outside one."""
+    session's sidecar once, inside a repo, and never outside one. The two captures are stamped 36 minutes apart
+    (LOCAL_TIME_NOW), so the earlier message stays a candidate of the later item."""
     root = repeat_repo("repeat-binding")
     cfg, sid = new_cfg(), "repeat-binding"
-    env = git_counter(cfg)
+    env = dict(git_counter(cfg), LOCAL_TIME_NOW=EARLY_NOW)
     write_old_inbox(cfg, OLD_A_SID, OLD_A_TEXT, sidecar=os.path.realpath(root))
     write_old_inbox(cfg, OLD_B_SID, OLD_B_TEXT)
     start = len(git_lines(env))
@@ -3455,7 +3480,7 @@ def case_repeat_old_inboxes_bind_by_sidecar_and_capture_writes_it_once():
     check("binding: capture starts at most one git process", len(git_lines(env)) - start <= 1,
           git_lines(env, start))
     mid = snapshot(cfg)
-    capture(cfg, sid, MSG_TWO, cwd=root)
+    capture(cfg, sid, MSG_TWO, cwd=root, extra_env={"LOCAL_TIME_NOW": LATE_NOW})
     check("binding: a second capture leaves the sidecar as it was",
           sidecar_rel(sid) not in written_between(mid, snapshot(cfg)), sorted(written_between(mid, snapshot(cfg))))
     add_item(cfg, sid)
@@ -3464,8 +3489,9 @@ def case_repeat_old_inboxes_bind_by_sidecar_and_capture_writes_it_once():
     check("binding: the old inbox with a sidecar for this repo is a candidate",
           "OLD-A" in prompt and "inbox:" + OLD_A_SID[:8] + "@" in prompt, prompt[-300:])
     check("binding: the old inbox with no sidecar is not a candidate", "OLD-B" not in prompt, "OLD-B found")
-    check("binding: this session's earlier message is a candidate",
-          MSG_ONE.split("\n")[0] in prompt and "inbox:" + sid[:8] + "@" in prompt, prompt[-300:])
+    own_ref = "inbox:%s@%s" % (sid[:8], EARLY_HEADER[:16])  # the 10:04 message of this session, by its own ref
+    check("binding: this session's earlier message is a candidate by its own ref",
+          own_ref in candidate_refs(prompt), candidate_refs(prompt))
     cfg_plain = new_cfg()
     plain = plain_folder(os.path.dirname(cfg_plain))
     check("binding: the plain folder is outside any git repo", not in_a_repo(plain), plain)
@@ -3524,10 +3550,23 @@ def case_repeat_cost_one_call_one_grep_and_two_files():
           extra <= 1, "judging=%d quiet=%d grep=%d" % (len(lines1), len(lines2), grep_starts(lines1)))
 
 
+def candidates_part(prompt):
+    """The text under the prompt's CANDIDATES heading."""
+    return prompt.split("\nCANDIDATES\n", 1)[1] if "\nCANDIDATES\n" in prompt else ""
+
+
 def candidate_refs(prompt):
     """The ref of each candidate line: the lines under the prompt's CANDIDATES heading."""
-    part = prompt.split("\nCANDIDATES\n", 1)[1] if "\nCANDIDATES\n" in prompt else ""
-    return re.findall(r"^\[([^\]]+)\] ", part, re.M)
+    return re.findall(r"^\[([^\]]+)\] ", candidates_part(prompt), re.M)
+
+
+def candidate_ref_of(prompt, phrase):
+    """The ref of the first candidate line whose text holds `phrase`, or "" when no candidate does."""
+    for ln in candidates_part(prompt).split("\n"):
+        m = re.match(r"\[(.+?)\] (.*)$", ln)
+        if m and phrase in m.group(2):
+            return m.group(1)
+    return ""
 
 
 def cap_counts(prompt):
@@ -3584,27 +3623,36 @@ def case_repeat_cap_keeps_each_source_within_its_share():
         check("cap %d: at most 100 inbox blocks" % steps, counts["inbox"] <= 100, counts)
 
 
-def case_repeat_repeat_only_reason_has_no_page_suffix_and_no_double_period():
-    """A block whose only reason is a repeat flag carries neither the page and standing suffix, nor a
-    double period. A flag beside another reason has no double period either."""
+def case_repeat_mark_never_blocks_and_prints_one_system_line():
+    """A mark never blocks, because it is a note the session merges or drops, not a gate on the turn. A Stop
+    whose only reason is a mark passes: systemMessage holds the one flag line, and the line still gains the
+    mark. A mark beside a burst message
+    that needs items keeps the block for that reason alone: the flag stays out of the block reason, and
+    systemMessage holds it, with no double period in the reason."""
     root = repeat_repo("repeat-reason", step=True)
     cfg, sid = new_cfg(), "repeat-reason"
     capture(cfg, sid, MSG_ONE, cwd=root)
     add_item(cfg, sid)
     p, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
-    reason = block_reason(p) or ""
-    check("reason: the repeat-only Stop blocks", block_reason(p) is not None, p.desc())
-    check("reason: no page and standing suffix on a repeat-only block",
-          "Send each page ruling" not in reason, reason)
-    check("reason: no double period in a repeat-only block", ".." not in reason, reason)
+    out = guard_json(p) or {}
+    check("never blocks: a Stop whose only reason is a mark does not block", not is_block(out), p.desc())
+    msg = str(out.get("systemMessage", ""))
+    check("never blocks: systemMessage holds the flag as one line",
+          "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in msg and "\n" not in msg, p.desc())
+    check("never blocks: the mark still lands on the item line", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE + MARKED,
+          inbox_line(cfg, sid, ITEM_ID))
     cfg2, sid2 = new_cfg(), "repeat-mixed"
     capture(cfg2, sid2, MSG_ONE, cwd=root)
     add_item(cfg2, sid2)
     capture(cfg2, sid2, MSG_TWO, cwd=root)  # a burst message with no item: a reason of its own
     p2, calls2 = stop(cfg2, sid2, root, answer=repeat_answer(ITEM_ID))
     reason2 = block_reason(p2) or ""
-    check("reason: a repeat flag beside another reason is in the block with no double period",
-          "may repeat" in reason2 and ".." not in reason2, reason2)
+    check("never blocks: a burst reason still blocks beside a mark", block_reason(p2) is not None, p2.desc())
+    check("never blocks: the flag stays out of the block reason", "may repeat" not in reason2, reason2)
+    check("never blocks: systemMessage holds the flag beside the block",
+          "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in str((guard_json(p2) or {}).get("systemMessage", "")),
+          p2.desc())
+    check("never blocks: no double period in the block reason", ".." not in reason2, reason2)
 
 
 def case_repeat_second_judging_adds_no_second_mark():
@@ -3625,8 +3673,8 @@ def case_repeat_second_judging_adds_no_second_mark():
 
 
 def case_repeat_unplaced_mark_is_reported_as_not_marked():
-    """The item's line is gone by the time the mark goes on: the block reason names the flag and says
-    it is not marked, and never says it is marked on the item."""
+    """The item's line is gone by the time the mark goes on: systemMessage names the flag and says
+    it is not marked, and never says it is marked on the item. The mark blocks nothing."""
     root = repeat_repo("repeat-unplaced", step=True)
     cfg, sid = new_cfg(), "repeat-unplaced"
     capture(cfg, sid, MSG_ONE, cwd=root)
@@ -3634,11 +3682,12 @@ def case_repeat_unplaced_mark_is_reported_as_not_marked():
     p, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID),
                     drop=(inbox_of(cfg, sid), "- " + ITEM_ID + " "))
     check("unplaced: one model call", len(calls) == 1, p.desc())
-    reason = block_reason(p) or ""
-    check("unplaced: the reason names the flag", "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in reason, p.desc())
-    check("unplaced: the reason says not marked", "not marked" in reason, reason)
-    check("unplaced: the reason never says marked on the item",
-          re.search(r"(?<!not )marked on the item", reason) is None, reason)
+    msg = str((guard_json(p) or {}).get("systemMessage", ""))
+    check("unplaced: systemMessage names the flag", "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in msg, p.desc())
+    check("unplaced: systemMessage says not marked", "not marked" in msg, msg)
+    check("unplaced: systemMessage never says marked on the item",
+          re.search(r"(?<!not )marked on the item", msg) is None, msg)
+    check("unplaced: the mark blocks nothing", not is_block(guard_json(p)), p.desc())
 
 
 def case_repeat_word_repeats_in_an_item_still_gets_the_mark():
@@ -3657,10 +3706,10 @@ def case_repeat_word_repeats_in_an_item_still_gets_the_mark():
           inbox_line(cfg, sid, "fb-1-4") == line4 + MARKED, inbox_line(cfg, sid, "fb-1-4"))
     check("word: a ref-like run mid-line is not a mark, so the line gains one",
           inbox_line(cfg, sid, "fb-1-5") == line5 + MARKED, inbox_line(cfg, sid, "fb-1-5"))
-    reason = block_reason(p) or ""
-    check("word: the reason names both items and says marked",
-          "fb-1-4 may repeat %s" % REPEAT_REF in reason and "fb-1-5 may repeat %s" % REPEAT_REF in reason
-          and "marked on the item" in reason and "not marked" not in reason, reason)
+    msg = str((guard_json(p) or {}).get("systemMessage", ""))
+    check("word: systemMessage names both items and says marked",
+          "fb-1-4 may repeat %s" % REPEAT_REF in msg and "fb-1-5 may repeat %s" % REPEAT_REF in msg
+          and "marked on the item" in msg and "not marked" not in msg, msg)
 
 
 def case_repeat_cap_keeps_the_newest_notes_lines():
@@ -3698,7 +3747,7 @@ def case_repeat_cap_keeps_the_open_roadmap_steps():
 
 def case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit():
     """An answer entry whose id or ref is a list is not a hit. It must not stop the valid hit of the same
-    answer, which still gets its mark and its reason."""
+    answer, which still gets its mark and its systemMessage line."""
     root = repeat_repo("repeat-list", step=True)
     cfg, sid = new_cfg(), "repeat-list"
     capture(cfg, sid, MSG_ONE, cwd=root)
@@ -3711,8 +3760,8 @@ def case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit():
     check("list: one model call", len(calls) == 1, p.desc())
     check("list: the valid hit still marks the line", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE + MARKED,
           inbox_line(cfg, sid, ITEM_ID))
-    reason = block_reason(p) or ""
-    check("list: the block names the valid hit", "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in reason,
+    msg = str((guard_json(p) or {}).get("systemMessage", ""))
+    check("list: systemMessage names the valid hit", "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in msg,
           p.desc())
     check("list: no repeats-not-checked note", "repeats not checked" not in str(guard_json(p) or {}),
           p.desc())
@@ -3778,6 +3827,492 @@ def case_repeat_repo_item_is_never_judged_as_a_repeat():
     check("repo item: the note beside it is in the prompt", "[%s]" % ITEM_ID_2 in prompt, prompt[-300:])
     check("repo item: its line gets no mark", " repeats " not in inbox_line(cfg, sid, REPO_ID),
           inbox_line(cfg, sid, REPO_ID))
+
+
+# The own-home and per-item cases write the inbox with fixed headers, not with capture(): a capture stamps
+# the real clock, and two captures in one minute share an inbox ref, so the refs would not name a message.
+NEW_SID = "c3d4e5f6-0a1b-4c2d"
+EARLY_HEADER = "2026-10-13 10:04 CDT (UTC-05:00)"
+LATE_HEADER = "2026-10-13 10:40 CDT (UTC-05:00)"
+# The same two minutes as LOCAL_TIME_NOW. They are 36 minutes apart, outside the 30-minute window in which a same-inbox
+# candidate is dropped, so the earlier message stays a candidate of the later one.
+EARLY_NOW, LATE_NOW = "2026-10-13T10:04:00-05:00", "2026-10-13T10:40:00-05:00"
+EARLY_REF = "inbox:%s@%s" % (NEW_SID[:8], EARLY_HEADER[:16])  # the candidate ref of the 10:04 message
+MARK_EARLY = " repeats " + EARLY_REF
+
+
+def write_inbox(cfg, sid, rows):
+    """Writes the inbox from (header, text, items) rows, in the format, each header as given."""
+    write_file(inbox_of(cfg, sid), "".join(render_block(text, header=h, items=items) for h, text, items in rows))
+
+
+LATE_REF = "inbox:%s@%s" % (NEW_SID[:8], LATE_HEADER[:16])  # the candidate ref of the 10:40 message
+SAME_MINUTE_REF = EARLY_REF + "#2"  # the second of two messages stamped 10:04: inbox_refs takes `#2`
+AGAIN_ID = "fb-1004-1"
+AGAIN_LINE = "- fb-1004-1 [note] -> noted"
+
+
+def judged_again_with_mark(name, rows, second_ref, mark):
+    """The shared step of the second-judging marks. `rows` is the inbox, and the item (AGAIN_ID) sits on the block
+    whose line already holds `mark`. The Stop judges the item again, and the model names `second_ref` as its
+    repeat. Returns (cfg, Proc, calls)."""
+    root = repeat_repo(name, step=True)
+    cfg = new_cfg()
+    write_inbox(cfg, NEW_SID, rows)
+    answer = json.dumps({"repeats": [{"id": AGAIN_ID, "ref": second_ref}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    return cfg, p, calls
+
+
+def case_repeat_same_minute_mark_is_recognised_on_a_second_judging():
+    """A ref of a message stamped in a minute shared with another ends `#<block number>` (inbox_refs). A line
+    already marked with that ref is marked: a Stop that judges the item again must leave the line with its one
+    mark. MARKED must recognise the `#N` suffix: without it, the `#2` mark reads as no mark, and mark_items
+    appends the same ref again. The Stop's flag line names the ref, so the hit is known accepted, not a
+    vacuous pass. The pair sits 36 minutes before the item, so its `#2` candidate stays in the item's list."""
+    mark = " repeats " + SAME_MINUTE_REF
+    rows = [(EARLY_HEADER, MSG_TWO, []), (EARLY_HEADER, MSG_ONE, []), (LATE_HEADER, MSG_ONE, [AGAIN_LINE + mark])]
+    cfg, p, calls = judged_again_with_mark("repeat-same-minute-mark", rows, SAME_MINUTE_REF, mark)
+    check("same minute mark: the Stop judges the item once", len(calls) == 1, p.desc())
+    check("same minute mark: the Stop flags the item at its ref", "%s may repeat %s" % (AGAIN_ID, SAME_MINUTE_REF) in p.out,
+          p.desc())
+    check("same minute mark: the line keeps its one mark",
+          inbox_line(cfg, NEW_SID, AGAIN_ID) == AGAIN_LINE + mark, inbox_line(cfg, NEW_SID, AGAIN_ID))
+
+
+def case_repeat_unsuffixed_mark_stays_one_mark_on_a_second_judging():
+    """Control for the case above: the same shape with the second message in its own minute, so its ref has no
+    `#`. MARKED matches a time-only ref, and mark_items adds no second mark. It keeps the plain ref working
+    beside the `#N` case, so a fix to the suffix match cannot break the plain one."""
+    mark = " repeats " + LATE_REF
+    rows = [(EARLY_HEADER, MSG_ONE, [AGAIN_LINE + mark]), (LATE_HEADER, MSG_TWO, [])]
+    cfg, p, calls = judged_again_with_mark("repeat-unsuffixed-mark", rows, LATE_REF, mark)
+    check("unsuffixed mark control: the Stop judges the item once", len(calls) == 1, p.desc())
+    check("unsuffixed mark control: the Stop flags the item at its ref", "%s may repeat %s" % (AGAIN_ID, LATE_REF) in p.out,
+          p.desc())
+    check("unsuffixed mark control: the line keeps its one mark",
+          inbox_line(cfg, NEW_SID, AGAIN_ID) == AGAIN_LINE + mark, inbox_line(cfg, NEW_SID, AGAIN_ID))
+
+
+def case_repeat_own_home_is_never_a_candidate_for_its_item():
+    """R38 (owner 13:03 CST Nov 11): a session's follow-up items match the work it filed from its own earlier
+    items. The step an item names as its home is that item's own home, so the judge drops it for that item:
+    the model's naming of the step marks nothing on it. The other item of the same message has no such home,
+    so it keeps the step as a candidate and gets the mark for a repeat in other words (carousel and wheel)."""
+    root = repeat_repo("repeat-own-home", step=True)
+    cfg = new_cfg()
+    homed_line, other_line = "- fb-1004-1 [task] -> step:wheel-speed", "- fb-1004-2 [note] -> noted"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [homed_line, other_line])])
+    answer = json.dumps({"repeats": [{"id": "fb-1004-1", "ref": REPEAT_REF},
+                                     {"id": "fb-1004-2", "ref": REPEAT_REF}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    check("own home: one model call, for the item that keeps the step", len(calls) == 1, p.desc())
+    check("own home: the item whose home is the step gets no mark",
+          inbox_line(cfg, NEW_SID, "fb-1004-1") == homed_line, inbox_line(cfg, NEW_SID, "fb-1004-1"))
+    check("own home: the other item of the same message gets the mark",
+          inbox_line(cfg, NEW_SID, "fb-1004-2") == other_line + MARKED, inbox_line(cfg, NEW_SID, "fb-1004-2"))
+
+
+def case_repeat_each_item_is_judged_against_the_other_messages():
+    """R38 (owner 13:03 CST Nov 11): one candidate list was given to every item in a Stop, so each message of the
+    Stop hid the others. The later message is 36 minutes after the earlier one, outside the 30-minute window, so the
+    earlier message stays the later item's candidate and gets the mark. The item on the earlier message is never
+    marked against its own message. One model call covers both items."""
+    root = repeat_repo("repeat-per-item", step=True)
+    cfg = new_cfg()
+    early_line, late_line = "- fb-1004-1 [note] -> noted", "- fb-1040-1 [note] -> noted"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [early_line]), (LATE_HEADER, MSG_TWO, [late_line])])
+    answer = json.dumps({"repeats": [{"id": "fb-1040-1", "ref": EARLY_REF}, {"id": "fb-1004-1", "ref": EARLY_REF}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    check("per item: one model call covers both messages", len(calls) == 1, p.desc())
+    check("per item: the later item is marked against the earlier message",
+          inbox_line(cfg, NEW_SID, "fb-1040-1") == late_line + MARK_EARLY, inbox_line(cfg, NEW_SID, "fb-1040-1"))
+    check("per item: the earlier item is not marked against its own message",
+          inbox_line(cfg, NEW_SID, "fb-1004-1") == early_line, inbox_line(cfg, NEW_SID, "fb-1004-1"))
+
+
+# The backlog cases name candidates by fixed refs: a todo or notes line is `todo:<line>` or `note:<line>`, and a
+# debt is `debt:<slug>`. Each file below puts its one item on line 3.
+EARLY_PHRASE = "the carousel spins too slow"  # the first words of MSG_ONE
+SECOND_DEBT_SLUG = "spin-rate-floor"
+SECOND_DEBT_TEXT = "# Spin rate floor\n\nThe spin rate may not drop below six degrees per frame.\n"
+BACKLOG_TODO = "# Todo\n\n- Wheel speed cap: raise the spin limit\n"
+BACKLOG_NOTES = "# Notes\n\n- keep the wheel speed setting in the reader\n"
+TODO_REF, NOTE_REF, DEBT_REF = "todo:3", "note:3", "debt:" + DEBT_SLUG
+
+
+def backlog_repo(name):
+    """A rolled-out repo whose backlog holds each candidate kind, untracked: the todo file, the notes file and
+    two debts. A case names one of them as its item's home."""
+    root = repeat_repo(name, debt=True)
+    write_file(os.path.join(root, "docs", "todo.md"), BACKLOG_TODO)
+    write_file(os.path.join(root, "docs", "debts", "notes.md"), BACKLOG_NOTES)
+    write_file(os.path.join(root, "docs", "debts", SECOND_DEBT_SLUG + ".md"), SECOND_DEBT_TEXT)
+    return root
+
+
+def case_repeat_same_minute_blocks_keep_their_own_candidates():
+    """R38 (restart plan, owner 13:03 CST Nov 11): two messages stamped in the same minute share the inbox ref
+    inbox:<sid8>@<hh:mm>, and each takes `#<block number>`. The later item sits 36 minutes after that pair, so both
+    messages stay its candidates, and it marks the earlier one by its own ref. Control: the earlier item sits in the
+    pair, so the pair is inside the 30-minute window of its own block and is not its candidate: it gets no mark.
+    Both items name their candidate by its words, so the case holds whatever ref a fix gives each message."""
+    root = repeat_repo("repeat-same-minute", step=True)
+    cfg = new_cfg()
+    early_line, late_line = "- fb-1004-1 [note] -> noted", "- fb-1040-1 [note] -> noted"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [early_line]), (EARLY_HEADER, MSG_TWO, []),
+                               (LATE_HEADER, MSG_TWO, [late_line])])
+    p, calls = stop(cfg, NEW_SID, root, pick=[["fb-1040-1", EARLY_PHRASE], ["fb-1004-1", EARLY_PHRASE]])
+    check("same minute: one model call covers both messages", len(calls) == 1, p.desc())
+    prompt = calls[0]["prompt"] if len(calls) == 1 else ""
+    refs = candidate_refs(prompt)
+    check("same minute: both messages stamped 10:04 keep their own refs",
+          EARLY_REF + "#1" in refs and EARLY_REF + "#2" in refs, refs)
+    ref = candidate_ref_of(prompt, EARLY_PHRASE)
+    check("same minute: the earlier message is a candidate for the later item", ref != "", prompt[-300:])
+    check("same minute: the later item is marked against the earlier message",
+          ref != "" and inbox_line(cfg, NEW_SID, "fb-1040-1") == late_line + " repeats " + ref,
+          inbox_line(cfg, NEW_SID, "fb-1040-1"))
+    check("same minute control: the earlier item names its own message and gets no mark",
+          inbox_line(cfg, NEW_SID, "fb-1004-1") == early_line, inbox_line(cfg, NEW_SID, "fb-1004-1"))
+
+
+# A same-inbox candidate less than 30 minutes from its item's own block is not that item's candidate (decision
+# owner-feedback-inbox, "Repeats"). The window is stamp to stamp: each block's own header decides, never the clock.
+# Each Stop here keeps the roadmap step as a candidate, so the model is called and the prompt can be read.
+WINDOW_ITEM_ID = "fb-1004-1"
+WINDOW_ITEM_LINE = "- fb-1004-1 [note] -> noted"
+BEFORE_29 = "2026-10-13 09:35 CDT (UTC-05:00)"  # 29 minutes before EARLY_HEADER
+AFTER_29 = "2026-10-13 10:33 CDT (UTC-05:00)"  # 29 minutes after EARLY_HEADER
+BEFORE_31 = "2026-10-13 09:33 CDT (UTC-05:00)"  # 31 minutes before EARLY_HEADER
+AFTER_31 = "2026-10-13 10:35 CDT (UTC-05:00)"  # 31 minutes after EARLY_HEADER
+BEFORE_30 = "2026-10-13 09:34 CDT (UTC-05:00)"  # exactly 30 minutes before EARLY_HEADER
+AFTER_30 = "2026-10-13 10:34 CDT (UTC-05:00)"  # exactly 30 minutes after EARLY_HEADER
+NEAR_HEADER = "2026-10-13 10:20 CDT (UTC-05:00)"  # 16 minutes after EARLY_HEADER
+# Mixed-offset stamps: a CDT and a CST stamp on one night of a clock change. The window reads each stamp's own
+# offset, so real time decides it, and the clock faces these stamps also show do not.
+MIXED_CDT_LATE = "2026-11-01 01:55 CDT (UTC-05:00)"  # 06:55 UTC: 25 real minutes before MIXED_CST, 35 on the faces
+MIXED_CST = "2026-11-01 01:20 CST (UTC-06:00)"  # 07:20 UTC
+MIXED_CDT_EARLY = "2026-11-01 01:10 CDT (UTC-05:00)"  # 06:10 UTC: 70 real minutes before MIXED_CST, 10 on the faces
+OTHER_1003 = "2026-10-13 10:03 CDT (UTC-05:00)"  # one minute before EARLY_HEADER, in another session's inbox
+TODAY_DRAFT_PRS = ("can we have it be that draft PRs first have to check with batch runner that it's not using mac os "
+                   "runners at this time before opening the pr for CI to be ready? or is there anyway to expand the "
+                   "amount of mac runners we have? i also have my own macbook registered as a runner now that we can "
+                   "maybe rely on for batches?")
+TODAY_OTHER_WAYS = ("are there other ways to also just buy/add more runners that aren't just from github? like how do "
+                    "other startups do this etc?")
+TODAY_MAC_NOW = ("my mac is literally on right now so you can add it as a runner if need be (degen's already used it) "
+                 "anyways agreed on e, my mac isn't available all the time but imjust saying it shd be available rn "
+                 "and it can help")
+TODAY_MAC_STUDIO = ("changed the approval requirements ! im pretty down to buy a mac studio / mini, how many runners / "
+                    "throughput does those kinda devices offer me? and how about old macs like a mac pro running intel "
+                    "xeon etc?")
+
+
+def new_ref(header):
+    """The candidate ref of a block of this session's inbox, for a block whose minute no other block shares."""
+    return "inbox:%s@%s" % (NEW_SID[:8], header[:16])
+
+
+def case_repeat_candidate_within_thirty_minutes_is_not_a_candidate():
+    """The item's inbox holds a block 29 minutes before it and one 29 minutes after it, both saying what the item
+    says. Neither is the item's candidate, so neither ref is in the prompt, and the stub naming both is rejected."""
+    root = repeat_repo("repeat-window-drop", step=True)
+    cfg = new_cfg()
+    write_inbox(cfg, NEW_SID, [(BEFORE_29, MSG_ONE, []), (EARLY_HEADER, MSG_ONE, [WINDOW_ITEM_LINE]),
+                               (AFTER_29, MSG_ONE, [])])
+    answer = json.dumps({"repeats": [{"id": WINDOW_ITEM_ID, "ref": new_ref(BEFORE_29)},
+                                     {"id": WINDOW_ITEM_ID, "ref": new_ref(AFTER_29)}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    refs = candidate_refs(calls[0]["prompt"]) if len(calls) == 1 else []
+    check("window drop: one model call, and the roadmap step is its candidate",
+          len(calls) == 1 and REPEAT_REF in refs, p.desc() + " " + str(refs))
+    check("window drop: the block 29 minutes before is not a candidate", new_ref(BEFORE_29) not in refs, refs)
+    check("window drop: the block 29 minutes after is not a candidate", new_ref(AFTER_29) not in refs, refs)
+    check("window drop: the item gets no mark", inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID) == WINDOW_ITEM_LINE,
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID))
+    check("window drop: no flag is printed", "may repeat" not in p.out, p.desc())
+
+
+def case_repeat_candidate_thirty_one_minutes_away_stays_a_candidate():
+    """Control: the blocks 31 minutes before and after the item are its candidates, and the stub's naming of the
+    earlier one marks the item. The clock is set a minute after that block, so a window measured from now would
+    drop it; a window measured stamp to stamp keeps it."""
+    root = repeat_repo("repeat-window-keep", step=True)
+    cfg = new_cfg()
+    write_inbox(cfg, NEW_SID, [(BEFORE_31, MSG_ONE, []), (EARLY_HEADER, MSG_ONE, [WINDOW_ITEM_LINE]),
+                               (AFTER_31, MSG_ONE, [])])
+    answer = json.dumps({"repeats": [{"id": WINDOW_ITEM_ID, "ref": new_ref(BEFORE_31)}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer, extra_env={"LOCAL_TIME_NOW": "2026-10-13T09:34:00-05:00"})
+    refs = candidate_refs(calls[0]["prompt"]) if len(calls) == 1 else []
+    check("window keep: one model call, and the roadmap step is its candidate",
+          len(calls) == 1 and REPEAT_REF in refs, p.desc() + " " + str(refs))
+    check("window keep: the block 31 minutes before is a candidate", new_ref(BEFORE_31) in refs, refs)
+    check("window keep: the block 31 minutes after is a candidate", new_ref(AFTER_31) in refs, refs)
+    check("window keep: the item is marked against the block 31 minutes before",
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID) == WINDOW_ITEM_LINE + " repeats " + new_ref(BEFORE_31),
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID))
+
+
+def case_repeat_candidate_exactly_thirty_minutes_away_is_not_a_candidate():
+    """The window closes at 30 minutes: a block exactly 30 minutes before the item, and one exactly 30 minutes after it,
+    are within it, so neither is a candidate. The stub's naming of both is rejected."""
+    root = repeat_repo("repeat-window-edge", step=True)
+    cfg = new_cfg()
+    write_inbox(cfg, NEW_SID, [(BEFORE_30, MSG_ONE, []), (EARLY_HEADER, MSG_ONE, [WINDOW_ITEM_LINE]),
+                               (AFTER_30, MSG_ONE, [])])
+    answer = json.dumps({"repeats": [{"id": WINDOW_ITEM_ID, "ref": new_ref(BEFORE_30)},
+                                     {"id": WINDOW_ITEM_ID, "ref": new_ref(AFTER_30)}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    refs = candidate_refs(calls[0]["prompt"]) if len(calls) == 1 else []
+    check("window edge: one model call, and the roadmap step is its candidate",
+          len(calls) == 1 and REPEAT_REF in refs, p.desc() + " " + str(refs))
+    check("window edge: the block exactly 30 minutes before is not a candidate", new_ref(BEFORE_30) not in refs, refs)
+    check("window edge: the block exactly 30 minutes after is not a candidate", new_ref(AFTER_30) not in refs, refs)
+    check("window edge: the item gets no mark", inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID) == WINDOW_ITEM_LINE,
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID))
+
+
+def case_repeat_mixed_offsets_inside_thirty_real_minutes_is_not_a_candidate():
+    """Across the night the clocks went back, a CDT block 25 real minutes before a CST block reads 35 minutes before it
+    on the clock faces. The window reads real time, so the CDT block is within it: it is not the item's candidate, and
+    the stub's naming of it is rejected. A window that compared clock faces would keep it."""
+    root = repeat_repo("repeat-mixed-near", step=True)
+    cfg = new_cfg()
+    write_inbox(cfg, NEW_SID, [(MIXED_CDT_LATE, MSG_ONE, []), (MIXED_CST, MSG_TWO, [WINDOW_ITEM_LINE])])
+    answer = json.dumps({"repeats": [{"id": WINDOW_ITEM_ID, "ref": new_ref(MIXED_CDT_LATE)}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    refs = candidate_refs(calls[0]["prompt"]) if len(calls) == 1 else []
+    check("mixed near: one model call, and the roadmap step is its candidate",
+          len(calls) == 1 and REPEAT_REF in refs, p.desc() + " " + str(refs))
+    check("mixed near: the CDT block 25 real minutes before is not a candidate",
+          new_ref(MIXED_CDT_LATE) not in refs, refs)
+    check("mixed near: the item gets no mark", inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID) == WINDOW_ITEM_LINE,
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID))
+
+
+def case_repeat_mixed_offsets_beyond_thirty_real_minutes_stays_a_candidate():
+    """The reverse: a CDT block 70 real minutes before a CST block reads 10 minutes before it on the clock faces. The
+    window reads real time, so the CDT block stays the item's candidate, and the stub's naming of it marks the item."""
+    root = repeat_repo("repeat-mixed-far", step=True)
+    cfg = new_cfg()
+    write_inbox(cfg, NEW_SID, [(MIXED_CDT_EARLY, MSG_ONE, []), (MIXED_CST, MSG_TWO, [WINDOW_ITEM_LINE])])
+    cdt_ref = new_ref(MIXED_CDT_EARLY)
+    answer = json.dumps({"repeats": [{"id": WINDOW_ITEM_ID, "ref": cdt_ref}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    refs = candidate_refs(calls[0]["prompt"]) if len(calls) == 1 else []
+    check("mixed far: one model call, and the roadmap step is its candidate",
+          len(calls) == 1 and REPEAT_REF in refs, p.desc() + " " + str(refs))
+    check("mixed far: the CDT block 70 real minutes before is a candidate", cdt_ref in refs, refs)
+    check("mixed far: the item is marked against the CDT block",
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID) == WINDOW_ITEM_LINE + " repeats " + cdt_ref,
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID))
+
+
+def case_repeat_only_near_blocks_left_makes_no_model_call():
+    """Every item's candidates are its own block or blocks within 30 minutes of it, so no candidate is left for any
+    item. The two items sit 16 minutes apart, each the other's near block, and the repo has no roadmap step or debt.
+    The Stop makes no model call, and neither item is marked."""
+    root = repeat_repo("repeat-only-near")
+    cfg = new_cfg()
+    near_line = "- fb-1020-1 [note] -> noted"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [WINDOW_ITEM_LINE]), (NEAR_HEADER, MSG_TWO, [near_line])])
+    p, calls = stop(cfg, NEW_SID, root, answer=ANSWER_NONE)
+    check("only near: no model call", len(calls) == 0, p.desc() + " calls=%d" % len(calls))
+    check("only near: the first item gets no mark", inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID) == WINDOW_ITEM_LINE,
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID))
+    check("only near: the second item gets no mark", inbox_line(cfg, NEW_SID, "fb-1020-1") == near_line,
+          inbox_line(cfg, NEW_SID, "fb-1020-1"))
+
+
+def case_repeat_stamp_that_is_not_text_reads_as_no_time():
+    """stamp_time fails open: a stamp that is not text, None or a number, reads as no time, as a stamp with no offset
+    does. Such a stamp in a block does not stop near_refs: a block with no time is near no block."""
+    guard = guard_module()
+    for label, stamp in (("None", None), ("5", 5)):
+        try:
+            got = guard.stamp_time(stamp)
+        except Exception as e:  # recorded as the value, so the failure is an assert and not a crash
+            got = "raises %s" % type(e).__name__
+        check("non-text stamp: stamp_time(%s) is None" % label, got is None, got)
+    blocks = [{"stamp": "2026-10-13 10:04 CDT (UTC-05:00)"}, {"stamp": None}]
+    for n in (0, 1):
+        try:
+            got = guard.near_refs(blocks, ["inbox:x@a", "inbox:x@b"], n)
+        except Exception as e:
+            got = "raises %s" % type(e).__name__
+        check("non-text stamp: near_refs of block %d returns no refs beside a None stamp" % n, got == set(), got)
+
+
+def case_repeat_other_session_one_minute_away_stays_a_candidate():
+    """Control: the same text one minute before the item, in another session's inbox that names this repo. Another
+    session's inbox is not the item's own thread, so its block stays the candidate and the item is marked."""
+    root = repeat_repo("repeat-other-session", step=True)
+    cfg = new_cfg()
+    write_old_inbox(cfg, OLD_A_SID, MSG_ONE, sidecar=os.path.realpath(root), header=OTHER_1003)
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [WINDOW_ITEM_LINE])])
+    other_ref = "inbox:%s@%s" % (OLD_A_SID[:8], OTHER_1003[:16])
+    answer = json.dumps({"repeats": [{"id": WINDOW_ITEM_ID, "ref": other_ref}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    refs = candidate_refs(calls[0]["prompt"]) if len(calls) == 1 else []
+    check("other session: one model call, and the roadmap step is its candidate",
+          len(calls) == 1 and REPEAT_REF in refs, p.desc() + " " + str(refs))
+    check("other session: the block one minute before, in the other inbox, is a candidate", other_ref in refs, refs)
+    check("other session: the item is marked against that block",
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID) == WINDOW_ITEM_LINE + " repeats " + other_ref,
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID))
+
+
+def case_repeat_today_false_pairs_are_not_marked():
+    """Today's two false marks, in one Stop. fb-1419-4 (14:19) was marked against the 14:16 message, and fb-1422-2
+    (14:22) against the 14:19 mac message. Each is within 30 minutes of its item, so neither is a candidate, and
+    the stub's naming of either ref is rejected. The two 14:19 messages share a minute, so the mac message is the
+    third block of the inbox and takes `#3` (inbox_refs)."""
+    root = repeat_repo("repeat-today", step=True)
+    cfg = new_cfg()
+    write_inbox(cfg, NEW_SID, [
+        ("2026-11-12 14:16 CST (UTC-06:00)", TODAY_DRAFT_PRS, []),
+        ("2026-11-12 14:19 CST (UTC-06:00)", TODAY_OTHER_WAYS, ["- fb-1419-4 [note] -> noted"]),
+        ("2026-11-12 14:19 CST (UTC-06:00)", TODAY_MAC_NOW, []),
+        ("2026-11-12 14:22 CST (UTC-06:00)", TODAY_MAC_STUDIO, ["- fb-1422-2 [note] -> noted"]),
+    ])
+    draft_ref = "inbox:%s@2026-11-12 14:16" % NEW_SID[:8]
+    mac_ref = "inbox:%s@2026-11-12 14:19#3" % NEW_SID[:8]
+    answer = json.dumps({"repeats": [{"id": "fb-1419-4", "ref": draft_ref}, {"id": "fb-1422-2", "ref": mac_ref}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    refs = candidate_refs(calls[0]["prompt"]) if len(calls) == 1 else []
+    check("today: one model call, and the roadmap step is its candidate",
+          len(calls) == 1 and REPEAT_REF in refs, p.desc() + " " + str(refs))
+    check("today: the 14:16 message is not a candidate", draft_ref not in refs, refs)
+    check("today: the 14:19 mac message is not a candidate", mac_ref not in refs, refs)
+    check("today: fb-1419-4 is not marked", inbox_line(cfg, NEW_SID, "fb-1419-4") == "- fb-1419-4 [note] -> noted",
+          inbox_line(cfg, NEW_SID, "fb-1419-4"))
+    check("today: fb-1422-2 is not marked", inbox_line(cfg, NEW_SID, "fb-1422-2") == "- fb-1422-2 [note] -> noted",
+          inbox_line(cfg, NEW_SID, "fb-1422-2"))
+    check("today: no flag is printed", "may repeat" not in p.out, p.desc())
+
+
+def prompt_head(name):
+    """One judging Stop on a repo with a step candidate. Returns (Proc, calls, head): head is the model prompt's
+    text before its NEW ITEMS part, lowercased, so the checks read the guard's PROMPT and no item text."""
+    root = repeat_repo(name, step=True)
+    cfg = new_cfg()
+    capture(cfg, name, MSG_ONE, cwd=root)
+    add_item(cfg, name)
+    p, calls = stop(cfg, name, root, answer=ANSWER_NONE)
+    head = (calls[0]["prompt"] if len(calls) == 1 else "").split("\nNEW ITEMS\n", 1)[0].lower()
+    return p, calls, head
+
+
+def case_repeat_prompt_says_a_follow_up_on_the_same_topic_is_not_a_repeat():
+    """The model is told that a follow-up or detail on the same topic is not a repeat, and that a candidate is named
+    only when the new item asks again for a change it already asked for and got an answer. The words are checked in
+    the prompt's head, before its NEW ITEMS text, case-insensitively."""
+    p, calls, head = prompt_head("repeat-prompt")
+    check("prompt: one model call", len(calls) == 1, p.desc())
+    check("prompt: a follow-up or detail on the same topic is not a repeat",
+          all(w in head for w in ("follow-up", "same topic", "not a repeat")), head[-400:])
+    check("prompt: a repeat asks again for a change it already asked for and got an answer",
+          all(w in head for w in ("asks again", "already asked", "answer")), head[-400:])
+
+
+def case_repeat_prompt_shared_word_is_no_repeat_and_candidate_covers_the_whole_item():
+    """The model is told that a shared word or a broad topic is not a repeat, that a candidate is named only for the
+    same specific change as the whole new item, and that a candidate covering one of two topics in the item is none.
+    The meaning match ("judged by meaning") and the follow-up sentence stay. Checked in the prompt's head, as above."""
+    p, calls, head = prompt_head("repeat-prompt-whole")
+    check("prompt-whole: one model call", len(calls) == 1, p.desc())
+    check("prompt-whole: a shared word is not a repeat", "shared word" in head,
+          "'shared word' not in the prompt head")
+    check("prompt-whole: a candidate asks for the same specific change as the whole item",
+          all(w in head for w in ("same specific change", "whole")),
+          "missing from the prompt head: " + ", ".join(w for w in ("same specific change", "whole") if w not in head))
+    check("prompt-whole: a candidate covering one of two topics is none",
+          any("two topics" in s and "none" in s for s in head.split(". ")),
+          "no sentence of the prompt head holds both 'two topics' and 'none'")
+    check("prompt-whole: the meaning match stays judged by meaning", "judged by meaning" in head,
+          "'judged by meaning' not in the prompt head")
+    check("prompt-whole: the follow-up sentence stays",
+          all(w in head for w in ("follow-up", "same topic", "not a repeat")),
+          "missing from the prompt head: "
+          + ", ".join(w for w in ("follow-up", "same topic", "not a repeat") if w not in head))
+
+
+def case_repeat_todo_home_is_never_a_candidate_for_its_item():
+    """R38 (owner 13:03 CST Nov 11): an item's own home is never a candidate for it. A todo home dropped only its
+    block, so the item was marked against a line of its own file (todo:3). Control: a notes line of another file
+    still marks the item."""
+    root = backlog_repo("repeat-todo-home")
+    cfg = new_cfg()
+    home_line, other_line = "- fb-1101-1 [task] -> docs/todo.md", "- fb-1101-2 [task] -> docs/todo.md"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [home_line, other_line])])
+    answer = json.dumps({"repeats": [{"id": "fb-1101-1", "ref": TODO_REF}, {"id": "fb-1101-2", "ref": NOTE_REF}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    check("todo home: one model call for both items", len(calls) == 1, p.desc())
+    check("todo home: the item homed to docs/todo.md is not marked against its own todo line",
+          inbox_line(cfg, NEW_SID, "fb-1101-1") == home_line, inbox_line(cfg, NEW_SID, "fb-1101-1"))
+    check("todo home control: the item still marks against a notes line of another file",
+          inbox_line(cfg, NEW_SID, "fb-1101-2") == other_line + " repeats " + NOTE_REF,
+          inbox_line(cfg, NEW_SID, "fb-1101-2"))
+
+
+def case_repeat_notes_home_is_never_a_candidate_for_its_item():
+    """R38 (owner 13:03 CST Nov 11): an item's own home is never a candidate for it. The notes file is a home
+    too, so its item is never marked against a notes line (note:3). Control: a todo line of another file still
+    marks the item."""
+    root = backlog_repo("repeat-notes-home")
+    cfg = new_cfg()
+    home_line, other_line = ("- fb-1102-1 [task] -> docs/debts/notes.md",
+                             "- fb-1102-2 [task] -> docs/debts/notes.md")
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [home_line, other_line])])
+    answer = json.dumps({"repeats": [{"id": "fb-1102-1", "ref": NOTE_REF}, {"id": "fb-1102-2", "ref": TODO_REF}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    check("notes home: one model call for both items", len(calls) == 1, p.desc())
+    check("notes home: the item homed to docs/debts/notes.md is not marked against its own notes line",
+          inbox_line(cfg, NEW_SID, "fb-1102-1") == home_line, inbox_line(cfg, NEW_SID, "fb-1102-1"))
+    check("notes home control: the item still marks against a todo line of another file",
+          inbox_line(cfg, NEW_SID, "fb-1102-2") == other_line + " repeats " + TODO_REF,
+          inbox_line(cfg, NEW_SID, "fb-1102-2"))
+
+
+def case_repeat_dot_slash_debt_home_is_never_a_candidate_for_its_item():
+    """R38 (owner 13:03 CST Nov 11): an item's debt home is its own home, written `./docs/debts/x.md` or
+    `docs/debts/x.md`. The ./ form kept its debt as a candidate. Controls: the plain form drops the same debt, and
+    a [note] with no debt home still marks against it."""
+    root = backlog_repo("repeat-dot-slash-home")
+    cfg = new_cfg()
+    dot_line = "- fb-1103-1 [task] -> ./docs/debts/wheel-speed-cap.md"
+    plain_line = "- fb-1103-2 [task] -> docs/debts/wheel-speed-cap.md"
+    note_line = "- fb-1103-3 [note] -> noted"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [dot_line, plain_line, note_line])])
+    answer = json.dumps({"repeats": [{"id": i, "ref": DEBT_REF} for i in ("fb-1103-1", "fb-1103-2", "fb-1103-3")]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    check("dot slash home: one model call for the three items", len(calls) == 1, p.desc())
+    check("dot slash home: the ./ form is not marked against its own debt",
+          inbox_line(cfg, NEW_SID, "fb-1103-1") == dot_line, inbox_line(cfg, NEW_SID, "fb-1103-1"))
+    check("dot slash home control: the plain form is not marked against its own debt",
+          inbox_line(cfg, NEW_SID, "fb-1103-2") == plain_line, inbox_line(cfg, NEW_SID, "fb-1103-2"))
+    check("dot slash home control: a note with no debt home still marks against the debt",
+          inbox_line(cfg, NEW_SID, "fb-1103-3") == note_line + " repeats " + DEBT_REF,
+          inbox_line(cfg, NEW_SID, "fb-1103-3"))
+
+
+def case_repeat_debt_home_is_never_a_candidate_for_its_item():
+    """R38 (owner 13:03 CST Nov 11): an item homed to a debt file is never marked against that debt. A different
+    debt stays a candidate for it."""
+    root = backlog_repo("repeat-debt-home")
+    cfg = new_cfg()
+    own_line = "- fb-1104-1 [task] -> docs/debts/wheel-speed-cap.md"
+    other_line = "- fb-1104-2 [task] -> docs/debts/spin-rate-floor.md"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [own_line, other_line])])
+    answer = json.dumps({"repeats": [{"id": "fb-1104-1", "ref": DEBT_REF}, {"id": "fb-1104-2", "ref": DEBT_REF}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    check("debt home: one model call for both items", len(calls) == 1, p.desc())
+    check("debt home: the item homed to a debt is not marked against that debt",
+          inbox_line(cfg, NEW_SID, "fb-1104-1") == own_line, inbox_line(cfg, NEW_SID, "fb-1104-1"))
+    check("debt home control: the item homed to another debt still marks against this debt",
+          inbox_line(cfg, NEW_SID, "fb-1104-2") == other_line + " repeats " + DEBT_REF,
+          inbox_line(cfg, NEW_SID, "fb-1104-2"))
 
 
 def case_one_shot_grant_passes_with_its_home_and_blocks_without_one():
@@ -4437,7 +4972,7 @@ CASES = (
     case_page_note_u2028_in_note_saves_verbatim,
     case_page_note_u0085_in_note_saves_verbatim,
     case_page_note_u2028_in_at_saves_once,
-    case_repeat_roadmap_step_marks_the_item_and_blocks,
+    case_repeat_roadmap_step_marks_the_item_and_tells_the_owner,
     case_repeat_stop_hook_active_marks_and_tells_the_owner,
     case_repeat_judged_items_are_not_judged_again,
     case_repeat_removed_mark_is_not_flagged_again,
@@ -4447,7 +4982,7 @@ CASES = (
     case_repeat_backlog_debt_text_is_in_the_prompt,
     case_repeat_cost_one_call_one_grep_and_two_files,
     case_repeat_cap_keeps_each_source_within_its_share,
-    case_repeat_repeat_only_reason_has_no_page_suffix_and_no_double_period,
+    case_repeat_mark_never_blocks_and_prints_one_system_line,
     case_repeat_second_judging_adds_no_second_mark,
     case_repeat_unplaced_mark_is_reported_as_not_marked,
     case_repeat_word_repeats_in_an_item_still_gets_the_mark,
@@ -4455,7 +4990,27 @@ CASES = (
     case_repeat_cap_keeps_the_open_roadmap_steps,
     case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit,
     case_repeat_spaced_inbox_mark_is_recognised_on_a_second_judging,
+    case_repeat_same_minute_mark_is_recognised_on_a_second_judging,
+    case_repeat_unsuffixed_mark_stays_one_mark_on_a_second_judging,
     case_repeat_repo_item_is_never_judged_as_a_repeat,
+    case_repeat_own_home_is_never_a_candidate_for_its_item,
+    case_repeat_each_item_is_judged_against_the_other_messages,
+    case_repeat_same_minute_blocks_keep_their_own_candidates,
+    case_repeat_candidate_within_thirty_minutes_is_not_a_candidate,
+    case_repeat_candidate_thirty_one_minutes_away_stays_a_candidate,
+    case_repeat_candidate_exactly_thirty_minutes_away_is_not_a_candidate,
+    case_repeat_mixed_offsets_inside_thirty_real_minutes_is_not_a_candidate,
+    case_repeat_mixed_offsets_beyond_thirty_real_minutes_stays_a_candidate,
+    case_repeat_only_near_blocks_left_makes_no_model_call,
+    case_repeat_stamp_that_is_not_text_reads_as_no_time,
+    case_repeat_other_session_one_minute_away_stays_a_candidate,
+    case_repeat_today_false_pairs_are_not_marked,
+    case_repeat_prompt_says_a_follow_up_on_the_same_topic_is_not_a_repeat,
+    case_repeat_prompt_shared_word_is_no_repeat_and_candidate_covers_the_whole_item,
+    case_repeat_todo_home_is_never_a_candidate_for_its_item,
+    case_repeat_notes_home_is_never_a_candidate_for_its_item,
+    case_repeat_dot_slash_debt_home_is_never_a_candidate_for_its_item,
+    case_repeat_debt_home_is_never_a_candidate_for_its_item,
     case_one_shot_grant_passes_with_its_home_and_blocks_without_one,
     case_guard_ruling_home_is_judged_in_the_repo_the_session_worked_in,
     case_step_path_is_derived_from_override_step_dir,
