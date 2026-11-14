@@ -133,15 +133,31 @@ FETCH_SPY = "fetch-spy.log"  # the file, in the run's folder, that names each gu
 
 
 def origin_url(repo):
-    """The raw URL of the repo's origin remote, or None when it has none. Not insteadOf-expanded."""
-    answer = _nowindow.run([VCS, "-C", repo, "config", "--get", "remote.origin.url"], capture_output=True, text=True,
-                           env=ENV, timeout=60)
-    url = answer.stdout.strip()
-    return url if answer.returncode == 0 and url else None
+    """The URL a fetch of origin reaches: the remote's URL with the longest matching url.<base>.insteadOf prefix replaced,
+    as git does. A fixture may keep a GitHub URL in its config and send the fetch to a local bare repo. One `git config`
+    start reads the remote's URL and every insteadOf rule, and no network is reached. None when there is no origin URL."""
+    answer = _nowindow.run([VCS, "-C", repo, "config", "--get-regexp", r"^(remote\.origin\.url|url\..+\.insteadof)$"],
+                           capture_output=True, text=True, env=ENV, timeout=60)
+    if answer.returncode != 0:
+        return None
+    raw, rewrites = None, []
+    for line in answer.stdout.splitlines():
+        key, _, value = line.partition(" ")
+        if key == "remote.origin.url":
+            raw = value
+        elif key.lower().endswith(".insteadof"):
+            rewrites.append((key[len("url."):-len(".insteadof")], value))
+    if not raw:
+        return None
+    matches = [(base, prefix) for base, prefix in rewrites if prefix and raw.startswith(prefix)]
+    if not matches:
+        return raw
+    base, prefix = max(matches, key=lambda match: len(match[1]))
+    return base + raw[len(prefix):]
 
 
 def real_origin(repo):
-    """True when the repo's origin is a URL that reaches a network host."""
+    """True when a fetch of the repo's origin reaches a network host. A local origin, a path or file URL, is not real."""
     url = origin_url(repo)
     return url is not None and url.startswith(REAL_ORIGIN)
 
