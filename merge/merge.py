@@ -112,13 +112,13 @@
                           is not open or not found, and the linted PR itself are each a stop; a repeated number is read once). Missed
                           case: a PR posted under another session id is not found as this lane's, unless --with names it. A PR body
                           with no session URL has no lane PRs, so only --with finds any. A commit or ref target is measured against its base only, and is not cross-measured.
-                          A head whose diff against the base touches hooks/mutate_*.py or hooks/mutate_*.mjs also runs, after a passing lint, the command of the head's checks-mutate-guard job (CI step "Guard mutation test") in that same worktree.
+                          A head whose diff against the base touches hooks/mutate_*.py or hooks/mutate_*.mjs also runs, after a passing lint, the command of each of the head's mutation test shard jobs (CI step "Guard mutation test, shard i/M") in that same worktree.
                           The run happens at the hand-off lint; the batch runner's pre-join lint skips it when a hand-off PASS names the live head.
-                          It FAILs on any survivor, on any wrong-cause or unknown mutant (as CI does), on a run past that job's
+                          It FAILs on any survivor, on any wrong-cause or unknown mutant (as CI does), on a run past a shard job's
                           timeout-minutes, on a command that cannot start, on a report it cannot read at any exit, and on a tally at a
                           nonzero exit (a table is judged by its counts, not its exit code). It prints its wall time and killed,
-                          survived and unknown counts, on the PASS line or in the FAIL text. Extra cost, only then: one run of that
-                          command (11 to 16 min, a reviewer's figure, unmeasured); on any other head, one `git diff --name-only`. A pre-join lint that skips
+                          survived and unknown counts, on the PASS line or in the FAIL text. Extra cost, only then: up to three shard runs
+                          one after another (decision lanes-run-no-full-ci-job holds the measured cost); on any other head, one `git diff --name-only`. A pre-join lint that skips
                           the run prints "mutation test run skipped here: it runs at the lane's hand-off lint". The call on an
                           integration PR's number runs it, since no hand-off PASS names that PR.
                           --touched-tests: after the lint passes, also runs each test file the diff against the base touches, once,
