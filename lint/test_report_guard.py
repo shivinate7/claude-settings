@@ -2826,6 +2826,25 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                 out = self.lane(peer_msg("pick?"), assistant_text(self.reply(body)))
                 self.assert_blocked(out, "Lane pick guard", "its parent")
 
+    def test_ln_red_consultant_with_parent_is_owner_facing(self):
+        # Catches: a session tagged cs-build:consultant that has a parent id read as a lane, so its question
+        # to the owner is refused for not going to a parent.
+        record = self.lane_record(tags=("cs-build:consultant",))
+        bare = self.make_repo("bare-consultant", page=False)
+        out = self.stop([*record, human("decide"), *self.box(), assistant_text(self.reply(self.PICK))],
+                        env_id=self.LANE_ENV, repo=bare)
+        self.assertIsNone(out)
+        out = self.stop([*record, human("decide"), assistant_text(self.reply(self.QUESTION))], env_id=self.LANE_ENV)
+        self.assert_blocked(out, "Pick guard")
+        self.assertNotIn("Lane pick guard", out.get("reason", ""))
+
+    def test_ln_red_lane_and_consultant_tags_together_stay_a_lane(self):
+        # Catches: the consultant exemption widened past its bug, so a record with the lane tag too passes
+        # a question that main refuses.
+        record = self.lane_record(tags=("cs-build:lane", "cs-build:consultant"))
+        out = self.stop([*record, peer_msg("pick?"), assistant_text(self.reply(self.PROMISE))], env_id=self.LANE_ENV)
+        self.assert_blocked(out, "Lane pick guard", "its parent")
+
     def test_ln_red_box_or_items_write_blocks(self):
         # Catches: a lane's box or items write read as its send. Neither passes a lane.
         for label, act in (("box", self.box()), ("items", self.items_write("set"))):
