@@ -4893,7 +4893,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # ------------------------------------------------------------------ a waiting-page item states the question form
 #
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
-# `command-in-item`, `gh-login-switch`, `task-names-check`, `task-why-cited`, `owner-judge`, `question-form`, `question-departs`, `option-letter-keys`, `option-letters-frozen`). This check runs them only for a
+# `command-in-item`, `task-options`, `gh-login-switch`, `task-names-check`, `task-why-cited`, `owner-judge`, `question-form`, `question-departs`, `option-letter-keys`, `option-letters-frozen`). This check runs them only for a
 # write to this repo's waiting page. `option-labels-match-chat` runs after them (data_tool_label_hit): it
 # reads the transcript, and starts that read only for a write that carries options.
 from shared_names import COMMENTS_TOOL, DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
@@ -6994,6 +6994,8 @@ def judge(payload) -> None:
             refuse(tool, "deny", "press-link", question_form.PAGE_REASONS["press-link"], matched)
         if rule == "command-in-item":
             refuse(tool, "deny", "command-in-item", question_form.PAGE_REASONS["command-in-item"], matched)
+        if rule == "task-options":
+            refuse(tool, "deny", "task-options", question_form.PAGE_REASONS["task-options"], matched)
         if rule == "gh-login-switch":
             refuse(tool, "deny", "gh-login-switch", question_form.PAGE_REASONS["gh-login-switch"], matched)
         if rule == "task-names-check":

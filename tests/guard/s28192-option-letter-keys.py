@@ -120,11 +120,14 @@ ol("a str_replace that adds Option b wins. to context is allowed", "allow", None
 ol("a str_replace that takes option e2 out of context is allowed", "allow", None, action="str_replace",
    field="context", old_str="Option e2 wins.", new_str="Option a wins.")
 
-# Kind: an item with no kind is a decision. A task and a note are not judged.
+# Kind: an item with no kind is a decision. A task and a note are not judged. A task holds no options (rule
+# task-options, section 26700) and that rule runs before this one, so a task keyed e2 is refused by it, never by
+# this rule. The task here has no options, and its text names option e2: the text scan here must skip a task.
 ol("an item with no kind is judged as a decision and denied", "deny",
    ol_item(kind=None, options=ol_keyed("e2", "a", "c")))
-ol("a task keyed e2, a and c is not judged", "allow",
-   ol_item(kind="task", options=ol_keyed("e2", "a", "c"), context=OL_CTX + "\n" + TN_WHY))
+ol("a task whose text names option e2 is not judged", "allow",
+   ol_item(kind="task", options=None, pick=None, why=None,
+           context="Option e2 is safer for the stamp check.\n" + TN_WHY))
 ol("a note keyed e2, a and c is not judged", "allow", ol_item(kind="note", options=ol_keyed("e2", "a", "c")))
 
 # Updates: judged when they carry options; the kind defaults to decision.

@@ -142,6 +142,7 @@ FAMILIES = {
     "uniform-pick": "the page writer: a pick never names an option that widens a shared tool",
     "press-link": "the page writer: a press in a web app carries a link to the exact page",
     "command-in-item": "the page writer: a task step never sends the owner to a file for a command",
+    "task-options": "the page writer: a task with a non-empty options list is refused, naming the fix (kind decision, or the command field); a decision with options passes",
     "gh-login-switch": "the page writer: a gh command in a task switches login first, shivinate7 by default and ssemwal-cdc only for a repo shivinate7 cannot reach",
     "task-names-check": "the page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
     "owner-judge": "the page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task",
