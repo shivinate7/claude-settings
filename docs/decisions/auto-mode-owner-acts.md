@@ -160,7 +160,7 @@ Other classifier refusals that day: unknown. The coordinator's transcript could 
 ### Notes
 
 - Not covered: the server's `elevated_session_untrusted_device` refusal is not the classifier. No entry can lift it. It also refused one of this lane's `send_message` calls to its coordinator.
-- Widens a shared tool (t18, the uniform ruling): yes. The owner chose this knowing it. `settings.json` installs into `~/.claude`, so the entries apply in every repo. The `shivinate7` and own-account bounds keep them to the owner's own things.
+- Widens a shared tool: no. `settings.json` installs into `~/.claude`, so the entries apply the same way in every repo (owner, 2026-11-06 12:41 CST, item 278). The `shivinate7` and own-account bounds keep them to the owner's own things.
 - Home: the classifier reads `autoMode` only from `~/.claude/settings.json`, managed settings or `--settings`. `install.sh` links or copies this repo's `settings.json` there.
 - Check: `hooks/test_auto_mode_allow.py`, the one check for `autoMode`. It pins each named entry: the entry exists once, quotes its incident, and names its bounds in its Covers text and in a "Never covers" sentence. A new entry adds its own pins there. It also fails a list that drops `$defaults`.
 - Cost: none at run time. The classifier already runs; each entry adds prose to its prompt.
