@@ -314,14 +314,17 @@ def cite_unread_folders_case():
     env["CLAUDE_CONFIG_DIR"] = os.path.join(folder, "cfg")
     env["PATH"] = GHMAIN + os.pathsep + PY_PATH
 
-    def ask(command):
+    def ask(command, run_env=env):
         return subprocess.run(
             [sys.executable, copy],
             input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command},
                               "cwd": NOGIT}),
-            capture_output=True, text=True, env=env, timeout=60)
+            capture_output=True, text=True, env=run_env, timeout=60)
 
-    probe = ask(VCS + ' commit -m "cites decisions/one-shared-record-stamp.md"')
+    # git is on PATH for the probe: a commit whose git cannot start asks, and that is not this case's subject.
+    git_env = dict(env)
+    git_env["PATH"] = GHMAIN + os.pathsep + PY_PATH + os.pathsep + GIT_PATH
+    probe = ask(VCS + ' commit -m "cites decisions/one-shared-record-stamp.md"', git_env)
     if "permissionDecision" in probe.stdout:
         return False, "the inline probe must stand down, got %r" % probe.stdout[:120]
     try:
