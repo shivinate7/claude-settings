@@ -6,7 +6,7 @@ Modes:
   300 seconds with no new output. The job keeps running. For a background call with an agent_id
   in the payload (17 lowercase hex), it puts the agent marker ahead of the wrapper.
 - --stop: At Stop, lists each open background job whose output file did not change for
-  the quiet age.
+  the quiet age, and blocks a Stop while a CI wait has no check-in.
 
 Hook: stall_watch.py --hook
   PreToolUse hook. For a Bash call with run_in_background true, it returns updatedInput only
@@ -34,7 +34,10 @@ Hook: stall_watch.py --hook
   design (bin/verdict) appends its heartbeat there too, and the watcher relays it to its stdout (the
   harness output file), so a redirect in the command cannot hide it from the watcher or the Stop check.
   Each log the original names (named_logs: `> F`, `>> F`, `&> F`, `>& F`, `tee F`, `--log F`)
-  is passed as `--also F`.
+  is passed as `--also F`. A relative F after a `cd` or `pushd` that surely runs in the main shell is
+  joined to its target. The directory can be unknown: `cd $X`, `cd -`, a cd behind `||`, `&` or `then`, a cd that ends in `&`, `|` or `||`,
+  or inside `{ }`. Then the hook leaves F out of `--also` and passes `--unwatched F`. The STALL report names it.
+  A list that ends in `&` runs in a background subshell, so its cd does not move the main shell.
   Cost: one append per heartbeat by the tool, and one read of BEAT on each 0.2 s loop pass in the watcher.
 
   Agent marker: for a background Bash call whose payload has a valid agent_id, the wrapper above gets
@@ -54,8 +57,13 @@ Watcher: stall_watch.py --watch-pid PID --log LOG [--quiet SECS] [--beat BEAT] [
          [--log-fd N] [--beat-fd N]
   Streams LOG to stdout (from fd N when given: the handle the wrapper opened, else by path). Any new byte, also a bare \\r, resets the timer. It streams each new byte
   of BEAT (a file that need not exist yet) to stdout too, and it resets the timer the same way. After SECS (default
-  300) without new bytes, and with no change to any --also log, it prints a STALL report and exits 3,
-  and the job keeps running. The
+  300) without new bytes, with no change to any --also log and with no CPU time advanced in any process
+  under the job's shell, it prints a STALL report and exits 3. The job keeps running.
+  The CPU time comes from the once-a-second `ps` that also reads the job's state, plus the CPU time of the
+  children each process has already waited for, read from /proc/PID/stat (Linux; N + 1 reads for N processes
+  under the job). It adds no process, timer or file. The job shell's own time does not count.
+  On Linux ps gives whole seconds, so a live child under 1/SECS of a core (0.33% at 300 s) may still stall.
+  --unwatched F (repeatable) names a log whose directory is unknown; the report lists it. The
   STALL line lists the job's shell and every process under it, parent first. Stopping them in that
   order ends the job, with two limits: an orphan (`(sleep N &); sleep N`) is adopted by init and
   not listed, and a TERM trap that returns respawns a loop body (SIGKILL ends it). When the job
@@ -75,6 +83,29 @@ Stop: stall_watch.py --stop
   and it closes as a shell does. It is not listed while a tool_use in the read window has no tool_result, read from
   the last 64 KB of a quiet agent's transcript, widened to hold a whole last record. Cost: one stat per
   running agent, one tail read per quiet agent. Any error, or stop_hook_active true, prints nothing and exits 0. No posix check.
+  CI-wait check: the same Stop run reads the transcript once more, one record at a time. The newest
+  ready call (`gh pr ready <N>` in Bash or PowerShell, outside quotes, heredoc bodies and `#` comments, not
+  --undo; or MCP update_pull_request with draft false) opens a wait. An --undo, or draft true, closes the wait on its PR. A `gh` global flag before `pr`
+  (`gh -R o/r pr ready 5`) is skipped. A later user or queued message with a
+  `CI green|cancelled on <sha>` line closes it; a `CI unknown` line leaves it open. A merge or close that
+  names the waited PR number closes it (bin/merge N, merge N, gh pr merge N, gh pr close N in Bash or
+  PowerShell, same scanner rules; MCP merge_pull_request with that pullNumber). The ready call's PR and a
+  merge's are read alike (pr_ref): the first all-digit word or the N of a /pull/N URL, with each flag and its
+  value (CI_VALUE_FLAGS: -R o/r, -C /repo, --body "x", --body-file f, --subject "Fix", --comment x,
+  --session lane) skipped; with no number, the first non-dash word (a branch) is the PR named. A gh pr merge or close with no
+  PR word, only flags and their values, closes any open wait; so does one whose PR word is a $var, an unknown
+  number. A bin/merge with no PR word, or a $var one, gives no event. A gh pr merge with --auto or
+  --disable-auto closes nothing, and an MCP merge with no pullNumber closes none. A wait
+  whose ready call named no number (bare gh pr ready, or a $var) closes on a merge or close of any PR. A
+  `CI red` line keeps it open and voids the check-ins before it. A later send_later, create_trigger,
+  CronCreate or ScheduleWakeup call covers it, unless its tool_result has is_error true. An open wait with no check-in prints
+  {"decision": "block", "reason": ...} naming the PR (the systemMessage of any stale job rides in the same
+  line). Rule git-ci-wait-checks-in. Cost: one more read of the transcript at Stop, zero process starts, zero
+  files written, zero timers, no network. Any error prints nothing.
+  A shell job about to be listed is dropped when a process under it burns CPU, the watcher's rule (posix with
+  lsof only). The job has no pid at Stop, so its processes are the ones that hold its output file as stdout or
+  stderr. Two ps reads 1.5 s apart, only when a quiet shell job has such a process. The job shell's own time
+  does not count. A listed job whose named log has an unknown directory says so: that log is not watched.
   Seams: STALL_WATCH_NOW (epoch seconds), STALL_WATCH_OUTPUT_BASE (replaces the folder of each
   output path, keeps the file name), STALL_WATCH_QUIET (the age in seconds).
   A listed job shows the `until:` note from the description of the call that started it (Bash or
@@ -83,6 +114,7 @@ Stop: stall_watch.py --stop
 See docs/decisions/stall-watch.md.
 """
 import calendar
+import io
 import json
 import os
 import re
@@ -131,48 +163,193 @@ REDIRECT_OPS = (">", ">>", ">|", "&>", "&>>", ">&")
 LOG_FLAGS = ("--log",)
 
 
+# Words after which a command starts. A cd after one of them may not run, so it leaves the directory unknown.
+COMMAND_STARTERS = ("then", "do", "else", "elif", "if", "while", "until", "{", "!", "time")
+UNREADABLE_PATH = re.compile(r"[$`*?\[]")
+# Reserved words that open and close a compound command. Its body is a list of its own.
+BLOCK_OPENERS = ("{", "if", "while", "until", "for", "case", "select")
+BLOCK_CLOSERS = ("}", "fi", "done", "esac")
+
+
+def expand_home(path):
+    """path with a leading `~`, `$HOME` or `${HOME}` replaced by HOME from the environment."""
+    path = os.path.expanduser(path)
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    for form in ("${HOME}", "$HOME"):
+        if path == form or path.startswith(form + "/"):
+            return home + path[len(form):]
+    return path
+
+
+def _cd_target(args, cwd):
+    """The directory a `cd` or `pushd` leaves the shell in: `args` are the tokens after it, cwd the
+    directory before it. cwd and the result are None (unknown), "" (where the shell started) or a
+    path that is relative to the start. `cd -`, `pushd +N`, a target with `$` (but `$HOME`), a
+    backtick or a glob, and any cd from an unknown directory leave the directory unknown."""
+    rest = list(args)
+    while rest and rest[0].startswith("-") and rest[0] != "-":  # options such as -P; `--` ends them
+        if rest.pop(0) == "--":
+            break
+    target = expand_home(rest[0] if rest else "~")
+    if cwd is None or target == "-" or target.startswith(("+", "~")) or UNREADABLE_PATH.search(target):
+        return None
+    return target if os.path.isabs(target) else os.path.join(cwd, target) if cwd else target
+
+
+class _KeepNewline(io.StringIO):
+    """A command as a stream for shlex. readline stops before the newline: shlex skips a comment with
+    readline, and the newline that ends the comment must stay a token that ends the command."""
+
+    def readline(self, size=-1):
+        line = super().readline()
+        if line.endswith("\n"):
+            self.seek(self.tell() - 1)
+            line = line[:-1]
+        return line
+
+
+def _background_amp(tok, k):
+    """True when tok[k], an `&` in a punctuation token, ends a list. `&&`, `&>`, `>&` and `|&` do not."""
+    prev, nxt = tok[k - 1] if k else "", tok[k + 1] if k + 1 < len(tok) else ""
+    return prev not in ("&", "|", "<", ">") and nxt not in ("&", ">")
+
+
+def _continues_list(prior, before, punct):
+    """True when a newline follows `&&`, `||` or `|`, so the list goes on to the next line. prior is
+    the text before the newline in its token; with none, the token before it is read."""
+    prior = prior.rstrip("\n")
+    if not prior:
+        prior = before if before and set(before) <= punct else ""
+    return prior.endswith(("&&", "||", "|"))
+
+
+def read_named_logs(command):
+    """Return (paths, unresolved): the files a command names as its own log, and the relative ones
+    whose directory the hook cannot read. See named_logs for the forms read.
+
+    A relative path after a `cd` or `pushd` the tokenizer reads is joined to its target. An absolute
+    target gives an absolute path. A relative target gives a path relative to where the shell started,
+    where the watcher stands. The tokenizer reads cd, so a cd in quotes or after `#` is
+    text. Only a cd that surely runs in the main shell moves the directory. That is the first command
+    of a list item (after the start, `;`, a newline or `(`), or one after only cds joined by `&&`.
+    These leave the directory unknown: a cd after `||`, `&`, `|`, `then`, `do`, `{` or `)`, and a cd
+    after a command joined by `&&`. So do a cd that ends in `&`, `|` or `||` (also before a newline),
+    a cd inside `{ }`, and `popd`.
+    A `(` saves the directory and a `)` restores it. A list that ends in a lone `&` runs in a
+    background subshell. Its logs resolve against its own directory, and after the `&` the directory
+    is the one where that list started. A compound command (`{ }`, `if`, `while`, `for`, `case`) has
+    lists of its own. Newlines are tokens. A comment stops before its newline, so that newline is a
+    token too."""
+    try:
+        lex = shlex.shlex(_KeepNewline(strip_heredoc_bodies(command, shells_only=True)), posix=True,
+                          punctuation_chars="();<>|&\n")
+        lex.whitespace_split = True
+        lex.whitespace = " \t\r"
+        tokens = []
+        while True:
+            tok = lex.get_token()
+            if tok is None:
+                break
+            tokens.append(tok)
+    except Exception:
+        return [], []
+    punct = set(lex.punctuation_chars)
+    found, cwd, saved, braces, only_cds, i = [], "", [], 0, True, 0
+    list_dir, blocks = "", []  # where the current list started; the start of each enclosing list
+    while i < len(tokens):
+        tok, nxt = tokens[i], tokens[i + 1] if i + 1 < len(tokens) else None
+        before = tokens[i - 1] if i else None
+        start = i == 0 or set(before) <= punct or before in COMMAND_STARTERS
+        if set(tok) <= punct:
+            for k, ch in enumerate(tok):
+                if ch == "(":
+                    saved.append((cwd, list_dir))
+                    list_dir = cwd
+                elif ch == ")":
+                    if saved:
+                        cwd, list_dir = saved.pop()
+                    else:
+                        list_dir = cwd  # a case pattern ends, and its list starts
+                elif ch == ";" or (ch == "\n" and not _continues_list(tok[:k], before, punct)):
+                    list_dir = cwd
+                elif ch == "&" and _background_amp(tok, k):
+                    # The list before a lone `&` runs in a background subshell: the main shell stays.
+                    if cwd is not None:
+                        cwd = list_dir
+                    list_dir = cwd
+            if tok.endswith(REDIRECT_OPS) and nxt is not None:
+                if not (tok.endswith(">&") and (nxt.isdigit() or nxt == "-")):
+                    found.append((nxt, cwd))
+                i += 2
+                continue
+            i += 1
+            continue
+        if start:
+            if i == 0 or (set(before) <= punct and (set(";\n(") & set(before))):
+                only_cds = True  # the first command of a list item
+            elif before != "&&":
+                only_cds = False  # after `||`, `&`, `|`, `)`, or a reserved word: it may not run
+            if tok == "{":
+                braces += 1
+            elif tok == "}":
+                braces = max(0, braces - 1)
+            if tok in BLOCK_OPENERS:  # a compound command opens a list inside the current one
+                blocks.append(list_dir)
+                list_dir = cwd
+            elif tok in BLOCK_CLOSERS and blocks:
+                list_dir = blocks.pop()
+            elif tok in ("then", "do", "else", "elif"):
+                list_dir = cwd
+        if start and tok in ("cd", "pushd", "popd"):
+            j = i + 1
+            while j < len(tokens) and not set(tokens[j]) <= punct:
+                j += 1
+            ends = tokens[j] if j < len(tokens) else ""
+            if tok == "popd" or not only_cds or braces or ends == "&" or ends.startswith("|"):
+                cwd = None
+            else:
+                cwd = _cd_target(tokens[i + 1:j], cwd)
+            i = j
+            continue
+        if start and tok not in COMMAND_STARTERS and tok != "}":
+            only_cds = False  # a command other than cd: a later cd after `&&` may not run
+        if os.path.basename(tok) == "tee" and start:
+            j = i + 1
+            while j < len(tokens) and not set(tokens[j]) <= punct:
+                if not tokens[j].startswith("-"):
+                    found.append((tokens[j], cwd))
+                j += 1
+            i = j
+            continue
+        if tok in LOG_FLAGS and nxt is not None:
+            found.append((nxt, cwd))
+        elif tok.startswith(tuple(f + "=" for f in LOG_FLAGS)):
+            found.append((tok.split("=", 1)[1], cwd))
+        i += 1
+    keep, unresolved = [], []
+    for path, where in found:
+        path = expand_home(path)
+        if not path or UNREADABLE_PATH.search(path) or path.startswith("/dev/"):
+            continue
+        if not os.path.isabs(path):
+            if where is None:
+                if path not in unresolved:
+                    unresolved.append(path)
+                continue
+            path = os.path.join(where, path) if where else path
+        if path not in keep:
+            keep.append(path)
+    return keep, unresolved
+
+
 def named_logs(command):
     """The files a command names as its own log: the target of `> F`, `>> F`, `&> F` or `>& F` (any
     descriptor), each file argument of `tee`, and the value of `--log F` or `--log=F`. shlex reads
     the command, so a path inside quotes or after `#` is text. A heredoc body is dropped first. A
     target with `$`, a backtick or a glob, a descriptor (`>&2`) and a /dev/ path are left out. A
-    command shlex cannot read names none. The paths stay as written: a relative one resolves against
-    the reader's own working directory."""
-    try:
-        lex = shlex.shlex(strip_heredoc_bodies(command, shells_only=True), posix=True,
-                          punctuation_chars=True)
-        lex.whitespace_split = True
-        tokens = list(lex)
-    except Exception:
-        return []
-    punct = set(lex.punctuation_chars)
-    found, i = [], 0
-    while i < len(tokens):
-        tok, nxt = tokens[i], tokens[i + 1] if i + 1 < len(tokens) else None
-        if set(tok) <= punct and tok.endswith(REDIRECT_OPS) and nxt is not None:
-            if not (tok.endswith(">&") and (nxt.isdigit() or nxt == "-")):
-                found.append(nxt)
-            i += 2
-            continue
-        if os.path.basename(tok) == "tee" and (i == 0 or set(tokens[i - 1]) <= punct):
-            j = i + 1
-            while j < len(tokens) and not set(tokens[j]) <= punct:
-                if not tokens[j].startswith("-"):
-                    found.append(tokens[j])
-                j += 1
-            i = j
-            continue
-        if tok in LOG_FLAGS and nxt is not None:
-            found.append(nxt)
-        elif tok.startswith(tuple(f + "=" for f in LOG_FLAGS)):
-            found.append(tok.split("=", 1)[1])
-        i += 1
-    keep = []
-    for path in found:
-        path = os.path.expanduser(path)
-        if path and not re.search(r"[$`*?\[]", path) and not path.startswith("/dev/") and path not in keep:
-            keep.append(path)
-    return keep
+    command shlex cannot read names none. A relative path stays as written unless a `cd` comes
+    before it (read_named_logs), which resolves it; one whose directory is unknown is left out."""
+    return read_named_logs(command)[0]
 
 
 def log_marks(paths, base=None):
@@ -188,18 +365,144 @@ def log_marks(paths, base=None):
     return marks
 
 
-def _run(args):
+def _run(args, timeout=TOOL_TIMEOUT):
     try:
         return _nowindow.run(args, capture_output=True, text=True, errors="replace",
-                              timeout=TOOL_TIMEOUT).stdout
+                              timeout=timeout).stdout
     except Exception as exc:
         return "(%s did not answer: %s)\n" % (args[0], type(exc).__name__)
 
 
+class JobState(str):
+    """The ps state of the job. `cpu` is {pid: CPU seconds} for every process under the job's shell,
+    or None when ps gave no table (a read that could not run)."""
+    cpu = None
+
+
+CPU_TIME = re.compile(r"(?:(?:(\d+)-)?(\d+):)?(\d+):(\d+(?:\.\d+)?)$")
+
+
+def cpu_seconds(text):
+    """Seconds in a ps `time` field, [[dd-]hh:]mm:ss[.cc]; 0 when it does not read."""
+    m = CPU_TIME.match(text)
+    if not m:
+        return 0.0
+    days, hours, mins, secs = m.groups()
+    return int(days or 0) * 86400 + int(hours or 0) * 3600 + int(mins) * 60 + float(secs)
+
+
+PS_DOWN = "(ps did not answer"
+
+
+def proc_table(timeout=TOOL_TIMEOUT):
+    """(rows, kids, note) from one ps call: rows is {pid: [pid, ppid, stat, time]}, kids {ppid: [pid]}.
+    note is the text of a ps that gave no answer, else ''."""
+    out = _run(["ps", "-axo", "pid=,ppid=,stat=,time="], timeout)
+    if out.startswith(PS_DOWN):
+        return {}, {}, out.strip()
+    rows, kids = {}, {}
+    for line in out.splitlines():
+        p = line.split()
+        if len(p) >= 4:
+            rows[p[0]] = p
+            kids.setdefault(p[1], []).append(p[0])
+    return rows, kids, ""
+
+
+def reaped_seconds(pid):
+    """CPU seconds of the children that process pid has already waited for (cutime + cstime in /proc/PID/stat). It catches a
+    chain of short children that ps never shows alive at a sample. 0 where /proc is absent or the read fails."""
+    try:
+        with open("/proc/%s/stat" % pid) as f:
+            text = f.read()
+        fields = text[text.rindex(")") + 2:].split()
+        return (int(fields[13]) + int(fields[14])) / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError, AttributeError):
+        return 0.0
+
+
+def tree_cpu(table, pid):
+    """{pid: CPU seconds} for every process under pid in a proc_table, each with the time of the children it has reaped
+    (reaped_seconds). pid's own time is left out, its reaped children's time is in: a builtin loop in the job shell, with no child,
+    is no sign of work, a child that ended is. At Stop the root is the job's
+    shell; in a hook-wrapped job its subshell is under it and counts, so a builtin spin reads busy and Stop
+    does not list the job; the watcher reports it. Cost: one /proc read for each process under pid and one for pid, no process."""
+    rows, kids, _ = table
+    cpu, stack = {str(pid): reaped_seconds(pid)}, list(kids.get(str(pid), []))
+    while stack:
+        cur = stack.pop()
+        if cur not in cpu:
+            cpu[cur] = cpu_seconds(rows[cur][3]) + reaped_seconds(cur)
+            stack.extend(kids.get(cur, []))
+    return cpu
+
+
+def cpu_advanced(seen, cpu):
+    """True when a process in cpu has more CPU seconds than in seen (a new one counts from 0)."""
+    return any(secs > seen.get(p, 0.0) for p, secs in cpu.items())
+
+
 def job_state(pid):
     """Return the ps state of pid, or '' when it is gone. A Z state is an ended job whose
-    parent shell has not yet waited for it."""
-    return _run(["ps", "-o", "stat=", "-p", str(pid)]).strip()
+    parent shell has not yet waited for it. The answer's `cpu` holds the CPU seconds of each process
+    under it, from the same one ps call (the watcher reads CPU time as a sign of life)."""
+    table = proc_table()
+    if table[2]:  # unreadable is not ended
+        return JobState(table[2])
+    if str(pid) not in table[0]:
+        return JobState("")
+    state = JobState(table[0][str(pid)][2])
+    state.cpu = tree_cpu(table, pid)
+    return state
+
+
+CPU_SAMPLE = 1.5  # seconds between the two ps reads at Stop: whole-second CPU time must tick in between
+BUSY_BUDGET = 6.0  # seconds for the whole busy check at Stop; the Stop hook is killed at 10 s (settings.json)
+
+
+def busy_outputs(paths):
+    """The output files in paths whose job has CPU time advancing in a process under it, the Stop-side
+    form of the watcher's CPU-time-as-life rule. posix with lsof only: else none. A job's processes are
+    found by the output file they hold as stdout or stderr (the job has no pid at Stop); the files are
+    the ones about to be listed. Two ps reads CPU_SAMPLE apart, and only when some process holds a file.
+    One deadline, BUSY_BUDGET, bounds lsof, both ps reads and the wait: each call's timeout is the time
+    left, and a check that runs out of time returns none, so every job is listed as before."""
+    if os.name != "posix" or not paths or not shutil.which("lsof"):
+        return set()
+    deadline = time.monotonic() + BUSY_BUDGET
+
+    def left():
+        return min(TOOL_TIMEOUT, deadline - time.monotonic())
+    names = {os.path.realpath(p): p for p in paths}
+    holders, pid, fd = {}, None, None
+    if left() <= 0:
+        return set()
+    for line in _run(["lsof", "-nP", "-F", "pfn", "--"] + list(names), left()).splitlines():
+        if line.startswith("p"):
+            pid, fd = line[1:], None
+        elif line.startswith("f"):
+            fd = line[1:]
+        elif line.startswith("n") and fd in ("1", "2") and line[1:] in names:
+            holders.setdefault(line[1:], set()).add(pid)
+    if not holders:
+        return set()
+    if left() <= CPU_SAMPLE:  # no time for a sample and a second read
+        return set()
+    before = proc_table(left())
+    if left() <= CPU_SAMPLE:
+        return set()
+    time.sleep(CPU_SAMPLE)
+    if left() <= 0:
+        return set()
+    after = proc_table(left())
+    if before[2] or after[2]:
+        return set()
+    busy = set()
+    for name, pids in holders.items():
+        for root in (p for p in pids if p in after[0] and after[0][p][1] not in pids):
+            if cpu_advanced(tree_cpu(before, root), tree_cpu(after, root)):
+                busy.add(names[name])
+    return busy
 
 
 def ended_state(state):
@@ -226,7 +529,7 @@ def job_tree(pid):
     return found
 
 
-def report(pid, quiet, log, also=(), beat=None, logf=None, beatf=None):
+def report(pid, quiet, log, also=(), beat=None, logf=None, beatf=None, unwatched=()):
     """Print the STALL report. logf and beatf are the handles the watcher holds (the job removes the
     files by path when it ends, so the tail reads the handle, never the path)."""
     rows = job_tree(pid)
@@ -260,6 +563,8 @@ def report(pid, quiet, log, also=(), beat=None, logf=None, beatf=None):
     lines += ["Last %d output lines:" % TAIL_LINES] + ["  " + l for l in tail or ["(no output)"]]
     lines.append("Log: %s (usually removed when the job ends)" % log)
     lines += ["Named log, no growth either: " + os.path.abspath(p) for p in also]
+    lines += ["Named log not watched (a `cd` makes its directory unknown, so it may have grown): " + p
+              for p in unwatched]
     try:  # the wrapper creates the beat file empty: a heartbeat is a non-empty one
         beat_used = os.fstat(beatf.fileno()).st_size > 0 if beatf is not None else bool(beat and os.path.exists(beat))
     except (OSError, ValueError):
@@ -279,7 +584,7 @@ def held(fd):
         return None
 
 
-def watch(pid, log, quiet, also=(), beat=None, log_fd=None, beat_fd=None):
+def watch(pid, log, quiet, also=(), beat=None, log_fd=None, beat_fd=None, unwatched=()):
     """Stream LOG and BEAT; report a stall after quiet seconds with no new byte on either and no
     change to any named log (named_logs). The named logs cost one stat each a second, in this loop.
     BEAT is where a quiet-by-design tool (bin/verdict) appends its heartbeat; it may not exist at
@@ -290,6 +595,7 @@ def watch(pid, log, quiet, also=(), beat=None, log_fd=None, beat_fd=None):
     marks = log_marks(also)
     next_check = 0.0
     recheck = False
+    seen_cpu = {}
     waited = 0
     lf, bf = held(log_fd), held(beat_fd)
     while lf is None and not os.path.exists(log):  # the shell creates it a moment before this runs
@@ -303,8 +609,14 @@ def watch(pid, log, quiet, also=(), beat=None, log_fd=None, beat_fd=None):
             ended = checked = False
             if now >= next_check or recheck:  # one ps a second, not one per read
                 checked, recheck = True, False
-                ended = ended_state(job_state(pid))
+                state = job_state(pid)
+                ended = ended_state(state)
                 next_check = now + 1.0
+                cpu = getattr(state, "cpu", None)
+                if cpu is not None:  # CPU time that advanced in the job or a process under it is life
+                    if cpu_advanced(seen_cpu, cpu):
+                        last = time.monotonic()
+                    seen_cpu = cpu
                 if also:
                     seen = log_marks(also)
                     if seen != marks:  # the job still writes to a log it named
@@ -329,7 +641,7 @@ def watch(pid, log, quiet, also=(), beat=None, log_fd=None, beat_fd=None):
                 if not checked:  # the last sample may be a second old: sample again, then decide
                     recheck = True
                     continue
-                report(pid, quiet, log, also, beat, f, bf)
+                report(pid, quiet, log, also, beat, f, bf, unwatched)
                 if bf is not None:
                     bf.close()
                 return STALL_EXIT
@@ -375,6 +687,7 @@ def hook():
     except Exception:
         return 0
     quiet = os.environ.get("STALL_WATCH_QUIET") or str(DEFAULT_QUIET)
+    logs, unresolved = read_named_logs(original)  # a relative log in an unknown directory is not watched
     base = os.path.join(os.path.realpath(tempfile.gettempdir()), "stall-watch-%s" % uuid.uuid4().hex)
     log, beat = base + ".log", base + ".beat"  # the job makes the beat file, if a tool writes to it
     q = shlex.quote
@@ -397,7 +710,8 @@ def hook():
         + " ".join(q(a) for a in [sys.executable, os.path.abspath(__file__)])
         + " --watch-pid $pid --log " + q(log) + " --quiet " + q(quiet) + " --beat " + q(beat)
         + " --log-fd 9 --beat-fd 8"
-        + "".join(" --also " + q(p) for p in named_logs(original))
+        + "".join(" --also " + q(p) for p in logs)
+        + "".join(" --unwatched " + q(p) for p in unresolved)
         + "; rc=$?; "
         + "[ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; " + cleanup + "; exit $rc\n} 9< "
         + q(log) + " 8< " + q(beat)
@@ -441,8 +755,8 @@ def parse_time(text):
 
 
 def scan_jobs(transcript):
-    """Return ({job id: (output path or None, until note or '', (named logs, cwd), start time or None,
-    is an agent)}, previous Stop time or None) for every job with no terminal task notice and no TaskStop
+    """Return ({job id: (output path or None, until note or '', (named logs, cwd, unresolved logs),
+    start time or None, is an agent)}, previous Stop time or None) for every job with no terminal task notice and no TaskStop
     result. A job is a shell (toolUseResult backgroundTaskId) or a background agent (toolUseResult
     isAsync true, status async_launched, agentId; its path is the launch's outputFile). The
     note and the named logs come from the call that started the job, matched by tool_use_id. The
@@ -501,7 +815,8 @@ def scan_jobs(transcript):
                         cmd = b["input"].get("command")
                         if isinstance(cmd, str):
                             cwd = rec.get("cwd")
-                            logs[b.get("id")] = (named_logs(cmd), cwd if isinstance(cwd, str) else None)
+                            named, unresolved = read_named_logs(cmd)
+                            logs[b.get("id")] = (named, cwd if isinstance(cwd, str) else None, unresolved)
                 stops.update(b["id"] for b in content if isinstance(b, dict)
                              and b.get("type") == "tool_use" and b.get("name") == "TaskStop"
                              and isinstance(b.get("id"), str))
@@ -511,7 +826,7 @@ def scan_jobs(transcript):
                     for b in content:
                         if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str) and b["tool_use_id"] in stops:
                             done.update(stopped_ids(b.get("content")))
-    return ({k: (v, notes.get(job_call.get(k)) or "", logs.get(job_call.get(k)) or ((), None), began.get(k),
+    return ({k: (v, notes.get(job_call.get(k)) or "", logs.get(job_call.get(k)) or ((), None, ()), began.get(k),
                 k in agents)
              for k, v in jobs.items() if k not in done}, prev_stop)
 
@@ -539,6 +854,185 @@ def stopped_ids(content):
         msg = content
     m = STOPPED.match(msg) if isinstance(msg, str) else None
     return [m.group(1)] if m else []
+
+# "finished" is the word actions/ci-done-comment/comment.sh puts in its red line; test CI94 runs that script, so the pattern follows it.
+CI_VERDICT = re.compile(r"^CI (?:finished )?(green|red|cancelled|unknown) on \S", re.M)
+CI_KEYS = (b"ready", b"pull_request", b"merge", b"send_later", b"create_trigger", b"CronCreate",
+           b"ScheduleWakeup", b"CI ", b"close", b'"is_error":true', b'"is_error": true')
+CI_CHECKIN_TOOLS = ("send_later", "create_trigger", "CronCreate", "ScheduleWakeup")
+CI_SEGMENT = re.compile(r"[;&|\n]+")
+PR_NUMBER = re.compile(r"[0-9]+\Z")
+PR_URL = re.compile(r"/pull/([0-9]+)")
+CI_VALUE_FLAGS = frozenset(("-R", "--repo", "--hostname", "-C", "--session", "-b", "--body", "-F", "--body-file",
+                            "-t", "--subject", "-A", "--author-email", "--match-head-commit", "-c", "--comment"))
+CI_REMEDY = ("Set a one-time send_later check-in for this wait (rule git-ci-wait-checks-in), then stop. "
+             "Set the next one after each red CI verdict, wider apart.")
+
+
+def unquoted(command):
+    """The command with quoted text, `#` comments and heredoc bodies dropped, so only shell words remain.
+    A quote with no closer is a plain character (an apostrophe in a word), so it hides nothing after it."""
+    text = strip_heredoc_bodies(command)
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c in "'\"":
+            j = i + 1
+            while j < n and text[j] != c:
+                j += 2 if (c == '"' and text[j] == "\\") else 1
+            if j < n:
+                out.append(c + c)
+                i = j + 1
+                continue
+        elif c == "\\":
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        elif c == "#" and (not out or out[-1][-1] in " \t\n;&|("):
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def shell_calls(command):
+    """The word lists of each simple command in a shell command line, quoted text and comments gone."""
+    return [seg.split() for seg in CI_SEGMENT.split(unquoted(command)) if seg.strip()]
+
+
+def pr_ref(words):
+    """The PR a ready, merge or close call names: its first all-digit word, or the number in a /pull/<N> URL.
+    A flag and the value it takes (CI_VALUE_FLAGS: -R o/r, -C /repo, --body "x", --session lane) are skipped.
+    With no number, its first non-dash word (a branch name), which matches no numbered wait. '' when the
+    call names no PR: only flags, or a PR word that is a shell variable or empty quotes, whose number is
+    unknown. A call with no PR word is bare."""
+    words = list(flag_free(words))
+    for w in words:
+        if PR_NUMBER.match(w):
+            return w
+        m = PR_URL.search(w)
+        if m:
+            return m.group(1)
+    return next((w for w in words if not w.startswith(("$", "'", '"'))), "")
+
+
+def flag_free(words):
+    """The words with each flag and the value it takes dropped. A flag in --name=value form is one word."""
+    skip = False
+    for w in words:
+        if skip:
+            skip = False
+        elif w.startswith("-"):
+            skip = w in CI_VALUE_FLAGS
+        else:
+            yield w
+
+
+def gh_pr_call(words):
+    """('ready'|'merge'|'close', the words after it) for a `gh pr <sub>` call, global flags such as
+    `-R o/r` before `pr` skipped; None for any other call."""
+    if not words or words[0] != "gh":
+        return None
+    rest = list(words[1:])
+    i = 0
+    while i < len(rest) and rest[i].startswith("-"):
+        i += 2 if rest[i] in CI_VALUE_FLAGS else 1
+    if rest[i:i + 1] == ["pr"] and rest[i + 1:i + 2] and rest[i + 1] in ("ready", "merge", "close"):
+        return rest[i + 1], rest[i + 2:]
+    return None
+
+
+def ci_events(rec):
+    """The CI-wait events one transcript record holds, in order: ('ready', pr), ('checkin', call id),
+    ('failed', call id), ('merge', pr), ('mergeany',), ('verdict', word). A user or queued message holds a
+    verdict line; only an assistant call holds the rest. A tool result is no message, so a verdict it prints
+    is not one, but its error flag voids the check-in it answers. ('merge', pr) is a merge or close that names
+    pr (pr_ref); ('mergeany',) is a gh pr merge or close that names no PR at all, only flags, which aims at
+    the current branch's PR."""
+    kind = rec.get("type")
+    if kind == "attachment":
+        att = rec.get("attachment")
+        text = att.get("prompt") if isinstance(att, dict) and att.get("type") == "queued_command" else None
+        return [("verdict", m.group(1)) for m in CI_VERDICT.finditer(text)] if isinstance(text, str) else []
+    content = rec["message"]["content"]
+    if kind == "user":
+        failed = [("failed", b.get("tool_use_id")) for b in (content if isinstance(content, list) else ())
+                  if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error") is True]
+        if failed or "toolUseResult" in rec:
+            return failed
+        if isinstance(content, list):
+            content = "\n".join(b["text"] for b in content if isinstance(b, dict) and b.get("type") == "text"
+                                and isinstance(b.get("text"), str))
+        return [("verdict", m.group(1)) for m in CI_VERDICT.finditer(content)] if isinstance(content, str) else []
+    events = []
+    for b in content if kind == "assistant" and isinstance(content, list) else ():
+        if not (isinstance(b, dict) and b.get("type") == "tool_use" and isinstance(b.get("input"), dict)):
+            continue
+        name, inp = str(b.get("name")), b["input"]
+        tool = name.rsplit("__", 1)[-1]
+        if tool in CI_CHECKIN_TOOLS:
+            events.append(("checkin", b.get("id")))
+        elif tool == "merge_pull_request":
+            if inp.get("pullNumber"):
+                events.append(("merge", str(inp["pullNumber"])))
+        elif tool == "update_pull_request" and inp.get("draft") is False:
+            events.append(("ready", str(inp.get("pullNumber") or "")))
+        elif tool == "update_pull_request" and inp.get("draft") is True:
+            events.append(("undo", str(inp.get("pullNumber") or "")))
+        elif isinstance(inp.get("command"), str) and name in ("Bash", "PowerShell"):
+            for words in shell_calls(inp["command"]):
+                gh = gh_pr_call(words)
+                if gh and gh[0] == "ready":
+                    events.append(("undo" if "--undo" in gh[1] else "ready", pr_ref(gh[1])))
+                elif gh:
+                    # --auto only queues the merge and --disable-auto drops it: neither has merged anything
+                    if not {"--auto", "--disable-auto"} & set(gh[1]):
+                        pr = pr_ref(gh[1])
+                        events.append(("merge", pr) if pr else ("mergeany",))
+                elif words[0] == "merge" or words[0].replace("\\", "/").endswith("bin/merge"):
+                    pr = pr_ref(words[1:])
+                    if pr:
+                        events.append(("merge", pr))
+    return events
+
+
+def open_ci_wait(transcript):
+    """The PR of a CI wait that is open with no check-in, as a string ('' when the call named none), or
+    None. The newest ready call opens a wait. A green or cancelled verdict closes it; an unknown verdict
+    leaves it open. A merge or close closes a numbered wait only when it names that PR, or is a gh pr merge
+    or close that names no PR at all; it closes a wait whose ready call named no number (bare, a branch or
+    a $var) when it names any PR or none. An undo (gh pr ready --undo, or MCP draft true) closes the wait on
+    its PR the same way. A
+    red verdict keeps it open and voids the check-ins before it. A check-in after the anchor
+    covers it, unless its result was an error. One streamed read, records in file order."""
+    wait = None  # [pr, ids of the check-ins since the anchor]
+    with open(transcript, "rb") as f:
+        for line in f:
+            if not any(k in line for k in CI_KEYS):
+                continue
+            try:
+                events = ci_events(json.loads(line))
+            except Exception:  # a bad or half-written line is skipped
+                continue
+            for ev in events:
+                if ev[0] == "ready":
+                    wait = [ev[1], set()]
+                elif wait is None:
+                    continue
+                elif ev[0] == "checkin":
+                    wait[1].add(ev[1])
+                elif ev[0] == "failed":
+                    wait[1].discard(ev[1])
+                elif ev[0] == "mergeany" or (ev[0] in ("merge", "undo") and (not wait[0].isdigit() or wait[0] == ev[1])):
+                    wait = None  # a wait that names no number (bare, a branch, a $var) closes on any PR
+                elif ev[0] == "verdict":
+                    if ev[1] == "red":
+                        wait[1].clear()
+                    elif ev[1] != "unknown":
+                        wait = None
+    return wait[0] if wait and not wait[1] else None
 
 
 TRANSCRIPT_AGENT_ID = re.compile(r"[\w-]+\Z")  # an id safe to put in a transcript file name
@@ -596,18 +1090,29 @@ def open_call(path, size):
 
 
 def stop():
-    if not TASK_NOTIFICATION_TAG:  # every finished job would look open: say nothing
-        return 0
     try:
         call = json.load(sys.stdin)
         if call.get("stop_hook_active") is True:
             return 0
+    except Exception:  # guard-hooks-fail-closed: a failed check prints nothing and does not block
+        return 0
+    out = {}
+    try:
+        pr = open_ci_wait(call["transcript_path"])
+        if pr is not None:
+            out["decision"] = "block"
+            out["reason"] = "PR %s is marked ready and no check-in is set (decision ci-wait-reads-run-status). %s" % (pr or "(this branch)", CI_REMEDY)
+    except Exception:
+        pass
+    try:
+        if not TASK_NOTIFICATION_TAG:  # every finished job would look open: list none
+            raise ValueError("no task-notification tag")
         now = float(os.environ.get("STALL_WATCH_NOW") or time.time())
         quiet = float(os.environ.get("STALL_WATCH_QUIET") or DEFAULT_QUIET)
         base = os.environ.get("STALL_WATCH_OUTPUT_BASE")
-        rows = []
+        rows, quiet_shells = [], {}  # quiet_shells: row index -> the output file of that shell job
         open_jobs, prev_stop = scan_jobs(call["transcript_path"])
-        for job, (path, note, (named, cwd), began, agent) in open_jobs.items():
+        for job, (path, note, (named, cwd, unresolved), began, agent) in open_jobs.items():
             until = " | until: " + note if note else ""
             real = path
             if path and base:
@@ -637,20 +1142,28 @@ def stop():
                         rows.append("%s: background agent, no activity for %ds: %s%s %s" % (
                             job, idle, real, until, AGENT_REMEDY))
                 continue
-            for mark in log_marks([p for p in named if os.path.isabs(p) or cwd], cwd).values():
+            watched = [p for p in named if os.path.isabs(p) or cwd]
+            unwatched = list(unresolved) + [p for p in named if p not in watched]
+            for mark in log_marks(watched, cwd).values():
                 if mark:  # a named log the job still writes keeps it off the list
                     idle = min(idle, now - mark[1])
             if idle >= quiet:
                 if prev_stop is not None and now - idle + quiet <= prev_stop:
                     continue  # its stall crossed before the previous Stop, which listed it
-                rows.append("%s: no output for %ds: %s%s" % (job, idle, path, until))
+                miss = " (named log not watched, its directory is unknown: %s)" % ", ".join(unwatched) if unwatched else ""
+                quiet_shells[len(rows)] = real
+                rows.append("%s: no output for %ds: %s%s%s" % (job, idle, path, until, miss))
+        busy = busy_outputs(list(quiet_shells.values()))  # a job whose process tree burns CPU is not quiet
+        rows = [r for i, r in enumerate(rows) if quiet_shells.get(i) not in busy]
         if rows:
             head = "Background jobs still running and quiet: stop it or tell the owner."
             if "| until: " in "".join(rows):
                 head += " Say whether each until condition is met."
-            print(json.dumps({"systemMessage": "\n".join([head] + rows)}))
+            out["systemMessage"] = "\n".join([head] + rows)
     except Exception:  # guard-hooks-fail-closed: a failed check prints nothing and does not block
         pass
+    if out:
+        print(json.dumps(out))
     return 0
 
 
@@ -661,17 +1174,19 @@ def main(argv):
         return stop()
     opts = {"--quiet": DEFAULT_QUIET, "--watch-pid": None, "--log": None, "--beat": None,
             "--log-fd": None, "--beat-fd": None}
-    also = []
+    also, unwatched = [], []
     for i in range(0, len(argv) - 1, 2):
         if argv[i] == "--also":
             also.append(argv[i + 1])
+        elif argv[i] == "--unwatched":
+            unwatched.append(argv[i + 1])
         elif argv[i] in opts:
             opts[argv[i]] = argv[i + 1]
     if not opts["--watch-pid"] or not opts["--log"]:
         print(__doc__)
         return 2
     return watch(int(opts["--watch-pid"]), opts["--log"], float(opts["--quiet"]), also, opts["--beat"],
-                 opts["--log-fd"], opts["--beat-fd"])
+                 opts["--log-fd"], opts["--beat-fd"], unwatched)
 
 
 if __name__ == "__main__":
