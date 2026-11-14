@@ -13503,7 +13503,7 @@ class CloudAllow(unittest.TestCase):
 
     def test_the_repo_settings_json_has_one_merge_allow_rule_and_no_other(self):
         # The repo's settings.json is what a local session reads (a link to it). Not matched on a bare "merge": `Bash(gh pr merge:*)` is there.
-        # Owner pick 786 c (2026-11-13 19:21 CST, decision auto-mode-owner-acts): the red-main revert path's one rule is allowed there, nothing else.
+        # Only the red-main revert path's rule may be here, so a revert merge needs no prompt and every other merge act still does (decision auto-mode-owner-acts).
         with open(os.path.join(REPO_ROOT, "settings.json"), encoding="utf-8") as f:
             allow = json.load(f).get("permissions", {}).get("allow", [])
         self.assertTrue(allow)
