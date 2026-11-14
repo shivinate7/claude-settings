@@ -8,10 +8,10 @@ import re
 
 import guard_core
 from guard_core import (
-    HEREDOC_HEADER, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT, SCRIPT_HEADERS,
-    PowerShellScript, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
-    dir_before_segment, heredoc_delimiter, interpreter_bodies, is_powershell, nested_script, norm, resolve_command,
-    segment_tokens, split_segments, strip_heredoc_bodies,
+    GIT_OPT_WITH_VALUE, HEREDOC_HEADER, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT,
+    SCRIPT_HEADERS, PowerShellScript, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally,
+    basename, dir_before_segment, heredoc_delimiter, interpreter_bodies, is_powershell, long_flag_abbrev,
+    command_indexes, inner_commands, nested_script, norm, resolve_command, segment_tokens, split_segments, strip_heredoc_bodies,
 )
 from guard_env import _quoted_words, _substitutions, script_spots
 
@@ -2313,6 +2313,322 @@ def _interpreter_write_hit(raw: str, cwd: str, predicate, script_files: bool = F
             if hit:
                 return hit
     return _script_file_hit(raw, cwd, predicate) if script_files else ""
+
+
+# ------------------------------------------------------------------ a patch `git apply` writes
+#
+# `git apply` writes each file the patch's headers name, which the shell text never does. The guard reads
+# those names the way `git apply --numstat` does (`-p` strips leading folders, `--directory` prepends one,
+# both sides of a rename or copy count) and hands each to the caller's predicate. The patch comes from a
+# file argument, a `<` file, a heredoc or here-string on stdin, or a `cat <<EOF |` heredoc piped in. A patch
+# the guard cannot read in full (missing, a folder, over `_SCRIPT_READ_LIMIT`, or fed by any other
+# pipe) is unknown and stays allowed. `--check`, `--stat`, `--numstat` and `--summary` write nothing.
+_APPLY_QUIET_FLAGS = (("--check", "--ch"), ("--stat", "--st"), ("--numstat", "--nu"), ("--summary", "--su"))
+_APPLY_VALUE_FLAGS = (("--directory", "--di"), ("--include", "--inc"), ("--exclude", "--ex"),
+                      ("--whitespace", "--wh"), ("--build-fake-ancestor", "--bu"))
+_APPLY_REDIRECT = re.compile(r"^(?:\d*|&)(<<<|<<-?|<|>>|>)(.*)$", re.S)
+_HUNK_HEADER = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
+_C_ESCAPES = {"a": 7, "b": 8, "f": 12, "n": 10, "r": 13, "t": 9, "v": 11}
+
+
+def _c_unquote(text: str):
+    """(value, length read) of the C-quoted name that starts `text` (git quotes odd names so), else (None, 0)."""
+    out, at = bytearray(), 1
+    while at < len(text):
+        char = text[at]
+        if char == '"':
+            return out.decode("utf-8", "replace"), at + 1
+        if char == "\\" and at + 1 < len(text):
+            octal = re.match(r"[0-7]{1,3}", text[at + 1:])
+            if octal:
+                out.append(int(octal.group(), 8) & 255)
+                at += 1 + len(octal.group())
+            else:
+                out += bytes([_C_ESCAPES[text[at + 1]]]) if text[at + 1] in _C_ESCAPES else text[at + 1].encode()
+                at += 2
+            continue
+        out += char.encode()
+        at += 1
+    return None, 0
+
+
+def _strip_leading(name: str, count: int):
+    """`name` without its first `count` folders (git's `-p`), else None when it has fewer."""
+    for _ in range(count):
+        cut = name.find("/")
+        if cut < 0:
+            return None
+        name = name[cut:].lstrip("/")
+    return name or None
+
+
+def _header_names(rest: str, strip: int) -> list:
+    """The names a `---` or `+++` header line names (the text after its marker). A name ends at a tab; a plain
+    `diff -u` header may carry a timestamp after a space, so the first word counts too. `/dev/null` is no name."""
+    if rest.startswith('"'):
+        value, _ = _c_unquote(rest)
+        found = [value] if value else []
+    else:
+        head = rest.split("\t")[0].rstrip()
+        found = [head, head.split(" ")[0]]
+    return [name for name in (_strip_leading(each, strip) for each in found if each and each != "/dev/null") if name]
+
+
+def _diff_git_names(rest: str, strip: int) -> list:
+    """The two names of a `diff --git A B` line (the text after `diff --git `). Git cuts the line in half when
+    both names are the same; any other cut with a space in a name is no reading this guard can make."""
+    names = []
+    if rest.startswith('"'):
+        first, used = _c_unquote(rest)
+        tail = rest[used:].lstrip(" ")
+        second = _c_unquote(tail)[0] if tail.startswith('"') else tail
+        names = [first, second]
+    elif rest.count(" ") == 1:
+        names = rest.split(" ")
+    elif len(rest) % 2 == 1 and rest[len(rest) // 2] == " ":
+        names = [rest[:len(rest) // 2], rest[len(rest) // 2 + 1:]]
+    return [name for name in (_strip_leading(each, strip) for each in names if each and each != "/dev/null") if name]
+
+
+def _patch_names(text: str, strip: int) -> list:
+    """Every file name the headers of a patch name, in order, each once. A hunk's lines are counted off by the
+    sizes its `@@` header states, so a removed line that reads `-- x` is no `---` header."""
+    names, old_left, new_left = [], 0, 0
+    for line in text.split("\n"):
+        line = line.rstrip("\r")
+        if old_left > 0 or new_left > 0:
+            if line.startswith("-"):
+                old_left -= 1
+            elif line.startswith("+"):
+                new_left -= 1
+            elif not line.startswith("\\"):
+                old_left, new_left = old_left - 1, new_left - 1
+            continue
+        hunk = _HUNK_HEADER.match(line)
+        if hunk:
+            old_left, new_left = (1 if size is None else int(size) for size in hunk.groups())
+        elif line.startswith("diff --git "):
+            names += _diff_git_names(line[11:], strip)
+        elif line.startswith(("--- ", "+++ ")):
+            names += _header_names(line[4:], strip)
+        elif line.startswith(("rename from ", "rename to ", "copy from ", "copy to ")):
+            names += _header_names(line.split(" ", 2)[2], 0)
+    return list(dict.fromkeys(names))
+
+
+def _apply_root(where: str) -> str:
+    """The top folder of the repository `where` is in, else `where`: the patch's names count from there."""
+    here = where
+    while here and here != os.path.dirname(here):
+        if os.path.exists(os.path.join(here, ".git")):
+            return here
+        here = os.path.dirname(here)
+    return where
+
+
+def _heredoc_bodies_of(raw: str, segment: str) -> list:
+    """The body of each heredoc whose header line holds `segment`, read both ways `_split_heredocs` walks."""
+    found = []
+    for reading in (False, True):
+        for _quote, body, header in _split_heredocs(raw, reading)[1]:
+            if segment.strip() in header and body not in found:
+                found.append(body)
+    return found
+
+
+def _apply_call(tokens, index: int, at: str):
+    """(the folder the call runs in, its arguments after `apply`) for the `git` word at `index`, else None when the
+    subcommand is no `apply` or a `-C` value cannot be told. Git's own options come first; `-C` moves the folder."""
+    cursor = index + 1
+    while cursor < len(tokens):
+        token = tokens[cursor]
+        if token == "-C" and cursor + 1 < len(tokens):
+            at = _script_path(tokens[cursor + 1], at)
+            if not at:
+                return None
+            cursor += 2
+        elif token in GIT_OPT_WITH_VALUE:
+            cursor += 2
+        elif token.startswith("-"):
+            cursor += 1
+        else:
+            break
+    if cursor < len(tokens) and tokens[cursor].lower() == "apply":
+        return at, list(tokens[cursor + 1:])
+    return None
+
+
+def _apply_options(words):
+    """(strip, directory prefix, writes nothing, patch files, stdin file, here-strings, reads a heredoc) of the
+    arguments of one `git apply`. A redirect is no patch file; the file after `<` is stdin."""
+    strip, prefix, apply_flag, quiet, heredoc, ended = 1, "", False, False, False, False
+    files, stdin_file, here_strings = [], "", []
+    index = 0
+    while index < len(words):
+        word = words[index]
+        index += 1
+        redirect = _APPLY_REDIRECT.match(word)
+        if redirect:
+            operator, value = redirect.groups()
+            if not value and index < len(words):
+                value = words[index]
+                index += 1
+            if operator == "<":
+                stdin_file = value
+            elif operator == "<<<":
+                here_strings.append(value)
+            elif operator.startswith("<<"):
+                heredoc = True
+        elif ended:   # after `--` every word is a file name, but a redirect (matched above) is still a redirect
+            files.append(word)
+        elif word == "--":
+            ended = True
+        elif word.startswith("--"):
+            name, glued, value = word.partition("=")
+            if long_flag_abbrev(name, "--apply", "--ap"):
+                apply_flag = True
+            elif any(long_flag_abbrev(name, full, short) for full, short in _APPLY_QUIET_FLAGS):
+                quiet = True
+            elif any(long_flag_abbrev(name, full, short) for full, short in _APPLY_VALUE_FLAGS):
+                if not glued and index < len(words):
+                    value = words[index]
+                    index += 1
+                if long_flag_abbrev(name, "--directory", "--di"):
+                    prefix = value
+        elif word == "-" or not word.startswith("-"):
+            files.append(word)
+        else:
+            for at, char in enumerate(word[1:], 1):   # a short cluster: `-Rv`, `-p1`, `-p 1`
+                if char in "pC":
+                    value = word[at + 1:]
+                    if not value and index < len(words):
+                        value = words[index]
+                        index += 1
+                    if char == "p" and value.isdigit():
+                        strip = int(value)
+                    break
+    return strip, prefix, quiet and not apply_flag, files, stdin_file, here_strings, heredoc
+
+
+_ESCAPE_PAIR = re.compile(r"\\(.)", re.S)
+
+
+def _printed_text(tokens) -> str:
+    """The text an `echo` or `printf` command in `tokens` prints, else '': its words up to the first redirect, with
+    the `\\n`-style escapes of `echo -e` and `printf` read. A `printf` format with no `%b` or `%s` is the text itself."""
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) not in ("echo", "printf"):
+        return ""
+    words = []
+    for word in tokens[index + 1:]:
+        if _APPLY_REDIRECT.match(word):
+            break
+        words.append(word)
+    while words and re.match(r"^-[a-zA-Z]+$", words[0]):
+        words.pop(0)
+    if basename(tokens[index]) == "printf" and len(words) > 1 and re.search(r"%[bs]", words[0]):
+        words = words[1:]
+    return _ESCAPE_PAIR.sub(lambda m: {"n": "\n", "t": "\t", "\\": "\\"}.get(m.group(1), m.group(0)), "".join(words))
+
+
+def _written_patch_texts(raw, segments, ends, number, path, cwd) -> list:
+    """The text each earlier segment of this command writes to `path`: a heredoc body (`_heredoc_scripts`), or the
+    text an `echo` or `printf` prints into it with a redirect or through a pipe into `tee`. A patch that this command
+    writes and then applies is not on disk when the guard reads the command, so its headers are read from here."""
+    texts = [body for made, body in _heredoc_scripts(raw, segments, ends, cwd).get(path, ()) if made < number]
+    for made in range(number):
+        match = _HEREDOC_TARGET.search(segments[made])
+        if not match or "<<" in segments[made]:
+            continue
+        target = next(group for group in match.groups() if group)
+        if _script_path(target, dir_before_segment(segments, made, cwd, ends) or cwd) != path:
+            continue
+        feed = made - 1 if made > 0 and ends[made - 1] == "|" and not _printed_text(segment_tokens(segments[made])) else made
+        text = _printed_text(segment_tokens(segments[feed]))
+        if text:
+            texts.append(text)
+    return texts
+
+
+def _apply_patch_texts(raw, segments, ends, number, at, files, stdin_file, here_strings, heredoc, cwd=""):
+    """The text of each patch one `git apply` reads, as far as the guard can read it."""
+    texts = []
+    stdin = not files or "-" in files
+    for name in files:
+        if name != "-":
+            path = _script_path(name, at)
+            texts.append(_read_script(path))
+            if path:
+                texts += [(text, False) for text in _written_patch_texts(raw, segments, ends, number, path, cwd or at)]
+    if stdin and stdin_file:
+        texts.append(_read_script(_script_path(stdin_file, at)))
+    if stdin:
+        texts += [(text, False) for text in here_strings]
+        owner = number
+        if not heredoc:
+            # `cat <<EOF | git apply`: the heredoc belongs to the first command of the pipeline.
+            while owner > 0 and ends[owner - 1] == "|":
+                owner -= 1
+            cat = segment_tokens(segments[owner]) if owner != number else None
+            index = resolve_command(cat) if cat else None
+            if index is None or basename(cat[index]) != "cat" or "<<" not in segments[owner]:
+                owner = None
+        if owner is not None:
+            texts += [(body, False) for body in _heredoc_bodies_of(raw, segments[owner])]
+    return [text for text, cut in texts if text and not cut]
+
+
+def git_apply_hit(raw: str, cwd: str, predicate) -> str:
+    """The first file a `git apply` in `raw` writes that `predicate(path, folder)` accepts, else ''. The names come
+    from `_patch_names`. A crash of the scan reads as no hit: it must never skip the rules after it."""
+    try:
+        return _git_apply_hit(raw, cwd, predicate)
+    except Exception:
+        return ""
+
+
+def _git_apply_hit(raw: str, cwd: str, predicate, depth: int = 0) -> str:
+    if "apply" not in raw:
+        return ""
+    # Read the command as `_shell_write_hit` does: each `$VAR` is its earlier assignment (an unknown one stays as
+    # written, so its patch cannot be read and stays allowed), each subshell `(git apply p)` is a command start
+    # (`command_indexes`), and each script a shell, `eval` or runner starts (`inner_commands`) is read in turn.
+    raw = _resolve_vars(raw)
+    ends = []
+    segments = split_segments(_strip_heredoc_bodies_unconditionally(raw), ends)
+    for number, segment in enumerate(segments):
+        tokens = segment_tokens(segment) if "apply" in segment else None
+        if not tokens:
+            continue
+        at = dir_before_segment(segments, number, cwd, ends) or cwd
+        if depth < _APPLY_NEST_LIMIT:
+            for text in inner_commands(tokens):
+                hit = _git_apply_hit(str(text), at, predicate, depth + 1)
+                if hit:
+                    return hit
+        for index in command_indexes(tokens):
+            if basename(guard_core.GLUED_OPEN.sub("", tokens[index])) not in ("git", "git.exe"):
+                continue
+            call = _apply_call(tokens, index, at)
+            if not call:
+                continue
+            where, words = call
+            # a subshell's closing paren is glued to its last word: `(git apply p)`
+            if words and index == 0 and guard_core.GLUED_OPEN.match(tokens[0]):
+                words[-1] = words[-1].rstrip(")") or words[-1]
+            strip, prefix, quiet, *sources = _apply_options(words)
+            if quiet:
+                continue
+            # The names count from the repository's top folder; a patch run outside one counts from the folder.
+            for text in _apply_patch_texts(raw, segments, ends, number, where, *sources, cwd=cwd):
+                for name in _patch_names(text, strip):
+                    name = prefix.rstrip("/") + "/" + name if prefix else name
+                    if any(predicate(name, base) for base in dict.fromkeys((_apply_root(where), where))):
+                        return name
+    return ""
+
+
+_APPLY_NEST_LIMIT = 4   # `bash -c "bash -c '...'"` is read this deep, then left allowed
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
