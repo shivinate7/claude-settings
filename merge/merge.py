@@ -1543,7 +1543,7 @@ class Host:
         One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A newest-first walk of the push group's
         green runs costs one jobs read each, down to the first that is not empty (the newest, when it ran a suite). A failed read is unknown.
         A red verdict also leaves `self.base_facts` for revert_proven, as data the prose cannot carry: `blamed` (the full head shas of the breaking merges), `red` (red runs judged),
-        `others` (red entries without a run, cancelled runs and re-runs in flight beside the red), `head` (the head sha of the newest run read) and `own_red` (a red run judged is on that head, so the head's own run failed). Every other verdict leaves it None."""
+        `others` (red entries without a run, cancelled runs and re-runs in flight beside the red), `head` (the head sha of the newest run read) and `red_heads` (the head sha of each red run judged). Every other verdict leaves it None."""
         self.base_facts = None  # a red verdict sets it below; any other verdict, and any stop, leaves it None
         try:
             if os.path.dirname(ALARM_EVENTS) not in sys.path:
@@ -1644,7 +1644,7 @@ class Host:
             return "unknown", " ".join(str(e).split())
         if red:
             self.base_facts = {"blamed": blamed, "red": len(red_runs), "others": len(red) - len(red_runs) + len(cancelled) + len(unknown), "head": base_head,
-                               "own_red": any(r.get("head_sha") == base_head for r in red_runs)}
+                               "red_heads": [r.get("head_sha") for r in red_runs]}
             return "red", " | ".join(red + blame + cancelled)
         return ("unknown", " | ".join(unknown + cancelled)) if unknown or cancelled else ("green", "")
 
@@ -3347,29 +3347,63 @@ def pull_number_in_title(line):
     m = re.match(r"Merge pull request #(\d+)\b", line) or re.search(r"\(#(\d+)\)\s*$", line)
     return m.group(1) if m else None
 
+REVERT_WALK_MAX = 200  # commits revert_proven reads from the breaking merge up to the base's head; a longer walk is not proven
+
+def _shas(read):
+    """A git list read (rc, out) -> its 40-hex shas in order, or None when the read failed, any line is not a sha, or it holds more than REVERT_WALK_MAX."""
+    c, out = read
+    lines = out.split()
+    if c or len(lines) > REVERT_WALK_MAX or not all(re.fullmatch(r"[0-9a-f]{40}", x) for x in lines):
+        return None
+    return lines
+
 def revert_proven(root, host, base):
     """True when a red base is lifted by a revert already merged with its tree proven (owner ruling own-823-b-revert-merge-lifts-red, decision no-merge-onto-red-main).
-    Read from the facts base_state left on the host (`base_facts`), never from its prose. All must hold: exactly one red run, no cancelled run, no re-run in flight
-    and no other red read beside it; no red run on the head itself (the revert's own run on the base failed, so its tree is no fix); exactly one breaking merge, named by its full sha; origin/<base> is the head the runs were read at; that head, or its
-    second parent when it is a merge commit, says `This reverts commit <the breaking sha>`; the head's tree is the tree of the head of the pull request it names;
-    and that pull request head's checks read green (Host.head_state, the one reader). A revert of the revert names another sha, so it never matches. A
-    first red names no breaking merge, so it never lifts. Any read that fails is not proven: unknown never reads clear. Skipped runs are no evidence here.
-    Cost accepted by the owner: a revert that does not fix the failure reads clear until the next full run."""
+    Merges resume when the revert merges, with its run still going (ruling own-745-b-resume-at-revert), and stay resumed while unrelated commits land above it.
+    Read from the facts base_state left on the host (`base_facts`), never from its prose. All must hold:
+    - exactly one red run, no cancelled run, no re-run in flight and no other red read beside it, and exactly one breaking merge B, named by its full sha;
+    - origin/<base> is the head the runs were read at, and B is its ancestor;
+    - of every commit from B up to the head (any parent, so a revert under a catch-up merge counts; at most REVERT_WALK_MAX), exactly one, R, says `This reverts commit <B>`;
+    - no commit there names R, or the commit that landed R, as reverted (a re-land);
+    - the landing commit is the oldest commit of the head's first-parent line that holds R. Its title names pull request N (`Merge pull request #N`, or `(#N)` for a squash);
+    - the landing commit's tree is the tree of N's head, and that head's checks read green (Host.head_state, the one reader);
+    - the red run sits on B or between B and the landing commit, never on the landing commit or above it (the revert's own run, or a later merge, failed).
+    A first red names no breaking merge, so it never lifts. Any read that fails, or a walk past the cap, is not proven: unknown never reads clear.
+    Skipped runs are no evidence here. Cost accepted by the owner: a revert that does not fix the failure reads clear until the next full run."""
     facts = getattr(host, "base_facts", None)
-    if not facts or len(facts["blamed"]) != 1 or facts["red"] != 1 or facts["others"] or facts["own_red"]:
+    if not facts or len(facts["blamed"]) != 1 or facts["red"] != 1 or facts["others"]:
         return False
     sha = facts["blamed"][0]
     try:
-        head = git(root, "rev-parse", f"origin/{base}")
-        parents = git(root, "rev-list", "--parents", "-n", "1", f"origin/{base}")
-        if head[0] or parents[0] or head[1] != facts["head"]:
+        c, head = git(root, "rev-parse", f"origin/{base}")
+        if c or head != facts["head"] or git(root, "merge-base", "--is-ancestor", sha, head)[0]:
             return False
-        revert = re.compile(rf"(?m)^This reverts commit {re.escape(sha)}(?![0-9a-f])")
-        tips = [head[1]] + ([parents[1].split()[2]] if len(parents[1].split()) == 3 else [])  # a merge commit carries the revert as its second parent
-        said = [git(root, "log", "-1", "--format=%B", t) for t in tips]
-        if any(c for c, _ in said) or not any(revert.search(text) for _, text in said):
+        c, out = git(root, "log", "-z", "--format=%H%n%B", f"-n{REVERT_WALK_MAX + 1}", f"{sha}..{head}")
+        said = [e.strip("\n").partition("\n") for e in out.split("\0") if e.strip()]
+        if c or len(said) > REVERT_WALK_MAX or not all(re.fullmatch(r"[0-9a-f]{40}", x) for x, _, _ in said):
             return False
-        title = git(root, "log", "-1", "--format=%s", head[1])
+
+        def reverting(s):  # the commits whose message says `This reverts commit <s>`; a longer hex (another sha that starts with s) is no match
+            line = re.compile(rf"(?m)^This reverts commit {re.escape(s)}(?![0-9a-f])")
+            return [x for x, _, text in said if line.search(text)]
+        reverts = reverting(sha)
+        if len(reverts) != 1:
+            return False
+        revert = reverts[0]
+        chain = _shas(git(root, "rev-list", "--first-parent", f"-n{REVERT_WALK_MAX + 1}", f"{sha}..{head}"))
+        holds = _shas(git(root, "rev-list", "--ancestry-path", f"-n{REVERT_WALK_MAX + 1}", f"{revert}..{head}"))
+        if chain is None or holds is None:
+            return False
+        landed = next((x for x in reversed(chain) if x == revert or x in holds), None)  # chain is newest first
+        if landed is None or reverting(revert) or reverting(landed):
+            return False
+        above = _shas(git(root, "rev-list", "--ancestry-path", f"-n{REVERT_WALK_MAX + 1}", f"{landed}..{head}"))
+        if above is None:
+            return False
+        below = ({sha} | {x for x, _, _ in said}) - set(above) - {landed}
+        if not all(r in below for r in facts["red_heads"]):
+            return False
+        title = git(root, "log", "-1", "--format=%s", landed)
         n = pull_number_in_title(title[1])
         if title[0] or not n:
             return False
@@ -3379,14 +3413,14 @@ def revert_proven(root, host, base):
         finally:
             for k, v in kept.items():
                 setattr(host, k, v)
-        trees = [git(root, "rev-parse", f"{x}^{{tree}}") for x in (head[1], info["head"])]
+        trees = [git(root, "rev-parse", f"{x}^{{tree}}") for x in (landed, info["head"])]
         return not any(c for c, _ in trees) and trees[0][1] == trees[1][1] and head_not_green(host.head_state(int(n), sha=info["head"])) is None
-    except (Stop, subprocess.TimeoutExpired, OSError, KeyError, ValueError, IndexError):
+    except (Stop, subprocess.TimeoutExpired, OSError, KeyError, ValueError, IndexError, TypeError):
         return False
 
 def base_verdict(root, host, base):
-    """host.base_state over the workflow files on origin/<base>, with a red lifted to green when revert_proven says the revert of the breaking merge is on the base with its
-    tree proven. The one place both the preview and red_base read, so they print one verdict. A failed read of the workflow files is unknown."""
+    """host.base_state over the workflow files on origin/<base>, with a red lifted to green when revert_proven says the revert of the breaking merge landed on the base with its
+    tree proven and no red run on it or above it. The one place both the preview and red_base read, so they print one verdict. A failed read of the workflow files is unknown."""
     try:
         flows = base_workflows(root, f"origin/{base}")
     except (Stop, subprocess.TimeoutExpired, OSError) as e:
@@ -3399,7 +3433,8 @@ def base_verdict(root, host, base):
 def red_base(root, host, base, red_ok=""):
     """The red-main check (decision no-merge-onto-red-main): refuse while the base's latest completed run has a red job, or cannot be read.
     --base-red-ok "<reason>" is a reason flag, as --undo-check-unknown-ok is, and Claude may type it with a reason: the way out for the batch that carries the fix (a revert PR of the breaking merge among them), or for an unknown read whose cause the reason names. A lift is logged and returns its reason, for record_lift.
-    Once that revert is merged with its tree proven, base_verdict reads the base green (revert_proven), so no flag is needed after it; a revert whose tree is not proven leaves the base red until its own run on the base is green."""
+    Once that revert is merged with its tree proven, base_verdict reads the base green (revert_proven), so no flag is needed after it, for later merges too, until a run on the
+    revert or above it is red; a revert whose tree is not proven leaves the base red until its own run on the base is green."""
     verdict, detail = base_verdict(root, host, base)
     if verdict == "green":
         return
@@ -3416,7 +3451,7 @@ def red_base(root, host, base, red_ok=""):
     carries = f"if this batch carries the fix, or the unknown read has a known cause, run again with the reason flag {RED_FLAG} \"<reason>\"."
     if broke:  # the revert PR is the batch that carries the fix: its own Drops-lines trailer covers each file the silent-undo check names, and the reason flag lifts no silent-undo finding
         way = (f"Open a revert PR for the breaking merge named above (`git revert -m 1 <commit>` for a merge commit) and merge it with the reason flag {RED_FLAG} \"<reason>\". "
-               f"Merges resume at once when that revert is on {base} with its tree proven (the revert's PR checks are green and {base}'s tree is the revert's tree); "
+               f"Merges resume at once when that revert is on {base} with its tree proven (the revert's PR checks are green and the tree of the merge that landed it is the revert PR's tree), and stay resumed until a run on that merge or above it is red; "
                f"any other revert waits until its run on main is green (a green run that ran the suite), and until then its run is pending and the breaking red stays the newest. "
                f"The revert PR needs a Drops-lines trailer for each file the silent-undo check names (a revert of a merge that edits and adds files is flagged \"whole file restored\" and \"file deleted\"), "
                f"and so does a re-land that reverts the revert; the reason flag {RED_FLAG} does not lift that check. "
