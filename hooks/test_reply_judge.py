@@ -1471,6 +1471,43 @@ def case_shiv_style_rule_names_the_carve_out():
         check(name, ok, cause)
 
 
+ALLOW_WORDS = ("allow-list entry", "allow entry")
+ALLOW_QUALIFIERS = ("settings.local.json", "per-repo allow")
+
+
+def bare_allow_widenings(cl):
+    """The clauses that call a plain allow-list or allow entry widening: no settings.local.json or per-repo allow
+    qualifier, and no negation. A clause that says the global entry is not widening never counts."""
+    return [c for c in cl if any(a in c for a in ALLOW_WORDS) and "widen" in c
+            and not any(q in c for q in ALLOW_QUALIFIERS) and not any(n in c for n in NEG_WORDS)]
+
+
+def case_prompt_names_no_bare_allow_entry():
+    # The widening sentence that opens the prompt must not call a plain allow-list entry widening: the widening entry is
+    # one in settings.local.json or a per-repo allow entry, so the sentence does not contradict the global carve-out.
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    cl = clauses(run.prompt().split(WIDENS_ASK, 1)[0])
+    check("bare allow entry scope: the prompt names style-question-form", has_pin(cl, ("style-question-form",)), cl[:2])
+    if not has_pin(cl, ("style-question-form",)):
+        return
+    bare = bare_allow_widenings(cl)
+    check("bare allow entry: no clause of the prompt calls a plain allow-list or allow entry widening",
+          not bare, "a clause calls a plain allow entry widening: %r" % (bare[:1],))
+
+
+def case_carve_out_says_it_names_no_repo_in_prompt():
+    # An entry that names no repo is the global one. An entry that names one repo's path stays a per-repo exception.
+    # The prompt carries WIDENING_CARVE_OUT verbatim, so the phrase reaches the judge.
+    carve = qf_text("WIDENING_CARVE_OUT")
+    ok = "names no repo" in norm(carve).lower()
+    check("names no repo: question_form.WIDENING_CARVE_OUT says the global entry names no repo", ok,
+          "WIDENING_CARVE_OUT does not say the global entry names no repo")
+    if ok:
+        run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+        check("names no repo: the prompt carries the phrase", "names no repo" in norm(run.prompt()).lower(),
+              "the prompt does not carry the phrase")
+
+
 # Roadmap c135, item 31's shape: options that can all be done together, asked as pick-one. The prompt
 # flags it and says to ask it as a multi-select item (`multi: true`). Options that exclude each other,
 # such as now or later, stay a pick-one question.
@@ -2282,6 +2319,8 @@ CASES = (
     case_prompt_carries_the_carve_out_from_one_home,
     case_prompt_still_names_the_widening_forms,
     case_shiv_style_rule_names_the_carve_out,
+    case_prompt_names_no_bare_allow_entry,
+    case_carve_out_says_it_names_no_repo_in_prompt,
     case_widens_finding_logs_its_rule,
     case_prompt_flags_a_pick_one_question_whose_options_could_combine,
     case_route_cite_carries_cited_same_act_and_alternate_rows,

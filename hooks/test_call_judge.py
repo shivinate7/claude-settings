@@ -1409,8 +1409,9 @@ def norm(text):
 
 
 def clauses(text):
-    """The lowercase clauses of a text. A clause ends at a period and a space, so settings.local.json stays whole."""
-    return [c for c in norm(text).lower().split(". ") if c.strip()]
+    """The lowercase clauses of a text. A clause ends at a period or a semicolon, each followed by a space, so
+    settings.local.json stays whole and a clause after a semicolon is judged alone."""
+    return [c for c in re.split(r"\.\s|;\s", norm(text).lower()) if c.strip()]
 
 
 def has_pin(cl, *groups):
@@ -1484,6 +1485,56 @@ def case_skill_widens_paragraph_names_the_carve_out():
           "no clause of the widens paragraph carries the carve-out")
     for name, ok, cause in still_widens(cl, "the waiting-page skill"):
         check(name, ok, cause)
+
+
+ALLOW_WORDS = ("allow-list entry", "allow entry")
+ALLOW_QUALIFIERS = ("settings.local.json", "per-repo allow")
+
+
+def bare_allow_widenings(cl):
+    """The clauses that call a plain allow-list or allow entry widening: no settings.local.json or per-repo allow
+    qualifier, and no negation. A clause that says the global entry is not widening never counts."""
+    return [c for c in cl if any(a in c for a in ALLOW_WORDS) and "widen" in c
+            and not any(q in c for q in ALLOW_QUALIFIERS) and not any(n in c for n in NEG_WORDS)]
+
+
+def case_widening_template_keeps_a_repo_exception_widening():
+    # The clause "an option that only names a repo ... is not widening" must not swallow a per-repo exception. The clause
+    # after it says an option that adds an exception for a repo is widening. A scratch mutant that deletes that clause
+    # must fail this check.
+    rule = widening_rule()
+    check("per-repo exception scope: call_judge.WIDENING_RULE is defined as non-blank text", bool(rule),
+          "WIDENING_RULE is not defined in call_judge.py")
+    if not rule:
+        return
+    cl = clauses(rule)
+    check("per-repo exception clause: WIDENING_RULE has a clause that makes an option adding an exception for a repo widening",
+          has_pin(cl, ("adds an exception for a repo",)) and not has_pin(cl, ("adds an exception for a repo",), NEG_WORDS),
+          "no clause of WIDENING_RULE makes an option that adds an exception for a repo widening")
+
+
+def case_widening_rule_names_no_bare_allow_entry():
+    # A plain allow-list or allow entry is not named as widening: the widening entry is one in settings.local.json or a
+    # per-repo allow entry, so the sentence does not contradict the global carve-out.
+    rule = widening_rule()
+    check("bare allow entry scope: call_judge.WIDENING_RULE is defined as non-blank text", bool(rule),
+          "WIDENING_RULE is not defined in call_judge.py")
+    if not rule:
+        return
+    bare = bare_allow_widenings(clauses(rule))
+    check("bare allow entry: no clause of WIDENING_RULE calls a plain allow-list or allow entry widening",
+          not bare, "a clause calls a plain allow entry widening: %r" % (bare[:1],))
+
+
+def case_carve_out_says_it_names_no_repo():
+    # An entry that names no repo is the global one. An entry that names one repo's path stays a per-repo exception.
+    carve = qf_text("WIDENING_CARVE_OUT")
+    ok = "names no repo" in norm(carve).lower()
+    check("names no repo: question_form.WIDENING_CARVE_OUT says the global entry names no repo", ok,
+          "WIDENING_CARVE_OUT does not say the global entry names no repo")
+    if ok:
+        check("names no repo: WIDENING_RULE carries the phrase", "names no repo" in norm(widening_rule()).lower(),
+              "WIDENING_RULE does not carry the phrase")
 
 
 def case_fail_open():
@@ -1835,6 +1886,8 @@ def main():
                  case_widening_fair_option_passes_code_path, case_widening_rule_names_the_mark,
                  case_widening_carve_out_has_one_home, case_widening_rule_still_names_the_widening_forms,
                  case_skill_widens_paragraph_names_the_carve_out,
+                 case_widening_template_keeps_a_repo_exception_widening, case_widening_rule_names_no_bare_allow_entry,
+                 case_carve_out_says_it_names_no_repo,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
