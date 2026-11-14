@@ -766,7 +766,7 @@ class Flips(unittest.TestCase):
 
     def red(self, *case, path="cfg.txt"):
         got = self.resolve(*case, path=path)
-        self.assertTrue(any(path in p for p in got), (case, path, got))
+        self.assertTrue(any(path in p for p in got), "the merge that changed %s was not flagged: case %r, verdict %r" % (path, case, got))
 
     def in_place(self, main_line, branch_line, path="cfg.txt"):
         """PR 1 merges main with `path` holding main_line. PR 2, cut after it, rewrites that line in place to branch_line. -> the verdict."""
