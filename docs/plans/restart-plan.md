@@ -352,7 +352,7 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   change, the role's model otherwise). Fixes are verified per G5. Correction, owner 16:07 CST Nov 10
   (relayed; step rounds-rules-one-record): round 3 follows owner pick 471 a
   (2026-11-09 23:39 CST, step review-state-guard-needs-round-3) as it stands. A guard or check change
-  that passes round 1 is done; only one fixed under a fix verifier waits for round 3. The net-value test is
+  that passes round 1 is done, and a fix verifier PASS ends review too (owner, 2026-11-13 18:35 CST). The net-value test is
   only for an unclear case that cannot finish by the end of the rounds (the 2026-10-15 "still
   unfinished" valve in hold-unsafe-after-round-3). Evidence: round 3 found a failure 0 of 14+ times
   after a clean round 2; the net-value hold caught 6 real holes. Deferred: Sonnet round 1 for every
