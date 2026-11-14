@@ -17,8 +17,8 @@ HungRead runs a real child process that outlives the bound, as a git or gh call 
 Groups: the bound constants exist (red until merge.py names them), each check's bound applies (red), the start lines and
 the whole run (red), and controls: a check under its bound keeps its own verdict (green on the old code, which pins what
 the bound must keep).
-The run bound: READY_CI_RUN_SECONDS is past the ready checks times READY_CI_STEP_SECONDS (red), and one more ready check moves
-the bound it is given by READY_CI_STEP_SECONDS (red). The clash read's pools do not hold the process at exit (red, one case per
+The run bound: ready_ci_run_seconds of the ready checks is past the checks times READY_CI_STEP_SECONDS (red), and one more ready
+check moves the bound of its job's ci-job call by READY_CI_STEP_SECONDS (red). The clash read's pools do not hold the process at exit (red, one case per
 pool, in a child process). A debt lint that does not load reads unknown, naming the lint (red); `import merge` still works
 without it (control).
 Temp files: each case's folders come from this run's folder (lint/_test_temp.py), removed at exit.
@@ -99,10 +99,10 @@ def slow(seconds, value):
 
 def ci_job_passes(checks, calls=None):
     """Stands in for merge.ci_job_run: each check in `checks` passes, and the lines are the ones pre_ready_rows reads. calls, when
-    given, receives each call's keyword arguments, such as the bound the run was given."""
+    given, receives each call's job and keyword arguments, such as the bound the run was given."""
     def run(wt, *args, raw=None, **kwargs):
         if calls is not None:
-            calls.append(kwargs)
+            calls.append({"job": args[0], **kwargs})
         if raw is not None:
             raw.extend(f"PASS {name}: ok" for name in checks)
         return "pass", [], [], False
@@ -147,18 +147,22 @@ class BoundsExist(unittest.TestCase):
         cap = merge.load_debt_retire().TIMEOUT
         self.assertGreaterEqual(value, cap, f"READY_DEBT_SECONDS ({value} s) is below the debt lint's own cap ({cap} s)")
 
+    def run_bound(self):
+        """ready_ci_run_seconds of merge.readyChecks, the one home of the whole run's bound. getattr: a missing name reads as this assert."""
+        fn = getattr(merge, "ready_ci_run_seconds", None)
+        self.assertIsNotNone(fn, "merge.py names no ready_ci_run_seconds, so the whole pre-ready run has no backstop")
+        return fn(READY_CHECKS)
+
     def test_the_run_bound_exceeds_the_ready_checks_times_the_step_bound(self):
-        value = getattr(merge, "READY_CI_RUN_SECONDS", None)
-        self.assertIsNotNone(value, "merge.py names no READY_CI_RUN_SECONDS, so the whole pre-ready run has no backstop")
+        value = self.run_bound()
         floor = len(READY_CHECKS) * merge.READY_CI_STEP_SECONDS
-        self.assertGreater(value, floor, f"READY_CI_RUN_SECONDS ({value} s) does not exceed {len(READY_CHECKS)} ready checks x "
+        self.assertGreater(value, floor, f"ready_ci_run_seconds of the ready checks ({value} s) does not exceed {len(READY_CHECKS)} ready checks x "
                                          f"{merge.READY_CI_STEP_SECONDS} s = {floor} s, so the backstop can end the run while a step still has its bound")
 
     def test_the_run_bound_is_the_ready_checks_times_the_step_bound_plus_300_seconds(self):
-        value = getattr(merge, "READY_CI_RUN_SECONDS", None)
-        self.assertIsNotNone(value, "merge.py names no READY_CI_RUN_SECONDS, so the whole pre-ready run has no backstop")
+        value = self.run_bound()
         want = len(READY_CHECKS) * merge.READY_CI_STEP_SECONDS + 300
-        self.assertEqual(value, want, f"READY_CI_RUN_SECONDS is {value} s, not {len(READY_CHECKS)} ready checks x "
+        self.assertEqual(value, want, f"ready_ci_run_seconds of the ready checks is {value} s, not {len(READY_CHECKS)} ready checks x "
                                       f"{merge.READY_CI_STEP_SECONDS} s + 300 s = {want} s")
 
 
@@ -351,20 +355,26 @@ class RunBoundFollowsTheChecks(unittest.TestCase):
         self.root = tempfile.mkdtemp(dir=RUN_FOLDER)
 
     def bounds_for(self, checks):
+        """-> [(job, bound)] of the ci-job calls the pre-ready run makes for `checks`, in call order."""
         calls = []
         with unittest.mock.patch.object(merge, "ci_job_run", ci_job_passes(checks, calls)), \
                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             merge.pre_ready_rows(self.root, 7, "main", checks, None)
-        return [call.get("bound") for call in calls]
+        return [(call["job"], call.get("bound")) for call in calls]
 
     def test_one_more_ready_check_moves_the_run_bound_by_the_step_bound(self):
-        before = self.bounds_for(READY_CHECKS)
-        after = self.bounds_for([*READY_CHECKS, "One more check"])
-        self.assertEqual((len(before), len(after)), (1, 1), "the pre-ready run did not make one ci-job call per list")
-        self.assertIsNotNone(before[0], "the run given the real list has no bound")
-        self.assertEqual(after[0] - before[0], merge.READY_CI_STEP_SECONDS,
-                         f"one more ready check moved the run bound by {after[0] - before[0]} s, not by READY_CI_STEP_SECONDS "
-                         f"({merge.READY_CI_STEP_SECONDS} s)")
+        extra = "One more check"
+        extended = [*READY_CHECKS, extra]
+        job = next(j for j, group in merge.ready_job_groups(extended).items() if any(entry == extra for entry, _ in group))
+        before, after = self.bounds_for(READY_CHECKS), self.bounds_for(extended)
+        self.assertEqual([j for j, _ in before], list(merge.ready_job_groups(READY_CHECKS)),
+                         "the pre-ready run did not make one ci-job call per job of the ready checks")
+        before_bound, after_bound = dict(before)[job], dict(after)[job]
+        self.assertIsNotNone(before_bound, f"the ci-job call of job {job} has no bound")
+        self.assertIsNotNone(after_bound, f"the ci-job call of job {job} has no bound with one more ready check")
+        self.assertEqual(after_bound - before_bound, merge.READY_CI_STEP_SECONDS,
+                         f"one more ready check moved the bound of job {job}'s ci-job call by {after_bound - before_bound} s, not by "
+                         f"READY_CI_STEP_SECONDS ({merge.READY_CI_STEP_SECONDS} s)")
 
 
 # A child process for ProcessExit: it runs merge's clash_verdict with READY_CLASH_SECONDS small, and one leaf of cross_measure's

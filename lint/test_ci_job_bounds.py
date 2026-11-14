@@ -17,7 +17,7 @@ Ends of a run: a step's child outlives neither ci-job's SIGTERM nor its SIGINT (
 unfinished step's row its bound (BackstopOfTheRun). CI_JOB_STEP_SECONDS past threading.TIMEOUT_MAX is one unknown line, exit 2
 (StepBoundLimit).
 """
-import contextlib, io, os, shutil, signal, subprocess, sys, threading, time, unittest, unittest.mock
+import contextlib, io, os, re, shutil, signal, subprocess, sys, threading, time, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -223,7 +223,7 @@ class BackstopOfTheRun(tcj.Job):
         self.addCleanup(lambda: end_tree(recorded_pid(os.path.join(self.root, "child.pid"))))
         state, lines, _, _ = self.run_backstop([tcj.step("bad", "exit 1"), tree_step("slow")], ("--step", "bad", "--step", "slow"))
         self.assertEqual(state, "unknown", "the backstop did not end the run as unknown")
-        self.assertTrue(any(line.startswith("FAIL bad") for line in lines),
+        self.assertTrue(any(re.match(r"FAIL\s+bad\b", line) for line in lines),
                         f"the FAIL line of the step that finished was lost when the backstop ended the run: {lines}")
 
     def test_the_row_of_a_step_the_backstop_ended_reads_its_bound(self):
@@ -232,7 +232,7 @@ class BackstopOfTheRun(tcj.Job):
         os.makedirs(workflows)
         with open(os.path.join(workflows, "checks.yml"), "w", encoding="utf-8", newline="\n") as f:
             f.write(tcj.workflow(tcj.step("bad", "exit 1"), tree_step("slow"), job="checks"))
-        with unittest.mock.patch.object(merge, "READY_CI_RUN_SECONDS", BACKSTOP), \
+        with unittest.mock.patch.object(merge, "ready_ci_run_seconds", lambda checks: BACKSTOP), \
                 unittest.mock.patch.dict(os.environ, {"VERDICT_LOG": os.path.join(self.root, "verdict.log"), "TMPDIR": self.root}), \
                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             rows, _ = merge.pre_ready_rows(self.root, 7, "main", ["bad", "slow"], None)
