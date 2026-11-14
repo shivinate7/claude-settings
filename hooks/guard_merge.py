@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 from guard_core import (
     SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    dir_before_segment, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    dir_before_segment, heredoc_heads, inline_script, inner_commands, own_heredoc_bodies, resolve_command, resolve_default_base, segment_tokens, split_segments,
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
@@ -720,8 +720,8 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 # and the test lines it stages are read the way the marker read reads its tree (`_commit_test_adds`: one
 # `git diff --numstat`, and one `git ls-files --others` for each add that names paths). Only a commit with a
 # push after it costs that read. A message the guard cannot read (`-F`, `-C`, `-c`, an editor) makes the whole
-# push a no-hit. A failed read, a copy of the hooks with no lint folder beside it, and a default base that
-# cannot be read are no hit.
+# push a no-hit, except an `-m "$(cat <<'EOF' ...)"` message, which is read from its heredoc body. A failed
+# read, a copy of the hooks with no lint folder beside it, and a default base that cannot be read are no hit.
 CONFLICT_MARKERS_REASON = (
     "Rule (Git, conflict-markers; decision commit-refuses-conflict-markers): this commit would hold conflict markers in {file}. "
     "Remedy: resolve the markers in that file, re-stage it, then retry."
@@ -737,9 +737,22 @@ CONFLICT_MARKERS_CHAIN_REASON = (
 )
 RED_RUN_PUSH_REASON = (
     "Rule (Git, red-run; decision red-run-trailer-on-test-commits): this push would send test commits with no "
-    "valid Red-run line: {flagged}. Remedy: {fix}"
+    "valid Red-run trailer: {flagged}. Remedy: {fix}"
 )
-RED_RUN_BELOW_FIX = "A commit named below the last one needs its message reworded in a rebase, then a push."
+# A flagged commit below the tip: a trailer-only commit named `amend! <sha>` carries the new message, and the
+# autosquash rebase folds it into that commit. No editor opens (`fixup -C`), so a session can drive it. The
+# sha is the one the refusal lists for the flagged commit.
+RED_RUN_BELOW_FIX = (
+    "Reword each flagged commit by its sha, listed above: `git commit --allow-empty -m \"amend! <sha>\" "
+    "-m \"<subject>\" -m \"Red-run: ...\"`, then `GIT_SEQUENCE_EDITOR=true GIT_EDITOR=false git rebase -i "
+    "--autosquash <sha>^`, then `git push`."
+)
+# A branch rewritten since it was pushed: the remote holds an earlier form of the flagged commits, so a reword
+# changes pushed history, which no session does.
+RED_RUN_PUSHED_FIX = (
+    "These commits were pushed before, and the branch has been rewritten since, so a reword would rewrite "
+    "pushed history. This needs the owner: ask the owner to reword them."
+)
 RED_RUN_SHOWN = 3   # flagged commits a red-run refusal lists, the rest counted
 OCTOPUS_PUSH_REASON = (
     "Rule (Git, octopus-push; decision octopus-push-refused): this push would send {sha}, a merge commit of more than two parents. "
@@ -918,27 +931,39 @@ def _red_run_found(where, source, base, memo, is_test_rel, virtual):
 
 
 def red_run_reason(matched):
-    """`(reason, shown)` for a red-run hit `(found, last)`: the refusal text, and the first flagged commit for the
-    log. The remedy is the first two lines of check_red_run's own (`REMEDY`); the third names a branch switch, which a
-    refusal never names. A commit below the last one adds a line on rebasing."""
-    found, last = matched
+    """`(reason, shown)` for a red-run hit `(found, last, rewritten)`: the refusal text, and the first flagged commit
+    for the log. The remedy is the first two lines of check_red_run's own (`REMEDY`); the third names a branch
+    switch, which a refusal never names. A commit below the last one prints the trailer line of `REMEDY` and
+    RED_RUN_BELOW_FIX in place of the amend, which reaches only the last commit. A rewritten branch (`rewritten`)
+    prints RED_RUN_PUSHED_FIX alone: no command rewrites pushed history."""
+    found, last, rewritten = matched
     check_red_run = _red_run_module()
     rows = ["%s %s: adds lines to %s" % row for row in found[:RED_RUN_SHOWN]]
     more = " and %d more" % (len(found) - RED_RUN_SHOWN) if len(found) > RED_RUN_SHOWN else ""
-    fix = " ".join(line.removeprefix("check_red_run: ")[:1].upper() + line.removeprefix("check_red_run: ")[1:]
-                   for line in check_red_run.REMEDY[:2])
-    if any(row[0] not in (last, "new") for row in found):
-        fix += " " + RED_RUN_BELOW_FIX
+    lines = [line.removeprefix("check_red_run: ")[:1].upper() + line.removeprefix("check_red_run: ")[1:]
+             for line in check_red_run.REMEDY[:2]]
+    below = any(row[0] not in (last, "new") for row in found)
+    fix = RED_RUN_PUSHED_FIX if rewritten else " ".join(lines[:1] + [RED_RUN_BELOW_FIX] if below else lines)
     return RED_RUN_PUSH_REASON.format(flagged=cap_safe("; ".join(rows), 600) + more, fix=fix), cap_safe(rows[0], 120)
+
+
+def _rewritten(where, tracking, base, source):
+    """True when the range base is the destination's remote-tracking ref and `source` no longer holds it: the branch
+    was rewritten after it was pushed, so its flagged commits are copies of pushed ones. A failed read is False."""
+    if not tracking or base != tracking:
+        return False
+    done = _git(where, "merge-base", "--is-ancestor", base, source)
+    return done is not None and done.returncode == 1
 
 
 def _push_hit(segment, stripped, cwd, args, is_test_rel=None, virtual=None):
     """Return `("push", file)` for the first file a `git push` would send with all three conflict markers,
-    else `("red-run", (found, last))` for the first ref that sends a test commit with no valid Red-run line
+    else `("red-run", (found, last, rewritten))` for the first ref that sends a test commit with no valid Red-run trailer
     (`_red_run_found`), else `("", "")`. For each ref the push names, the range is the merge base with the
     destination's remote-tracking tip, else the source's upstream, else the default base, up to the local
     source ref: in the usual case one `git diff --check`, with no read of the top folder, the source or a base
-    first. The red-run check then adds one `git log` over the same base."""
+    first. The red-run check then adds one `git log` over the same base, and on a hit one `git merge-base
+    --is-ancestor`: a destination tracking ref the source no longer holds is a branch rewritten since its push."""
     virtual = virtual or {"tip": None, "pending": [], "unreadable": False}
     for where, source, _dest, tracking, _remote, memo in _push_refs(segment, stripped, cwd, args):
         done, source, base = _checked_range(where, source, tracking, memo)
@@ -949,7 +974,7 @@ def _push_hit(segment, stripped, cwd, args, is_test_rel=None, virtual=None):
             return "push", name
         found, last = _red_run_found(where, source, base, memo, is_test_rel, virtual)
         if found:
-            return "red-run", (found, last)
+            return "red-run", (found, last, _rewritten(where, tracking, base, source))
     return "", ""
 
 
@@ -1107,14 +1132,18 @@ def _commit_paragraphs(args):
     return paragraphs
 
 
-def _note_commit(virtual, args, paths):
+def _note_commit(virtual, args, paths, bodies=()):
     """Records a `git commit` of this call in `virtual`, for the red-run read of a push after it: a new commit adds
     a (message, test paths) to `pending`, and an `--amend` rewrites the newest pending commit, else the tip, where
-    a message of its own replaces the old one. A message the guard cannot read makes the push a no-hit."""
+    a message of its own replaces the old one. A message the guard cannot read makes the push a no-hit.
+    `bodies` are the heredoc bodies of the commit's own segment: an `-m` that holds a `$(cat <<'EOF' ...)` takes
+    its message from them, so they join the paragraphs. The guard's strip leaves them out of the segment text."""
     paragraphs = _commit_paragraphs(args)
     if paragraphs is None:
         virtual["unreadable"] = True
         return
+    if bodies and any("<<" in paragraph for paragraph in paragraphs):
+        paragraphs = paragraphs + list(bodies)
     message = "\n\n".join(paragraphs) if paragraphs else None
     if "--amend" not in args:
         virtual["pending"].append((message, paths))
@@ -1170,12 +1199,13 @@ def _repo_of(repos, where):
     return repos[where]
 
 
-def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None):
+def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
     """Return `(kind, file)` for the first commit or push that would carry all three conflict markers
     in one file, else `('', '')`. The kind is `commit`, `push`, or `chain` (a push after a commit the
     guard could not judge; the file is then `git push`). A push that carries no marker but sends a test
-    commit with no valid Red-run line returns `('red-run', (found, last))` (`_red_run_found`); a caller that
-    passes no `is_test_rel` reads no red-run hit. Each segment is judged from its own command word."""
+    commit with no valid Red-run trailer returns `('red-run', (found, last, rewritten))` (`_red_run_found`); a caller that
+    passes no `is_test_rel` reads no red-run hit. Each segment is judged from its own command word. `raw` is the
+    command before the heredoc strip: a commit's `-m "$(cat <<'EOF' ...)"` message is read from it."""
     pending = []                        # earlier adds no commit has taken: (where, None) stages whole, (where, specs) names paths
     repos = {}                          # where -> (top, has_head), one `git rev-parse` each until the next commit
     readable = True                     # every segment so far is one that cannot change the tree
@@ -1186,10 +1216,12 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None):
     # A commit with no push after it lands before any push reads a range, so it needs no red-run read.
     last_push = max((number for number, call in enumerate(calls) if call is not None and call[0] == "push"), default=-1)
     virtual = {"tip": None, "pending": [], "unreadable": False}   # commits of this call that have not landed, for the red-run read
+    heads_before = 0                    # heredoc headers in the segments ahead, which picks a segment's own bodies in `raw`
     for number, segment in enumerate(segments):
         if not segment.strip():
             continue
         call = calls[number]
+        before, heads_before = heads_before, heads_before + len(heredoc_heads(segment)[0])
         if call is not None and call[0] == "push":
             if blind_commit and (blind_triplet or conflict_step):
                 return "chain", "git push"
@@ -1237,7 +1269,8 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None):
         if not has_head:   # no HEAD: `git diff` would read an empty tree
             continue
         if call[0] == "commit" and number < last_push and is_test_rel is not None and _red_run_present():
-            _note_commit(virtual, call[1], _commit_test_adds(where, top, all_flag, specs, wholes, adds, is_test_rel))
+            bodies = own_heredoc_bodies(segment, raw, before) if raw and "<<" in segment else ()
+            _note_commit(virtual, call[1], _commit_test_adds(where, top, all_flag, specs, wholes, adds, is_test_rel), bodies)
         if specs:
             found = _marker_findings(where, top, ["HEAD", "--", *specs], None)
         else:

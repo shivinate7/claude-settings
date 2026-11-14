@@ -48,7 +48,7 @@ MAX_PATHS = 5
 REMEDY = (
     "check_red_run: add `Red-run: <command> -> <N> failed on <sha>` (N 1 or more), or "
     "`Red-run: none: <reason>` for a change that adds no new claim, to the commit message.",
-    "check_red_run: the last commit, not yet pushed: reword it with "
+    "check_red_run: the last commit: reword it with "
     "`git commit --amend -m <subject> -m \"Red-run: ...\"`, then `git push`.",
     "check_red_run: a flagged commit that is not last, or is already pushed: "
     "`git switch -c <new branch> <sha>^`, `git cherry-pick <sha>`, "
@@ -70,7 +70,7 @@ def git(root, *args):
 
 
 def has_trailer(message):
-    """True when a line of the message is a valid Red-run line: a red run of 1 or more failures, or none with a reason."""
+    """True when a line of the message is a valid Red-run trailer: a red run of 1 or more failures, or none with a reason."""
     for line in message.splitlines():
         red = RED.match(line)
         if (red and int(red.group(1)) >= 1) or NONE.match(line.rstrip()):

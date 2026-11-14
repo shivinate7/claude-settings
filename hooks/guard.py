@@ -241,7 +241,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (commit-refuses-conflict-markers)
   red-run              deny. A `git push` whose range (the one conflict-markers reads, less the commits the
                        default base holds) has a non-merge commit that adds lines to a test path and has no
-                       valid `Red-run:` line, judged by `judge` in lint/check_red_run.py, the one home. A
+                       valid `Red-run:` trailer, judged by `judge` in lint/check_red_run.py, the one home. A
                        commit in the same call before the push counts, read from its `-m` text (an `--amend`
                        with none keeps the commit's own); a message the guard cannot read, a failed read and a
                        default base it cannot read are no hit. The refusal names only commit and push. Cost:
@@ -555,7 +555,7 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
+            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, own_heredoc_bodies, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
@@ -1803,27 +1803,6 @@ def heredoc_offsets(segments, ends, bodies_kept=True):
             queue += [d for d in found if not any(line.strip() == d for line in segment.split("\n")[1:])]
             reading = bodies_kept and bool(queue) and end == "\n"
     return offsets
-
-
-def own_heredoc_bodies(segment: str, raw: str, before: int):
-    """Return the bodies of the heredocs whose headers sit inside this segment, in order. A heredoc
-    of another command (`cat <<A && git commit -F - <<B`) is not the message.
-
-    `before` is the count of headers in the segments ahead of this one. Raw is walked as the
-    shell reads it (_split_heredocs): each header outside quotes and comments takes the next body
-    in turn, and a body line is never read for headers. This segment takes the bodies `before`
-    onward, one per header it holds, so two commits with the same text each take their own body.
-    Raw is walked twice, bash's reading and the contraction reading, as split_segments does, and
-    the bodies of both are judged: a lone `'` can hide a header from one reading, never both.
-    """
-    count = len(heredoc_heads(segment)[0])
-    if not count:
-        return []
-    texts = []
-    for contractions_are_text in (False, True):   # bash's reading, then the contraction reading
-        found = [body for _, body, _ in _split_heredocs(raw, contractions_are_text)[1]]
-        texts.extend(found[before:before + count])
-    return list(dict.fromkeys(texts))   # the readings often agree: judge each body once
 
 
 def message_texts(segment: str, raw: str, where: str, before: int, titles: bool = False):
@@ -4844,10 +4823,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 6c2. A commit or push that would carry all three conflict markers in one file (rule conflict-markers).
     # Cost: per judged commit, one `git rev-parse --show-toplevel --verify -q HEAD` (one more for an add in
     # another folder) and one `git diff --check`; none for an add alone, or a command with no commit or push.
-    # A push of a test commit with no Red-run line is refused here too (rule red-run): it shares the push's
+    # A push of a test commit with no Red-run trailer is refused here too (rule red-run): it shares the push's
     # range, and adds one `git log` per push. A commit in the same call, before the push, is read from its
     # `-m` text; guard_merge states the cost.
-    kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel)
+    kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel, raw)
     if kind == "red-run":
         red_reason, red_shown = red_run_reason(matched)
         refuse(tool, "deny", "red-run", red_reason, red_shown)
