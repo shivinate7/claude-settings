@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Cases for the GitHub quota back-off (step gh-quota-budget). A read whose reply says the REST quota is low waits for the reset, and
 a CI wait that polls stops polling while the quota is low. The CI watch cases are in hooks/test_ci_wake.py, the one home of that loop.
+The confirm cases (ConfirmFlow) run merge.main through GhHalf's gh shim in test_merge.py, the one home of that flow.
 
 Run: python3 merge/test_merge_quota.py
 
@@ -40,6 +41,17 @@ def low_until_reset(now):
 def full(now):
     """A full quota (Remaining equal to Limit) in a fresh window that resets an hour on."""
     return {"X_RateLimit_Limit": LIMIT, "X_RateLimit_Remaining": LIMIT, "X_RateLimit_Reset": str(int(RESET + 3600))}
+
+
+def low_reply(out, reset):
+    """A `gh api -i` reply made low: Remaining 0 of LIMIT, the reset at `reset`. The reply's other headers and its body stay as the shim sent them."""
+    m = re.match(r"HTTP/\S+ (\d{3})", out)
+    if not m:  # a transport error has no header block, so no quota to make low
+        return out
+    headers, body = tm.merge.split_headers(out)
+    headers = {k: v for k, v in headers.items() if not k.startswith("x-ratelimit-")}
+    headers.update({"x-ratelimit-limit": LIMIT, "x-ratelimit-remaining": "0", "x-ratelimit-reset": str(int(reset))})
+    return tm.gh_i(int(m.group(1)), body, **headers)
 
 
 def check_row(status, conclusion):
@@ -265,6 +277,154 @@ class QuotaMerge(unittest.TestCase):
         self.assertEqual(oid, MERGE_OID, f"the merge did not land: {why}")  # scope
         self.assertEqual([e for e in g.events if e[0] == "pause"], [], "a merge with the quota full paused")
         self.assertEqual([t for t, argv in g.calls if "PUT" in argv], [NOW], "the PUT was not sent at once")
+
+    def test_a_low_put_reply_holds_the_read_after_it(self):  # control: the PUT's own low reply arms the call after it, so the hold-off clears after the PUT
+        g = QuotaGh(self, quota=low_until_reset, quota_on=r"/merge$")
+        host = g.host()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            oid, why = host.merge(7, "squash", HEAD)
+        self.assertEqual(oid, MERGE_OID, f"the merge did not land: {why}")  # scope
+        puts = [i for i, (_, argv) in enumerate(g.calls) if "PUT" in argv]
+        self.assertEqual(len(puts), 1, f"{len(puts)} PUTs, want the one merge call")  # scope
+        self.assertLess(g.calls[puts[0]][0], RESET, "scope: the PUT came after the reset, so its low reply armed no hold")
+        after = g.calls[puts[0] + 1][0]
+        self.assertGreaterEqual(after, RESET, f"the read after the low PUT reply came at {after:.0f} s, before the quota reset at {RESET:.0f} s")
+
+    def test_a_merge_that_stops_on_its_pr_read_clears_the_hold_off_for_the_calls_after_it(self):  # control: a Stop or NetStop in the stretch clears the hold-off
+        for stop in (tm.merge.Stop("the pull request read stopped"), tm.merge.NetStop("the pull request read stopped")):
+            with self.subTest(stop=type(stop).__name__):
+                g = QuotaGh(self, quota=low_until_reset)
+                host = g.host()
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), \
+                        unittest.mock.patch.object(host, "pr", side_effect=stop):
+                    with self.assertRaises(type(stop)):
+                        host.merge(7, "squash", HEAD)
+                    host.api("pulls/7")  # its low reply arms the call after it
+                    host.api("pulls/7")
+                self.assertEqual(len(g.calls), 2, f"{len(g.calls)} gh calls after the stop, want the two reads")  # scope
+                second = g.calls[1][0]
+                self.assertGreaterEqual(second, RESET, f"the read after a low reply came at {second:.0f} s, before the quota reset at {RESET:.0f} s: the hold-off outlived the stop")
+
+
+class ConfirmFlow(tm.Env):
+    """The confirm flow itself: merge.main on a real checkout with a real Host, through the gh shim of GhHalf (the fixture's home). A wrapper
+    adds the events that the order is read from to calls.log, in the order they happen: a gh call's line (the shim's), LOW after a reply made
+    low, BRAKE begin and BRAKE end around the batch brake, and PAUSE n for a pause of n seconds. Only the replies `low_rule` picks change."""
+
+    def setUp(self):
+        super().setUp()
+        tm.gh_case_setup(self)
+        self.in_brake, self.low_sent, self.brake_no = False, [], 0
+        self.fail_brake, self.fail_text = None, None  # a case makes every api read of brake number fail_brake fail with fail_text
+        self.low_rule = lambda argv: False  # a case says which api call's reply is low
+        real_sh, real_brake = tm.merge.sh, tm.merge.batch_refusal
+
+        def sh(args, *a, **kw):
+            code, out = real_sh(args, *a, **kw)
+            argv = args[1:] if args[:1] == ["gh"] else args
+            if self.in_brake and self.brake_no == self.fail_brake and argv[:1] == ["api"]:
+                return 1, self.fail_text
+            if argv[:1] == ["api"] and "-i" in argv and self.low_rule(argv):
+                self.low_sent.append(argv)
+                self.mark("LOW")
+                out = low_reply(out, self.now + 600)  # the reset is 600 s on: the hold waits 600 s
+            return code, out
+
+        def brake(host, n, base, head):
+            self.brake_no += 1
+            self.mark("BRAKE begin")
+            self.in_brake = True
+            try:
+                return real_brake(host, n, base, head)
+            finally:
+                self.in_brake = False
+                self.mark("BRAKE end")
+
+        for name, fake in (("sh", sh), ("batch_refusal", brake)):
+            patch = unittest.mock.patch.object(tm.merge, name, fake)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def mark(self, text):
+        with open(os.path.join(self.state, "calls.log"), "a", encoding="utf-8") as f:
+            f.write(text + "\n")
+
+    def events(self):
+        with open(os.path.join(self.state, "calls.log"), encoding="utf-8") as f:
+            return f.read().splitlines()
+
+    def confirm(self):
+        """-> (rc, output) of `merge 7 --confirm` on the fixture's Host, whose pauses go into the event order."""
+        host = tm.GhHalf.gh_host(self, pause=lambda: self.mark("PAUSE %d" % self.paused[-1]))
+        return self.run_merge("7", "--confirm", host=host)
+
+    def test_a_low_reply_on_the_batch_brake_read_arms_no_hold_before_the_put(self):
+        self.low_rule = lambda argv: self.in_brake and argv[:1] == ["api"]  # every read of the batch brake replies low
+        rc, out = self.confirm()
+        self.assertEqual(rc, 0, out)  # scope: the merge went through
+        ev = self.events()
+        put = next(i for i, line in enumerate(ev) if line.startswith("PUT pulls/7/merge"))  # scope
+        begin = max(i for i in range(put) if ev[i] == "BRAKE begin")  # the batch brake read right before the PUT
+        reads = [i for i in range(begin, put) if ev[i] == "GET pulls/7"]
+        self.assertTrue(reads, f"scope: no pull request read between the batch brake and the PUT: {ev[begin:put + 1]}")
+        pr = reads[0]
+        self.assertIn("LOW", ev[begin:pr], f"scope: the batch brake's read did not reply low: {ev[begin:pr + 1]}")
+        held = [line for line in ev[begin:pr] if line.startswith("PAUSE")]
+        self.assertEqual(held, [], f"a hold was served between the batch brake read and the pull request read, so the PUT went out after a pause: {ev[begin:put + 1]}")
+
+    def test_a_hold_armed_by_a_checks_read_is_served_before_the_batch_brake_read(self):  # control: a low checks read holds the call after it, before the brake
+        self.low_rule = lambda argv: argv[1].endswith("/check-runs") and not self.low_sent  # the first checks read replies low
+        rc, out = self.confirm()
+        self.assertEqual(rc, 0, out)  # scope
+        ev = self.events()
+        checks = next(i for i, line in enumerate(ev) if re.match(r"GET commits/[0-9a-f]+/check-runs", line))  # scope
+        self.assertEqual(ev[checks + 1], "LOW", f"scope: the first checks read did not reply low: {ev[checks:checks + 3]}")
+        self.assertTrue(ev[checks + 2].startswith("PAUSE"), f"the call after the low checks read was {ev[checks + 2]!r}, not the hold")
+        put = next(i for i, line in enumerate(ev) if line.startswith("PUT pulls/7/merge"))
+        begin = max(i for i in range(put) if ev[i] == "BRAKE begin")
+        self.assertGreater(begin, checks + 2, "the batch brake read came before the hold that the checks read armed was served")
+
+    def test_a_low_put_reply_holds_the_read_after_the_put_in_the_confirm_flow(self):  # control: after the brake and the merge's own read, the PUT's low reply still holds the read after it
+        self.low_rule = lambda argv: "PUT" in argv  # the merge call's reply is low
+        rc, out = self.confirm()
+        self.assertEqual(rc, 0, out)  # scope: the merge went through
+        ev = self.events()
+        put = next(i for i, line in enumerate(ev) if line.startswith("PUT pulls/7/merge"))
+        self.assertEqual(ev[put + 1], "LOW", f"scope: the PUT's reply did not reply low: {ev[put:put + 3]}")
+        self.assertTrue(ev[put + 2].startswith("PAUSE"), f"the call after the low PUT reply was {ev[put + 2]!r}, not the hold")
+        self.assertEqual(ev[put + 3], "GET pulls/7 after-merge", f"the read after the hold was {ev[put + 3]!r}")
+
+    def stop_in_the_second_brake(self, text):
+        """Every api read of the second brake fails with `text`, so the run stops inside the brake. -> the Host the run used."""
+        self.fail_brake, self.fail_text = 2, text
+        host = tm.GhHalf.gh_host(self, pause=lambda: self.mark("PAUSE %d" % self.paused[-1]))
+        rc, out = self.run_merge("7", "--confirm", host=host)
+        ev = self.events()
+        self.assertEqual(ev.count("BRAKE begin"), 2, "scope: the run did not reach the second brake")
+        self.assertNotEqual(rc, 0, out)  # scope: the run stopped
+        self.assertNotIn("PUT pulls/7/merge", " ".join(ev), "scope: a merge call went out")
+        return host
+
+    def hold_after_the_stop(self, host):
+        """Every reply is low from here on. Two reads of the pull request, made by the same Host after the stop: the second waits."""
+        self.low_rule = lambda argv: argv[:1] == ["api"]
+        start = len(self.events())
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            host.api("pulls/7")
+            host.api("pulls/7")
+        tail = self.events()[start:]
+        reads = [i for i, line in enumerate(tail) if line == "GET pulls/7"]
+        self.assertEqual(len(reads), 2, f"scope: {len(reads)} reads after the stop, want two: {tail}")
+        between = tail[reads[0]:reads[1]]
+        self.assertIn("LOW", between, f"scope: the first read after the stop did not reply low: {between}")
+        self.assertTrue(any(line.startswith("PAUSE") for line in between),
+                        f"the second read after the stop went out at once, so the hold-off outlived the stop: {tail}")
+
+    def test_a_plain_403_stop_in_the_second_brake_clears_the_hold_off_for_the_calls_after_it(self):  # control
+        self.hold_after_the_stop(self.stop_in_the_second_brake(tm.PLAIN_403))
+
+    def test_a_network_error_stop_in_the_second_brake_clears_the_hold_off_for_the_calls_after_it(self):  # control
+        self.hold_after_the_stop(self.stop_in_the_second_brake(tm.NET_TLS))
 
 
 class QuotaInsideDeadline(unittest.TestCase):
