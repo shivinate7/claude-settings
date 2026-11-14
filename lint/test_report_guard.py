@@ -5482,6 +5482,10 @@ class PendingRefusalTests(unittest.TestCase):
 MG_RULE = "building-mistake-names-its-guard"
 MG_DONE = "> **Done** OTHER read the audit"
 MG_INBOX = "I broke my feedback inbox: a sed -i deleted its closing fence, not its last item."
+# The incident's Deviations text. It admits a mistake by the builders, not by "I", so only its guard line is read.
+MG_INCIDENT = ("The builders who merged main did not run the dropped-lines check, so lane-lint failed twice. "
+               "Each time a builder added an empty commit with a `Drops-lines` trailer that marks the dropped "
+               "lines as intended.")
 
 
 def mg_report(deviations, done=MG_DONE, nxt="> **Next** none"):
@@ -5704,6 +5708,251 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
     def test_mg_red_forgot_the_check_before_when_clause_blocks(self):
         self.assert_blocked(mg_report("I forgot the check when the lane was open."))
+
+    # A guard line labels its guard (Guard: or guard —). Between the label and the end of its line it must name a PR
+    # or commit ref, step:<slug> or a debt. The check reads it with or without an admission, in any section.
+    # Red: a guard line with no ref, or a debt that a negator clears, blocks.
+    def test_mg_red_guard_line_incident_habit_blocks(self):
+        self.assert_blocked(mg_report(
+            MG_INCIDENT + " Guard: future merge briefs run `lint/check_silent_undo.py` before the push. "
+            "This is only a brief habit for now, with no step queued yet."))
+
+    def test_mg_red_guard_line_remember_blocks(self):
+        self.assert_blocked(mg_report("Guard: I will remember to run the check before the push."))
+
+    def test_mg_red_guard_line_in_next_blocks(self):
+        self.assert_blocked(mg_report("none", nxt="> **Next** guard: briefs now say to run the check"))
+
+    def test_mg_red_guard_line_negated_debt_blocks(self):
+        self.assert_blocked(mg_report(MG_INBOX + " Guard: briefs will run the check; a debt is not needed."))
+
+    def test_mg_red_guard_line_no_debt_filed_blocks(self):
+        self.assert_blocked(mg_report(MG_INBOX + " No debt was filed."))
+
+    def test_mg_red_guard_line_ref_on_another_line_blocks(self):
+        # The step ref sits on a bullet below the label, so it is not between the label and the end of its line.
+        self.assert_blocked("%s\n> **Deviations** Guard: see the note.\n> - step:x\n> **Next** none" % MG_DONE)
+
+    def test_mg_red_guard_line_lone_quote_blocks(self):
+        # An opening quote with no close opens no quoted span, so the guard line after it is still read.
+        self.assert_blocked(mg_report("Owner said 'no. Guard: see the note."))
+
+    # Green: a guard line that names its ref or debt passes. So does a guard word that is not a label, and a guard
+    # line that is only quoted or fenced.
+    def test_mg_green_guard_line_incident_fixed_form_passes(self):
+        self.assert_allowed(mg_report(MG_INCIDENT + " Guard: step:merge-main-silent-undo-precheck."))
+
+    def test_mg_green_guard_line_pr_ref_passes(self):
+        self.assert_allowed(mg_report("Guard — the push guard refuses it (#2077)."))
+
+    def test_mg_green_guard_line_commit_ref_passes(self):
+        self.assert_allowed(mg_report("Guard: commit 3c2d1d97f"))
+
+    def test_mg_green_guard_line_debt_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX + " Guard: a debt records it."))
+
+    def test_mg_green_guard_line_done_filename_passes(self):
+        self.assert_allowed(mg_report("none", done="> **Done** BUILT guard_merge.py refuses the push (#123)"))
+
+    def test_mg_green_guard_line_backticked_passes(self):
+        self.assert_allowed(mg_report("The brief quoted `Guard: run it later` from the lane."))
+
+    # A guard label is guard or guards, then : — – - or --, and it opens a sentence: a line start after a bullet,
+    # blockquote mark or bold section label, or after . ; ! ?. The colon form also counts after a dash, a comma, "and"
+    # or "(", and "Missing guard:" is a label. The dash form (guard — or guard -) opens a sentence only. A guard
+    # line's ref is read from its label to the line end, backticks kept: #N and PR N need 2+ digits, and a bare sha
+    # needs 7-40 hex with a digit and a letter a-f. The refusal names the section and never quotes the line.
+    # Green: a guard word that is not a label, and a label with a ref, pass.
+    def test_mg_green_guard_label_done_pr_then_mid_sentence_guard_passes(self):
+        self.assert_allowed(mg_report("none", done="> **Done** BUILT #2046 — the push guard - refuses a dirty push"))
+
+    def test_mg_green_guard_label_next_mid_sentence_guard_passes(self):
+        self.assert_allowed(mg_report("none", nxt="> **Next** the report guard — it refuses the reply"))
+
+    # A guard label after a dash counts in colon form, so the incident sentence "... broke X — Guard: ..." is read.
+    def test_mg_red_guard_label_done_guard_after_dash_blocks(self):
+        self.assert_blocked(mg_report(
+            "none", done="> **Done** BUILT the lint fix — guard: future briefs run it first"))
+
+    def test_mg_green_guard_label_backticked_pr_ref_passes(self):
+        self.assert_allowed(mg_report("Guard: built as `#2077`."))
+
+    def test_mg_green_guard_label_backticked_sha_ref_passes(self):
+        self.assert_allowed(mg_report("Guard: built in `3c2d1d97f`."))
+
+    # Red: a label with no ref that counts (2+ digits for #N and PR N, a sha with a letter), or a plural or -- label.
+    def test_mg_red_guard_label_one_digit_issue_ref_blocks(self):
+        self.assert_blocked(mg_report("Guard: future briefs run the check before push (see list item #1)."))
+
+    def test_mg_red_guard_label_one_digit_pr_ref_blocks(self):
+        self.assert_blocked(mg_report("Guard: future briefs run the check, PR 3 of the plan."))
+
+    def test_mg_red_guard_label_double_dash_blocks(self):
+        self.assert_blocked(mg_report("Guard -- future briefs run the check before push."))
+
+    def test_mg_red_guard_label_plural_blocks(self):
+        self.assert_blocked(mg_report("Guards: future briefs run the check."))
+
+    def test_mg_red_guard_label_digits_are_not_a_sha_blocks(self):
+        self.assert_blocked(mg_report("Guard: future briefs run the check on 100000 lines."))
+
+    # Remedy: the refusal never quotes the guard line's text, and it names the section. One cause per test.
+    def test_mg_red_guard_label_refusal_does_not_quote_line_blocks(self):
+        out = self.verdict(mg_report("Guard: run the check before the push."))
+        self.assertIsNotNone(out, "no block: a guard line with no ref passed")
+        self.assertEqual(out.get("decision"), "block", out)
+        self.assertIn(MG_RULE, out.get("reason", ""), "the block does not name the rule: %s" % out)
+        self.assertNotIn("run the check", out.get("reason", "").lower(), "the refusal quotes the guard line: %s" % out)
+
+    def test_mg_red_guard_label_refusal_names_section_blocks(self):
+        out = self.verdict(mg_report("Guard: run the check before the push."))
+        self.assertIsNotNone(out, "no block: a guard line with no ref passed")
+        self.assertIn("Deviations", out.get("reason", ""), "the refusal does not name the section: %s" % out)
+
+    # A guard label may sit inside **...**, *...* or _..._, with the colon inside or outside.
+    # Red: a label in any of those forms, with no ref, blocks.
+    def test_mg_red_guard_r3_bold_label_colon_inside_blocks(self):
+        self.assert_blocked(mg_report("**Guard:** future briefs run the check."))
+
+    def test_mg_red_guard_r3_bold_bullet_label_colon_outside_blocks(self):
+        self.assert_blocked("%s\n> **Deviations**\n> - **Guard**: future briefs run the check.\n> **Next** none" % MG_DONE)
+
+    def test_mg_red_guard_r3_italic_label_blocks(self):
+        self.assert_blocked(mg_report("*Guard:* future briefs run the check."))
+
+    def test_mg_red_guard_r3_underscore_label_blocks(self):
+        self.assert_blocked(mg_report("_Guard:_ future briefs run the check."))
+
+    # Emphasis may wrap "Missing guard", so a bold,
+    # italic or underscore "Missing guard:" label counts too. Each red has no ref after its label; each green has one.
+    def test_mg_red_bold_missing_guard_colon_inside_blocks(self):
+        self.assert_blocked(mg_report("**Missing guard:** none yet."))
+
+    def test_mg_red_bold_missing_guard_colon_outside_blocks(self):
+        self.assert_blocked(mg_report("**Missing guard**: none yet."))
+
+    def test_mg_red_italic_missing_guard_label_blocks(self):
+        self.assert_blocked(mg_report("*Missing guard:* none yet."))
+
+    def test_mg_red_underscore_missing_guard_label_blocks(self):
+        self.assert_blocked(mg_report("_Missing guard_: none yet."))
+
+    def test_mg_red_bold_bullet_missing_guard_label_blocks(self):
+        self.assert_blocked("%s\n> **Deviations**\n> - **Missing guard:** none yet.\n> **Next** none" % MG_DONE)
+
+    def test_mg_green_bold_missing_guard_colon_inside_with_step_passes(self):
+        self.assert_allowed(mg_report("**Missing guard:** step:lint-precheck."))
+
+    def test_mg_green_bold_missing_guard_colon_outside_with_pr_passes(self):
+        self.assert_allowed(mg_report("**Missing guard**: built in PR #2881."))
+
+    def test_mg_green_italic_missing_guard_label_with_step_passes(self):
+        self.assert_allowed(mg_report("*Missing guard:* step:lint-precheck."))
+
+    def test_mg_green_underscore_missing_guard_label_with_pr_passes(self):
+        self.assert_allowed(mg_report("_Missing guard_: built in PR #2881."))
+
+    def test_mg_green_bold_bullet_missing_guard_label_with_step_passes(self):
+        self.assert_allowed(
+            "%s\n> **Deviations**\n> - **Missing guard:** step:lint-precheck.\n> **Next** none" % MG_DONE)
+
+    # Green: a debt word that a negator does not reach (3 words before, 2 after) still counts. A PR #N or a /pull/N
+    # ref counts with any digits. Each case follows the admission, so only its debt or ref clears it.
+    def test_mg_green_guard_r3_debt_negator_five_after_records_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX + " Debt check-gap records it and nothing else changed."))
+
+    def test_mg_green_guard_r3_debt_negator_three_after_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX + " Debt check-gap filed (not urgent)."))
+
+    def test_mg_green_guard_r3_debt_negator_five_after_not_touched_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX + " Filed debt check-gap and I did not touch the code."))
+
+    def test_mg_green_guard_r3_debt_so_no_session_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX + " Debt check-gap is filed so no session has to remember."))
+
+    def test_mg_green_guard_r3_pr_number_ref_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX + " Guard: built in PR #7."))
+
+    def test_mg_green_guard_r3_pull_url_ref_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX + " Guard: built in https://github.com/o/r/pull/7."))
+
+    # A guard label also follows a dash, a comma, "and" or "(" in the colon form, and "Missing guard:" is a label.
+    # Each red has no ref after its label, and each green has one. Inputs have no apostrophe or first-person admission.
+    def test_mg_red_guard_label_after_dash_blocks(self):
+        self.assert_blocked(mg_report(
+            "The builders broke the lint check — Guard: future briefs run the check first."))
+
+    def test_mg_red_guard_label_after_comma_blocks(self):
+        self.assert_blocked(mg_report("The builders broke the lint check, Guard: future briefs run the check first."))
+
+    def test_mg_red_guard_label_after_and_blocks(self):
+        self.assert_blocked(mg_report(
+            "The builders broke the lint check and Guard: future briefs run the check first."))
+
+    def test_mg_red_missing_guard_label_blocks(self):
+        self.assert_blocked(mg_report("Missing guard: future briefs run the check first."))
+
+    def test_mg_red_bracketed_guard_label_blocks(self):
+        self.assert_blocked(mg_report("The builders skipped the check (Guard: future briefs run it first)."))
+
+    def test_mg_green_guard_label_after_dash_with_pr_passes(self):
+        self.assert_allowed(mg_report("The builders broke the lint check — Guard: PR #2881 runs it first."))
+
+    def test_mg_green_guard_label_after_comma_with_step_passes(self):
+        self.assert_allowed(mg_report("The builders broke the lint check, Guard: step:lint-precheck."))
+
+    def test_mg_green_guard_label_after_and_with_debt_passes(self):
+        self.assert_allowed(mg_report("The builders broke the lint check and Guard: a debt records it."))
+
+    def test_mg_green_missing_guard_label_with_pr_passes(self):
+        self.assert_allowed(mg_report("Missing guard: built in PR #2881."))
+
+    def test_mg_green_bracketed_guard_label_with_step_passes(self):
+        self.assert_allowed(mg_report("The builders skipped the check (Guard: step:lint-precheck)."))
+
+    # False-alarm pins: a guard word that is no label. Each line has no ref after its guard word, so a label read
+    # there would refuse it. The dash form opens a sentence only, so it stays unlabelled after a comma.
+    def test_mg_green_push_guard_hyphen_prose_passes(self):
+        self.assert_allowed(mg_report("The push guard - refuses it when the tree is dirty."))
+
+    def test_mg_green_push_guard_em_dash_prose_passes(self):
+        self.assert_allowed(mg_report("The push guard — refused my push when the tree was dirty."))
+
+    def test_mg_green_guard_merge_file_after_dash_passes(self):
+        self.assert_allowed(mg_report("The builders broke the lint check — guard_merge.py refuses the push."))
+
+    def test_mg_green_guard_merge_file_after_comma_passes(self):
+        self.assert_allowed(mg_report("The builders broke the lint check, guard_merge.py refuses the push."))
+
+    def test_mg_green_dash_form_guard_after_comma_passes(self):
+        self.assert_allowed(mg_report("Fixed the hook, guard — it refuses the push."))
+
+    def test_mg_green_backticked_guard_label_after_dash_passes(self):
+        self.assert_allowed(mg_report("The builders broke the lint check — `Guard: future briefs run it`."))
+
+    # A spaced hyphen is a dash for a label after it, in the colon form.
+    def test_mg_red_guard_label_after_hyphen_blocks(self):
+        self.assert_blocked(mg_report("The builders broke the check - Guard: future briefs run it first."))
+
+    def test_mg_green_guard_label_after_hyphen_with_step_passes(self):
+        self.assert_allowed(mg_report("The builders broke the check - Guard: step:lint-precheck."))
+
+    # An en dash or a double hyphen before the label counts the same way: the colon form after a mid-sentence break.
+    def test_mg_red_guard_label_after_en_dash_blocks(self):
+        self.assert_blocked(mg_report("The builder broke the check – Guard: run it first."))
+
+    def test_mg_red_guard_label_after_double_dash_blocks(self):
+        self.assert_blocked(mg_report("The builder broke the check -- Guard: run it first."))
+
+    def test_mg_green_guard_label_after_en_dash_with_step_passes(self):
+        self.assert_allowed(mg_report("The builder broke the check – Guard: step:lint-precheck."))
+
+    def test_mg_green_guard_label_after_double_dash_with_step_passes(self):
+        self.assert_allowed(mg_report("The builder broke the check -- Guard: step:lint-precheck."))
+
+    # A ref after a mid-line label counts, with a ref before the label on the same line.
+    def test_mg_green_guard_label_after_comma_ref_before_and_after_passes(self):
+        self.assert_allowed(mg_report("none", done="> **Done** BUILT #1183, guard: step:x-y"))
 
 
 if __name__ == "__main__":

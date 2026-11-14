@@ -1117,7 +1117,11 @@ def departs_problem(text):
 # admits only when a first-person word comes before its fault word, so "The test was wrong so I re-pointed it"
 # passes. A negator clears it only when at most MISTAKE_NEGATOR_GAP words sit between it and the fault word,
 # so a negator that governs an earlier verb ("I did not run the check and broke it") does not.
-# `step:<slug>` is checked for form only.
+# `step:<slug>` is checked for form only. A guard line ("Guard: ..." or "guard — ...", in any section) must hold a
+# ref, a step or a debt between its label and the end of its line, whether or not an admission was found. A negator
+# clears the word debt only within DEBT_NEGATOR_BEFORE words before it or DEBT_NEGATOR_AFTER words after it, in its
+# clause or, for a label such as "Debt: not needed", in the clause after the label: "a debt is not needed" and
+# "Debt: not needed" name none, and "Debt check-gap filed (not urgent)" names one.
 MISTAKE_FIRST_PERSON_RE = re.compile(r"\bI\b|\b[Mm]y\b")
 # "broke the batch into three lanes" splits a thing and admits nothing: "into" is followed by a count or a
 # parts noun. "broke the build into a red state" still admits. The words between may hold no "by", "when"
@@ -1131,6 +1135,9 @@ MISTAKE_FAULT_RE = re.compile(
     r"instead of checking)\b", re.I)
 MISTAKE_NEGATOR_RE = re.compile(r"\bnot\b|n't\b|\bnever\b|\bno\b|\bnothing\b", re.I)
 MISTAKE_NEGATOR_GAP = 3
+DEBT_NEGATOR_BEFORE = 3
+DEBT_NEGATOR_AFTER = 2
+DEBT_LABEL_BREAK_RE = re.compile(r"\s*(?::|[\u2014\u2013]|-{1,2}\s)")
 MISTAKE_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|\n")
 MISTAKE_CLAUSE_SPLIT_RE = re.compile(
     r"[,:;\u2014\u2013]|\s-{1,2}\s|\b(?:because|since|but|while|although)\b", re.I)
@@ -1138,9 +1145,33 @@ MISTAKE_URL_RE = re.compile(r"https?://\S+")
 MISTAKE_STEP_RE = re.compile(r"\bstep:[a-z0-9][a-z0-9-]*")
 MISTAKE_DEBT_RE = re.compile(r"\bdebts?\b", re.I)
 MISTAKE_GUARD_WORD_RE = re.compile(r"\b(?:guard|check|hook)s?\b", re.I)
+# A guard label opens a sentence: a line start after a bullet, a bold section label (the blockquote mark is already
+# stripped), or a space after . ; ! ?. It is guard or guards, then a colon, a dash, or a spaced - or --. Markdown
+# emphasis (**, * or _) may wrap the word, with the colon inside or outside it: **Guard:**, **Guard**:, *Guard:*.
+# The emphasis mark must touch the word, so a "* " bullet is no emphasis. "Missing guard:" is a label too, because a
+# report that admits a gap writes it so; emphasis may wrap the whole phrase, as in **Missing guard:**, so the mark
+# may come before "missing" as well as before "guard". The colon form also counts mid-sentence, after a dash, a spaced hyphen, a
+# comma, the word "and" or "(", because a writer tucks the label in after the admission it answers. The dash form
+# opens a sentence only, so `guard_merge.py`, `push-guard`, "the push guard - refuses" and "the push guard --
+# refused it" are no label: prose with a guard word in it must not block.
+_EMPHASIS = r"(?:\*\*|\*|_)"
+_GUARD_WORD = _EMPHASIS + r"?(?:missing\s+)?" + _EMPHASIS + r"?guards?" + _EMPHASIS + r"?"
+MISTAKE_GUARD_LABEL_RE = re.compile(
+    r"(?:^\s*(?:(?:[-*+]|\d+[.)])\s+)?(?:\*\*[^*\n]+\*\*:?\s*)?|(?<=[.;!?])\s+)"
+    + _GUARD_WORD + r"(?:\s*:|\s*[\u2014\u2013]|\s+--?\s)" + _EMPHASIS + r"?"
+    r"|(?:[\u2014\u2013,(]|\s-{1,2}\s|\band\b)\s*" + _GUARD_WORD + r"\s*:" + _EMPHASIS + r"?", re.I)
+# A guard line's ref is stricter than DONE_REF_RE. "PR #N" and a /pull/N URL name a PR with any digits. A bare #N and
+# "PR N" need 2+ digits, so a list item "#1" is no PR. A bare sha needs 7-40 hex digits with a digit and a letter
+# a-f, so a plain number is no sha.
+GUARD_REF_RE = re.compile(
+    r"(?:\bPRs?\s*#\d+|/pull/\d+|#\d{2,}|\bPRs?\s*\d{2,}|/commit/[0-9a-f]{7,40}"
+    r"|\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b)")
 MISTAKE_REASON = owner_line(
     "Mistake guard (rule building-mistake-names-its-guard)",
     "Deviations admits a mistake, %s, and names no guard or check that would have stopped it")
+GUARD_LINE_REASON = owner_line(
+    "Mistake guard (rule building-mistake-names-its-guard)",
+    "a guard line in %s names no PR, commit, step or debt; a habit or brief line is no guard")
 
 
 def _admitted_clause(deviations):
@@ -1161,18 +1192,54 @@ def _sentences(text):
     return [BULLET_RE.sub("", s.strip()) for s in MISTAKE_SENTENCE_SPLIT_RE.split(text)]
 
 
+def _debt_named(text):
+    """True when `text` holds the word debt that no negator near it clears. Words split on whitespace only, so a
+    contraction such as isn't stays one word. Each window stops at a clause break, so "No guard yet, debt filed"
+    names a debt. A label break right after the word ("Debt: not needed") is skipped, so its value is read."""
+    for sentence in _sentences(text):
+        breaks = [(m.start(), m.end()) for m in MISTAKE_CLAUSE_SPLIT_RE.finditer(sentence)]
+        for debt in MISTAKE_DEBT_RE.finditer(sentence):
+            start = max([end for _, end in breaks if end <= debt.start()], default=0)
+            label = DEBT_LABEL_BREAK_RE.match(sentence, debt.end())
+            after = label.end() if label else debt.end()
+            stop = min([begin for begin, _ in breaks if begin >= after], default=len(sentence))
+            near = sentence[start:debt.start()].split()[-DEBT_NEGATOR_BEFORE:] + \
+                sentence[after:stop].split()[:DEBT_NEGATOR_AFTER]
+            if not MISTAKE_NEGATOR_RE.search(" ".join(near)):
+                return True
+    return False
+
+
+def _bare_guard_line(report):
+    """The section name of the first guard line of the report block that holds no ref, step or debt, else ''.
+    Labels are found with quoted text, fences and URLs blanked to spaces of the same length. The ref is read from
+    the label to the line end in the original text, so a backticked ref counts."""
+    def blank(m):
+        return re.sub(r"[^\n]", " ", m.group())
+    plain = QUOTED_RE.sub(blank, MISTAKE_URL_RE.sub(blank, FENCE_RE.sub(blank, report)))
+    section = ""
+    for raw, line in zip(report.splitlines(), plain.splitlines()):
+        head = LABEL_RE.match(raw)
+        if head and head.group(1).strip().rstrip(":").strip() in LABEL_ORDER:
+            section = head.group(1).strip().rstrip(":").strip()
+        for label in MISTAKE_GUARD_LABEL_RE.finditer(line):
+            tail = raw[label.end():]
+            if not (GUARD_REF_RE.search(tail) or MISTAKE_STEP_RE.search(tail) or _debt_named(tail)):
+                return section or "the report"
+    return ""
+
+
 def mistake_problem(text):
     """The refusal text when Deviations admits a mistake and names no guard (rule
     `building-mistake-names-its-guard`), else ''."""
     deviations = report_section(text, "Deviations")
     clause = _admitted_clause(deviations)
-    if not clause:
-        return ""
     # A guard word and its ref must share a sentence, so a stray ref elsewhere does not clear the admission.
-    if (MISTAKE_STEP_RE.search(deviations) or MISTAKE_DEBT_RE.search(deviations)
-            or any(MISTAKE_GUARD_WORD_RE.search(s) and DONE_REF_RE.search(s) for s in _sentences(deviations))):
-        return ""
-    return MISTAKE_REASON % repr(clause[:80])
+    if clause and not (MISTAKE_STEP_RE.search(deviations) or _debt_named(deviations)
+                       or any(MISTAKE_GUARD_WORD_RE.search(s) and DONE_REF_RE.search(s) for s in _sentences(deviations))):
+        return MISTAKE_REASON % repr(clause[:80])
+    bare = _bare_guard_line(block_text(text, keep_indent=True))
+    return GUARD_LINE_REASON % bare if bare else ""
 
 
 def _own_lane_read(path, own_id):
