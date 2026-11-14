@@ -1965,6 +1965,69 @@ def case_roadmap_broken_pipe_other_stderr_stays_unreadable():
           len(roadmap) == 1 and "unreadable" in roadmap[0] and "absent" not in roadmap[0], str(unknown)[:300])
 
 
+# ------------------------------------------------------------------ a failed fetch's note: once, and never as unsearched
+
+FETCH_NOTE = "read as of"  # the freshness note of a failed fetch of origin/roadmap (lint/roadmap_ref.py)
+STEP_OK_ID = "apps-step-keep"
+STEP_OK_SENTENCE = ("Ruling (owner, 2026-11-12): keep the GitHub apps' access to claude-settings as it is. "
+                    "Marker apps-step-5d1c.")
+
+
+def failed_fetch_repo(name, steps=None):
+    """A repo whose origin/roadmap holds the ruled store of RULED_ID and, with `steps` ({id: note}), those step notes.
+    Its origin is a local path with no repo behind it, so the freshness fetch fails. Its FETCH_HEAD is absent."""
+    tree = fixture.ruling_files({RULED_ID: fixture.entry(RULED_ID, at=RULED_AT, ruling=RULED_TEXT,
+                                                       supersedes=RULED_SUPERSEDES)})
+    for step_id, note in (steps or {}).items():
+        tree["roadmap/data/steps/%s.json" % step_id] = json.dumps({"note": note, "why": ""})
+    repo = tcj.make_repo(name, decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    tcj.git(repo, "remote", "add", "origin", os.path.join(RUN_FOLDER, name + "-gone.git"))
+    fixture.point_ref(repo, fixture.STORE_REF, tree, tcj.ROOT)
+    fixture.without_fetch_head(repo)
+    return repo
+
+
+def case_failed_fetch_note_reaches_the_verdict_once_with_steps_absent():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("failed fetch absent steps: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = failed_fetch_repo("past-fetch-absent")
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        result = fn(tcj.APPS_GOAL, repo)
+    check("failed fetch absent steps: scope, the ruled entry is a candidate", RULED_ID in ruled_ids(result[0]),
+          str(result)[:300])
+    count = str(result).count(FETCH_NOTE)
+    check("failed fetch absent steps: the read as of note reaches the verdict once, though the steps are absent",
+          count == 1, "the note appears %d times in %s" % (count, str(result)[:300]))
+
+
+def case_failed_fetch_note_once_and_no_searched_source_unknown():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("failed fetch steps ok: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = failed_fetch_repo("past-fetch-steps", steps={STEP_OK_ID: STEP_OK_SENTENCE})
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        result = fn(tcj.APPS_GOAL, repo)
+    check("failed fetch steps ok: scope, the step ruling is a candidate",
+          any(c.startswith(STEP_OK_ID + ": ") for c in result[0]), str(result)[:300])
+    count = str(result).count(FETCH_NOTE)
+    check("failed fetch steps ok: the read as of note reaches the verdict once", count == 1,
+          "the note appears %d times in %s" % (count, str(result)[:300]))
+    unknown = question_form.unknown_line(result[1])
+    check("failed fetch steps ok: no unknown source carries the note, since the steps were searched",
+          FETCH_NOTE not in unknown, unknown[:300])
+    # Control: a fetch record that names the ref's tip and is fresh says nothing, so the note above is the failed fetch's.
+    fixture.set_fetch_head(repo)
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        fresh = fn(tcj.APPS_GOAL, repo)
+    check("failed fetch steps ok: control, a fresh roadmap fetch adds no note", FETCH_NOTE not in str(fresh),
+          str(fresh)[:300])
+
+
 # ------------------------------------------------------------------ item 51's field: a picture's focus at the top level
 
 def case_item_51_stray_field():
@@ -2723,6 +2786,8 @@ def main():
                  case_ruled_store_marks_an_unread_entry_unchecked,
                  case_ruled_store_ranks_by_shared_words_before_recency,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
+                 case_failed_fetch_note_reaches_the_verdict_once_with_steps_absent,
+                 case_failed_fetch_note_once_and_no_searched_source_unknown,
                  case_task_why_cited_reds, case_task_why_cited_greens,
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
                  case_task_str_replace_removes_only_the_label, case_str_replace_blank_prose_line_passes,

@@ -139,7 +139,7 @@ class RulingsReadTests(unittest.TestCase):
         helper = fresh_helper(mock.Mock())
         with mock.patch("guard_pointer.pointer_checkout", return_value=second), \
                 mock.patch.dict(sys.modules, {"roadmap_ref": helper}):
-            candidates, _unknown = question_form.past_rulings("Should we keep the store to one place?", first)
+            candidates = question_form.past_rulings("Should we keep the store to one place?", first)[0]
         checked = [os.path.realpath(call.args[0]) for call in helper.fresh_ref.call_args_list]
         self.assertIn(os.path.realpath(first), checked, "control: the first root's roadmap ref was not checked: %r"
                       % (checked,))
@@ -243,13 +243,18 @@ class SecondRootNoteTests(unittest.TestCase):
                                            fixture.ruling_files({RULING: fixture.entry(RULING)}))
         fixture.without_fetch_head(second)
         with mock.patch("guard_pointer.pointer_checkout", return_value=second):
-            candidates, unknown = question_form.past_rulings("Should we keep the store to one place?", first)
-        verdict = "\n".join(candidates + unknown)
+            result = question_form.past_rulings("Should we keep the store to one place?", first)
+        candidates, verdict = result[0], str(result)
         self.assertTrue(any(c.startswith("ruled:%s:" % RULING) for c in candidates),
                         "control: the second root's ruling is not a candidate, so its store was not read: %r"
                         % (candidates,))
         self.assertIn("read as of", verdict, "a failed fetch of the second root's ruled store is not named in the "
                                              "verdict: %r" % (verdict,))
+        self.assertEqual(verdict.count("read as of"), 1, "the failed fetch's note reached the verdict %d times, want 1: %r"
+                         % (verdict.count("read as of"), verdict))
+        unknown = question_form.unknown_line(result[1])
+        self.assertNotIn("read as of", unknown, "the second root's ruled store was searched, so no unknown source may "
+                         "carry its note: %r" % (unknown,))
 
 
 def tearDownModule():
