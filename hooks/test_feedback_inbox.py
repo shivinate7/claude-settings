@@ -4367,7 +4367,7 @@ def claude_settings_no_record_repo():
         git(root, "remote", "add", "origin", CLAUDE_SETTINGS_ORIGIN)
         origin = os.path.join(ROOT, "origin-claude-settings-no-record.git")
         git(ROOT, "init", "-q", "--bare", origin)
-        git(root, "config", "url.%s.insteadOf" % origin, CLAUDE_SETTINGS_ORIGIN)
+        git(root, "config", "url.%s.insteadOf" % origin.replace(os.sep, "/"), CLAUDE_SETTINGS_ORIGIN)
         lane_file(root, "roadmap/data/steps/%s.json" % PLAIN_STEP)
         return root
     return shared_repo("claude-settings-no-record", build)
