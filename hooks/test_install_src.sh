@@ -118,11 +118,13 @@ tar -czf "$work/repo.tar.gz" -C "$work/tarsrc" claude-settings-main
 
 # Make a bare-bones fake checkout of the repo at $1, with CLAUDE.md/settings.json content
 # of our choosing. $3, if given, is the origin URL (default: the legitimate https form);
-# pass an adversarial or alternate-form origin to drive the origin-matching cases.
+# pass an adversarial or alternate-form origin to drive the origin-matching cases. $4, if given, is a settings.json to
+# copy in; the default is an empty object.
 make_checkout() {
   dir="$1"
   md_body="$2"
   origin="${3:-https://github.com/shivinate7/claude-settings.git}"
+  settings_src="${4:-}"
   mkdir -p "$dir"
   cp "$REPO_ROOT/landed-dirs.txt" "$dir/landed-dirs.txt"
   for sub in $(landed_dirs); do mkdir -p "$dir/$sub"; done
@@ -130,7 +132,7 @@ make_checkout() {
   ( cd "$dir" && git init -q -b master && git config user.email t@example.com && git config user.name t \
       && git remote add origin "$origin" )
   printf '%s\n' "$md_body" > "$dir/CLAUDE.md"
-  printf '{}\n' > "$dir/settings.json"
+  if [ -n "$settings_src" ]; then cp "$settings_src" "$dir/settings.json"; else printf '{}\n' > "$dir/settings.json"; fi
   ( cd "$dir" && git add -A && git commit -q -m init )
 }
 
@@ -691,6 +693,28 @@ case10() {
 run_local_install() {
   # $1 = checkout dir, $2 = HOME, $3 = CLAUDE_CONFIG_DIR
   ( cd "$1" && env -i PATH="$PATH" HOME="$2" CLAUDE_CONFIG_DIR="$3" bash ./install.sh 2>&1 )
+}
+
+# ---- defaultmode1: a local install carries permissions.defaultMode into the user's settings -------------------
+# A local session runs the cloud's permission mode, so the mode in the repo's settings.json must reach
+# ~/.claude/settings.json. A local install links that file to the checkout's (the symlink leg, Linux and macOS).
+# The no-symlink copy leg is Windows only and is not run here: it is unknown on this host.
+defaultmode1() {
+  name="defaultmode1: a local install carries permissions.defaultMode into the user's settings"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/defaultmode1-checkout"
+  make_checkout "$co" "# repo CLAUDE.md defaultmode1" "" "$REPO_ROOT/settings.json"
+  cp "$INSTALL_SH" "$co/install.sh"
+  out=$(run_local_install "$co" "$h" "$cfg")
+  rc=$?
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ ! -e "$cfg/settings.json" ]; then
+    bad "$name" "the install wrote no $cfg/settings.json"
+  else
+    mode=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("permissions", {}).get("defaultMode"))' "$cfg/settings.json" 2>/dev/null)
+    if [ "$mode" = "auto" ]; then ok "$name"; else bad "$name" "the user's settings.json has permissions.defaultMode [$mode], want auto"; fi
+  fi
+  rm -rf "$h"
 }
 
 prune_case1() {
@@ -5936,6 +5960,7 @@ run case5
 run case6
 run case9
 run case10
+run defaultmode1
 run prune_case1
 run prune_case2
 run prune_case3
