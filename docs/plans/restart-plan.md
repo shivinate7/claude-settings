@@ -123,7 +123,7 @@ for the guard test file split.
   topic 1"; 14:37 CST: "yes it can be closed". Every split a rule chose is removed, so both places
   behave the same. A split the platform forces lives only inside the tool, never in a role's
   definition. Splits to remove in this lane: two tests for "cloud" in the code; guards that judge only
-  one of start_session and create_session; the merge role file on the cloud only. Also the load brake on
+  one of start_session and create_session (this split is now permanent: no PreToolUse hook sees start_session, whose model floor and handoff check run after the call in its PostToolUse audit; decision `start-session-not-pretooluse`); the merge role file on the cloud only. Also the load brake on
   the owner's computer only, and a lane the owner starts that cannot merge on the cloud yet
   (docs/todo.md, "Let a solo session merge", owner 2026-11-02 14:02 CST). Deferred to a later build phase (owner 14:37 CST,
   "can be targeted after/later"): the details of forced splits, mainly a team that mixes local and

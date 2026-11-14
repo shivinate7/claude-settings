@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""The PreToolUse matcher that routes to hooks/guard.py must cover every tool the guard judges.
-Run: python3 lint/test_settings_matcher.py. Without Workflow and start_session in the matcher,
+"""The PreToolUse matcher that routes to hooks/guard.py must cover every tool the guard judges, except start_session.
+start_session is checked after the call, by its PostToolUse audit (roadmap step start-session-not-pretooluse). A PreToolUse
+matcher that covers it makes the desktop app show the "Allow Claude to start the session?" card on every start, even in
+Bypass (anthropics/claude-code#103832). Run: python3 lint/test_settings_matcher.py. Without Workflow in the matcher,
 the guard's agent-model-floor never sees those calls.
 It also pins the page-tool names in settings.json's permissions.allow: cloud page writes must not ask,
 and ArtifactComments posts visible text, so it stays asking.
@@ -164,7 +166,9 @@ class JudgedToolMatcher(unittest.TestCase):
                                 % (os.path.basename(module.__file__), constant))
                 names += flatten(getattr(module, constant))
         names += list(GITHUB_WRITE_TOOLS) + sorted(judged_names_in_guard_files())
-        return sorted(set(names))
+        # start_session is judged after the call, by its PostToolUse audit, so no PreToolUse matcher may cover it
+        # (StartSessionNotPreToolUse). It is left out by value, since START_TOOLS names it as well as SESSION_TOOL.
+        return sorted(set(names) - {guard.SESSION_TOOL})
 
     def test_guard_matcher_covers_every_judged_tool(self):
         self.assertTrue(self.matchers, "no guard.py entry in settings.json PreToolUse")
@@ -226,9 +230,10 @@ class JudgedToolMatcher(unittest.TestCase):
 
 class Matcher(unittest.TestCase):
     def test_guard_matcher_covers_model_floor_tools(self):
+        # start_session is not listed: its model floor is checked after the call (StartSessionNotPreToolUse).
         matchers = guard_matchers()
         self.assertTrue(matchers)
-        for tool in ("Agent", "Task", "Workflow", "mcp__ccd_session__start_session"):
+        for tool in ("Agent", "Task", "Workflow"):
             with self.subTest(tool=tool):
                 self.assertTrue(any(re.fullmatch(m, tool) for m in matchers))
 
@@ -314,6 +319,48 @@ class Matcher(unittest.TestCase):
         self.assertFalse(covers(pulls[0], "compact"), "the cloud-pull SessionStart matcher %r covers compact" % matcher)
         self.assertTrue(covers(pulls[0], "startup"), "the cloud-pull SessionStart matcher %r does not cover startup" % matcher)
         self.assertTrue(covers(pulls[0], "resume"), "the cloud-pull SessionStart matcher %r does not cover resume" % matcher)
+
+
+def pre_tool_covers(matcher, tool):
+    """True when a PreToolUse matcher covers `tool` in any form the harness may read: an absent or empty matcher and
+    "*" cover every tool; any other matcher is a regex, which covers the tool when it matches the whole name (a pipe
+    list is one such regex) or matches anywhere in the name."""
+    if matcher in (None, "", "*"):
+        return True
+    return re.fullmatch(matcher, tool) is not None or re.search(matcher, tool) is not None
+
+
+START_SESSION = "mcp__ccd_session__start_session"
+
+
+class StartSessionNotPreToolUse(unittest.TestCase):
+    """No PreToolUse entry covers start_session, in any form. The desktop app counts any non-built-in PreToolUse hook
+    whose matcher covers the tool as an ask rule, so the "Allow Claude to start the session?" card shows on every
+    start, even in Bypass, and even when the hook answers allow (anthropics/claude-code#103832). The start checks run
+    at PostToolUse instead (the start-session audit section in tests/guard/)."""
+
+    def test_no_pretooluse_matcher_covers_start_session(self):
+        entries = pre_tool_entries()
+        self.assertTrue(entries, "no PreToolUse entries in settings.json: the scan reads nothing")
+        for index, entry in enumerate(entries):
+            matcher = entry.get("matcher")
+            with self.subTest(entry=index):
+                self.assertFalse(pre_tool_covers(matcher, START_SESSION),
+                                 "PreToolUse entry %d matcher %r covers %s" % (index, matcher, START_SESSION))
+
+    def test_matcher_forms_are_read_each_way(self):
+        # A control for the scan above: each form it reads covers or misses the tool as it should, so the scan is not vacuous.
+        cases = (
+            (None, True), ("", True), ("*", True),
+            ("Bash|mcp__ccd_session__start_session|Edit", True),
+            ("mcp__ccd_session__.*", True),
+            ("start_session", True),
+            ("Bash|Edit", False),
+            ("mcp__claude-code-remote__.*", False),
+        )
+        for matcher, want in cases:
+            with self.subTest(matcher=matcher):
+                self.assertEqual(pre_tool_covers(matcher, START_SESSION), want)
 
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
