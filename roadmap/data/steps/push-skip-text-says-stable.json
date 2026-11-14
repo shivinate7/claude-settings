@@ -1,0 +1,14 @@
+{
+ "id": "push-skip-text-says-stable",
+ "title": "The push-skip decision and script text say child repos follow @stable, not \"pin by SHA\"",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 03:32 CST Nov 14 (relayed from the degen #706 lane's hand-in; the lane says R44 and the stable test say @stable; triage read the two texts below on the stable checkout, not R44's @stable wording or the test): docs/decisions/push-skip-on-proven-tree.md line 7 says child repos \"pin it by SHA\"; actions/push-skip/push-skip.py line 4 says \"Child repos pin the action\" and line 20 says a repo \"that pins this action by SHA gets the reader its pin carries\".",
+ "source": "Rulings: r44 (owner 14:05 CST Nov 11: child repos follow claude-settings, with cited exceptions only) and the owner's 22:13 CST Nov 13 word (ruling own-degen-home-switch-now); the coordinator told degen #706's lane \"go stable\" on both (its own undoable pick, 03:22 CST). Neighbours: push-skip-proven-tree (doing; the decision and the action live there), stable-switch-map-check. Not folded into the #3279 docs follow-up: that follow-up is about windows-shards-outgrow-caps.md and is a different file.",
+ "note": "Triage 03:32 CST Nov 14: done check: the decision line and the two push-skip.py lines say child repos follow @stable (as ruled), with no \"by SHA\" claim left; the lane reads the stable test first and names it, so the new wording cites what the test pins. A docs and docstring edit; no check verdict changes. Path ALONE; small; tracker: the coordinator. No lane started. No owner question.",
+ "updatedAt": "2026-11-14T03:32:40-06:00"
+}
