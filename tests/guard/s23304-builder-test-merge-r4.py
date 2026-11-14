@@ -1,6 +1,6 @@
 # section 23304
 # A builder's merge that resolves a conflict in a test file, for two holes the reader still lets through (decision
-# builders-cannot-edit-tests; owner ruling, plan R31: a lost test is a silent accuracy hole).
+# builders-cannot-edit-tests: a lost test is a silent accuracy hole).
 #   1. A rename that conflicts. One parent renames the test file and the other edits it and adds a case. The conflict
 #      sits at the new path, which the other parent does not hold, so the reader never sees that parent's file. A
 #      result that keeps the renamed file whole drops the other parent's edit and case, so it is refused.

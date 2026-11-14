@@ -54,7 +54,7 @@ def _mt2_same(value):
     return "def test_same():\n    assert %d\n" % value
 
 
-def _mt2_deny(name, repo):
+def _mt2_refuse(name, repo):
     """Denied at commit, at push and at the first stop, by builder-diff. The control pins the verdict, not the words."""
     sh(name + ", at commit", COMMIT, "deny", rule=BDIFF, cwd=repo, agent_id="bld1", agent_type="builder")
     sh(name + ", at push", PUSH, "deny", rule=BDIFF, cwd=repo, agent_id="bld1", agent_type="builder")
@@ -125,7 +125,7 @@ _mt_allow("builder-refuse: a builder's open merge that keeps both sides' deps li
 # Control: the same union with an added line that disables tests is still denied (the old-content check stays).
 MT2_CFG_OFF_UNION = _mt2_union_case("mt2-cfg-union-off", MT2_CFG, MT2_CFG_BASE, "    pyyaml\n", "    attrs\n",
                                     tail=MT2_CFG_OFF)
-_mt2_deny("builder-refuse: control, a keep-both union in setup.cfg that adds a test-ignoring addopts line is denied",
+_mt2_refuse("builder-refuse: control, a keep-both union in setup.cfg that adds a test-ignoring addopts line is denied",
           MT2_CFG_OFF_UNION)
 
 # ---- 3. A same-named case that both parents changed differently: one parent's change is lost, so refused ----
