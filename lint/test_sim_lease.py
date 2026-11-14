@@ -18,11 +18,14 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SIM_LEASE = os.environ.get("SIM_LEASE") or os.path.join(HERE, "..", "bin", "sim-lease")
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+import agent_procs  # noqa: E402  the one home of the per-agent process record (hooks/agent_procs.py)
+SIM_LEASE =os.environ.get("SIM_LEASE") or os.path.join(HERE, "..", "bin", "sim-lease")
 REAL_PS = shutil.which("ps") or "/bin/ps"
 RUN_FOLDER = None
 SLOT_UDID = None  # read from the tool under test in setUpModule: the one home of the device IDs
@@ -137,8 +140,8 @@ class LeaseCase(unittest.TestCase):
         extra = ["--udid"] if udid else []
         return self.run_tool("take", "--device", device, "--pid", str(pid), "--wait", str(wait), *extra, env=env)
 
-    def give(self, pid):
-        return self.run_tool("give", "--pid", str(pid))
+    def give(self, pid, env=None):
+        return self.run_tool("give", "--pid", str(pid), env=env)
 
     def status(self):
         return self.run_tool("status")
@@ -499,6 +502,21 @@ class LeaseRecord(LeaseCase):
             leases = json.load(handle)["leases"]
         self.assertTrue(any(e.get("pid") == holder.pid for e in leases),
                         "the lease for pid %d is not in leases.json" % holder.pid)
+
+    def test_a_give_by_the_agent_ends_its_record_entry_so_the_released_lease_names_no_owner(self):
+        """A released lease names no owner. Before the give, AGENT's record names the holder to AGENT. The give, run as
+        AGENT, must end that entry, so a later read of the record names no owner for the pid. The read is the one the
+        guard uses (agent_procs.recorded_owners)."""
+        holder = self.spawn()
+        procs = self.take_for_agent(holder)
+        with mock.patch.dict(os.environ, {"CLAUDE_AGENT_PROCS_DIR": procs}):
+            self.assertEqual(agent_procs.recorded_owners(holder.pid), [self.AGENT],
+                             "scope: the agent's record does not name the lease holder, pid %d, to the agent" % holder.pid)
+        r = self.give(holder.pid, env={"CLAUDE_AGENT_ID": self.AGENT, "CLAUDE_AGENT_PROCS_DIR": procs})
+        self.assertEqual(r.returncode, 0, "scope: give exited %d: %s" % (r.returncode, r.stderr.strip()))
+        with mock.patch.dict(os.environ, {"CLAUDE_AGENT_PROCS_DIR": procs}):
+            self.assertEqual(agent_procs.recorded_owners(holder.pid), [],
+                             "the released lease of pid %d still names its owner %s" % (holder.pid, self.AGENT))
 
 
 if __name__ == "__main__":
