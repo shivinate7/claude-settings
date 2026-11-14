@@ -16,7 +16,7 @@ CHECKS_YML overrides the path (used for red runs on a scratch copy).
 CiCoverage also proves every tracked test file has a run step: test_*.py, test_*.sh, test_*.mjs, *.test.mjs,
 *.test.js and *.test.ps1. A file the mod-test collector prints is covered by the step that runs that collector.
 
-SplitJobs does the same for the Linux split (checks, checks-merge-install) and the macOS split (checks-macos, checks-macos-b):
+SplitJobs does the same for the Linux split (checks, checks-hooks, checks-rest, checks-merge-install) and the macOS split (checks-macos, checks-macos-b):
 each suite runs in exactly one job of its split, with its pinned `if:` and `shell:`. It also reads the Linux guard split
 (checks-guard, checks-guard-2): the guard suite runs in one shard per job, each with its GUARD_SHARD value, and both shards
 are named in the all-jobs-passed and ci-done needs.
@@ -70,9 +70,9 @@ REQUIRED = [
 
 
 # The suites the single `checks` job ran (Linux) and the single `checks-macos` job ran (macOS) before the split, each with
-# its step's `if:` and `shell:`. checks-merge-install and checks-macos-b took some of them, so each suite runs in exactly one
-# job of its split. A suite is a run of a test file, a mutation test or the mod tests. The Linux pair is CHECKS_SUITE_JOBS,
-# its one home in lint/workflow_steps.py; the macOS lists stay here.
+# its step's `if:` and `shell:`. checks-hooks, checks-rest and checks-merge-install took some of them (Linux), and checks-macos-b
+# some of the macOS ones, so each suite runs in exactly one job of its split. A suite is a run of a test file, a mutation
+# test or the mod tests. The Linux jobs are CHECKS_SUITE_JOBS, its one home in lint/workflow_steps.py; the macOS lists stay here.
 LINUX_SPLIT = CHECKS_SUITE_JOBS
 LINUX_CODE = "needs.scope.outputs.code == 'true'"
 LINUX_CODE_SWEEP = f"{LINUX_CODE} && needs.scope.outputs.sweep == 'true'"
@@ -1398,7 +1398,7 @@ def without_need(text, job, name):
 
 
 class SplitJobs(unittest.TestCase):
-    """The Linux split (checks, checks-merge-install) and the macOS split (checks-macos, checks-macos-b): each suite of the old
+    """The Linux split (checks, checks-hooks, checks-rest, checks-merge-install) and the macOS split (checks-macos, checks-macos-b): each suite of the old
     single job runs in exactly one job of its split, with its pinned `if:` and `shell:` and no env (LINUX_SUITES, MACOS_SUITES)."""
 
     def setUp(self):
@@ -1407,6 +1407,36 @@ class SplitJobs(unittest.TestCase):
 
     def test_each_linux_suite_runs_once_in_its_split(self):
         self.assertEqual(linux_split_problems(self.text), [])
+
+    def test_every_lint_form_step_stays_in_the_checks_job(self):
+        """`merge --lane-lint` runs the `checks` job by name (bin/ci-job checks --lint), so a lint step moved into another Linux
+        split job would run in CI but never in lane lint. What counts as a lint step is bin/ci-job's one definition (is_lint),
+        read from it, never copied. Three times a merge of main put one in checks-hooks or checks-rest."""
+        import importlib.machinery
+        import importlib.util
+        loader = importlib.machinery.SourceFileLoader("ci_job_for_split", os.path.join(HERE, "..", "bin", "ci-job"))
+        ci_job = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+        loader.exec_module(ci_job)
+        stray = []
+        for job in CHECKS_SUITE_JOBS:
+            if job == "checks":
+                continue
+            for step in step_blocks(job_block(self.text, job)):
+                if ci_job.is_lint(step):
+                    stray.append((job, step_key(step, "name") or ci_job.uses(step)))
+        self.assertEqual(stray, [])
+
+    def test_no_step_name_repeats_across_the_checks_split(self):
+        """A step run twice by the split reads as one step. The setup steps carry no name."""
+        seen, repeat = set(), []
+        for job in CHECKS_SUITE_JOBS:
+            for step in step_blocks(job_block(self.text, job)):
+                name = step_key(step, "name")
+                if name:
+                    if name in seen:
+                        repeat.append(name)
+                    seen.add(name)
+        self.assertEqual(repeat, [])
 
     def test_each_macos_suite_runs_once_in_its_split_and_the_guard_slice_in_checks_macos(self):
         self.assertEqual(macos_split_problems(self.text), [])
@@ -1419,16 +1449,21 @@ class SplitJobs(unittest.TestCase):
 
     def test_checker_sees_the_linux_split_defects(self):
         rows = [(c, i, s, {}) for c, (i, s) in LINUX_SUITES.items()]
-        half = len(rows) // 2
 
-        def doc(rs):
-            return split_doc({"checks": ("ubuntu-latest", rs[:half]), "checks-merge-install": ("ubuntu-latest", rs[half:])})
+        def doc(rs, extra=()):
+            """The rows cut into one contiguous share per job of LINUX_SPLIT; each (job, row) in `extra` is a copy added to that job."""
+            cuts = [len(rs) * k // len(LINUX_SPLIT) for k in range(len(LINUX_SPLIT) + 1)]
+            jobs = {job: list(rs[cuts[k]:cuts[k + 1]]) for k, job in enumerate(LINUX_SPLIT)}
+            for job, row in extra:
+                jobs[job].append(row)
+            return split_doc({job: ("ubuntu-latest", share) for job, share in jobs.items()})
 
         self.assertEqual(linux_split_problems(doc(rows)), [])
         c0, i0, s0, _ = rows[0]
         bad = {
             "a suite dropped": doc(rows[1:]),
-            "a suite run twice": doc(rows + [rows[-1]]),
+            "a suite run twice in one job": doc(rows, extra=[(LINUX_SPLIT[-1], rows[-1])]),
+            "a suite run in two jobs": doc(rows, extra=[(LINUX_SPLIT[1], rows[0])]),  # rows[0] is in the first job
             "a suite's if changed": doc([(c0, "needs.scope.outputs.code == 'false'", s0, {})] + rows[1:]),
             "a suite's shell added": doc([(c0, i0, "bash", {})] + rows[1:]),
             "a suite's env set": doc([(c0, i0, s0, {"BASE_REF": "main"})] + rows[1:]),
@@ -2108,7 +2143,7 @@ class ScanCases(unittest.TestCase):
         self.assertEqual(step_if(job["steps"][0]), "needs.scope.outputs.code == 'true'")
 
 
-# Mod and map-skill tests: one step in each of the jobs checks (Linux), checks-windows and checks-macos, on
+# Mod and map-skill tests: one step in each of the jobs checks-rest (Linux), checks-windows and checks-macos, on
 # the `mods` scope flag. The step runs .github/scripts/mod-tests.sh with no argument, and that script is the
 # one home of both suites. A copy of either suite in a run step would drift, so no step may hold one. The
 # script finds every *.test.mjs and *.test.js file under mods/ except node_modules, so a new mods/<name>/
@@ -2116,7 +2151,7 @@ class ScanCases(unittest.TestCase):
 # The checker self-tests (ModTestStepChecker) run on synthetic text and pass now: they show each defect is
 # seen. MOD_SCRIPT_NAME marks the step that runs the script.
 MOD_FLAG = "mods"
-MOD_JOBS = ["checks", "checks-windows", "checks-macos"]
+MOD_JOBS = ["checks-rest", "checks-windows", "checks-macos"]
 MOD_SCRIPT_NAME = "mod-tests.sh"
 MOD_CMD = "bash .github/scripts/mod-tests.sh"
 MOD_SCRIPT = os.environ.get("MOD_TESTS_SH") or os.path.join(HERE, "..", ".github", "scripts", MOD_SCRIPT_NAME)
@@ -2429,24 +2464,24 @@ class ModTestStepChecker(unittest.TestCase):
                        "          find mods -name '*.test.mjs' -print\n")
         inline_skill = "      - name: Skill\n        run: |\n          cd skills/plain-english-map/tests\n          node --test\n"
         defects = {
-            "no step in checks": mod_doc(steps=only("checks", "")),
+            "no step in checks-rest": mod_doc(steps=only("checks-rest", "")),
             "step missing from checks-windows": mod_doc(steps=only("checks-windows", "")),
             "step missing from checks-macos": mod_doc(steps=only("checks-macos", "")),
             "step passes an argument": mod_doc(steps=only("checks-macos", MOD_STEP.replace(".sh\n", ".sh mods\n"))),
-            "step passes skill": mod_doc(steps=only("checks", MOD_STEP.replace(".sh\n", ".sh skill\n"))),
-            "step calls another script": mod_doc(steps=only("checks", MOD_STEP.replace("mod-tests.sh", "mod-tests.sh; echo"))),
+            "step passes skill": mod_doc(steps=only("checks-rest", MOD_STEP.replace(".sh\n", ".sh skill\n"))),
+            "step calls another script": mod_doc(steps=only("checks-rest", MOD_STEP.replace("mod-tests.sh", "mod-tests.sh; echo"))),
             "two steps in one job": mod_doc(steps=only("checks-windows", MOD_STEP + MOD_STEP)),
-            "inline copy of the mod glob in checks": mod_doc(extra={"checks": inline_glob}),
+            "inline copy of the mod glob in checks-rest": mod_doc(extra={"checks-rest": inline_glob}),
             "inline copy of the mod glob in checks-windows": mod_doc(extra={"checks-windows": inline_glob}),
-            "inline copy of the skill run": mod_doc(extra={"checks": inline_skill}),
-            "old mod step kept beside the new one": mod_doc(steps=only("checks", inline_glob + MOD_STEP)),
+            "inline copy of the skill run": mod_doc(extra={"checks-rest": inline_skill}),
+            "old mod step kept beside the new one": mod_doc(steps=only("checks-rest", inline_glob + MOD_STEP)),
             "wrong flag": mod_doc(steps=only("checks-windows", MOD_STEP.replace("outputs.mods", "outputs.code"))),
             "no !cancelled()": mod_doc(steps=only("checks-macos", MOD_STEP.replace("!cancelled() && ", ""))),
-            "reads the event": mod_doc(steps=only("checks", MOD_STEP.replace("== 'true' }}", "== 'true' && github.event_name != 'pull_request' }}"))),
+            "reads the event": mod_doc(steps=only("checks-rest", MOD_STEP.replace("== 'true' }}", "== 'true' && github.event_name != 'pull_request' }}"))),
             "no shell": mod_doc(steps=only("checks-windows", MOD_STEP.replace("        shell: bash\n", ""))),
             "shell sh": mod_doc(steps=only("checks-macos", MOD_STEP.replace("shell: bash", "shell: sh"))),
             "shell pwsh": mod_doc(steps=only("checks-windows", MOD_STEP.replace("shell: bash", "shell: pwsh"))),
-            "continue-on-error": mod_doc(steps=only("checks", MOD_STEP.replace("        shell: bash\n", "        shell: bash\n        continue-on-error: true\n"))),
+            "continue-on-error": mod_doc(steps=only("checks-rest", MOD_STEP.replace("        shell: bash\n", "        shell: bash\n        continue-on-error: true\n"))),
             "no checkout": mod_doc(checkout=False),
             "a step after the mod step": mod_doc(extra={"checks-macos": "      - run: echo\n"}),
             "scope lacks the mods output": mod_doc(scope_out=False),
@@ -2465,10 +2500,10 @@ class ModTestStepChecker(unittest.TestCase):
         # Rows: a comment that names the script is no step, and a `run: |` block that holds only the script line is
         # the step. Named failure: a commented-out step reads as present, or a block step as absent.
         commented = "      # run: bash .github/scripts/mod-tests.sh\n"
-        self.assertTrue(mods_step_problems(mod_doc(steps=only("checks", commented))))
+        self.assertTrue(mods_step_problems(mod_doc(steps=only("checks-rest", commented))))
         block = MOD_STEP.replace(f"run: {MOD_CMD}\n", f"run: |\n          {MOD_CMD}\n")
-        self.assertEqual(mods_step_problems(mod_doc(steps=only("checks", block))), [])
-        trailing = mod_doc(extra={"checks": "      # find mods -name '*.test.mjs'\n"})
+        self.assertEqual(mods_step_problems(mod_doc(steps=only("checks-rest", block))), [])
+        trailing = mod_doc(extra={"checks-rest": "      # find mods -name '*.test.mjs'\n"})
         self.assertEqual(mods_step_problems(trailing), [])  # a comment line is not a run
 
     def test_the_script_checker_sees_each_defect(self):

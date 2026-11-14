@@ -193,17 +193,371 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 actions/test_ruling_kind_records_dir.py
 
-      - name: Janitor sweep fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' && needs.scope.outputs.sweep == 'true' }}
-        run: python3 janitor/test_sweep.py
+      - name: Refusal settle fixture suite
+        run: python3 lint/test_report_guard_refusal.py
 
-      - name: Janitor sweep mutation test
-        if: ${{ needs.scope.outputs.sweep == 'true' }}
-        run: python3 janitor/mutate_sweep.py
+      - name: Stop-hook guard fixture suite
+        run: python3 lint/test_report_guard.py
 
-      - name: Reap proof Git Bash one-home suite
+      - name: Stop-hook triage hold suite
+        run: python3 lint/test_report_guard_stalled.py
+
+      - name: Stop-hook question route suite
+        run: python3 lint/test_report_guard_route.py
+
+      - name: Stop-hook page writer suite
+        run: python3 lint/test_report_guard_page_writer.py
+
+      - name: Stop-hook stamped copy suite
+        run: python3 lint/test_report_guard_stamped.py
+
+      - name: Stop-hook route row falsifier suite
+        run: python3 lint/test_report_guard_falsifier.py
+
+      - name: Stop-hook hand-off cite suite
+        run: python3 lint/test_report_guard_handoff.py
+
+      - name: Clause parser suite
+        run: python3 lint/test_clause.py
+
+      - name: Stop-hook cannot-claim suite
+        run: python3 lint/test_report_guard_cannot.py
+
+      - name: Stop-hook landing fixture suite
+        run: python3 lint/test_report_guard_landing.py
+
+      - name: Stop-hook owner-safe reason suite
+        run: python3 lint/test_report_guard_remedy.py
+
+      - name: Stop-hook review-record fixture suite
+        run: python3 lint/test_report_guard_review.py
+
+      - name: STE auto-fix fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
-        run: python3 janitor/test_prove_agent_end_reap.py
+        run: python3 lint/test_ste_autofix.py
+
+      - name: Ruling census fixture suite
+        run: python3 lint/test_ruling_census.py
+
+      - name: Rule audit fixture suite
+        run: python3 lint/test_rule_audit.py
+
+      - name: Stale prose check fixture suite
+        run: python3 lint/test_stale_cites.py
+
+      - name: Ruled store fixture suite
+        run: python3 lint/test_ruled_store.py
+
+      - name: Route judge measure fixture suite
+        run: python3 lint/test_prove_route_judge.py
+
+      - name: Guard log report fixture suite
+        run: python3 lint/test_guard_log_report.py
+
+      - name: Verdict runner fixture suite
+        run: python3 lint/test_verdict.py
+
+      - name: Wait-pid helper fixture suite
+        run: python3 lint/test_wait_pid.py
+
+      - name: Wait-until helper fixture suite
+        run: python3 lint/test_wait_until.py
+
+      - name: Now-central helper fixture suite
+        run: python3 lint/test_now_central.py
+
+      - name: sim-lease fixture suite
+        run: python3 lint/test_sim_lease.py
+
+      - name: Fixture copy helper suite
+        run: python3 lint/test_tracked_tree.py
+
+      - name: Test-run signing opt-out fixture suite
+        run: python3 lint/test_test_git.py
+
+      - name: Debt notes union merge fixture suite
+        run: python3 lint/test_notes_union_merge.py
+
+      - name: Job runner fixture suite (bin/ci-job)
+        run: python3 lint/test_ci_job.py
+
+      - name: Rule mechanization audit
+        run: python3 lint/rule_audit.py
+
+      - name: Windows split guard
+        run: python3 lint/test_windows_split.py
+
+      - name: all-jobs-passed needs every pull-request job
+        run: python3 lint/test_all_jobs_passed.py
+
+      - name: Scope detector fixture suite
+        run: python3 lint/test_ci_scope.py
+
+      - name: Touched-test selector fixture suite
+        run: python3 lint/test_touched_tests.py
+
+      - name: Nightly skip fixture suite
+        run: python3 lint/test_nightly_skip.py
+
+      - name: Windows rest split fixture suite
+        run: python3 lint/test_windows_rest_split.py
+
+      - name: Push skip fixture suite
+        run: python3 lint/test_push_skip.py
+
+      - name: Stable workflow move job suite
+        run: python3 lint/test_stable_workflow.py
+
+      - name: Lane checkout depth fixture suite
+        run: python3 lint/test_lane_touched_fetch.py
+
+      - name: rm shim fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 lint/test_rm_shim.py
+
+      - name: Landed-directory check fixture suite
+        run: python3 lint/test_check_landed_dirs.py
+
+      - name: Settings matcher fixture suite
+        run: python3 lint/test_settings_matcher.py
+
+      - name: Hook platform exit fixture suite
+        run: python3 lint/test_hook_platform_exit.py
+
+      - name: Hook stub fixture suite
+        run: python3 lint/test_check_hook_stubs.py
+
+      - name: Hook dup-name fixture suite
+        run: python3 lint/test_check_hook_dup_names.py
+
+      - name: Record slug fixture suite
+        run: python3 lint/test_check_record_slugs.py
+
+      - name: Cost line pin fixture suite
+        run: python3 lint/test_check_cost_pins.py
+
+      - name: Red-run trailer fixture suite
+        run: python3 lint/test_check_red_run.py
+
+      - name: Plan refuter fixture suite
+        run: python3 lint/test_check_plan_refuter.py
+
+      - name: Copy finder fixture suite
+        run: python3 lint/test_find_copies.py
+
+      - name: Time-pinned finder fixture suite
+        run: python3 lint/test_find_time_pinned.py
+
+      - name: Mod version fixture suite
+        run: python3 lint/test_check_mod_versions.py
+
+      - name: Hook catalog fixture suite
+        run: python3 lint/test_hook_catalog.py
+
+      - name: Hook catalog check
+        run: python3 lint/hook_catalog.py --check
+
+      - name: Hook stub check
+        run: python3 lint/check_hook_stubs.py
+
+      - name: Hook dup-name check
+        run: python3 lint/check_hook_dup_names.py
+
+      - name: Record slug length
+        run: python3 lint/check_record_slugs.py
+
+      - name: Cost line pins
+        run: python3 lint/check_cost_pins.py
+
+      # Pull requests only: the range is base..HEAD, and a push has no base. The checkout is full-depth (fetch-depth 0).
+      - name: Red-run trailer
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 lint/check_red_run.py --base "origin/$BASE_REF"
+
+      - name: Plan refuter line
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 lint/check_plan_refuter.py --base "origin/$BASE_REF"
+
+      # No `if:`: ci-scope.sh turns no flag on for a docs/map/*.md path, and a map page changed alone must still be read.
+      # The script says why it runs `npm ci` first.
+      - name: Layout fixture suite
+        run: python3 lint/test_layout.py
+
+      - name: Label once fixture suite
+        run: python3 lint/test_label_once.py
+
+      - name: Repo colour fixture suite
+        run: python3 lint/test_repo_colour.py
+
+      - name: Retired repo fixture suite
+        run: python3 lint/test_retired_repos.py
+
+      - name: Artifact cite fixture suite
+        run: python3 lint/test_check_artifact_cites.py
+
+      - name: Artifact cite check
+        run: python3 lint/check_artifact_cites.py --steps list
+
+      - name: Layout readers hold no record path
+        run: python3 lint/check_layout.py
+
+      - name: Shared resource declaration fixture suite
+        run: python3 lint/test_check_shared_resources.py
+
+      - name: Shared resource declaration check
+        run: python3 lint/check_shared_resources.py
+
+      - name: iPhone mockup check fixture suite
+        run: python3 lint/test_check_ios_mockup.py
+
+      - name: Compliance probes fixture suite
+        run: python3 lint/test_compliance_probes.py
+
+      - name: CLAUDE.md size fixture suite
+        run: python3 lint/test_check_claude_md_size.py
+
+      - name: CLAUDE.md size (warns, never fails)
+        run: python3 lint/check_claude_md_size.py
+
+      - name: Glossary fixture suite
+        run: python3 lint/test_check_glossary.py
+
+      - name: Glossary homes and avoided names
+        run: python3 lint/check_glossary.py
+
+      - name: Retired names, one word per meaning
+        run: python3 lint/test_retired_names.py
+      # No scope condition: the suite reads the skill's .md templates, and a .md-only change must run it too.
+      - name: Mod version bump
+        run: python3 lint/check_mod_versions.py
+
+      - name: Ruling kind fixture suite
+        run: python3 lint/test_check_ruling_kind.py
+
+      - name: Ruling kind check
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 lint/check_ruling_kind.py --base "origin/$BASE_REF"
+
+      - name: Silent undo fixture suite
+        run: python3 lint/test_check_silent_undo.py
+
+      - name: Debt retire fixture suite
+        run: python3 lint/test_check_debt_retire.py
+
+      - name: Silent undo check
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 lint/check_silent_undo.py --upstream "origin/$BASE_REF" --head "$HEAD_SHA" --strict
+
+      - name: Comment narration fixture suite
+        run: python3 lint/test_check_comment_narration.py
+
+      - name: Comment narration check
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 lint/check_comment_narration.py --base "origin/$BASE_REF"
+
+      - name: Unknown-read contract fixture suite
+        run: python3 lint/test_check_unknown_reads_contract.py
+
+      - name: Unknown-read contract (guard + session_start)
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 lint/check_unknown_reads_contract.py
+
+      - name: Landed-directory manifest agreement
+        run: python3 lint/check_landed_dirs.py
+
+      - name: Agent and skill model floor
+        run: python3 lint/check_agent_models.py
+
+      - name: Agent and skill model floor fixture suite
+        run: python3 lint/test_check_agent_models.py
+
+      - name: Agent push form fixture suite
+        run: python3 lint/test_agent_push_form.py
+
+      - name: Skill model rows check
+        run: python3 lint/check_skill_model_rows.py
+
+      - name: Skill model rows fixture suite
+        run: python3 lint/test_check_skill_model_rows.py
+
+      - name: Python 3.9 floor check
+        run: python3 lint/check_python_floor.py
+
+      - name: Python 3.9 floor fixture suite
+        run: python3 lint/test_check_python_floor.py
+
+      - name: No-window spawn check
+        run: python3 lint/test_no_window_spawn.py
+
+      - name: STE lint
+        uses: $/actions/ste-lint
+        with:
+          scope: ${{ inputs.full_ste_audit && 'all' || 'changed' }}
+          fail: ${{ !inputs.full_ste_audit }}
+
+      - name: STE lint action fixture suite
+        run: python3 actions/ste-lint/test_action.py
+
+      - name: Playwright setup action suite
+        run: python3 actions/playwright-setup/test_action.py
+
+      # The suite's own watchdog (actions/stamp/suite_watchdog.mjs) ends it at 180 s. A hang reads red,
+      # with the hung test named and its process tree killed. A process the suite started and left
+      # running reads red too, killed and named; so does a sweep that could not read.
+      - name: Opt-in CI template fixture suites
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        shell: bash
+        run: |
+          bash actions/all-jobs-passed/test_action.sh
+          bash actions/ci-alarm/test_action.sh
+          python3 actions/ci-alarm/test_clear_rule.py
+          python3 actions/ci-done-comment/test_comment.py
+          bash actions/ruling-kind/test_action.sh
+          bash actions/zizmor/test_action.sh
+          bash actions/silent-undo/test_action.sh
+          bash actions/stable-mover/test_action.sh
+          python3 actions/readme-links/test_readme_links.py
+          bash githooks/main-ref/test_hook.sh
+          bash githooks/test_pre_commit.sh
+          node --test testing/skip-locally-fail-in-ci.test.mjs
+          bash actions/push-skip/test_action.sh
+
+      # Last step, so a red test here skips none of the steps above, and a red step above does not hide
+      # a mod test (!cancelled() runs it anyway). The script is the one home of the mod tests and the
+      # plain-english-map skill tests. The same step ends checks-windows and checks-macos. The `mods` flag
+      # comes from ci-scope.sh.
+
+  # The `checks` job split by test family, for wall time: it took 35.1 min over 161 serial steps in run 43234925158 (batch 103),
+  # and no one suite dominated. `checks` keeps every step that `bin/ci-job checks --lint` runs (merge.py's lane lint reads
+  # that job by name), so it stays the lint family. This job holds the hooks/ suites. checks-rest holds the other suites.
+  # lint/test_windows_split.py proves each old step still runs in exactly one of the three, with its `if:`, `shell:` and env.
+  checks-hooks:
+
+    runs-on: ubuntu-latest
+    needs: scope
+    # provisional 60 (decision ci-job-caps, rule 6) until 5 green runs, then re-cap from the measured slowest / 0.7.
+    # These steps summed 542 s (9.0 min) inside the old `checks` job in run 43234925158; about 9.6 min with setup. Unmeasured as a job of its own.
+    timeout-minutes: 60 # provisional
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
 
       - name: Config watch fixture suite
         run: python3 hooks/test_config_watch.py
@@ -324,130 +678,44 @@ jobs:
       - name: Directory before a segment suite
         run: python3 hooks/test_dir_before_segment.py
 
-      - name: Refusal settle fixture suite
-        run: python3 lint/test_report_guard_refusal.py
-
-      - name: Stop-hook guard fixture suite
-        run: python3 lint/test_report_guard.py
-
-      - name: Stop-hook triage hold suite
-        run: python3 lint/test_report_guard_stalled.py
-
-      - name: Stop-hook question route suite
-        run: python3 lint/test_report_guard_route.py
-
-      - name: Stop-hook page writer suite
-        run: python3 lint/test_report_guard_page_writer.py
-
-      - name: Stop-hook stamped copy suite
-        run: python3 lint/test_report_guard_stamped.py
-
-      - name: Stop-hook route row falsifier suite
-        run: python3 lint/test_report_guard_falsifier.py
-
-      - name: Stop-hook hand-off cite suite
-        run: python3 lint/test_report_guard_handoff.py
-
-      - name: Clause parser suite
-        run: python3 lint/test_clause.py
-
-      - name: Stop-hook cannot-claim suite
-        run: python3 lint/test_report_guard_cannot.py
-
-      - name: Stop-hook landing fixture suite
-        run: python3 lint/test_report_guard_landing.py
-
-      - name: Stop-hook owner-safe reason suite
-        run: python3 lint/test_report_guard_remedy.py
-
-      - name: Stop-hook review-record fixture suite
-        run: python3 lint/test_report_guard_review.py
-
-      - name: STE auto-fix fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' }}
-        run: python3 lint/test_ste_autofix.py
-
       - name: Ruling home fixture suite
         run: python3 hooks/test_ruling_home.py
 
       - name: Scratchpad owner fixture suite
         run: python3 hooks/test_scratchpad_owner.py
 
-      - name: Ruling census fixture suite
-        run: python3 lint/test_ruling_census.py
+  # The janitor, mutation, skills, actions-script, PowerShell and mod suites of the old `checks` job. See checks-hooks for why it split.
+  checks-rest:
 
-      - name: Rule audit fixture suite
-        run: python3 lint/test_rule_audit.py
+    runs-on: ubuntu-latest
+    needs: scope
+    # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps; ends with step time-pinned-tests-go), above the 3600 s suite cap
+    # that the janitor sweep mutation test runs under. That test runs here, as it did in `checks`.
+    # These steps summed 520 s (8.7 min) inside the old `checks` job in run 43234925158 (the mutation test took 54 s there);
+    # about 9.3 min with setup. Unmeasured as a job of its own.
+    # The mod step is the last step, as in every job that runs it (lint/test_windows_split.py MOD_JOBS).
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Stale prose check fixture suite
-        run: python3 lint/test_stale_cites.py
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
 
-      - name: Ruled store fixture suite
-        run: python3 lint/test_ruled_store.py
+      - name: Janitor sweep fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' && needs.scope.outputs.sweep == 'true' }}
+        run: python3 janitor/test_sweep.py
 
-      - name: Route judge measure fixture suite
-        run: python3 lint/test_prove_route_judge.py
+      - name: Janitor sweep mutation test
+        if: ${{ needs.scope.outputs.sweep == 'true' }}
+        run: python3 janitor/mutate_sweep.py
 
-      - name: Guard log report fixture suite
-        run: python3 lint/test_guard_log_report.py
-
-      - name: Verdict runner fixture suite
-        run: python3 lint/test_verdict.py
-
-      - name: Wait-pid helper fixture suite
-        run: python3 lint/test_wait_pid.py
-
-      - name: Wait-until helper fixture suite
-        run: python3 lint/test_wait_until.py
-
-      - name: Now-central helper fixture suite
-        run: python3 lint/test_now_central.py
-
-      - name: sim-lease fixture suite
-        run: python3 lint/test_sim_lease.py
-
-      - name: Fixture copy helper suite
-        run: python3 lint/test_tracked_tree.py
-
-      - name: Test-run signing opt-out fixture suite
-        run: python3 lint/test_test_git.py
-
-      - name: Debt notes union merge fixture suite
-        run: python3 lint/test_notes_union_merge.py
-
-      - name: Job runner fixture suite (bin/ci-job)
-        run: python3 lint/test_ci_job.py
-
-      - name: Rule mechanization audit
-        run: python3 lint/rule_audit.py
-
-      - name: Windows split guard
-        run: python3 lint/test_windows_split.py
-
-      - name: all-jobs-passed needs every pull-request job
-        run: python3 lint/test_all_jobs_passed.py
-
-      - name: Scope detector fixture suite
-        run: python3 lint/test_ci_scope.py
-
-      - name: Touched-test selector fixture suite
-        run: python3 lint/test_touched_tests.py
-
-      - name: Nightly skip fixture suite
-        run: python3 lint/test_nightly_skip.py
-
-      - name: Windows rest split fixture suite
-        run: python3 lint/test_windows_rest_split.py
-
-      - name: Push skip fixture suite
-        run: python3 lint/test_push_skip.py
-
-      - name: Lane checkout depth fixture suite
-        run: python3 lint/test_lane_touched_fetch.py
-
-      - name: rm shim fixture suite
+      - name: Reap proof Git Bash one-home suite
         if: ${{ needs.scope.outputs.code == 'true' }}
-        run: python3 lint/test_rm_shim.py
+        run: python3 janitor/test_prove_agent_end_reap.py
 
       - name: Mutation verdict fixture suite
         run: python3 hooks/test_mutate_shared.py
@@ -471,89 +739,8 @@ jobs:
           [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
           python3 hooks/test_mutate_ci.py
 
-      - name: Landed-directory check fixture suite
-        run: python3 lint/test_check_landed_dirs.py
-
-      - name: Settings matcher fixture suite
-        run: python3 lint/test_settings_matcher.py
-
-      - name: Hook platform exit fixture suite
-        run: python3 lint/test_hook_platform_exit.py
-
-      - name: Hook stub fixture suite
-        run: python3 lint/test_check_hook_stubs.py
-
-      - name: Hook dup-name fixture suite
-        run: python3 lint/test_check_hook_dup_names.py
-
-      - name: Record slug fixture suite
-        run: python3 lint/test_check_record_slugs.py
-
-      - name: Cost line pin fixture suite
-        run: python3 lint/test_check_cost_pins.py
-
-      - name: Red-run trailer fixture suite
-        run: python3 lint/test_check_red_run.py
-
-      - name: Plan refuter fixture suite
-        run: python3 lint/test_check_plan_refuter.py
-
-      - name: Copy finder fixture suite
-        run: python3 lint/test_find_copies.py
-
-      - name: Time-pinned finder fixture suite
-        run: python3 lint/test_find_time_pinned.py
-
-      - name: Mod version fixture suite
-        run: python3 lint/test_check_mod_versions.py
-
-      - name: Hook catalog fixture suite
-        run: python3 lint/test_hook_catalog.py
-
-      - name: Hook catalog check
-        run: python3 lint/hook_catalog.py --check
-
-      - name: Hook stub check
-        run: python3 lint/check_hook_stubs.py
-
-      - name: Hook dup-name check
-        run: python3 lint/check_hook_dup_names.py
-
-      - name: Record slug length
-        run: python3 lint/check_record_slugs.py
-
-      - name: Cost line pins
-        run: python3 lint/check_cost_pins.py
-
-      # Pull requests only: the range is base..HEAD, and a push has no base. The checkout is full-depth (fetch-depth 0).
-      - name: Red-run trailer
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: python3 lint/check_red_run.py --base "origin/$BASE_REF"
-
-      - name: Plan refuter line
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: python3 lint/check_plan_refuter.py --base "origin/$BASE_REF"
-
-      # No `if:`: ci-scope.sh turns no flag on for a docs/map/*.md path, and a map page changed alone must still be read.
-      # The script says why it runs `npm ci` first.
       - name: Map check
         run: bash .github/scripts/map-check.sh
-
-      - name: Layout fixture suite
-        run: python3 lint/test_layout.py
-
-      - name: Label once fixture suite
-        run: python3 lint/test_label_once.py
-
-      - name: Repo colour fixture suite
-        run: python3 lint/test_repo_colour.py
-
-      - name: Retired repo fixture suite
-        run: python3 lint/test_retired_repos.py
 
       - name: Waiting page staleness fixture suite
         run: python3 skills/waiting-page/test_stale_pages.py
@@ -572,118 +759,14 @@ jobs:
       - name: Waiting page park relay prose suite
         run: python3 skills/waiting-page/test_skill_park_relay.py
 
-      - name: Artifact cite fixture suite
-        run: python3 lint/test_check_artifact_cites.py
-
-      - name: Artifact cite check
-        run: python3 lint/check_artifact_cites.py --steps list
-
       - name: Roadmap builder fixture suite
         run: python3 skills/roadmap/test_build.py
 
-      - name: Layout readers hold no record path
-        run: python3 lint/check_layout.py
-
-      - name: Shared resource declaration fixture suite
-        run: python3 lint/test_check_shared_resources.py
-
-      - name: Shared resource declaration check
-        run: python3 lint/check_shared_resources.py
-
-      - name: iPhone mockup check fixture suite
-        run: python3 lint/test_check_ios_mockup.py
-
-      - name: Compliance probes fixture suite
-        run: python3 lint/test_compliance_probes.py
-
-      - name: CLAUDE.md size fixture suite
-        run: python3 lint/test_check_claude_md_size.py
-
-      - name: CLAUDE.md size (warns, never fails)
-        run: python3 lint/check_claude_md_size.py
-
-      - name: Glossary fixture suite
-        run: python3 lint/test_check_glossary.py
-
-      - name: Glossary homes and avoided names
-        run: python3 lint/check_glossary.py
-
-      - name: Retired names, one word per meaning
-        run: python3 lint/test_retired_names.py
-      # No scope condition: the suite reads the skill's .md templates, and a .md-only change must run it too.
       - name: project-ops skill scaffold suite
         run: python3 skills/project-ops/tests/test_scaffold.py
 
       - name: ios-apps skill starter suite
         run: python3 skills/ios-apps/tests/test_new_app.py
-
-      - name: Mod version bump
-        run: python3 lint/check_mod_versions.py
-
-      - name: Ruling kind fixture suite
-        run: python3 lint/test_check_ruling_kind.py
-
-      - name: Ruling kind check
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: python3 lint/check_ruling_kind.py --base "origin/$BASE_REF"
-
-      - name: Silent undo fixture suite
-        run: python3 lint/test_check_silent_undo.py
-
-      - name: Debt retire fixture suite
-        run: python3 lint/test_check_debt_retire.py
-
-      - name: Silent undo check
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          BASE_REF: ${{ github.base_ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 lint/check_silent_undo.py --upstream "origin/$BASE_REF" --head "$HEAD_SHA" --strict
-
-      - name: Comment narration fixture suite
-        run: python3 lint/test_check_comment_narration.py
-
-      - name: Comment narration check
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: python3 lint/check_comment_narration.py --base "origin/$BASE_REF"
-
-      - name: Unknown-read contract fixture suite
-        run: python3 lint/test_check_unknown_reads_contract.py
-
-      - name: Unknown-read contract (guard + session_start)
-        if: ${{ needs.scope.outputs.code == 'true' }}
-        run: python3 lint/check_unknown_reads_contract.py
-
-      - name: Landed-directory manifest agreement
-        run: python3 lint/check_landed_dirs.py
-
-      - name: Agent and skill model floor
-        run: python3 lint/check_agent_models.py
-
-      - name: Agent and skill model floor fixture suite
-        run: python3 lint/test_check_agent_models.py
-
-      - name: Agent push form fixture suite
-        run: python3 lint/test_agent_push_form.py
-
-      - name: Skill model rows check
-        run: python3 lint/check_skill_model_rows.py
-
-      - name: Skill model rows fixture suite
-        run: python3 lint/test_check_skill_model_rows.py
-
-      - name: Python 3.9 floor check
-        run: python3 lint/check_python_floor.py
-
-      - name: Python 3.9 floor fixture suite
-        run: python3 lint/test_check_python_floor.py
-
-      - name: No-window spawn check
-        run: python3 lint/test_no_window_spawn.py
 
       - name: PowerShell syntax check, install.ps1
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -697,21 +780,6 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: pwsh -NoProfile -File install.test.ps1
 
-      - name: STE lint
-        uses: $/actions/ste-lint
-        with:
-          scope: ${{ inputs.full_ste_audit && 'all' || 'changed' }}
-          fail: ${{ !inputs.full_ste_audit }}
-
-      - name: STE lint action fixture suite
-        run: python3 actions/ste-lint/test_action.py
-
-      - name: Playwright setup action suite
-        run: python3 actions/playwright-setup/test_action.py
-
-      # The suite's own watchdog (actions/stamp/suite_watchdog.mjs) ends it at 180 s. A hang reads red,
-      # with the hung test named and its process tree killed. A process the suite started and left
-      # running reads red too, killed and named; so does a sweep that could not read.
       - name: Record stamp engine fixture suite
         run: node actions/stamp/test_stamp.mjs
 
@@ -722,31 +790,6 @@ jobs:
         shell: bash
         run: bash actions/stamp/test_action.sh
 
-      - name: Stable workflow move job suite
-        run: python3 lint/test_stable_workflow.py
-
-      - name: Opt-in CI template fixture suites
-        if: ${{ needs.scope.outputs.code == 'true' }}
-        shell: bash
-        run: |
-          bash actions/all-jobs-passed/test_action.sh
-          bash actions/ci-alarm/test_action.sh
-          python3 actions/ci-alarm/test_clear_rule.py
-          python3 actions/ci-done-comment/test_comment.py
-          bash actions/ruling-kind/test_action.sh
-          bash actions/zizmor/test_action.sh
-          bash actions/silent-undo/test_action.sh
-          bash actions/stable-mover/test_action.sh
-          python3 actions/readme-links/test_readme_links.py
-          bash githooks/main-ref/test_hook.sh
-          bash githooks/test_pre_commit.sh
-          node --test testing/skip-locally-fail-in-ci.test.mjs
-          bash actions/push-skip/test_action.sh
-
-      # Last step, so a red test here skips none of the steps above, and a red step above does not hide
-      # a mod test (!cancelled() runs it anyway). The script is the one home of the mod tests and the
-      # plain-english-map skill tests. The same step ends checks-windows and checks-macos. The `mods` flag
-      # comes from ci-scope.sh.
       - name: Mod and map-skill tests
         if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
         shell: bash
@@ -755,6 +798,7 @@ jobs:
   # The merge tool and install suites, split off `checks` for wall time: `checks` took 33.4 min in run 41730427997 and
   # these CI steps took about 16 of them. Each keeps its own `if:`, its shell and its cap. This job has no scope condition of
   # its own, like `checks`: its suites carry the `code` flag.
+
   checks-merge-install:
     runs-on: ubuntu-latest
     needs: scope
@@ -2124,6 +2168,8 @@ jobs:
       - push-skip
       - scope
       - checks
+      - checks-hooks
+      - checks-rest
       - checks-merge-install
       - checks-guard
       - checks-guard-2
@@ -2171,6 +2217,8 @@ jobs:
       - scope
       - push-skip
       - checks
+      - checks-hooks
+      - checks-rest
       - checks-merge-install
       - checks-guard
       - checks-guard-2
