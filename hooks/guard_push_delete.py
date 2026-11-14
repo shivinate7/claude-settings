@@ -4,6 +4,8 @@ guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
 import bisect
+import fnmatch
+import json
 import os
 import re
 import stat
@@ -1340,20 +1342,23 @@ def parent_delete_hit(segments, number: int, cwd: str):
 # other checkout's install. The rule reads the filesystem: a real folder, or none, is judged as it
 # always was. A bare `rm node_modules` removes only the link, so it stays allowed.
 # `--prefix` is read (npm_prefix_flag): its folder is the one judged. A workspace flag is read for
-# `npm version` only (NPM_WORKSPACE_FLAGS).
-# THE READ-ONLY LIST: every npm subcommand and alias that never rewrites node_modules, by the npm 10.9.9
-# list in lib/utils/cmd-list.js. A subcommand off this list is refused in a linked folder, so a new npm
-# command, a typo and an abbreviation fail closed. The list is a curated copy because the guard cannot
-# read npm's own at hook time.
+# `npm version` only (NPM_WORKSPACE_FLAGS). From a workspace folder, the walk goes on to the
+# workspace root, as npm does (npm_walk).
+# THE READ-ONLY LIST: the canonical name (as `npm_deref` resolves a typed word) of every npm command that never
+# rewrites node_modules, by the npm 10.9.9 list in lib/utils/cmd-list.js. A typed word is judged by what
+# `npm_deref` makes of it, so an alias or an abbreviation of a listed name is read-only too, and `npm_deref` is
+# the one home of the alias tables. A command off this list, a new npm command, a typo that names no command
+# and an ambiguous abbreviation are refused in a linked folder: the list fails closed. The list is a curated
+# copy because the guard cannot read npm's own at hook time.
 NPM_READ_ONLY = {
-    "access", "adduser", "add-user", "login", "logout", "audit", "bugs", "issues", "cache",  # glossary-ok: "bugs" is npm's own subcommand name
-    "completion", "config", "c", "get", "set", "deprecate", "diff", "dist-tag", "dist-tags", "docs",
-    "home", "doctor", "exec", "x", "explain", "why", "find-dupes", "fund", "help", "hlep",
-    "help-search", "hook", "ll", "la", "ls", "list", "org", "ogr", "outdated", "owner", "author",
+    "access", "adduser", "login", "logout", "audit", "bugs", "cache",  # glossary-ok: "bugs" is npm's own subcommand name
+    "completion", "config", "get", "set", "deprecate", "diff", "dist-tag", "docs",
+    "doctor", "exec", "explain", "find-dupes", "fund", "help",
+    "help-search", "hook", "ll", "ls", "org", "outdated", "owner",
     "pack", "ping", "pkg", "prefix", "profile", "publish", "query", "repo", "root", "run-script",
-    "run", "rum", "urn", "sbom", "search", "s", "se", "find", "star", "stars", "unstar", "start",
-    "stop", "restart", "test", "t", "tst", "team", "token", "unpublish", "version", "verison", "view",
-    "v", "info", "show", "whoami",
+    "sbom", "search", "star", "stars", "unstar", "start",
+    "stop", "restart", "test", "team", "token", "unpublish", "version", "view",
+    "whoami",
 }
 # Global options that take the next word as their value, so that word is not the subcommand.
 NPM_VALUE_FLAGS = {
@@ -1364,11 +1369,42 @@ NPM_VALUE_FLAGS = {
 }
 # Options after which the command changes nothing in the working folder's install.
 NPM_NO_CHANGE = {"-g", "--global", "--location=global", "--help", "-h", "--dry-run"}
-# Subcommands that run install scripts even with --dry-run, so a dry run is no exemption for them.
-NPM_DRY_RUN_WRITERS = {"rebuild", "rb", "edit"}
+# THE DRY-RUN-SAFE LIST: the commands (by npm's own name, after NPM_ALIASES) that honour --dry-run and
+# change nothing with it. A dry run exempts only these. `rebuild` and `edit` run install scripts even
+# with --dry-run, and `explore` opens a shell, so none is listed; an unknown name is not listed either.
+NPM_DRY_RUN_SAFE = {
+    "install", "ci", "update", "uninstall", "dedupe", "prune", "link", "install-test",
+    "install-ci-test", "audit", "version",
+}
 # With one of these, `npm version` reifies the linked root, so it changes the install. Without one it
-# only rewrites package.json.
+# only rewrites package.json. `--workspaces-update=false` or `--no-workspaces-update` turns that reify off.
 NPM_WORKSPACE_FLAGS = {"-w", "-ws"}
+# npm 10.9.9, lib/utils/cmd-list.js: the command names and the aliases that `npm_deref` resolves. A
+# curated copy, as NPM_READ_ONLY is, because the guard cannot read npm's own at hook time.
+NPM_COMMANDS = {
+    "access", "adduser", "audit", "bugs", "cache", "ci", "completion", "config", "dedupe", "deprecate",  # glossary-ok: "bugs" is npm's own subcommand name
+    "diff", "dist-tag", "docs", "doctor", "edit", "exec", "explain", "explore", "find-dupes", "fund",
+    "get", "help", "help-search", "hook", "init", "install", "install-ci-test", "install-test", "link",
+    "ll", "login", "logout", "ls", "org", "outdated", "owner", "pack", "ping", "pkg", "prefix",
+    "profile", "prune", "publish", "query", "rebuild", "repo", "restart", "root", "run-script", "sbom",
+    "search", "set", "shrinkwrap", "star", "stars", "start", "stop", "team", "test", "token",
+    "uninstall", "unpublish", "unstar", "update", "version", "view", "whoami",
+}
+NPM_ALIASES = {
+    "author": "owner", "home": "docs", "issues": "bugs", "info": "view", "show": "view",  # glossary-ok: "bugs" is npm's own subcommand name
+    "find": "search", "add": "install", "unlink": "uninstall", "remove": "uninstall",
+    "rm": "uninstall", "r": "uninstall", "un": "uninstall", "rb": "rebuild", "list": "ls",
+    "ln": "link", "create": "init", "i": "install", "it": "install-test", "cit": "install-ci-test",
+    "up": "update", "c": "config", "s": "search", "se": "search", "tst": "test", "t": "test",
+    "ddp": "dedupe", "v": "view", "run": "run-script", "clean-install": "ci",
+    "clean-install-test": "install-ci-test", "x": "exec", "why": "explain", "la": "ll",
+    "verison": "version", "ic": "ci", "innit": "init", "in": "install", "ins": "install",
+    "inst": "install", "insta": "install", "instal": "install", "isnt": "install",
+    "isnta": "install", "isntal": "install", "isntall": "install", "install-clean": "ci",
+    "isntall-clean": "ci", "hlep": "help", "dist-tags": "dist-tag", "upgrade": "update",
+    "udpate": "update", "rum": "run-script", "sit": "install-ci-test", "urn": "run-script",
+    "ogr": "org", "add-user": "adduser",
+}
 DELETE_WORDS = ("rm", "remove-item", "ri", "del", "erase", "rd", "rmdir")
 
 
@@ -1407,22 +1443,113 @@ def _nm_inside(arg: str, where: str) -> str:
     return ""
 
 
-def npm_prefix(where: str) -> str:
-    """The folder npm installs into, as `npm prefix` finds it: the first folder from `where` upward
-    that holds a package.json or a node_modules. With none up to the drive root, npm uses `where`."""
+def npm_deref(word: str):
+    """The npm command a typed word runs, as npm's own `deref` resolves it: camelCase to dashes, an
+    exact name, an alias, or an abbreviation that no other name or alias shares (an abbreviation of a
+    name that another name extends, such as `install`, is the alias list's job). None for an unknown
+    word."""
+    word = re.sub(r"[A-Z]", lambda found: "-" + found.group(0).lower(), word)
+    if word in NPM_COMMANDS:
+        return word
+    if word in NPM_ALIASES:
+        return NPM_ALIASES[word]
+    matches = [name for name in NPM_COMMANDS | set(NPM_ALIASES) if name.startswith(word)] if word else []
+    if len(matches) != 1:
+        return None
+    found = matches[0]
+    while found in NPM_ALIASES:
+        found = NPM_ALIASES[found]
+    return found
+
+
+def _brace_expand(pattern: str):
+    """The patterns a minimatch brace set stands for: `packages/{a,b}` is `packages/a` and `packages/b`.
+    Braces nest. A set with no comma (`{a}`) or an unclosed brace stays literal."""
+    depth, start, commas = 0, -1, []
+    for at, char in enumerate(pattern):
+        if char == "{":
+            if depth == 0:
+                start, commas = at, []
+            depth += 1
+        elif char == "," and depth == 1:
+            commas.append(at)
+        elif char == "}" and depth:
+            depth -= 1
+            if depth == 0 and commas:
+                cuts = [start] + commas + [at]
+                head, tail = pattern[:start], pattern[at + 1:]
+                return [done for lo, hi in zip(cuts, cuts[1:])
+                        for body in _brace_expand(pattern[lo + 1:hi])
+                        for done in _brace_expand(head + body + tail)]
+    return [pattern]
+
+
+def _workspace_member(root: str, folder: str) -> bool:
+    """True when the package.json in `root` lists `folder` in its `workspaces` (a list, or an object
+    with `packages`), as npm maps it: `*` stays inside one folder name, `**` crosses folders, and a
+    `!` pattern removes a match. The folder needs its own package.json to count."""
+    try:
+        with open(os.path.join(root, "package.json"), encoding="utf-8") as handle:
+            workspaces = json.load(handle).get("workspaces")
+    except (OSError, ValueError, AttributeError):
+        return False
+    if isinstance(workspaces, dict):
+        workspaces = workspaces.get("packages")
+    if not isinstance(workspaces, list) or not os.path.lexists(os.path.join(folder, "package.json")):
+        return False
+    parts = os.path.relpath(folder, root).replace("\\", "/").split("/")
+
+    def matches(pattern, at=0, taken=0):
+        if at == len(pattern):
+            return taken == len(parts)
+        if pattern[at] == "**":
+            # `**` crosses folders but not a dot folder, as minimatch reads it.
+            return any(matches(pattern, at + 1, skip) for skip in range(taken, len(parts) + 1)
+                       if not any(part.startswith(".") for part in parts[taken:skip]))
+        if parts[taken:taken + 1] and parts[taken].startswith(".") and not pattern[at].startswith("."):
+            return False
+        return taken < len(parts) and fnmatch.fnmatchcase(parts[taken], pattern[at]) and matches(
+            pattern, at + 1, taken + 1)
+
+    # The last entry that matches decides, as npm reads the list in order: a `!` entry removes the folder,
+    # a later plain entry adds it back.
+    member = False
+    for entry in workspaces:
+        if isinstance(entry, str):
+            negated = entry.startswith("!")
+            for expanded in _brace_expand(entry.lstrip("!")):
+                if matches(expanded.replace("\\", "/").removeprefix("./").strip("/").split("/")):
+                    member = not negated
+    return member
+
+
+def npm_walk(where: str, workspaces: bool = True):
+    """(the folder npm installs into, whether it is a workspace root reached from a workspace), as
+    `npm prefix` finds them. The folder is the first from `where` upward that holds a package.json or
+    a node_modules. When that folder has a package.json, npm keeps walking, and the first folder above
+    it whose package.json lists it in `workspaces` becomes the prefix. With none up to the drive root,
+    npm uses `where`. With `workspaces` False (the `--no-workspaces` option), npm stops at that first
+    folder, the member itself (npm 10.9.9: `npm prefix --no-workspaces` run in a member prints the member)."""
+    first = None
     folder = where
     while True:
-        if any(os.path.lexists(os.path.join(folder, name)) for name in ("package.json", "node_modules")):
-            return folder
+        if first is None:
+            if any(os.path.lexists(os.path.join(folder, name)) for name in ("package.json", "node_modules")):
+                first = folder
+        elif not workspaces:
+            return first, False
+        elif _workspace_member(folder, first):
+            return folder, True
         parent = os.path.dirname(folder)
         if parent == folder:
-            return where
+            return (first or where), False
         folder = parent
 
 
 def npm_prefix_flag(words, where: str) -> str:
     """The folder `--prefix <dir>` or `--prefix=<dir>` names, from `where` when relative, else ''. npm uses
-    that folder as the prefix as it stands, with no walk upward. The last flag wins, as in npm."""
+    that folder as the prefix as it stands, with no walk upward. The last flag wins, as in npm. With no
+    `--prefix` and `--no-workspaces`, the folder is the member npm runs in (`npm_walk` with the walk off)."""
     value = ""
     for at, word in enumerate(words):
         if word == "--prefix" and at + 1 < len(words):
@@ -1432,7 +1559,55 @@ def npm_prefix_flag(words, where: str) -> str:
     value = value.strip("\"'")
     if "$" in value or "`" in value or value.startswith("~"):
         return ""  # the shell fills these in, so the guard cannot name the folder: the walk from `where` decides
+    if not value and _workspaces_off(words):
+        return npm_walk(where, False)[0]  # no `--prefix`, but `--no-workspaces`: the member itself, with no walk up
     return os.path.join(where, value) if value else ""
+
+
+def npm_prefix(where: str) -> str:
+    """The folder npm installs into: the first element of `npm_walk`."""
+    return npm_walk(where)[0]
+
+
+def _workspaces_off(words) -> bool:
+    """True when the last `workspaces` option on the command turns it off: `--no-workspaces`,
+    `--workspaces=false` or `--workspaces false`. With it off, npm's prefix is the member it runs in,
+    with no walk up to the workspace root. `-ws` and `--workspaces` turn it on again."""
+    off = False
+    for at, flag in enumerate(words):
+        if flag == "--no-workspaces" or flag == "--workspaces=false":
+            off = True
+        elif flag in ("--workspaces", "--workspaces=true", "-ws"):
+            off = flag == "--workspaces" and words[at + 1:at + 2] == ["false"]
+    return off
+
+
+def _workspace_reify(words) -> bool:
+    """False when the last `workspaces-update` option on the command turns it off: `--no-workspaces-update`,
+    `--workspaces-update=false`, or `--workspaces-update false`. With the option off, npm skips the
+    reify that a workspace run of `npm version` ends with."""
+    reify = True
+    for at, flag in enumerate(words):
+        if flag == "--no-workspaces-update" or flag == "--workspaces-update=false":
+            reify = False
+        elif flag == "--workspaces-update=true":
+            reify = True
+        elif flag == "--workspaces-update":
+            reify = words[at + 1:at + 2] != ["false"]
+    return reify
+
+
+def _has_positional(words) -> bool:
+    """True when `words` holds a word that is no option and no option's value: for `npm version`, the bump."""
+    at = 0
+    while at < len(words):
+        if words[at] in NPM_VALUE_FLAGS:
+            at += 2
+        elif words[at].startswith("-"):
+            at += 1
+        else:
+            return True
+    return False
 
 
 def linked_nm_hit(segment: str, where: str) -> str:
@@ -1448,6 +1623,7 @@ def linked_nm_hit(segment: str, where: str) -> str:
     def install(args):
         # A `)` glued to the last word closes the subshell or substitution the command sits in.
         words = [arg.rstrip(")") for arg in args]
+        workspaces = not _workspaces_off(words)
         subcommand, at = "", 0
         while at < len(words):
             if words[at] in NPM_VALUE_FLAGS:
@@ -1456,18 +1632,30 @@ def linked_nm_hit(segment: str, where: str) -> str:
                 at += 1
             else:
                 word = words[at].lower()
-                version_in_workspace = word == "version" and any(
-                    flag in NPM_WORKSPACE_FLAGS or flag.startswith("--workspace") for flag in words)
+                command = npm_deref(words[at])
+                # `npm version` takes npm's workspace path, and reifies the root, with a workspace flag or
+                # from a workspace folder, unless `workspaces-update` is off. From a workspace folder, a
+                # bare `npm version` names no bump: npm only lists the versions and reifies nothing.
+                version_in_workspace = command == "version" and _workspace_reify(words) and (
+                    any(flag in NPM_WORKSPACE_FLAGS or (
+                        flag.startswith("--workspace") and not flag.startswith("--workspaces-update"))
+                        for flag in words) or (npm_walk(where, workspaces)[1] and _has_positional(words[at + 1:])))
                 # `audit` rewrites the install when `fix` follows it, after any flag.
-                if word not in NPM_READ_ONLY or (word == "audit" and "fix" in words[at + 1:]) or (
+                if command not in NPM_READ_ONLY or (command == "audit" and "fix" in words[at + 1:]) or (
                         version_in_workspace):
                     subcommand = word
-                if word in NPM_DRY_RUN_WRITERS:
+                if command not in NPM_DRY_RUN_SAFE:
                     words = [flag for flag in words if flag != "--dry-run"]
                 break
         if subcommand and not NPM_NO_CHANGE.intersection(words) and is_link(
                 os.path.join(npm_prefix_flag(words, where) or npm_prefix(where), "node_modules")):
             return "npm " + subcommand + " in a folder whose node_modules is a link"
+        # From a member, npm installs at the root and also reifies the member's own node_modules, so a link
+        # there is written through even when the root's folder is real (npm 10.9.9 removed packages the lock
+        # lacks from the link's target). The member is the folder where the walk with workspaces off stops.
+        if subcommand and not NPM_NO_CHANGE.intersection(words) and not npm_prefix_flag(words, where) and (
+                npm_walk(where, workspaces)[1]) and is_link(os.path.join(npm_walk(where, False)[0], "node_modules")):
+            return "npm " + subcommand + " in a workspace member whose node_modules is a link"
         return ""
 
     return (_command_hit(segment, DELETE_WORDS, delete, flagged=True)
