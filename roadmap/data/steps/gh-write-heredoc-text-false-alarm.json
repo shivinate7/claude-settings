@@ -1,0 +1,14 @@
+{
+ "id": "gh-write-heredoc-text-false-alarm",
+ "title": "The guard that refuses cloud `gh` writes does not refuse a command whose heredoc only holds the words of a gh ready call",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Guard false alarm (the #3063 lane, via coordinator 12:21 CST Nov 14; the coordinator did not study it, nor did triage): rule `gh-write-cloud` refused Bash calls whose heredoc held literal gh-ready text; the lane used the Edit tool instead. For the guard's record under the cry-wolf rule: a guard that goes red when nothing is wrong is spent. What is unread: the command lines and the text of the refusal. Kin (same shape: guard text matched inside a heredoc body): draft-pr-guard-heredoc, draft-pr-guard-text-false-alarm, env-heredoc-false-alarm, process-args-heredoc-probe. First act of a lane: read the guard record and the exact calls, then reproduce, red then green: a heredoc that only quotes `gh pr ready` text is not refused, and a real `gh pr ready` call still is. Test the scanner on comment openers and a lone quote in the heredoc text.",
+ "source": "the #3063 lane via coordinator 12:21 CST Nov 14",
+ "note": "Filed 12:23 CST Nov 14 by triage. Tracker: the coordinator. No lane yet. Rule: verification-cry-wolf-guard-is-spent.",
+ "updatedAt": "2026-11-14T12:23:00"
+}
