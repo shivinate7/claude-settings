@@ -53,8 +53,8 @@ HOOK = os.environ.get("SENDMESSAGE_STATE_UNDER_TEST") or os.path.join(HERE, "sen
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 ROOT = _test_temp.run_folder()  # every temp file of this run, fixture repos included, lives under it
-sys.path.insert(0, os.path.join(HERE, "test_support"))
-import cost_probe  # noqa: E402  the shared cost counters (hooks/test_support/cost_probe.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)  # a pass, a failed case or a crash leaves no folder
 STUB_DIR = os.path.join(ROOT, "stub")
 FAILED = []

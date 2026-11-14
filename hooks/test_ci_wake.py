@@ -133,8 +133,8 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
-sys.path.insert(0, os.path.join(HERE, "test_support"))
-import cost_probe  # noqa: E402  the shared cost counters (hooks/test_support/cost_probe.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 # Absolute: each case runs the hook with its own temp folder as cwd, so a relative path breaks there.
 MODULE = os.path.abspath(os.environ.get("CI_WAKE_MODULE") or os.path.join(HERE, "ci_wake.py"))
 PY = sys.executable

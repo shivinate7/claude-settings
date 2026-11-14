@@ -64,8 +64,8 @@ from case_runner_test import Skip, run_cases
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
-sys.path.insert(0, os.path.join(HERE, "test_support"))
-import cost_probe  # noqa: E402  the shared cost counters (hooks/test_support/cost_probe.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 MODULE = os.environ.get("STALL_WATCH_MODULE") or os.path.join(HERE, "stall_watch.py")
 PY = sys.executable
 VERDICT = os.path.join(os.path.dirname(HERE), "bin", "verdict")

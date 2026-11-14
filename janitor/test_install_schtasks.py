@@ -26,9 +26,9 @@ INSTALLER = os.path.join(HERE, "install_schtasks.py")
 sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
-sys.path.insert(0, os.path.join(REPO_ROOT, "hooks", "test_support"))
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
-import cost_probe  # noqa: E402  the shared cost counters (hooks/test_support/cost_probe.py)
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 import guard  # noqa: E402
 import install_schtasks  # noqa: E402
 

@@ -27,7 +27,7 @@ import sys
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
+REPO = os.path.abspath(os.path.join(HERE, ".."))
 sys.path.insert(0, os.path.join(REPO, "hooks"))
 import _nowindow  # noqa: E402  the one home of a child start (hooks/_nowindow.py)
 

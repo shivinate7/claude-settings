@@ -37,8 +37,8 @@ import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (on
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import test_refusal_note as hook_base  # noqa: E402  the route-rows seam name and fixture (one home, hooks/test_refusal_note.py)
-sys.path.insert(0, os.path.join(HOOKS, "test_support"))
-import cost_probe  # noqa: E402  the shared cost counters (hooks/test_support/cost_probe.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 # The correction step's words (decision guard-remedy-not-to-owner, shared tails). A refusal holds none of them; the

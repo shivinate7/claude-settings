@@ -56,8 +56,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # line. These cases check the Central line alone, so no child sees a store.
 for _name in ("MAILBOX_REPO", "MAILBOX_CACHE"):
     os.environ.pop(_name, None)
-sys.path.insert(0, os.path.join(HERE, "test_support"))
-import cost_probe  # noqa: E402  the shared cost counters (hooks/test_support/cost_probe.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 MODULE_PATH = os.environ.get("LOCAL_TIME_UNDER_TEST") or os.path.join(HERE, "local_time.py")
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)

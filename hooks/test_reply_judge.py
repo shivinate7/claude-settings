@@ -36,9 +36,9 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "lint"))
-sys.path.insert(0, os.path.join(HERE, "test_support"))
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
-import cost_probe  # noqa: E402  the shared cost counters (hooks/test_support/cost_probe.py)
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 
 MODULE_PATH = os.environ.get("REPLY_JUDGE_UNDER_TEST") or os.path.join(HERE, "reply_judge.py")
 SETTINGS_PATH = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO_ROOT, "settings.json")

@@ -55,10 +55,10 @@ REPO_ROOT = os.path.dirname(HERE)
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO_ROOT, "settings.json")
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "lint"))
-sys.path.insert(0, os.path.join(HERE, "test_support"))
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import _test_ruling_kind_fixture as fx  # noqa: E402  the fixture record text (lint/_test_ruling_kind_fixture.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
-import cost_probe  # noqa: E402  the shared cost counters (hooks/test_support/cost_probe.py)
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 
 try:
     import prose_judge as pj
