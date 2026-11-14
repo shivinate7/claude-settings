@@ -97,6 +97,9 @@ STEP_TAG = "cs-step:"
 TOPIC_TAG = "cs-topic:"
 BUILD_TAG = "cs-build:"
 LANE_TAG = BUILD_TAG + "lane"
+# The consultant is owner-facing: its questions go to the owner, never to a parent, so it carries no lane duty even
+# when its record names a parent id.
+CONSULTANT_TAG = BUILD_TAG + "consultant"
 # A lane start's title opens with LANE_TITLE_FORM, so the owner's sidebar shows which branch a lane runs (rule
 # lane-title-slug). The check's pattern is cut from the form, so the form the remedy prints and the opening the
 # guard accepts cannot differ: the text round the placeholder is kept literal, and the placeholder reads a branch
