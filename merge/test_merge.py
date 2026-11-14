@@ -15387,8 +15387,9 @@ class ReviewNoRestart(ReviewEnv):
     below REVIEW_LAST_ROUND without a --fix-check. A record with no round line and a --fix-check is no restart: its fix check passes, or fails and
     needs a new lane (owner, page item 741, 14:01 CST). A record may open at the last round after a failed second round, or after a failed fix
     check with no second round written, and then holds that last round alone. A comment that does not parse, or that names another pull request, is skipped. A refusal exits 2 and prints
-    nothing on stdout. A record with no round line is refused after an earlier record whose last design reviewer line is FAIL or PARTIAL, since it holds
-    no design reviewer line to clear that hold. Each accepted case is a control: it prints a record on main and after the change."""
+    nothing on stdout. A record with no round line is refused after an earlier record whose last design reviewer line is FAIL or PARTIAL, or after
+    records with no design reviewer line that follow it, since it holds no design reviewer line to clear that hold. Each accepted case is a control:
+    it prints a record on main and after the change."""
 
     EARLIER_FIX_FROM = "1e" * 20  # the head a fix check's fix diff started from: a fix check line never names its own record's Head
     GRANT = REVIEW_GRANT_TEXT  # the owner's grant of a fourth review pass, bound to this pull request
@@ -15699,6 +15700,31 @@ class ReviewNoRestart(ReviewEnv):
                     self.assert_accepted(rc, out, err)
                 else:
                     self.assert_refused_naming_design(rc, out, err)
+
+    def run_after_a_design_line_chain(self, verdict):
+        """-> (rc, out, err) of a record with no round line after an earlier record whose last design reviewer line is `verdict`, through a
+        second record with no round line at FIX_HEAD, which holds no design reviewer line. The second's fix verifier PASSes at REVIEW_OLD_HEAD."""
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", f"Round 1: design-reviewer, opus, {verdict}"))
+        second = record_text(head=self.FIX_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="PASS"),))
+        self.assertEqual(record_verdict(self, earlier, head=REVIEW_OLD_HEAD)[0], "open", "scope: the earlier record must read open on its own")
+        self.assertEqual(self.design_line_values(second), [], "scope: the second record holds no design reviewer line, so only the walk reaches the earlier one")
+        argv = self.review_argv(fix=f"{self.FIX_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS")
+        for body in (earlier, second):
+            parse_text(self, body)
+        # the second record's fix verifier is the newest one, so the live head is read as a plain commit: listed with no parents
+        host = self.record_host(*(review_comment(i, 7, body) for i, body in enumerate((earlier, second), 1)), head=self.head(), commits={self.head(): []})
+        return self.run_args(*argv, host=host)
+
+    def test_a_fix_verifier_only_record_after_a_design_line_fail_through_another_is_refused(self):
+        # A record with no round line that follows another such record is refused too: the refusal walks back through records with no design
+        # reviewer line to the last one that has such a line, as the reader does. The control below changes only the earlier design line.
+        rc, out, err = self.run_after_a_design_line_chain("FAIL")
+        self.assert_refused_naming_design(rc, out, err)
+
+    def test_a_fix_verifier_only_record_after_a_design_line_pass_through_another_is_accepted(self):
+        # Control for the refusal above: the earlier record's last design reviewer line is PASS, so the walk stops there and the same record is accepted.
+        rc, out, err = self.run_after_a_design_line_chain("PASS")
+        self.assert_accepted(rc, out, err)
 
 class ReviewFixAfterRoundThree(ReviewEnv):
     """The chain of a Guard or check change: a failed first round (haiku), a failed second round (sonnet), a passing third round (sonnet, net value
