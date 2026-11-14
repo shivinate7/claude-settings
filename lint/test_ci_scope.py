@@ -616,8 +616,9 @@ class Scope(unittest.TestCase):
 
 # A records-only push after a fully green head. GREEN_HEAD names the
 # pull request's newest earlier head whose `checks` run was fully green. When the delta from it to HEAD is docs/records.md
-# alone, the 13 job and suite flags below are false, and the four lint flags and mutation_report keep their whole-PR
-# values. Every other case runs as before: the flags follow the whole PR diff against BASE_SHA.
+# alone, the 13 job and suite flags below are false, and so is mutation_report: the shortcut skips every job of the push.
+# The four lint flags keep their whole-PR values. Every other case runs as before: the flags follow the whole PR diff
+# against BASE_SHA.
 def differing(got, want, names=None):
     """-> the sorted names whose value in `got` is not `want`'s. Default: every name either one holds."""
     names = set(got) | set(want) if names is None else names
@@ -666,8 +667,8 @@ class RecordsOnlyPush(unittest.TestCase):
         self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
         for n in self.OFF:
             self.assertEqual(got.get(n), "false", f"{n} stays on after a records-only push past a green head: {got}")
-        keep = list(LINT_FLAGS) + ["mutation_report"]
-        self.assertEqual(differing(got, whole, keep), [], f"a lint flag or mutation_report moved off the whole PR diff: {got}")
+        keep = list(LINT_FLAGS)
+        self.assertEqual(differing(got, whole, keep), [], f"a lint flag moved off the whole PR diff: {got}")
 
     # The skip flag is 'true' exactly when the shortcut forced the 13 flags off. In CI HEAD is the merge commit, so the merged
     # shape is checked too. The facts are read before the flags and the flag (P7).
@@ -726,8 +727,8 @@ class RecordsOnlyPush(unittest.TestCase):
         self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
         for n in self.OFF:
             self.assertEqual(got.get(n), "false", f"{n} stays on for a hand-edited records page: {got}")
-        keep = list(LINT_FLAGS) + ["mutation_report"]
-        self.assertEqual(differing(got, whole, keep), [], f"a lint flag or mutation_report moved for a hand-edited page: {got}")
+        keep = list(LINT_FLAGS)
+        self.assertEqual(differing(got, whole, keep), [], f"a lint flag moved for a hand-edited page: {got}")
 
     # A push never reads GREEN_HEAD: every flag is on, as it was before the change.
     def test_records_only_push_event_runs_everything(self):
@@ -773,8 +774,8 @@ class RecordsOnlyPush(unittest.TestCase):
                          f"scope: the delta to PR_HEAD is not docs/records.md alone: {facts}")
         for n in self.OFF:
             self.assertEqual(got.get(n), "false", f"{n} stays on: the delta ran to the merge commit, not PR_HEAD: {got}")
-        keep = list(LINT_FLAGS) + ["mutation_report"]
-        self.assertEqual(differing(got, whole, keep), [], f"a lint flag or mutation_report moved off the whole PR diff: {got}")
+        keep = list(LINT_FLAGS)
+        self.assertEqual(differing(got, whole, keep), [], f"a lint flag moved off the whole PR diff: {got}")
 
     # The control beside the case above: a second delta path runs the whole PR diff, with the base change in the merge commit too.
     def test_records_only_uses_pr_head_not_the_merge_commit_second_path_runs_as_before(self):
@@ -786,6 +787,44 @@ class RecordsOnlyPush(unittest.TestCase):
         self.assertEqual(facts.get("delta_pr_head"), sorted([self.RECORDS, other]), f"scope: the delta to PR_HEAD is not the two paths: {facts}")
         self.assertEqual(differing(got, whole), [], f"a second delta path moved a flag off the whole PR diff: {got}")
         self.assertSkipFlag(got, False)
+
+    # The shortcut turns off every job of a records-only push, the mutation-report job included, whatever the head ref.
+    # The scope is asserted before the flag (P7): the shortcut applies, then mutation_report is read.
+    def test_records_only_mutation_report_skip_applies_batch_branch_is_false(self):
+        facts = {}
+        got = run([self.RECORDS], green=self.CODE, head_ref="batch-x", facts=facts)
+        self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+        self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
+        self.assertSkipFlag(got, True)
+        self.assertEqual(got.get("mutation_report"), "false", f"a records-only push on a batch pull request turns mutation_report on: {got}")
+
+    # The same shortcut on a pull request from another branch: mutation_report is false, as it was before the shortcut.
+    def test_records_only_mutation_report_skip_applies_lane_branch_is_false(self):
+        facts = {}
+        got = run([self.RECORDS], green=self.CODE, head_ref="lane-x", facts=facts)
+        self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+        self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
+        self.assertSkipFlag(got, True)
+        self.assertEqual(got.get("mutation_report"), "false", f"a records-only push on a lane pull request turns mutation_report on: {got}")
+
+    # The control beside the two cases above: GREEN_HEAD empty, so the shortcut does not apply and a batch pull request keeps
+    # mutation_report on. The skip is asserted before the flag (P7).
+    def test_records_only_mutation_report_skip_does_not_apply_batch_branch_is_true(self):
+        facts = {}
+        got = run([self.RECORDS], green=self.CODE, green_head="", head_ref="batch-x", facts=facts)
+        self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
+        self.assertSkipFlag(got, False)
+        self.assertEqual(got.get("mutation_report"), "true", f"a batch pull request with no green head turns mutation_report off: {got}")
+
+    # The control: a push never takes the shortcut, so mutation_report is on for a push even with GREEN_HEAD set. The scope
+    # is asserted before the flag (P7).
+    def test_records_only_mutation_report_push_with_green_head_is_true(self):
+        facts = {}
+        got = run([self.RECORDS], green=self.CODE, event="push", facts=facts)
+        self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+        self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
+        self.assertSkipFlag(got, False)
+        self.assertEqual(got.get("mutation_report"), "true", f"a push with GREEN_HEAD set turns mutation_report off: {got}")
 
 
 # The mod phase must run each mods check script (mods/**/check.mjs), not only *.test.mjs. The script cds to its own
