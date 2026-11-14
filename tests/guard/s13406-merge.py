@@ -533,15 +533,16 @@ def role_result(tool_id, text):
         {"type": "tool_result", "tool_use_id": tool_id, "content": [{"type": "text", "text": text}]}]}})
 
 
-def role_record(tags, session=ROLE_OWN, title="a lane session"):
-    """The text get_session returns: a JSON object whose ccr block holds the record."""
+def role_record(tags, session=ROLE_OWN, title="a lane session", parent="session_PARENT01"):
+    """The text get_session returns: a JSON object whose ccr block holds the record. `parent` None writes no parent,
+    a plain session; a session with a parent is a lane (R13 point 4, lane-no-popup)."""
     return json.dumps({"ccr": {"id": session, "title": title, "tags": list(tags),
-                               "parent_session_id": "session_PARENT01"}})
+                               "parent_session_id": parent}})
 
 
-def role_call(tool_id, tags, session=ROLE_OWN, title="a lane session"):
-    """One paired get_session call whose record carries `tags`."""
-    return [role_use(tool_id, GET_SESSION), role_result(tool_id, role_record(tags, session, title))]
+def role_call(tool_id, tags, session=ROLE_OWN, title="a lane session", parent="session_PARENT01"):
+    """One paired get_session call whose record carries `tags` and `parent`."""
+    return [role_use(tool_id, GET_SESSION), role_result(tool_id, role_record(tags, session, title, parent))]
 
 
 def role_tag_call(tool_id, session=ROLE_OWN):
@@ -676,12 +677,15 @@ ROLE_LINES = {
     "pending-newest": role_call("g1", RUNNER_TAGS) + [role_use("g2", GET_SESSION)],
     "foreign-newest": role_call("g1", RUNNER_TAGS) + role_call("g2", LANE_TAGS, session=ROLE_OTHER),
     # trust-card-in-build shapes: an own record with no cs-build tag, and foreign records beside or in place of it.
-    "untagged": role_call("g1", ["cs-repo:o/r"]),
+    # The allow shapes below carry no parent: a plain session. A session with a parent is a lane (R13 point 4).
+    "untagged": role_call("g1", ["cs-repo:o/r"], parent=None),
+    # R13 point 4: the same record with a parent is a lane. Only the parent differs from "untagged".
+    "lane-untagged": role_call("g1", ["cs-repo:o/r"]),
     "other-untagged": role_call("g1", ["cs-repo:o/r"], session=ROLE_OTHER),
-    "foreign-lane-newest": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", LANE_TAGS, session=ROLE_OTHER),
+    "foreign-lane-newest": role_call("g1", ["cs-repo:o/r"], parent=None) + role_call("g2", LANE_TAGS, session=ROLE_OTHER),
     # A session reads its record untagged at start, then tags itself: the untagged read is stale from then on.
     "untagged-then-tags": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1"),
-    "tags-then-untagged": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", ["cs-repo:o/r"]),
+    "tags-then-untagged": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", ["cs-repo:o/r"], parent=None),
     "tags-then-coordinator": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", COORD_TAGS),
     "untagged-then-lane": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", LANE_TAGS),
     # roadmap-one-writer reads these too: a triage record, its tag set after, a title, another session, and
@@ -692,7 +696,7 @@ ROLE_LINES = {
     "triage-then-other-tags": role_call("g1", TRIAGE_TAGS) + role_tag_call("t1", session=ROLE_OTHER),
     "triage-then-tags-no-ids": role_call("g1", TRIAGE_TAGS) + [role_use("t1", SET_SESSION_TAGS, {"add": ["x"]}),
                                                                role_result("t1", "ok")],
-    "untagged-then-other-tags": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1", session=ROLE_OTHER),
+    "untagged-then-other-tags": role_call("g1", ["cs-repo:o/r"], parent=None) + role_tag_call("t1", session=ROLE_OTHER),
     "untagged-then-both-tags": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1", session=ROLE_OTHER)
     + role_tag_call("t2"),
     "triage-title": role_call("g1", LANE_TAGS, title="handed to cs-build:triage"),
@@ -1308,8 +1312,11 @@ for _trust_tool in TRUST_TOOLS:
     _trust_word = _trust_tool.rsplit("__", 1)[1]
     trust_refuse(_trust_word + " in a coordinator session is refused", _trust_tool, role_path("coordinator"))
     trust_refuse(_trust_word + " in a lane session is refused", _trust_tool, role_path("lane"))
-    trust_allow(_trust_word + " in a session whose record has no cs-build tag allows", _trust_tool,
+    trust_allow(_trust_word + " in a session whose record has no cs-build tag and no parent allows", _trust_tool,
                 role_path("untagged"))
+    # R13 point 4 (lane-no-popup): the same record with a parent is a lane. Its card is refused, routed to the parent.
+    trust_refuse(_trust_word + " in a session with a parent and no cs-build tag is refused, routed to @parent", _trust_tool,
+                 role_path("lane-untagged"), carries=("@parent",))
     # No own record to read is a refusal, and the reason steers to get_session alone, then a retry.
     for _trust_why, _trust_file in (
         ("no get_session record", "no-record"),
