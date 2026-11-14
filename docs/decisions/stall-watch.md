@@ -104,10 +104,19 @@ guard rule, so the watcher does the waiting and the session is told once.
   Kept as a stall: a child that holds a lock and does nothing, no CPU (the `playwright install` hang, case 4).
   The watcher reports a stall only on a job state and named-log sample from the same pass. A sample
   from the once-a-second check can be a second old, and miss a write or the job's end.
-  Each background job starts at most one watcher process, unmeasured. Its process cost is open: owner Cockpit item 180 holds
-  it (plan `docs/plans/align-watchers.md`, unmeasured). Each named log gets at most one stat a second in the watcher's own loop,
-  one more before each stall report, and one at each Stop check, not pinned. The beat file costs at most one append per
-  heartbeat. The watcher reads it on each 0.2 s loop pass.
+
+  Each background job starts one watcher process. It is a named exception to rule `outcomes-mechanize-rules`
+  (owner ruling, Cockpit item 180, pick a, 2026-11-06 12:19 CST; home `.claude/rules/hooks.md`). Status: ruled (`stall-watch-exceptions-180a`).
+  The watcher lives as long as its job. Cost, per `outcomes-mechanize-rules`: the hook
+  starts no child for a plain command (`hooks/test_stall_watch.py`, class `CostTests`). For a command that ends
+  in an odd trailing backslash, it starts one `sh` child (`hooks/test_stall_watch.py`, class `CostTests`). Each
+  background call starts one watcher, not pinned: no test counts watcher starts (note `stall-cost-proxies`).
+  The watcher reads the job's state about every second, through one `ps` child per read (`hooks/test_stall_watch.py`,
+  class `CostTests`, pins one `ps` child per state read). The job's log and beat files are removed when the job
+  ends (`hooks/test_stall_watch.py`, class `CostTests`). How often: once per background shell call. Each named log
+  gets one stat a second in the watcher's own loop, one more before each stall report, and one at each Stop check
+  (unmeasured). The beat file costs one append per heartbeat (unmeasured). The watcher reads it on each 0.2 s loop
+  pass.
 - The job removes its log and beat file when it ends, also after a STALL report (the job keeps writing
   until then, so nothing is removed at stall time), and when the original calls `exit N` (the exit code is
   kept). The wrapper creates both files and opens both before the job starts. The watcher inherits those
@@ -117,8 +126,8 @@ guard rule, so the watcher does the waiting and the session is told once.
   so does one that sets its own EXIT trap. The exec'd command replaces the job's subshell and keeps its pid, so
   the report still lists one process. A stalled job of that kind leaves its two files. A job killed before it can run its
   trap leaves them too. A job that never stalls is cleaned by the wrapper after `wait`. The report's
-  `Log:` line says the file is usually removed when the job ends. Cost: two small files created per job
-  and two held handles in the watcher, no new process (unmeasured). In a wrapped run the watcher no longer polls for the beat file. Run by hand with no beat handle, it still tries one open a second.
+  `Log:` line says the file is usually removed when the job ends. Cost: the job creates its log and beat files, and removes them as above
+  (`hooks/test_stall_watch.py`, class `CostTests`). The handles the watcher holds on them are unmeasured. In a wrapped run the watcher no longer polls for the beat file. Run by hand with no beat handle, it still tries one open a second.
 
 ## The Stop-time check
 

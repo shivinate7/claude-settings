@@ -82,10 +82,10 @@ gh api repos/<owner>/<repo>/branches/<branch>/protection
 
 Read `required_status_checks` in that output. It must name one check: `all-jobs-passed`.
 
-A skipped job fails the rollup. So skip a scoped-out suite at its CI step, and the job still
-passes. A required job that never starts, because of a path filter on the whole workflow, stops
-the merge. Require a matrix through one fan-in job with `if: always()`. Its check name stays fixed
-when the matrix changes.
+A skipped job fails the rollup, unless `scope-skips` names it (step 19). So skip a scoped-out
+suite at its CI step, and the job still passes. A required job that never starts, because of a
+path filter on the whole workflow, stops the merge. Require a matrix through one fan-in job with
+`if: always()`. Its check name stays fixed when the matrix changes.
 
 Rename a required check by moving the rule to `all-jobs-passed`. `protect.py`, the one script that
 writes the ruled ruleset, accepts only that name for `--check`. It refuses any other name. Preview
@@ -311,21 +311,68 @@ Source: https://docs.github.com/en/billing/managing-billing-for-github-actions/a
 
 ## 19. Scope skip on a CI step
 
-Each job that needs `scope` starts. Its CI step carries the scope flag. The job never carries it.
+Each job that needs `scope` carries the scope flag on its CI step. Three macOS jobs,
+`shell-macos`, `checks-macos` and `checks-macos-b`, also carry a flag in a job-level `if`, because
+a step-level skip still starts a runner.
 
 ```yaml
-  shell-macos:
+  shell-suite:
     needs: scope
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 60   # provisional, step 5
     steps:
       - uses: actions/checkout@<full-sha>  # v5.0.0
         with: {persist-credentials: false}
       - name: Shell suite
-        if: ${{ needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request' }}
+        if: ${{ needs.scope.outputs.shell_suite == 'true' || github.event_name != 'pull_request' }}
         run: echo "run the shell suite here"
 ```
 
 The scope flag comes from the scope job's outputs. A draft PR skips the scope job, so every job that
-needs it skips too (step 11). That draft skip is the only job-level skip. A job that runs only off
-pull requests skips at its CI steps the same way. A skipped job fails the rollup.
+needs it skips too (step 11). A job that runs only off pull requests skips at its CI steps the same
+way. A skipped job fails the rollup unless `scope-skips` names it. That input takes
+`{job: [scope flag, ...]}`, and passes a listed job only when the scope job succeeded and each
+listed flag is exactly `"false"`.
+
+## 20. Skip a push whose tree a PR run already proved
+
+The `push-skip` job asks the shared action whether the pushed commit's tree is the head tree of a
+merged PR whose run passed. `scope` waits on the job. The suite jobs need `scope`, so a skip
+reaches every job through `needs`, and the run ends green. The job starts on every event and its
+steps run on a push only. A job-level `if` would leave it skipped on a pull request. A skipped
+needed job fails the rollup unless `scope-skips` names it (step 19).
+
+```yaml
+  push-skip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      actions: read
+    outputs:
+      skip: ${{ steps.decide.outputs.skip }}
+    steps:
+      - uses: actions/checkout@<full-sha>  # v5.0.0
+        if: ${{ github.event_name == 'push' }}
+        with: {persist-credentials: false}
+      - name: Decide whether the push can skip
+        id: decide
+        if: ${{ github.event_name == 'push' }}
+        uses: shivinate7/claude-settings/actions/push-skip@<full-sha>  # <version>
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.sha }}
+          PUSH_TREE: ${{ github.event.head_commit.tree_id }}
+          EVENT: ${{ github.event_name }}
+  scope:
+    if: ${{ !cancelled() && needs.push-skip.outputs.skip != 'true' }}
+    needs: [push-skip]
+```
+
+The action reads your suite jobs from your own `.github/workflows/checks.yml`: the jobs your
+`all-jobs-passed` needs, except `scope`, `push-skip` and the rollup. Set the `workflow` input when
+the file has another name. A step that scope skips in a suite job does not stop the skip: a narrowed
+PR run that passed still skips the push. A `schedule` or manual run never skips on this action.
