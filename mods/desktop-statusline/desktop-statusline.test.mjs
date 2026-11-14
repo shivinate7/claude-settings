@@ -92,7 +92,8 @@ const fire = (h, event, e = {}) => {
   if (!hook) throw new Error(`no handler for ${event}`)
   return hook.fn(h.$, e, async x => x)
 }
-const settle = () => new Promise(r => setTimeout(r, 5))
+// One macrotask turn. The fake host does its work in promises only, so every chain it starts has settled by then.
+const settle = () => new Promise(r => setImmediate(r))
 async function advance(h, ms) {
   const end = h.now + ms
   for (;;) {

@@ -1933,7 +1933,6 @@ for (const kind of ["hold", "orphan"]) {
       // A file, not a pipe: without a watchdog the fixture would hold a pipe, and this test, forever.
       const outFile = join(dir, "out.txt");
       const fd = openSync(outFile, "w");
-      const t0 = Date.now();
       let r, found;
       try {
         r = shSync(process.execPath, [SELF], { env, stdio: ["ignore", fd, fd], timeout: 40_000 });
@@ -1941,9 +1940,10 @@ for (const kind of ["hold", "orphan"]) {
         closeSync(fd);
         found = leftovers(pidFile);
       }
-      const secs = (Date.now() - t0) / 1000;
       const out = readFileSync(outFile, "utf8");
-      assert.ok(secs < 30, `took ${secs} s\n${out}`);
+      // The watchdog prints the cap line when it ends the suite. Teardown time after the cap is not bounded here: a real-clock
+      // bound breaks test-practices P5, and shSync's 40 s timeout is the only limit on it.
+      assert.match(out, /The suite ran past its 5 s cap/, `no cap line: the cap did not end the suite\n${out}`);
       assert.equal(found.pids.length, 2, out);
       assert.deepEqual(found.left, [], `still running: ${JSON.stringify(found.left)}; exit ${r.status}; cap line ${/ran past its/.test(out) ? "present" : "absent"}\n${out}`);
       assert.equal(r.status, 1, out);
