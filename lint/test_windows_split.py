@@ -1754,7 +1754,7 @@ def skip_block_problems(text):
     return problems
 
 
-def scope_skip_problems(text):
+def scope_waits_on_skip_jobs_problems(text):
     """R61 part 3: scope needs both skip jobs, and its if skips a scheduled run exactly when nightly-skip says skip. A skipped
     scope skips every job through needs; an unset or failed skip job reads '' and runs everything (unknown is not skip)."""
     sc = all_jobs(text).get("scope") or {}
@@ -1871,8 +1871,8 @@ class MacOnceByBatch(unittest.TestCase):
         self.assertEqual(skip_block_problems(self.text), [])
 
     def test_scope_waits_on_the_skip_and_skips_a_scheduled_run_only_when_the_skip_says_skip(self):
-        # Named failure: a scheduled run reruns a green main, or a skipped gate skips a push or a red run.
-        self.assertEqual(scope_skip_problems(self.text), [])
+        # Named failure: a scheduled run reruns a green main, or a skipped nightly-skip job skips a push or a red run.
+        self.assertEqual(scope_waits_on_skip_jobs_problems(self.text), [])
 
     def test_checker_sees_the_push_guard_defects(self):
         # The control: the macOS scope skip on a macOS job, with its scope condition in the steps, passes. Each defect is flagged.
@@ -1910,12 +1910,12 @@ class MacOnceByBatch(unittest.TestCase):
                  "      - run: echo scope\n")
         self.assertEqual(skip_job_problems("jobs:\n" + nightly_skip), [])
         self.assertEqual(skip_block_problems("jobs:\n" + nightly_skip), [])
-        self.assertEqual(scope_skip_problems("jobs:\n" + scope + nightly_skip), [])
+        self.assertEqual(scope_waits_on_skip_jobs_problems("jobs:\n" + scope + nightly_skip), [])
         # A scope that waits on nightly-skip alone is the defect this scope check names.
-        self.assertTrue(scope_skip_problems("jobs:\n" + scope.replace("    needs:\n      - nightly-skip\n      - push-skip\n",
-                                                                      "    needs:\n      - nightly-skip\n") + nightly_skip))
+        self.assertTrue(scope_waits_on_skip_jobs_problems("jobs:\n" + scope.replace("    needs:\n      - nightly-skip\n      - push-skip\n",
+                                                                                    "    needs:\n      - nightly-skip\n") + nightly_skip))
         # The control, with !cancelled() as the status function: it passes too.
-        self.assertEqual(scope_skip_problems("jobs:\n" + scope.replace("always()", "!cancelled()") + nightly_skip), [])
+        self.assertEqual(scope_waits_on_skip_jobs_problems("jobs:\n" + scope.replace("always()", "!cancelled()") + nightly_skip), [])
         skip_bad = {
             "the gate skips on a pull request": nightly_skip.replace(
                 "    runs-on:", "    if: ${{ github.event_name == 'schedule' }}  # the 03:17 run only\n    runs-on:", 1),
@@ -1944,7 +1944,7 @@ class MacOnceByBatch(unittest.TestCase):
         }
         for label, text in scope_bad.items():
             with self.subTest(defect=label):
-                self.assertTrue(scope_skip_problems("jobs:\n" + text + nightly_skip), label)
+                self.assertTrue(scope_waits_on_skip_jobs_problems("jobs:\n" + text + nightly_skip), label)
 
 
 FULL_SUITE_BASES = (GUARD_JOB, "checks-windows-merge", "checks-windows-rest")
