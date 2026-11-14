@@ -1407,4 +1407,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    finally:
+        shutil.rmtree(RUN_FOLDER, ignore_errors=True)
