@@ -25,7 +25,7 @@ chat `Gain:` and `Lose:` in the option's description. Only a line at a line star
 
 THE OLDER RULES keep their ids and run first, in this order, then the form:
 `item-field-rendered` (a field the page draws), `port-question`, `uniform-pick`, `press-link`, `command-in-item`,
-`gh-login-switch`, `task-names-check`, `task-why-cited` (page items), then the form. A missing Goal, Problem or Based on line, a
+`task-options`, `gh-login-switch`, `task-names-check`, `task-why-cited` (page items), then the form. A missing Goal, Problem or Based on line, a
 Based on count outside 1-3, a kind outside
 PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`, and so does a Goal, Problem or
 Based on line whose text is only an angle-bracket placeholder (the template copied; `<Button>` inside real
@@ -391,14 +391,11 @@ TASK_OPTIONS_REASON = ("The page draws `options` only for a decision, so a task'
 
 
 def task_options_hit(op, data) -> str:
-    """A non-empty `options` list on an item the page draws as a task: kind task, or a set with no kind key (a
-    missing kind reads as task, as in command_in_item_hit). An update with no kind key leaves the stored kind
-    alone, so it may be a decision's options. A non-list `options` is not this rule's."""
-    if not isinstance(data, dict):
-        return ""
-    if op == "update" and "kind" not in data:
-        return ""
-    if data.get("kind", "task") != "task":
+    """A non-empty `options` list on an open item written with an explicit `kind: task`. A set or an update with
+    no kind key is never refused: the guard cannot see the stored kind, which may be a decision whose options
+    the page draws (as decision_form_hit and _open_decision read it). A closed item passes. A non-list
+    `options` is not this rule's."""
+    if not isinstance(data, dict) or data.get("kind") != "task" or data.get("status") == "closed":
         return ""
     options = data.get("options")
     if isinstance(options, list) and options:
