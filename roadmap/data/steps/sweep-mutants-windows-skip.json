@@ -1,0 +1,14 @@
+{
+ "id": "sweep-mutants-windows-skip",
+ "title": "Fix the red main: the Windows sweep mutation job reports 2 survivors and 38 skipped in janitor/mutate_sweep.py",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL3svSojL48HQgrLDbp",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Main's push run is red, so only the revert merges and the batch runner gets no go.",
+ "source": "Coordinator 18:28 CST Nov 13, from the consultant's facts; owner typed 18:26 CST via the consultant. Unchecked by triage.",
+ "note": "Filed 18:33 CST Nov 13. Facts (consultant): main push run 43531841828, job checks-windows-sweep (132251441686) fails \"147 of 149 killed, 2 survived, 38 skipped\". Survivors in janitor/mutate_sweep.py: the finish gate (dead host live lock) and the cut-short restore (finished dead-host tree). They came from #2783 via #3278. Lane sweep-mutants-windows-skip (session_013NEJL3svSojL48HQgrLDbp, Sonnet medium) started 18:28. Done check: a green main push run that ran its suites. Bandaid per consultant: #3303 turns main green meanwhile. Related: dead-host-free-on-win-mac.",
+ "updatedAt": "2026-11-13T18:33:58-06:00"
+}
