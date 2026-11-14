@@ -1,0 +1,14 @@
+{
+ "id": "check-timeout-remedy-verdict-path",
+ "title": "The check-timeout refusal names `verdict <cmd>`, a bare command that is not on PATH in a cloud session; it names the full path",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 01:27 CST Nov 14 (lane combine-g1, relayed; unchecked by triage): the check-timeout remedy says \"start it in the background, as `verdict <cmd>`\", and the lane's `command -v verdict` printed nothing in its cloud box. In triage's own session the tool exists at ~/.claude/bin/verdict, and a builder earlier ran it as `/root/.claude/bin/verdict python3 lint/test_rule_audit.py` (lane shared-savings-gap-read), so the likely cause is that the folder is not on PATH, not that verdict is missing. Unproven in the lane's box.",
+ "source": "Coordinator 01:27 CST Nov 14 (relayed). Neighbours: lane-lint-in-isolated-worktree (ready: the second refusal the lane hit), lane-lint-bg-timeout (doing), lane-lint-cloud-time-limit (doing). A remedy never names the forbidden target (rule git-remedy-never-names-target).",
+ "note": "Triage 01:35 CST Nov 14: the harm: an agent that follows the refusal's remedy to the letter runs a command the shell cannot find, and then stops or asks for an override it did not need. Fix: the lane first runs `command -v verdict` and `ls ~/.claude/bin/verdict` in a cloud lane session and says whether it is missing or only off PATH. Then, red first: the check-timeout refusal text names the form that runs in that box (the full path, or the install step), and a test pins the text against the constant the guard emits (rule building-allow-list-is-the-constant). A guard text change: own lane, or folded into the lane that takes lane-lint-bg-timeout. Not started.",
+ "updatedAt": "2026-11-14T01:35:00-06:00"
+}
