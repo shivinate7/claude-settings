@@ -535,6 +535,19 @@ def say(*lines):
         enc = sys.stdout.encoding or "ascii"
         print(text.encode(enc, "backslashreplace").decode(enc), flush=True)
 
+@contextlib.contextmanager
+def timed_phase(name):
+    """Print a start line and an end line around one phase of a merge run, so a run shows where its time went (decision merge-phase-timing).
+    The end line says `done` or, when the phase raises, `stopped`. Cost: two printed lines a phase, no thread, process or file."""
+    t0 = time.time()
+    say(f"merge: phase {name}: start")
+    try:
+        yield
+    except BaseException:
+        say(f"merge: phase {name}: stopped after {round(time.time() - t0)} s")
+        raise
+    say(f"merge: phase {name}: done in {round(time.time() - t0)} s")
+
 # ------------------------------------------------------------------ the merge lock
 # A lock is a commit that a ref points at. The commit message holds the expiry. The ref is
 # refs/heads/merge-lock/<defaultBranch>: a branch, because the cloud proxy refuses a push to any ref outside refs/heads.
@@ -3304,7 +3317,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         return draft_step(root, cfg, n, host, info)
     lock.holder = {"pr": n, "branch": info["branch"], "session": session}
     lifts = {}  # each reason flag that lifts a check in this run, for the merge commit message
-    token = lock.acquire(base, LOCK_TTL_SECONDS)
+    with timed_phase("lock"):
+        token = lock.acquire(base, LOCK_TTL_SECONDS)
     host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant), so the fixed TTL need not cover it
     tmp = wt = claim_sha = None
     judge = None  # the prose judge's plan, built under the lock and run after it is released
@@ -3321,7 +3335,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         if info["draft"]:  # it turned draft after the first read: the records step, never a merge
             return draft_step(root, cfg, n, host, info)
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
-        record_lift(lifts, RED_FLAG, red_base(root, host, base, red_ok))
+        with timed_phase("main-run"):
+            record_lift(lifts, RED_FLAG, red_base(root, host, base, red_ok))
         if express:  # the worktree opens early: the classifier reads the head's diff
             tmp, wt = open_worktree(root, info, base)
             no_express = express_refusal(root, wt, base_ref, info)
@@ -3334,7 +3349,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         extend_lock(lock, UNDO_CHECK_LOCK_SECONDS)
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), lane_head))
         extend_lock(lock, debt_check_lock_seconds())
-        debt_check(wt, base_ref, host, dict(info, head=lane_head))
+        with timed_phase("debt-check"):
+            debt_check(wt, base_ref, host, dict(info, head=lane_head))
         record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
         stale, stands = holds_base(wt, base_ref, info["head"])  # rule M3: a clean merge-tree against the tip, read before the claim
         if stale:
@@ -3345,13 +3361,14 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         resumed = own_claim(wt, stamp_cfg, base_ref) if base == cfg["defaultBranch"] else None
         claimed, trailer = bool(resumed), None  # claimed: the pushed commit holds a Record-claim
         pushed = False  # true once this run pushed a commit: the run stops there, and the next confirm reads that commit's checks
-        say("merge: checking the head's checks and runs ...")  # before the read, which can block
-        state = host.head_state(n, info["head"])  # a resumed claim is the head: the claim commit's own checks are read, never the head under it
-        not_green = head_not_green(state)
-        if not_green and state.startswith("unknown ("):  # a read that could not run, a network fault included, is not a verdict on the head
-            raise Stop(f"{not_green}. Nothing was claimed or pushed. {GREEN_CITE}")
-        if not_green:
-            raise Stop(f"the head's own checks are not green, so nothing was claimed or pushed {GREEN_CITE}: {not_green}.")
+        with timed_phase("head-checks"):
+            say("merge: checking the head's checks and runs ...")  # before the read, which can block
+            state = host.head_state(n, info["head"])  # a resumed claim is the head: the claim commit's own checks are read, never the head under it
+            not_green = head_not_green(state)
+            if not_green and state.startswith("unknown ("):  # a read that could not run, a network fault included, is not a verdict on the head
+                raise Stop(f"{not_green}. Nothing was claimed or pushed. {GREEN_CITE}")
+            if not_green:
+                raise Stop(f"the head's own checks are not green, so nothing was claimed or pushed {GREEN_CITE}: {not_green}.")
         if base != cfg["defaultBranch"]:
             if head_claim(wt):  # an old claim would put real ids into a branch that is not the default
                 raise Stop(f"{info['head'][:7]} on {branch} holds a Record-claim, and {base} is not the default branch {STAMP_CITE}. Revert that commit and run again.")
@@ -3463,7 +3480,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                     say(f"merge: {stands}. The green run stands.")
                 return proof
 
-            prove(fail)
+            with timed_phase("prove"):
+                prove(fail)
             if pushed:  # the first step of two: the pushed commit's own checks start now, and the merge call waits for the next confirm
                 say(f"merge: the claim is pushed to {branch} at {claim_sha[:9]}. Nothing was merged. Run --confirm again when the new head is green. {CLAIM_STEP_CITE}")
                 return 0
@@ -3474,7 +3492,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             rule_files = [x for x in names.split("\0") if x.lower() in RULE_FILES or x.lower().startswith(RULE_PREFIX)] if c == 0 else None
             host.commit_message = lift_message(lifts)
             merging = True
-            commit, msg = host.merge(n, m["method"], sha)
+            with timed_phase("merge-call"):
+                commit, msg = host.merge(n, m["method"], sha)
             merging = False
             if not commit:
                 fail("the merge was refused " + REFUSED_CITE + ":\n" + msg)
