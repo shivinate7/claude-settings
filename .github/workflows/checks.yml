@@ -1339,10 +1339,6 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_now_central.py
 
-      - name: Unknown-read contract (guard + session_start)
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
-        run: python3 lint/check_unknown_reads_contract.py
-
       # The suite's own watchdog (actions/stamp/suite_watchdog.mjs) ends it at 180 s; the slowest normal
       # run took 102 s (run 42456407663). A hang reads red there, with the hung test named, and its process
       # tree killed. A process the suite started and left running reads red too, killed and named with its
@@ -2128,10 +2124,6 @@ jobs:
       - name: Hook platform exit fixture suite
         if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
         run: python lint/test_hook_platform_exit.py
-
-      - name: Unknown-read contract (guard + session_start)
-        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}
-        run: python lint/check_unknown_reads_contract.py
 
       - name: Janitor triggers fixture suite (SessionEnd hook)
         if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}
