@@ -4603,11 +4603,17 @@ def lost_work_branches(h, open_refs):
     """-> (branches, why): each branch of origin that state f lists, as {name, sha, ahead, age_h}, by name; `why` is None, or the reason the list was not read
     (then no branch). f: ahead of the base, and none of these: the base, an `archive/` branch, a batch integration branch (BATCH_PREFIX), a branch with an
     `archive/<name>` copy (its work was filed away), a branch named by an open pull request's head ref (`open_refs`), a branch whose tip a pull request
-    of any state (open, closed or merged) holds, read from its refs/pull/N/head, a branch whose newest commit is under LOST_WORK_DONE_HOURS old. One fetch
+    of any state (open, closed or merged) holds, read from its refs/pull/N/head, the repo's record branch (layout.record_branch; an unreadable key is no
+    list, with a `why`), a branch whose newest commit is under LOST_WORK_DONE_HOURS old. One fetch
     (Host.fetch_lost_work_refs), three for-each-refs (the branches the base does not hold, the archive copies, the pull request heads), one rev-list walk
     of every pull request head past the base, then one rev-list count per branch left; no gh call. One walk, because a `git branch --contains` per
     branch timed out on thousands of branches."""
+    import layout  # lint/layout.py: the one home of the record branch's name
     root = h.cwd or "."
+    try:
+        record = layout.record_branch(root)
+    except layout.LayoutError as e:  # BranchNameError names the key; an unreadable extras file names itself
+        return [], ' '.join(str(e).split())[:300]
     fetched = h.fetch_lost_work_refs()
     if fetched[0]:
         return [], f"git fetch of the branches failed: {' '.join(fetched[1].split())[:300]}"
@@ -4635,7 +4641,7 @@ def lost_work_branches(h, open_refs):
         ref, sha, when = line.split("\t")
         name = ref[len(LOST_WORK_REFS):]
         age = max(0.0, (h.now() - int(when)) / 3600)
-        if (name == h.base or name.startswith(("archive/", BATCH_PREFIX)) or name in open_refs or name in copies or sha in held
+        if (name == h.base or name == record or name.startswith(("archive/", BATCH_PREFIX)) or name in open_refs or name in copies or sha in held
                 or age < LOST_WORK_DONE_HOURS):
             continue  # every skip comes before the count, so a skipped branch costs no git process
         code, count = git(root, "rev-list", "--count", f"{LOST_WORK_REFS}{h.base}..{sha}")
