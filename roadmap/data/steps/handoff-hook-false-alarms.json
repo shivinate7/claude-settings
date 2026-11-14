@@ -1,0 +1,16 @@
+{
+ "id": "handoff-hook-false-alarms",
+ "title": "Fix the two likely false alarms of the handoff gate: old compacted sessions, and a `~` path in the brief",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "PR #3364 merged"
+ ],
+ "why": "Lane handoff-written-by-hook (session_013NEJL48SpnFUrrNgR2jv18) 23:50 CST Nov 13 (relayed; unchecked by triage): PR #3364 passed round 2 review and filed two likely false alarms as debts: (a) every session that compacted before the deploy is refused up to 3 times at its first Stop, once each, then passes; (b) a brief that writes the handoff path with `~` does not count, and the refusal does not say why. Debts handoff-old-compact-false-alarm and handoff-brief-path-form.",
+ "source": "Lane message to triage 23:50 CST Nov 13 (relayed); decision precompact-handoff item 4; ruling own-810-subagent-writes-handoff.",
+ "note": "Triage 23:51 CST Nov 13: follow-up lane after #3364 merges. Fix (a) and (b), and make the refusal name its way out (step refusal-names-way-out). A guard that goes red when nothing is wrong is spent (rule verification-cry-wolf-guard-is-spent), so measure how often each fires in the first days after deploy; the cloud has no guard log, so that read needs a Mac session. A guard change, so review rounds apply. Blocked until #3364 merges.",
+ "updatedAt": "2026-11-13T23:51:00-06:00"
+}
