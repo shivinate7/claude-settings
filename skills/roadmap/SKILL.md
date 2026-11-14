@@ -297,7 +297,18 @@ After each build the roadmap build script prints the upkeep list for the triage 
   `records` stops every joint line. The batch runner pushes each branch to `archive/<branch>`, closes each draft, then
   archives the lane. The joint pass reads rows already loaded: no process, file or log of its own.
 
-  An idle lane not to archive now reads `hold (<reason>; lane <session id>)`. The reason is one of three.
+  The live file's optional `keepSessions` (`[{id, reason}]`, the lanes the owner keeps) names the sessions to leave. A kept session that
+  would be read as idle prints one `hold (kept: <reason>; lane <session id>)` line, never a lane line, and is not counted among the lanes to archive.
+  An absent key keeps nothing. A `keepSessions` that is not a list of rows with a text `id` makes the whole list unknown, never an empty keep list.
+  A live lane row whose `unarchived_epoch` is an int below 0 also makes the whole list unknown.
+  After a landed merge onto the default branch, `merge --confirm` reads `roadmap/live/live.json` on origin's roadmap branch and prints this
+  report when its `readAt` is later than the merge commit's time. Otherwise it prints one line saying the pass is owed because the file is stale
+  or unread, then one `check this lane (...)` line for each lane behind the merged steps (the step record's `lane`, else the session link at the
+  foot of the pull request body). A check line is not a lane to archive: the lane's session state, open pull requests and keep list decide that.
+  A lane still working prints no check line. `keepSessions` is read from the file at any age. With no roadmap branch on origin it prints nothing,
+  and a merge onto another base prints nothing. The merge's exit code is unchanged.
+
+  An idle lane not to archive now reads `hold (<reason>; lane <session id>)`. The reason is one of three, or `kept:` (above).
   `no cs-step tag`: the archive guard refuses such a lane. A step id that is off the record branch with no
   `Step:` trailer on main. When the lane also carries another repo's `cs-repo:` tag, that reason ends `; also tagged <those tags>`.
   `step <ids> still doing under this lane`: each step whose `lane` is the session, with status doing or active, not landed on main.
@@ -308,6 +319,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   - `--live` is missing or unreadable;
   - `readAt` is bad, over 60 minutes old or in the future;
   - there is no `sessions` list, or a session or pull row has the wrong shape (a pull `branch` that is not text or null counts);
+  - `keepSessions` is not a list of rows with a text `id`, or a live lane row's `unarchived_epoch` is an int below 0;
   - no live lane row of the repo carries one of the five `SESSION_STATUS_BUCKET_*` names. Archived rows
     are not counted, so only archived lanes, or no live lane rows, read an empty row;
   - main or its git log cannot be read;

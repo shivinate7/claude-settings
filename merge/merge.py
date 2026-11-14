@@ -18,6 +18,13 @@
                           marked ready, and no flag lifts it. A repo with no list runs no ready check, and one line says so.
                           Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
                           (the 3600 s lint bound applies). No new file but ci-job's own log.
+                          After a landed merge onto the default branch (never a refused one, never a merge onto another base) it fetches origin/roadmap and reads
+                          roadmap/live/live.json. A readAt later than the merge commit's time prints the `merge --idle-lanes` report. Otherwise one line says the
+                          idle-lanes pass is owed because the file is stale or unread (a failed fetch is unread), and the merged step's lane (its record's `lane`,
+                          else the session link at the foot of the PR body) prints as `check this lane`, never as a lane to archive. A lane still working prints
+                          no line. A session in the file's keepSessions, read at any age, prints a `hold (` line. With no roadmap branch on origin it prints nothing.
+                          None of this changes the exit code. Cost: one fetch, two git reads, the step records read in one git cat-file and, on the owed path
+                          only, one open-pulls read; no file, timer or new process beyond those git reads (merge/test_merge.py ConfirmIdleLanes pins the reads and the files).
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
                           The batch runner's join (cloud) needs a lane-lint PASS for the head's sha. Only a batch integration PR skips it, when the all-jobs-passed rollup is green on that exact head:
                           then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
@@ -127,6 +134,8 @@
                           lane lines (a lane the roadmap's live file shows done and safe to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step's status is set to todo or done), then a summary line. A lane that waits (a step not done, an open pull, an open item) prints no line, except a lane only stale drafts hold: that prints one `joint (close #N ...; archive archive/<branch> ...; archive lane <id>)` line, counted among the lanes to archive. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
                           posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
+                          A session in the live file's keepSessions ([{id, reason}]) prints a `hold (kept: ...)` line, never a lane line, and is not counted among the
+                          lanes to archive; a keepSessions that is not a list of rows with an id reads unknown (exit 1), as does an int unarchived_epoch below 0.
   merge <pr> --ready      a lane's one act on its own draft: the draft step of --confirm (rebuild the records page, run the repo's ready
                           checks, push the page, ask the host to mark the PR ready) and nothing more. A PR that is ready already is left as it is. It
                           never merges, takes no lock and needs no merge role. A red head or a head that conflicts with the base is not marked ready.
@@ -239,6 +248,7 @@ def run_id(run):
     m = RUN_URL_ID.search(run)
     return m.group(1) if m else run
 
+IDLE_CITE = "(decision session-tiers, the batch runner reads the lanes to archive from the output of each merge)"
 UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not run is reported as unknown, never as clear)"
 # The two role cites name no tier: a lane must not learn which tier may claim a merge.
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
@@ -3484,6 +3494,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         if wt:
             drop_worktree(root, tmp, wt)
         lock.release(base, token)
+    if base == cfg["defaultBranch"]:  # a merge onto an integration branch owes no pass
+        idle_lanes_after_merge(root, commit, host, n, info.get("body", ""))  # lock released: it fetches and reads; the merge has landed, so it never moves `code`
     report = prose_judge_run(judge, n)  # each model call waits up to MODEL_TIMEOUT, so it runs with the lock released
     if report:
         say(*report)
@@ -4318,18 +4330,23 @@ def kind_misfits(kind, files):
 
 IDLE_BUILD = pathlib.Path(__file__).resolve().parents[1] / "skills/roadmap/build.py"  # the one home of the idle-lane rules
 
+def load_idle_build():
+    """The roadmap build, loaded from IDLE_BUILD. Raises what the load raises (a build that exits at import raises SystemExit)."""
+    spec = importlib.util.spec_from_file_location("roadmap_build", IDLE_BUILD)
+    build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build)
+    return build
+
 def idle_lanes(live, repo_dir=None):
     """merge --idle-lanes: print lane lines (a lane to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step's status is set to todo or done), then the summary line. A lane that waits (a step not done, an open pull, an open item) prints no line, except a lane only stale drafts hold: that prints one `joint (close #N ...; archive archive/<branch> ...; archive lane <id>)` line, counted among the lanes to archive. Exit 1 with no summary when the
     live file is not named or the roadmap build cannot be loaded or run, so an unread list never reads as an empty one.
-    `repo_dir` is the -C checkout (None: the one the process stands in)."""
+    `live` is the file's path, or the live file already parsed (a dict, as idle_lanes_after_merge passes it). A kept session (keepSessions)
+    prints a `hold (kept: ...)` line. `repo_dir` is the -C checkout (None: the one the process stands in)."""
     if not live:
         print("merge: --idle-lanes needs --live FILE, the publisher's live-work file. No list was made.", file=sys.stderr)
         return 1
     try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("roadmap_build", IDLE_BUILD)
-        build = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(build)
+        build = load_idle_build()
     except (Exception, SystemExit) as e:  # a build that exits at import is unloadable too
         print(f"merge: cannot load the roadmap build {IDLE_BUILD}: {type(e).__name__}: {e}. No list was made.", file=sys.stderr)
         return 1
@@ -4352,6 +4369,78 @@ def idle_lanes(live, repo_dir=None):
         entries = [*entries, f"merge: {len(lanes)} lanes to archive{held}. {tail}"]
     say(*entries)
     return 1 if unread else 0
+
+LIVE_PATH = "roadmap/live/live.json"  # triage commits the live file here on origin's roadmap branch at each batch merge
+
+def idle_lanes_after_merge(root, commit, host, n, body):
+    """After a landed merge onto the default branch: print the `merge --idle-lanes` report when the live file on origin/roadmap was read after the
+    merge commit's time. Otherwise (stale, missing, unreadable, or origin unreadable) print one line saying the pass is owed, then the
+    lanes to check from the merged step's record (idle_lanes_to_check). A repo whose origin has no roadmap branch has no live file and owes no pass:
+    it prints nothing. The live file is passed in memory, never written. Never raises and never moves the exit code: the merge has landed.
+    Cost: one fetch, two git reads, the step records in one git cat-file, one log of the merge; on the owed path one open-pulls read; one more
+    `git ls-remote` only when the fetch fails."""
+    owed = "merge: the idle-lanes pass is owed: the live file on origin/roadmap is %s. Run merge --idle-lanes --live FILE once triage has read it. " + IDLE_CITE
+    try:
+        try:
+            fetch_branch(root, "roadmap", IDLE_CITE)
+        except Stop:
+            # A fetch of a missing branch and a failed fetch both exit non-zero; only a listing that works and is empty proves the branch is absent.
+            lc, listed = git(root, "ls-remote", "--heads", "origin", "refs/heads/roadmap")
+            if lc == 0 and not listed.strip():
+                return
+            say(owed % "unread (the fetch of origin/roadmap failed)")
+            return
+        c, text = git(root, "show", f"refs/remotes/origin/roadmap:{LIVE_PATH}")
+        c2, merged_at = git(root, "show", "-s", "--format=%cI", commit)
+        raw = None  # the live file parsed, or None when it could not be read
+        if c:
+            why = "unread (git could not read the file)"
+        else:
+            try:
+                raw = json.loads(text)
+            except ValueError:
+                why = "unread (the file is not JSON)"
+            else:
+                why = None if isinstance(raw, dict) else "unread (the file is not a JSON object)"
+                raw = raw if isinstance(raw, dict) else None
+        if raw is not None:
+            try:
+                read_at = datetime.datetime.fromisoformat(raw["readAt"].replace("Z", "+00:00"))
+                landed = datetime.datetime.fromisoformat(merged_at) if not c2 else None
+            except (ValueError, TypeError, KeyError, AttributeError):
+                read_at = landed = None
+                why = "unread (its readAt or the merge commit's time is not an ISO time)"
+            if why is None and landed is None:
+                why = "unread (git could not read the merge commit's time)"
+            elif why is None and read_at.tzinfo is None:
+                why = "unread (its readAt has no time zone)"
+            elif why is None and read_at <= landed:
+                why = "stale (read before this merge landed)"
+        if why is None:
+            idle_lanes(raw, root)  # its exit code is the report's own; the merge's code stays as it was
+            return
+        say(owed % why)
+        idle_lanes_to_check(root, commit, host, n, body, raw)
+    except Exception as e:
+        say(owed % f"unread ({type(e).__name__}: {e})")
+
+def idle_lanes_to_check(root, commit, host, n, body, raw):
+    """The owed path's second source: each step the merge landed (Step trailers on the merge's commits) names a lane in its record on
+    origin/roadmap; the roadmap build (lanes_to_check) says which of those lanes to check by hand. `raw` is the live file parsed, or None."""
+    c, trailers = git(root, "log", "--format=%(trailers:key=Step,valueonly,separator=%x2C)", f"{commit}^1..{commit}")
+    if c:  # no first parent: the commit alone
+        c, trailers = git(root, "log", "-1", "--format=%(trailers:key=Step,valueonly,separator=%x2C)", commit)
+    if c:
+        say("unknown (the Step trailers of the merge could not be read, so its lane is not named)")
+        return
+    slugs = {s.strip() for line in trailers.splitlines() for s in line.split(",") if s.strip()}
+    if not slugs:
+        return
+    build = load_idle_build()
+    steps = build.load(build.Ref(pathlib.Path(root), "origin/roadmap"))["steps"]
+    lines = build.lanes_to_check(steps, slugs, body, raw, lambda: {p["head"]["ref"] for p in host.open_pulls() if p.get("number") != n})
+    if lines:
+        say(*lines)
 
 def build_parser():
     """The one home of merge's command line. The guard (hooks/guard_merge.py) parses a command with this, so its reading of -C and --repo-dir is the tool's own.
