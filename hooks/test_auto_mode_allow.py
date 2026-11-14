@@ -25,8 +25,9 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   limits the already granted act to messages that ask.
 - One "Relayed Grant:" entry quotes page_grant.py's COMMAND and COUNTED_LINE, read from the
   checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
-  relayed-grant-read-from-page) and the closed-item clause in RELAYED_CLOSED (ruling own-753-a: a
-  routed close counts, as page_grant rule 4 in ruling own-748-b-rule-4). Its Covers text names the
+  relayed-grant-read-from-page) and the closed-item clause in RELAYED_CLOSED and its order in
+  RELAYED_CLOSED_ORDER (ruling own-753-a: a routed close counts, as page_grant rule 4 in ruling
+  own-748-b-rule-4). Its Covers text names the
   one settings change: a label that names `settings.json` and the entry by its exact title or key,
   one entry per grant. Its "Never covers wins"
   sentence follows the Never covers sentence and settles any clash with Covers.
@@ -128,6 +129,10 @@ RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page 
 RELAYED_CLOSED = (("closed item", "a closed item"), ("routed close", "routed close"),
                   ("lane", "`lane`"), ("home", "`home`"), ("lastAnswer.at", r"`lastAnswer\.at`"),
                   ("arbiter overturn", "arbiter overturn"))
+# The order of that clause, which the tokens above do not fix: a closed item is neither a routed close (it keeps
+# `lane`, `home` and the answer whose time matches `lastAnswer.at`) nor an arbiter overturn. Words may be added
+# inside the parenthesis. A reversed clause or an either/or clause refuses a routed close, the opposite of the ruling.
+RELAYED_CLOSED_ORDER = r"closed item that is neither a routed close.*lane.*home.*lastAnswer\.at.*nor an arbiter overturn"
 # Each term the Relayed Grant entry's Covers text names for its one settings change.
 RELAYED_SETTINGS_COVERS = (("one settings change", "one settings change"),
                            ("label names the settings file and entry", r"label.*?settings file.*?entry"),
@@ -334,6 +339,13 @@ class RelayedGrantIsAllowed(unittest.TestCase):
         for name, pattern in RELAYED_CLOSED:
             with self.subTest(term=name):
                 self.assertRegex(clause, "(?i)" + pattern, "Never covers does not name %r" % name)
+
+    def test_never_covers_keeps_the_closed_item_clause_order(self):
+        clause = never_covers(allow_entry(RELAYED))
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Grant entry")
+        self.assertRegex(clause, "(?i)" + RELAYED_CLOSED_ORDER,
+                         "Never covers does not say a closed item is neither a routed close nor an arbiter overturn, "
+                         "in that order")
 
     def test_never_covers_wins_over_covers(self):
         entry = allow_entry(RELAYED)
