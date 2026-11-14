@@ -305,6 +305,24 @@ class QuotaMerge(unittest.TestCase):
                 second = g.calls[1][0]
                 self.assertGreaterEqual(second, RESET, f"the read after a low reply came at {second:.0f} s, before the quota reset at {RESET:.0f} s: the hold-off outlived the stop")
 
+    def test_a_merge_leaves_an_outer_hold_off_as_it_found_it(self):  # the False rows are the control: a flag found False stays False
+        paths = {"the merge lands": None, "the pull request read raises Stop": tm.merge.Stop, "the pull request read raises NetStop": tm.merge.NetStop}
+        for before in (True, False):
+            for label, exc in paths.items():
+                with self.subTest(hold_off_before=before, path=label):
+                    g = QuotaGh(self, quota=full)
+                    host = g.host()
+                    host.hold_off = before  # confirm holds the flag around its batch brake read, so a merge inside that stretch must not clear it
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        if exc is None:
+                            oid, why = host.merge(7, "squash", HEAD)
+                            self.assertEqual(oid, MERGE_OID, f"the merge did not land: {why}")  # scope
+                        else:
+                            with unittest.mock.patch.object(host, "pr", side_effect=exc("the pull request read stopped")):
+                                with self.assertRaises(exc):  # scope
+                                    host.merge(7, "squash", HEAD)
+                    self.assertIs(host.hold_off, before, f"{label}: Host.merge left hold_off {host.hold_off}, want {before} as it found it")
+
 
 class ConfirmFlow(tm.Env):
     """The confirm flow itself: merge.main on a real checkout with a real Host, through the gh shim of GhHalf (the fixture's home). A wrapper
