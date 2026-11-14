@@ -60,6 +60,13 @@
 # of the job has prints one `unknown` line, and when any name is missing no step runs: exit 2. A named step that does not
 # run (an action, a false if:) is also one `unknown` line, never a pass. The merge's ready checks run its declared
 # merge.readyChecks this way. Exit codes as below.
+# CI_JOB_STEP_SECONDS bounds each --step step (a positive whole number; merge's ready run sets it, merge.READY_CI_STEP_SECONDS): its
+# start line reads `start: <name> (bound N s)`, and a step still running at N s is killed with its whole process tree (its own
+# session and a group SIGKILL on POSIX, `taskkill /T` on Windows) and prints `unknown <name>: did not finish in N s`, exit 2. Each
+# named step has its own bound, and the steps after it still run. A bound never turns a FAIL or unknown into a pass. A value that is
+# not a positive whole number is one unknown line, exit 2, never no bound. --lint and a plain run ignore it: a hung check must not
+# hold a merge, and the lint run has merge's whole-run bound. Cost: one timer thread per bounded step, cancelled when the step ends.
+# Limit: a descendant that left the step's session or job escapes the kill.
 # --pinned is for merge's ready check: a step whose uses: is a remote `<owner>/claude-settings/actions/<code-check|zizmor>
 # @<40-hex sha>` runs that harness from a tree exported at the sha, so the child is judged by the code it pins, not the local
 # copy. The tree is `git archive <sha>` of the whole repo, from the clone beside this file, else the pointer checkout
@@ -98,7 +105,7 @@
 # (a SIGKILL from merge's timeout reaches only ci-job: it leaves the folder in TMPDIR and may leave verdict children running). Each `not run` line,
 # the summary and each CI step's `start: <name>` line on stderr (before it runs, so a caller sees which CI step is running)
 # are one print.
-import concurrent.futures, os, re, shutil, subprocess, sys, tarfile, tempfile, threading
+import concurrent.futures, os, re, shutil, signal, subprocess, sys, tarfile, tempfile, threading
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
@@ -496,12 +503,41 @@ def lint_workers():
     return max(1, min(os.cpu_count() or 1, 4))
 
 
-def run_step(name, step, install, detail, shell, env, cwd, ctx, log, suite=False):
+def step_bound(environ=None):
+    """The seconds CI_JOB_STEP_SECONDS gives each --step step: (seconds or None when unset, a reason when the value is not a
+    positive whole number). A bad value is never read as no bound: a caller that set a bound meant to have one."""
+    raw = (os.environ if environ is None else environ).get("CI_JOB_STEP_SECONDS", "").strip()
+    if not raw:
+        return None, ""
+    if raw.isascii() and raw.isdigit() and int(raw) > 0:
+        return int(raw), ""
+    return None, "CI_JOB_STEP_SECONDS=%r is not a positive whole number of seconds" % raw
+
+
+def kill_tree(proc):
+    """End the step's whole process tree, not its shell alone: a child the step started outlives a kill of the shell and holds
+    the run's pipes. POSIX: the step has its own session (run_step starts it so), and its group gets SIGKILL. Windows: taskkill /T."""
+    try:
+        if os.name == "nt":
+            _nowindow.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
+    except (OSError, ProcessLookupError):
+        pass  # already gone
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
+
+def run_step(name, step, install, detail, shell, env, cwd, ctx, log, suite=False, bound=None):
     """Run one step through bin/verdict, its output appended to `log`: (state, the step's one line). ctx: (top, base,
     values, pinned). A parallel step gets a log of its own, so the reads from its start offset see only its output.
-    suite: a CI step picked for its suite line, run whole, with the preamble marker (preamble_marked)."""
+    suite: a CI step picked for its suite line, run whole, with the preamble marker (preamble_marked).
+    bound: seconds the step may run (--step runs only). Past it the step's process tree is killed and the result is
+    ("unknown", "did not finish in N s"), never a pass."""
     top, base, values, pinned = ctx
-    err_line("start: %s\n" % name)
+    err_line("start: %s%s\n" % (name, " (bound %d s)" % bound if bound else ""))
     with tempfile.NamedTemporaryFile("w", suffix=".ps1" if shell[0] == "pwsh" else ".sh", delete=False,
                                      encoding="utf-8", newline="\n") as f:
         marked = preamble_marked(detail, shell[0]) if suite else None
@@ -510,17 +546,33 @@ def run_step(name, step, install, detail, shell, env, cwd, ctx, log, suite=False
     try:
         start = os.path.getsize(log) if os.path.exists(log) else 0
         kept = []
+        expired = threading.Event()
+        timer = None
         with _nowindow.Popen([sys.executable, os.path.join(BIN, "verdict"), *shell, script],
                              cwd=os.path.join(top, cwd) if cwd else top, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True,
+                             **({"start_new_session": True} if bound and os.name != "nt" else {}),  # a group of its own, for kill_tree
                              env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF", PIN_NOTE_ENV, HEAD_SHA_ENV}},
                                   **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
                                   **env, "VERDICT_LOG": log}) as proc:
-            for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output
-                if line.startswith("verdict: still running"):
-                    err_line(line)
-                else:
-                    kept.append(line)
+            if bound:
+                def expire():
+                    expired.set()
+                    kill_tree(proc)
+                timer = threading.Timer(bound, expire)
+                timer.daemon = True
+                timer.start()
+            try:
+                for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output
+                    if line.startswith("verdict: still running"):
+                        err_line(line)
+                    else:
+                        kept.append(line)
+            finally:
+                if timer:
+                    timer.cancel()
+        if expired.is_set():  # the bound ended it: whatever the step printed so far is no verdict
+            return "unknown", "did not finish in %d s" % bound
         rc = proc.returncode
         gone = missing_in_log(log, start, script)
         preamble_ran = not marked or bool(re.search(r"(?m)^%s\r?$" % PREAMBLE_MARK, log_text(log, start)))
@@ -623,6 +675,10 @@ def main(argv):
     args = [a for a in args if a not in ("--plan", "--lint", "--pinned")]
     if len(args) != 1 or (wanted and lint):
         print(USAGE)
+        return 2
+    bound, bad_bound = step_bound() if wanted else (None, "")  # only a --step run is bounded: --lint keeps merge's whole-run bound
+    if bad_bound:
+        print("%-15s %s" % ("unknown", bad_bound))
         return 2
     job = args[0]
     top = git("rev-parse", "--show-toplevel") or os.getcwd()
@@ -767,7 +823,7 @@ def main(argv):
                     kept_logs = True
                 first = first.replace(own, log)  # the verdict line names the log that stays
             else:
-                state, first = run_step(name, step, install, detail, shell, env, cwd, ctx, log, kind[n - 1] == "suite")
+                state, first = run_step(name, step, install, detail, shell, env, cwd, ctx, log, kind[n - 1] == "suite", bound)
             tally["FAIL" if state == "FAIL" else "unknown"] += state not in ("PASS", "SKIP")
             blocker = blocker or (name if install and state == "unknown" else None)
             print("%-15s %s: %s" % (state, name, first))

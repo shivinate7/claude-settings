@@ -2594,6 +2594,14 @@ PROBE_WORKERS = 8  # parallel `git diff` starts of the open-PR clash's path read
 PRE_READY_CLASH_SCOPE = "ready"  # which open PRs the pre-ready run's clash counts (coordinator ruling, undoable): "ready" counts a clash only with a PR that is not a draft and reports the shared files of each draft, with no merge-tree; "all" counts every open PR on the base
 PRE_READY_REPORT_FILES = 5  # shared files a draft's report line names, then "and N more"
 PRE_READY_REPORT_LINES = 5  # report lines the clash verdict prints under its line; a repo with hundreds of drafts would print one for each
+# Bounds of the pre-ready run (margin x10 of the warm worst of 9 runs; a cold runner is unmeasured). A check past its bound reads unknown, never a pass.
+READY_CI_STEP_SECONDS = 300  # each ci-job step of merge.readyChecks: handed to ci-job as CI_JOB_STEP_SECONDS, which kills the step's process tree
+READY_CI_RUN_SECONDS = 900  # the whole ready ci-job run: the backstop under the per-step bound, in place of LINT_SECONDS
+READY_CLASH_SECONDS = 480  # clash_verdict: its merge read and its cross_measure together
+try:
+    READY_DEBT_SECONDS = 3 * load_debt_retire().TIMEOUT  # three suites' worth of the debt lint's own per-suite cap, read from its one home, never copied
+except ImportError:  # debt_check raises the same error at once, so a missing lint module cannot hang; debt_verdict then runs unbounded
+    READY_DEBT_SECONDS = None
 
 def changed_paths(root, base, head):
     """-> the set of paths the branch `head` changes against origin/<base> (`git diff --name-only --no-renames`, three dots: from the merge base),
@@ -2719,7 +2727,7 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         stop = "\n".join([f"the cross-measure of {head[:9]} is unknown, not a pass:", *unknown, "Run again. " + LANE_LINT_REMEDY])
     return fails, reports, stop
 
-def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None):
+def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None, bound=None, step_seconds=None):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
@@ -2729,14 +2737,20 @@ def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None):
     notes: a list the caller passes to receive, on a pass, each ci-job line that holds the pin note marker (a stale pin); the draft step passes none and ignores them.
     raw: a list the caller passes to receive every stdout line, for the pre-ready run's one verdict line per step (step_verdicts).
     head_sha: the pushed head, given to ci-job as CI_JOB_HEAD_SHA when the HEAD of `wt` is not that head (lane_lint's merge commit). With none, ci-job
-    reads HEAD, and an inherited CI_JOB_HEAD_SHA is dropped, so it never names another tree's head."""
+    reads HEAD, and an inherited CI_JOB_HEAD_SHA is dropped, so it never names another tree's head.
+    bound: seconds the whole run may take, LINT_SECONDS when None. A run past it is unknown, and its line names the --step checks it ran, so a stall reads as which checks and how long.
+    step_seconds: handed to ci-job as CI_JOB_STEP_SECONDS, the bound of each --step step (ci-job kills a step's process tree past it)."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_") and k != CI_JOB_HEAD_SHA_ENV}  # as the merge's own lint run reads it
     if head_sha:
         env[CI_JOB_HEAD_SHA_ENV] = head_sha
+    if step_seconds is not None:
+        env["CI_JOB_STEP_SECONDS"] = str(step_seconds)
+    seconds = LINT_SECONDS if bound is None else bound
     try:
-        c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
+        c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=seconds, live_stderr=True)
     except subprocess.TimeoutExpired:
-        return "unknown", [f"ci-job did not finish in {LINT_SECONDS} s"], [], False
+        steps = [b for a, b in zip(args, args[1:]) if a == "--step"]
+        return "unknown", [f"ci-job ({', '.join(steps)}) did not finish in {seconds} s" if steps else f"ci-job did not finish in {seconds} s"], [], False
     lines = out.splitlines()
     if raw is not None:
         raw.extend(lines)
@@ -3525,8 +3539,35 @@ def step_verdicts(raw, checks, state):
             rows.append(("unknown", name, detail))
     return rows
 
+def bounded(seconds, call):
+    """-> (True, what `call()` returned) or (False, None) when it did not return in `seconds`; an exception it raised is raised here. `call` runs in a daemon
+    thread, so a hang in Python code (not only in a child process) is cut off. Limit: Python cannot stop a thread, so work that outran its bound lingers until
+    this process exits, and may still write or start git and gh children meanwhile. `seconds` None waits for it."""
+    box = {}
+
+    def work():
+        try:
+            box["value"] = call()
+        except BaseException as e:  # carried to the caller's thread
+            box["error"] = e
+
+    thread = threading.Thread(target=work, daemon=True)
+    thread.start()
+    thread.join(seconds)
+    if thread.is_alive():
+        return False, None
+    if "error" in box:
+        raise box["error"]
+    return True, box["value"]
+
 def debt_verdict(wt, base, host, info):
-    """-> (verdict, "debt retire", detail): the debt-close lint (debt_check) on the tree `wt`. Unread and any read that could not run are unknown, a Dropped finding is a fail."""
+    """-> (verdict, "debt retire", detail): the debt-close lint (debt_check) on the tree `wt`, bounded by READY_DEBT_SECONDS in all, a hang in Python code included
+    (bounded: the stuck lint may linger until process exit). Past the bound it is unknown. Unread and any read that could not run are unknown, a Dropped finding is a fail."""
+    done, row = bounded(READY_DEBT_SECONDS, lambda: debt_read(wt, base, host, info))
+    return row if done else ("unknown", "debt retire", f"did not finish in {READY_DEBT_SECONDS} s")
+
+def debt_read(wt, base, host, info):
+    """debt_verdict without the bound."""
     try:
         debt_check(wt, f"origin/{base}", host, info)
     except Unread as e:
@@ -3539,7 +3580,13 @@ def debt_verdict(wt, base, host, info):
 
 def clash_verdict(root, n, base, host, info):
     """-> (verdict, "open-PR clash", detail): the head of PR `n` against every other open PR on `base`, by cross_measure with scope PRE_READY_CLASH_SCOPE. A head that does not merge
-    clean with the base, a failed list read, a fetch that failed and any pair git cannot read are unknown, never a pass."""
+    clean with the base, a failed list read, a fetch that failed and any pair git cannot read are unknown, never a pass. READY_CLASH_SECONDS bounds all of it, the merge read
+    too (bounded: a read past it is unknown, and its git or gh call may linger until process exit)."""
+    done, row = bounded(READY_CLASH_SECONDS, lambda: clash_read(root, n, base, host, info))
+    return row if done else ("unknown", "open-PR clash", f"did not finish in {READY_CLASH_SECONDS} s")
+
+def clash_read(root, n, base, host, info):
+    """clash_verdict without the bound."""
     name = "open-PR clash"
     try:
         fetched = {}
@@ -3564,14 +3611,20 @@ def pre_ready_rows(wt, n, base, checks, pre):
     open-PR clash of the PR's head, each once. Prints one verdict line per check, `pass NAME`, `fail NAME: why` or `unknown NAME: why`, all before any refusal.
     -> (rows, (state, lines, log)): rows of (verdict, name, detail), and ci_job_run's own answer.
     After the lines it prints SCAFFOLD_NOTE once (a coverage note that is no row, so no exit code moves with it).
-    Cost: one ci-job run, one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees."""
+    Each check has a bound of its own and prints `start: <check> (bound N s)` before it runs (ci-job prints its steps' lines): READY_CI_STEP_SECONDS per ci-job step,
+    READY_CI_RUN_SECONDS for the whole ci-job run, READY_DEBT_SECONDS, READY_CLASH_SECONDS. A check past its bound is unknown, never a pass.
+    Cost: one ci-job run, one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees.
+    A bounded check adds one thread; a check that outran its bound may linger until process exit."""
     raw = []
     args = ["checks", "--pinned", *[a for name in checks for a in ("--step", name)], "--base", f"origin/{base}"]
-    ci = ci_job_run(wt, *args, raw=raw)
+    ci = ci_job_run(wt, *args, raw=raw, bound=READY_CI_RUN_SECONDS, step_seconds=READY_CI_STEP_SECONDS)
     rows = step_verdicts(raw, checks, ci[0])
     if pre:
         root, host, info = pre
-        rows += [debt_verdict(wt, base, host, info), clash_verdict(root, n, base, host, info)]
+        say(f"start: debt retire (bound {READY_DEBT_SECONDS} s)")
+        rows.append(debt_verdict(wt, base, host, info))
+        say(f"start: open-PR clash (bound {READY_CLASH_SECONDS} s)")
+        rows.append(clash_verdict(root, n, base, host, info))
     say(*[f"{v} {name}" + (f": {d}" if d else "") for v, name, d in rows])
     if pre:
         say(SCAFFOLD_NOTE)  # a coverage note, not a check: it is no row, so no exit code moves with it
