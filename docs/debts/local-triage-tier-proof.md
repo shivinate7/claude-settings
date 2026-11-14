@@ -6,7 +6,7 @@
 
 **Decision.** `session-tiers` (session roles).
 
-**State.** The code is built (lane local-tier-file): the launcher writes a role file, and the guard reads it for the roadmap push and for a local confirm (decision `session-tiers`, Local sessions). The debt stays open until the measurement below.
+**State.** The code is built (lane local-tier-file): the launcher writes a role file, and the guard reads it for the roadmap push and for a local confirm. A local confirm is judged by the session's own file only. (a) An own file must name batch-runner, and the guard also checks the repo. (b) With no own file and no CS_SESSION_ROLE, today's behaviour stands. (c) CS_SESSION_ROLE set with no matching own file refuses (decision `session-tiers`, Local sessions). The debt stays open until the measurement below.
 
 **Retire.** A local triage session on a Mac and on a Windows PC proves its tier, and its roadmap push passes. A guard test shows the push refused before the fix and passed after it, on both platforms. Any other session's roadmap push stays refused. The retire check is a real push: a triage session started with `claude-role triage` pushes to the roadmap branch on a Mac and on a Windows PC. It passes there, which also measures that the hook's session id equals the Bash call's `CLAUDE_CODE_SESSION_ID` on Windows.
 
