@@ -10,7 +10,7 @@ Why: run `merge 3377 --confirm` ran 28 min 35 s with no progress line after a 2 
 
 Measure over 5 merges before any redesign. This record changes no wait, no order and no verdict. A redesign of a slow phase is a new record, with its numbers.
 
-Cost: at most two printed lines a phase and at most 12 for a run that reaches the merge call. It starts no thread or process and writes no file. The fixture suite for this record pins the line count, the thread count and the file count.
+Cost: at most two timed lines a phase and at most 12 for a run that reaches the merge call. It starts no thread or process and writes no file. The fixture suite for this record (`merge/test_merge_phase_timing.py`) pins the line count, the thread starts and the file count. A timing line that cannot be written (a closed pipe, as in `merge N --confirm | head -1`) is dropped, so it never stops a phase or leaves the lock held; the same suite pins that.
 
 Measured so far: two merges, in the reason above. Unmeasured: how long each other phase takes.
 

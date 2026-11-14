@@ -550,15 +550,23 @@ def say(*lines):
 @contextlib.contextmanager
 def timed_phase(name):
     """Print a start line and an end line around one phase of a merge run, so a run shows where its time went (decision merge-phase-timing).
-    The end line says `done` or, when the phase raises, `stopped`. Cost: two printed lines a phase, no thread, process or file."""
+    The end line says `done` or, when the phase raises, `stopped`. Cost: two printed lines a phase, no thread, process or file.
+    A line that cannot be written (a closed pipe) is dropped: a timing line must never stop a phase, or leave the lock taken in the lock phase held."""
     t0 = time.time()
-    say(f"merge: phase {name}: start")
+
+    def timing(text):
+        try:
+            say(text)
+        except (OSError, ValueError):
+            pass
+
+    timing(f"merge: phase {name}: start")
     try:
         yield
     except BaseException:
-        say(f"merge: phase {name}: stopped after {round(time.time() - t0)} s")
+        timing(f"merge: phase {name}: stopped after {round(time.time() - t0)} s")
         raise
-    say(f"merge: phase {name}: done in {round(time.time() - t0)} s")
+    timing(f"merge: phase {name}: done in {round(time.time() - t0)} s")
 
 # ------------------------------------------------------------------ the stall-watch beat
 @contextlib.contextmanager

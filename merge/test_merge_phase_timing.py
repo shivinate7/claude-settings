@@ -95,6 +95,69 @@ class TimedPhaseLines(unittest.TestCase):
                          "a block that raised after 3.2 s did not print start, then stopped after 3 s, and no done line")
 
 
+class TimedPhaseStartsNoThread(unittest.TestCase):
+    """The decision's cost sentence: timed_phase starts no thread. The count is of Thread.start calls made while a phase runs, so a thread
+    that starts and is joined inside the helper is seen."""
+
+    def test_a_phase_makes_no_thread_start_call(self):
+        starts = []
+        real_start = threading.Thread.start
+
+        def counting_start(thread):
+            starts.append(thread.name)
+            return real_start(thread)
+        with unittest.mock.patch.object(threading.Thread, "start", counting_start), contextlib.redirect_stdout(io.StringIO()):
+            with phase("lock"):
+                pass
+            try:
+                with phase("prove"):
+                    raise merge.Stop("a refusal")
+            except merge.Stop:
+                pass
+        self.assertEqual(starts, [], "timed_phase started a thread")
+
+
+class BrokenStdout:
+    """A stdout whose pipe reader is gone (`merge N --confirm | head -1`): every write fails as the OS fails it."""
+    encoding = "utf-8"
+
+    def write(self, _text):
+        raise BrokenPipeError(32, "Broken pipe")
+
+    def flush(self):
+        raise BrokenPipeError(32, "Broken pipe")
+
+
+class TimingLineNeverStopsTheRun(unittest.TestCase):
+    """A timing line that cannot be written must not change what the phase does: a failed print after the lock is taken would leave the
+    lock held, because confirm releases it in a try that starts after the lock phase."""
+
+    def run_block(self, fail=None):
+        """-> (whether the block ran to its end, the exception that left the phase or None), with stdout broken for the whole phase."""
+        ran, err = [], None
+        with unittest.mock.patch.object(sys, "stdout", BrokenStdout()):
+            try:
+                with phase("lock"):
+                    ran.append("start")
+                    if fail is not None:
+                        raise fail
+                    ran.append("end")
+            except BaseException as e:  # the case reads it below
+                err = e
+        return ran, err
+
+    def test_a_block_runs_to_its_end_when_the_start_and_done_lines_cannot_be_written(self):
+        ran, err = self.run_block()
+        self.assertEqual(ran, ["start", "end"], "the block did not run to its end with stdout broken")
+        self.assertIsNone(err, f"a broken stdout stopped the phase with {err!r}")
+
+    def test_the_blocks_own_exception_leaves_the_phase_as_it_was_raised_when_the_stopped_line_cannot_be_written(self):
+        boom = merge.Stop("the head's own checks are not green")
+        ran, err = self.run_block(fail=boom)
+        self.assertEqual(ran, ["start"])
+        self.assertIs(err, boom, f"a broken stdout replaced the block's exception with {err!r}")
+
+
 class ConfirmPhases(tm.Env):
     """A scripted confirm run through merge.main, on the fixture's FakeHost. leave_no_pending_record leaves the lane nothing to claim, so the
     one run reaches merge-call. A run with a claim to push stops after prove and merges on a second run: that run is not a one-run case."""
