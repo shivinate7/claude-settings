@@ -3711,11 +3711,11 @@ class ReplacedDocs(unittest.TestCase):
         self.assertFalse("if the integration PR is dropped" in self.step_8(),
                          "step 8 of skills/ci-hygiene/SKILL.md ties the reopen to the integration PR being dropped, not to a lane marked Dropped")
 
-    def test_session_tiers_names_the_integration_pr_at_the_hand_in(self):
+    def test_session_roles_names_the_integration_pr_at_the_hand_in(self):
         self.assertTrue("integration PR" in self.closes_bullet(),
                         "the session-tiers bullet that says a pull request closes as replaced does not name the integration PR")
 
-    def test_session_tiers_does_not_say_combined_pull_request(self):
+    def test_session_roles_does_not_say_combined_pull_request(self):
         self.assertFalse("combined pull request" in self.closes_bullet(),
                          "the session-tiers bullet that says a pull request closes as replaced still says combined pull request")
 
