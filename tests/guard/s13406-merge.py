@@ -1119,8 +1119,10 @@ def record_push_cost_case():
     default base, costs one `git symbolic-ref` for
     origin/HEAD and one `git rev-parse --verify` per candidate branch tried, until one exists. A `git show`
     runs only when a marker finding needs its line read. The layout and extras files
-    are read once each. A spawn log cannot show a file read, so that cost is unmeasured here. The
-    transcript is read only when the push reaches the record branch: a push to another branch passes
+    are read once each. A spawn log cannot show a file read, so that cost is unmeasured here. The red-run
+    check (rule red-run, decision red-run-trailer-on-test-commits) adds one `git log` per push that reaches a
+    readable base, and no diff read of its own, so each row above that reaches a base counts one `log`.
+    The transcript is read only when the push reaches the record branch: a push to another branch passes
     with an unreadable transcript, and a push to the record branch with one is refused. A stand-in git
     on PATH logs each spawn."""
     if os.name == "nt":
@@ -1151,19 +1153,21 @@ def record_push_cost_case():
 
     for label, tail, want, *cwd in (
         ("a refspec push to lane/foo", "push origin lane/foo",
-         {"rev-parse": 1, "symbolic-ref": 1, "diff": 1, "rev-list": 1}),
-        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1, "rev-list": 1}),
-        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1, "rev-list": 1}),
-        ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "config": 1, "diff": 1}),
-        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1, "config": 1, "diff": 1}),
+         {"rev-parse": 1, "symbolic-ref": 1, "diff": 1, "rev-list": 1, "log": 1}),
+        ("a HEAD push", "push origin HEAD",
+         {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1, "rev-list": 1, "log": 1}),
+        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1, "rev-list": 1, "log": 1}),
+        ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "config": 1, "diff": 1, "log": 1}),
+        ("a literal destination, HEAD:main", "push origin HEAD:main",
+         {"rev-parse": 1, "config": 1, "diff": 1, "log": 1}),
         ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo",
-         {"rev-parse": 1, "diff": 1, "rev-list": 1}),
+         {"rev-parse": 1, "diff": 1, "rev-list": 1, "log": 1}),
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
-         {"rev-parse": 2, "symbolic-ref": 1, "diff": 3, "rev-list": 1}),
+         {"rev-parse": 2, "symbolic-ref": 1, "diff": 3, "rev-list": 1, "log": 1}),
         # A stray push: HEAD on a branch tracking another name. The destination's ref is read and is absent, so
         # the conflict check rejects that base and reads the upstream: two diff reads.
         ("a stray push, HEAD on a branch tracking another name", "push origin HEAD",
-         {"rev-parse": 2, "symbolic-ref": 2, "config": 1, "diff": 2, "rev-list": 1}, PUSHSTRAY),
+         {"rev-parse": 2, "symbolic-ref": 2, "config": 1, "diff": 2, "rev-list": 1, "log": 1}, PUSHSTRAY),
         # rule push-all-main. push_ask_hit alone reads, for a --all push to a network remote, the remote's config, the
         # current branch (the agent test), one for-each-ref of the tracking refs, and one for-each-ref of the local
         # branches when the tracking refs show no update. A glob reads the config and the same two for-each-ref reads.
@@ -1174,13 +1178,14 @@ def record_push_cost_case():
         ("a --all push to a network remote", "push --all origin",
          {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "for-each-ref": 2}),
         ("a glob push to a network remote", "push origin refs/heads/*:refs/heads/*",
-         {"rev-parse": 2, "symbolic-ref": 1, "config": 1, "for-each-ref": 2, "diff": 3, "rev-list": 1}),
+         {"rev-parse": 2, "symbolic-ref": 1, "config": 1, "for-each-ref": 2, "diff": 3, "rev-list": 1, "log": 1}),
         ("a --all push to a local-path origin", "push --all origin",
          {"rev-parse": 1, "symbolic-ref": 1, "config": 2}, PUSHLOCALAHEAD),
         # rule red-run (decision red-run-trailer-on-test-commits): a push that sends a docs commit and no test path adds
-        # no call, such as a `git log`, for the rule's check. RR_DOCS is built in section 43400, which loads after this one.
+        # one `git log` for the rule's check, and no diff read of its own: the one diff is the conflict-markers base.
+        # RR_DOCS is built in section 43400, which loads after this one.
         ("a push of a docs-only commit, no test path", "push origin topic",
-         {"config": 1, "diff": 1, "rev-list": 1, "rev-parse": 1, "symbolic-ref": 1}, RR_DOCS),
+         {"config": 1, "diff": 1, "rev-list": 1, "rev-parse": 1, "symbolic-ref": 1, "log": 1}, RR_DOCS),
     ):
         kinds, lines = spawn_kinds(VCS + " " + tail, cwd[0] if cwd else PUSHFEAT)
         if kinds != want:
@@ -1203,7 +1208,8 @@ def record_push_cost_case():
         problems.append("a push to roadmap with an unreadable transcript: %s, want deny" % got)
     if problems:
         return False, "; ".join(problems)
-    return True, "one rev-parse per push, one more for a stray push, symbolic-ref for HEAD and bare, " \
+    return True, "one rev-parse per push, one more for a stray push, one git log for red-run, " \
+                 "symbolic-ref for HEAD and bare, " \
                  "push.default for bare only, one rev-list per pushed ref not to main or master; " \
                  "the transcript is read only at the record branch"
 
