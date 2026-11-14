@@ -4,11 +4,11 @@
  "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJKzVWixDqQgAjMzTCgV",
  "owner": "triage",
  "blockedBy": [],
  "why": "Consultant 00:21 CST Nov 14 (relayed; owner priority fb-1556-6, cut repetition): PR #2980 was re-cut as #3376 only to fix a commit trailer, same tree, and review round 1 and lane lint ran again.",
  "source": "Consultant message 00:21 CST Nov 14 (relayed). Related, folded or kept apart by the lane: step replacement-pr-carries-review (the fix check names the replaced PR's record), step record-replacement-pr-rounds (a replacement PR keeps the rounds owed), step red-run-pre-push (the cause of the two re-cuts).",
  "note": "Triage 00:23 CST Nov 14: when a new PR's tree sha equals the tree sha of a PR that passed review and lane lint, the merge tool and lane lint accept the earlier records for the new PR, so a re-cut does not restart round 1 or the lint cycle. The lane first reads what the two related steps already cover and builds only the gap. A guard change: review rounds apply. Not started. Lane started 00:25 CST Nov 14 (coordinator 00:25, relayed; session id not given; path ALONE via runner 10).",
- "updatedAt": "2026-11-14T00:25:20-06:00"
+ "updatedAt": "2026-11-14T00:27:20-06:00"
 }
