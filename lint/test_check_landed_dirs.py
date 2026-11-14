@@ -181,6 +181,63 @@ class CheckLandedDirsTests(unittest.TestCase):
                          "a file in hooks/.notes/, a dot-folder that is no cache, passed the check: %s" % result.stdout)
         self.assertIn("probe.txt", result.stderr)
 
+    def test_a_test_helper_in_a_subfolder_names_the_flat_home(self):
+        # Why: a builder that hits this refusal needs the one way out, a flat test_<name>.py file beside its tests.
+        # The refused path itself holds `test_`, so the way out is pinned as the literal `test_<name>.py`.
+        result = run_in_copy(add_file("hooks/test_support/x.py", "case\n"))
+        self.assertEqual(result.returncode, 1,
+                         "a helper in hooks/test_support/, a subfolder of landed hooks/, passed the check: %s" % result.stdout)
+        self.assertIn("hooks/test_support/x.py", result.stderr,
+                      "the refusal does not name the refused helper: %s" % result.stderr)
+        self.assertIn("test_<name>.py", result.stderr,
+                      "the refusal does not name the way out, a test_<name>.py file: %s" % result.stderr)
+        self.assertIn("flat", result.stderr,
+                      "the refusal does not say the way out is flat: %s" % result.stderr)
+        self.assertIn("beside", result.stderr,
+                      "the refusal does not say the way out sits beside its tests: %s" % result.stderr)
+
+    def test_a_flat_test_file_beside_its_tests_passes_the_check(self):
+        # Why: the way out the refusal names must pass. A flat test_<name>.py at the top of a landed folder is landed.
+        result = run_in_copy(add_file("hooks/test_cost_probe.py", "case\n"))
+        self.assertIn("check_landed_dirs: ok", result.stdout,
+                      "the check did not reach its ok line: %s" % result.stderr)
+        self.assertEqual(result.returncode, 0, "a flat hooks/test_cost_probe.py was refused: %s" % result.stderr)
+
+    def test_a_helper_in_a_test_support_subfolder_still_fails_the_check(self):
+        # Why: the verdict must not widen. A helper in a subfolder of a landed folder stays refused.
+        result = run_in_copy(add_file("hooks/test_support/cost_probe.py", "case\n"))
+        self.assertEqual(result.returncode, 1,
+                         "a helper in hooks/test_support/ passed the check, so the verdict widened: %s" % result.stdout)
+        self.assertIn("cost_probe.py", result.stderr, "the refusal does not name the helper: %s" % result.stderr)
+
+
+RECORD_PATH = os.path.join(ROOT, "docs", "decisions", "builders-cannot-edit-tests.md")
+HELPER_HOME_HEADING = "## Where a test-support helper lives"
+
+
+def record_section(text, heading):
+    """The lines under `heading`, up to the next `## ` heading. None when the record has no such heading."""
+    lines = text.split("\n")
+    starts = [i for i, line in enumerate(lines) if line.rstrip() == heading]
+    if not starts:
+        return None
+    start = starts[0] + 1
+    end = next((i for i in range(start, len(lines)) if lines[i].startswith("## ")), len(lines))
+    return "\n".join(lines[start:end])
+
+
+class HelperHomeRecordTests(unittest.TestCase):
+
+    def test_the_decision_record_names_the_flat_home_for_a_test_helper(self):
+        # Why: a builder reads the record for where a helper goes. The test reads that one section only,
+        # so no other line of the record can satisfy it.
+        with open(RECORD_PATH, encoding="utf-8") as f:
+            section = record_section(f.read(), HELPER_HOME_HEADING)
+        self.assertIsNotNone(section, "the decision record has no '%s' section" % HELPER_HOME_HEADING)
+        self.assertIn("test_<name>.py", section,
+                      "the '%s' section does not name the flat test_<name>.py home" % HELPER_HOME_HEADING)
+        self.assertIn("flat", section, "the '%s' section does not say the home is flat" % HELPER_HOME_HEADING)
+
 
 if __name__ == "__main__":
     unittest.main()

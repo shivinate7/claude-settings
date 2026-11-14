@@ -389,6 +389,13 @@ add("test-author: Edit of hooks/guard_core.py is refused", "deny", rule=TA, tool
 add("builder-test: Edit of hooks/mutate_guard.py is refused", "deny", rule=BT, tool="Edit",
     file_path="hooks/mutate_guard.py", carries=("test-author", "Report"),
     agent_id="bld1", agent_type="builder", cwd=GITMAIN)
+# A test-support helper goes flat, beside its tests (decision builders-cannot-edit-tests, where a test-support
+# helper lives). A flat test_<name>.py in a landed folder is a test path: a test-author writes it, a builder may not.
+for _tool in ("Edit", "Write"):
+    add("test-author: %s of hooks/test_cost_probe.py is allowed" % _tool, "allow", tool=_tool,
+        file_path="hooks/test_cost_probe.py", **A)
+    add("builder-test: %s of hooks/test_cost_probe.py is refused" % _tool, "deny", rule=BT, tool=_tool,
+        file_path="hooks/test_cost_probe.py", carries=("test-author", "Report"), **B)
 # The near misses stay a builder's product code: a later mutate_*.py is not a mutation test. A listed
 # name in another case is the same file on Windows, so it is refused for a builder too.
 add("builder-test: Edit of hooks/mutate_x.py is allowed", "allow", tool="Edit",
