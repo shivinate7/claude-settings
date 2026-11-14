@@ -3760,8 +3760,9 @@ def live_review_state(h, rec, live, main, claims=None):
 def rollup_green(h, n, head):
     """True only when the ROLLUP_JOB rows of the newest run on `head` are all a pass and no older run's row is red. The newest run is the largest id in
     the row links (/actions/runs/<id>/): a draft run skips the rollup job and the ready run after it passes it, so both sit on one head and the newer
-    run decides. An older run's skipped, cancelled or pending row is ignored. An older run's red row (bucket "fail" or "timed out ...") still holds the
-    rollup not green, as the merge check reads it, so the skip line never prints for a head the check then refuses. A row that names no run cannot be
+    run decides. An older run's skipped, cancelled or pending row is ignored. An older run's red row (bucket "fail" or "timed out ...") holds the
+    rollup not green unless h.checks drops it (`superseded`: the newest run of that workflow has a pass or pending row of the same name), so the skip line never
+    prints for a head the check then refuses. A red row that nothing newer clears (the newest run of that workflow lacks the name or skipped it, or another workflow) still holds it. A row that names no run cannot be
     placed, so it must pass whatever the newest run says. No row, any other bucket among the deciding rows, or a failed read is False, so the caller
     keeps its own check. Cost: the one read h.checks already makes."""
     try:
@@ -3793,8 +3794,8 @@ def lint_check(h, n, info, root, cfgrel):
     linted_head, so a head pushed after this read is refused there. A PASS for an earlier head also counts when every commit since is a claim (claim_only):
     the join's own claim push, resumed, moves the head by exactly that.
     The lint is skipped only for a batch integration PR (is_integration_pr) when the all-jobs-passed rollup (ROLLUP_JOB) is green on info["head"], the sha the
-    merge takes: CI proved that head (rule roles-each-layer-proves-once). Green is the verdict of the newest run on that head, and an older run's red row still refuses (rollup_green), because a draft
-    run's skipped row stays on the head beside the ready run's pass. A lane PR keeps the need above even on a green rollup, as does a rollup that is
+    merge takes: CI proved that head (rule roles-each-layer-proves-once). Green is the verdict of the newest run on that head, and an older run's red row that no newer pass or pending row of the same name clears
+    still refuses (rollup_green), because a draft run's skipped row stays on the head beside the ready run's pass. A lane PR keeps the need above even on a green rollup, as does a rollup that is
     absent, red, pending or skipped in its newest run, green only on another sha, or unreadable."""
     if is_integration_pr(info) and rollup_green(h, n, info["head"]):
         say(f"merge: lane lint skipped for #{n}: {ROLLUP_JOB} is green on {info['head'][:9]}, so CI already proved this head.")
