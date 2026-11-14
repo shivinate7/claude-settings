@@ -5,7 +5,9 @@ hook on AskUserQuestion. A prompt hook sees only the call's JSON. An agent hook 
 returns ok. Neither has a command field, so neither runs guard_core.refuse, the one home of the owner
 override (decision owner-override).
 
-An AskUserQuestion box runs hooks/question_form.py chat_hit first. A hit refuses with the rule it
+An AskUserQuestion box from a lane (an own record with a parent) is refused first, with no model call, rule
+`lane-question-box`: the lane sends the question to its parent (rule questions-go-to-owner). An unread record or an
+error counts as no lane. Any other box runs hooks/question_form.py chat_hit. A hit refuses with the rule it
 names, through the same refuse(), and makes no model call; the model sees only a box that passes.
 Each call that passes gets one model verdict through decision_watch.invoke_model, the one model caller.
 A verdict {"ok": false, "reason": R} refuses through guard_core.refuse(), the one home of the override
@@ -72,6 +74,13 @@ SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
 # and the code rules question_form.chat_hit names) is the question reviewer's.
 SPAWN_CITE = "(decision haiku-prompt-hooks, the spawn judge refuses a brief that breaks the spawn rules)"
 QUESTION_CITE = "(decision question-reviewer-agent-hook, a question is reviewed before it reaches the owner)"
+# A lane (a session with a parent) never opens the question box. Code refuses it before any model call.
+LANE_RULE = "lane-question-box"
+LANE_CITE = "(rule questions-go-to-owner, a lane routes its question to its parent)"
+LANE_REASON = (
+    "this session has a parent, so it is a lane, and a lane never opens a box that stops it until the owner answers. "
+    "Send the question to your parent with send_message to @parent, in the same turn. Then keep working on what does "
+    "not depend on the answer, or end your turn: the parent's reply wakes you.")
 # THE TIME BUDGET. One model call per hook run, so the longest path is the question call's 60 s plus
 # start-up. The settings.json PreToolUse entry for this hook carries "timeout": 70.
 SPAWN_MODEL, SPAWN_TIMEOUT = "claude-sonnet-5-5", 30
@@ -329,13 +338,29 @@ def explore_off_model(tool, args):
     return "sonnet" not in model and "opus" not in model
 
 
+def lane_parent(payload):
+    """The parent session id of this session's own record, or None for no parent, no id, an unread record or any error:
+    an unread record counts as no lane, so the box goes to the model review as before (guard.lane_session_hit's rule).
+    Cost: one transcript read, only on a question box."""
+    try:
+        import override
+        own_id = override.remote_session_id()
+        transcript = payload.get("transcript_path")
+        if own_id is None or not isinstance(transcript, str) or not transcript:
+            return None
+        import own_session
+        return own_session.own_session_read(transcript, own_id)[2]
+    except Exception:
+        return None
+
+
 def refuse(payload, tool, args, rule, reason):
     """Refuse through guard_core.refuse(), which lets an owner override lift it. refuse() exits."""
     reason = reason.strip()
     if reason.startswith(rule):
         reason = reason[len(rule):].lstrip(" :-")
     vetoed = explore_off_model(tool, args)
-    text = reason + " " + {SPAWN_RULE: SPAWN_CITE}.get(rule, QUESTION_CITE)  # the text both paths below carry
+    text = reason + " " + {SPAWN_RULE: SPAWN_CITE, LANE_RULE: LANE_CITE}.get(rule, QUESTION_CITE)  # the text both paths below carry
     try:
         import guard_core
         guard_core.set_log_session(payload.get("session_id"))
@@ -390,6 +415,8 @@ def main():
         reask = widening = False
         if tool == "AskUserQuestion":
             import question_form
+            if lane_parent(payload):
+                return refuse(payload, tool, args, LANE_RULE, LANE_REASON)
             code_rule, matched = question_form.chat_hit(args)
             if code_rule:
                 reason = "%s (%s)" % (question_form.CHAT_REASONS[code_rule], matched)
