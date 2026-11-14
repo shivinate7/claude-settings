@@ -83,7 +83,7 @@ Notes: the shared-tree gaps `git update-ref -d`, `git rm -rf .` and `git read-tr
 | `load-brake` | machine-load-brake | "a call that starts a lane or an agent reads the machine's load. A busy or full machine refuses new lanes and agents" | exact | exact | a busy machine refuses a background Agent | - |
 | `guard-crash` | guard-hooks-fail-closed | "a guard that times out or crashes does not ... except a missing guard module, which refuses" | exact | exact | a raise is allowed and logged; a missing module is denied | rule rewrite: the guard index line says only "allowed"; add the missing-module deny |
 
-Notes: create_session is not a start tool for load-brake, so a lane session starts on a full machine; the decision names start_session only (owner question). `narrated-tail` logs as live-stream with no index line.
+Notes: create_session is not a start tool for load-brake, so a lane session starts on a full machine; the decision named start_session only (owner question). Since decision `start-session-not-pretooluse`, no PreToolUse hook sees start_session, so the brake reads Agent, Task and Workflow only. `narrated-tail` logs as live-stream with no index line.
 
 ## C. Agents, models, roles and worktrees
 
