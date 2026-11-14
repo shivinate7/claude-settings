@@ -1,10 +1,10 @@
 {
  "id": "own-809-let-go",
  "at": "2026-11-13T23:40:00-06:00",
- "title": "Item 809: let it go; the owner reads the refusal as an app bug",
- "ruling": "Owner, saved on the waiting page 23:38 CST Nov 13, item 809, \"none of these\", note \"its apparently a bug on the app let it go\". Read: stop measuring which layer refused the home coordinator's fifth start-session call; the owner takes it as a bug in the app, not a rule to change. Triage did not check the bug claim. Item 751 (step c107) is separate and stays open.",
+ "title": "Item 809: let it go (superseded by own-809-reopen-hook-card)",
+ "ruling": "Superseded 00:12 CST Nov 14 by ruling own-809-reopen-hook-card: the owner reopened item 809 after a test showed the guard hook's start_session matcher causes the card. Earlier reading, kept for the record: on the waiting page 23:38 CST Nov 13 the owner answered \"none of these\", \"its apparently a bug on the app let it go\". Item 751 (step c107) is separate and stays open.",
  "quote": "its apparently a bug on the app let it go",
  "source": "Owner page save 23:38 CST Nov 13 (05:38:01Z), read by triage in the answers store; filed by triage.",
- "status": "open",
+ "status": "superseded",
  "step": "c107"
 }

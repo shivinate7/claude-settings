@@ -1,9 +1,10 @@
 {
   "title": "Refresh the ci-hygiene skill and apply it in every repo",
-  "status": "todo",
+  "status": "doing",
   "order": 103.33745,
   "why": "shiv, Oct 30 15:08 CDT (via coordinator): refresh the ci-hygiene skill and apply it to every repo.",
-  "note": "Coordinator 00:10 CST Nov 14 (relayed): no hold is written in this step. The skill text runs as step ci-hygiene-once-per-batch (#3004, in the CI fold at runner 10). The per-repo audit and fix lanes start now; a lane row follows when the coordinator reports one started. Kept from earlier notes: the skill refresh landed on main in batch 40, #923 (Oct 31). Done check: each repo's CI passes the refreshed skill's checks. Two small skill fixes from the q_max lane (Nov 1): item 15 checks the zizmor pin with grep zizmor==, which misses an action-input pin (version: 1.30.1), so reword it for both forms; audit item 2 needs a carve-out for jobs skipped by design (banchi design-check-passed, the nightly-alarm skip), held in its EXCLUDED list. House zizmor pin is 1.30.1; 1.31.1 exists; take the newest that passes, after reading its changelog. The every-repo part waits for free runner time (step child-ci-once-per-batch). No lane runs the refresh yet.",
+  "note": "Coordinator 00:10 CST Nov 14 (relayed): no hold is written in this step. The skill text runs as step ci-hygiene-once-per-batch (#3004, in the CI fold at runner 10). The per-repo audit and fix lanes start now; a lane row follows when the coordinator reports one started. Kept from earlier notes: the skill refresh landed on main in batch 40, #923 (Oct 31). Done check: each repo's CI passes the refreshed skill's checks. Two small skill fixes from the q_max lane (Nov 1): item 15 checks the zizmor pin with grep zizmor==, which misses an action-input pin (version: 1.30.1), so reword it for both forms; audit item 2 needs a carve-out for jobs skipped by design (banchi design-check-passed, the nightly-alarm skip), held in its EXCLUDED list. House zizmor pin is 1.30.1; 1.31.1 exists; take the newest that passes, after reading its changelog. The every-repo part waits for free runner time (step child-ci-once-per-batch). No lane runs the refresh yet. Lane row 00:12 CST Nov 14 (coordinator, relayed): lane ci-hygiene-audit-cs, session_013NEJL1dbfsCQJnAHMW3apP, claude-settings audit then fix PRs, path ALONE via runner 10; child audits by runner 11.",
   "phase": "cleanup",
-  "updatedAt": "2026-11-14T00:10:30-06:00"
+  "updatedAt": "2026-11-14T00:12:37-06:00",
+  "lane": "session_013NEJL1dbfsCQJnAHMW3apP"
 }

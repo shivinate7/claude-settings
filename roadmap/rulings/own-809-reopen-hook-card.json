@@ -1,0 +1,10 @@
+{
+ "id": "own-809-reopen-hook-card",
+ "at": "2026-11-14T00:12:37-06:00",
+ "title": "Item 809 reopened: the guard hook's start_session matcher makes the desktop app show the card",
+ "ruling": "Owner, typed in the triage chat 00:12 CST Nov 14: \"Reopen 809.\" Fix: remove mcp__ccd_session__start_session from the PreToolUse matcher in settings.json, with no regex matcher; keep the start checks some other way that adds no PreToolUse hook on that tool, and say which is chosen and which checks are lost; add a settings test, red first; record the decision that start_session is not gated at PreToolUse. Cause proven by the owner's test at 00:04 CST Nov 14 (card with the matcher, none without it); app issue anthropics/claude-code#103832. Supersedes ruling own-809-let-go (\"a bug on the app, let it go\"). Triage did not check the app code path.",
+ "quote": "Reopen 809. Fix: the Claude desktop app shows an \"Allow Claude to start the session?\" card on every mcp__ccd_session__start_session call, even in Bypass mode, because our guard hook lists that tool.",
+ "source": "Owner message in the triage session, 00:12 CST Nov 14; filed by triage.",
+ "status": "open",
+ "step": "start-session-not-pretooluse"
+}
