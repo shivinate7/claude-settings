@@ -37,6 +37,19 @@ cp -r "$here" "$pin/actions/push-skip" && cp -r "$root/lint" "$pin/lint" \
 python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import test_all_jobs_passed as t; sys.stdout.write(t.CHILD_GOOD)' "$root/lint" \
   > "$caller/.github/workflows/checks.yml" || { echo "FAIL - fixture: lint/test_all_jobs_passed.py did not give CHILD_GOOD"; exit 1; }
 
+# The gated callers: this repo's checks.yml, which sets the macOS scope-skips map, and the same file with that input removed. The gate's
+# jobs come from testing/scope_skips.py here, since the pinned copy holds no testing/ folder.
+gated_caller="$work/gated_caller"; nomap_caller="$work/nomap_caller"
+mkdir -p "$gated_caller/.github/workflows" "$nomap_caller/.github/workflows"
+[ "$(grep -c '^          scope-skips: ' "$root/.github/workflows/checks.yml")" -eq 1 ] \
+  || { echo "FAIL - fixture: checks.yml does not set its scope-skips input exactly once"; exit 1; }
+cp "$root/.github/workflows/checks.yml" "$gated_caller/.github/workflows/checks.yml" \
+  && sed '/^          scope-skips: /d' "$root/.github/workflows/checks.yml" > "$nomap_caller/.github/workflows/checks.yml" \
+  || { echo "FAIL - fixture: the gated callers could not be written"; exit 1; }
+GATED=$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import scope_skips; print(" ".join(sorted(scope_skips.MACOS_GATE)))' "$root/testing") \
+  || { echo "FAIL - fixture: testing/scope_skips.py did not give MACOS_GATE"; exit 1; }
+export GATED
+
 # The driver: loads the pinned script, answers its reads from the case's canned routes, and prints the skip value it wrote.
 cat > "$work/drive.py" <<'PY'
 import contextlib, importlib.util, io, os, sys, urllib.parse
@@ -58,10 +71,11 @@ def job(name, conclusion="success", steps=None):
             "steps": [step("Run")] if steps is None else steps}
 
 
-def batch_reads():
+def batch_reads(runs=None):
+    runs = [run(ROLLUP), run("lint"), run("test-mac")] if runs is None else runs
     return {"commits/%s/pulls" % PUSH: [{"head": {"ref": "batch-x", "sha": BATCH}}],
             "git/commits/%s" % BATCH: {"tree": {"sha": TREE}},
-            "commits/%s/check-runs" % BATCH: {"check_runs": [run(ROLLUP), run("lint"), run("test-mac")]}}
+            "commits/%s/check-runs" % BATCH: {"check_runs": runs}}
 
 
 def lane_reads(jobs=None):
@@ -74,6 +88,28 @@ def lane_reads(jobs=None):
             "actions/runs/7/jobs": {"jobs": jobs}}
 
 
+GATED = os.environ.get("GATED", "").split()  # the macOS gate's jobs, from testing/scope_skips.py (test_action.sh reads it: the pinned copy holds no testing/)
+
+
+def caller_needed():
+    """The jobs the caller's workflow needs, read by the pinned copy's own reader (lint/all_jobs_passed_rules.py), rollup included."""
+    sys.path.insert(0, os.path.join(pin, "lint"))
+    import all_jobs_passed_rules
+    with open(os.path.join(caller, ".github", "workflows", "checks.yml"), encoding="utf-8") as handle:
+        return all_jobs_passed_rules.split_jobs(handle.read())[0] + [ROLLUP]
+
+
+def gated_runs(needed):
+    """The check runs of a ready batch head: each gated job skipped by its flags, every other job passed."""
+    return [run(name, "skipped" if name in GATED else "success") for name in needed]
+
+
+def gated_jobs(needed):
+    """The jobs of a ready lone-lane run: each gated job skipped with no steps, every other job passed."""
+    return [job(name, "skipped", steps=[]) if name in GATED else job(name) for name in needed]
+
+
+NEEDED = caller_needed()
 CASES = {
     "green_batch": (batch_reads(), {}),
     "green_lane": (lane_reads(), {}),
@@ -82,6 +118,9 @@ CASES = {
     "schedule": (lane_reads(), {"EVENT": "schedule"}),
     "dispatch": (lane_reads(), {"EVENT": "workflow_dispatch"}),
 }
+CASES["gated_batch"] = (batch_reads(gated_runs(NEEDED)), {})
+CASES["gated_lane"] = (lane_reads(gated_jobs(NEEDED)), {})
+CASES["gated_nomap"] = CASES["gated_batch"]  # the same ready run, judged against a caller whose scope-skips input is removed
 routes, extra = CASES[case]
 
 
@@ -108,9 +147,9 @@ print(lines[0] if len(lines) == 1 else "none")
 PY
 
 # Pinned cases: the script the copy carries decides from the caller's workspace, with its own readers.
-pinned() { # pinned <case> <want>
-  local got
-  got=$(python3 -I "$work/drive.py" "$pin" "$caller" "$1" "$work" 2>"$work/$1.err") || got="error"
+pinned() { # pinned <case> <want> [the calling checkout, the child's by default]
+  local got dir="${3:-$caller}"
+  got=$(python3 -I "$work/drive.py" "$pin" "$dir" "$1" "$work" 2>"$work/$1.err") || got="error"
   if [ "$got" = "$2" ]; then ok "pinned: $1 gives skip=$2"
   else no "pinned: $1 gives skip=$got, wanted $2 ($(head -c 300 "$work/$1.err" | tr '\n' ' '))"; fi
 }
@@ -120,5 +159,8 @@ pinned skipped_suite false
 pinned skipped_step true
 pinned schedule false
 pinned dispatch false
+pinned gated_batch true "$gated_caller"
+pinned gated_lane true "$gated_caller"
+pinned gated_nomap false "$nomap_caller"
 
 exit "$bad"
