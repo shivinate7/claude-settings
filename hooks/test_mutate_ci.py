@@ -374,6 +374,19 @@ def profile_file(profile):
     return path
 
 
+def walk_suites(target):
+    """The suites the read finds for `target` before GUARD_MODULE_DROPPED_SUITES takes any away: `suites_for_paths` on the
+    tracked files of REPO, with no union. A drop is a choice of the selector, not a miss of the read."""
+    previous = os.getcwd()
+    os.chdir(REPO)
+    try:
+        tracked, reason = mutate_guard._tracked_files()
+        assert tracked is not None, reason
+        return set(mutate_guard.suites_for_paths([target], tracked, union=False))
+    finally:
+        os.chdir(previous)
+
+
 def run_cli(args, cwd=REPO):
     """`hooks/mutate_guard.py <args>` in a child Python, from `cwd`: the repository root, or a fixture repository, whose
     `git ls-files` the mode reads. Returns (exit code, stdout, stderr). The mode's entry point is checked first: when it
@@ -1693,7 +1706,11 @@ class TestsForTests(unittest.TestCase):
         self.assertTrue(beside, "the fixture: hooks/ holds tracked test_guard files")
         code, out, err = run_cli(["--tests-for", target])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        printed = set(out.splitlines())
+        # hooks/guard.py has a GUARD_MODULE_FAMILIES row, so hooks/test_guard.py prints as `hooks/test_guard.py::<family>` lines:
+        # the file counts as printed when one of its family lines is.
+        families = {line.split("::")[1] for line in out.splitlines() if line.startswith("hooks/test_guard.py::")}
+        self.assertEqual(families, set(guard_table()[target]), "the row's families are the family lines it prints")
+        printed = {line.split("::")[0] for line in out.splitlines()}
         for name in sorted(beside):
             with self.subTest(beside=name):
                 self.assertIn(name, printed, "%s sits beside hooks/guard.py, so it is printed" % name)
@@ -1756,23 +1773,25 @@ class TestsForTests(unittest.TestCase):
         for target in sorted({target for target, _, _ in cases}):
             code, out, err = run_cli(["--tests-for", target])
             self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-            printed[target] = set(out.splitlines())
+            printed[target] = walk_suites(target) if target == "hooks/guard.py" else set(out.splitlines())
         for target, suite, call in cases:
             with self.subTest(suite=suite, target=target):
                 self.assertIn(call, show(REPO, "HEAD", suite), "the fixture: %s calls its loader with %s" % (suite, target))
                 self.assertIn(suite, printed[target],
                               "%s loads %s through a parameter, so --tests-for %s must print it" % (suite, target, target))
 
-    def test_a_path_constant_naming_guard_py_prints_the_suite_that_copies_it(self):
+    def test_a_path_constant_naming_guard_py_is_read_but_its_suite_is_dropped_as_unusable(self):
         target = "hooks/guard.py"
         self.assertNotIn(target, dict(mutate_guard.REPORT_TARGETS), "the fixture: %s must be unlisted" % target)
         loader = "hooks/test_wrappers.py"
         self.assertRegex(show(REPO, "HEAD", loader), r'(?m)^GUARD_PY = os\.path\.join\(HERE, "guard\.py"\)$',
                          "the fixture: %s binds guard.py to the GUARD_PY path constant" % loader)
+        self.assertIn(loader, walk_suites(target),
+                      "%s copies guard.py by its GUARD_PY path constant, so the read of %s must find it" % (loader, target))
         code, out, err = run_cli(["--tests-for", target])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        self.assertIn(loader, out.splitlines(),
-                      "%s copies guard.py by its GUARD_PY path constant, so --tests-for %s must print it" % (loader, target))
+        self.assertNotIn(loader, out.splitlines(),
+                         "%s reads not green on the unparsed copy, so --tests-for %s drops it" % (loader, target))
 
     def test_a_path_constant_naming_settings_json_prints_the_suite_that_opens_it(self):
         target = "settings.json"
@@ -1880,25 +1899,14 @@ class LintSuitesChainTests(unittest.TestCase):
 
 
 # GUARD_MODULE_FAMILIES (hooks/mutate_guard.py) gives a guard module its family suites, hooks/test_guard.py::<family>,
-# and the import walk's suites come with them. WALK_SUITES holds those walk suites for each row: the walk of the tracked
-# tree with the row left out, minus the whole hooks/test_guard.py. A row with no entry fails by name. A name these cases
-# read from mutate_guard has a default, so a case fails on the row it lacks, not on a missing name.
-WALK_SUITES = {
-    "hooks/guard_kill.py": ["hooks/test_checks_never_raise.py"],
-    "hooks/guard_env.py": ["janitor/test_session_end_sweep.py"],
-    "hooks/guard_frozen.py": ["hooks/test_dir_before_segment.py", "hooks/test_shared_names.py"],
-    "hooks/guard_pointer.py": [],
-    "hooks/guard_rm_var.py": [],
-    "hooks/guard_shared_tree.py": ["hooks/test_checks_never_raise.py"],
-    "hooks/guard_stream.py": [],
-    "hooks/guard_push_delete.py": ["hooks/test_auto_mode_allow.py"],
-    "hooks/guard_branch_worktree.py": ["hooks/test_auto_mode_allow.py"],
-    # hooks/test_shared_names.py opens guard_merge.py by its path (a path read, so it is a walk suite since the path forms).
-    "hooks/guard_merge.py": ["hooks/test_shared_names.py", "lint/test_hook_catalog.py", "lint/test_report_guard_review.py",
-                             "lint/test_settings_matcher.py"],
-    "hooks/guard_mask_script.py": [],
-    "hooks/guard_argv.py": [],
-}
+# and the import walk's suites come with them. row_walk_suites reads those walk suites for a row from walk_suites (the one
+# read of the tracked tree), so a suite that starts to load a module is counted with no list to update (rule
+# building-allow-list-is-the-constant).
+def row_walk_suites(module):
+    """The import walk's suites for a table row: walk_suites, minus the whole hooks/test_guard.py (its family lines stand
+    in for it) and the row's GUARD_MODULE_DROPPED_SUITES."""
+    dropped = getattr(mutate_guard, "GUARD_MODULE_DROPPED_SUITES", {}).get(module, ())
+    return walk_suites(module) - {"hooks/test_guard.py"} - set(dropped)
 
 
 def guard_table():
@@ -2005,11 +2013,9 @@ class GuardModuleFamilyTests(unittest.TestCase):
         self.assertIn("hooks/guard_kill.py", table, "GUARD_MODULE_FAMILIES has no row for hooks/guard_kill.py")
         for module, families in sorted(table.items()):
             with self.subTest(module=module):
-                self.assertIn(module, WALK_SUITES, "%s has a row but no WALK_SUITES entry: name its import-walk suites"
-                              % module)
                 code, out, err = run_cli(["--tests-for", module])
                 self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-                expected = {"hooks/test_guard.py::%s" % family for family in families} | set(WALK_SUITES[module])
+                expected = {"hooks/test_guard.py::%s" % family for family in families} | row_walk_suites(module)
                 self.assertEqual(out.splitlines(), sorted(expected),
                                  "%s prints its family lines and its import-walk suites, each once, sorted" % module)
 
@@ -2024,13 +2030,30 @@ class GuardModuleFamilyTests(unittest.TestCase):
                 self.assertNotIn("hooks/test_guard.py", out.splitlines(),
                                  "%s prints the whole hooks/test_guard.py, which takes minutes per mutant" % module)
 
+    def test_tests_for_guard_py_runs_family_slices_and_never_the_two_whole_slow_suites(self):
+        """hooks/guard.py: the whole hooks/test_guard.py and merge/test_merge.py time out at 180 s on the clean source, so
+        no mutant starts inside the 300 s budget (step mutation-tests-for-cost, 6 runs, 0 of 10 mutants ran)."""
+        target = "hooks/guard.py"
+        self.assertNotIn(target, dict(mutate_guard.REPORT_TARGETS), "the fixture: %s is no REPORT_TARGETS row" % target)
+        code, out, err = run_cli(["--tests-for", target])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        printed = out.splitlines()
+        self.assertIn(target, guard_table(), "hooks/guard.py needs a GUARD_MODULE_FAMILIES row")
+        self.assertNotIn("hooks/test_guard.py", printed, "the whole hooks/test_guard.py takes minutes per mutant")
+        self.assertNotIn("merge/test_merge.py", printed, "the whole merge/test_merge.py takes minutes per mutant")
+        self.assertTrue([line for line in printed if line.startswith("hooks/test_guard.py::")],
+                        "hooks/guard.py prints at least one hooks/test_guard.py::<family> line")
+        for name in ("hooks/test_wrappers.py", "lint/test_layout.py", "lint/test_report_guard_stamped.py"):
+            self.assertNotIn(name, printed, "%s asserts on guard.py's own text, so it reads not green on the unparsed "
+                                            "copy and never kills a mutant" % name)
+
     def test_a_suite_that_loads_a_table_module_inside_a_function_is_kept(self):
         """lint/test_hook_catalog.py imports guard_merge inside a test method, so the import walk finds it only
         through a function-bound load. The union keeps it beside the family line. The scope is asserted first, then
         the print."""
         target, suite = "hooks/guard_merge.py", "lint/test_hook_catalog.py"
         self.assertIn(target, guard_table(), "the fixture: %s keeps its GUARD_MODULE_FAMILIES row" % target)
-        self.assertIn(suite, WALK_SUITES[target], "the fixture: WALK_SUITES names %s for %s" % (suite, target))
+        self.assertIn(suite, row_walk_suites(target), "the fixture: the import walk reaches %s for %s" % (suite, target))
         tree = ast.parse(show(REPO, "HEAD", suite))
         module_level = [node for node in tree.body if isinstance(node, ast.ImportFrom) and node.module == "guard_merge"]
         self.assertEqual(module_level, [], "the fixture: %s has no module-level import of guard_merge" % suite)
@@ -2040,7 +2063,7 @@ class GuardModuleFamilyTests(unittest.TestCase):
         self.assertTrue(in_def, "the fixture: %s imports guard_merge inside a def" % suite)
         code, out, err = run_cli(["--tests-for", target])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        expected = {"hooks/test_guard.py::%s" % family for family in guard_table()[target]} | set(WALK_SUITES[target])
+        expected = {"hooks/test_guard.py::%s" % family for family in guard_table()[target]} | row_walk_suites(target)
         self.assertEqual(out.splitlines(), sorted(expected),
                          "%s loads guard_merge only inside a def, so the import walk finds it through a function-bound "
                          "load, and the union keeps it beside the merge family line" % suite)
