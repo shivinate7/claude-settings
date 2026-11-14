@@ -3594,7 +3594,7 @@ def pre_ready_rows(wt, n, base, checks, pre):
     Each job's step names are read from the workflow in `wt` (job_step_names), so a declared step the tree lacks reads its own `unknown ... not run` row, is never sent
     to ci-job, and makes the state at least unknown. A job with no present step runs no ci-job; a job whose workflow cannot be read reads every check unknown.
     Each job's steps are read from that job's own lines, so a step name two jobs hold reads only its own job.
-    Cost: one ci-job run per job with a present step, one workflow read per job, one debt-close lint (a scratch worktree and one Retire test run per closed debt),
+    Cost: one ci-job run per job with a present step, one read of the workflow files per job (job_workflow opens each one), one debt-close lint (a scratch worktree and one Retire test run per closed debt),
     one cross_measure; no file but ci-job's log and the temporary worktrees."""
     rows, states, lines, log = [], [], [], []
     for job, group in ready_job_groups(checks).items():
