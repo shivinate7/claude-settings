@@ -494,6 +494,105 @@ def decode_ansi_c(text: str) -> str:
     return "".join(out) + text[last:] if out else text
 
 
+def _bash_arithmetic_spans(segment: str, steps):
+    """The (start, end) index spans of each bash `$(( ))`, `(( ))` and `${ }` in `segment` that
+    closes in it. `steps` is `list(walk_quotes(segment))`; a quoted bracket counts for nothing. A
+    `((` whose first `)` is single is two subshells (`((cmd)&)`), so it makes no span. An opener with
+    no closer makes no span, as in the quote walk: the rest stays visible."""
+    free = [index for index, _, quote in steps if not quote]
+    spans, at = [], 0
+    while at < len(free):
+        index = free[at]
+        head = segment[index:index + 3]
+        paren = head == "$((" or (head[:2] == "((" and (index == 0 or segment[index - 1] in " \t\r\n;|&!"))
+        brace = head[:2] == "${"
+        skip = 3 if head == "$((" else 2
+        if not (paren or brace) or free[at:at + skip] != list(range(index, index + skip)):
+            at += 1
+            continue
+        depth, end = (2 if paren else 1), None
+        for spot in range(at + skip, len(free)):
+            char = segment[free[spot]]
+            if char == ("(" if paren else "{"):
+                depth += 1
+            elif char == (")" if paren else "}"):
+                if paren and depth == 2:
+                    if segment[free[spot] + 1:free[spot] + 2] == ")" and spot + 1 < len(free) \
+                            and free[spot + 1] == free[spot] + 1:
+                        end = spot + 1
+                    break
+                depth -= 1
+                if not depth:
+                    end = spot
+                    break
+        if end is None:
+            at += 1
+            continue
+        spans.append((index, free[end]))
+        at = end + 1
+    return spans
+
+
+def _amp_cuts(segment: str):
+    """Each unquoted `&` of `segment` that ends a job or redirects, as (index, kind), read with
+    `walk_quotes`, so a quoted `&`, an escaped `\\&` and a `&` inside a multi-line quote are none.
+    `kind` is "glued" (`tail -3&`: the `&` ends the word before it), "redirect" (a glued `&>`, which
+    redirects both streams and ends no job), or "spaced" (`&` after white space, or at the start).
+    These are no cut:
+    - a `&` of `&&`, `|&`, `>&` or `<&`;
+    - a `&` that comes first after `(` or `{` (white space may come between). PowerShell's call
+      operator sits there (`(& $tool x)`, `{&$tool $_}`), and in bash a job cannot;
+    - in PowerShell, a `&` before a character other than white space, since `&$cmd` and `&"x"` are
+      its call operator;
+    - in bash, a `&` inside `$(( ))`, `(( ))` or `${ }`, where it is bitwise and or a character."""
+    cuts = []
+    if "&" not in segment:
+        return cuts
+    powershell = is_powershell(segment)
+    steps = list(walk_quotes(segment))
+    spans = [] if powershell else _bash_arithmetic_spans(segment, steps)
+    opener = ""   # the last step before this one that is not white space (an escaped `\(` is `\`)
+    for index, char, quote in steps:
+        last, opener = opener, (opener if char in " \t\r\n" else char)
+        if char != "&" or quote:
+            continue
+        before, after = (segment[index - 1] if index else " "), segment[index + 1:index + 2]
+        if after == "&" or before in ">&<|":
+            continue
+        if last in ("(", "{") or any(start < index < end for start, end in spans):
+            continue
+        ends_word = after in ("", " ", "\t", "\r", "\n")
+        if before in " \t\r\n":
+            if after != ">" and not (powershell and not ends_word):
+                cuts.append((index, "spaced"))
+        elif after == ">":
+            cuts.append((index, "redirect"))
+        elif ends_word or not powershell:
+            cuts.append((index, "glued"))
+    return cuts
+
+
+def backgrounding_amp(segment: str, tokens, start: int = 0) -> str:
+    """The text a backgrounding `&` ends in one segment, else ''. The one home of "this command
+    runs as a background job", read by the check-tail rule and the detached-launch rule. A `&` is a
+    job when it ends a piece that holds a word after a command word (the one at `start` in the
+    first piece, any word in a later one), spaced or glued (`_amp_cuts`). The pieces come from the
+    raw text, never from `tokens`: tokens keep no quote marks, so a quoted `&` and a bare one are
+    the same token. `tokens` is `segment_tokens(segment)`; None means the segment cannot be read,
+    which is no job. A `&` at the head of a segment (`|&`, a PowerShell `& $cmd`) ends an empty piece."""
+    if not tokens:
+        return ""
+    last, floor = 0, start
+    for index, kind in _amp_cuts(segment):
+        if kind == "redirect":
+            continue
+        words = segment_tokens(type(segment)(segment[last:index]))
+        if words and (kind == "glued" or len(words) > floor):
+            return words[-1] + ("&" if kind == "glued" else " &")
+        last, floor = index + 1, 0
+    return ""
+
+
 def segment_tokens(segment: str):
     """Tokenize one segment with shlex, or return None when it cannot be parsed.
 

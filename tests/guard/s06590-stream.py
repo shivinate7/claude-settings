@@ -472,12 +472,187 @@ sh("check-tail: the bin merge --release-check piped to tail in the foreground is
    "~/.claude/bin/merge --release-check 5 6 | tail -3", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: merge --release-check with no pipe in the foreground is allowed (control)",
    "merge --release-check 5 6", "allow", cwd=NOGIT)
+# --release-check keeps the tail and head reach (decision background-check-through-verdict), so a grep after it is
+# allowed. The lane-lint and review-record rows carry the wider reach.
+sh("check-tail: merge --release-check piped to grep is allowed, the reach is tail and head only",
+   "merge --release-check 5 6 | grep x", "allow", cwd=NOGIT)
 add("check-tail: merge --release-check piped to tail, backgrounded, is refused", "deny",
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="merge --release-check 5 6 2>&1 | tail -3")
 add("check-tail: merge --release-check with no pipe, backgrounded, is allowed (control)", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="merge --release-check 5 6")
+
+# --- check-tail: any filter after a merge verdict call, a glued `&`, and the merge option forms
+# (decision background-check-through-verdict; detached-launch reads the glued `&`).
+#
+# ANY FILTER. After merge --lane-lint or --review-record, any filter cuts what the agent reads, not only tail
+# and head. The writers tee, tee.exe, Tee-Object and Out-File with nothing after them are the exception. So are
+# a verdict call, a redirect to a file, and a grep of that file in a later command.
+sh("check-tail: merge --lane-lint piped to sed -n 1,5p, with no tail or head, is refused",
+   "merge --lane-lint 7 | sed -n 1,5p", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane-lint piped to grep -m1 FAIL, with no tail or head, is refused",
+   "merge --lane-lint 7 | grep -m1 FAIL", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --review-record piped to awk, with no tail or head, is refused",
+   "merge --review-record 7 | awk 'END{print}'", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane-lint through tee, then sed -n, is refused",
+   "merge --lane-lint 7 | tee x | sed -n 1,5p", "deny", "check-tail", cwd=NOGIT)
+add("check-tail: ci-job checks --lint piped to grep FAIL, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/ci-job checks --lint | grep FAIL")
+sh("check-tail: merge --lane-lint piped to tee, with nothing after it, is allowed",
+   "merge --lane-lint 7 | tee lint.log", "allow", cwd=NOGIT)
+sh("check-tail: merge --lane-lint piped to tee.exe, with nothing after it, is allowed",
+   "merge --lane-lint 7 | tee.exe lint.log", "allow", cwd=NOGIT)
+sh("check-tail: merge --lane-lint piped to Tee-Object, with nothing after it, is allowed",
+   "merge --lane-lint 7 | Tee-Object -FilePath lint.log", "allow", cwd=NOGIT)
+sh("check-tail: merge --lane-lint piped to Out-File, with nothing after it, is allowed",
+   "merge --lane-lint 7 | Out-File lint.log", "allow", cwd=NOGIT)
+sh("check-tail: a verdict call of merge --lane-lint, with no pipe, is allowed",
+   "~/.claude/bin/verdict merge --lane-lint 7 2>&1", "allow", cwd=NOGIT)
+sh("check-tail: merge --lane-lint redirected to a file, with no pipe, is allowed",
+   "merge --lane-lint 7 > lint.log 2>&1", "allow", cwd=NOGIT)
+sh("check-tail: merge --lane-lint into a file, then grep -m1 of the file, is allowed",
+   "merge --lane-lint 7 > lint.log 2>&1; grep -m1 FAIL lint.log", "allow", cwd=NOGIT)
+sh("check-tail: merge --lane-lint into a file, then grep -m1 of the file piped to tail, is allowed",
+   "merge --lane-lint 7 > lint.log 2>&1; grep -m1 FAIL lint.log | tail -1", "allow", cwd=NOGIT)
+
+# GLUED `&`. A `&` glued to the word before it ends a job as a spaced `&` does. detached-launch refuses the job
+# when no pid is captured, and check-tail refuses a named check whose job is cut. A `&` that is no job is a `&&`,
+# a `|&`, a `>&` or `2>&1`, a quoted `&`, a `&` after a comment's `#`, a `&` inside a multi-line quote, bash
+# arithmetic, or PowerShell's call operator.
+add("detached-launch: ci-job checks piped to tail -3&, the & glued to the word, is refused", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3&")
+add("detached-launch: ci-job checks|tail&, with no space around the pipe or the &, is refused", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks|tail&")
+add("detached-launch: ci-job checks piped to grep '#x'&, a glued & after a quoted #, is refused", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | grep '#x'&")
+add("detached-launch: ci-job checks piped to grep \"don't\"&, a glued & after a quoted apostrophe, is refused",
+    "deny", "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command='ci-job checks | grep "don\'t"&')
+add("detached-launch: (ci-job x | tail)&, a subshell backgrounded by a glued &, is refused", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command="(ci-job x | tail)&")
+add("detached-launch: cmd 2>&1&, a glued & after a redirect, is refused", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command="cmd 2>&1&")
+add("check-tail: ci-job checks piped to tail -3&, a newline, then echo $!, is refused", "deny",
+    "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3&\necho $!")
+add("check-tail: ci-job checks piped to tail -3& echo $!, the glued & with the pid captured, is refused", "deny",
+    "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3& echo $!")
+add("check-tail: ci-job checks piped to grep '#x'& echo $!, a glued & after a quoted #, is refused", "deny",
+    "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | grep '#x'& echo $!")
+add("check-tail: ci-job checks | tail -3 && echo done & echo $!, a spaced & backgrounds the && list, is refused",
+    "deny", "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL,
+    command="ci-job checks | tail -3 && echo done & echo $!")
+add("check-tail: ci-job checks | tail -3 && echo done& echo $!, a glued & backgrounds the && list, is refused",
+    "deny", "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL,
+    command="ci-job checks | tail -3 && echo done& echo $!")
+add("check-tail: ci-job checks --lint piped to grep FAIL & echo $!, a spaced & with the pid captured, is refused",
+    "deny", "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/ci-job checks --lint | grep FAIL & echo $!")
+add("detached-launch: ci-job checks piped to tail -3 with a spaced &, is refused (control)", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3 &")
+sh("check-tail: ci-job checks |& tail -3, the & of |& is a pipe, is allowed",
+   "ci-job checks |& tail -3", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks|&tail -3, the & of |& glued to the next word, is allowed",
+   "ci-job checks|&tail -3", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks && tail x, a && list with no job, is allowed",
+   "ci-job checks && tail x", "allow", cwd=NOGIT)
+sh("check-tail: echo a&&b, a && glued to both words, is allowed", "echo a&&b", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks piped to grep 'a&', a & inside quotes, is allowed",
+   "ci-job checks | grep 'a&'", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks piped to tail -3 >&2, the & of a redirect, is allowed",
+   "ci-job checks | tail -3 >&2", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks piped to tail -3 2>&1, the & of a redirect, is allowed",
+   "ci-job checks | tail -3 2>&1", "allow", cwd=NOGIT)
+sh("check-tail: cmd 2>&1 piped to tail, the & of a redirect, is allowed",
+   "cmd 2>&1 | tail", "allow", cwd=NOGIT)
+sh("check-tail: cmd >&2 then echo, the & of a redirect, is allowed", "cmd >&2; echo x", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks piped to tail -3 # bg&, a & after a comment's #, is allowed",
+   "ci-job checks | tail -3 # bg&", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks piped to tail -3 # a& b, a & after a comment's #, is allowed",
+   "ci-job checks | tail -3 # a& b", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks piped to grep, a & at a line's end inside a multi-line quote, is allowed",
+   'ci-job checks | grep "first line&\nsecond line"', "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks piped to grep, a & inside a multi-line quote, is allowed",
+   'ci-job checks | grep "x& y\nz"', "allow", cwd=NOGIT)
+sh("check-tail: grep of a quoted lone &, is allowed", "grep '&' file", "allow", cwd=NOGIT)
+# The quoted & is no job, but it must not hide the job after it: the piece before the job then tokenizes whole.
+sh("check-tail: ci-job checks --lint piped to grep 'a&b' FAIL & echo $!, a quoted & before the job, is refused",
+   "~/.claude/bin/ci-job checks --lint | grep 'a&b' FAIL & echo $!", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: cut of a quoted lone & piped to head, is allowed",
+   "cut -d '&' -f1 q | head -3", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks piped to grep -c of a quoted lone &, is allowed",
+   "ci-job checks | grep -c '&'", "allow", cwd=NOGIT)
+sh("check-tail: grep of a double-quoted lone & piped to tail, is allowed",
+   'grep "&" file | tail -3', "allow", cwd=NOGIT)
+sh("detached-launch: (& $tool x).Count, a call operator in a grouped expression, is allowed",
+   "(& $tool x).Count", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: $a = @(& $tool x), a call operator inside @(), is allowed",
+   "$a = @(& $tool x)", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: 1..3 | ForEach-Object {&$tool $_}, a glued call operator in a scriptblock, is allowed",
+   "1..3 | ForEach-Object {&$tool $_}", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: $r = (& ci-job checks), a call operator on a roster command, is allowed",
+   "$r = (& ci-job checks)", "allow", tool="PowerShell", cwd=NOGIT)
+# A PowerShell call operator is no job, with or without an assignment before it. The control has no assignment.
+sh("check-tail: $r = & ci-job checks --lint piped to Select-String FAIL, a call operator after =, is allowed",
+   "$r = & ci-job checks --lint | Select-String FAIL", "allow", tool="PowerShell", cwd=NOGIT)
+# A PowerShell call operator after an assignment, in a && list's last piece, is no background job.
+sh("check-tail: ci-job checks | tail -3 && $r = & ci-job x, a call operator after = in a && list, is allowed",
+   "ci-job checks | tail -3 && $r = & ci-job x", "allow", tool="PowerShell", cwd=NOGIT)
+sh("check-tail: & ci-job checks --lint piped to Select-String FAIL, a call operator alone, is allowed (control)",
+   "& ci-job checks --lint | Select-String FAIL", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: echo $((5&3)), a bitwise & in arithmetic expansion, is allowed",
+   "echo $((5&3))", "allow", cwd=NOGIT)
+sh("detached-launch: if (( n&1 )); then echo odd; fi, a bitwise & in an arithmetic test, is allowed",
+   "if (( n&1 )); then echo odd; fi", "allow", cwd=NOGIT)
+sh("detached-launch: echo ${s//&/and}, a & in a parameter pattern, is allowed",
+   "echo ${s//&/and}", "allow", cwd=NOGIT)
+
+# MERGE OPTIONS. The merge tool's parser takes an exact option name only: allow_abbrev is off in merge/merge.py
+# build_parser (decision merge-confirm-repo). A prefix such as `--lane` or `--lane=7` exits 2 and runs nothing, so
+# the guard allows it. `--name=value` splits at the `=`, so `--lane-lint=7` is the check. A merge run as a module
+# (`-m merge.merge`) runs the merge script.
+sh("check-tail: merge --lane-l, a prefix of --lane-lint, piped to tail is allowed",
+   "merge --lane-l 7 2>&1 | tail -3", "allow", cwd=NOGIT)
+sh("check-tail: merge --review-r, a prefix of --review-record, piped to head is allowed",
+   "merge --review-r 7 | head -5", "allow", cwd=NOGIT)
+sh("check-tail: merge --lane, a prefix of --lane-lint, piped to tail is allowed",
+   "merge --lane 7 | tail -8", "allow", cwd=NOGIT)
+sh("check-tail: merge --lane-lint=7 in the = form, piped to tail is refused",
+   "merge --lane-lint=7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane=7, a prefix in the = form, piped to tail is allowed",
+   "merge --lane=7 | tail -3", "allow", cwd=NOGIT)
+sh("check-tail: merge --l, a prefix that names two options so argparse refuses it, piped to tail is allowed",
+   "merge --l 7 | tail -3", "allow", cwd=NOGIT)
+sh("check-tail: python3 -m merge.merge --lane-lint piped to tail is refused",
+   "python3 -m merge.merge --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3 -Im merge.merge --lane-lint piped to tail is refused",
+   "python3 -Im merge.merge --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3 -W ignore -m merge.merge --lane-lint piped to tail is refused",
+   "python3 -W ignore -m merge.merge --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+
+# A lint script piped into a filter, with a commit or push later in the call, hides the lint's exit: the commit
+# reads the last stage's exit. Each spelling below is refused. Its form with no commit after it is allowed.
+sh("check-tail: python3 lint/ste_lint.py piped to tail, then && git commit, is refused",
+   "python3 lint/ste_lint.py x.md | tail -3 && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3 lint/ste_lint.py piped to tail, with no commit or push after it, is allowed",
+   "python3 lint/ste_lint.py x.md | tail -3", "allow", cwd=NOGIT)
+sh("check-tail: verdict python3 lint/ste_lint.py, then && git commit, with no pipe, is allowed",
+   "verdict python3 lint/ste_lint.py x.md && git commit -m x", "allow", cwd=NOGIT)
+sh("check-tail: python3 -m pytest piped to tail, then && git commit, is allowed",
+   "python3 -m pytest -q | tail -3 && git commit -m x", "allow", cwd=NOGIT)
+sh("check-tail: cd lint, then python3 -m pytest piped to tail, then && git commit, is allowed",
+   "cd lint && python3 -m pytest -q | tail -3 && git commit -m x", "allow", cwd=NOGIT)
+sh("check-tail: cd lint, then a bare lint script piped to tail, then && git commit, is refused",
+   "cd lint && ./ste_lint.py x.md | tail -3 && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3 -m lint.ste_lint piped to tail, then && git commit, is refused",
+   "python3 -m lint.ste_lint x.md | tail -3 && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3 -Im lint.ste_lint piped to tail, then && git commit, is refused",
+   "python3 -Im lint.ste_lint x.md | tail -3 && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3 -W ignore -m lint.ste_lint piped to tail, then && git commit, is refused",
+   "python3 -W ignore -m lint.ste_lint x.md | tail -3 && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+# A lone tee is no cut, but a lint's exit is read through every later stage: the commit runs on the last stage's exit.
+sh("check-tail: python3 lint/ste_lint.py piped to tee, then && git commit, is refused",
+   "python3 lint/ste_lint.py x.md | tee lint.log && git commit -m x", "deny", "check-tail", cwd=NOGIT)
 
 # =========================================================================== 2c. waiter loops
 #

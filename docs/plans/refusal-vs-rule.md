@@ -30,7 +30,7 @@ merge while another ready PR ran CI, stricter than the batch-CI rule that was th
 - **uncited:** no rule or decision holds the refusal. Most are fail-closed stops on a failed read.
 - **unverified:** no rule sentence could be quoted.
 
-130 rows: exact 78, looser 11, stricter 9, uncited 31, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
+130 rows: exact 78, looser 10, stricter 10, uncited 31, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
 exact has a gap.
 
 
@@ -69,7 +69,7 @@ Notes: the shared-tree gaps `git update-ref -d`, `git rm -rf .` and `git read-tr
 | `live-stream` | none | - | uncited | exact | `tail -f x` is denied, and so is `timeout 5 tail -f x`, which the remedy itself suggests | tool fix: pass a `timeout N` wrapper; rule rewrite: write a live-stream decision |
 | `waiter` | agents-wait-with-monitor | "refuses only real waste: a loop that pauses... two or more pauses... one pause of 25 s or more" | exact | exact | `sleep 30` is denied; `sleep 3` passes | - |
 | `background-end` | background-needs-end-note | "refuses the call when the note is missing or its condition is empty" | exact | exact | `npm run dev` with no end note is denied | - |
-| `check-tail` | background-check-through-verdict | "A pipeline that holds a named check and a later `tail` or `head` stage is refused." | looser | exact | `merge --lane-lint 7 \| tail -3` is denied, foreground or background; the same call through `verdict` with no pipe after it passes (`verdict <cmd> \| tail` is denied by verdict-pipe-refused), as does a `tee` with no filter after it (`tee x | tail` is denied); `ci-job` is denied in the background only. A PowerShell `Select-Object -Last` passes, as the record's known gaps say | tool fix: read `Select-Object -First/-Last` as `head`/`tail` |
+| `check-tail` | background-check-through-verdict | "A pipeline that holds a named check and a later filter that cuts what the agent reads is refused." | stricter | exact | `merge --lane-lint 7 \| tail -3` is denied, foreground or background, and so is `merge --lane-lint 7 \| sed -n 1,5p`; the same call through `verdict` with no pipe after it passes (a pipe out of `verdict` is denied by verdict-pipe-refused), as does a `tee`, `tee.exe`, `Tee-Object` or `Out-File` with no filter after it (`tee x \| tail` is denied); `ci-job` is denied in the background only, a `run_in_background` call or a job `&`; `python3 lint/ste_lint.py x \| tail -2 && git commit` is denied, and the same lint piped with no commit or push after it passes. `merge --release-check` is read through `tail` and `head` only, as the record says; the code refuses any later filter stage, so `merge --lane-lint 7 \| cat` and `tee x \| wc -l` are denied though they cut nothing (note check-tail-any-filter-false-alarms) | tool fix: refuse only a stage that cuts the output, if the false alarms cost more than the any-filter ruling saves |
 | `playwright-browsers-path` | playwright-browsers-path | "refuses a Bash or PowerShell command that sets the variable." | exact | exact | an export is denied; echo and unset pass | - |
 | `playwright-install` | playwright-install-once | "An agent never runs a Playwright browser install, in any form." | exact | exact | `npx playwright install` is denied | - |
 | `simulator-boot-cap` | sweep-shuts-down-idle-simulators | "refuses a session's boot when 2 devices are already booted, and names them" | exact | exact | a third boot is denied | - |

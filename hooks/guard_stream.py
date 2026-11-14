@@ -9,9 +9,10 @@ import re
 import shlex
 
 from guard_core import (
-    DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
-    bare_words, command_indexes, inline_script, inner_commands, is_powershell, resolve_command,
-    segment_tokens, split_segments,
+    DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _segment_cd_move,
+    _skip_assignments_and_keywords, backgrounding_amp, basename, bare_words, command_indexes, git_calls,
+    inline_script, inner_commands, is_powershell, resolve_command, segment_tokens, split_segments,
+    CD_UNKNOWN,
 )
 from guard_env import _substitutions
 
@@ -85,6 +86,11 @@ LIVE_STREAM_REASON = (
 NARRATING_COMMANDS = ("merge", "merge.cmd")
 NARRATING_SCRIPT_TAILS = ("merge/merge.py", "merge/launch.py")
 TRUNCATING_FILTERS = ("tail", "head")
+# The lone writer stage the check rule lets through: `tee`, `tee.exe`, `Tee-Object` and `Out-File`. No filter
+# cuts what it keeps. `tee` and `Tee-Object -FilePath` print the whole stream and write it to a file the agent
+# reads back. `Tee-Object -Variable` writes no file but prints the stream in full. `Out-File` prints nothing, so
+# its file is the only copy of the stream, as with `> file`. Compared on `basename` with `.exe` stripped.
+FILE_WRITER_STAGES = ("tee", "tee-object", "out-file")
 SCRIPT_INTERPRETER = re.compile(r"(?:python[\d.]*w?|py)$")
 
 
@@ -103,16 +109,47 @@ def narrating_stage(segment: str) -> str:
 INTERPRETER_VALUE_FLAGS = ("-W", "-X")
 
 
+def _flag_module(tokens, at: int):
+    """What the interpreter flag at `at` (`-m`, `-Im`, `-Wignore`, `-uc`) does with the rest of its word.
+    Returns (module, next_at): module is the `-m` operand, "" for `-c` (code, no script), None for a flag
+    that names neither. A value flag (-W, -X) takes the rest of its word, else the next word."""
+    flag = tokens[at]
+    if flag.startswith("--"):
+        return None, at + 1
+    for pos, char in enumerate(flag[1:], 1):
+        rest = flag[pos + 1:]
+        if char == "c":
+            return "", at + 1
+        if char == "m":
+            if rest:
+                return rest, at + 1
+            return (tokens[at + 1] if at + 1 < len(tokens) else ""), at + 2
+        if "-" + char in INTERPRETER_VALUE_FLAGS:
+            return None, at + (1 if rest else 2)
+    return None, at + 1
+
+
 def _script_operand(tokens, index: int) -> str:
-    """The script an interpreter at `index` runs: its first word that is no flag. '' for `-m <module>`
-    and `-c <code>`, which run no script, so what follows them is an argument of theirs."""
+    """The script an interpreter at `index` runs: its first word that is no flag. `-m <module>` runs the
+    module's file, so `-m lint.ste_lint` reads as `lint/ste_lint.py` and the roster and lint tails judge it as
+    they judge the path. '' for `-c <code>`, which runs no script."""
     at = index + 1
     while at < len(tokens) and tokens[at].startswith("-"):
-        flag = tokens[at]
-        if flag in ("-m", "-c"):
-            return ""
-        at += 2 if flag in INTERPRETER_VALUE_FLAGS else 1
+        module, at = _flag_module(tokens, at)
+        if module is not None:
+            return module.replace(".", "/") + ".py" if module else ""
     return _whole_word(tokens, at) if at < len(tokens) else ""
+
+
+def _script_run(tokens, index: int) -> str:
+    """The script the command at `index` runs, else ''. An interpreter runs its script operand
+    (`_script_operand`). A `.py` command word is the script itself, which is how `uv run lint/x.py` runs
+    it. The one reader of both spellings, for `_roster_word`, `check_stage` and `lint_stage`."""
+    word = basename(tokens[index])
+    script = _script_operand(tokens, index) if SCRIPT_INTERPRETER.match(word.removesuffix(".exe")) else ""
+    if not script and word.endswith(".py"):
+        script = tokens[index]
+    return script
 
 
 def _whole_word(tokens, at: int) -> str:
@@ -141,9 +178,7 @@ def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
     if word in NARRATING_COMMANDS:
         return word
     if interpreter_only:
-        script = _script_operand(tokens, index) if SCRIPT_INTERPRETER.match(word.removesuffix(".exe")) else ""
-        if not script and word.endswith(".py"):
-            script = tokens[index]  # `uv run merge/merge.py`: uv runs the script, so it is the command word
+        script = _script_run(tokens, index)
         if script.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
             return word + " " + basename(script)
         return ""
@@ -181,18 +216,20 @@ NARRATED_TAIL_REASON = (
 )
 
 
-# A CHECK piped into `tail` or `head` (decision background-check-through-verdict). A filter that keeps
-# one end holds every byte until the command exits, then prints a few lines, so the one useful line, the
-# verdict, can be cut off or never read. `verdict <cmd>` keeps the whole log and prints the verdict
-# itself. Only named checks count, one entry per incident, because refusing every `| tail` is the
-# cry-wolf guard (docs/decisions/guard-that-cries-wolf-is-spent.md). The merge tool's verdict calls
-# (`--lane-lint`, `--review-record`, `--release-check`) are refused in the foreground too. They count as `merge`,
-# `merge.cmd`, or `merge/merge.py` or `merge/launch.py` run by `python`, a `python3.N`, `pythonw` or
-# `py`, behind a wrapper or `uv run`. A call through `verdict` is verdict-pipe's, never read here.
-# `merge --confirm` is narrated_tail_hit's, so it is left out here and never refused twice.
-# `ci-job` is refused in the background only.
+# A CHECK piped into a filter (decision background-check-through-verdict). A filter after the run can cut
+# or hide the one useful line, the verdict, so it can be lost or never read. `verdict <cmd>` keeps the whole
+# log and prints the verdict itself. Only named checks count, one entry per incident, because refusing every
+# `| tail` is the cry-wolf guard (docs/decisions/guard-that-cries-wolf-is-spent.md). The merge tool's verdict
+# calls (`--lane-lint`, `--review-record`, `--release-check`) are refused in the foreground too. They count as
+# `merge`, `merge.cmd`, or `merge/merge.py` or `merge/launch.py` run by `python`, a `python3.N`, `pythonw` or
+# `py` (also as `-m merge.merge`), behind a wrapper or `uv run`. A call through `verdict` is verdict-pipe's,
+# never read here. `merge --confirm` is narrated_tail_hit's, so it is left out here and never refused twice.
+# `ci-job` is refused in the background only, and a job `&` is the background.
+# Which filter counts depends on the check: `--lane-lint`, `--review-record` and `ci-job` reach every
+# later stage but a lone file writer (FILE_WRITER_STAGES), and `--release-check` reaches `tail` and `head` only.
 CHECK_COMMANDS = ("ci-job", "ci-job.cmd")
 CHECK_FLAGS = ("--lane-lint", "--review-record", "--release-check")
+ANY_FILTER_FLAGS = ("--lane-lint", "--review-record")
 CHECK_SCRIPT_TAIL = "bin/ci-job"
 # The `uv` and `uv run` flags that take the next word as their value (`uv run --help`, uv 0.11), so
 # `uv run -w pytest python x.py` skips `pytest`. The global flags that sit before `run` are in this list too.
@@ -230,32 +267,105 @@ def _skip_uv_run(tokens, index: int) -> int:
     return index
 
 
-def check_stage(segment: str, background: bool) -> str:
-    """The command word when one segment runs a named check, else ''. `ci-job` counts
-    only in the background."""
+def _merge_flag(tokens, flag: str) -> bool:
+    """True when a token is the merge tool's option `flag`, bare or as `flag=value`. The tool's parser takes no
+    prefix of an option (allow_abbrev is off, decision merge-confirm-repo), so `--lane` runs no check and is
+    no flag here."""
+    return any(token == flag or token.startswith(flag + "=") for token in tokens)
+
+
+def check_stage(segment: str, background: bool):
+    """(command word, any_filter) when one segment runs a named check, else ("", False). `ci-job` counts
+    only in the background. `any_filter` says every later stage but a lone file writer reaches the check, not
+    `tail` and `head` alone."""
     tokens = segment_tokens(segment)
     if not tokens:
-        return ""
+        return "", False
     index = resolve_command(tokens)
     if index is None:
-        return ""
+        return "", False
     index = _skip_uv_run(tokens, index)
     if basename(tokens[index]) in CHECK_COMMANDS:
-        return basename(tokens[index]) if background else ""
-    if SCRIPT_INTERPRETER.match(basename(tokens[index]).removesuffix(".exe")) and _script_operand(
-            tokens, index).replace("\\", "/").endswith(CHECK_SCRIPT_TAIL):
-        return CHECK_COMMANDS[0] if background else ""
-    if "--confirm" in tokens or not any(flag in tokens for flag in CHECK_FLAGS):
-        return ""
-    return _roster_word(tokens, index, interpreter_only=True)
+        return (basename(tokens[index]), True) if background else ("", False)
+    if _script_run(tokens, index).replace("\\", "/").endswith(CHECK_SCRIPT_TAIL):
+        return (CHECK_COMMANDS[0], True) if background else ("", False)
+    if "--confirm" in tokens or not any(_merge_flag(tokens, flag) for flag in CHECK_FLAGS):
+        return "", False
+    return (_roster_word(tokens, index, interpreter_only=True),
+            any(_merge_flag(tokens, flag) for flag in ANY_FILTER_FLAGS))
 
 
-def _pipeline_hit(stages, background: bool) -> str:
-    """The matched text when a named check in one pipeline's stages reaches `tail`/`head`. A `tee`
-    between them does not end the reach, since the filter after it still cuts what the agent reads. A
-    `tee` with no `tail` or `head` after it is not a hit."""
+LINT_SCRIPT = re.compile(r"(?:^|/)lint/[^/]+\.py$")
+
+
+def _enters_lint_dir(segment: str, in_lint: bool) -> bool:
+    """Whether the working directory is `lint/` after `segment`, given `in_lint` before it. A `cd` to a
+    path that ends in `lint` enters it; a `cd` anywhere else leaves it; any other segment keeps it. The
+    move is read by `_segment_cd_move`, the one reader of `cd`, `pushd` and `Set-Location`."""
+    tokens = segment_tokens(segment)
+    move = _segment_cd_move(tokens) if tokens else None
+    if move is None:
+        return in_lint
+    if move is CD_UNKNOWN or move == "-":
+        return False
+    return basename(move.replace("\\", "/").rstrip("/")) == "lint"
+
+
+def lint_stage(segment: str, in_lint: bool = False):
+    """("lint", True) when one segment runs a script under `lint/`, through an interpreter, as
+    `-m lint.<name>`, or as the `.py` command word (`uv run lint/x.py`), else ("", False). With `in_lint`
+    (an earlier `cd lint` in the same command), a script named by its basename is under `lint/` too
+    (`./ste_lint.py`). Only a word that is itself a token counts: `-m pytest` reads as `pytest.py`, which is
+    no word of the call, so it is no lint script. The second value is the any_filter flag of check_stage."""
+    tokens = segment_tokens(segment)
+    index = resolve_command(tokens) if tokens else None
+    if index is None:
+        return "", False
+    index = _skip_uv_run(tokens, index)
+    script = _script_run(tokens, index).replace("\\", "/")
+    bare = script.removeprefix("./")
+    if in_lint and "/" not in bare and script in [token.replace("\\", "/") for token in tokens]:
+        script = "lint/" + bare
+    return ("lint", True) if LINT_SCRIPT.search(script) else ("", False)
+
+
+def _ends_in_ampersand(stages, first: int) -> bool:
+    """Whether the pipeline is backgrounded by a `&` in the stage at `first` or a later one, spaced or
+    glued to the last word (`backgrounding_amp`, the one reader detached-launch shares). split_segments
+    leaves the `&` of `|&` at the head of the next stage; that one is a pipe, not a job, and
+    `backgrounding_amp` reads it as none."""
+    for segment in stages[first:]:
+        tokens = segment_tokens(segment)
+        if tokens and backgrounding_amp(segment, tokens, _skip_assignments_and_keywords(tokens)):
+            return True
+    return False
+
+
+def _list_ends_in_ampersand(segments, ends, after: int) -> bool:
+    """Whether the `&&` or `||` list that a pipeline closes, which goes on from segment `after`, is
+    ended by a job `&`: `ci-job x | tail && echo done & echo $!` backgrounds the whole list. The
+    list runs on through `|`, `&&` and `||` and stops at `;` or a newline, or at the first `&`."""
+    for segment, end in zip(segments[after:], ends[after:]):
+        tokens = segment_tokens(segment)
+        if tokens and backgrounding_amp(segment, tokens, _skip_assignments_and_keywords(tokens)):
+            return True
+        if end not in ("|", "&&", "||"):
+            return False
+    return False
+
+
+def _pipeline_hit(stages, background: bool, stage_of=check_stage, any_later: bool = False,
+                  list_amp: bool = False) -> str:
+    """The matched text when a stage that `stage_of(segment, backgrounded)` names, in one pipeline's
+    stages, is followed by a filter that cuts what the agent reads. `backgrounded` is the call's
+    `background`, a job `&` that ends the stage's list (`list_amp`), or a job `&` in this stage or a later
+    one. The stage's any_filter widens the reach from `tail` and `head` to every later stage but a lone file
+    writer (FILE_WRITER_STAGES), since `sed -n`, `grep -m1` and `awk` cut what the agent reads as `tail`
+    does; a `tee` between the check and a filter does not end the reach. With `any_later`, any later command
+    counts: a pipeline's exit is its last stage's, so `grep`, `tee` and `wc` mask the exit of the stage
+    before them as `tail` does (the lint-then-commit gate reads the exit, not the cut)."""
     for first, segment in enumerate(stages):
-        stage = check_stage(segment, background)
+        stage, any_filter = stage_of(segment, background or list_amp or _ends_in_ampersand(stages, first))
         if not stage:
             continue
         for later in stages[first + 1:]:
@@ -264,30 +374,53 @@ def _pipeline_hit(stages, background: bool) -> str:
             if at is None:
                 continue
             word = basename(tokens[at])
-            if word in TRUNCATING_FILTERS:
+            if any_later or word in TRUNCATING_FILTERS or (
+                    any_filter and word.removesuffix(".exe") not in FILE_WRITER_STAGES):
                 return stage + " | " + word
     return ""
 
 
+def _commits_or_pushes(segment: str) -> bool:
+    """True when one segment runs a commit or a push, read by the one reader of git calls."""
+    return any(verb in ("commit", "push") for verb, _args in git_calls(segment))
+
+
 def check_tail_hit(stripped: str, background: bool) -> str:
-    """The matched text when a call pipes a named check into `tail`/`head`, directly or through other
-    filters. A pipeline ends at any separator other than `|`."""
+    """The matched text when a call pipes a named check into a filter that cuts what the agent reads (see
+    `_pipeline_hit`), directly or through other filters. A pipeline ends at any separator other than `|`.
+    A lint script piped into any later command counts only when a later pipeline of the call runs a commit
+    or a push: the pipeline's exit is the last stage's, so a red lint hides, and the commit or push runs on
+    it. A commit before the lint is no follow-up."""
     ends = []
     segments = split_segments(stripped, ends)
-    stages = []
-    for segment, end in zip(segments, ends):
+    pipelines, stages = [], []
+    for number, (segment, end) in enumerate(zip(segments, ends)):
         stages.append(segment)
         if end != "|":
-            hit = _pipeline_hit(stages, background)
+            list_amp = end in ("&&", "||") and _list_ends_in_ampersand(segments, ends, number + 1)
+            hit = _pipeline_hit(stages, background, list_amp=list_amp)
             if hit:
                 return hit
+            pipelines.append(stages)
             stages = []
-    return _pipeline_hit(stages, background)
+    hit = _pipeline_hit(stages, background)
+    if hit:
+        return hit
+    pipelines.append(stages)
+    in_lint = False
+    for at, stages in enumerate(pipelines):
+        hit = _pipeline_hit(stages, background,
+                            lambda segment, bg: lint_stage(segment, in_lint), any_later=True)
+        for segment in stages:
+            in_lint = _enters_lint_dir(segment, in_lint)
+        if hit and any(_commits_or_pushes(segment) for later in pipelines[at + 1:] for segment in later):
+            return hit + " then a commit or push"
+    return ""
 
 
 CHECK_TAIL_REASON = (
-    "this check's output goes into a filter that keeps one end, so the filter holds everything "
-    "until the check exits and the verdict can be lost "
+    "this check's output goes into a filter after the run, and the filter can cut or hide the "
+    "verdict line "
     "(decision background-check-through-verdict). "
     "Remedy: run the check through verdict, as `verdict <cmd>` with nothing after it. It keeps the "
     "full log and prints the verdict itself."

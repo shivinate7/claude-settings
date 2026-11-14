@@ -22,7 +22,7 @@ from guard_core import (
     QUOTE_MARKS,
     ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS,
     POWERSHELL_CALL, PowerShellScript, SILENT_WRITE_REDIRECT, _pwsh_script, _skip_assignments_and_keywords,
-    _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, inline_script,
+    _split_heredocs, _strip_heredoc_bodies_unconditionally, backgrounding_amp, basename, inline_script,
     resolve_command, segment_tokens, split_segments,
 )
 from guard_env import substitution_commands
@@ -587,11 +587,12 @@ def cmd_start_hit(tokens) -> str:
 
 
 def bare_background_hit(cmd: str) -> str:
-    """Return the matched text when ANY segment holds a bare background job (`&` as its own
-    token, after the command word) with no pid captured anywhere in the command, else ''.
+    """Return the matched text when ANY segment holds a background job `&`, spaced or glued to
+    the word before it (`cmd&`), with no pid captured anywhere in the command, else ''.
 
-    The `&` must come AFTER the command word: a leading `&` is PowerShell's call operator,
-    never a background job. Every heredoc body is dropped first: an `&` there is not a job.
+    `backgrounding_amp` reads the raw text, so a quoted `&` is no job, and the `&` must come AFTER
+    the command word: a leading `&` is PowerShell's call operator, never a background job. Every
+    heredoc body is dropped first: an `&` there is not a job.
     """
     cmd = _strip_heredoc_bodies_unconditionally(cmd)
     if "$!" in cmd:
@@ -600,10 +601,9 @@ def bare_background_hit(cmd: str) -> str:
         tokens = segment_tokens(segment) if segment.strip() else None
         if not tokens:
             continue
-        start = _skip_assignments_and_keywords(tokens)
-        for i in range(start + 1, len(tokens)):
-            if tokens[i] == "&":
-                return tokens[i - 1] + " &"
+        matched = backgrounding_amp(segment, tokens, _skip_assignments_and_keywords(tokens))
+        if matched:
+            return matched
     return ""
 
 
