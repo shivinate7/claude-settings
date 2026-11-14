@@ -1200,10 +1200,9 @@ LOCAL_REPO_REASON = (
 
 
 def local_session_id(session_id: str) -> str:
-    """The session id a local role file may prove the record writer for, else ''. The hook payload's id and the environment's CLAUDE_CODE_SESSION_ID must both
-    be present and equal; the reader then tests the id's shape. A guess about who is asking reads no file."""
-    env_id = os.environ.get("CLAUDE_CODE_SESSION_ID")
-    return session_id if isinstance(session_id, str) and session_id and session_id == env_id else ""
+    """The session id a local role file may prove the record writer for: the hook payload's own id, else ''. The environment's
+    CLAUDE_CODE_SESSION_ID names no file here, since a file for the env id alone is not this session's. The reader tests the id's shape."""
+    return session_id if isinstance(session_id, str) else ""
 
 
 def _local_role_proves(session_id: str, roles, repo) -> bool:
@@ -1314,8 +1313,8 @@ RECORD_REASON = (
 
 def _own_role_proved(transcript: str, role: str, session_id: str = "", root=None) -> bool:
     """True when the own newest get_session record lists cs-build:<role> and no set_session_tags call
-    follows it. A session with no cloud id is local: it is proved when the launcher's role file for its own id (hook id equal to the
-    environment's, local_session_id) names `role` and the repo of the checkout at `root`. Fails closed: no id, no transcript or any read error is False."""
+    follows it. A session with no cloud id is local: it is proved when the launcher's role file for its own id (the hook payload's id,
+    local_session_id) names `role` and the repo of the checkout at `root`. Fails closed: no id, no transcript or any read error is False."""
     try:
         from override import remote_session_id
         own_id = remote_session_id()
