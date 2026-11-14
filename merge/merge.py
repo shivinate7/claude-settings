@@ -1947,6 +1947,7 @@ def records_proof(wt, base_ref):
         git(wt, "clean", "-fdq")
 
 CI_JOB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "ci-job")  # the lint steps of a job, read from the workflow; the tool brings it
+CI_JOB_HEAD_SHA_ENV = "CI_JOB_HEAD_SHA"  # ci-job's head.sha when set (bin/ci-job HEAD_SHA_ENV); ci-job is a script, not a module, so the name is copied
 READY_ROUTES = ("Mark ready in cloud by MCP update_pull_request draft=false; on a computer by `gh pr ready`, "
                 "a GraphQL call a cloud session gets 403 on (route pr-ready-mcp-cloud, route pr-ready-gh-cli-cloud, route pr-ready-gh-cli-local)")
 DRAFT_ROUTES = ("Return to draft in cloud by MCP update_pull_request draft=true; on a computer by `gh pr ready --undo` "
@@ -2577,15 +2578,19 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         stop = "\n".join([f"the cross-measure of {head[:9]} is unknown, not a pass:", *unknown, "Run again. " + LANE_LINT_REMEDY])
     return fails, reports, stop
 
-def ci_job_run(wt, *args, notes=None):
+def ci_job_run(wt, *args, notes=None, head_sha=None):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
     lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead; on a pass, the names of the CI steps ci-job skipped (from its
     `skipped <step>: <why>` lines), so no pass hides a CI step that did not run. log: ci-job's log line, as a list of
     0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps.
-    notes: a list the caller passes to receive, on a pass, each ci-job line that holds the pin note marker (a stale pin); the draft step passes none and ignores them."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
+    notes: a list the caller passes to receive, on a pass, each ci-job line that holds the pin note marker (a stale pin); the draft step passes none and ignores them.
+    head_sha: the pushed head, given to ci-job as CI_JOB_HEAD_SHA when the HEAD of `wt` is not that head (lane_lint's merge commit). With none, ci-job
+    reads HEAD, and an inherited CI_JOB_HEAD_SHA is dropped, so it never names another tree's head."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_") and k != CI_JOB_HEAD_SHA_ENV}  # as the merge's own lint run reads it
+    if head_sha:
+        env[CI_JOB_HEAD_SHA_ENV] = head_sha
     try:
         c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
     except subprocess.TimeoutExpired:
@@ -2698,7 +2703,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     Then every head, a ref or commit too, is merged into origin/<base> with merge_reason: a conflict is a FAIL that names the base, and an unknown is a Stop.
     Once those pass, the merged tree is made a commit (`git commit-tree`, first parent the base tip, second the head) and the lint worktree checks it out, so every step
     and the touched tests read the files of the merge, not the head's older copy, and a diff of the base against HEAD or the work tree shows only the lane's own changes.
-    ci-job's `github.event.pull_request.head.sha` is then that merge commit, not the head. A commit-tree or checkout that fails is an UnknownStop, which no flag lifts.
+    The first parent is the base tip that merge_reason merged, never a later read of origin/<base>. ci-job gets the head as CI_JOB_HEAD_SHA, so its
+    `github.event.pull_request.head.sha` is the pushed head, not the merge commit. A commit-tree or checkout that fails is an UnknownStop, which no flag lifts.
     Then cross_measure checks a PR's head against the lane's other open PRs and `with_prs`: an unknown there is a Stop too.
     A FAIL above (the base conflict, a clash that counts) or an unknown stops before the ci-job run, as one refusal that lists every FAIL block; the ci-job never runs beside it.
     Any other target is a commit or ref. ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
@@ -2752,13 +2758,13 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         # The lint tree is a merge commit of the base (first parent) and the head, so every file is the merged copy and HEAD is clean: a step that diffs the
         # base against HEAD or the work tree reads only the lane's own changes, and the history steps see the lane's commits under one merge commit.
         c, made = sh(["git", "-C", wt, "-c", "user.name=merge-lane-lint", "-c", "user.email=merge-lane-lint@invalid", "commit-tree", merged[0],
-                      "-p", f"refs/remotes/origin/{base}", "-p", head, "-m", f"lane-lint merge of {head[:9]} into {base}"])
+                      "-p", merged[1], "-p", head, "-m", f"lane-lint merge of {head[:9]} into {base}"])
         merge_commit = made.strip()
         c2, out = (c, made) if c else git(wt, "checkout", "-q", "--detach", merge_commit)
         if c2:
             raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the merge of the head with {base} could not be made the lint worktree's HEAD: {out} {LANE_LINT_CITE}")
         refuse_incomplete_tree(wt, head, base, merge_commit)
-        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
+        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes, head_sha=head)
         if state == "pass" and touched_tests:
             touched = run_touched_tests(wt, base, head)
     finally:
@@ -4071,7 +4077,9 @@ def unknown_reason(e):
 RELEASE_READ_ERRORS = (Stop, ValueError, KeyError, TypeError, OSError, subprocess.TimeoutExpired)  # OSError: gh or git missing; TimeoutExpired: sh's cap on a slow call
 
 def merge_reason(root, n, base, head, fetched, tree_out=None):
-    """-> None when merging `head` into origin/<base> is clean, else the reason. A clean merge appends the merged tree's OID to the list `tree_out`, when given. `git merge-tree --write-tree` exits 1 both for a conflict and
+    """-> None when merging `head` into origin/<base> is clean, else the reason. A clean merge appends the merged tree's OID, then the sha of the base tip
+    it merged, to the list `tree_out`, when given. The tip is read just before and just after the merge-tree; reads that differ are unknown. So a
+    fetch that moves origin/<base> later cannot give the caller a parent that differs from the tree's. Cost of that: two `git rev-parse` starts per call. `git merge-tree --write-tree` exits 1 both for a conflict and
     for a sha it cannot read, so only a CONFLICT line in its output says conflict; any other output is unknown, never clean. The base is fetched once
     per run (`fetched` maps base -> its fetch error or None). A head this clone lacks is fetched from the pull request's own ref."""
     if base not in fetched:
@@ -4087,10 +4095,19 @@ def merge_reason(root, n, base, head, fetched, tree_out=None):
         fetch_out = git(root, "fetch", "-q", "origin", f"+refs/pull/{n}/head:refs/remotes/origin/pull/{n}")[1]
     if git(root, "cat-file", "-e", f"{head}^{{commit}}")[0]:
         return unknown_reason(f"the head {head[:9]} is not in this clone and could not be fetched: {fetch_out}")
+    def tip():
+        c, sha = git(root, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{base}^{{commit}}")
+        return None if c or not sha.strip() else sha.strip()
+    before = tip()
+    if before is None:
+        return unknown_reason(f"the tip of origin/{base} could not be read")
     c, out = git(root, "merge-tree", "--write-tree", f"refs/remotes/origin/{base}", head)
+    after = tip()
+    if after != before:
+        return unknown_reason(f"origin/{base} moved during the merge read ({before[:9]} to {(after or 'unreadable')[:9]})")
     if not c:
         if tree_out is not None:
-            tree_out.append(out.split("\n", 1)[0].strip())
+            tree_out.extend([out.split("\n", 1)[0].strip(), before])
         return None
     if c == 1 and "CONFLICT" in out:
         return f"the merge with {base} is not clean (merge conflict)"
