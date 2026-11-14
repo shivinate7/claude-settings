@@ -48,6 +48,9 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   the merge go names. Its Never covers names each act in BATCH_MERGE_REFUSED, the reason flags, a
   merge with no `--head`, and a merge go from a session not tagged cs-build:coordinator (decision
   `auto-mode-owner-acts`).
+- Both merge entries, "Relayed Merge Yes:" and "Batch Runner Merge:", quote one act:
+  `merge <pr> --confirm --head <sha> [--priority-rows <file>]`. Their Covers text grants no flag beyond
+  that one, which the owner ruled on 2026-11-14 00:19 CST (own-817-a-priority-rows).
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
 same cases run against a copy with a clause removed and show red there.
 """
@@ -142,7 +145,14 @@ BATCH_MERGE_REFUSED = (("not tagged cs-build:batch-runner", "not tagged `cs-buil
 # The reason flags that lift a merge check (merge/merge.py); each entry's Never covers names both.
 REASON_FLAGS_REFUSED = (("--base-red-ok", "--base-red-ok"),
                         ("--undo-check-unknown-ok", "--undo-check-unknown-ok"))
-MERGE_GO_REFUSED = (("any other session", "any other session"),
+# The own-817 ruling (owner, 2026-11-14 00:19 CST): both merge entries name this flag after --head <sha>, and the
+# grant covers that one flag on that one act. A constant, not read from merge/merge.py, so the case goes red on
+# the entry text and not on a flag the merge tool has not built yet.
+PRIORITY_ROWS = "[--priority-rows <file>]"
+# The flags a merge entry's Covers text may name: the act's own flags, and the one the ruling grants.
+MERGE_COVERS_FLAGS = ("--confirm", "--head", "--priority-rows")
+MERGE_FLAG = re.compile(r"(?<![\w-])--[a-z][a-z-]*[a-z]")
+MERGE_GO_REFUSED =(("any other session", "any other session"),
                     ("not a coordinator", "not a coordinator"))
 # The Covers text names the session that started this one, and the no-act report it lets through.
 MESSAGE_TARGET = (("the session that started this one", "the session that started this one"),)
@@ -260,6 +270,13 @@ def head_flag():
              and node.args and isinstance(node.args[0], ast.Constant)
              and any(k.arg == "type" and isinstance(k.value, ast.Name) and k.value.id == "head_arg" for k in node.keywords)]
     return flags[0] if len(flags) == 1 else None
+
+
+def merge_act(entry):
+    """The one backticked merge command in an entry's Covers text, or None when there is not exactly one."""
+    word = (merge_command() or "").split(" ")[0]
+    spans = [span for span in re.findall(r"`([^`]+)`", bounds_text(entry)) if word and span.startswith(word + " ")]
+    return spans[0] if len(spans) == 1 else None
 
 
 def allow_entry(prefix):
@@ -392,8 +409,10 @@ class RelayedMergeYesIsAllowed(unittest.TestCase):
         command, flag = merge_command(), head_flag()
         self.assertIsNotNone(command, "merge/cloud_allow.json must hold exactly one --confirm merge rule")
         self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the relayed head")
-        self.assertIn("`%s %s <sha>`" % (command, flag), bounds_text(entry),
-                      "Covers text must quote the merge command with the head flag and <sha> for the relayed head")
+        act = merge_act(entry)
+        self.assertIsNotNone(act, "Covers text must quote exactly one merge command")
+        self.assertEqual(act, "%s %s <sha> %s" % (command, flag, PRIORITY_ROWS),
+                         "Covers text must quote the merge command with --head <sha>, then [--priority-rows <file>], for the relayed head")
 
     def test_covers_names_the_coordinator_tag(self):
         entry = self.relayed_merge_entry()
@@ -458,8 +477,10 @@ class BatchRunnerMergeIsAllowed(unittest.TestCase):
         command, flag = merge_command(), head_flag()
         self.assertIsNotNone(command, "merge/cloud_allow.json must hold exactly one --confirm merge rule")
         self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the head the CI ran on")
-        self.assertIn("`%s %s <sha>`" % (command, flag), bounds_text(entry),
-                      "Covers text must quote the merge command with the head flag and <sha> for the head the CI ran on")
+        act = merge_act(entry)
+        self.assertIsNotNone(act, "Covers text must quote exactly one merge command")
+        self.assertEqual(act, "%s %s <sha> %s" % (command, flag, PRIORITY_ROWS),
+                         "Covers text must quote the merge command with --head <sha>, then [--priority-rows <file>], for the head the CI ran on")
 
     def test_covers_names_the_batch_runner_tag(self):
         entry = self.batch_merge_entry()
@@ -505,6 +526,30 @@ class BatchRunnerMergeIsAllowed(unittest.TestCase):
         self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the head the CI ran on")
         self.assertIn("a merge with no `%s`" % flag, clause,
                       "Never covers does not name a merge with no `%s`" % flag)
+
+
+class MergeEntriesGrantOnlyPriorityRows(unittest.TestCase):
+    """Own-817 ruling: both merge entries grant --priority-rows and no other flag, and quote the same act."""
+
+    def merge_entry(self, prefix):
+        entry = allow_entry(prefix)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % prefix)
+        return entry
+
+    def test_covers_names_no_flag_beyond_the_ruling(self):
+        for prefix in (RELAYED_MERGE, BATCH_MERGE):
+            with self.subTest(entry=prefix):
+                entry = self.merge_entry(prefix)
+                self.assertIsNotNone(merge_act(entry), "Covers text must quote exactly one merge command")
+                extra = sorted(set(MERGE_FLAG.findall(bounds_text(entry))) - set(MERGE_COVERS_FLAGS))
+                self.assertFalse(extra, "Covers text grants a flag the ruling does not: %r" % extra)
+
+    def test_both_entries_name_the_same_act(self):
+        relayed = merge_act(self.merge_entry(RELAYED_MERGE))
+        batch = merge_act(self.merge_entry(BATCH_MERGE))
+        self.assertIsNotNone(relayed, "Relayed Merge Yes Covers text must quote exactly one merge command")
+        self.assertIsNotNone(batch, "Batch Runner Merge Covers text must quote exactly one merge command")
+        self.assertEqual(relayed, batch, "the two merge entries name different acts")
 
 
 class OwnerPrHousekeepingIsAllowed(unittest.TestCase):
