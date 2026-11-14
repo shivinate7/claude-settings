@@ -8,6 +8,9 @@ UP_WIDE = {"key": "a", "label": "Let the stamp accept banchi's titles", "how": "
            "lose": "l", "widens": True}
 UP_MATCH = {"key": "b", "label": "Rename banchi's titles to the shared form", "how": "h", "gain": "g",
             "lose": "l"}
+UP_THIRD = {"key": "c", "label": "Keep banchi's titles and skip the stamp", "how": "h", "gain": "g",
+            "lose": "l"}
+UP_THREE = [UP_WIDE, UP_MATCH, UP_THIRD]
 
 
 # The line a waiting-page task carries (rule task-names-check, its cases below). It sits here, above its
@@ -31,11 +34,12 @@ def up(name, expected, item, action="set", **extra):
 
 
 up("today's item (pick names the widening option) is denied", "deny", up_item())
-up("a pick of the option that matches the shared form is allowed", "allow", up_item(pick="b"))
-up("a widening option offered and not picked is allowed", "allow", up_item(pick="b", why="One form."))
-up("an item with no pick is allowed", "allow", up_item(pick=None, why=None))
+up("a pick of the option that matches the shared form is allowed", "allow", up_item(pick="b", options=UP_THREE))
+up("a widening option offered and not picked is allowed", "allow",
+   up_item(pick="b", why="One form.", options=UP_THREE))
+up("an item with no pick is allowed", "allow", up_item(pick=None, why=None, options=UP_THREE))
 up("widens false is not a widening option", "allow",
-   up_item(options=[dict(UP_WIDE, widens=False), UP_MATCH]))
+   up_item(options=[dict(UP_WIDE, widens=False), UP_MATCH, UP_THIRD]))
 up("a stood pick of a widening option is denied", "deny", up_item(stands=True))
 up("an update that carries options and a widening pick is denied", "deny",
    {"options": [UP_WIDE, UP_MATCH], "pick": "a"}, action="update")
@@ -52,10 +56,6 @@ add("uniform pick: the refusal names the ruling and what to pick", "deny", "unif
 
 # Roadmap c135: a multi item (`multi: true`) or ranked item (`ranked: true`) holds `pick` as a list of
 # option keys. The list never holds a key of an option marked `widens: true`, as a string pick never does.
-UP_THIRD = {"key": "c", "label": "Keep banchi's titles and skip the stamp", "how": "h", "gain": "g",
-            "lose": "l"}
-UP_THREE = [UP_WIDE, UP_MATCH, UP_THIRD]
-
 up("a multi item whose list pick holds the widening option is denied", "deny",
    up_item(multi=True, options=UP_THREE, pick=["a", "b"]))
 up("a multi item whose list pick holds the widening option last is denied", "deny",
@@ -102,9 +102,9 @@ def up_keyless(name, item):
 
 
 up_keyless("a widening option with no key and an item with no pick is refused by option-letter-keys",
-           up_item(options=[UP_KEYLESS, UP_MATCH], pick=None, why=None))
+           up_item(options=[UP_KEYLESS, UP_MATCH, UP_THIRD], pick=None, why=None))
 up_keyless("a widening option with no key and an item with a null pick is refused by option-letter-keys",
-           dict(up_item(options=[UP_KEYLESS, UP_MATCH], why=None), pick=None))
+           dict(up_item(options=[UP_KEYLESS, UP_MATCH, UP_THIRD], why=None), pick=None))
 up_keyless("a widening option with no key and a multi item with no pick is refused by option-letter-keys",
            up_item(multi=True, options=[UP_KEYLESS, UP_MATCH, UP_THIRD], pick=None, why=None))
 add("uniform pick: a batch with a multi item whose list pick holds the widening option is denied",

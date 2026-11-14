@@ -28,6 +28,9 @@ Interface the module must match (the lane's form contract):
 - A widening option: page `widens: true`, never in `pick`; chat `Goes against your ruling: a repo changes to
   fit a shared tool, never the tool to fit a repo` in its label or description, and never `(Recommended)` in
   its label (rule uniform-pick).
+- A question the ruling already answers (rule uniform-answered, decision uniform-over-variants): a question with
+  2+ options where every option but one widens is refused, with or without a pick, and its reason carries
+  `uniform-over-variants decides this; take the non-widening option`. Cases: case_uniform_answered_*.
 - A press in a web app: page `links`; chat an https:// url in that option's description (rule press-link).
   The chat scan skips an option's Gain and Lose text, as the page scan reads only label and how.
 - A chat refusal reason names its remedy and no field of the waiting page (no `stands`). Each page reason
@@ -144,13 +147,20 @@ def form_text(goal=GOAL, problem=PROBLEM, based=BASED, departs=DEPARTS):
     return "\n".join(line for line in (goal, problem, *based, departs) if line)
 
 
+# The third option of the base page item: a plain choice, so the base holds one widening option beside two plain
+# ones, which rule uniform-answered lets through. A case that needs another shape passes its own options.
+PLAIN_THIRD = {"gain": "The lane waits, and nothing changes.", "how": "The lane stays as it is until you answer.",
+               "key": "c", "label": "Wait and change nothing", "lose": "The lane waits a day."}
+
+
 def page_item(tail="", options=None, lines=None, **over):
-    """Item 92 in the form: the form lines in `context`, option b marked widens, the pick on a. `lines`
-    sets the whole context, one line each, for a case that changes the order of the lines."""
+    """Item 92 in the form: the form lines in `context`, option b marked widens, the pick on a, and the plain
+    option c. `lines` sets the whole context, one line each, for a case that changes the order of the lines."""
     item = copy.deepcopy(ITEM92)
     item["context"] = "\n".join(lines) if lines is not None else form_text(
         **{k: v for k, v in over.items() if k in LINE_KEYS}) + tail
     item["options"][1]["widens"] = True
+    item["options"].append(copy.deepcopy(PLAIN_THIRD))
     if options is not None:
         item["options"] = options
     item.update({k: v for k, v in over.items() if k not in LINE_KEYS})
@@ -228,8 +238,8 @@ def case_item_92():
     with_problem = dict(ITEM92, context=ITEM92["context"] + "\n" + PROBLEM)
     page("item 92 with a valid Problem line and no Based on line is still refused, naming Based on", "set",
          entry_of(with_problem), (FORM_RULE, "Based on"))
-    page("item 92 rewritten to the form (Goal, Problem, Based on, gain and lose, b widens, pick a) passes", "set",
-         entry_of(page_item()), None)
+    page("item 92 rewritten to the form (Goal, Problem, Based on, gain and lose, b widens, pick a, plain c) passes",
+         "set", entry_of(page_item()), None)
     got_old, got_new = call("item_hit", "set", entry_of(ITEM92)), guard_hit("set", entry_of(ITEM92))
     check("guard.data_tool_hit gives item 92 the verdict question_form.item_hit gives (one home)",
           got_old == got_new and got_old[0] == FORM_RULE, "item_hit %r, guard %r" % (got_old, got_new))
@@ -361,6 +371,126 @@ def case_older_rules_keep_their_ids():
     page("a task with a Why yours line and no form lines is not judged by the form", "set", entry_of(task), None)
     page("a task with no Why yours line is refused as task-names-check", "set",
          entry_of(dict(task, context="Nothing here.")), ("task-names-check", None))
+
+
+# ------------------------------------------------------------------ a question the ruling already answers
+
+# Rule uniform-answered, decision uniform-over-variants: when every option but one widens a shared tool, the one
+# option left is the only choice the ruling allows, so the question is already answered. It is refused with or
+# without a pick: on the page an option widens by `widens: true`, in the chat box by the WIDENS words in its label
+# or description. Roadmap step widening-question-not-asked, coordinator yes 07:21 CST Nov 12.
+ANSWERED_RULE = "uniform-answered"
+ANSWERED_WORDS = "uniform-over-variants decides this; take the non-widening option"
+
+
+def page_option(key, label, widens=False):
+    option = {"key": key, "label": label, "how": "The lane does it.", "gain": "It lands today.",
+              "lose": "Two forms stay."}
+    if widens:
+        option["widens"] = True
+    return option
+
+
+def answered_item(options, pick=None):
+    """The page item with these options and no pick (the item 376 shape), or with `pick` as its pick."""
+    item = page_item(options=options)
+    if pick is None:
+        item.pop("pick", None)
+    else:
+        item["pick"] = pick
+    return item
+
+
+def answered_box(options):
+    """A chat box over (label, widens) pairs. A widening option carries the WIDENS words in its description."""
+    built = []
+    for label, widens in options:
+        tail = " " + WIDE + "." if widens else ""
+        built.append({"label": label, "description": "Gain: it lands today. Lose: two forms stay." + tail})
+    return tcj.good_box(options=built)
+
+
+def case_uniform_answered_reds():
+    shape = [page_option("a", "Keep one form"), page_option("b", "Allow the second form", widens=True)]
+    page("item 376 shape, one plain and one widening option with no pick, is refused as uniform-answered", "set",
+         entry_of(answered_item(shape)), (ANSWERED_RULE, None))
+    page("the same two options with the pick on the plain one are refused as uniform-answered", "set",
+         entry_of(answered_item(shape, pick="a")), (ANSWERED_RULE, None))
+    three = [page_option("a", "Keep one form"), page_option("b", "Allow the second form", widens=True),
+             page_option("c", "Allow a third form", widens=True)]
+    page("three options, two widening and one plain, with no pick, are refused as uniform-answered", "set",
+         entry_of(answered_item(three)), (ANSWERED_RULE, None))
+    chat("item 376 as a box question, one plain and one widening option, is refused as uniform-answered",
+         answered_box([("Keep one form", False), ("Allow the second form", True)]), (ANSWERED_RULE, None))
+    chat("a box of one plain and two widening options is refused as uniform-answered",
+         answered_box([("Keep one form", False), ("Allow the second form", True), ("Allow a third form", True)]),
+         (ANSWERED_RULE, None))
+
+
+def case_uniform_answered_controls():
+    plain = [page_option("a", "Keep one form"), page_option("b", "Wait a day")]
+    page("two options, neither widening, with no pick, pass", "set", entry_of(answered_item(plain)), None)
+    page("two options, neither widening, with a pick, pass", "set", entry_of(answered_item(plain, pick="b")), None)
+    mixed = [page_option("a", "Keep one form"), page_option("b", "Wait a day"),
+             page_option("c", "Allow the second form", widens=True)]
+    page("one widening beside two plain options, with no pick, passes", "set", entry_of(answered_item(mixed)), None)
+    page("one widening beside two plain options, with the plain pick a, passes", "set",
+         entry_of(answered_item(mixed, pick="a")), None)
+    page("a single widening option, fewer than two options, passes", "set",
+         entry_of(answered_item([page_option("a", "Allow the second form", widens=True)])), None)
+    chat("two options, neither widening, pass",
+         answered_box([("Keep one form", False), ("Wait a day", False)]), None)
+    chat("one widening beside two plain options passes",
+         answered_box([("Keep one form", False), ("Wait a day", False), ("Allow the second form", True)]), None)
+    chat("a single widening option, fewer than two options, passes",
+         answered_box([("Allow the second form", True)]), None)
+
+
+def case_uniform_answered_reasons():
+    page_reason = (getattr(question_form, "PAGE_REASONS", None) or {}).get(ANSWERED_RULE, "")
+    chat_reason = (getattr(question_form, "CHAT_REASONS", None) or {}).get(ANSWERED_RULE, "")
+    check("uniform-answered: the page reason table carries the ruling's words", ANSWERED_WORDS in page_reason,
+          "PAGE_REASONS[%r] is %r" % (ANSWERED_RULE, page_reason[:160]))
+    check("uniform-answered: the chat reason table carries the ruling's words", ANSWERED_WORDS in chat_reason,
+          "CHAT_REASONS[%r] is %r" % (ANSWERED_RULE, chat_reason[:160]))
+    shape = answered_item([page_option("a", "Keep one form"), page_option("b", "Allow the second form", widens=True)])
+    said = printed_reason({"url": PAGE_URL, "action": "set", "collection": "items", "doc_id": DOC, "data": shape})
+    check("uniform-answered: guard.py prints the ruling's words for the item 376 shape", ANSWERED_WORDS in said,
+          said[:200] or "no reason printed")
+    box = answered_box([("Keep one form", False), ("Allow the second form", True)])
+    r = tcj.run_hook(tcj.question_input(box=box), answer=tcj.ALLOW)
+    check("uniform-answered: call_judge's refusal of the box prints the ruling's words",
+          ANSWERED_WORDS in r.reason(), tcj.detail(r))
+
+
+def case_uniform_answered_closed_item_passes():
+    shape = [page_option("a", "Keep one form"), page_option("b", "Allow the second form", widens=True),
+             page_option("c", "Allow a third form", widens=True)]
+    base = answered_item(shape)
+    base.pop("status", None)  # the control: this item with no status is open
+    closed = dict(base, status="closed")
+    got = call("widens_answered_hit", closed)
+    check("uniform-answered: widens_answered_hit passes a closed item with one plain option", got == "",
+          "want '' for a closed item, got %r" % (got,))
+    page("a closed item with one plain option and two widening ones, with no pick, passes", "set",
+         entry_of(closed), None)
+    page("control: the same item with no status is refused as uniform-answered", "set",
+         entry_of(base), (ANSWERED_RULE, None))
+
+
+def case_uniform_answered_all_widening_passes():
+    # No option is left for the ruling to choose, so the rule does not apply; both options widen, no pick.
+    both = [page_option("a", "Allow the second form", widens=True), page_option("b", "Allow a third form", widens=True)]
+    page("a page item whose two options both widen, with no pick, passes", "set", entry_of(answered_item(both)), None)
+    chat("a box whose two options both carry the widening words, with no Recommended, passes",
+         answered_box([("Allow the second form", True), ("Allow a third form", True)]), None)
+
+
+def case_uniform_answered_single_option_passes():
+    # The rule needs two or more options. One plain option is not a choice the ruling has made for the owner.
+    single = [page_option("a", "Keep one form")]
+    page("a page item with one plain option and no widening, with no pick, passes", "set",
+         entry_of(answered_item(single)), None)
 
 
 # ------------------------------------------------------------------ closed items, stood picks, updates
@@ -687,8 +817,8 @@ def case_chat_boxes():
     options = [{"label": "Allow the second form",
                 "description": "Gain: it lands today. Lose: two forms stay. " + wide},
                {"label": "Keep one form (Recommended)", "description": "Gain: one form stays. Lose: it waits."}]
-    chat("a t18-marked option that is not Recommended passes beside a Recommended one",
-         tcj.good_box(options=options), None)
+    chat("a t18-marked option beside a Recommended one is the only alternative: refused as uniform-answered",
+         tcj.good_box(options=options), (ANSWERED_RULE, None))
 
     options = tcj.good_options()
     options[1] = {"label": "Press Merge in GitHub", "description": "Gain: it lands at once. Lose: nobody reads it first."}
@@ -977,7 +1107,8 @@ def case_chat_press_scan_skips_gain_and_lose():
 # What each chat refusal must tell the agent to write, and the words that belong to the waiting page only:
 # a chat box has no `stands`, `context`, `links` or `pick` field to set.
 CHAT_REMEDY = {FORM_RULE: ("Goal", "Problem", "Based on", "Gain", "Lose"), "owner-judge": tuple(OWNER_STAKES),
-               "uniform-pick": ("(Recommended)",), "press-link": ("https://",), DEPARTS_RULE: ("Departs from",)}
+               "uniform-pick": ("(Recommended)",), "uniform-answered": ("take the non-widening option",),
+               "press-link": ("https://",), DEPARTS_RULE: ("Departs from",)}
 PAGE_ONLY = ("stands", "`context`", "waiting page", "`links`", "`pick`", "`gain`", "`lose`")
 
 
@@ -1039,6 +1170,8 @@ def case_page_reasons_are_one_table():
             ("a port with no Departs from line", page_item(port=True, departs=None)),
             ("a decision with no Departs from line", page_item(departs=None)),
             ("a pick that names the widening option", page_item(pick="b")),
+            ("a question whose only alternative widens, with no pick", answered_item(
+                [page_option("a", "Keep one form"), page_option("b", "Allow the second form", widens=True)])),
             ("a press with no link", page_item(options=press)),
             ("a step that sends the owner to a file for a command",
              dict(task, steps=["Open plans/merge.md", "Run its command"])),
@@ -2669,7 +2802,10 @@ def main():
                  case_item_stray_field_refused_from_a_record_branch_checkout,
                  case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
-                 case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
+                 case_uniform_answered_reds, case_uniform_answered_controls, case_uniform_answered_reasons,
+                 case_uniform_answered_closed_item_passes, case_uniform_answered_all_widening_passes,
+                 case_uniform_answered_single_option_passes, case_closed_stood_and_updates, case_str_replace, case_batch,
+                 case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose, case_session_press_needs_no_link,
                  case_claude_own_merge_needs_no_link,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,

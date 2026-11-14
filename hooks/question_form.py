@@ -24,7 +24,7 @@ THE FORM. A decision on the page (in `context`), or a chat question with 2+ opti
 chat `Gain:` and `Lose:` in the option's description. Only a line at a line start counts.
 
 THE OLDER RULES keep their ids and run first, in this order, then the form:
-`item-field-rendered` (a field the page draws), `port-question`, `uniform-pick`, `press-link`, `command-in-item`,
+`item-field-rendered` (a field the page draws), `port-question`, `uniform-pick`, `uniform-answered`, `press-link`, `command-in-item`,
 `gh-login-switch`, `task-names-check`, `task-why-cited` (page items), then the form. A missing Goal, Problem or Based on line, a
 Based on count outside 1-3, a kind outside
 PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`, and so does a Goal, Problem or
@@ -325,6 +325,13 @@ CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool acce
                       "repo changes to fit a shared tool, never the tool to fit a repo. Recommend an option "
                       "where the repo changes to match the shared format, and give the widening option no "
                       "(Recommended) label.")
+# Rule `uniform-answered` (docs/decisions/uniform-over-variants.md): when every option but one widens, the
+# ruling has already chosen the one left, so the question is refused with or without a pick. A question whose
+# options all widen passes both rules: `uniform-answered` needs exactly one that does not, `uniform-pick` needs a pick.
+ANSWERED_REASON = ("uniform-over-variants decides this; take the non-widening option. Every option but one widens "
+                   "what a shared tool accepts, and the owner ruled that a repo changes to fit a shared tool, so "
+                   "this question is already answered. Do the one option that does not widen; do not ask. "
+                   "(decision uniform-over-variants, a repo changes to fit a shared tool, never the tool to fit a repo)")
 # Older sessions still write these words in chat; the mark keeps refusing them. No card, rule text or
 # reason carries them.
 LEGACY_WIDENS_TEXT = "Goes against your uniform ruling (t18)"
@@ -341,6 +348,23 @@ RECOMMENDED = re.compile(r"\(Recommended\)", re.I)
 
 RECOMMENDED_FIELDS = ("recommended", "pick")  # the item field that holds the recommended option's key, then its old name
 WIDENS_KEY = "widens"  # the Python home of the mark's key; call_judge.WIDENING_RULE names it too, and skills/waiting-page/page.html reads the literal in JS
+
+
+def only_one_stays(widening) -> bool:
+    """True when 2+ options are judged and exactly one is not widening (`widening` is one bool per option)."""
+    return len(widening) >= 2 and widening.count(False) == 1
+
+
+def widens_answered_hit(data) -> str:
+    """The matched text when an open decision's options leave exactly one that is not marked `widens: true`.
+    A closed item passes, as in decision_form_hit."""
+    if not _open_decision(data):
+        return ""
+    options = data.get("options")
+    if not isinstance(options, list):
+        return ""  # an update without `options` cannot see the stored ones and passes
+    widening = [o.get(WIDENS_KEY) is True for o in options if isinstance(o, dict)]
+    return "every option but one widens" if only_one_stays(widening) else ""
 
 
 def widens_pick_hit(data) -> str:
@@ -1020,6 +1044,9 @@ def item_hit(op, entry, cwd="", session_id=None):
     hit = widens_pick_hit(data)
     if hit:
         return "uniform-pick", hit
+    hit = widens_answered_hit(data)
+    if hit:
+        return "uniform-answered", hit
     hit = press_link_hit(op, data)
     if hit:
         return "press-link", hit
@@ -1725,6 +1752,9 @@ def _chat_question_hit(question, options):
         label, desc = _option_text(o, "label"), _option_text(o, "description")
         if RECOMMENDED.search(label) and WIDENS_MARK.search(label + " " + desc):
             return "uniform-pick", "recommended option goes against the uniform ruling"
+    if only_one_stays([bool(WIDENS_MARK.search(_option_text(o, "label") + " " + _option_text(o, "description")))
+                       for o in options]):
+        return "uniform-answered", "every option but one goes against the uniform ruling"
     for o in options:
         label, desc = _option_text(o, "label"), _option_text(o, "description")
         links = [{"url": u} for u in CHAT_URL.findall(desc)]
@@ -1810,8 +1840,8 @@ def cross_repo_hit(op, data, page_repo, session_id=None):
 
 # ------------------------------------------------------------------ the reasons, one table per surface
 
-PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "press-link": PRESS_LINK_REASON,
-                "command-in-item": COMMAND_REASON, "gh-login-switch": GH_LOGIN_REASON,
+PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "uniform-answered": ANSWERED_REASON,
+                "press-link": PRESS_LINK_REASON, "command-in-item": COMMAND_REASON, "gh-login-switch": GH_LOGIN_REASON,
                 "task-names-check": TASK_REASON, WHY_RULE: WHY_CITED_REASON, CROSS_REPO_RULE: CROSS_REPO_REASON,
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
                 "item-field-page-only": PAGE_ONLY_REASON,
@@ -1822,7 +1852,7 @@ CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write
                      "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s. "
                      "(decision owner-judge-test, a decision reaches the owner only when he can judge it)"
                      % ", ".join(OWNER_STAKES))
-CHAT_REASONS = {"uniform-pick": CHAT_WIDENS_REASON, "press-link": CHAT_PRESS_LINK_REASON,
+CHAT_REASONS = {"uniform-pick": CHAT_WIDENS_REASON, "uniform-answered": ANSWERED_REASON, "press-link": CHAT_PRESS_LINK_REASON,
                 FORM_RULE: CHAT_FORM_REASON, STAKE_RULE: CHAT_STAKE_REASON, DEPARTS_RULE: DEPARTS_REASON}
 
 

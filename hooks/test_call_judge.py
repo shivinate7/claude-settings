@@ -1351,7 +1351,10 @@ def case_widening_fair_option_passes_code_path():
             "gain": "The change lands in the repo today. " + PAGE_MARK, "lose": "The shared tool keeps its one form."}
     marked = {"key": "b", "label": "Accept a second accepted form", "gain": "Other repos read the shared tool alike.",
               "lose": "The shared tool takes a second form.", mark_key: True}
-    item = good_page_item(PAGE_MARK, pick="a", options=[fair, marked])
+    # A third plain option: two options that do not widen keep the item out of the uniform-answered refusal.
+    plain = {"key": "c", "label": "Skip the stamp for this repo", "gain": "The shared tool keeps its one form.",
+             "lose": "This repo's titles stay as they are."}
+    item = good_page_item(PAGE_MARK, pick="a", options=[fair, marked, plain])
     got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": item})
     check("fair option fixture: the item passes question_form.item_hit with the pick on the fair option",
           got == ("", ""), got)

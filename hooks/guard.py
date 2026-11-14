@@ -6992,6 +6992,8 @@ def judge(payload) -> None:
             refuse(tool, "deny", "port-question", question_form.PAGE_REASONS["port-question"], matched)
         if rule == "uniform-pick":
             refuse(tool, "deny", "uniform-pick", question_form.PAGE_REASONS["uniform-pick"], matched)
+        if rule == "uniform-answered":
+            refuse(tool, "deny", "uniform-answered", question_form.PAGE_REASONS["uniform-answered"], matched)
         if rule == "press-link":
             refuse(tool, "deny", "press-link", question_form.PAGE_REASONS["press-link"], matched)
         if rule == "command-in-item":
