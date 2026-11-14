@@ -5,13 +5,13 @@
 Owner, 2026-11-13 21:39 CST, in a batch runner's chat (relayed by the runner and the consultant): "why are u not setting a watcher and or just polling to be woken? why setting check ins". A session that waits on CI calls `subscribe_pr_activity` for the PR first. It keeps one long check-in as a safety net (rule `git-ci-wait-checks-in`).
 
 - `hooks/ready_subscribe_warn.py` is a PreToolUse hook on `mcp__github__update_pull_request`. It acts only on a call with `draft` false, the cloud's ready route. `ci_wake.mcp_ready_calls` parses that call, the one parser of it.
-- It reads the session's transcript once, through `lint/_transcript.py`. The last `subscribe_pr_activity` or `unsubscribe_pr_activity` call for that owner, repo and PR number decides. A subscribe as the last word is silence. An unsubscribe, or none, prints one `additionalContext` warning that names `subscribe_pr_activity`.
-- It never sets a permissionDecision, so it never refuses the ready mark. It fails open and silent on bad input, a missing transcript or any error.
+- It reads the session's transcript once, through `lint/_transcript.py`. The last counted `subscribe_pr_activity` or `unsubscribe_pr_activity` call for that owner, repo and PR number decides. A subscribe counts unless its result is an error (`is_error`, or a failed `toolUseResult`) or its text says "already watching", in any case, in a plain string or a content-list block. The tool answers so for a PR another Claude agent watches, and this session then gets no events. A subscribe with no result record counts, so the hook fails open. A counted subscribe as the last word is silence. An unsubscribe, or none, prints one `additionalContext` warning that names `subscribe_pr_activity`.
+- It never sets a permissionDecision, so it never refuses the ready mark. Whether the model receives a PreToolUse `additionalContext` is unmeasured: no other PreToolUse hook in this repo emits one. It fails open and silent on bad input, a missing transcript or any error.
 - A call in a sidechain record counts. A subscribe that sits only in a resumed `api-request-blob` copy does not, because the shared reader yields no call from one. `hooks/test_ready_subscribe_warn.py` pins both (the blob case is the owner lane's ruling).
 
 ## The mistake and the harm
 
-A batch runner (runner 10) set timed check-ins on PR 3302 and no subscription. Its run ended at 21:33 CST, and a rerun came at about 21:37 CST (the consultant's account, unchecked). The harm: a late rerun on the top-priority PR. A subscription wakes the session on a finished run with all jobs passed, a comment, and a review. A red run posts a `ci-done` comment, which the subscription also delivers (decision `ci-wait-reads-run-status`).
+A batch runner (runner 10) set timed check-ins on PR 3302 and no subscription. Its run ended at 21:33 CST, and a rerun came at about 21:37 CST (the consultant's account, unchecked). The harm: a late rerun on the top-priority PR. A subscription wakes the session on CI results, a comment, and a review. A red run posts a `ci-done` comment, which the subscription also delivers (decision `ci-wait-reads-run-status`).
 
 ## Why warn, not refuse
 
