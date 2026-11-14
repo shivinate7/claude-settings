@@ -1297,6 +1297,16 @@ TRUST_TOOLS = {
 }
 # The remedy steers to get_session. It never tells the session to call either tool.
 TRUST_NAMED = ("confirm_repository_trust", "request_computer_folder")
+# ask_owner as a string or number opens the card if the server coerces it, so any value but absent, null or false
+# refuses (round 1 finding 3). The cite for the lane offer line: ruling own-778-a-reword-offer-for-lane, owner,
+# 2026-11-13 18:24 CST, page item 778 pick a, relayed by the coordinator at 18:31 CST.
+for _coerced in ("true", 1):
+    add("trust-card-in-build: update_trigger with ask_owner %r in a lane session is refused" % (_coerced,), "deny",
+        rule=TRUST_RULE, tool="mcp__claude-code-remote__update_trigger", cwd=NOGIT, lacks=TRUST_NAMED,
+        transcript=role_path("lane"), env=ROLE_ENV, trigger_id="trig_X", ask_owner=_coerced)
+add("trust-card-in-build: update_trigger with ask_owner false in a lane session allows", "allow",
+    tool="mcp__claude-code-remote__update_trigger", cwd=NOGIT, silent=True, transcript=role_path("lane"),
+    env=ROLE_ENV, trigger_id="trig_X", ask_owner=False)
 # The same tool without ask_owner opens no card: a lane may edit its own scheduled task.
 add("trust-card-in-build: update_trigger without ask_owner in a lane session allows", "allow",
     tool="mcp__claude-code-remote__update_trigger", cwd=NOGIT, silent=True, transcript=role_path("lane"),
@@ -1327,8 +1337,14 @@ offer_case("a lane's refusal carries the lane offer line", role_path("lane"),
            ("offer the owner this line to type", "grants nothing"), ("To allow this act, type",))
 offer_case("a session with a parent and no cs-build tag carries the lane offer line", role_path("lane-untagged"),
            ("offer the owner this line to type",), ("To allow this act, type",))
-offer_case("a refusal with no readable own record keeps the plain offer line", role_path("untagged"),
-           ("To allow this act, type",), ("offer the owner this line to type",), env=None)
+for _offer_why, _offer_transcript, _offer_env in (
+    ("no session id in the env", role_path("untagged"), None),
+    ("no get_session record", role_path("no-record"), ROLE_ENV),
+    ("a get_session result that is not JSON", role_path("not-json"), ROLE_ENV),
+    ("a transcript_path that cannot be read", role_path("unreadable"), ROLE_ENV),
+):
+    offer_case("a refusal with " + _offer_why + " keeps the plain offer line", _offer_transcript,
+               ("To allow this act, type",), ("offer the owner this line to type",), env=_offer_env)
 
 for _trust_tool in TRUST_TOOLS:
     _trust_word = _trust_tool.rsplit("__", 1)[1]
