@@ -875,6 +875,12 @@ def branch_of(n):
 
 
 INTEGRATION_NAME = "cross-measure"  # the batch the integration cases lint; its branch is merge.integration_branch(INTEGRATION_NAME)
+COMBINED_MARKER = "<!-- combined-pr -->"  # the combined-PR marker line (ruling own-811-c-marker-line): one body line, alone on it, outside a fenced code block
+
+
+def combined_body(session_id=OWN):
+    """A lane PR's body with the combined-PR marker line in it, beside its session line."""
+    return lane_body(session_id, "Lane work.\n" + COMBINED_MARKER)
 
 
 def names_pr(text, number):
@@ -1340,9 +1346,7 @@ class CrossMeasure(LaneFixture):
     # lane head itself is checked against its base; a counted FAIL refuses before the ci-job run, so the ci-job never runs beside it.
 
     def test_a_stale_sibling_that_clashes_only_through_main_passes_with_a_report_line_naming_it(self):  # R1: a sibling that clashes with main but not with the lane head is stale. The lane passes, and the report names the sibling.
-        sib = self.pr_writes(8, {"shared-a.txt": "sibling\n"}, lane_body(OWN))  # cut before main moves
-        self.commit_on("main", {"shared-a.txt": "main\n"}, "origin/main")  # main moves on the same path after the sibling was cut
-        head = self.merge_into_feat("origin/main")  # the lane head merges main, so it holds main's change
+        sib, head = self.sibling_clashes_through_main()
         self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
         self.assertEqual(self.clash(sib, "origin/main"), "conflict", "precondition: PR 8 does not clash with main, so it is no stale sibling")
         self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the lane head does not merge clean with main")
@@ -1620,6 +1624,135 @@ class CrossMeasure(LaneFixture):
                 self.assertRegex(text, r"FAIL", "the refusal does not read as a FAIL: " + text)
                 self.assertEqual(pass_lines(text), [], "a lane PR on branch %s printed a PASS line: %s" % (branch, text))
                 self.assertEqual(lints, 0, "the ci-job lint ran past the FAIL on branch %s: %s" % (branch, text))
+
+    # The combined-PR marker (ruling own-811-c-marker-line). A lane PR whose body holds COMBINED_MARKER alone on one line is read like a batch
+    # integration PR by the cross rule: a clash of its head with a same-session PR is a report line, not a FAIL. A base clash still counts through
+    # the base, and the marker moves nothing else: the draft read and lint_check read the PR as they read any lane PR.
+
+    def sibling_clashes_through_main(self):
+        """PR 8 is cut before main moves and clashes with the new main; the lane head merges main, so it is clean with main and clashes with PR 8 only.
+        -> (PR 8's sha, the lane head's sha)."""
+        sib = self.pr_writes(8, {"shared-a.txt": "sibling\n"}, lane_body(OWN))  # cut before main moves
+        self.commit_on("main", {"shared-a.txt": "main\n"}, "origin/main")  # main moves on the same path after the sibling was cut
+        head = self.merge_into_feat("origin/main")  # the lane head merges main, so it holds main's change
+        return sib, head
+
+    def clash_with_pr_8(self, body):
+        """The lane head (feat) and same-lane PR 8 both write shared-a.txt, each clean with main, so they clash only with each other. PR 7 is a lane PR
+        (feat, no freeze block) with `body`. -> (the lane head's sha, PR 8's sha)."""
+        head = self.own_writes({"shared-a.txt": "lane 7\n"})
+        sib = self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN))
+        self.host.body = body
+        self.assertFalse(merge.is_integration_pr({"branch": self.host.branch, "body": self.host.body}), "precondition: PR 7 is a batch integration PR, so the case probes no marker")
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the lane head does not merge clean with main")
+        self.assertEqual(self.clash(sib, "origin/main"), "clean", "precondition: PR 8 does not merge clean with main, so the clash is not the pair the case names")
+        self.assertEqual(self.clash(head, sib), "conflict", "precondition: the lane head and PR 8 do not clash, so the case probes nothing")
+        return head, sib
+
+    def test_combined_marker_a_lane_pr_whose_head_clashes_with_a_same_session_pr_passes_and_reports_the_clash(self):
+        """The marker makes the clash with PR 8 a report line after the PASS line, not a FAIL: the lane passes and the ci-job lint runs once.
+        Red on the old code: the clash counts there, so the lane is refused with a FAIL that names PR 8."""
+        self.clash_with_pr_8(combined_body())
+        self.assertEqual(self.host.body.splitlines().count(COMBINED_MARKER), 1, "precondition: PR 7's body does not hold the marker line once, so the case probes no marker")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a lane PR with the combined-PR marker was refused for its clash with PR #8: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, "the lane did not print one PASS line: " + text)
+        lines = text.splitlines()
+        pass_at = next(i for i, line in enumerate(lines) if line.startswith("PASS:"))
+        report = [line for line in lines[pass_at + 1:] if names_pr(line, 8)]
+        self.assertTrue(report, "no report line after the PASS names the clashing PR #8: " + text)
+        self.assertIn("shared-a.txt", "\n".join(report), "the report line for PR #8 does not name the clashing file: " + text)
+        self.assertIn("Not counted", "\n".join(report), "the report line for PR #8 does not say the clash is not counted: " + text)
+        self.assertNotIn("FAIL", "\n".join(report), "the report line for PR #8 reads as a FAIL: " + text)
+        self.assertEqual(lints, 1, "the ci-job lint did not run once on the passing marked PR: " + text)
+
+    def test_combined_marker_the_same_clash_without_the_marker_is_still_refused(self):  # control: green on the old code
+        self.clash_with_pr_8(lane_body(OWN))
+        self.assertNotIn(COMBINED_MARKER, self.host.body, "precondition: PR 7's body holds the marker, so the control probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the same clash without the marker passed the lane: " + text)
+        self.assertTrue(names_pr(text, 8), "the refusal does not name the conflicting PR #8: " + text)
+        self.assertIn("shared-a.txt", text, "the refusal does not name the clashing file: " + text)
+        self.assertRegex(text, r"FAIL", "the refusal does not read as a FAIL: " + text)
+        self.assertEqual(pass_lines(text), [], "the refused lane printed a PASS line: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past the refusal: " + text)
+
+    def test_combined_marker_a_sibling_that_clashes_only_through_main_still_reports_through_main(self):
+        """The marker does not turn a base clash into one that counts: PR 8's own head conflicts with main, so its line says the clash comes through
+        main, and it does not say the PR rebases after the merge (the integration wording). Green on the old code; it pins that the base reasons
+        come before the integration reason."""
+        sib, head = self.sibling_clashes_through_main()
+        self.host.body = combined_body()
+        self.assertFalse(merge.is_integration_pr({"branch": self.host.branch, "body": self.host.body}), "precondition: PR 7 is a batch integration PR, so the case probes no marker")
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
+        self.assertEqual(self.clash(sib, "origin/main"), "conflict", "precondition: PR 8 does not clash with main, so the clash does not come through main")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the lane head does not merge clean with main")
+        self.assertEqual(self.clash(head, sib), "conflict", "precondition: the lane head and PR 8 do not clash, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a marked lane PR was refused for a sibling that clashes only through main: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, "the lane did not print one PASS line: " + text)
+        report = "\n".join(line for line in text.splitlines() if names_pr(line, 8))
+        self.assertTrue(report, "the PASS names no report line for PR #8: " + text)
+        self.assertRegex(report, r"comes through main", "the report line for PR #8 does not say the clash comes through main: " + text)
+        self.assertNotRegex(report, r"(?i)rebase[^\n]*after[^\n]*merge", "the report line for PR #8 says the PR rebases after the merge, the integration wording: " + text)
+        self.assertNotIn("FAIL", report, "the report line for PR #8 reads as a FAIL: " + text)
+
+    def test_combined_marker_a_marked_head_that_conflicts_with_main_still_fails_and_names_main(self):
+        """The marker lifts only a clash with a same-session PR. A marked head that conflicts with main still refuses, names main, runs no ci-job
+        and posts nothing (R3 with the marker)."""
+        self.commit_on("main", {"shared-a.txt": "main\n"}, "origin/main")
+        head = self.own_writes({"shared-a.txt": "lane 7\n"})
+        self.host.body = combined_body()
+        self.assertFalse(merge.is_integration_pr({"branch": self.host.branch, "body": self.host.body}), "precondition: PR 7 is a batch integration PR, so the case probes no marker")
+        self.assertEqual(self.clash(head, "origin/main"), "conflict", "precondition: the marked head merges clean with main, so the case probes nothing")
+        self.assertEqual(self.host.pulls, {}, "precondition: another PR is listed, so the refusal does not come from the base alone")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a marked head that conflicts with main passed the lane: " + text)
+        self.assert_conflict_line_names(text, "main", "the refusal")
+        self.assertEqual(pass_lines(text), [], "a marked head that conflicts with main printed a PASS line: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past a base conflict of a marked head: " + text)
+        self.assertEqual(self.host.posted, [], "a marked head that conflicts with main posted a lane-lint comment: " + text)
+
+
+class CombinedMarkerLine(unittest.TestCase):
+    """merge.has_combined_marker (ruling own-811-c-marker-line): the combined-PR marker is the body line COMBINED_MARKER, alone on its line, and it
+    counts only as the one such line outside a fenced code block. CRLF line ends count. Two such lines, a line with other text, or a marker in a fence
+    is no marker. The cases call the function directly: until it exists they error on the missing name, and the CrossMeasure cases' red is the real cause."""
+
+    def test_combined_marker_a_lone_marker_line_counts(self):
+        self.assertTrue(merge.has_combined_marker("Lane work.\n\n" + COMBINED_MARKER + "\n\nsession\n"))
+
+    def test_combined_marker_a_marker_line_with_crlf_line_ends_counts(self):
+        self.assertTrue(merge.has_combined_marker("Lane work.\r\n" + COMBINED_MARKER + "\r\n\r\nsession\r\n"))
+
+    def test_combined_marker_a_marker_inside_a_backtick_fence_is_no_marker(self):
+        self.assertFalse(merge.has_combined_marker("Example:\n```\n" + COMBINED_MARKER + "\n```\n"))
+
+    def test_combined_marker_a_marker_inside_a_tilde_fence_is_no_marker(self):
+        self.assertFalse(merge.has_combined_marker("Example:\n~~~\n" + COMBINED_MARKER + "\n~~~\n"))
+
+    def test_combined_marker_a_fenced_marker_beside_an_unfenced_one_is_one_marker(self):  # control: the fenced line is not read, the unfenced one counts
+        self.assertTrue(merge.has_combined_marker("```\n" + COMBINED_MARKER + "\n```\n\n" + COMBINED_MARKER + "\n"))
+
+    def test_combined_marker_two_marker_lines_are_no_marker(self):
+        self.assertFalse(merge.has_combined_marker(COMBINED_MARKER + "\n\n" + COMBINED_MARKER + "\n"))
+
+    def test_combined_marker_a_marker_with_trailing_text_is_no_marker(self):
+        self.assertFalse(merge.has_combined_marker(COMBINED_MARKER + " see below\n"))
+
+    def test_combined_marker_a_marker_with_leading_text_is_no_marker(self):
+        self.assertFalse(merge.has_combined_marker("see below " + COMBINED_MARKER + "\n"))
+
+    def test_combined_marker_an_empty_body_is_no_marker(self):  # the empty state
+        self.assertFalse(merge.has_combined_marker(""))
+
+    def test_combined_marker_a_body_with_no_marker_is_no_marker(self):  # control
+        self.assertFalse(merge.has_combined_marker(lane_body(OWN)))
 
 
 BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
@@ -2852,6 +2985,20 @@ class DraftRun(LaneFixture):
                 self.assertEqual(rc, 0, "a batch integration PR with %s was refused (exit %s):\n%s" % (label, rc, out))
                 self.assertEqual(len(pass_lines(out)), 1, out)
 
+    def test_combined_marker_a_marked_lane_pr_still_reads_its_draft_runs_and_a_failed_run_refuses_it(self):
+        """The marker does not skip the draft read: the ("pass", []) shortcut stays for a batch integration PR only. A marked lane PR reads its live
+        head's draft runs, and a failed windows run refuses it. Red on a mutant that shortcuts the read for any marked PR: the lane then passes."""
+        self.use_ci_job(PASSING, 0)
+        head = self.head("feat")
+        self.host.body = combined_body()
+        self.assertFalse(merge.is_integration_pr({"branch": self.host.branch, "body": self.host.body}), "precondition: PR 7 is a batch integration PR, so the case probes no lane read")
+        rows = {head: [tm.draft_row("touched"), tm.draft_row("run (windows-latest)", "failure", job=2)]}
+        rc, out = self.run_case(rows, "--lane-lint", "7")
+        self.assertEqual(tm.check_run_reads(self.host.draft_reads), [head], "the lint did not read the live head's draft runs for a marked lane PR:\n" + out)
+        self.assertEqual(rc, 1, "a marked lane PR with a failed windows run passed the lint (exit %s):\n%s" % (rc, out))
+        self.assertIn(tm.job_link(tm.DRAFT_RUN, 2), out, "the refusal does not name the failed run's link:\n" + out)
+        self.assertEqual(self.lint_calls(), [], "the lint ran past a failed draft run on a marked lane PR:\n" + out)
+
     def test_a_failed_windows_or_macos_run_is_not_lifted_by_a_reason_and_is_named_as_a_failure(self):  # control: green on the old code
         self.use_ci_job(PASSING, 0)
         head = self.head("feat")
@@ -3347,6 +3494,15 @@ class LintCheckJoin(tm.CloudSession):
         self.assertIn("no lane-lint PASS", out, "the lane PR's refusal does not say no lane-lint PASS names its head:\n" + out)
         self.assertIn(head[:9], out, "the lane PR's refusal does not name its live head:\n" + out)
         self.assertEqual(rollup_skip_lines(out), [], "a lane PR printed a line that says the lane lint was skipped:\n" + out)
+
+    def test_combined_marker_a_marked_lane_pr_with_all_jobs_passed_green_still_needs_the_lane_lint(self):
+        """The marker does not join the batch integration PRs whose green rollup skips the lint (lint_check skips only for is_integration_pr). A marked
+        lane PR with a green rollup and no lane-lint PASS is refused, with no skip line. Red on a mutant that skips the lint for any marked PR: the join merges."""
+        body = combined_body()
+        self.assertFalse(merge.is_integration_pr({"branch": "feat", "body": body}), "precondition: the marked PR is a batch integration PR, so the join skips the lint for it")
+        out = self.assert_refused([], "all-jobs-passed green on the live head of a marked lane PR", checks_seq=[[("checks", "pass", ""), (REQUIRED_CHECK, "pass", "")]], body=body)
+        self.assertIn("no lane-lint PASS", out, "the marked lane PR's refusal does not say no lane-lint PASS:\n" + out)
+        self.assertEqual(rollup_skip_lines(out), [], "a marked lane PR printed a line that says the lane lint was skipped:\n" + out)
 
     def feat_commit(self, files, subject, trailer=None):
         """One commit on feat, pushed from the second clone: `files` maps a path to its text, and `trailer` (a Record-claim line, or None) ends
