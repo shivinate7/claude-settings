@@ -1,0 +1,14 @@
+{
+ "id": "lane-lint-unknown-on-ready-pr",
+ "title": "The lane lint reads UNKNOWN on a ready PR, so no combined PR can be lint-checked while it is ready",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A combined PR cannot pass lane lint once it is marked ready, so it merges on an unknown, as #3292 did.",
+ "source": "Coordinator 18:09 CST Nov 13: PR #3292 at merge time; the coordinator's account, unchecked by triage.",
+ "note": "Filed 18:08 CST Nov 13. At merge time PR #3292's lane lint read UNKNOWN: the PR had been flipped back to draft after a ready run showed 3 red guard jobs from the arm rows; its record sat at an earlier head (51051ee89, comment 6867648570), and member #3289 had only a Haiku round 1 record. A lane reads first why lint is UNKNOWN on a ready PR (draft-only reads? a missing ready-run?). Do not lift the check to fit; fix the read. Relations: item 775 (macOS queue and lint unknown), express-combined-pr, review-record-restart-on-doc-nit, reviewer-round-1-model-vs-marker. A check change: test-author red case first, builder, reviewer. Past rulings not checked. Not started.",
+ "updatedAt": "2026-11-13T18:08:33-06:00"
+}

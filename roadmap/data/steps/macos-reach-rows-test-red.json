@@ -1,7 +1,7 @@
 {
  "id": "macos-reach-rows-test-red",
  "title": "hooks/test_guard.py stops at its macOS arm check on main: MACOS_REACH rows are missing or name no arm",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJKzgjANKBgYiDuBzJFF",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "No guard family or shard of hooks/test_guard.py can run on main until the rows are fixed, so main is red on a check no lane caused.",
  "source": "Lane rebuild-2123 (session_013NEJL4Lqx759D54GPKCSc2), 16:30 CST Nov 13: its builder checked against a git archive of main (ab27336489). Lane's read, unchecked by triage.",
- "note": "Filed 16:31 CST Nov 13. The test stops before any case runs with two lines: \"untagged darwin arm hooks/proc_env.py::_entries: add a row to MACOS_REACH\" and \"MACOS_REACH row hooks/proc_env.py::holds_session_tag names no darwin arm\". Fix: a test-author fixes the MACOS_REACH rows (one added, one pointed at a real arm or removed). Test files, so a lane, not triage. Not caused by #3249; #3249 waits on neither beyond lane-lint reading main. Relations: red-main steps (main is red, so only a revert merges: check rule `git-red-main-reverts` against this fix before it merges). Past rulings not checked. Not started. Lane 16:32 CST Nov 13 (coordinator 16:32): started, session_013NEJKzgjANKBgYiDuBzJFF (tag cs-step:macos-reach-rows-test-red; triage read the id from the session list). Runner 10 reads how its PR merges while main is red (ruling own-745-b-resume-at-revert); the coordinator sends its go when the heads are clean.",
- "updatedAt": "2026-11-13T16:32:02-06:00"
+ "note": "Filed 16:31 CST Nov 13. The test stops before any case runs with two lines: \"untagged darwin arm hooks/proc_env.py::_entries: add a row to MACOS_REACH\" and \"MACOS_REACH row hooks/proc_env.py::holds_session_tag names no darwin arm\". Fix: a test-author fixes the MACOS_REACH rows (one added, one pointed at a real arm or removed). Test files, so a lane, not triage. Not caused by #3249; #3249 waits on neither beyond lane-lint reading main. Relations: red-main steps (main is red, so only a revert merges: check rule `git-red-main-reverts` against this fix before it merges). Past rulings not checked. Not started. Lane 16:32 CST Nov 13 (coordinator 16:32): started, session_013NEJKzgjANKBgYiDuBzJFF (tag cs-step:macos-reach-rows-test-red; triage read the id from the session list). Runner 10 reads how its PR merges while main is red (ruling own-745-b-resume-at-revert); the coordinator sends its go when the heads are clean. Done. Merged 18:08 CST Nov 13 in combined PR #3292 (coordinator 18:09; main 2a388ccd92 at 18:05 CST; merger shivinate7, unconfirmed by the coordinator, who asked runner 10; the coordinator sent no go for that head). Not read by triage. Carried as #3289 (arm rows); its member record was a Haiku round 1 only (step reviewer-round-1-model-vs-marker).",
+ "updatedAt": "2026-11-13T18:08:33-06:00"
 }
