@@ -8,10 +8,10 @@ import re
 
 import guard_core
 from guard_core import (
-    HEREDOC_HEADER, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT, SCRIPT_HEADERS,
+    UNSET, HEREDOC_HEADER, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT, SCRIPT_HEADERS,
     PowerShellScript, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
-    dir_before_segment, heredoc_delimiter, interpreter_bodies, is_powershell, nested_script, norm, resolve_command,
-    segment_tokens, split_segments, strip_heredoc_bodies,
+    dir_before_segment, expand_default_words, heredoc_delimiter, interpreter_bodies, is_powershell, nested_script,
+    norm, resolve_command, segment_tokens, split_segments, strip_heredoc_bodies,
 )
 from guard_env import _quoted_words, _substitutions, script_spots
 
@@ -318,8 +318,11 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
 # A redirect (`>/dev/null`, `2>f`, `<<'EOF'`) and the name after `function` leave the command's start
 # as it was, so `D=x >/dev/null` still sets D. An unquoted `$D` whose value holds two words is an
 # ambiguous redirect target that writes nothing, so it stays as written there (unless IFS is set).
-# RESIDUAL GAP: a value from `$(...)`, backticks, `read`, `${D:-x}`, a loop variable, `eval '...'`, or
-# an interpreter (`python -c`) is not resolved, nor is a variable set in a different tool call. An
+# `${D:-w}`, `${D-w}` and `${D:?w}` read from the table as a value, or as the word when D is unset (`:-` also
+# when empty). A name the table lacks reads from the environment in `known`; one the table forgot (a value from `$(...)`)
+# stays as written. `_expanded` reads no default form.
+# RESIDUAL GAP: a value from `$(...)`, backticks, `read`, a nested `${D:-${E:-x}}`, `${D:+w}`, a loop variable,
+# `eval '...'`, or an interpreter (`python -c`) is not resolved, nor is a variable set in a different tool call. An
 # assignment in a pipeline stage or a background job (`D=x | cat`, `D=x &`) is kept here, though the
 # shell runs it in a subshell and keeps nothing, so a later `$D` can read a value the shell does not.
 # An escaped `\$D` in an unquoted heredoc body reads the parent's value, not the child's.
@@ -442,7 +445,7 @@ def _read_word(cmd: str, i: int, src=None):
 
 
 def _expand(text: str, table: dict, as_target: bool = False) -> str:
-    """`text` with each `$VAR` read. `as_target` is an unquoted redirect target: a value of two words
+    """`text` with each `$VAR` and `${VAR:-word}` read. `as_target` is an unquoted redirect target: a value of two words
     is an ambiguous redirect that writes nothing, so its variable stays as written (fail closed when
     IFS is set, which can change where the shell splits)."""
     splits = as_target and "IFS" not in table
@@ -450,7 +453,14 @@ def _expand(text: str, table: dict, as_target: bool = False) -> str:
     def read(use):
         value = table.get(use.group(1) or use.group(2))
         return use.group(0) if value is None or (splits and _TWO_WORDS.search(value)) else value
-    return _VAR_USE.sub(read, text)
+
+    def known(name):   # a name never assigned is read from the environment, as `_expanded` reads `$VAR`; one the
+        # command set to a value the guard cannot read (`D=$(mktemp -d)`) is not, since the shell gives it its real value
+        value = table[name] if name in table else os.environ.get(name, UNSET)
+        if value is None:   # a forgotten name has no value to search: the form stays as written
+            return None
+        return None if value is not UNSET and splits and _TWO_WORDS.search(value) else value
+    return _VAR_USE.sub(read, expand_default_words(text, known, lambda word: _VAR_USE.sub(read, word)))
 
 
 def _dq_text(text: str, table: dict, depth: int = 0) -> str:
@@ -517,12 +527,13 @@ def _value_of(parts, table: dict) -> str:
 
 def _assign(table: dict, name: str, plus: str, parts, opens_group: bool) -> None:
     """Set `name` in `table` to the value `parts` read as. A value that holds `$` or a backtick, or that is
-    cut by a `(` or backtick (an array, `$(...)`), is not known: the name forgets its old value too."""
+    cut by a `(` or backtick (an array, `$(...)`), is not known: the name forgets its old value too. It is
+    kept as None, so it is told apart from a name never assigned: only that one reads the environment."""
     value = _value_of(parts, table)
     if "$" in value or "`" in value or opens_group:
-        table.pop(name, None)
+        table[name] = None
     elif plus:
-        if name in table:
+        if table.get(name) is not None:
             table[name] += value
     else:
         table[name] = value
@@ -600,7 +611,7 @@ def _resolve_into(cmd: str, table: dict, depth: int = 0):
                 for name, value in names.items():
                     if value is None and quoted:
                         scope.pop(name, None)
-                    elif value is not None and (quoted or name not in table):
+                    elif value is not None and (quoted or table.get(name) is None):
                         scope[name] = value   # the child expands a verbatim body; the parent, any other
                 out.append(_resolve_into(_like(src, src[i:body_end]), scope, depth + 1)[0])
                 out.append(src[body_end:line_end])
@@ -1241,6 +1252,7 @@ def _join_path(head: str, tail: str) -> str:
 
 
 _PY_TEMP = "\0temp"   # a folder a python or node temp call made: no path of the repo, so nothing under it is judged
+_PY_CWD = "\0cwd"   # a name bound to the working folder: told apart from an unknown name, which names no repo path
 _PY_TEMP_CALLS = ("mkdtemp", "mkstemp", "gettempdir", "TemporaryDirectory")
 
 
@@ -1260,7 +1272,7 @@ def _py_temp_head(node, env):
         return env.get(node.id) == [_PY_TEMP]
     if isinstance(node, ast.Attribute) and node.attr == "name":   # `TemporaryDirectory().name`
         return _py_temp_head(node.value, env)
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.Add)):
         return _py_temp_head(node.left, env)
     if isinstance(node, ast.Call):
         name = _py_call_name(node)
@@ -1284,17 +1296,86 @@ def _py_up(paths, steps: int):
     return out
 
 
+def _py_is_cwd(node, env=None):
+    """True for the working folder of the call: `os.getcwd()`, `Path.cwd()`, a name bound to one (`env`),
+    `str(...)` or `Path(...)` of one."""
+    import ast
+    if isinstance(node, ast.Name):
+        return env is not None and env.get(node.id) == [_PY_CWD]
+    if not isinstance(node, ast.Call):
+        return False
+    name = _py_call_name(node)
+    if name in ("getcwd", "cwd"):
+        return not node.args
+    return (name == "str" or name in _PATH_CTORS) and len(node.args) == 1 and _py_is_cwd(node.args[0], env)
+
+
+def _py_glue(left, right):
+    """`left + right` read as a path: the working folder (`left` is None) or a path, then a piece that starts
+    with a slash. A folder name glued on with no slash is no path of the repo, so it reads as none."""
+    if left is None:
+        return right.lstrip("/") if right.startswith("/") else None
+    return left + right
+
+
+def _py_concat(node, env):
+    """The paths of `left + right`. A left side that is the working folder or a known path gives a path when
+    the right side is readable, else the left alone. An unknown left side (`tmpdir + '/tests/x.py'`) gives
+    none: the join names a folder the scan cannot place, so it is no path of the repo."""
+    if _py_temp_head(node, env):
+        return [_PY_TEMP]
+    right = _py_paths(node.right, env)
+    if _py_is_cwd(node.left, env):
+        return [path for path in (_py_glue(None, piece) for piece in right) if path] if right else []
+    left = _py_paths(node.left, env)
+    if not left or not right:
+        return left
+    return [path for path in (_py_glue(a, b) for a in left for b in right) if path is not None]
+
+
+def _py_fstring(node, env):
+    """The paths of an f-string: its constant parts joined. A `{...}` part that is the working folder at the
+    start leaves the rest relative to it; a known path joins in; an unreadable one is left out, except at the
+    start, where an unknown folder makes the whole string no path of the repo."""
+    import ast
+    if node.values and isinstance(node.values[0], ast.FormattedValue) and _py_temp_head(node.values[0].value, env):
+        return [_PY_TEMP]
+    out, at_working_folder = [""], False
+    for index, piece in enumerate(node.values):
+        if isinstance(piece, ast.Constant):
+            options = [piece.value]
+        elif index == 0 and _py_is_cwd(piece.value, env):
+            at_working_folder = True
+            continue
+        else:
+            options = _py_paths(piece.value, env)
+            if not options:
+                if index == 0:
+                    return []
+                continue
+        out = [a + b for a in out for b in options]
+    if at_working_folder:
+        return [path.lstrip("/") for path in out if path.startswith("/")]
+    return out
+
+
 def _py_paths(node, env):
-    """The path strings an expression can hold: a string, `Path(...)`, `a / b`, `os.path.join`, a
-    name bound to one of those, or a chain of path calls. A part it cannot tell (`Path.cwd()`,
-    `os.getcwd()`, `__file__`) is left out, so the literal pieces still join: `Path.cwd() / 'tests'`
-    reads `tests`. A join that starts with a temp folder (`_py_temp_head`) holds only that folder.
+    """The path strings an expression can hold: a string, `Path(...)`, `a / b`, `a + b`, an f-string,
+    `os.path.join`, a name bound to one of those, or a chain of path calls. A part it cannot tell
+    (`Path.cwd()`, `os.getcwd()`, `__file__`) is left out, so the literal pieces still join:
+    `Path.cwd() / 'tests'` and `os.getcwd() + '/tests'` read `tests`. A `+` or f-string whose first
+    piece is unknown (`tmpdir + '/tests/x.py'`) reads as no path. A join that starts with a temp folder
+    (`_py_temp_head`) holds only that folder.
     Empty when no piece is known."""
     import ast
     if isinstance(node, ast.Constant):
         return [node.value] if isinstance(node.value, str) else []
     if isinstance(node, ast.Name):
-        return list(env.get(node.id, ()))
+        return [value for value in env.get(node.id, ()) if value != _PY_CWD]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _py_concat(node, env)
+    if isinstance(node, ast.JoinedStr):
+        return _py_fstring(node, env)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
         if _py_temp_head(node.left, env):
             return [_PY_TEMP]
@@ -1364,7 +1445,7 @@ def _py_env_at(tree, script: str = ""):
         for end, name, value, node in events:
             if end > (call.lineno, call.col_offset):
                 break
-            values = _py_paths(value, env)
+            values = _py_paths(value, env) or ([_PY_CWD] if _py_is_cwd(value, env) else [])
             if id(node) in top:
                 env[name] = values
             else:
