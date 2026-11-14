@@ -1914,7 +1914,7 @@ WALK_SUITES = {
     "hooks/guard_branch_worktree.py": ["hooks/test_auto_mode_allow.py"],
     # hooks/test_shared_names.py opens guard_merge.py by its path (a path read, so it is a walk suite since the path forms).
     "hooks/guard_merge.py": ["hooks/test_shared_names.py", "lint/test_hook_catalog.py", "lint/test_report_guard_review.py",
-                             "lint/test_settings_matcher.py"],
+                             "lint/test_settings_matcher.py", "skills/roadmap/test_build.py"],
     "hooks/guard_mask_script.py": [],
     "hooks/guard_argv.py": [],
     # hooks/guard.py: the walk of the tracked tree, minus the whole hooks/test_guard.py and GUARD_MODULE_DROPPED_SUITES
