@@ -201,4 +201,42 @@ add("local-role: a grep for the launcher's name is allowed", "allow", tool="Bash
 add("local-role: reading bin/claude-role with cat is allowed", "allow", tool="Bash",
     command="cat bin/claude-role", cwd=PUSHSSH, session=LT_SID, silent=True)
 
+# More forms that claim a role for a child session: a subshell, a command substitution, a brace group, and a PowerShell
+# SetEnvironmentVariable. RED on fbb931781, where the guard allows each one.
+for _cmd in (
+    "(CS_SESSION_ROLE=batch-runner claude -p hi)",
+    "echo $(CS_SESSION_ROLE=batch-runner claude -p hi)",
+    "{ CS_SESSION_ROLE=triage claude; }",
+):
+    add("local-role: a Bash call that starts a child session with a role in a group or substitution is denied: " + _cmd, "deny",
+        tool="Bash", command=_cmd, cwd=PUSHSSH, session=LT_SID)
+add("local-role: a PowerShell call that sets CS_SESSION_ROLE with SetEnvironmentVariable and starts claude is denied", "deny",
+    tool="PowerShell", command="[Environment]::SetEnvironmentVariable('CS_SESSION_ROLE', 'batch-runner', 'Process'); claude -p hi",
+    cwd=PUSHSSH, session=LT_SID, windows=True)
+# CONTROLS, green on fbb931781: text that names the variable or the launcher is not a claim, and neither is a shell that reads or unsets it.
+add("local-role: a commit message that quotes CS_SESSION_ROLE and claude-role is allowed", "allow", tool="Bash",
+    command="git commit -m \"CS_SESSION_ROLE comes from bin/claude-role\"", cwd=PUSHSSH, session=LT_SID, silent=True)
+add("local-role: a heredoc that names CS_SESSION_ROLE is allowed", "allow", tool="Bash",
+    command="cat <<'EOF'\nCS_SESSION_ROLE=batch-runner claude -p hi\nEOF", cwd=PUSHSSH, session=LT_SID, silent=True)
+add("local-role: a comment that names CS_SESSION_ROLE is allowed", "allow", tool="Bash",
+    command="echo ok # it's CS_SESSION_ROLE", cwd=PUSHSSH, session=LT_SID, silent=True)
+add("local-role: env | grep CS_SESSION_ROLE is allowed", "allow", tool="Bash",
+    command="env | grep CS_SESSION_ROLE", cwd=PUSHSSH, session=LT_SID, silent=True)
+add("local-role: env -u CS_SESSION_ROLE is allowed", "allow", tool="Bash",
+    command="env -u CS_SESSION_ROLE true", cwd=PUSHSSH, session=LT_SID, silent=True)
+add("local-role: unset CS_SESSION_ROLE is allowed", "allow", tool="Bash",
+    command="unset CS_SESSION_ROLE", cwd=PUSHSSH, session=LT_SID, silent=True)
+add("local-role: python3 -m pytest -k CS_SESSION_ROLE is allowed", "allow", tool="Bash",
+    command="python3 -m pytest -k CS_SESSION_ROLE", cwd=PUSHSSH, session=LT_SID, silent=True)
+add("local-role: python3 lint/test_claude_role.py is allowed", "allow", tool="Bash",
+    command="python3 lint/test_claude_role.py", cwd=PUSHSSH, session=LT_SID, silent=True)
+# PowerShell reads of the variable are not judged (guard.py: a read is not judged). RED on fbb931781 for the two that deny today.
+for _cmd in (
+    "Test-Path Env:CS_SESSION_ROLE",
+    "Get-Item Env:CS_SESSION_ROLE",
+    "Remove-Item Env:CS_SESSION_ROLE",
+):
+    add("local-role: a PowerShell read of the launcher's variable is allowed: " + _cmd, "allow",
+        tool="PowerShell", command=_cmd, cwd=PUSHSSH, session=LT_SID, silent=True, windows=True)
+
 FAMILY = _LT_PREV_FAMILY
