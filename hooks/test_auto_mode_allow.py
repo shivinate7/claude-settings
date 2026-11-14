@@ -159,14 +159,14 @@ MERGE_TOOL_NAMES = (("merge", "`merge`"), ("~/.claude/bin/merge", r"`~/\.claude/
 MERGE_ORDERS = (("merge <pr> --review-record", r"`merge <pr> --review-record`"),
                 ("merge --review-record <pr>", r"`merge --review-record <pr>`"))
 MERGE_REVIEW_ONLY_READS = (("prints", r"\bprints\b"), ("posts nothing", "posts nothing"))
-# Each act the Merge Review Record "Never covers" sentence must name: the check-lifting flags, the other merge forms,
+# The flags a Merge Review Record Covers text must never name, and its Never covers sentence must (decision `auto-mode-owner-acts`).
+MERGE_REVIEW_NEVER_FLAGS = ("--confirm", "--ready", "--base-red-ok", "--lint-unknown-ok", "--undo-check-unknown-ok")
+# Each act the Merge Review Record "Never covers" sentence must name: the refused flags, the other merge forms,
 # and a session not tagged cs-build:lane (decision `auto-mode-owner-acts`).
-MERGE_REVIEW_REFUSED = (("--confirm", r"`--confirm`"), ("--ready", r"`--ready`"),
-                        ("--base-red-ok", r"`--base-red-ok`"), ("--lint-unknown-ok", r"`--lint-unknown-ok`"),
-                        ("--undo-check-unknown-ok", r"`--undo-check-unknown-ok`"),
-                        ("gh pr merge", r"`gh pr merge`"), ("push", r"\bpush\b"), ("force push", r"force[- ]push"),
-                        ("any other merge form", "any other merge form"),
-                        ("a session not tagged cs-build:lane", r"not tagged `cs-build:lane`"))
+MERGE_REVIEW_REFUSED = tuple((flag, "`%s`" % flag) for flag in MERGE_REVIEW_NEVER_FLAGS) + (
+    ("gh pr merge", r"`gh pr merge`"), ("any push", r"\bany push\b"), ("force push", r"force[- ]push"),
+    ("any other merge form", "any other merge form"),
+    ("a session not tagged cs-build:lane", r"not tagged `cs-build:lane`"))
 # The Covers text names the session that started this one, and the no-act report it lets through.
 MESSAGE_TARGET = (("the session that started this one", "the session that started this one"),)
 MESSAGE_REPORT = (("asks for no act", "asks for no act"), ("pull request number", "pull request number"),
@@ -304,6 +304,12 @@ def review_record_flags():
                     and str(keyword.value.value).startswith("with --review-record")):
                 flags.append(node.args[0].value)
     return sorted(flags)
+
+
+def flag_list(covers):
+    """The flags a Covers text lists after 'only these flags besides it:', sorted, or None when it has no such list."""
+    found = re.search(r"only these flags besides it:(.*?)\.(?:\s|$)", covers)
+    return sorted(re.findall(r"`(--[\w-]+)", found.group(1))) if found else None
 
 
 def allow_entry(prefix):
@@ -628,10 +634,16 @@ class MergeReviewRecordIsAllowed(unittest.TestCase):
         covers = entry_part(self, MERGE_REVIEW_RECORD)
         flags = review_record_flags()
         self.assertTrue(flags, "merge/merge.py's argparse names no record flag")
-        for flag in flags:
+        listed = flag_list(covers)
+        self.assertIsNotNone(listed, "Covers text has no 'only these flags besides it:' list")
+        extra = sorted(set(listed) - set(flags))
+        missing = sorted(set(flags) - set(listed))
+        self.assertEqual(listed, sorted(flags), "the flag list differs from merge/merge.py: extra %r, missing %r"
+                         % (extra, missing))
+        for flag in MERGE_REVIEW_NEVER_FLAGS:
             with self.subTest(flag=flag):
-                self.assertRegex(covers, re.escape(flag) + r"(?![\w-])",
-                                 "Covers text does not name the record flag %s" % flag)
+                self.assertNotRegex(covers, r"(?<![\w-])" + re.escape(flag) + r"(?![\w-])",
+                                    "Covers text names the refused flag %s" % flag)
 
     def test_covers_says_it_prints_and_posts_nothing(self):
         covers = entry_part(self, MERGE_REVIEW_RECORD)
@@ -640,8 +652,10 @@ class MergeReviewRecordIsAllowed(unittest.TestCase):
                 self.assertRegex(covers, pattern, "Covers text does not say %r" % name)
 
     def test_covers_names_the_lane_session_tag(self):
-        self.assertIn("`cs-build:lane`", entry_part(self, MERGE_REVIEW_RECORD),
-                      "Covers text must name the session tagged `cs-build:lane`")
+        covers = entry_part(self, MERGE_REVIEW_RECORD)
+        self.assertIn("`cs-build:lane`", covers, "Covers text must name the session tagged `cs-build:lane`")
+        tags = sorted(set(re.findall(r"cs-build:[\w-]+", covers)))
+        self.assertEqual(tags, ["cs-build:lane"], "Covers text names a cs-build tag other than cs-build:lane: %r" % tags)
 
     def test_never_covers_names_each_refused_form(self):
         clause = entry_part(self, MERGE_REVIEW_RECORD, never=True)
