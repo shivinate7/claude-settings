@@ -1020,7 +1020,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 <!-- /roadmap:data -->
 
 <script>
-const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answeredOpen: true, sunk: null, known: null, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, unfold: {}, seen: null, sendAt: null, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null, lines: [], lineOpen: {}, mark: {}, hidItems: null, showReadItems: false };
+const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answeredOpen: true, sunk: null, known: null, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, unfold: {}, seen: null, sendAt: null, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null, lines: [], lineOpen: {}, mark: {}, hidItems: null, loadAt: null, showReadItems: false };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
@@ -2040,8 +2040,12 @@ const closedAt = (it) => { const t = typeof it.closed === "string" ? Date.parse(
 // A closed item stays on the page as one line while it carries a `closed` time and has not been marked read. One with no `closed` time was closed before lines shipped, and counts as read.
 const isClosedLine = (it) => it.status === "closed" && !isRuling(it) && closedAt(it) !== null;
 const readAt = (it) => { const t = typeof it.dismissed === "string" ? Date.parse(it.dismissed) : NaN; return isNaN(t) ? null : t; };
-// Read: the owner marked it, and the writer has not replied since. A later reply brings the line back.
-const isRead = (it) => { const d = readAt(it); return d !== null && !(Date.parse(it.replied) > d); };
+// A closed line older than this many hours at page load counts as read, so answered lines do not pile up until the owner presses Mark read.
+const LINE_AGE_H = 24;
+// Aged: closed longer ago than LINE_AGE_H before the load (state.loadAt, fixed once, so no line ages out mid-visit), with no reply since the close.
+const isAged = (it) => state.loadAt !== null && isClosedLine(it) && closedAt(it) < state.loadAt - LINE_AGE_H * 36e5 && !(Date.parse(it.replied) > closedAt(it));
+// Read: the owner marked it, and the writer has not replied since; or it aged out. A later reply brings the line back.
+const isRead = (it) => { const d = readAt(it); return (d !== null && !(Date.parse(it.replied) > d)) || isAged(it); };
 // An open answered item is routed once it is filed. One that waits on a run or a PR, sits on a lane, or has no filing yet keeps its card.
 const routedOpen = (it) => !isRuling(it) && isSunk(it) && isSaved(it) && !waitsOf(it) && !laneOf(it) && !!rcOf(it).filed;
 const isLine = (it) => (it.status === "closed" ? isClosedLine(it) : routedOpen(it));
@@ -3216,7 +3220,7 @@ render(); renderAsks();
     // A closed item with a `closed` time stays as one line until the owner marks it read, and the arbiter's writer's rulings keep their section. One with no `closed` time is read, so it is nowhere.
     state.items = all.filter((i) => i.status !== "closed"); state.rulings = all.filter(isRuling); state.lines = all.filter(isClosedLine); state.loaded = true;
     // The lines read at load are worked out once, so a mark this visit leaves its line in place until the next load.
-    if (state.hidItems === null) state.hidItems = new Set(all.filter(isRead).map((i) => i.id));
+    if (state.hidItems === null) { state.loadAt = Date.now(); state.hidItems = new Set(all.filter(isRead).map((i) => i.id)); }
     feed.items = true; feed.all = all; freezeSeen(); freezeSunk(); render();
   }, () => {});
   db.collection("answers").onSnapshot((s) => { state.answers = map(s); feed.answers = true; freezeSeen(); freezeSunk(); render(); }, () => {});

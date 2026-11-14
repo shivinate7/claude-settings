@@ -153,6 +153,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   - `closed` (an ISO UTC time with a trailing `Z`) is when the item closed. The session that closes the item writes it in the same `update` as `status: "closed"`
     (step 2 of "Route and close"; the writer does the same for a chat answer). The page shows a closed item that has a `closed` time as one line in "Answered" until the owner marks it read.
     A closed item with no `closed` time counts as read, so the page never shows it.
+    A closed line older than `LINE_AGE_H` (24 hours, in `page.html`) at page load also counts as read, page-side with no write; a `replied` later than `closed` brings it back.
   - `dismissed` (an ISO time, or `null`) is the owner's read mark. Only the page writes it, at the owner's press, with `update`: Mark read writes the time, and Mark unread writes `null`
     (the runtime has no field delete). No session writes `dismissed`. A session changes a closed item, or any item the owner may have marked, only with `update`, never `set`:
     `set` drops `closed` and `dismissed`, and the item then counts as read and leaves the page. A `replied` time later than `dismissed` brings the line back.
