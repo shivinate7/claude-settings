@@ -1,0 +1,8 @@
+{
+  "claim": "A check-in that waits on CI waits at most cap_minutes, so, under the 1-hour prompt cache, its wake lands inside the cache. The cap spaces check-ins. It is not a limit on the run.",
+  "source": "Claude Code docs, prompt cache lifetime: 1 hour, and 5 minutes once usage enters overage. This session's system text gives the same two figures.",
+  "read": "2026-11-12",
+  "cache_lifetime_seconds": 3600,
+  "overage_lifetime_seconds": 300,
+  "cap_minutes": 55
+}

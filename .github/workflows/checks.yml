@@ -574,6 +574,9 @@ jobs:
       - name: Claude Code compaction check fixture suite
         run: python3 hooks/test_cc_version_check.py
 
+      - name: CI-wait cap fixture suite
+        run: python3 hooks/test_ci_wait_cap.py
+
       - name: Handoff wave-2 fixture suite
         run: python3 hooks/test_handoff_wave2.py
 
