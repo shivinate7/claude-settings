@@ -1177,6 +1177,10 @@ def record_push_cost_case():
          {"rev-parse": 2, "symbolic-ref": 1, "config": 1, "for-each-ref": 2, "diff": 3, "rev-list": 1}),
         ("a --all push to a local-path origin", "push --all origin",
          {"rev-parse": 1, "symbolic-ref": 1, "config": 2}, PUSHLOCALAHEAD),
+        # rule red-run (decision red-run-trailer-on-test-commits): a push that sends a docs commit and no test path adds
+        # no call, such as a `git log`, for the rule's check. RR_DOCS is built in section 43400, which loads after this one.
+        ("a push of a docs-only commit, no test path", "push origin topic",
+         {"config": 1, "diff": 1, "rev-list": 1, "rev-parse": 1, "symbolic-ref": 1}, RR_DOCS),
     ):
         kinds, lines = spawn_kinds(VCS + " " + tail, cwd[0] if cwd else PUSHFEAT)
         if kinds != want:
