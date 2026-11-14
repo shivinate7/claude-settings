@@ -1,27 +1,20 @@
 # section 43200
-FAMILY = "brief-ids-in-roster"  # the family of the roster check on lane briefs and lane starts
+FAMILY = "brief-ids-in-roster"  # the family of the bare-id check on lane briefs and lane starts
 
-# ---- Brief ids in roster. A lane brief or a lane start that names a session id outside the roster is refused, so a
-# hand-typed wrong id cannot wake a dead session. The roster is the `## Standing sessions` list in CLAUDE.md, read from
-# refs/remotes/origin/roadmap of the payload's repo. The check reads a create_session that tags a lane (its prompt,
-# whatever its opener), and a send_message with a line that starts with `Grant:` or `Lane brief:` after an optional
-# markdown lead, wherever that line sits. Every case runs the real guard as a child, so each deny fails on old code as
-# an assert ("expected deny, got allow") and never as an import error, which P3 does not allow for a new feature. Each
-# allow case is a green control on old code.
+# ---- Brief ids. A lane brief or a lane start that names a session id is refused, roster ids included. A brief names a
+# slug or a role, and the lane looks the id up in the roster (owner ruling, 2026-11-14 00:19 CST). The check reads no
+# roster and no git ref, so a repo with no roster is judged the same as one with a roster. Every case runs the real
+# guard as a child, so each deny fails on old code as an assert ("expected deny, got allow") and never as an import
+# error, which P3 does not allow for a new feature. Each allow case is a green control on old code.
 #
 # The escape: an id with a backtick or a double quote right before it and right after it is data (an incident quote)
 # and passes. A quote elsewhere on the line hides nothing: a lone quote, a lone backtick or an apostrophe leaves a bare
 # id judged, and so does a closed span with the id outside it (building-scanner-respects-strings). An id is matched in
 # any case, and it ends before a dot, a dash or a `.md` after it.
 #
-# Known holes, named here as fail-open cases below: a repo with no roadmap ref, a roster with no Standing sessions section,
-# an empty roster (the header with only template placeholders), and an unreadable ref each let every id through. The
-# send_message target (session_id) is not judged: lanes are not on the roster, so a roster check on it would refuse every
-# lane brief.
+# The roster fixtures below stay. A case that names a roster id on one of them proves the guard reads no roster: that
+# id still denies, because it is a bare id.
 ROSTER_RULE = "brief-ids-in-roster"
-# The refusal's remedy names this fetch, and no id as a thing to use. The reason names the roster, not the file: CLAUDE.md
-# is a forbidden fragment for every rule but its own.
-ROSTER_REMEDY = "git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap"
 ROSTER_SEND = "mcp__claude-code-remote__send_message"
 ROSTER_TITLE = "Lane brief-ids-from-roster: check the ids a brief names"
 ROSTER_GRANT = "Grant: owner 20:41 CST Nov 13, the roster check"
@@ -29,7 +22,7 @@ ROSTER_TASK = "Task: step brief-ids-from-roster "
 GRANT_TASK = ROSTER_GRANT + "\n" + ROSTER_TASK
 
 # An id is `session_`, a digit, then letters and digits. The runner id and the wrong id are the incident's: runner 10's
-# right id, and the id the coordinator's brief named for it.
+# right id, and the id the coordinator's brief named for it. The roster ids are bare ids too, so a brief refuses them.
 ROSTER_COORD = "session_01RosCoordAa0001Zz"
 ROSTER_TRIAGE = "session_01RosTriageBb0002Yy"
 ROSTER_RUNNER = "session_013NEJL2f1YCYsvLdpFqtWP3"
@@ -40,6 +33,7 @@ ROSTER_BATCH = "session_01RosBatchRepoCc0003Xx"  # a batch runner per repo scope
 ROSTER_ARBITER = "session_01RosArbiterDd0004Ww"
 ROSTER_WRONG_UPPER = "SESSION_" + ROSTER_WRONG[len("session_"):]  # the wrong id with its prefix in capitals
 ROSTER_RUNNER_UPPER = "SESSION_" + ROSTER_RUNNER[len("session_"):]  # the runner's roster id, typed in capitals
+FULL_IDS = [ROSTER_COORD, ROSTER_TRIAGE, ROSTER_RUNNER, ROSTER_BATCH, ROSTER_ARBITER]
 
 ROSTER_REPO = os.path.join(ROOT, "roster-repo")  # the roster the coordinator keeps: three rows
 ROSTER_FULL = os.path.join(ROOT, "roster-full")  # full size: every row the template names
@@ -64,7 +58,7 @@ ROSTER_ROW_PLACEHOLDER = ('- Coordinator (starts every other session, holds lane
 def roster_claude_md(rows, heading="## Standing sessions", before_rows=""):
     """CLAUDE.md with a Standing sessions section holding `rows`, then a lane notes section after it. `heading` is the
     section's heading line, and `before_rows` is any text between the section's intro and its rows. The lane's id sits
-    in the lane notes section, so a case that names it proves the roster reader stops at the section's end."""
+    in the lane notes section, so a case that names it proves the id is judged where it sits."""
     return ("# Claude settings fixture\n\nThe rules of this repo live beside this file.\n\n"
             + heading + "\n\nThis roster is the one record of who holds each standing session.\n\n" + before_rows
             + "\n".join(rows) + "\n\nLanes are not on the roster. The coordinator holds lane state.\n\n"
@@ -91,7 +85,7 @@ def roster_repo(where, text, ref=True):
 
 
 def roster_reads(where):
-    """The CLAUDE.md the fixture's roadmap ref holds, or None when git cannot read it: what the guard reads."""
+    """The CLAUDE.md the fixture's roadmap ref holds, or None when git cannot read it."""
     shown = run_vcs(where, "show", "refs/remotes/origin/roadmap:CLAUDE.md")
     return shown.stdout if shown.returncode == 0 else None
 
@@ -108,9 +102,9 @@ def build_rosters():
     roster_repo(ROSTER_SUBHEAD, roster_claude_md([ROSTER_ROW_COORD, ROSTER_ROW_TRIAGE, ROSTER_ROW_RUNNER],
                                                  before_rows="### Batch 10\n\n"))
     # Break the one blob of the unreadable ref: a loose ref to an object git does not hold. The ref then resolves to
-    # nothing readable, so the guard reads no roster, and the check below holds that it really is unreadable.
+    # nothing readable, and the check below holds that it really is unreadable.
     write(os.path.join(ROSTER_UNREADABLE, ".git", "refs", "remotes", "origin", "roadmap"), "1" * 40 + "\n")
-    # Each fixture must hold what its cases claim. A roster that failed to build would let every allow pass for nothing.
+    # Each fixture must hold what its cases claim. A roster that failed to build would make a roster case prove nothing.
     for where, (needle, present) in (
             (ROSTER_REPO, (ROSTER_RUNNER, True)),
             (ROSTER_FULL, (ROSTER_ARBITER, True)),
@@ -137,11 +131,16 @@ def roster_incident(quote=""):
             % (quote, ROSTER_WRONG, quote, quote, ROSTER_RUNNER, quote))
 
 
+def _bad_ids(bad):
+    """The ids a deny's reason must not name: one id, or a tuple of them."""
+    return (bad,) if isinstance(bad, str) else tuple(bad)
+
+
 def roster_send(name, expected, message, cwd=ROSTER_REPO, target=ROSTER_RUNNER, bad=None, **kw):
-    """A send_message the guard judges. A deny names its rule, carries the fetch remedy and never the bad id."""
+    """A send_message the guard judges. A deny names its rule, and never the bad id."""
     if expected == "deny":
         add(name, "deny", rule=ROSTER_RULE, tool=ROSTER_SEND, cwd=cwd, session_id=target, message=message,
-            carries=(ROSTER_REMEDY,), lacks=(bad,), **kw)
+            lacks=_bad_ids(bad), **kw)
     else:
         add(name, "allow", tool=ROSTER_SEND, cwd=cwd, session_id=target, message=message, silent=True, **kw)
 
@@ -151,16 +150,16 @@ def roster_start(name, expected, prompt, cwd=ROSTER_REPO, bad=None):
     roster check can refuse it: the lane rules around it pass."""
     fields = dict(TITLE_START, cwd=cwd, prompt=prompt, title=ROSTER_TITLE)
     if expected == "deny":
-        add(name, "deny", rule=ROSTER_RULE, carries=(ROSTER_REMEDY,), lacks=(bad,), **fields)
+        add(name, "deny", rule=ROSTER_RULE, lacks=_bad_ids(bad), **fields)
     else:
         add(name, "allow", **fields)
 
 
-# ---- Refused. A bare id the roster does not hold is refused, behind a Grant opener.
+# ---- Refused. A bare session id is refused behind a Grant opener, a roster id included.
 roster_send("brief-ids-in-roster: a Grant and Task message that names runner 10 by a wrong id is refused", "deny",
             GRANT_TASK + "Runner 10 is " + ROSTER_WRONG + ".", bad=ROSTER_WRONG)
 # A Lane brief opener reads the same ids. The target's transcript is a lane on its own topic, so lane-one-topic passes
-# the brief and the roster check is what refuses it.
+# the brief and the bare-id check is what refuses it.
 roster_send("brief-ids-in-roster: a Lane brief to a lane on its own topic that names a wrong runner id is refused", "deny",
             "Lane brief: icon-a. Topic: icons.\nRunner 10 is " + ROSTER_WRONG + ".", bad=ROSTER_WRONG,
             target=ROLE_OTHER, transcript=role_path("step-topic-lane"), env=ROLE_ENV)
@@ -179,13 +178,12 @@ roster_send("brief-ids-in-roster: a lone backtick before a wrong id does not hid
             GRANT_TASK + "A tick ` opens here, then runner 10 is " + ROSTER_WRONG + ".", bad=ROSTER_WRONG)
 roster_send("brief-ids-in-roster: an apostrophe in Don't does not hide a wrong id after it", "deny",
             GRANT_TASK + "Don't send runner 10 " + ROSTER_WRONG + ".", bad=ROSTER_WRONG)
-# An id that appears only in another section of CLAUDE.md is not on the roster: the reader stops at the section's end.
-roster_send("brief-ids-in-roster: an id that appears only after the roster section is refused", "deny",
+# An id that appears only in another section of CLAUDE.md is refused like any other: the lane notes section is no roster.
+roster_send("brief-ids-in-roster: an id that sits in a lane notes section of CLAUDE.md is refused", "deny",
             GRANT_TASK + "Lane " + ROSTER_LANE + " holds the step.", bad=ROSTER_LANE)
-# Full size: every row the template names is on the roster, and a wrong id beside them is still refused.
+# Full size: the template's five rows are all bare ids, and a wrong id beside them is refused too.
 roster_send("brief-ids-in-roster: a full roster, with a wrong id beside its five rows, is refused", "deny",
-            GRANT_TASK + " ".join([ROSTER_COORD, ROSTER_TRIAGE, ROSTER_RUNNER, ROSTER_BATCH, ROSTER_ARBITER])
-            + " and " + ROSTER_WRONG + ".", cwd=ROSTER_FULL, bad=ROSTER_WRONG)
+            GRANT_TASK + " ".join(FULL_IDS) + " and " + ROSTER_WRONG + ".", cwd=ROSTER_FULL, bad=ROSTER_WRONG)
 # A lane start: the exact text of the incident's start prompt, with the wrong id bare, is refused.
 roster_start("brief-ids-in-roster: a lane start with the incident's start text and a bare wrong id is refused", "deny",
              ROSTER_GRANT + "\n" + ROSTER_TASK + roster_incident(), bad=ROSTER_WRONG)
@@ -195,12 +193,42 @@ roster_start("brief-ids-in-roster: a lane start, Grant then a wrong runner id, i
 roster_start("brief-ids-in-roster: a lane start with no Grant line that names a wrong id is refused", "deny",
              "Task: runner 10 is " + ROSTER_WRONG + ".", bad=ROSTER_WRONG)
 
-# ---- Allowed. A roster id passes, and so does an id in backticks or double quotes, which is data.
-roster_send("brief-ids-in-roster: a Grant and Task message naming runner 10 by its roster id is allowed", "allow",
-            GRANT_TASK + "Runner 10 is " + ROSTER_RUNNER + ".")
+# ---- Refused, roster ids too. A brief names a slug or a role, so a roster id is refused the same as a wrong one.
+roster_send("brief-ids-in-roster: a Grant and Task message naming runner 10 by its roster id is refused", "deny",
+            GRANT_TASK + "Runner 10 is " + ROSTER_RUNNER + ".", bad=ROSTER_RUNNER)
 # A roster id followed by a closing bracket, a semicolon or a period is one id: the trailing punctuation is not part of it.
-roster_send("brief-ids-in-roster: a roster id before a bracket, a semicolon or a period is allowed", "allow",
-            GRANT_TASK + "Runner 10 (" + ROSTER_RUNNER + "); the roster lists " + ROSTER_RUNNER + ".")
+roster_send("brief-ids-in-roster: a roster id before a bracket, a semicolon or a period is refused", "deny",
+            GRANT_TASK + "Runner 10 (" + ROSTER_RUNNER + "); the roster lists " + ROSTER_RUNNER + ".", bad=ROSTER_RUNNER)
+roster_send("brief-ids-in-roster: a Lane brief to a lane on its own topic that names a roster id is refused", "deny",
+            "Lane brief: icon-a. Topic: icons.\nRunner 10 is " + ROSTER_RUNNER + ".", bad=ROSTER_RUNNER,
+            target=ROLE_OTHER, transcript=role_path("step-topic-lane"), env=ROLE_ENV)
+roster_send("brief-ids-in-roster: the full roster's five bare ids are all refused", "deny",
+            GRANT_TASK + " ".join(FULL_IDS) + ".", cwd=ROSTER_FULL, bad=tuple(FULL_IDS))
+roster_start("brief-ids-in-roster: a lane start naming runner 10 by its roster id is refused", "deny",
+             ROSTER_GRANT + "\n" + ROSTER_TASK + "Runner 10 is " + ROSTER_RUNNER + ".", bad=ROSTER_RUNNER)
+roster_send("brief-ids-in-roster: a roster id under a date on the heading is refused", "deny",
+            GRANT_TASK + "Runner 10 is " + ROSTER_RUNNER + ".", cwd=ROSTER_DATED, bad=ROSTER_RUNNER)
+roster_send("brief-ids-in-roster: a wrong id with a date on the roster heading is refused", "deny",
+            GRANT_TASK + "Runner 10 is " + ROSTER_WRONG + ".", cwd=ROSTER_DATED, bad=ROSTER_WRONG)
+roster_send("brief-ids-in-roster: a roster id under a ### line in the roster section is refused", "deny",
+            GRANT_TASK + "Runner 10 is " + ROSTER_RUNNER + ".", cwd=ROSTER_SUBHEAD, bad=ROSTER_RUNNER)
+roster_send("brief-ids-in-roster: a wrong id under a ### line in the roster section is refused", "deny",
+            GRANT_TASK + "Runner 10 is " + ROSTER_WRONG + ".", cwd=ROSTER_SUBHEAD, bad=ROSTER_WRONG)
+# A roster id in a handoff path, before .md, or before a dash, is one id and is refused.
+roster_send("brief-ids-in-roster: a roster id in a handoff path, before .md, is refused", "deny",
+            GRANT_TASK + "Read the handoff at ~/.claude/handoffs/" + ROSTER_RUNNER + ".md", bad=ROSTER_RUNNER)
+roster_send("brief-ids-in-roster: a roster id before a dash is refused", "deny",
+            GRANT_TASK + ROSTER_RUNNER + "- wake now.", bad=ROSTER_RUNNER)
+# No period after the id: the end of the message is a boundary the id ends at.
+roster_send("brief-ids-in-roster: a roster id at the end of a message, with no period, is refused", "deny",
+            GRANT_TASK + "Runner 10 is " + ROSTER_RUNNER, bad=ROSTER_RUNNER)
+roster_send("brief-ids-in-roster: an uppercase roster id is the same id and is refused", "deny",
+            GRANT_TASK + "Runner 10 is " + ROSTER_RUNNER_UPPER + ".", bad=ROSTER_RUNNER_UPPER)
+roster_start("brief-ids-in-roster: a lane start naming runner 10 in a handoff path, before .md, is refused", "deny",
+             ROSTER_GRANT + "\n" + ROSTER_TASK + "Read the handoff at ~/.claude/handoffs/" + ROSTER_RUNNER + ".md",
+             bad=ROSTER_RUNNER)
+
+# ---- Allowed. A quoted id is data and passes, and so does a message with no session id.
 roster_send("brief-ids-in-roster: the incident sentence with its ids in backticks is allowed", "allow",
             GRANT_TASK + roster_incident("`"))
 roster_send("brief-ids-in-roster: the incident sentence with its ids in double quotes is allowed", "allow",
@@ -210,20 +238,21 @@ roster_send("brief-ids-in-roster: a Grant and Task message with no session id is
 # A message with no lane opener is not read, so a wrong id in it passes.
 roster_send("brief-ids-in-roster: a message with no lane opener, naming a wrong id, is allowed: it is not read", "allow",
             "Status: PR 12 merged. Runner 10 is " + ROSTER_WRONG + ".")
-roster_send("brief-ids-in-roster: a Lane brief to a lane on its own topic that names a roster id is allowed", "allow",
-            "Lane brief: icon-a. Topic: icons.\nRunner 10 is " + ROSTER_RUNNER + ".",
-            target=ROLE_OTHER, transcript=role_path("step-topic-lane"), env=ROLE_ENV)
-roster_send("brief-ids-in-roster: the full roster's five ids are all allowed", "allow",
-            GRANT_TASK + " ".join([ROSTER_COORD, ROSTER_TRIAGE, ROSTER_RUNNER, ROSTER_BATCH, ROSTER_ARBITER]) + ".",
-            cwd=ROSTER_FULL)
-roster_start("brief-ids-in-roster: a lane start naming runner 10 by its roster id is allowed", "allow",
-             ROSTER_GRANT + "\n" + ROSTER_TASK + "Runner 10 is " + ROSTER_RUNNER + ".")
+roster_send("brief-ids-in-roster: a wrong id alone in backticks, and one alone in double quotes, is allowed", "allow",
+            GRANT_TASK + "Wrong: `" + ROSTER_WRONG + "`, and \"" + ROSTER_WRONG + "\".")
 roster_start("brief-ids-in-roster: a lane start with the incident's start text in backticks is allowed", "allow",
              ROSTER_GRANT + "\n" + ROSTER_TASK + roster_incident("`"))
+# A brief that names only a slug or a role passes: the lane looks the id up in the roster, so the brief needs none.
+roster_send("brief-ids-in-roster: a Grant and Task message that names a role and a step slug, with no id, is allowed", "allow",
+            GRANT_TASK + "Coordinator: wake batch runner 10 for step brief-ids-from-roster.")
+roster_send("brief-ids-in-roster: a Lane brief that names a role and a slug, with no id, is allowed", "allow",
+            "Lane brief: icon-a. Topic: icons.\nWake the batch runner 10 for the coordinator.",
+            target=ROLE_OTHER, transcript=role_path("step-topic-lane"), env=ROLE_ENV)
+roster_start("brief-ids-in-roster: a lane start that names a role and a slug, with no id, is allowed", "allow",
+             ROSTER_GRANT + "\n" + ROSTER_TASK + "Ask the batch runner 10 for the coordinator's ruling.")
 
 # ---- Read wider. A Grant or Lane brief line is read wherever it sits, after a markdown lead. A quote hides an id only when
-# it sits right before and right after it. An id matches in any case and ends before a dot, a dash or `.md`. The roster
-# section is the heading that starts `## Standing sessions`, with any suffix, up to the next `## ` heading.
+# it sits right before and right after it. An id matches in any case and ends before a dot, a dash or `.md`.
 roster_send("brief-ids-in-roster: a bold Grant line, with a wrong id on a later line, is refused", "deny",
             "**Grant:** owner said go, 2026-11-13 10:00 CST.\nWake " + ROSTER_WRONG, bad=ROSTER_WRONG)
 roster_send("brief-ids-in-roster: a quoted Grant line, with a wrong id on a later line, is refused", "deny",
@@ -236,49 +265,28 @@ roster_send("brief-ids-in-roster: a wrong id after a lone backtick, before a bac
             GRANT_TASK + "Stray ` before wake " + ROSTER_WRONG + ", then `done`.", bad=ROSTER_WRONG)
 roster_send("brief-ids-in-roster: an uppercase wrong id is refused", "deny",
             GRANT_TASK + "Runner 10 is " + ROSTER_WRONG_UPPER + ".", bad=ROSTER_WRONG_UPPER)
-# The refusal's reason names no escape: backticks and double quotes are not named as passing. A bare wrong id is judged.
-add("brief-ids-in-roster: the refusal does not name the quote escape, backticks or double quotes", "deny", rule=ROSTER_RULE,
-    tool=ROSTER_SEND, cwd=ROSTER_REPO, session_id=ROSTER_RUNNER, message=GRANT_TASK + "Runner 10 is " + ROSTER_WRONG + ".",
-    carries=(ROSTER_REMEDY,), lacks=(ROSTER_WRONG, "backticks", "double quotes"))
+# The refusal says to name the slug or the role, and names no quote escape, no CLAUDE.md and no bare id. A bare wrong id is
+# judged, and the reason is the one text every bare id gets.
+add("brief-ids-in-roster: the refusal says to name the slug or role, and names no backticks, double quotes or CLAUDE.md",
+    "deny", rule=ROSTER_RULE, tool=ROSTER_SEND, cwd=ROSTER_REPO, session_id=ROSTER_RUNNER,
+    message=GRANT_TASK + "Runner 10 is " + ROSTER_WRONG + ".",
+    carries=("slug", "role"), lacks=(ROSTER_WRONG, "backticks", "double quotes", "CLAUDE.md"))
 roster_start("brief-ids-in-roster: a lane start with a stray double quote before a wrong id is refused", "deny",
              ROSTER_GRANT + "\n" + ROSTER_TASK + 'The 5" monitor; wake ' + ROSTER_WRONG + ' and tell "them" to go.',
              bad=ROSTER_WRONG)
 roster_start("brief-ids-in-roster: a lane start with an uppercase wrong id is refused", "deny",
              ROSTER_GRANT + "\n" + ROSTER_TASK + "Runner 10 is " + ROSTER_WRONG_UPPER + ".", bad=ROSTER_WRONG_UPPER)
-# Each fixture's roster holds its id, so a wrong id refused on it is refused for not being on it. The control comes first.
-roster_send("brief-ids-in-roster: a roster id under a date on the heading is allowed", "allow",
-            GRANT_TASK + "Runner 10 is " + ROSTER_RUNNER + ".", cwd=ROSTER_DATED)
-roster_send("brief-ids-in-roster: a wrong id with a date on the roster heading is refused", "deny",
-            GRANT_TASK + "Runner 10 is " + ROSTER_WRONG + ".", cwd=ROSTER_DATED, bad=ROSTER_WRONG)
-roster_send("brief-ids-in-roster: a roster id under a ### line in the roster section is allowed", "allow",
-            GRANT_TASK + "Runner 10 is " + ROSTER_RUNNER + ".", cwd=ROSTER_SUBHEAD)
-roster_send("brief-ids-in-roster: a wrong id under a ### line in the roster section is refused", "deny",
-            GRANT_TASK + "Runner 10 is " + ROSTER_WRONG + ".", cwd=ROSTER_SUBHEAD, bad=ROSTER_WRONG)
-# Allowed. An id followed by `.md`, a dash or a period is the id, and a quote on both sides of it is data.
-roster_send("brief-ids-in-roster: a roster id in a handoff path, before .md, is allowed", "allow",
-            GRANT_TASK + "Read the handoff at ~/.claude/handoffs/" + ROSTER_RUNNER + ".md")
-roster_send("brief-ids-in-roster: a roster id before a dash is allowed", "allow",
-            GRANT_TASK + ROSTER_RUNNER + "- wake now.")
-roster_send("brief-ids-in-roster: a roster id at the end of a sentence is allowed", "allow",
-            GRANT_TASK + "Runner 10 is " + ROSTER_RUNNER + ".")
-roster_send("brief-ids-in-roster: a wrong id alone in backticks, and one alone in double quotes, is allowed", "allow",
-            GRANT_TASK + "Wrong: `" + ROSTER_WRONG + "`, and \"" + ROSTER_WRONG + "\".")
-roster_send("brief-ids-in-roster: an uppercase roster id is the same id and is allowed", "allow",
-            GRANT_TASK + "Runner 10 is " + ROSTER_RUNNER_UPPER + ".")
-roster_start("brief-ids-in-roster: a lane start naming runner 10 in a handoff path, before .md, is allowed", "allow",
-             ROSTER_GRANT + "\n" + ROSTER_TASK + "Read the handoff at ~/.claude/handoffs/" + ROSTER_RUNNER + ".md")
 
-# ---- Fail open, the known holes named above. Each allow below lets a wrong id through, on purpose: the check has no
-# roster to read. A repo with a roster and the holes both must still refuse, which the cases above pin.
-# Known hole: a repo with no roadmap ref. LANE_REPO is a checkout with no roadmap ref (section 29666).
-roster_send("brief-ids-in-roster: a repo with no roadmap ref fails open: a wrong id passes (known hole)", "allow",
-            GRANT_TASK + "Runner 10 is " + ROSTER_WRONG + ".", cwd=LANE_REPO)
-# Known hole: a roster with no Standing sessions section.
-roster_send("brief-ids-in-roster: a roster with no Standing sessions section fails open (known hole)", "allow",
-            GRANT_TASK + "Runner 10 is " + ROSTER_WRONG + ".", cwd=ROSTER_NOSECTION)
-# Known hole: an empty roster, the section there with only template placeholders. The fetch remedy cannot fill it.
-roster_send("brief-ids-in-roster: an empty roster, placeholders only, fails open (known hole)", "allow",
-            GRANT_TASK + "Runner 10 is " + ROSTER_WRONG + ".", cwd=ROSTER_EMPTY)
-# Known hole: an unreadable ref. The ref resolves to nothing readable, so no roster is read.
-roster_send("brief-ids-in-roster: an unreadable roadmap ref fails open (known hole)", "allow",
-            GRANT_TASK + "Runner 10 is " + ROSTER_WRONG + ".", cwd=ROSTER_UNREADABLE)
+# ---- No roster to read. The check reads no roster, so a repo with none judges a bare id the same as one with a roster.
+# A repo with no roadmap ref: LANE_REPO is a checkout with no roadmap ref (section 29666).
+roster_send("brief-ids-in-roster: a repo with no roadmap ref refuses a bare wrong id", "deny",
+            GRANT_TASK + "Runner 10 is " + ROSTER_WRONG + ".", cwd=LANE_REPO, bad=ROSTER_WRONG)
+# A roster with no Standing sessions section.
+roster_send("brief-ids-in-roster: a roster with no Standing sessions section refuses a bare wrong id", "deny",
+            GRANT_TASK + "Runner 10 is " + ROSTER_WRONG + ".", cwd=ROSTER_NOSECTION, bad=ROSTER_WRONG)
+# An empty roster, the section there with only template placeholders.
+roster_send("brief-ids-in-roster: an empty roster, placeholders only, refuses a bare wrong id", "deny",
+            GRANT_TASK + "Runner 10 is " + ROSTER_WRONG + ".", cwd=ROSTER_EMPTY, bad=ROSTER_WRONG)
+# An unreadable roadmap ref: it resolves to nothing readable.
+roster_send("brief-ids-in-roster: an unreadable roadmap ref refuses a bare wrong id", "deny",
+            GRANT_TASK + "Runner 10 is " + ROSTER_WRONG + ".", cwd=ROSTER_UNREADABLE, bad=ROSTER_WRONG)
