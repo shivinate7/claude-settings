@@ -14,11 +14,21 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             with-as or walrus target, or when it is a def directly in a module-level class. A name that moved
             but is still bound in the file is not removed. A test node id, `path.py::name` or
             `path.py::Class::name`, is read the same way, in a code span or not: each segment is a name.
+  STALE007  one backticked code span cites a script and a `--flag` of it, and the range removed that flag from the
+            script. A `~/.claude/<path>` cite is `<path>` at the repo root. A Python flag is an `add_argument`
+            string literal (read with `ast`); a shell (.sh) flag is a whole-word `--token` in the file. A flag
+            named only in a docstring or comment of a .py was never declared. A span that cites no script (as in
+            `git push --force`), or a script that never had the flag (a shim whose target holds the flags), never
+            fires. A flag another touched .py declares (or another touched .sh holds) at head moved there, and
+            so is one a `parents=[name()]` parser, or a helper called as `name(parser)`, declares in a tracked module
+            the script imports with `from module import name`, and one a loop over a module-level table passes to
+            `add_argument`. A removed flag head still names as a string constant in a form not read is unknown. A leading `./` is dropped from the cited script, and a bare basename
+            names the one tracked file with it (never one that two tracked files share).
   Unknown   the line cites `<file.mjs> <name>` (also .js, .cjs, .ts, .sh) in the same two forms, and the range
             touched that file. JavaScript and shell names are not read, so the line prints
             `stale-cites: unknown, <path>:<line> ...` and keeps the exit 0. It prints only when the range also
-            removes a path or a Python name, since only then is Markdown read. A range that touches only such
-            files prints nothing and passes. A value cite of such a file (STALE008) prints the same way, on an untouched
+            removes a path, a Python name or a flag, since only then is Markdown read. A range that touches only such
+            files prints nothing and passes. A touched .sh is still read once for its flags (STALE007). A value cite of such a file (STALE008) prints the same way, on an untouched
             line only when the whole tree is read and the range touched that file, and on an added line always. Its
             code is STALE008, so the mark for that code leaves it out. A JSON value cite is not read and prints nothing.
   STALE005  (range mode only, report only) a SENTENCE of governed prose, in a paragraph the range adds a line to,
@@ -53,9 +63,34 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             (MAP9 reads none) or whose path no tracked file has is a finding. A cite of a name that holds no literal at
             head, or of a file that does not parse, is unknown. An untouched line prints each of these as unknown too,
             only when the whole tree is read. A cite of a path the range removed is STALE001's.
-A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
+  STALE009  (decision record-cites-live-code; range mode only, report only) a SENTENCE of an added line of a decision
+            record (`docs/decisions/*.md`) that states what code does or does not do: a code subject (a noun such as
+            tool, ledger, script, hook, guard, check, or one source file) and a behaviour verb (reads, writes, prints,
+            calls, refuses, counts, runs, checks; also after never, only, or does not). It passes when it cites
+            `file.py` `name`, (file.py name) or a test node id, as STALE002 reads them. A cite of a .mjs, .cjs, .js,
+            .ts or .sh file is no finding: it gives one unknown line, and in a claim sentence that line prints even
+            for a file the range did not touch. A dead cite is no missing cite: STALE010 judges it, and STALE009
+            reports only a code claim with no cite. Paragraphs, sentences and the mark come from STALE005. It prints
+            as `stale-cites: report, path:line: STALE009 ...` and never changes the exit code (decision
+            source-prose-lint-ships-dark). A line marked `<!-- ste-disable-line STALE009 -->` is left out.
+  STALE010  (decision record-cites-live-code; range mode only, a finding) a line the range ADDS to governed Markdown
+            that cites a Python name in a STALE002 form (`file.py` `name`, (file.py name)) or as a test node id, when
+            the .py file is absent at head or does not bind the name there (`names_in`; a node id is judged one
+            segment at a time). A cite whose first folder is no tracked top folder at head (another repo, a library,
+            a src-layout package) is no cite, the test STALE003 applies (`in_tracked_top`); the top folders come from
+            a read of head's root tree through the one `cat-file`, so it starts no process of its own. A folder absent
+            at head that head's history deleted (`history_tops`) is the exception: it moved, so its cite is judged. A
+            folder never tracked stays silent. A failed log is one unknown line with the exit 0, and the folder stays
+            silent. Fenced lines count as prose, as for STALE002. It judges each line the range adds, a moved or
+            reworded line too, never a line it left, and not in --tree mode. It leaves a cite of a path the range
+            removed or renamed to STALE001 and a name the range unbound to STALE002, so a line never gets two codes
+            for one cite. A cite of a .mjs, .cjs, .js, .ts or .sh file gives one unknown line and no finding (the
+            existing unknown rule). A cited .py that does not parse at head is one unknown line, no finding. A line
+            marked `<!-- ste-disable-line STALE010 -->` is left out.
+A line left in place, for a name the range did not remove, never fires. A moved or reworded line is an added line,
+which STALE010 judges. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
-`<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004, STALE008). Fenced blocks count as prose.
+`<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004, STALE007, STALE008, STALE009, STALE010). Fenced blocks count as prose.
 Each Markdown file is read as committed at head, never from the working tree.
 --tree [REV] reads every tracked Markdown file at REV (default HEAD) instead of a range, so it fires on lines no
 change touched. It is opt-in (the ste-lint input `tree-cites`). It needs no base, so a shallow clone is fine.
@@ -93,12 +128,28 @@ Markdown outside RULE_FILES and adds no value cite of a code file (STALE008 belo
 a code-only range pays only for the patch text. An added governed line that holds a verb or a route word reads its
 file's head blob (the paragraph around it) and, when a sentence cites a route or a `(read ...)` or `(test ...)` file,
 the rows file or that file's presence at head, all through the one `cat-file` the run opens: one more start, and none
-for a range with no such line. A range that changes the rows file reads it at base and head through the same `cat-file`;
+for a range with no such line. So a range that adds a `docs/decisions` line holding a code verb (CODE_VERB_WORD,
+STALE009's list) starts 4 (rev-parse, merge-base, diff, cat-file). A full claim is not needed: "- Run the tests." in a
+decision record starts 4. A Markdown range starts 3 when it adds none of these: a line in a decision record holding a
+code verb, a STALE005 capability verb or route word, a folder .py name cite, a value cite of a code file. It starts 4
+with any of them (CostTests pins the 3 and the 4 for a STALE005 line or a code verb, NameCiteTests the 4 for a name
+cite). A range that changes the rows file reads it at base and head through the same `cat-file`;
 when a row id is gone it also lists the tree once and reads each tracked .md once.
-A touched .py adds one `git cat-file --batch` and, through the report below, one `ls-tree`, so it starts 5. A removed
-or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once, and only
-when a removed or renamed path, or a name that a touched .py no longer defines, gives the findings something to
-look for. A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
+A touched .py or .sh adds one `git cat-file --batch`, which the flag reader and the name reader share, and, through
+the report below, one `ls-tree`, so it starts 5. A removed or renamed path adds `ls-tree` and that `cat-file --batch`,
+so 5 at most. Each tracked .md is read once, and only when a removed or renamed path, a name that a touched .py no
+longer defines, or a flag that a touched .py or .sh no longer declares, gives the findings something to look for.
+A flag read through a parent parser or a helper (`parent_flags`, for a removed flag of a .py that imports one) first lists
+the whole head tree with one `ls-tree` and keeps it in `rng.tree`, then reads the module's blob through the same `cat-file`.
+That listing is the one the report would have made, so the count stays 5 (CostTests, test a_flag_read_through_an_untouched_helper_starts_no_git_process_beyond_the_five).
+STALE010 reads the added lines the one diff already carries, and for each .py file an added line cites, one blob
+at head through the one `cat-file` the run opens, once per range, plus head's root tree for the top-folder test. That
+`cat-file` is one start, and it opens only when an added line cites a .py file by a path with a folder part; no Markdown
+blob is read. A range that adds a folder .py cite and removes nothing starts 4 (rev-parse, merge-base, diff, that
+`cat-file`), one more than the same range with no such cite (NameCiteTests pins the 4); a range that already opens the
+`cat-file` for another read adds no start for it. One more start, a `git log`, runs when an added cite's top folder is
+absent at head. It runs once per range.
+A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
 STALE008 starts at most the one `cat-file`. It reads every tracked .md, through the same `ls-tree` and `cat-file`, only
 when a touched .py changed a module-level literal, as the removed-name read does. Otherwise it reads only the touched .md
 whose added lines hold a value cite of a .py, .mjs, .js, .cjs, .ts or .sh file, found from the diff already read. Such a
@@ -136,6 +187,7 @@ import route_match  # noqa: E402  the one home of the route rows file's path (ho
 from rule_audit import ANCHOR_RE, RULE_FILES  # noqa: E402  the one home of the anchor pattern and the rule files
 
 RECORDS_PAGE = "docs/records.md"
+CODE_NAME_CITE = "STALE010"  # a dead Python name cite on an added line (`dead_name_cites`)
 RUN = r"[\w./@+~-]+"  # a run of path characters; a cite is one whole run, so a `-` or `.` before a path is no boundary
 NOT_BEFORE = r"(?<![\w/.@+~-])"
 RUN_RE = re.compile(RUN)
@@ -231,8 +283,8 @@ class BlobReader:
     def __init__(self):
         self.proc = None
 
-    def get(self, spec):
-        """Bytes of the blob, or None when the object does not exist."""
+    def _ask(self, spec):
+        """(object type, raw bytes, hash length in bytes) of the object, or None when it does not exist."""
         if self.proc is None:
             self.proc = _nowindow.Popen(["git", "cat-file", "--batch"], stdin=subprocess.PIPE,
                                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -245,7 +297,30 @@ class BlobReader:
             return None
         data = self.proc.stdout.read(int(header[2]))
         self.proc.stdout.read(1)
-        return data if header[1] == b"blob" else b""
+        return header[1], data, len(header[0]) // 2
+
+    def get(self, spec):
+        """Bytes of the blob, or None when the object does not exist."""
+        found = self._ask(spec)
+        if found is None:
+            return None
+        return found[1] if found[0] == b"blob" else b""
+
+    def root_folders(self, rev):
+        """The names of the folders in the root tree of `rev`, read through this same process: no `ls-tree` start.
+        Only a tree entry counts, so a submodule or a symlink is no folder."""
+        found = self._ask("%s^{tree}" % rev)
+        if found is None:
+            return set()
+        _, data, width = found
+        folders, i = set(), 0
+        while i < len(data):
+            nul = data.index(b"\0", i)
+            mode, name = data[i:nul].split(b" ", 1)
+            if mode == b"40000":
+                folders.add(name.decode("utf-8", "replace"))
+            i = nul + 1 + width
+        return folders
 
     def close(self):
         if self.proc is not None:
@@ -473,6 +548,174 @@ def names_in(source):
     return names
 
 
+CLAUDE_HOME = "~/.claude/"
+FLAG_SPAN = re.compile(r"`([^`\n]+)`")
+LONG_FLAG = re.compile(r"--[A-Za-z][\w-]*")
+COMMAND_SEPARATORS = ("&&", "||", ";", "|", "&")
+SHELL_FLAG = re.compile(r"(?<![\w-])--[A-Za-z][\w-]*")
+SHELL_SCRIPT = re.compile(r"\.sh\Z")
+
+
+def is_flag(node):
+    """True for a string constant that is a long flag."""
+    return isinstance(node, ast.Constant) and isinstance(node.value, str) and bool(LONG_FLAG.fullmatch(node.value))
+
+
+def flag_tables(tree):
+    """{name: [element]} for each module-level name bound once to a tuple or list of string constants (an element
+    is the string) or of tuples and lists of constants (an element is the tuple of their values, None for a
+    non-string). A name bound twice, or to anything else, is left out: it is a form this reader does not take."""
+    count, tables = {}, {}
+    for node in module_statements(tree.body):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            name = node.targets[0].id
+            count[name] = count.get(name, 0) + 1
+            if not isinstance(node.value, (ast.Tuple, ast.List)):
+                continue
+            rows = []
+            for item in node.value.elts:
+                if isinstance(item, ast.Constant) and isinstance(item.value, str):
+                    rows.append(item.value)
+                elif isinstance(item, (ast.Tuple, ast.List)) and all(isinstance(e, ast.Constant) for e in item.elts):
+                    rows.append(tuple(e.value if isinstance(e.value, str) else None for e in item.elts))
+                else:
+                    rows = None
+                    break
+            if rows is not None:
+                tables[name] = rows
+    return {name: rows for name, rows in tables.items() if count[name] == 1}
+
+
+def looped_flags(loop, tables):
+    """The long flags a `for` loop over a `flag_tables` name declares: each add_argument in its body whose first
+    argument is the loop name, or the name at that place in a tuple target. `add_argument(*NAME)` is read too."""
+    rows = tables.get(loop.iter.id) if isinstance(loop.iter, ast.Name) else None
+    if rows is None:
+        return set()
+    if isinstance(loop.target, ast.Name):
+        places = {loop.target.id: None}
+    elif isinstance(loop.target, ast.Tuple):
+        places = {e.id: i for i, e in enumerate(loop.target.elts) if isinstance(e, ast.Name)}
+    else:
+        return set()
+    flags = set()
+    for call in (c for stmt in loop.body for c in ast.walk(stmt)):
+        if isinstance(call, ast.Call) and getattr(call.func, "attr", None) == "add_argument" and call.args \
+                and isinstance(call.args[0], ast.Name) and call.args[0].id in places:
+            place = places[call.args[0].id]
+            for row in rows:
+                value = row if place is None else row[place] if isinstance(row, tuple) and place < len(row) else None
+                if isinstance(value, str) and LONG_FLAG.fullmatch(value):
+                    flags.add(value)
+    return flags
+
+
+def declared_flags(root, tables=None):
+    """The long flags the `add_argument` calls under an ast node pass as string literals, as `*NAME` of a module
+    table (`tables` from `flag_tables`), or as the loop name of a `for` over one."""
+    tables = tables or {}
+    flags = set()
+    for node in ast.walk(root):
+        if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "add_argument":
+            flags.update(arg.value for arg in node.args if is_flag(arg))
+            for arg in node.args:
+                if isinstance(arg, ast.Starred) and isinstance(arg.value, ast.Name):
+                    flags.update(v for v in tables.get(arg.value.id, ()) if isinstance(v, str) and LONG_FLAG.fullmatch(v))
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            flags |= looped_flags(node, tables)
+    return flags
+
+
+def argument_flags(source):
+    """The long flags a Python source declares: the string literals passed to `add_argument`, and those a loop over
+    a module-level table or `*NAME` of one passes, read with `ast`. A flag only named in a docstring or comment is
+    not declared. None when the source does not parse."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return None
+    return declared_flags(tree, flag_tables(tree))
+
+
+def parent_parsers(source):
+    """[(module, name)] for each parser a Python source takes as `parents=[name()]` (or `parents=[name]`), where
+    `name` is imported with `from module import name`. A parent reached as `module.name()` is not read."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return []
+    imported = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                imported[alias.asname or alias.name] = (node.module, alias.name)
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            for keyword in node.keywords:
+                if keyword.arg == "parents" and isinstance(keyword.value, (ast.List, ast.Tuple)):
+                    for item in keyword.value.elts:
+                        target = item.func if isinstance(item, ast.Call) else item
+                        if isinstance(target, ast.Name) and target.id in imported:
+                            found.append(imported[target.id])
+    return found
+
+
+PARSER_MAKERS = {"ArgumentParser", "add_parser", "add_subparsers", "add_argument_group", "add_mutually_exclusive_group"}
+
+
+def helper_calls(source):
+    """[(module, name)] for each function a Python source calls with a parser as an argument, where `name` is
+    imported with `from module import name` and the argument is a plain name the source binds to a parser maker
+    (`ArgumentParser(...)`, `.add_parser(...)`, `.add_subparsers(...)` and the group makers). Not read: a helper
+    reached as `module.name(...)`, a parser passed through another name, or one a function takes as its own parameter."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return []
+    imported, parsers = {}, set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                imported[alias.asname or alias.name] = (node.module, alias.name)
+        elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            made = node.value.func
+            if (made.attr if isinstance(made, ast.Attribute) else getattr(made, "id", None)) in PARSER_MAKERS:
+                parsers.update(t.id for t in node.targets if isinstance(t, ast.Name))
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in imported:
+            passed = list(node.args) + [k.value for k in node.keywords]
+            if any(isinstance(a, ast.Name) and a.id in parsers for a in passed) and imported[node.func.id] not in found:
+                found.append(imported[node.func.id])
+    return found
+
+
+def named_flags(source):
+    """The long flags a Python source holds as a string constant anywhere, whether or not it passes one to
+    `add_argument`. Empty when it does not parse."""
+    try:
+        return {n.value for n in ast.walk(ast.parse(source)) if is_flag(n)}
+    except (SyntaxError, ValueError):
+        return set()
+
+
+def parser_flags(source, name):
+    """The flags the def `name` declares in a Python source, or all the module's flags when it has no such def."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return declared_flags(node, flag_tables(tree))
+    return declared_flags(tree, flag_tables(tree))
+
+
+def shell_flags(source):
+    """The whole-word `--token`s in a shell source; `--between-x` is no `--between`."""
+    return set(SHELL_FLAG.findall(source))
+
 # The value cite grammar, `[FILE: ]SYMBOL = LITERAL` in one backtick span: a Python copy of `VALUE_CITE_RE`,
 # `parseLiteral` and `sameValue` in skills/plain-english-map/scripts/map-check.mjs (the MAP9 check). The copy has a
 # reason: the ste-lint action runs Python only, with no Node, so it cannot call MAP9's reader.
@@ -560,6 +803,13 @@ def disabled(line):
     return codes
 
 
+def in_tracked_top(cite, tops):
+    """True when the first folder of a path cite is in `tops`, the tracked top folders. A cite into any other folder
+    (another repo, a library, a src-layout package) names nothing this tree holds. STALE003 (`scan_tree`) and
+    STALE010 (`dead_name_cites`) both apply this one test."""
+    return cite.split("/", 1)[0] in tops
+
+
 def path_cites(line, gone, exotic):
     """Each removed path the line names, at a path boundary."""
     hits = []
@@ -581,11 +831,18 @@ class Range:
         self.base, self.head, self.removed, self.renamed, self.batch = base, head, removed, renamed, batch
         self.added_lines = lines or {}  # the .md lines the range adds, by path
         self.unknowns = []
-        self.tree = None  # the head tree entries once a read listed the whole tree; the report reuses it
+        self.bound_names = {}  # path -> names bound at head (`head_names`), read once
+        self.removed_names = {}  # file at base -> names the range unbound there (NameReader.prepare)
+        self.tops = None  # the root folders at head (`BlobReader.root_folders`), read once by the first cite that needs them
+        self.history_tops = None  # the top folders of every path head's history deleted (`history_tops`), read once
+        self.added = set(added)
+        self.tree = None  # the head tree entries once a read listed the tree (the flag reader also lists it); the report reuses it
+        self.whole = False  # find_stale read every tracked Markdown page, so an untouched line was read too
         self.changed = set(removed) | set(renamed) | set(renamed.values()) | set(modified) | set(added)
         self.py_files = {p: p for p in modified if p.endswith(".py")}
         self.py_files.update({old: new for old, new in renamed.items() if old.endswith(".py") and new.endswith(".py")})
         self.foreign_files = {p for p in list(modified) + list(renamed.values()) if FOREIGN_FILE.search(p)}
+        self.shell_files = {p for p in self.foreign_files if SHELL_SCRIPT.search(p)}
         # The Markdown the range touched, as {path at head: path at base, or None for a new file}.
         self.md_base = {p: p for p in modified if p.endswith(".md")}
         self.md_base.update({new: old for old, new in renamed.items() if new.endswith(".md")})
@@ -635,6 +892,7 @@ class NameReader:
                                     % (path, " and ".join(bad)))
             elif before - after:
                 removed_names[path] = before - after
+        rng.removed_names = removed_names  # STALE010 leaves these names to STALE002
         return removed_names or None
 
     def line(self, state, text, claimed):
@@ -788,7 +1046,7 @@ class ValueReader:
         state.seen[key] += 1
         # The nth copy of a line is added when base holds fewer than n copies, so a second copy of an old line counts.
         added = state.fresh is not None and state.seen[key] > state.fresh[key]
-        whole = state.rng.tree is not None  # every tracked page is read: an untouched line is read too
+        whole = state.rng.whole  # every tracked page is read: an untouched line is read too
         messages = []
 
         def cannot_read(why, finding):
@@ -838,7 +1096,11 @@ ROWS_AT_HEAD = os.path.relpath(route_match.ROUTE_ROWS_FILE, os.path.join(os.path
 HTML_COMMENT = re.compile(r"<!--.*?-->")
 # Text in straight or curly double quotes, or a bare file path (a folder part and an extension): a mention, no claim.
 BARE_PATH = r"(?<![\w./@+~-])(?:[\w.@+~-]+/)+[\w.@+~-]*\.\w+"  # a file path with a folder part and an extension
-MENTION = re.compile(r'"[^"]*"|\u201c[^\u201d]*\u201d|' + BARE_PATH)
+QUOTED = r'"[^"]*"|\u201c[^\u201d]*\u201d'
+MENTION = re.compile(QUOTED + "|" + BARE_PATH)
+QUOTED_ONLY = re.compile(QUOTED)
+CODE_EXT = r"(?:py|mjs|cjs|js|ts|sh)"  # a source file a sentence can name as the subject of a code claim
+SOURCE_SPAN = re.compile(r"[\w./@+~-]+\.%s\Z" % CODE_EXT)
 PATH_SPAN = re.compile(BARE_PATH + r"\Z")
 HEADING_OR_QUOTE = re.compile(r"^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>)")
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
@@ -1021,13 +1283,15 @@ def named_excerpt(names, text, around=3, limit=40):
     return "\n".join(out)
 
 
-def blanked(text):
+def blanked(text, subjects=False):
     """(outside, route): `text` twice, each the same length, with the newlines kept.
     outside: each code span and HTML comment blanked, so a verb or a sentence end inside one is a mention.
     route: the same, except the words of a code span that names no path stay: a route word used as the subject,
     "`gh` cannot close", still counts. A span with a `/` or `.` names a file, so its words are not a route.
     Both also blank text in straight or curly double quotes and a bare file path, the same way: each is a mention.
-    An apostrophe is no quote and a lone quote pairs with none; single quotes are left as they are."""
+    An apostrophe is no quote and a lone quote pairs with none; single quotes are left as they are.
+    `subjects=True` is the view a code claim reads (CodeClaimReader): a code span that is one source file and a bare
+    file path stay in `outside`, since a path can be the subject of a claim; quotes and comments are still blanked."""
     outside, route = list(text), list(text)
 
     def blank(chars, start, end):
@@ -1037,13 +1301,15 @@ def blanked(text):
     for match in CODE_SPAN.finditer(text):
         start, end = match.span()
         ticks = len(match.group(1))
+        if subjects and SOURCE_SPAN.match(text[start + ticks:end - ticks].strip()):
+            continue
         blank(outside, start, end)
         if "/" in text[start:end] or "." in text[start:end]:
             blank(route, start, end)
         else:
             blank(route, start, start + ticks)
             blank(route, end - ticks, end)
-    for match in MENTION.finditer("".join(outside)):
+    for match in (QUOTED_ONLY if subjects else MENTION).finditer("".join(outside)):
         blank(outside, *match.span())
         blank(route, *match.span())
     for match in HTML_COMMENT.finditer("".join(outside)):
@@ -1096,6 +1362,136 @@ def blob_ids(blob):
         return None
 
 
+class FlagState:
+    """What FlagReader.line reads: the flags removed per script at head, and the run, for the head tree that
+    `find_stale` lists before it reads any line."""
+
+    def __init__(self, removed, rng, unread=None):
+        self.removed, self.rng, self.unread, self._names = removed, rng, unread or {}, None
+
+    def named(self, path):
+        """True when the range removed flags from `path`, or head still names a flag of it in a form not read."""
+        return path in self.removed or path in self.unread
+
+    def script(self, token):
+        """The script a cited token names, if it is one whose flags the range removed. A `~/.claude/<path>` cite is
+        `<path>` at the repo root, and a leading `./` is dropped. A bare basename names the one tracked file with
+        that name; a basename two tracked files share names neither."""
+        path = token[len(CLAUDE_HOME):] if token.startswith(CLAUDE_HOME) else token
+        path = path[2:] if path.startswith("./") else path
+        if self.named(path):
+            return path
+        if "/" in path or not self.rng.tree:
+            return None
+        if self._names is None:
+            self._names = {}
+            for tracked in file_paths(self.rng.tree):
+                self._names.setdefault(os.path.basename(tracked), []).append(tracked)
+        homes = self._names.get(path, [])
+        return homes[0] if len(homes) == 1 and self.named(homes[0]) else None
+
+
+class FlagReader:
+    """STALE007: a code span that cites `script --flag` for a flag the range removed from that script."""
+    code = "STALE007"
+
+    def prepare(self, rng):
+        removed_flags = {}  # script at head -> flags the range removed
+        files = dict(rng.py_files)  # base path -> head path
+        shell = rng.shell_files
+        files.update({old: new for old, new in rng.renamed.items() if new in shell})
+        files.update({p: p for p in shell if p not in rng.renamed.values()})
+        for path in sorted(files):
+            old_src = rng.batch.get("%s:%s" % (rng.base, path))
+            new_src = rng.batch.get("%s:%s" % (rng.head, files[path]))
+            if old_src is None or new_src is None:
+                continue
+            read = argument_flags if path.endswith(".py") else shell_flags
+            before, after = read(old_src.decode("utf-8", "replace")), read(new_src.decode("utf-8", "replace"))
+            if before is None or after is None:
+                continue  # a .py that does not parse is already reported as unknown by NameReader
+            if before - after:
+                removed_flags[files[path]] = before - after
+        unread = {}  # script at head -> flags head still names as a string constant, in a form not read
+        for script in list(removed_flags):
+            # A flag another file declares at head moved there; it is not removed.
+            removed_flags[script] -= self.declared_elsewhere(rng, script, files)
+            if script.endswith(".py"):
+                head_src = rng.batch.get("%s:%s" % (rng.head, script))
+                kept = removed_flags[script] & named_flags(head_src.decode("utf-8", "replace") if head_src else "")
+                if kept:
+                    unread[script] = kept
+                    removed_flags[script] -= kept
+            if not removed_flags[script]:
+                del removed_flags[script]
+        return FlagState(removed_flags, rng, unread) if removed_flags or unread else None
+
+    def declared_elsewhere(self, rng, script, files):
+        """The flags the other touched .py (or .sh) files declare at head, and, for a .py, the flags of each parent
+        parser it takes (touched or not), read through the open blob reader."""
+        suffix = ".py" if script.endswith(".py") else ".sh"
+        others = {p for p in list(files.values()) + sorted(rng.added) if p.endswith(suffix) and p != script}
+        read = argument_flags if suffix == ".py" else shell_flags
+        declared = set()
+        for path in sorted(others):
+            src = rng.batch.get("%s:%s" % (rng.head, path))
+            flags = read(src.decode("utf-8", "replace")) if src is not None else None
+            declared |= flags or set()
+        return declared | (self.parent_flags(rng, script) if suffix == ".py" else set())
+
+    def parent_flags(self, rng, script):
+        """The flags a `.py` script takes from another module at head, each read from the one tracked module its
+        `from module import name` names, through `parent_parsers` (`parents=[name()]`) and `helper_calls` (`name(parser)`).
+        One level only: a parent's own parents, and the helpers a helper calls, are not followed."""
+        src = rng.batch.get("%s:%s" % (rng.head, script))
+        text = src.decode("utf-8", "replace") if src is not None else ""
+        pairs = parent_parsers(text)
+        pairs += [p for p in helper_calls(text) if p not in pairs]
+        if not pairs:
+            return set()
+        if rng.tree is None:
+            rng.tree = tracked_entries(rng.head)
+        tracked = [p for p in file_paths(rng.tree) if p.endswith(".py")]
+        declared = set()
+        for module, name in pairs:
+            tail = module.replace(".", "/") + ".py"
+            homes = [p for p in tracked if p == tail or p.endswith("/" + tail)]
+            beside = [p for p in homes if os.path.dirname(p) == os.path.dirname(script)]
+            home = beside[0] if len(beside) == 1 else homes[0] if len(homes) == 1 else None
+            blob = rng.batch.get("%s:%s" % (rng.head, home)) if home else None
+            if blob is not None:
+                declared |= parser_flags(blob.decode("utf-8", "replace"), name)
+        return declared
+
+    def line(self, state, text, claimed):
+        if "--" not in text:
+            return []
+        messages = []
+        for span in FLAG_SPAN.finditer(text):
+            script = None  # the nearest script token before the current one, up to a separator
+            for token in span.group(1).split():
+                if token in COMMAND_SEPARATORS:
+                    script = None
+                    continue
+                ends = token.endswith(";")
+                token = token.rstrip(";")
+                script = state.script(token) or script
+                flag = LONG_FLAG.match(token)
+                if ends:
+                    script = None
+                if not (script and flag):
+                    continue
+                if flag.group(0) in state.removed.get(script, ()):
+                    message = "%s no longer takes %s at head; fix the cite" % (script, flag.group(0))
+                elif flag.group(0) in state.unread.get(script, ()):
+                    message = UnknownText("%s names %s at head in a form this check does not read" % (script, flag.group(0)))
+                else:
+                    continue
+                if message not in messages:
+                    messages.append(message)
+        return messages
+
+
 class RouteClaimReader:
     """STALE005: a sentence of governed prose that states a capability by route with no backing, in a paragraph the
     range adds a line to. Report only: its messages never become findings (decision source-prose-lint-ships-dark).
@@ -1120,8 +1516,7 @@ class RouteClaimReader:
         found, rows_at_head = {}, []
         for path in sorted(files):
             added = dict(files[path])
-            if not any(VERB.search(HTML_COMMENT.sub(" ", t)) or ROUTE_WORD.search(HTML_COMMENT.sub(" ", t))
-                       for t in added.values()):
+            if not any(self.worth_reading(t) for t in added.values()):
                 continue
             blob = rng.batch.get("%s:%s" % (rng.head, path))
             rows = (blob or b"").decode("utf-8", "replace").replace("\r\n", "\n").split("\n")
@@ -1130,24 +1525,37 @@ class RouteClaimReader:
                 i = bisect.bisect_left(numbers, first)
                 if i == len(numbers) or numbers[i] >= first + len(block):
                     continue  # the range adds no line to this paragraph
-                for number, message in self.judge_paragraph(rng, first, block, set(numbers), rows_at_head):
+                for number, message in self.judge_paragraph(rng, first, block, set(numbers), rows_at_head, path):
                     found[(path, number)] = message
         if rows_changed:
             self.removed_rows(rng, found, rows_at_head)
         return [(path, number, message) for (path, number), message in found.items()]
 
-    def judge_paragraph(self, rng, first, block, added, rows_at_head):
+    def worth_reading(self, row):
+        """True when an added row may hold a claim, so the file's head blob is read. A loose pre-check."""
+        row = HTML_COMMENT.sub(" ", row)
+        return bool(VERB.search(row) or ROUTE_WORD.search(row))
+
+    def view(self, text):
+        """(outside, route) of a paragraph, as `blanked` gives them."""
+        return blanked(text)
+
+    def states_claim(self, outside, route):
+        """True when a sentence, as `view` gives it, states what this reader judges."""
+        return bool(VERB.search(outside) and ROUTE_WORD.search(route))
+
+    def judge_paragraph(self, rng, first, block, added, rows_at_head, path=None):
         """[(first row number of the sentence, message)] for each unbacked claim sentence of the paragraph that
-        holds an added row and carries no `ste-disable-line STALE005` mark."""
+        holds an added row and carries no `ste-disable-line` mark for this reader's code."""
         text = "\n".join(block)
-        outside, route = blanked(text)
+        outside, route = self.view(text)
         starts, offset = [], 0
         for row in block:
             starts.append(offset)
             offset += len(row) + 1
         out = []
         for a, b in sentences(text, outside):
-            if not (VERB.search(outside[a:b]) and ROUTE_WORD.search(route[a:b])):
+            if not self.states_claim(outside[a:b], route[a:b]):
                 continue
             top, bottom = (first + bisect.bisect_right(starts, x) - 1 for x in (a, b - 1))
             if not any(n in added for n in range(top, bottom + 1)):
@@ -1155,13 +1563,13 @@ class RouteClaimReader:
             if any("ste-disable-line" in block[n - first] and self.code in disabled(block[n - first])
                    for n in range(top, bottom + 1)):
                 continue
-            message = self.judge(rng, text[a:b], rows_at_head)
+            message = self.judge(rng, text[a:b], rows_at_head, (path, top))
             if message:
                 out.append((top, message))
         return out
 
-    def judge(self, rng, sentence, rows_at_head):
-        """The message for one claim sentence, or None when it is backed."""
+    def judge(self, rng, sentence, rows_at_head, where=None):
+        """The message for one claim sentence, or None when it is backed. `where` is (path, line) of the sentence."""
         backed, dead, dead_files, unchecked = False, [], [], []
         for cite in paren_cites(sentence):
             kind, rest = cite_kind(cite)
@@ -1219,6 +1627,132 @@ class RouteClaimReader:
                     found.setdefault((md, number), "cites %s, a route row this range removes" % ", ".join(ids))
 
 
+# STALE009: a code subject, then a behaviour verb. A subject is a noun below or one source file (`hooks/x.py`, build.py).
+CODE_NOUNS = r"(?:tool|ledger|script|hook|guard|check|lint|linter|command|module|function|program|parser|scanner)"
+BEHAVIOUR_VERBS = ("read", "write", "print", "call", "refuse", "count", "run", "check")  # the base forms
+PRESENT_VERBS = ("reads", "writes", "prints", "calls", "refuses", "counts", "runs", "checks")
+CLAIM_END = r"(?![\w@+~/-]|\.\w)"  # a verb that opens a path (`reads.py`) is no verb
+CODE_CLAIM = re.compile(
+    r"(?:\b%s|(?<![\w./@+~-])`?[\w./@+~-]+\.%s`?)\s+(?:(?:never|only|always|also|just)\s+)*"
+    r"(?:%s|(?:does\s+not|doesn['’]t)\s+%s)%s"
+    % (CODE_NOUNS, CODE_EXT, "|".join(PRESENT_VERBS), "(?:%s)" % "|".join(BEHAVIOUR_VERBS), CLAIM_END), re.I)
+CODE_VERB_WORD = re.compile(r"\b(?:%s)\b" % "|".join(BEHAVIOUR_VERBS + PRESENT_VERBS), re.I)  # the loose pre-check
+
+NO_FILE = ()  # `head_names` answer for a file absent at head; an empty file gives an empty set
+
+
+def head_names(rng, path):
+    """The names `path` binds at head (`names_in`), NO_FILE for a file absent at head, or None when it does not parse.
+    Read once per path through the one `cat-file` and cached on `rng.bound_names`."""
+    if path not in rng.bound_names:
+        blob = rng.batch.get("%s:%s" % (rng.head, path))
+        if blob is None:
+            rng.bound_names[path] = NO_FILE
+        else:
+            names = names_in(blob.decode("utf-8", "replace"))
+            if names is None:
+                rng.unknowns.append("%s does not parse at head; cites of its names were not checked" % path)
+            rng.bound_names[path] = names
+    return rng.bound_names[path]
+
+
+def python_cites(text):
+    """[(path, name)] of each Python name a line cites in a STALE002 form or as a test node id, in line order."""
+    cites = [(m.start(), m.group(1), m.group(2)) for pair in PAIR_RES for m in pair.finditer(text)]
+    for node in NODE_RE.finditer(text):
+        cites += [(node.start(), node.group(1), name) for name in node.group(2).split("::")]
+    return [(path, name) for _, path, name in sorted(cites, key=lambda c: c[0])]
+
+
+def history_tops(rng):
+    """The top folders of each path the history of head deleted, or renamed away: one `git log`, cached on `rng`, started
+    only for a cite whose top folder is absent at head. A folder absent at head had every file of it deleted, so the
+    deletions name it. Only deletions are listed, so the output stays small, and `--no-renames` makes a rename-from path a
+    deletion. `-z` keeps a path unquoted. A log that fails is one unknown line, and the folder stays silent."""
+    if rng.history_tops is None:
+        try:
+            out = git("log", "--format=", "--name-only", "--no-renames", "--diff-filter=D", "-z", rng.head)
+            paths = (p.strip("\n") for p in out.decode("utf-8", "replace").split("\0"))
+            rng.history_tops = {p.split("/", 1)[0] for p in paths if "/" in p}
+        except Unknown as exc:
+            rng.unknowns.append("%s; a cite into a folder absent at head was not checked" % exc)
+            rng.history_tops = set()
+    return rng.history_tops
+
+
+def dead_name_cites(rng):
+    """STALE010, a finding: {(path, line, code): [messages]} for each cite of a Python name on a line the range adds to
+    governed Markdown, whose file is absent at head or does not bind the name there. A cite of a file the range removed
+    or renamed is STALE001's, and a name the range unbound is STALE002's. A cite into a top folder that is absent at head
+    and never tracked in its history is no cite; one into a folder the history tracked is checked, since the folder
+    moved. Fenced lines count as prose, as for STALE002. The blobs and the root tree come from the one `cat-file`,
+    and only for a line that cites a .py file."""
+    found, excludes = {}, exclude_patterns(".")
+    gone = set(rng.removed) | set(rng.renamed)
+    for md in sorted(rng.added_lines):
+        if not governed(md, excludes):
+            continue
+        for number, line in rng.added_lines[md]:
+            if ".py" not in line or ("ste-disable-line" in line and CODE_NAME_CITE in disabled(line)):
+                continue
+            for path, name in python_cites(line):
+                if not FILE_CITE.match(path):
+                    continue  # no folder part: no path cite, the STALE003 test
+                if rng.tops is None:
+                    rng.tops = rng.batch.root_folders(rng.head)
+                if not in_tracked_top(path, rng.tops) and not in_tracked_top(path, history_tops(rng)):
+                    continue  # a cite into a folder no commit tracked, as STALE003 reads an untracked one
+                names = None if path in gone else head_names(rng, path)
+                if names is None or name in names or name in rng.removed_names.get(path, ()):
+                    continue
+                message = "cites %s %s, %s" % (path, name, "a file absent at head" if names is NO_FILE
+                                                else "a file with no such name at head")
+                if message not in found.setdefault((md, number, CODE_NAME_CITE), []):
+                    found[(md, number, CODE_NAME_CITE)].append(message)
+    return found
+
+
+class CodeClaimReader(RouteClaimReader):
+    """STALE009: a sentence an added line of a decision record states about what code does or does not do (a code
+    subject and a behaviour verb) and that cites no name bound at head. A cite is STALE002's: "`file.py` `name`",
+    "(file.py name)" or a test node id. A cite of a .mjs, .js, .cjs, .ts or .sh file is read as unknown. A cite whose
+    name is gone is no missing cite here: STALE010 fails it. Report only
+    (decision source-prose-lint-ships-dark). Paragraphs, sentences and the disable mark are RouteClaimReader's."""
+    code = "STALE009"
+
+    def prepare(self, rng):
+        """(files, False), or None. files: {path: [(number, text)]} of the decision records the range adds lines to."""
+        try:
+            folders = set(decision_folders())
+        except layout.LayoutError as exc:  # a layout that does not read: one unknown, and no claim is read
+            rng.unknowns.append("decision folders not read, %s" % exc)
+            return None
+        excludes = exclude_patterns(".")
+        files = {p: rows for p, rows in rng.added_lines.items()
+                 if rows and governed(p, excludes) and posixpath.dirname(p) in folders}
+        return (files, False) if files else None
+
+    def worth_reading(self, row):
+        return bool(CODE_VERB_WORD.search(row))  # no comment strip: a `<!--` in a code span must hide nothing
+
+    def view(self, text):
+        outside, _ = blanked(text, subjects=True)
+        return outside, outside
+
+    def states_claim(self, outside, route):
+        return bool(CODE_CLAIM.search(outside))
+
+    def judge(self, rng, sentence, rows_at_head, where=None):
+        foreign = [m for pair in FOREIGN_PAIR_RES for m in pair.finditer(sentence)]
+        for m in foreign:
+            note = "%s:%d: %s %s: JavaScript and shell names are not checked" % (where + (m.group(1), m.group(2)))
+            if note not in rng.unknowns:
+                rng.unknowns.append(note)
+        if python_cites(sentence) or foreign:
+            return None  # a cite, live or dead, is no missing cite: STALE010 judges a dead one
+        return "states what code does or does not do with no cite; cite `file.py` `name` or (file.py name), a name bound at head"
+
+
 def route_ids(rng, cache):
     """(ids, why) of the route rows at head, read once. ids is the set of row ids, or None with `why` ("absent" or
     "unreadable") when the file is missing or is not {"rows": [...]}: one unknown is noted, and no id is called dead.
@@ -1249,7 +1783,8 @@ def route_ids(rng, cache):
 # its messages are report lines, never findings. A reader may also have `needs_tree(state)` and `pages(state)`: when
 # no reader that judges needs the tree, the run reads only the pages those readers name, and only those readers.
 # `begin(state, md, rng)` is called before the lines of each page. A new check adds one entry.
-READERS = (PathReader(), NameReader(), ForeignReader(), ForeignValueReader(), ValueReader(), RouteClaimReader())
+READERS = (PathReader(), NameReader(), ForeignReader(), FlagReader(), ForeignValueReader(), ValueReader(),
+           RouteClaimReader(), CodeClaimReader())
 
 
 def tracked_entries(rev, *paths):
@@ -1284,17 +1819,21 @@ def read_markdown(batch, rev, md):
 def find_stale(rng):
     """{(path, line, code): [messages]}: the findings. Fills `rng.unknowns`."""
     found = {}
-    if not rng.removed and not rng.renamed and not rng.py_files and not any(rng.added_lines.values()):
+    if not rng.removed and not rng.renamed and not rng.py_files and not rng.shell_files \
+            and not any(rng.added_lines.values()):
         return found  # the cost contract: nothing removed, so no blob, tree or Markdown read
     active = [(r, state) for r in READERS if getattr(r, "scope", "tree") == "tree"
               for state in [r.prepare(rng)] if state is not None]
     judges = [(r, state) for r, state in active if not getattr(r, "unknown", False)]
+    found.update(dead_name_cites(rng))
     if not judges:
         return found  # an unknown line never starts the Markdown read
 
     excludes = exclude_patterns(".")
     if any(getattr(r, "needs_tree", lambda state: True)(state) for r, state in judges):
-        rng.tree = tracked_entries(rng.head)
+        if rng.tree is None:
+            rng.tree = tracked_entries(rng.head)
+        rng.whole = True
         files = markdown_files(rng.tree, excludes)
     else:  # only the pages some reader names, and only those readers read them
         active = judges
@@ -1539,7 +2078,7 @@ def scan_tree(rev):
                 off = disabled(line) if "ste-disable-line" in line else set()
                 for run in RUN_RE.finditer(line):
                     cite = run.group(0).rstrip(".-")
-                    if not FILE_CITE.match(cite) or cite.split("/", 1)[0] not in tops \
+                    if not FILE_CITE.match(cite) or not in_tracked_top(cite, tops) \
                             or placeholder_adjacent(line, run.start(), run.end()):
                         continue
                     home = next((c for c in (cite, posixpath.normpath(posixpath.join(folder, cite)))

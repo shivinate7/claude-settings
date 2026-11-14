@@ -65,6 +65,8 @@ A definitive claim in prose carries one of these backings:
 
 A code span used as a claim's subject still counts as a claim. A claim with no backing is unbacked.
 
+A cite to a Python name in prose, "`file.py` `name`" or "(file.py name)", must name a name bound at head. STALE010 checks it when its top folder is tracked at head or in history (decision `record-cites-live-code`, claims about code cite live code names).
+
 ## STALE005: a capability stated without a backing
 
 STALE005 (the route-claim check) reports a sentence that states a capability by route with no backing. The unit it judges is a sentence in a paragraph the range touches, not a changed line. It is report-only until it measures 10% or fewer false alarms over 20 real hits. Then it refuses. Source for the threshold: coordinator pick Q3 (the threshold question), 2026-11-06 11:47 CST, process-only.
@@ -78,7 +80,7 @@ When an act contradicts a route row, the falsifier notes it: `hooks/refusal_note
 Built, report-only. `merge/merge.py` selects prose lines and sends each file to the model once (read merge/merge.py:3118-3155; read merge/merge.py:3218-3236; read merge/merge.py:3258-3300).
 
 - Selection: each line that cites a changed backing file, from `backed_lines`, the reverse map of code to the prose that cites it (read lint/stale_cites.py backed_lines). Plus each line the range adds to a governed file, except a heading, blank, fenced or quote line (read merge/merge.py prose_judge_lines).
-- Call: `decision_watch.invoke_model` with the `LINE_VERDICTS` shape, which reads `holds`, `stale` or `unbacked` per line (read hooks/decision_watch.py:675; read merge/merge.py:3276). The prompt also carries an excerpt of each backticked path a line names but does not cite, when the line also names another backticked name or number: the lines of that file within 3 of each of its lines that holds one of those names (read merge/merge.py:3203-3212; read lint/stale_cites.py:972-980; read lint/stale_cites.py:992-1021).
+- Call: `decision_watch.invoke_model` with the `LINE_VERDICTS` shape, which reads `holds`, `stale` or `unbacked` per line (read hooks/decision_watch.py:675; read merge/merge.py:3276). The prompt also carries an excerpt of each backticked path a line names but does not cite, when the line also names another backticked name or number: the lines of that file within 3 of each of its lines that holds one of those names (read merge/merge.py:3203-3212; read lint/stale_cites.py:1234-1242; read lint/stale_cites.py:1254-1283).
 - Cap: 3 files per merge (read merge/merge.py:3113). The lines of a file past the cap read UNKNOWN, counted under "past the call cap" (read merge/merge.py:3230-3231; read merge/merge.py:3271-3272). The report prints each stale or unbacked line, at most 20, then one count line for the rest (read merge/merge.py:3289-3295).
 - Errors: a model error, a timeout or an unreadable reply reads UNKNOWN, never a pass. The report prints one UNKNOWN count line for every line not judged, by cause, with no raw error text (read merge/merge.py:3248-3256; read merge/merge.py:3275-3283; read merge/merge.py:3297-3299). A failure of the whole plan prints one UNKNOWN line that names the exception type (read merge/merge.py:3235-3236; read merge/merge.py:3291-3292).
 - Report only: the prompts are built under the lock, and the model calls run after it is released and refuse nothing (read merge/merge.py:3767; read merge/merge.py:3772-3773; read merge/merge.py:3261).
@@ -103,12 +105,12 @@ A route row is read as unmeasured when its `measured` date is more than N days o
 
 No daemon and no timer.
 
-- The range scan starts one `git diff -M --raw -p -z -U0`. It carries the changed names and the added lines that STALE005 reads (read lint/stale_cites.py:344-350; read lint/stale_cites.py:1481-1482).
-- Blob reads share one `git cat-file --batch` process (unmeasured). It starts on the first read and closes at the end of the run (read lint/stale_cites.py:228-253; read lint/stale_cites.py:1483-1494).
-- The head blob of a file is read only when one of its added lines holds a verb or a route word (read lint/stale_cites.py:1116-1126).
-- A range that changes `hooks/route_rows.json` reads it at base and at head (read lint/stale_cites.py:1135-1136; read lint/stale_cites.py:1198-1200; not pinned: no test counts these reads). A sentence with a route cite reads the head blob once more (read lint/stale_cites.py:1175-1176; read lint/stale_cites.py:1222-1242) (unmeasured).
-- When a row id is removed, one `git ls-tree` runs and each tracked `.md` is read (read lint/stale_cites.py:1195-1219; read lint/stale_cites.py:1255-1259) (unmeasured).
-- STALE005's judge, `judge()`, is rule-based and starts no model (read lint/stale_cites.py:1163-1193).
+- The range scan starts one `git diff -M --raw -p -z -U0`. It carries the changed names and the added lines that STALE005 reads (read lint/stale_cites.py:405-411; read lint/stale_cites.py:1702-1703).
+- Blob reads share one `git cat-file --batch` process (unmeasured). It starts on the first read and closes at the end of the run (read lint/stale_cites.py:266-314; read lint/stale_cites.py:1704-1715).
+- The head blob of a file is read only when one of its added lines holds a verb or a route word (read lint/stale_cites.py:1197-1206).
+- A range that changes `hooks/route_rows.json` reads it at base and at head (read lint/stale_cites.py:1215-1216; read lint/stale_cites.py:1291-1293; not pinned: no test counts these reads). A sentence with a route cite reads the head blob once more (read lint/stale_cites.py:1268-1269; read lint/stale_cites.py:1441-1461) (unmeasured).
+- When a row id is removed, one `git ls-tree` runs and each tracked `.md` is read (read lint/stale_cites.py:1288-1312; read lint/stale_cites.py:1475-1479) (unmeasured).
+- STALE005's judge, `judge()`, is rule-based and starts no model (read lint/stale_cites.py:1256-1286).
 - The merge takes the changed names from a `--name-only` diff (read merge/merge.py:3719). The merge judge runs its own `git diff -U0` (read merge/merge.py:3139) and up to 3 model starts per merge (read merge/merge.py:3113). Its model starts are unmeasured.
 
 ## Owner-only
@@ -125,7 +127,7 @@ Built:
 - Part (v) layer (a), `hand_off_problem`, run at Stop (read `hand_off_problem` in lint/report_guard.py; its call is `hand_off_problem(hook, reply)` in lint/report_guard.py).
 - Part (v) on the waiting page: guard rule `task-why-cited` refuses a task's Why yours line that gives a capability reason with no route-row or dated measured cite (`why_cited_hit` in hooks/question_form.py; the verdict is `why_yours_verdict` in lint/report_guard.py).
 - The reply judge's route block (read hooks/reply_judge.py:146-152).
-- STALE005, report-only (read lint/stale_cites.py:1099-1106).
+- STALE005, report-only (read lint/stale_cites.py:1180-1187).
 - The merge's model judge, report-only (see Model judge at merge).
 - A labelled set that can score the merge judge (see Model judge at merge).
 
