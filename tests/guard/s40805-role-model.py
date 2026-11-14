@@ -33,7 +33,7 @@ ROLE_TABLE_RULES = ROLE_TABLE_HEAD + (
     "| reviewer | haiku | xhigh |\n"
     "| reviewer, rounds 2 and 3 | sonnet, the ceiling | high |\n"
     "| builder | sonnet | high |\n"
-    "| builder, try 3 after a FAIL at review round 2 | opus | high |\n"
+    "| builder, try 3 after a FAIL at review round 2 | sonnet, its own row | high |\n"
     "| `planner` (`agents/planner.md`) | sonnet | high |\n"
     "| general-purpose, `claude` | sonnet, by the default | model default |\n")
 ROLE_RULES_WANT = {"Explore": "haiku", "claude-code-guide": "haiku", "test-author": "haiku",
@@ -61,7 +61,7 @@ def refuter_name_check():
 # The owner's real decision file: each role, with the first word of its Model cell.
 ROLE_REAL_WANT = {"Explore": "haiku", "claude-code-guide": "haiku", "test-author": "haiku",
                   "reviewer": "haiku", "record-writer": "haiku", "builder": "sonnet", "Plan": "opus",
-                  "designer": "opus", "design-reviewer": "opus", REFUTER: "opus", "general-purpose": "sonnet",
+                  "designer": "opus", "design-reviewer": "sonnet", REFUTER: "opus", "general-purpose": "sonnet",
                   "claude": "sonnet"}
 # Bytes that are not text, so no reader can take the decision file as a table.
 ROLE_TABLE_UNREADABLE = b"# Agent model cap\n\xff\xfe\x80 not text\n"
@@ -243,14 +243,17 @@ role_opus_refuse("role-model: test-author on opus is denied under agent-model-ca
 # A role with no row has no grant, so the Opus ceiling refuses it, and says so rather than asking (item 127 pick a).
 role_opus_refuse("role-model: a role with no row on opus is denied under agent-model-cap, not asked (item 127)",
                "scout", "opus", "Look around.")
-role_opus_refuse("role-model: reviewer on opus with Round 3 of 3 is denied under agent-model-cap (item 127)",
-               "reviewer", "opus", "Round 3 of 3. Re-check the diff.")
-# Standing grants stay allowed on Opus (rule 9d): Plan, the design reviewer, the refuter, and a builder's third round.
+# A reviewer's third review on Opus is never lifted and names no override: its row is Sonnet high. The remedy names sonnet.
+add("role-model: reviewer on opus with Round 3 of 3 is denied under agent-role-model, with no override line", "deny",
+    ROLE_RULE, tool="Agent", config=ROLE_REAL_CFG, carries=("use sonnet",), lacks=("override",),
+    **role_input("reviewer", "opus", "Round 3 of 3. Re-check the diff."))
+# Standing grants stay allowed on Opus (rule 9d): Plan and the refuter. The design reviewer's row is Sonnet high,
+# and a builder's third try runs on its own row, so neither has a grant.
 role_model_allow("role-model: Plan on opus is allowed (standing grant)", "Plan", "opus", "Plan the change.")
-role_model_allow("role-model: design-reviewer on opus is allowed (standing grant)", "design-reviewer", "opus",
-                 "Review the mockup.")
-role_model_allow("role-model: builder on opus with Round 3 of 3 is allowed (standing grant)", "builder", "opus",
-                 "Round 3 of 3. Finish the fix.")
+role_opus_refuse("role-model: design-reviewer on opus is denied under agent-model-cap, its row is sonnet (own-756)",
+                 "design-reviewer", "opus", "Review the mockup.")
+role_opus_refuse("role-model: builder on opus with Round 3 of 3 is denied under agent-model-cap, its row is sonnet (own-758-b)",
+                 "builder", "opus", "Round 3 of 3. Finish the fix.")
 # The refuter's grant (page item 279, pick d): an Agent or Task spawn on Opus is allowed. Failure class: a false deny,
 # the spawn refused above its row, and a false allow, a reviewer or a near-miss name given the grant (the controls below).
 for _tool, _model in (("Agent", "opus"), ("Task", "claude-opus-5-5")):
@@ -342,8 +345,8 @@ workflow_refuse("role-model: Workflow Explore on sonnet with a variable brief is
 
 # H4: a call whose agentType the scan cannot read is skipped, not judged as general-purpose (guard.py spawn_inputs).
 # A shorthand agentType is unread, so the designer and design-reviewer rows pass on opus.
-workflow_allow("role-model: Workflow designer and design-reviewer on opus, a shorthand agentType in a loop, are allowed",
-               "for (const agentType of ['designer', 'design-reviewer']) agent(`Review the screen.`, {agentType, model: 'opus'});")
+workflow_allow("role-model: Workflow designer and Plan on opus, a shorthand agentType in a loop, are allowed",
+               "for (const agentType of ['designer', 'Plan']) agent(`Review the screen.`, {agentType, model: 'opus'});")
 # A spread of an object the scan cannot read hides the agentType, so the call is skipped and not judged as general-purpose.
 workflow_allow("role-model: Workflow opus agent() with a spread and no literal agentType is skipped, and allowed",
                "const base = {};\n"

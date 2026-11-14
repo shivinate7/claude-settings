@@ -6,7 +6,10 @@ Every other agent or skill file keeps the Sonnet floor.
 Failure classes: false deny (a listed role fails), false allow (another file passes, by name
 collision, case or alias), unreadable frontmatter.
 One case reads the real agents/plan.md: its "Premises first" paragraph cites the premise record.
-The lane session row of docs/decisions/agent-model-cap.md must start its effort cell with medium.
+The three lane rows of docs/decisions/agent-model-cap.md (guard or check, product code or design, docs) must each start their
+effort cell with the effort of their kind (high, medium, low), and each failure names the row it flags.
+The session rows (coordinator, arbiter, consultant, triage, batch runner) hold the owner's model and effort, and the agent and
+round rows stay unchanged.
 A drift between the guard's role lists and the role table fails the check (the guard's role_list_drift).
 An agent file's `model:` pin must equal its role's row in the role table. The role is the frontmatter `name:`,
 as the guard keys it. A file with no pin, or a name with no row, is not flagged by that rule.
@@ -20,7 +23,7 @@ Every agent file withholds the claude-code-remote server: disallowedTools: names
 or bare `mcp__claude-code-remote`), or tools: is an allow-list with no entry for it. Only the frontmatter counts, never the
 body or a description.
 """
-import contextlib, io, os, re, shutil, sys, tempfile, time, unittest, uuid
+import contextlib, io, os, re, shutil, subprocess, sys, tempfile, time, unittest, uuid
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -34,10 +37,14 @@ RUN_FOLDER = _test_temp.run_folder()
 
 ROLES = ("explore", "claude-code-guide", "test-author", "reviewer")
 MODELS = ("haiku", "claude-haiku-5-5", "Haiku")
-# The model table of docs/decisions/agent-model-cap.md, reduced to its lane session row. Only the effort cell varies.
+# The model table of docs/decisions/agent-model-cap.md, reduced to its three lane rows, one per lane kind. Each effort cell
+# takes a format argument, in the order guard or check, product code or design, docs.
 RECORD_RELPATH = os.path.join("docs", "decisions", "agent-model-cap.md")
 LANE_RECORD = ("| Point | Model | Effort |\n|---|---|---|\n"
-               "| lane session (decision `session-tiers`) | sonnet (temporary), the owner's ruling of 2026-11-08 12:21 CST, waiting-page item 439 (lane-model-sonnet), pick none; debt `lane-model-recheck` rechecks it | %s |\n")
+               "| lane, guard or check | sonnet | %s |\n"
+               "| lane, product code or design | sonnet | %s |\n"
+               "| lane, docs | sonnet | %s |\n")
+LANE_EFFORTS = ("high", "medium", "low")  # the valid efforts of the three lane rows, in LANE_RECORD's order
 
 
 def verdict(relpath, model=None, closed=True, text=None, relative=False, name="x", pinned=True):
@@ -115,7 +122,7 @@ class PinEqualsRow(unittest.TestCase):
         # Sonnet and opus pins clear the Haiku floor, so these fail only on the pin-equals-row rule.
         cases = (("reviewer", "sonnet", "haiku"), ("reviewer", "claude-sonnet-5-5", "haiku"),
                  ("reviewer", "opus", "haiku"), ("Explore", "sonnet", "haiku"),
-                 ("Plan", "sonnet", "opus"), ("designer", "sonnet", "opus"), ("design-reviewer", "sonnet", "opus"))
+                 ("Plan", "sonnet", "opus"), ("designer", "sonnet", "opus"), ("design-reviewer", "opus", "sonnet"))
         for role, pin, row in cases:
             with self.subTest(role=role, pin=pin):
                 self.assertRow(role, row)
@@ -126,7 +133,7 @@ class PinEqualsRow(unittest.TestCase):
 
     def test_pin_equal_to_its_row_passes(self):
         cases = [("Plan", "opus", "opus"), ("Plan", "claude-opus-5-5", "opus"), ("designer", "opus", "opus"),
-                 ("design-reviewer", "opus", "opus"), ("builder", "sonnet", "sonnet")]
+                 ("design-reviewer", "sonnet", "sonnet"), ("builder", "sonnet", "sonnet")]
         cases += [(role, model, "haiku") for role in ("Explore", "claude-code-guide", "test-author", "reviewer",
                                                        "record-writer") for model in MODELS]
         for role, model, row in cases:
@@ -188,27 +195,203 @@ class PlanPremises(unittest.TestCase):
 
 
 class LaneEffort(unittest.TestCase):
-    # The check reads the record it is given as a path. A record at docs/decisions/agent-model-cap.md fails
-    # unless the lane session row's effort cell starts with the lane effort, medium.
-    def record(self, effort):
-        return verdict(RECORD_RELPATH, text=LANE_RECORD % effort)
+    # The check reads the record it is given as a path. A record at docs/decisions/agent-model-cap.md must hold its three lane
+    # rows, one per kind, and each effort cell must start with the effort of its kind: guard or check high, product code or
+    # design medium, docs low. A failure names each row it flags.
+    def record(self, guard="high", product="medium", docs="low"):
+        return verdict(RECORD_RELPATH, text=LANE_RECORD % (guard, product, docs))
 
-    def test_lane_row_effort_default_fails(self):
-        code, out = self.record("default")
-        self.assertEqual(code, 1, "a lane row at effort default passes: %r" % out)
+    def test_three_lane_rows_at_their_efforts_pass(self):
+        self.assertEqual(self.record(), (0, ""))
 
-    def test_lane_row_effort_starting_medium_passes(self):
-        self.assertEqual(self.record("medium, the owner's ruling of 2026-10-30 15:11 CDT"), (0, ""))
+    def test_guard_or_check_row_at_medium_fails(self):
+        code, out = self.record(guard="medium")
+        self.assertEqual(code, 1, "a guard-or-check lane row at medium passes: %r" % out)
+        self.assertIn("guard or check", out, "the check does not name the guard-or-check row it flags: %r" % out)
 
-    def test_lane_row_effort_must_start_with_medium(self):
+    def test_product_row_at_default_fails(self):
+        code, out = self.record(product="default")
+        self.assertEqual(code, 1, "a product-code lane row at effort default passes: %r" % out)
+        self.assertIn("product code or design", out, "the check does not name the product-code row it flags: %r" % out)
+
+    def test_product_row_whose_cell_only_mentions_medium_fails(self):
         # A medium later in the cell is not the lane effort: the cell must start with it.
-        code, out = self.record("default, medium")
-        self.assertEqual(code, 1, "a lane row whose cell only mentions medium passes: %r" % out)
+        code, out = self.record(product="default, medium")
+        self.assertEqual(code, 1, "a product-code lane row whose cell only mentions medium passes: %r" % out)
+        self.assertIn("product code or design", out, "the check does not name the product-code row it flags: %r" % out)
 
-    def test_relative_record_path_with_default_row_fails(self):
+    def test_docs_row_at_medium_fails(self):
+        code, out = self.record(docs="medium")
+        self.assertEqual(code, 1, "a docs lane row at medium passes: %r" % out)
+        self.assertIn("lane, docs", out, "the check does not name the docs row it flags: %r" % out)
+
+    def test_a_record_with_one_lane_row_fails(self):
+        # One `lane` row in place of the three lane-kind rows. Each kind's row is missing, and the check names each one.
+        text = ("| Point | Model | Effort |\n|---|---|---|\n"
+                "| lane session (decision `session-tiers`) | sonnet (temporary) | medium |\n")
+        code, out = verdict(RECORD_RELPATH, text=text)
+        self.assertEqual(code, 1, "a record with one lane row passes: %r" % out)
+        for label in ("lane, guard or check", "lane, product code or design", "lane, docs"):
+            self.assertIn(label, out, "the check does not name the missing %r row: %r" % (label, out))
+
+    def test_a_record_missing_the_docs_row_fails(self):
+        text = LANE_RECORD.split("| lane, docs")[0] % LANE_EFFORTS[:2]
+        code, out = verdict(RECORD_RELPATH, text=text)
+        self.assertEqual(code, 1, "a record with no docs lane row passes: %r" % out)
+        self.assertIn("lane, docs", out, "the check does not name the missing docs row: %r" % out)
+
+    def test_relative_record_path_with_guard_row_at_medium_fails(self):
         # The check must read the record when the path is relative, as a run from the repository root gives it.
-        code, out = verdict(RECORD_RELPATH, text=LANE_RECORD % "default", relative=True)
-        self.assertEqual(code, 1, "a relative record path with a default lane row passes: %r" % out)
+        code, out = verdict(RECORD_RELPATH, text=LANE_RECORD % ("medium", "medium", "low"), relative=True)
+        self.assertEqual(code, 1, "a relative record path with a guard-or-check row at medium passes: %r" % out)
+
+
+def real_record_lines():
+    """The lines of this repository's model record, read as text. Missing or unreadable text fails the case, never passes it."""
+    with open(os.path.join(ROOT, RECORD_RELPATH), encoding="utf-8") as handle:
+        return [line.strip() for line in handle.read().splitlines()]
+
+
+def real_record_rows():
+    """The table rows of this repository's model record as cell lists, backticks removed, the header and separator included."""
+    return [[cell.strip().replace("`", "") for cell in line.strip().strip("|").split("|")]
+            for line in real_record_lines() if line.startswith("|")]
+
+
+class SessionRows(unittest.TestCase):
+    # The real record holds one row per session kind, with the owner's model and effort. A row is the first row whose first
+    # cell starts with the kind's label, lower-cased. Each subtest names the row it checks.
+    # The design-reviewer row is Sonnet high. It is the one agent row in this list.
+    SESSION_ROWS = (("coordinator", "sonnet", "high"), ("arbiter", "opus", "medium"),
+                    ("consultant", "opus", "medium"), ("triage", "sonnet", "high"),
+                    ("batch runner", "sonnet", "medium"), ("lane, guard or check", "sonnet", "high"),
+                    ("lane, product code or design", "sonnet", "medium"), ("lane, docs", "sonnet", "low"),
+                    ("design-reviewer", "sonnet", "high"))
+
+    def test_each_session_row_names_the_owner_model_and_effort(self):
+        rows = real_record_rows()
+        self.assertTrue(any("Point" in cells and "Model" in cells for cells in rows),
+                        "the real record holds no model table, so these rows prove nothing")
+        for label, model, effort in self.SESSION_ROWS:
+            with self.subTest(row=label):
+                found = next((cells for cells in rows if len(cells) >= 3 and cells[0].lower().startswith(label)), None)
+                self.assertIsNotNone(found, "the record has no row for the %r session" % label)
+                self.assertEqual(found[1].split()[0].strip(",").lower(), model,
+                                 "the %r row does not name model %r: %r" % (label, model, found))
+                self.assertEqual(found[2].split()[0].strip(",").lower(), effort,
+                                 "the %r row does not name effort %r: %r" % (label, effort, found))
+
+
+# The agent and round rows that the session and guard checks do not own. Each line is the record's line, byte for byte, so a
+# change to any of them fails here. The builder row and the design-reviewer row are not pinned here: SESSION_ROWS and the
+# guard section (s43160) check them.
+AGENT_ROWS = ("| Explore, claude-code-guide | haiku | xhigh |", "| test-author | haiku | xhigh |",
+              "| reviewer | haiku | xhigh |", "| record-writer (`agents/record-writer.md`) | haiku | xhigh |",
+              "| Plan (`agents/plan.md`) | opus | high |",
+              "| designer (`agents/designer.md`) | opus, the owner's standing grant of 2026-10-26 | high |",
+              "| refuter (`agents/refuter.md`) | opus, the owner's ruling of 2026-11-06 12:43 CST, waiting-page item 279, pick d (decision `plan-refuter`) | high |")
+# The reviewer's third-review row is not here: it is Sonnet high, checked by ReviewerRoundThree.
+# The builder's third-try row is not here either: that try has its own row, Sonnet.
+ROUND_ROWS = ("| reviewer | 1 guard | sonnet | xhigh |", "| reviewer | 1 other | haiku | xhigh |",
+              "| reviewer | 2 | sonnet | high |",
+              "| reviewer | fix verifier | sonnet | xhigh |")
+
+
+class ReviewerRoundThree(unittest.TestCase):
+    # The reviewer's third-review row is Sonnet high. Opus is not an option there.
+    def test_reviewer_round_three_row_is_sonnet_high(self):
+        rows = [cells for cells in real_record_rows() if len(cells) >= 4 and cells[0].lower() == "reviewer" and cells[1] == "3"]
+        self.assertTrue(rows, "the real record has no reviewer round 3 row")
+        self.assertEqual([rows[0][2].lower(), rows[0][3].lower()], ["sonnet", "high"],
+                         "the reviewer's round 3 row is not sonnet high: %r" % (rows[0],))
+
+
+# The prose must not say a reviewer can have its third review on Opus. A match is ROUND_THREE_OPUS: the third-review phrase,
+# then up to 80 characters with no period, then `opus`, in the agent, record, guidance and skill folders. The sentence of a
+# match decides it: a sentence that names the builder is left out, since the builder's third try has its own row (Sonnet).
+# The filter is by sentence, because one line can hold both kinds.
+ROUND_THREE_OPUS = re.compile(r"round 3[^.]{0,80}opus", re.IGNORECASE)
+ROUND_THREE_PATHS = ("agents", "docs/decisions", "CLAUDE.md", "skills")
+
+
+def sentence_around(text, start, end):
+    """The sentence of `text` that holds the span start..end: from the last '. ' before it to the next period after it."""
+    cut = text.rfind(". ", 0, start)
+    begin = cut + 2 if cut != -1 else 0
+    stop = text.find(".", end)
+    return text[begin: stop if stop != -1 else len(text)]
+
+
+def round_three_opus_hits(lines):
+    """(path, line number, sentence) of each reviewer sentence that names a third review on Opus, from `git grep -n` output lines."""
+    hits = []
+    for line in lines:
+        path, number, text = line.split(":", 2)
+        for match in ROUND_THREE_OPUS.finditer(text):
+            sentence = sentence_around(text, match.start(), match.end())
+            if "builder" not in sentence.lower():
+                hits.append((path, int(number), sentence.strip()))
+    return hits
+
+
+def git_grep_round_three():
+    """The `git grep -n` lines that match ROUND_THREE_OPUS in the folders of ROUND_THREE_PATHS, in this repository. A git error
+    raises, so the case errors and never passes unread (verification-report-unknown-reads)."""
+    result = subprocess.run(["git", "grep", "-niE", ROUND_THREE_OPUS.pattern, "--", *ROUND_THREE_PATHS],
+                            cwd=ROOT, capture_output=True, text=True)
+    if result.returncode not in (0, 1):  # 1 is no match; anything else is a failed read
+        raise RuntimeError("git grep failed (exit %d): %s" % (result.returncode, result.stderr.strip()))
+    return result.stdout.splitlines()
+
+
+def git_grep_round_three_any():
+    """The `git grep -n` lines for the bare phrase git searches for below, whatever follows it, in the folders of ROUND_THREE_PATHS: the scope the Opus search reads.
+    A git error raises, so the case errors and never passes unread (verification-report-unknown-reads)."""
+    result = subprocess.run(["git", "grep", "-niE", "round 3", "--", *ROUND_THREE_PATHS], cwd=ROOT, capture_output=True, text=True)
+    if result.returncode not in (0, 1):  # 1 is no match; anything else is a failed read
+        raise RuntimeError("git grep failed (exit %d): %s" % (result.returncode, result.stderr.strip()))
+    return result.stdout.splitlines()
+
+
+class ReviewerRoundThreeOpus(unittest.TestCase):
+    def test_the_search_reads_the_round_three_lines(self):
+        # Scope before verdict: the prose folders hold lines with the phrase at all, so an empty Opus verdict below means
+        # no reviewer sentence on Opus, not a search that reads nothing.
+        self.assertTrue(git_grep_round_three_any(), "git grep finds no `round 3` line in the prose folders, so the verdict below proves nothing")
+
+    def test_no_reviewer_sentence_names_round_three_on_opus(self):
+        hits = round_three_opus_hits(git_grep_round_three())
+        self.assertEqual(hits, [], "a reviewer sentence still names round 3 on Opus: %r" % (hits,))
+
+    def test_the_filter_leaves_out_the_builder_and_keeps_the_reviewer(self):
+        # The filter's own fixtures: the builder's third try is left out (its row is Sonnet), and a reviewer's third review on Opus is kept.
+        builder = "x.y/z.md:1:The builder's third try runs on Round 3 of 3 on opus."
+        reviewer = "x.y/z.md:2:Round 3 on Opus: the reviewer is refused."
+        self.assertEqual(round_three_opus_hits([builder]), [], "the builder's third-try sentence is not left out")
+        self.assertEqual(len(round_three_opus_hits([reviewer])), 1, "the reviewer's round 3 on Opus sentence is not kept")
+
+
+class UnchangedRows(unittest.TestCase):
+    # A green control: the agent rows and the round rows of the real record stay as they are.
+    def test_agent_rows_are_unchanged(self):
+        lines = real_record_lines()
+        missing = [row for row in AGENT_ROWS if row not in lines]
+        self.assertEqual(missing, [], "agent rows changed or missing from the real record: %r" % missing)
+
+    def test_round_rows_are_unchanged(self):
+        lines = real_record_lines()
+        missing = [row for row in ROUND_ROWS if row not in lines]
+        self.assertEqual(missing, [], "round rows changed or missing from the real record: %r" % missing)
+
+
+class DesignReviewerPin(unittest.TestCase):
+    # A green control: the design reviewer's agent file pins the model its row names (pin_row_problem), so the file and the
+    # record agree.
+    def test_design_reviewer_pin_equals_its_row(self):
+        with open(os.path.join(ROOT, "agents", "design-reviewer.md"), encoding="utf-8") as handle:
+            text = handle.read()
+        problem = C.pin_row_problem(text, C._guard.role_model_table(ROOT))
+        self.assertEqual(problem, "", "the design reviewer's agent file does not pin its row's model: %r" % problem)
 
 
 class RoleListDrift(unittest.TestCase):
@@ -247,14 +430,14 @@ class RoundRowDrift(unittest.TestCase):
 
     def write_fixture(self, round_row, round_table=True):
         """A pointer folder whose record holds the role rows, the round table with `round_row` (or no round table when
-        `round_table` is false), and the lane row. Returns the folder's root."""
+        `round_table` is false), and the three lane rows. Returns the folder's root."""
         root = tempfile.mkdtemp(dir=RUN_FOLDER)
         os.makedirs(os.path.join(root, "agents"))
         record = os.path.join(root, RECORD_RELPATH)
         os.makedirs(os.path.dirname(record))
         rounds = self.ROUND_HEAD + round_row + "\n" if round_table else ""
         with open(record, "w", encoding="utf-8") as handle:
-            handle.write(self.ROLE_ROWS + "\n" + rounds + LANE_RECORD % "medium")
+            handle.write(self.ROLE_ROWS + "\n" + rounds + LANE_RECORD % LANE_EFFORTS)
         return root
 
     def check_fixture(self, round_row, round_table=True):

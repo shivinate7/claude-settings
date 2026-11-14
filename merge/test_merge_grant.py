@@ -219,7 +219,9 @@ class ReviewGrantFlag(tm.ReviewEnv):
     and its PR must be the positional PR. Every refusal sits beside the good value, which must exit 0, so a parser that never learned the
     flag fails there too. A usage error prints no record."""
 
-    THREE = ("--round", "1:reviewer:sonnet:FAIL", "--round", "2:reviewer:sonnet:FAIL", "--round", "3:reviewer:opus:FAIL")
+    # The third review runs Sonnet high, and no third review names Opus.
+    # Only a granted fourth review may run Opus, so FOUR's last review is the one Opus review.
+    THREE = ("--round", "1:reviewer:sonnet:FAIL", "--round", "2:reviewer:sonnet:FAIL", "--round", "3:reviewer:sonnet:FAIL")
     FOUR = (*THREE, "--round", "4:reviewer:opus:PASS")
 
     def granted(self, *tail, rounds=FOUR, pr="7"):
@@ -253,6 +255,15 @@ class ReviewGrantFlag(tm.ReviewEnv):
         rc, out, err = self.run_args(*self.granted("--grant", REVIEW_GRANT))
         self.assertEqual(rc, 0, "merge refused --round 4 with --grant:\n" + out + err)
         out, _err = self.assert_usage_error(*self.granted("--round", "5:reviewer:opus:PASS", "--grant", REVIEW_GRANT))
+        self.assertNotIn(tm.REVIEW_MARKER, out)
+
+    def test_round_three_on_opus_is_refused_and_round_three_on_sonnet_passes(self):
+        # The reviewer's third review runs Sonnet high, and Opus is never an option. The control, the third review on sonnet,
+        # must exit 0, so only the model of the third review differs between the two forms.
+        head = ("--round", "1:reviewer:sonnet:FAIL", "--round", "2:reviewer:sonnet:FAIL")
+        rc, out, err = self.run_args(*self.granted(rounds=(*head, "--round", "3:reviewer:sonnet:PASS")))
+        self.assertEqual(rc, 0, "merge refused the control, round 3 on sonnet:\n" + out + err)
+        out, _err = self.assert_usage_error(*self.granted(rounds=(*head, "--round", "3:reviewer:opus:PASS")))
         self.assertNotIn(tm.REVIEW_MARKER, out)
 
     def test_grant_needs_review_record(self):

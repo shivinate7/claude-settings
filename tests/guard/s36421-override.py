@@ -384,8 +384,9 @@ for _is_timed in (False, True):
 # lifts it only for spawns of that role. Every other refusal and ask stands.
 OP_SECONDS = 2 * 3600  # the length of the override these stories type: `opus 2h`
 OP_BUILDER = {"prompt": "Round 1 of 3. Start the fix.", "model": "opus", "subagent_type": "builder"}
-OP_REVIEWER = {"prompt": "Round 3 of 3. Re-check the diff.", "model": "claude-opus-5-5",
-               "subagent_type": "reviewer"}
+# A reviewer on Opus with no round line: an Opus spawn that an override or a step grant may lift. A third-review brief is
+# never lifted, so it is not used for a lift.
+OP_REVIEWER = {"prompt": "Check the diff for typos.", "model": "claude-opus-5-5", "subagent_type": "reviewer"}
 
 
 def op_pass_path(config, session):
@@ -1181,17 +1182,25 @@ def ov_chain_acts(config, session):
     ))
 
 
+def ov_role_pointer(config):
+    """Point this config's global rules at this checkout, so the role rule reads the real record. Without the pointer
+    the role rule stands down, and a reviewer's third review on Opus would meet only the liftable Opus ceiling."""
+    write(os.path.join(config, "CLAUDE.md"), "@%s/CLAUDE.md\n" % slash(REPO))
+
+
 def ov_role_acts(config, session):
     """The model and role guards stay outside every override, as frozen paths do: an override that lifted them
-    would let an agent pick its own model or edit the tests it is judged by."""
+    would let an agent pick its own model or edit the tests it is judged by. A reviewer's third review on Opus is one
+    of them: no row lifts it, and its refusal names no override."""
+    ov_role_pointer(config)
     return (
         OvAct("a settings write that lifts the agent model cap", "Write",
               {"file_path": PROJ_LOCAL, "content": cap_settings()}, "agent-model-cap", "ask"),
         OvAct("a spawn on the Haiku model", "Agent",
               {"prompt": "do it", "model": "haiku"}, "agent-model-floor"),
-        OvAct("a builder's third round on Sonnet", "Agent",
-              {"prompt": "Round 3 of 3. Finish the fix.", "model": "sonnet",
-               "subagent_type": "builder"}, "roles-third-round-steps-up"),
+        OvAct("a reviewer's round 3 on Opus", "Agent",
+              {"prompt": "Round 3 of 3. Re-check the diff.", "model": "claude-opus-5-5",
+               "subagent_type": "reviewer"}, "agent-role-model"),
         OvAct("a builder's edit of a test file", "Edit",
               {"file_path": "src/test_app.py", "new_string": "x = 1"}, "builder-test-edit",
               agent_id="bld1", agent_type="builder"),
