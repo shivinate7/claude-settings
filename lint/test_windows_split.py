@@ -1410,18 +1410,34 @@ class SplitJobs(unittest.TestCase):
         self.assertEqual(linux_split_problems(self.text), [])
 
     def test_every_lint_form_step_stays_in_the_checks_job(self):
-        """`merge --lane-lint` runs the `checks` job by name (bin/ci-job checks --lint), so a lint step moved into checks-hooks or
-        checks-rest would run in CI but never in lane lint. Twice a merge of main put one there (the page-writer, ruled-store and
-        stable-workflow suites)."""
+        """`merge --lane-lint` runs the `checks` job by name (bin/ci-job checks --lint), so a lint step moved into another Linux
+        split job would run in CI but never in lane lint. What counts as a lint step is bin/ci-job's one definition (is_lint),
+        read from it, never copied. Three times a merge of main put one in checks-hooks or checks-rest."""
+        import importlib.machinery
+        import importlib.util
+        loader = importlib.machinery.SourceFileLoader("ci_job_for_split", os.path.join(HERE, "..", "bin", "ci-job"))
+        ci_job = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+        loader.exec_module(ci_job)
         stray = []
         for job in CHECKS_SUITE_JOBS:
-            if job in ("checks", "checks-merge-install"):
+            if job == "checks":
                 continue
             for step in step_blocks(job_block(self.text, job)):
-                cmd = run_body(step) or ""
-                if re.search(r"(?:^|\s)(?:python3? lint/|bin/ci-job )", cmd):
-                    stray.append((job, cmd.strip().splitlines()[0]))
+                if ci_job.is_lint(step):
+                    stray.append((job, step_key(step, "name") or ci_job.uses(step)))
         self.assertEqual(stray, [])
+
+    def test_no_step_name_repeats_across_the_checks_split(self):
+        """A step run twice by the split reads as one step. The setup steps carry no name."""
+        seen, repeat = set(), []
+        for job in CHECKS_SUITE_JOBS:
+            for step in step_blocks(job_block(self.text, job)):
+                name = step_key(step, "name")
+                if name:
+                    if name in seen:
+                        repeat.append(name)
+                    seen.add(name)
+        self.assertEqual(repeat, [])
 
     def test_each_macos_suite_runs_once_in_its_split_and_the_guard_slice_in_checks_macos(self):
         self.assertEqual(macos_split_problems(self.text), [])
