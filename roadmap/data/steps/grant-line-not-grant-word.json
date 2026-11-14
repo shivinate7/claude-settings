@@ -1,0 +1,14 @@
+{
+ "id": "grant-line-not-grant-word",
+ "title": "The Stop hook's feedback-inbox check treats a lane brief's Grant: line as no new grant word",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Every lane start opens with a Grant: line; the Stop hook wanted a home for that word, blocked every Stop, and the lane's fix was refused by the classifier.",
+ "source": "Coordinator 19:10 CST Nov 13, from lane consultant-tag-owner-facing (PR #3310, head a384eea0e); the lane's account, unchecked by triage.",
+ "note": "Filed 19:11 CST Nov 13. Incident (lane report): a `once:` home for the grant word was rejected because a standing word bars it; the hook then blocked every Stop; the lane's edit of the inbox file was refused by the classifier; the owner typed \"A\" and the lane closed the item as `[note] -> not-a-grant`. Every lane start will meet this. Fix wanted: either the hook reads a Grant: line in a brief as no new grant word, or a tracked ruling gives it a home. Harm stopped: a blocked Stop on every lane start. Rule building-mistake-names-its-guard. A hook change: test-author red case first. Past rulings not checked. Not started.",
+ "updatedAt": "2026-11-13T19:11:15-06:00"
+}

@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "No hook knows the consultant tag, so the Stop hook reads the consultant as a lane.",
  "source": "Coordinator 18:37 CST Nov 13: lane started (session_013NEJKzeVxu2aCLcuN4Th3M); owner 18:36 CST via the consultant; unchecked by triage.",
- "note": "Filed 18:38 CST Nov 13. The lane makes cs-build:consultant known: one home for role tags, and each reader (the Stop hook and any other) reads it. Related docs-only steps with branches but no PR yet: consultant-role-record (lane session_013NEJKzRMT3wY4q7PXYMjLM) and consultant-role-placement (lane session_013NEJL26r2BLU4DH1Ma3FYk). Done check: the Stop hook no longer treats a consultant session as a lane, proved by a test. A hook change: test-author red case first. Past rulings not checked.",
- "updatedAt": "2026-11-13T18:38:48-06:00"
+ "note": "Filed 18:38 CST Nov 13. The lane makes cs-build:consultant known: one home for role tags, and each reader (the Stop hook and any other) reads it. Related docs-only steps with branches but no PR yet: consultant-role-record (lane session_013NEJKzRMT3wY4q7PXYMjLM) and consultant-role-placement (lane session_013NEJL26r2BLU4DH1Ma3FYk). Done check: the Stop hook no longer treats a consultant session as a lane, proved by a test. A hook change: test-author red case first. Past rulings not checked. Coordinator 19:11 CST Nov 13 (19:10): PR #3310 (head a384eea0e) round 2 PASS; lane lint waits on its draft run; it goes to runner 10 after the run ends. Not given to combine-g1. The lane's inbox/Grant: incident is step grant-line-not-grant-word.",
+ "updatedAt": "2026-11-13T19:11:15-06:00"
 }
