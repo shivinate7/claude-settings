@@ -277,6 +277,34 @@ class PriorityBeforeMerge(tm.Env):
         for n, reads in enumerate(self.run_reads, 1):
             self.assertNotIn("runs " + HEAD_3302, reads, "run %d read the runs of a draft, whose verdict needs only its pull request" % n)
 
+    # A draft's --confirm is the records step: the priority check never runs for it, so no row is read and nothing merges.
+
+    def assert_draft_runs_no_check(self, rows_text, pulls):
+        """A draft N, FILE holding `rows_text`, and each (number, head) of `pulls` ready and green. The draft's --confirm runs no priority
+        check, reads no row, merges nothing, and marks N ready."""
+        self.host.draft = True
+        for n, head in pulls:
+            self.host.prio[n] = pr_fields(head, branch="feat-%d" % n)
+            self.host.prio_runs[head] = green(head)
+        rc, out, err = self.confirm(LOWER, rows_text)
+        self.assert_reached_check(out, err)
+        self.assertEqual(self.priority_lines(out, err), [], "a draft's --confirm ran the priority check, and a draft reads no row: " + out + err)
+        for n, reads in enumerate(self.run_reads, 1):
+            for pr, head in pulls:
+                for read in ("pr %d" % pr, "runs " + head):
+                    self.assertNotIn(read, reads, "run %d read %r, and a draft reads no row" % (n, read))
+        self.assertFalse(getattr(self.host, "merged", False), "a draft's --confirm merged: " + out + err)
+        self.assertEqual(self.host.readies, [LOWER], "the draft's --confirm does not mark it ready: " + out + err)
+
+    def test_a_draft_confirm_under_a_ready_row_runs_no_priority_check(self):
+        self.assert_draft_runs_no_check(ROW_3302, [(3302, HEAD_3302)])
+
+    def test_a_draft_confirm_under_full_rows_runs_no_priority_check(self):
+        self.assert_draft_runs_no_check(ROW_3302 + ROW_3303, [(3302, HEAD_3302), (3303, HEAD_3303)])
+
+    def test_a_draft_confirm_under_an_empty_rows_file_runs_no_priority_check(self):
+        self.assert_draft_runs_no_check("", [(3302, HEAD_3302)])
+
     def test_an_empty_rows_file_says_it_is_not_clear(self):
         rc, out, err = self.confirm(LOWER, "")
         self.assert_reached_check(out, err)
