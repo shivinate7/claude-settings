@@ -6972,7 +6972,8 @@ def coordinator_scope_hit(payload, tool: str, tool_input: dict, cwd: str) -> str
             return next((detail("mcp write: ", rel) for rel in coordinator_mcp_paths(tool_input)
                          if not coordinator_rel_ok(rel, root, named)), "")
         raw = str(tool_input.get("command", "") or "")
-        hit = _shell_write_hit(strip_heredoc_bodies(raw), cwd, outside, follow_cd=True, writes_first=True)
+        hit = _shell_write_hit(strip_heredoc_bodies(raw), cwd, outside, follow_cd=True, writes_first=True,
+                               skip_non_targets=True)
         if hit:
             return detail("shell write: ", hit)
         hit = interpreter_write_hit(raw, cwd, outside) if interpreter_may_write(raw) else ""
