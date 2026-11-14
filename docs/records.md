@@ -49,7 +49,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `git-never-merge-failing-ci` | Never merge a PR whose own run is red, or onto a red main, except its revert. | [`CLAUDE.md`](../CLAUDE.md) |
 | `gh-write-cloud` | In a cloud session, a `gh` pr, issue or `gh api` write is refused: write through the GitHub MCP tools or the merge tool. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-red-main-reverts` | While main's newest finished run is red, only the revert of the blamed commit merges, with `--base-red-ok "<reason>"`, until the revert's run on main is green. | [`CLAUDE.md`](../CLAUDE.md) |
-| `git-ci-wait-checks-in` | A session that waits on CI sets a one-time check-in when it starts to wait, and again after each red job, each wider apart. | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-ci-wait-checks-in` | A session that waits on CI sets a one-time check-in when it starts to wait, and again after each red job, each wider apart, never past 55 minutes. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-ci-done-comment-wakes` | A run that ends red posts one PR comment, which wakes the session that watches the PR (decision `ci-wait-reads-run-status`). | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-discard-output` | Keep git write output. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-remedy-never-names-target` | A refusal's printed remedy never names the forbidden target. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -146,6 +146,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ci-job-caps` | Owner, 2026-11-01 18:44 CST: each owner repo raises its job caps generously, as a stopgap, until its time-pinned tests are gone. | [`docs/decisions/ci-job-caps.md`](../docs/decisions/ci-job-caps.md) |
 | `ci-step2-bar` | Owner, 2026-10-28 13:40 CDT (waiting page item 34, pick b), roadmap step c95, step 2: count the real Windows or Mac bugs that reach main, and weigh that count against what step 2 saves. | [`docs/decisions/ci-step2-bar.md`](../docs/decisions/ci-step2-bar.md) |
 | `ci-unknown-is-red` | A lint that cannot read its input prints UNKNOWN. | [`docs/decisions/ci-unknown-is-red.md`](../docs/decisions/ci-unknown-is-red.md) |
+| `ci-wait-cap-guard` | The guard refuses a `send_later` call that waits on CI for longer than the cap (rule `ci-wait-cap`, in `hooks/guard.py`). | [`docs/decisions/ci-wait-cap-guard.md`](../docs/decisions/ci-wait-cap-guard.md) |
 | `cite-by-id-refuses-unread-file` | Owner, 2026-10-17 11:40 CDT (guard audit, finding 7): the guard refuses `git commit -F <file>` when it cannot read the file at hook time. | [`docs/decisions/cite-by-id-refuses-unread-file.md`](../docs/decisions/cite-by-id-refuses-unread-file.md) |
 | `claude-md-shrink` | Owner, 2026-10-16 23:53 CDT and 2026-10-17 00:40 CDT: | [`docs/decisions/claude-md-shrink.md`](../docs/decisions/claude-md-shrink.md) |
 | `commit-hook-bypass-refused` | The guard refuses a `git commit`, `git merge` or `git push` that skips git hooks (rule `hook-bypass`). | [`docs/decisions/commit-hook-bypass-refused.md`](../docs/decisions/commit-hook-bypass-refused.md) |
