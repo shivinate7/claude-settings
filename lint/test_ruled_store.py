@@ -83,18 +83,40 @@ def fetch_head(repo):
 FETCH_ORIGIN = "fixture-origin"  # the URL git names in a FETCH_HEAD line; the helper reads only the branch name
 
 
-def write_fetch_head(repo, branch="roadmap", when=None):
-    """Writes the repo's FETCH_HEAD as one fetch of `branch`, with its mtime at `when` (an epoch second) or now. Git
-    writes one such line per fetched branch; the roadmap ref is fresh only when the line names the roadmap."""
+ZERO_SHA = "0" * 40
+
+
+def ref_tip(repo, ref=STORE_REF):
+    """The sha that `ref` resolves to in repo, or None when it does not resolve. Never raises."""
+    answer = _nowindow.run([VCS, "-C", repo, "rev-parse", "--verify", "--quiet", ref], capture_output=True, text=True,
+                           env=ENV, timeout=60)
+    sha = answer.stdout.strip()
+    return sha if answer.returncode == 0 and sha else None
+
+
+def write_fetch_lines(repo, lines, when=None):
+    """Writes the repo's FETCH_HEAD with one line per (sha, branch) pair in `lines`, its mtime at `when` (an epoch
+    second) or now. Git writes one such line per fetched branch, in the order fetched."""
     path = fetch_head(repo)
     with open(path, "w", encoding="utf-8") as handle:
-        handle.write("%s\t\tbranch '%s' of %s\n" % ("0" * 40, branch, FETCH_ORIGIN))
+        for sha, branch in lines:
+            handle.write("%s\t\tbranch '%s' of %s\n" % (sha, branch, FETCH_ORIGIN))
     os.utime(path, None if when is None else (when, when))
 
 
-def set_fetch_head(repo, when=None):
-    """The repo's FETCH_HEAD as a fetch of the roadmap branch, its mtime at `when` or now."""
-    write_fetch_head(repo, "roadmap", when)
+def write_fetch_head(repo, branch="roadmap", when=None, sha=None):
+    """Writes the repo's FETCH_HEAD as one fetch of `branch`, its line naming `sha`, with its mtime at `when` (an epoch
+    second) or now. `sha` defaults to the tip of origin/<branch> in repo when that resolves, else zeros, so a fresh
+    line names the ref it is fresh for. The roadmap ref is fresh only when the roadmap line names the roadmap's tip."""
+    if sha is None:
+        sha = ref_tip(repo, "refs/remotes/origin/%s" % branch) or ZERO_SHA
+    write_fetch_lines(repo, [(sha, branch)], when)
+
+
+def set_fetch_head(repo, when=None, sha=None):
+    """The repo's FETCH_HEAD as a fetch of the roadmap branch, its mtime at `when` or now, its line naming `sha`
+    (default: the tip of origin/roadmap)."""
+    write_fetch_head(repo, "roadmap", when, sha)
 
 
 def without_fetch_head(repo):
