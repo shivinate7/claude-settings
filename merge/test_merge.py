@@ -19374,6 +19374,7 @@ class DraftRunJudge(unittest.TestCase):
     BATCH_SKIP = "batch-macos-skip: a batch checks run is in progress, so the macOS job is skipped"
     MACOS_WORDS = "macOS leg selected, row not there yet: rerun the lane lint once the run shows a macOS row"  # the exact words of that unknown line
     LEFT = "macOS left to batch CI"  # the one visible line of a macOS leg the batch runs
+    SPACED = "tests/test foo.py"  # a test path with a space: its selector line names the whole path
 
     def judge(self, rows):
         return DraftRunReads({self.SHA: rows}, []).draft_run_state(self.SHA)
@@ -19395,7 +19396,7 @@ class DraftRunJudge(unittest.TestCase):
         self.assertEqual(state, "unknown", "a skipped touched job with no test rows was judged %r, a pass with no proof a touched test ran: %s" % (state, lines))
 
     def test_a_touched_row_that_succeeded_with_no_test_rows_passes(self):  # control: green on the old code
-        state, lines = self.judge([draft_row("touched")])
+        state, lines = self.judged([draft_row("touched")], draft_log(self.TOUCHED))
         self.assertEqual(state, "pass", "a touched job that succeeded with no test rows was judged %r: %s" % (state, lines))
 
     def test_a_failed_older_run_and_a_passed_newer_run_of_one_job_pass_in_either_order(self):  # control: green on the old code
@@ -19403,7 +19404,7 @@ class DraftRunJudge(unittest.TestCase):
         self.assertLess(older["id"], newer["id"], "precondition: the passed run is not the newer one, so the case probes nothing")
         for rows in ([draft_row("touched"), older, newer], [draft_row("touched"), newer, older]):
             with self.subTest(order=[r["id"] for r in rows]):
-                state, lines = self.judge(rows)
+                state, lines = self.judged(rows, draft_log(self.TOUCHED))
                 self.assertEqual(state, "pass", "a re-run that passed after a failed run was judged %r, not pass: %s" % (state, lines))
 
     def test_a_passed_older_run_and_a_failed_newer_run_of_one_job_fail_in_either_order_and_name_the_newer_link(self):  # control: green on the old code
@@ -19445,6 +19446,13 @@ class DraftRunJudge(unittest.TestCase):
         self.assertTrue(lines, "the unknown verdict names no reason")
         self.assertEqual(reads, [self.TOUCHED_ID], f"the touched job's log was read {reads}, not once")
 
+    def test_an_empty_touched_log_with_no_macos_row_is_unknown_not_a_pass(self):
+        reads = []  # the selector printed nothing: no line rules a macOS leg out
+        state, lines = self.judged([draft_row("touched")], "", log_reads=reads)
+        self.assertEqual(state, "unknown", f"an empty touched log with no macOS row was judged {state!r}, not unknown: {lines}")
+        self.assertTrue(lines, "the unknown verdict for an empty touched log names no reason")
+        self.assertEqual(reads, [self.TOUCHED_ID], f"the touched job's log was read {reads}, not once")
+
     def test_timestamped_log_lines_still_select_the_macos_leg(self):
         stamp = "2026-11-14T14:20:01.1234567Z "
         text = draft_log(stamp + self.TOUCHED, stamp + self.RUN_BOTH)
@@ -19459,6 +19467,13 @@ class DraftRunJudge(unittest.TestCase):
         reads = []
         state, lines = self.judged([draft_row("touched")], text, log_reads=reads)
         self.assertUnknownForMacos(state, lines, reads, "a macOS run line after 300 lines")
+
+    def test_a_macos_leg_selected_for_a_path_with_a_space_is_unknown_not_a_pass(self):
+        reads = []
+        self.assertIn(" ", self.SPACED, "precondition: the path has no space, so the case probes nothing")
+        rows = [draft_row("touched"), draft_row("run (windows-latest)", job=2)]
+        state, lines = self.judged(rows, draft_log(self.TOUCHED, f"run {self.SPACED} on windows and macos"), log_reads=reads)
+        self.assertUnknownForMacos(state, lines, reads, "a macOS run line for a path with a space")
 
     def test_a_macos_row_that_lands_after_an_unknown_read_passes_with_no_second_log_read(self):
         reads = []
@@ -19515,6 +19530,12 @@ class DraftRunJudge(unittest.TestCase):
         state, lines = self.judged(rows, draft_log(self.TOUCHED, self.RUN_WINDOWS))
         self.assertEqual(state, "pass", f"a windows-only leg was judged {state!r}, not pass: {lines}")
         self.assertEqual(lines, [], f"a windows-only leg names a line: {lines}")
+
+    def test_a_windows_only_run_line_for_a_path_with_no_space_passes_with_no_lines(self):  # control: green on the old code
+        rows = [draft_row("touched"), draft_row("run (windows-latest)", job=2)]
+        state, lines = self.judged(rows, draft_log(self.TOUCHED, "run tests/test_a.py on windows"))
+        self.assertEqual(state, "pass", f"a windows-only run line was judged {state!r}, not pass: {lines}")
+        self.assertEqual(lines, [], f"a windows-only run line names a line: {lines}")
 
     def test_a_touched_log_that_names_no_test_passes_with_no_lines(self):  # control: green on the old code
         state, lines = self.judged([draft_row("touched")], draft_log("touched docs/x.md -> no test file maps to it"))
