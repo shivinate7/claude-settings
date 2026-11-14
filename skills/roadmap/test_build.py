@@ -3502,11 +3502,11 @@ class StepCheckFields(unittest.TestCase):
         self.assertTrue(hasattr(build, "step_check_fields"), "build has no step_check_fields")
 
     def test_neither_field_reads_none(self):
-        # Control, green on main: a step with no fields reads none.
+        # Control: a step with no fields reads none.
         self.assertEqual(self.check({"title": "t"}), "none", "a step with no step fields does not read none")
 
     def test_both_fields_null_read_none(self):
-        # Control, green on main: null is unset.
+        # Control: null is unset.
         self.assertEqual(self.check({"done_check": None, "ci_only": None}), "none", "null fields do not read none")
 
     def test_a_string_done_check_is_valid(self):
@@ -3672,7 +3672,7 @@ class StepCheckRow(UpkeepFixture):
                          "the full fixture does not list exactly the bad steps")
 
     def test_the_other_rows_read_the_same_with_and_without_a_bad_field(self):
-        # Control, green on main: only the new row reads the field, so no other row moves.
+        # Control: only the new row reads the field, so no other row moves.
         with_bad = self.build_steps({"probe": {"ci_only": "true"}})
         without = self.build_steps({"probe": {"ci_only": True}})
         self.assertEqual(self.other_rows(with_bad), self.other_rows(without),
@@ -3703,7 +3703,7 @@ class StepCheckDocs(unittest.TestCase):
         self.assertIn("`ci_only`", self.section(self.FIELDS), "the step check fields section does not name ci_only")
 
     def test_the_guard_section_still_names_the_guard_fields(self):
-        # Control, green on main: the guard fields stay documented in their section.
+        # Control: the guard fields stay documented in their section.
         section = self.section(self.GUARD)
         self.assertIn("`lane`", section, "the Lane and grants section no longer names lane")
         self.assertIn("`grants`", section, "the Lane and grants section no longer names grants")
