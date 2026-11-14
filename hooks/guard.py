@@ -3203,20 +3203,35 @@ def brief_first_line(brief) -> str:
     return next((line for line in brief.split("\n") if line.strip()), "")
 
 
+def unfenced_lines(brief: str):
+    """(offset, line) for each line of a text outside a ``` fence, in order; offset is where the line starts in the text.
+    A line whose stripped text starts with three backticks opens or closes a fence and is not yielded; an unclosed fence
+    runs to the end. The one home of the fence toggle (marker_scan, review_guard_marked)."""
+    fenced, offset = False, 0
+    for line in brief.split("\n"):
+        if line.strip().startswith("```"):
+            fenced = not fenced
+        elif not fenced:
+            yield offset, line
+        offset += len(line) + 1
+
+
 def marker_scan(brief) -> list:
     """The [(kind, n)] markers of a brief, read from BRIEF_MARKERS, in the order a reader meets them: each "line-start"
-    match in line order, then each "first-line" row's hit in table order. A "line-start" row reads every line of the
-    brief; a "first-line" row reads the first non-blank line alone. n is the row's group 1, or None for a row with none
+    match in line order, then each "first-line" row's hit in table order. A "line-start" row reads each line outside a
+    ``` fence (unfenced_lines): a fenced line quotes a marker and does not set one. A "first-line" row reads the first
+    non-blank line alone, fenced or not. n is the row's group 1, or None for a row with none
     (the audit marker). A brief that is not text has none. Pure: no I/O, no process, no file. The two positions read
     different spans of the brief (decision agent-model-cap); BRIEF_MARKERS says which row uses which."""
     if not isinstance(brief, str):
         return []
     first = brief_first_line(brief)
+    lines = list(unfenced_lines(brief))
     starts, leads = [], []
     for kind, rx, position in _MARKER_ROWS:
         if position == "line-start":
-            found = list(rx.finditer(brief))
-            starts.extend((hit.start(), kind, hit.group(1) if rx.groups else None) for hit in found)
+            starts.extend((offset + hit.start(), kind, hit.group(1) if rx.groups else None)
+                          for offset, line in lines for hit in rx.finditer(line))
         else:
             hit = rx.search(first)
             found = [hit] if hit else []
@@ -4016,11 +4031,8 @@ def review_guard_marked(brief) -> bool:
     or `yes-ish` is not a choice of yes."""
     if not isinstance(brief, str):
         return False
-    fenced = False
-    for line in brief.split("\n"):
-        if line.strip().startswith("```"):
-            fenced = not fenced
-        elif not fenced and line.lstrip(" \t").startswith(REVIEW_GUARD_MARKER):
+    for _, line in unfenced_lines(brief):
+        if line.lstrip(" \t").startswith(REVIEW_GUARD_MARKER):
             if (line.lstrip(" \t")[len(REVIEW_GUARD_MARKER):] or " ")[0] in " \t\r.":
                 return True
     return False

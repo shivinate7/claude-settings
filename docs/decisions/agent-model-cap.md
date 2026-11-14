@@ -187,10 +187,10 @@ start and none is judged.
 Kind of risk: likely.
 
 **The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in
-a reviewer's brief. A line that starts with it counts. When the brief's first non-blank line starts with no marker, the
+a reviewer's brief. A line that starts with it counts, unless the line sits inside a ``` fence: a fenced line quotes a marker and sets none, and an unclosed fence runs to the end of the brief. When the brief's first non-blank line starts with no marker, the
 leftmost marker on that line also counts if it is `Round N of 3`, such as "Reviewer, Round 2 of 3. Lane ...". A
 leftmost `Try N of 3` there adds nothing. The first-line form is case-sensitive. Later lines count only
-when they start with the marker. No guard reads a builder's marker, `Round N of 3` or the old `Try N of 3`. A round 2 reviewer runs on Sonnet. The round 3 reviewer runs Sonnet, effort high. A reviewer's Opus spawn with a `Round 3 of 3` marker is refused with the remedy `use sonnet`, and names no override (owner, 2026-11-13 14:05 CST).
+when they start with the marker and sit outside a fence. No guard reads a builder's marker, `Round N of 3` or the old `Try N of 3`. A round 2 reviewer runs on Sonnet. The round 3 reviewer runs Sonnet, effort high. A reviewer's Opus spawn with a `Round 3 of 3` marker is refused with the remedy `use sonnet`, and names no override (owner, 2026-11-13 14:05 CST).
 
 **No pin, and the ceiling is a refusal.** The variable is a true fallback: it decides only the spawns that name no
 model and whose definition names no model. `agents/builder.md` carries no `model:` key, so a builder

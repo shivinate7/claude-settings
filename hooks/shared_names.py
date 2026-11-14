@@ -59,7 +59,7 @@ FIX_CHECK_MARKER = "Fix check"
 # THE BRIEF MARKER TABLE (rules agent-role-model, roles-third-round-steps-up; decision agent-model-cap). One row per
 # marker: (kind, regex text, position). guard.marker_hits is the one scanner that reads it. Cost: a pure scan of the
 # brief text, no I/O, no process, no file. Its position decides where the row reads:
-#   "line-start": every line of the brief that starts with the marker, case-insensitive, leading blanks allowed.
+#   "line-start": every line outside a ``` fence that starts with the marker, case-insensitive, leading blanks allowed.
 #   "first-line": the brief's first non-blank line only, case-sensitive; a row says whether text may stand ahead of the marker
 #     (the round and audit rows allow it, the fix check row does not).
 # The two positions differ because the owner ruled them apart: a role word or markup ahead of `Round N of 3` on the
