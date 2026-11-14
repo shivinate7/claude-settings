@@ -206,6 +206,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `merge-deletes-batch-lanes` | Owner pick A for R42 part 2 (per-lane merge). | [`docs/decisions/merge-deletes-batch-lanes.md`](../docs/decisions/merge-deletes-batch-lanes.md) |
 | `merge-lock` | One lock holds each base branch while a merge run works on it. | [`docs/decisions/merge-lock.md`](../docs/decisions/merge-lock.md) |
 | `merge-needs-current-base` | Owner pick A for R42 part 2 (per-lane merge). | [`docs/decisions/merge-needs-current-base.md`](../docs/decisions/merge-needs-current-base.md) |
+| `merge-phase-timing` | Coordinator, 2026-11-14 06:51 CST, folded from step `merge-tool-phase-timing`: one merge run shows where its time goes. | [`docs/decisions/merge-phase-timing.md`](../docs/decisions/merge-phase-timing.md) |
 | `merge-practices` | Owner, page item 150, pick a, 2026-11-06 12:58 CST ("Build the small proof"): decision `test-practices` stays the testing chapter. | [`docs/decisions/merge-practices.md`](../docs/decisions/merge-practices.md) |
 | `mistake-means-missing-guard` | Owner, 2026-11-06 11:38 CST: AI sometimes assumes it broke something by accident. | [`docs/decisions/mistake-means-missing-guard.md`](../docs/decisions/mistake-means-missing-guard.md) |
 | `mockup-home` | Git is each artifact's home (owner ruling fb-1458-1, 2026-11-02 14:58 CST, option A). | [`docs/decisions/mockup-home.md`](../docs/decisions/mockup-home.md) |
