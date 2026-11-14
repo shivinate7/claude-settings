@@ -41,8 +41,15 @@ Never covers wins over Covers. A label that names one of these acts grants nothi
 
 ## What a relay message carries
 
-- The page URL, the item id and the act.
-- Never a paraphrase of the grant. The receiver reads the grant itself.
+Owner ruling R18, 2026-11-10 16:55 CST (roadmap step page-wakes-and-relays, item 5): a relay counts when it carries the owner's own words.
+
+- A line that opens `Grant:` and reads `Grant: "<exact words>" (owner, <time>) covers <act>`. The words are the owner's, copied from the owner's message. The time is that message's time. The act is the one the owner's words cover.
+- Never a paraphrase of the grant.
+- This section sets what a sender may send. What a receiver may act on stays as "What counts", "What never counts" and the "Relayed Grant" entry in `settings.json` set it. Only the owner changes that entry.
+- Rule `relay-grant-words` in `hooks/guard.py` judges the sender's call, on a `send_message` and on the built-in `SendMessage`. A line opens `Grant:` in any case, and may follow a list lead (`-`, `*`, `1.`, `>`). A `Grant:` mid-line is not judged. The rule refuses such a line in two cases. One: the line has another shape (unquoted words, an empty or missing time, no act, a placeholder left in). A zone in parentheses inside the time is allowed. Two: the quoted words are not a whole owner message of the sender's own feedback log (`local_time.inbox_paths`, the log `hooks/feedback_guard.py` reads), nor one whole line of one. Runs of whitespace count as one space, and case is ignored. A fragment of a message is refused. A sender with no session id, a missing log and an unreadable log are refusals. The reason names the rule and shows the form.
+- A message with no line that opens `Grant:` is no relay and is not judged. Prose that relays a yes ("The owner said go ahead") passes.
+- Not judged: the time in the line against the log's heading stamp, and whether the act is the one the words cover. Unmeasured.
+- Cost: the guard process already running reads the sender's inbox when a message has a `Grant:` line, and reads nothing for any other message. Family `relay-grant-words` pins the second part: its cases with no such line pass with an unreadable log. No new file, process or timer.
 
 ## Why a peer's message grants nothing
 
