@@ -54,7 +54,8 @@ A spawner is a session that starts its own agents. Each session role is a set of
 - **Batch runner.** A standing session. It owns the integration batch until the cutover (claude-settings decision `all-repos-switch-together`); after it, it merges each lane PR alone, on its own green run. It also owns the CI waits, the merge
   tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After each merge it archives each lane that `merge --idle-lanes --live <file>` prints, for the coordinator (decision `session-tiers`, Archiving scope; ruling R46). The coordinator archives each other finished session it started.
   In each wake it runs `merge --reviewed` once, with one `--root` per repo it owns (its `cs-repo:` tags), and
-  opens or builds each batch the output names in that wake. It runs each `--confirm` in the foreground (see below). A foreground wait on one repo's CI held another repo's
+  opens or builds each batch the output names in that wake. In each wake it also runs `merge --priority-rows FILE` on the rows of the role hand-off's `## Priorities` section,
+  one `priority: <slug> | pr: <owner>/<repo>#<N>` (or `| branch: <name>`) row for each owner priority ruling. A `flag` or `unknown` line goes to the coordinator in that wake. A row with no pr or branch is a flag. It runs each `--confirm` in the foreground (see below). A foreground wait on one repo's CI held another repo's
   hand-offs for 1 h 16 min once (decision `session-tiers`, incident 2026-11-07). Batch steps are in skill `ci-hygiene`, step 8. The left-out list
   and `--confirm --express` are in the merge tool's usage.
   It runs `merge <pr> --confirm --head <sha>` on the integration PR while it is a draft, with the head

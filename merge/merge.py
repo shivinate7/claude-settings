@@ -123,6 +123,18 @@
                           Before any step: a lint worktree that lacks lint/check_python_floor.py or .github/workflows/checks.yml, which the head's
                           own tree holds, reads UNKNOWN (exit 1, as every lane-lint refusal) and names the file; no step runs and --lint-unknown-ok never lifts it. Cost:
                           one `git ls-tree` of the head.
+  merge --priority-rows FILE|-
+                          one line per `priority: <slug> | pr: <owner>/<repo>#<N>` or `priority: <slug> | branch: <name>` row (FILE, or `-` for stdin),
+                          then a summary: `ok`, `waiting` (a run still going), `done` (merged), `flag` or `unknown`. A flag: the row names no pr or
+                          branch (no read), the PR is closed and not on main, a draft, dirty (conflicts), behind its base, or a newest run per name is
+                          red, or a branch has no open PR. Unknown, never ok: a read failed, the row names another repo (no read), GitHub has not
+                          computed the merge state, a ready clean head shows no run, or two open PRs have the branch. A draft that is also dirty prints both.
+                          No rows, or a file that is missing or empty, exits 1 with `no rows`, never clear. Exit 0 only when every row is ok, waiting or done.
+                          Reads the PR and runs the way --reviewed does (Host.pr, Host.runs, Host.judge_runs). Stands alone (-C and --config allowed);
+                          takes no lock and no merge role, merges and posts nothing, writes no file; any session may run it, the batch runner at each wake.
+                          Cost per call: at most two reads per `pr:` row (the pull request; the runs on its head only when the verdict needs them: a
+                          row that is merged, closed, a draft, dirty, behind or unknown reads the pull request alone), plus one shared read of the open
+                          pull list (one call per 100 PRs) per call when any row names a branch, then two reads per such row. No timer, process or file.
   merge --idle-lanes --live FILE
                           lane lines (a lane the roadmap's live file shows done and safe to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step's status is set to todo or done), then a summary line. A lane that waits (a step not done, an open pull, an open item) prints no line, except a lane only stale drafts hold: that prints one `joint (close #N ...; archive archive/<branch> ...; archive lane <id>)` line, counted among the lanes to archive. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -4330,6 +4342,110 @@ def idle_lanes(live, repo_dir=None):
     say(*entries)
     return 1 if unread else 0
 
+PRIORITY_PR = re.compile(r"([\w.-]+/[\w.-]+)#(\d+)")
+# Merge states whose verdict the newest run per name decides. A state outside this list and outside the earlier branches is unknown, never ok.
+PRIORITY_RUN_STATES = ("CLEAN", "BLOCKED", "UNSTABLE", "HAS_HOOKS")
+
+def priority_row(line):
+    """-> (slug, pr, branch) of one `priority: <slug> | key: value | ...` row; pr and branch are the value of the `pr` and `branch` keys, or None.
+    A key matches exactly, so an outbox row's `PRs: #3302 draft` names no pull request."""
+    head, *rest = line.split("|")
+    slug = head.split(":", 1)[1].strip()
+    keys = {}
+    for part in rest:
+        key, _, value = part.partition(":")
+        keys.setdefault(key.strip(), value.strip())
+    return slug, keys.get("pr") or None, keys.get("branch") or None
+
+def priority_verdict(h, number):
+    """-> (verdict, why) of pull request `number`, read once for its state and once for the runs on its head, the runs only when the verdict needs them.
+    A draft and a dirty head are both named. A read that fails raises; the caller reports it as unknown."""
+    info = h.pr(number)
+    if info["state"] == "MERGED":
+        return "done", "merged"
+    if info["state"] != "OPEN":
+        return "flag", "closed, not on main"
+    why = (["draft"] if info["draft"] else []) + (["dirty, conflicts with base"] if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY" else [])
+    if why:
+        return "flag", "; ".join(why)
+    if "UNKNOWN" in (info["mergeable"], info["merge_state"]):
+        return "unknown", "GitHub has not computed the merge state yet"
+    if info["merge_state"] == "BEHIND":
+        return "flag", "behind base"
+    if info["merge_state"] not in PRIORITY_RUN_STATES:
+        return "unknown", f"merge state {info['merge_state'].lower()} is not one this read judges"
+    runs = h.runs(info["head"])
+    if not runs:
+        return "unknown", "no workflow run on the head"
+    red, pending = h.judge_runs(runs)
+    if red:
+        return "flag", "; ".join(red)
+    if pending:
+        return "waiting", ", ".join(pending)
+    return "ok", "ready, clean, runs green"
+
+def priority_rows(source, repo_dir=None, host=None):
+    """merge --priority-rows: one verdict line per `priority:` row of the file SOURCE (`-` is stdin), then a summary. Verdicts: ok, waiting, done, flag, unknown.
+    Exit 0 only when every row is ok, waiting or done. No rows, or a file that is missing or empty, exits 1: never clear.
+    Cost: the reads priority_verdict makes per pull request row, and one shared open-pull list read per call when a row names a branch. It writes nothing and takes no lock."""
+    try:
+        text = sys.stdin.read() if source == "-" else pathlib.Path(source).read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        text = ""
+        print(f"merge: --priority-rows could not read {source}: {e.strerror or e}", file=sys.stderr)
+    rows = [x for x in (line.strip() for line in text.splitlines()) if x and not x.startswith("#")]
+    if not rows:
+        print("merge: --priority-rows: no rows. Nothing was checked; this is not clear.", file=sys.stderr)
+        return 1
+    import layout  # lint/layout.py: repo_name, the one reader of the origin
+    c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=repo_dir)
+    h = host or Host(cwd=repo_dir)
+    here = (h.repo or ("" if c else layout.repo_name(root.strip())) or "").lower()
+    opened = []  # the open pull list, read once per call: [rows] or [the exception that stopped the read]
+
+    def by_branch(branch):
+        if not opened:
+            try:
+                opened.append(h.open_prs())
+            except Exception as e:  # a Stop, a missing gh, malformed JSON: every branch row is unknown
+                opened.append(e)
+        if isinstance(opened[0], Exception):
+            raise opened[0]
+        hits = [n for n, info in opened[0] if info["branch"] == branch]
+        if len(hits) > 1:
+            return None, ("unknown", f"{len(hits)} open pull requests have the head {branch}")
+        return (hits[0], None) if hits else (None, ("flag", f"no open pull request has the head {branch}"))
+
+    lines, counts = [], {k: 0 for k in ("ok", "waiting", "done", "flag", "unknown")}
+    for row in rows:
+        if not row.startswith("priority:"):
+            slug, verdict, why = row[:60], "unknown", "not a priority row"
+        else:
+            slug, pr, branch = priority_row(row)
+            try:
+                if pr:
+                    m = PRIORITY_PR.fullmatch(pr)
+                    if not m:
+                        verdict, why = "unknown", f"pr {pr} is not owner/repo#N"
+                    elif m.group(1).lower() != here:
+                        verdict, why = "unknown", (f"{m.group(1)} is not this checkout's repo, so it is not read" if here else "this checkout's repo cannot be read, so the pull request is not read")
+                    else:
+                        verdict, why = priority_verdict(h, int(m.group(2)))
+                        slug += f" #{m.group(2)}"
+                elif branch:
+                    number, early = by_branch(branch)
+                    verdict, why = early or priority_verdict(h, number)
+                    slug += f" #{number}" if number else ""
+                else:
+                    verdict, why = "flag", "row names no branch or pr"
+            except Exception as e:  # a failed read is unknown, never clear
+                verdict, why = "unknown", "read failed: " + " ".join(str(e).split())
+        counts[verdict] += 1
+        lines.append(" ".join(f"{verdict} {slug}: {why}".split()))
+    lines.append("merge: " + ", ".join(f"{n} {k}" for k, n in counts.items()) + f" of {len(rows)} rows.")
+    say(*lines)
+    return 0 if not counts["flag"] and not counts["unknown"] else 1
+
 def build_parser():
     """The one home of merge's command line. The guard (hooks/guard_merge.py) parses a command with this, so its reading of -C and --repo-dir is the tool's own.
     allow_abbrev is off: a prefix such as `--repo` or `--confir` is an error, never the flag it starts."""
@@ -4352,6 +4468,7 @@ def build_parser():
     p.add_argument("--config", default=DEFAULT_CONFIG)
     p.add_argument("--idle-lanes", action="store_true", help="list the lanes to archive from the roadmap's live file; takes no lock, merges and posts nothing")
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
+    p.add_argument("--priority-rows", default=None, metavar="FILE", help="read the owner's priority rows (FILE, or - for stdin) and print one verdict line per row; takes no lock, merges and posts nothing, writes no file")
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
     p.add_argument("--root", action="append", default=[], metavar="DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; repeat it for each repo")
     p.add_argument("--release-check", nargs="+", action="extend", type=pr_arg, metavar="N", help="one line per pull request: PASS, or FAIL and the reasons (open, review record done at the live head and unedited, lint verdict, clean merge, stack); a missing line is a FAIL; takes no lock, merges nothing")
@@ -4403,6 +4520,8 @@ def main(argv, host=None, lock=None, hosts=None):
         p.error("--root goes with --reviewed")
     if a.root and a.repo_dir is not None:  # each --root names its own checkout, so a -C beside it would be read by nothing
         p.error("-C does not go with --root: each --root names its own checkout")
+    if a.priority_rows is not None and any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("priority_rows", "repo_dir", "config")):
+        p.error("--priority-rows stands alone (-C and --config may go with it)")
     if a.idle_lanes and (a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed
                          or a.review_record or a.lane_lint):
         p.error("--idle-lanes stands alone")
@@ -4417,7 +4536,7 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--lint-unknown-ok goes with --lane-lint")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
-    if a.idle_lanes or a.touches or a.release_check:
+    if a.idle_lanes or a.touches or a.release_check or a.priority_rows is not None:
         pass  # stands alone: checked above
     elif a.ready:  # a lane's one act on its own draft: no lock, no merge
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record or a.lane_lint:
@@ -4479,6 +4598,8 @@ def main(argv, host=None, lock=None, hosts=None):
                 print("merge: " + " ".join(unknown.split()), file=sys.stderr)
                 return 1
             return 0
+        if a.priority_rows is not None:
+            return priority_rows(a.priority_rows, a.repo_dir, host)  # before the role check and any lock: it reads, merges and posts nothing
         if a.idle_lanes:
             return idle_lanes(a.live, a.repo_dir)  # before the role check and any lock: it reads, merges and posts nothing
         if a.lane_lint:
