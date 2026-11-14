@@ -871,13 +871,13 @@ def case_guard_reads_only_its_own_session():
 FAIL_OPEN = "Feedback guard: ruling and task homes not checked"
 
 
-def homed(cfg, sid, items, handoff_ids=(), cwd=None, text="homes burst"):
+def homed(cfg, sid, items, handoff_ids=(), cwd=None, text="homes burst", extra_env=None):
     """Writes one jotted message and a handoff that holds `handoff_ids`, then runs the guard. A
-    multi-line `text` makes the message a burst."""
+    multi-line `text` makes the message a burst. `extra_env` adds variables for this run, such as a spy's log."""
     write_file(inbox_of(cfg, sid), render_block(text, items=items))
     write_file(handoff_of(cfg, sid), "# Handoff\n" + "".join("- %s\n" % i for i in handoff_ids))
     fixture.prime_origin(cwd)
-    return guard(cfg, sid, cwd=cwd)
+    return guard(cfg, sid, cwd=cwd, extra_env=extra_env)
 
 
 def fail_open_line(p):
@@ -2388,6 +2388,66 @@ def case_task_closed_step_home_passes():
     expect_silent("task step home: a closed task homed to a step on a lane branch passes", p)
 
 
+# The step cases of a stale roadmap ref: a task homed to a step file that sits on origin's roadmap branch only.
+ORIGINS = os.path.join(ROOT, "origins")  # the bare origins these cases fetch from: local paths, never a URL
+STEP_REL = "roadmap/data/steps/%s.json" % STEP_SLUG
+READ_AS_OF = re.compile(r"read as of (\d{2}:\d{2} (CST|CDT)|an unknown time)")
+
+
+def origin_only_step_repo(name, reachable=True):
+    """A repo whose step file sits on origin's roadmap branch only. The local origin/roadmap ref is stale: it holds no
+    step. FETCH_HEAD holds a roadmap fetch 120 s old, so the freshness check is stale. With `reachable` False the origin
+    path names no repo, so the fetch fails and the step is found nowhere."""
+    repo = make_repo(name, tracked=("debts/a-task.md",))
+    os.makedirs(ORIGINS, exist_ok=True)
+    origin = fixture.bare_origin(ORIGINS, name, fixture.step_file(STEP_SLUG, "todo"))
+    git(repo, "remote", "add", "origin", origin if reachable else origin + ".gone")
+    fixture.point_ref(repo, fixture.STORE_REF, {"README.md": "stale\n"}, ORIGINS)
+    fixture.write_fetch_head(repo, "roadmap")
+    head = fixture.fetch_head(repo)
+    stamp = os.stat(head).st_mtime
+    os.utime(head, (stamp - 120, stamp - 120))  # 120 s old: past roadmap_ref.MAX_AGE
+    return repo
+
+
+def stop_with_step_home(name, repo):
+    """One Stop, whose one item is a task homed to the step. The turns state predates its `judged` key, so every item
+    counts as judged and the repeat judge, with its roadmap read, does not run: the step home is the only read of the
+    ref. Returns (Proc, the freshness checks the Stop ran)."""
+    spy = os.path.join(ROOT, "fresh-ref-%s.log" % name)
+    cfg, sid = new_cfg(), "task-%s" % name
+    write_file(os.path.join(cfg, "handoffs", sid + ".inbox.turns"), json.dumps({"seen": 0, "burst": []}))
+    p = homed(cfg, sid, ("- fb-0958-12 [task] -> step:%s" % STEP_SLUG,), cwd=repo,
+              extra_env={"FRESH_REF_LOG": spy})
+    return p, len(read_or_empty(spy).splitlines())
+
+
+def case_task_step_only_on_origin_is_found_after_the_fetch():
+    """A task homed to `step:<slug>` passes when the step file is on origin's roadmap branch only. The local ref is
+    stale and FETCH_HEAD is old, so the Stop runs one freshness check, which fetches, and reads the step after it. Red
+    today: the step home reads the local refs with no check, so the task blocks."""
+    name = "step-origin-stale"
+    repo = origin_only_step_repo(name)
+    local = git(repo, "ls-tree", "-r", "--name-only", fixture.STORE_REF).split("\n")
+    check("step origin-only: the local origin/roadmap ref lacks the step file", STEP_REL not in local, "\n".join(local))
+    p, calls = stop_with_step_home(name, repo)
+    expect_silent("step origin-only: a task homed to a step on origin passes after the fetch", p)
+    check("step origin-only: the Stop runs one freshness check", calls == 1, "%d calls" % calls)
+
+
+def case_task_step_fetch_fails_names_the_read_as_of():
+    """The same task with origin unreachable: the step is on no ref the Stop can read, so the task blocks, and the block
+    reason says how fresh the read was. Red today: the step home's refusal carries no freshness note."""
+    name = "step-origin-gone"
+    repo = origin_only_step_repo(name, reachable=False)
+    p, calls = stop_with_step_home(name, repo)
+    reason = block_reason(p) or ""
+    check("step fetch fails: the Stop blocks the task (scope)", p.code == 0 and block_reason(p) is not None, p.desc())
+    check("step fetch fails: the Stop runs one freshness check", calls == 1, "%d calls" % calls)
+    check("step fetch fails: the block reason says read as of a time", READ_AS_OF.search(reason) is not None,
+          reason or p.desc())
+
+
 def case_task_missing_step_home_blocks():
     """An open or closed task whose home is `step:<slug>` with no step file on any branch blocks, and the
     reason names the item. Green today: the guard refuses a step home for a task whether or not the file
@@ -3132,6 +3192,17 @@ if os.environ.get("FETCH_SPY_LOG"):
     sys.path.insert(0, os.path.join(sys.argv[1], "..", "lint"))
     import test_ruled_store
     test_ruled_store.refuse_real_origin_fetches(os.environ["FETCH_SPY_LOG"])
+if os.environ.get("FRESH_REF_LOG"):  # one line per freshness check the guard runs: the spy of the step cases
+    sys.path.insert(0, os.path.join(sys.argv[1], "..", "lint"))
+    import roadmap_ref
+    real_fresh_ref = roadmap_ref.fresh_ref
+
+    def counted_fresh_ref(repo_dir, now=None, fetch=None):
+        with open(os.environ["FRESH_REF_LOG"], "a", encoding="utf-8") as f:
+            f.write(repo_dir + "\n")
+        return real_fresh_ref(repo_dir, now, fetch)
+
+    roadmap_ref.fresh_ref = counted_fresh_ref
 
 
 def stub(prompt, model=decision_watch.MODEL, timeout=decision_watch.MODEL_TIMEOUT, shape=None,
@@ -4501,6 +4572,8 @@ CASES = (
     case_closed_note_with_a_home_passes,
     case_task_open_step_home_passes,
     case_task_closed_step_home_passes,
+    case_task_step_only_on_origin_is_found_after_the_fetch,
+    case_task_step_fetch_fails_names_the_read_as_of,
     case_task_missing_step_home_blocks,
     case_ruling_step_home_still_blocks,
     case_task_backtick_step_home_passes,
