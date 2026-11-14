@@ -11,12 +11,13 @@
                           no merge call; run --confirm again when the claim head's own checks are green, and that run merges it. A relayed yes binds
                           across the claim commit. A confirm with nothing to claim merges in one run.
                           On a draft it is the records step and never merges: rebuild the page, push it, ask to mark the PR ready.
-                          A repo that lists merge.readyChecks in its config (step names of the checks job, such as "check invariants")
-                          gets them run first: `bin/ci-job checks --step NAME ... --base origin/<base>` in a temporary worktree on the tree
+                          A repo that lists merge.readyChecks in its config (step names of the checks job, such as "check invariants",
+                          or `<job>:<step>` for a step of another job, such as "checks-rest:project-ops skill scaffold suite")
+                          gets them run first: one `bin/ci-job <job> --step NAME ... --base origin/<base>` per job in a temporary worktree on the tree
                           the step would push, before any push and before the ready mark, on every path (default base, other base,
                           Record-claim head). A FAIL or an unknown stops the step with the step lines and the log: nothing pushed, not
                           marked ready, and no flag lifts it. A repo with no list runs no ready check, and one line says so.
-                          Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
+                          Cost per draft-step ready: one ci-job run per job of the list, and one worktree; the run time is unmeasured for a step subset
                           (the 3600 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
                           A confirm in the cloud needs a lane-lint PASS for the head's sha. Any pull request skips it, a lane PR included, when the all-jobs-passed rollup is green on that exact head:
@@ -112,6 +113,15 @@
                           is not open or not found, and the linted PR itself are each a stop; a repeated number is read once). Missed
                           case: a PR posted under another session id is not found as this lane's, unless --with names it. A PR body
                           with no session URL has no lane PRs, so only --with finds any. A commit or ref target is measured against its base only, and is not cross-measured.
+                          A head whose diff against the base touches hooks/mutate_*.py or hooks/mutate_*.mjs also runs, after a passing lint, the command of each of the head's mutation test shard jobs (CI step "Guard mutation test, shard i/M") in that same worktree.
+                          The run happens at the hand-off lint; the batch runner's pre-join lint skips it when a hand-off PASS names the live head.
+                          It FAILs on any survivor, on any wrong-cause or unknown mutant (as CI does), on a run past a shard job's
+                          timeout-minutes, on a command that cannot start, on a report it cannot read at any exit, and on a tally at a
+                          nonzero exit (a table is judged by its counts, not its exit code). It prints its wall time and killed,
+                          survived and unknown counts, on the PASS line or in the FAIL text. Extra cost, only then: up to three shard runs
+                          one after another (decision lanes-run-no-full-ci-job holds the measured cost); on any other head, one `git diff --name-only`. A pre-join lint that skips
+                          the run prints "mutation test run skipped here: it runs at the lane's hand-off lint". The call on an
+                          integration PR's number runs it, since no hand-off PASS names that PR.
                           --touched-tests: after the lint passes, also runs each test file the diff against the base touches, once,
                           in that worktree, after the lint steps (any lane-lint target takes it; the batch ready route does not). HEAVY and needs-setup tests and
                           .ps1 tests print `skip <test>: <reason>`. A failing test refuses, with its last output; a timeout, an
@@ -139,8 +149,7 @@
                           The open-PR clash reads the open PRs through the host's open_pulls (GitHub REST `GET pulls`, the read a lane or runner has),
                           and a failed list read prints `unknown open-PR clash`, never a pass. A clash counts only with a PR that is not a draft; a clash
                           with a draft is a report line `#N shares files: a, b`, read from the changed files alone, with no merge-tree (PRE_READY_CLASH_SCOPE: "ready", or "all" for every open PR).
-                          Every run prints `unknown scaffold: not run (lives in checks-rest, ci-job --step reads one job)`, a coverage note that moves no exit code: the
-                          project-ops scaffold suite is not covered. A repo with no readyChecks prints `unknown pre-ready: no merge.readyChecks declared` and exits 1.
+                          A repo with no readyChecks prints `unknown pre-ready: no merge.readyChecks declared` and exits 1.
                           Cost: see fast_checks, run_ready_checks, pre_ready_rows, cross_measure.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role). A local session reads the role the launcher
@@ -155,7 +164,7 @@ A list read asks for each page by number (`Host.pages`), so no `gh` flag beyond 
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, concurrent.futures, contextlib, datetime, fnmatch, functools, importlib.util, io, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, concurrent.futures, contextlib, datetime, fnmatch, functools, importlib.util, io, json, math, os, pathlib, re, shlex, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -549,6 +558,27 @@ def say(*lines):
     except UnicodeEncodeError:  # a piped Windows stdout is cp1252, strict: escape what it cannot hold, so no name can stop the steps after a merge. stderr already escapes
         enc = sys.stdout.encoding or "ascii"
         print(text.encode(enc, "backslashreplace").decode(enc), flush=True)
+
+@contextlib.contextmanager
+def timed_phase(name):
+    """Print a start line and an end line around one phase of a merge run, so a run shows where its time went (decision merge-phase-timing).
+    The end line says `done` or, when the phase raises, `stopped`. Cost: two printed lines a phase, no thread, process or file.
+    A line that cannot be written (a closed pipe) is dropped: a timing line must never stop a phase, or leave the lock taken in the lock phase held."""
+    t0 = time.time()
+
+    def timing(text):
+        try:
+            say(text)
+        except (OSError, ValueError):
+            pass
+
+    timing(f"merge: phase {name}: start")
+    try:
+        yield
+    except BaseException:
+        timing(f"merge: phase {name}: stopped after {round(time.time() - t0)} s")
+        raise
+    timing(f"merge: phase {name}: done in {round(time.time() - t0)} s")
 
 # ------------------------------------------------------------------ the stall-watch beat
 @contextlib.contextmanager
@@ -2506,6 +2536,10 @@ def head_holds(root, tip, head):
             held = ancestor(root, tip, head)
     return held
 
+def no_github_env():
+    """The environment of a lint run: this one without the GITHUB_ variables, as the merge's own lint run reads it."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
+
 def refuse_unstacked_head(root, head, base):
     """A stacked PR (base other than main) whose head lacks its base's current head FAILs the lint before the long ci-job run. The caller
     has fetched origin/<base> (open_worktree). In a shallow clone that cut the answer, the check fetches the full history once and asks
@@ -2730,6 +2764,119 @@ def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
+MUTATE_JOB, MUTATE_STEP = "checks-mutate-guard", "Guard mutation test"  # the old one-job head: its job and step, whose run: line and timeout-minutes the lint reads. A sharded head names each step MUTATE_STEP + ", shard i/M", one job each
+MUTATE_TEST_FILE = re.compile(r"hooks/mutate_[^/]*\.(?:py|mjs)")
+MUTATE_SKIPPED = "mutation test run skipped here: it runs at the lane's hand-off lint"  # printed wherever the lint skips the run: a pre-join lint whose hand-off PASS names the head
+
+def mutate_report_counts(out):
+    """-> (killed, survived, unknown, unread, tally, wrong) of a mutation test run's stdout, or None when it holds no report. Two forms: the per-file
+    table of hooks/mutate_shared.format_report (columns file mutants killed crashed survived rate silent; unknown is the crashed column), and the tally
+    line that run_mutants prints, which the job's own command ends with (`K of N mutations killed (S survived, W wrong cause, X skipped, U unknown)`;
+    `, U unknown` prints only when U is not 0, and `tally` is True). The tally's counts are read by their labels, not by the whole line, so this
+    parser holds no copy of the format that hooks/mutate_shared.run_mutants prints (that module's edit is refused to a builder: a debt of one
+    shared home). `wrong` is the tally's wrong-cause count, 0 for a table. `unread` counts the table's `UNKNOWN (reason)` rows: a file that read no mutant."""
+    rows = re.findall(r"^\S+[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+\d+%", out, re.M)
+    unread = len(re.findall(r"^\S+[ \t]+UNKNOWN \(", out, re.M))
+    if rows:
+        return sum(int(r[1]) for r in rows), sum(int(r[3]) for r in rows), sum(int(r[2]) for r in rows), unread, False, 0
+    line = re.search(r"^(\d+) of \d+ mutations killed \((.*)\)\s*$", out, re.M)
+    if line:
+        by_label = {label: int(n) for n, label in re.findall(r"(\d+) (survived|wrong cause|skipped|unknown)", line.group(2))}
+        return int(line.group(1)), by_label.get("survived", 0), by_label.get("unknown", 0), unread, True, by_label.get("wrong cause", 0)
+    return (0, 0, 0, unread, False, 0) if unread else None
+
+def mutate_run_check(wt):
+    """Run the head's mutation test in the tree `wt`: each shard job of checks.yml one after another (step "Guard mutation test, shard i/M"), or the
+    old one job (step "Guard mutation test") once when the head has no shard step. -> (summary, failures): one line of wall time and counts, and the
+    reasons the lint fails (empty on a pass). A shard that fails or times out ends the run, so no later shard starts, and its failures name its job.
+    The command, the MUTATE_SHARD env and the cap of each run come from the head's checks.yml, through the step parser and job_caps: no copy of any.
+    A workflow, step or cap that cannot be read, and a shard that is absent, stop the lint before the first run."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    from workflow_steps import job_block, run_body, step_blocks, step_env, step_key  # the one home of the step parser
+    try:
+        with open(os.path.join(wt, ".github", "workflows", "checks.yml"), encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, UnicodeError) as e:
+        raise Stop(f"the head's checks.yml cannot be read ({type(e).__name__}), so its mutation test run cannot start. {LANE_LINT_REMEDY}")
+    shard_step = re.compile(rf"{re.escape(MUTATE_STEP)}, shard (\d+)/(\d+)")
+    shards, counts = {}, set()  # shard number -> (job, step), and the shard counts M that the step names carry
+    for job in re.findall(r"^  ([\w-]+):\s*$", text, re.M):
+        for st in step_blocks(job_block(text, job)):
+            m = shard_step.fullmatch(step_key(st, "name") or "")
+            if m:
+                if int(m.group(1)) in shards:
+                    raise Stop(f"the head's checks.yml has shard {m.group(1)}/{m.group(2)} of the mutation test in both job {shards[int(m.group(1))][0]} and job {job}, so its mutation test run cannot start. {LANE_LINT_REMEDY}")
+                shards[int(m.group(1))] = (job, st)
+                counts.add(int(m.group(2)))
+    sharded = bool(shards)
+    if sharded:
+        if len(counts) != 1:
+            raise Stop(f"the head's checks.yml names shard counts {sorted(counts)} for the mutation test, so its mutation test run cannot start. {LANE_LINT_REMEDY}")
+        total = next(iter(counts))
+        absent = [f"{n}/{total}" for n in range(1, total + 1) if n not in shards]
+        if absent or set(shards) - set(range(1, total + 1)):
+            raise Stop(f"the head's checks.yml has no job with the step for shard {', '.join(absent) or 'numbers in 1 to ' + str(total)} of the mutation test (shard N of {total} absent), so its mutation test run cannot start. {LANE_LINT_REMEDY}")
+        steps = [(shards[n][0], shards[n][1], f"{n}/{total}") for n in range(1, total + 1)]
+    else:
+        steps = [(MUTATE_JOB, next((st for st in step_blocks(job_block(text, MUTATE_JOB)) if step_key(st, "name") == MUTATE_STEP), None), None)]
+    caps = job_caps([text])
+    plan = []  # every run is read before the first starts, so a job whose run or cap cannot be read stops the lint with no run made
+    for job, step, shard in steps:
+        body = (run_body(step) or "").strip() if step else ""
+        cap = caps.get(job)
+        if not body or "\n" in body or not cap:
+            raise Stop(f"the head's checks.yml has no one-line run: for CI step {(step_key(step, 'name') if step else MUTATE_STEP)!r} of job {job}, or no timeout-minutes on that job, so its mutation test run cannot start. {LANE_LINT_REMEDY}")
+        env = no_github_env()
+        if shard:
+            if step_env(step).get("MUTATE_SHARD") != shard:
+                raise Stop(f"the step for shard {shard} of job {job} in the head's checks.yml does not set MUTATE_SHARD to {shard}, so its mutation test run cannot start. {LANE_LINT_REMEDY}")
+            env["MUTATE_SHARD"] = shard
+        plan.append((job, body, cap, env))
+
+    def run_one(job, body, cap, env):
+        start = time.monotonic()
+        start_error = ""
+        try:
+            c, out = sh(shlex.split(body), cwd=wt, env=env, timeout=cap * 60, live_stderr=True)
+        except subprocess.TimeoutExpired:
+            c, out = None, ""
+        except (OSError, ValueError) as e:  # the command could not start (no such program, not executable, a bad quote): a FAIL, never a traceback or a pass
+            c, out, start_error = None, "", f"{type(e).__name__}: {e}"
+        wall = round(time.monotonic() - start) if c is not None else cap * 60
+        counts = mutate_report_counts(out)
+        killed, survived, unknown, unread, tally, wrong = counts or (0, 0, 0, 0, False, 0)
+        failures = []
+        if start_error:
+            return "mutation test run did not start", [f"the mutation test command could not start ({start_error}), so no mutation test run was made"]
+        if c is None or wall > cap * 60:
+            failures.append(f"the mutation test run took {wall} s, past the {cap}-minute cap of job {job}")
+        if counts is None:
+            failures.append(f"the mutation test run exited {'at its timeout' if c is None else c} and printed no report that can be read")
+        # A table is judged on its counts at any exit code. A tally is the command's own verdict, so CI is red on its nonzero exit, and run_mutants exits 1 on any survivor, wrong cause or unknown.
+        if tally and c:
+            failures.append(f"the mutation test run exited {c} on a tally of killed {killed}, survived {survived}, wrong cause {wrong}, unknown {unknown}, and CI fails the job on that exit")
+        if survived:
+            failures.append(f"{survived} mutant{'s' if survived != 1 else ''} survived")
+        if wrong:
+            failures.append(f"wrong cause {wrong}: the tally counts a mutant whose red lines miss its required case, and CI fails the run on any")
+        if unknown:
+            failures.append(f"unknown {unknown}: {unknown} mutant{'s' if unknown != 1 else ''} could not be read (crashed or timed out), and CI fails the run on any")
+        if unread:
+            failures.append(f"{unread} file{'s' if unread != 1 else ''} read no mutant (UNKNOWN row)")
+        if failures and tally:
+            failures.append("the run's own tally: " + re.search(r"^\d+ of \d+ mutations killed \(.*\)\s*$", out, re.M).group(0).strip())
+        return f"mutation test run {wall} s, killed {killed}, survived {survived}, unknown {unknown}, {'fail' if failures else 'pass'}", failures
+
+    summaries = []
+    for job, body, cap, env in plan:
+        summary, failures = run_one(job, body, cap, env)
+        if not sharded:
+            return summary, failures
+        summaries.append(f"{job}: {summary}")
+        if failures:  # a failed or timed-out shard decides the lint: no later shard starts
+            return "; ".join(summaries), [f"job {job}: {f}" for f in failures]
+    return "; ".join(summaries), []
+
 TOUCHED_SELECTOR = ".github/scripts/touched-tests.py"  # the lint worktree's own selector, so the head's tests are chosen by the head's rules
 TOUCHED_RUNNERS = {".py": sys.executable, ".sh": "bash", ".mjs": "node", ".js": "node"}  # bash, not sh: the suites use bashisms
 TOUCHED_TAIL_LINES = 15  # last output lines a failing test shows; the whole log would bury the assertion
@@ -2819,7 +2966,7 @@ def refuse_incomplete_tree(wt, head, base, tree=None):
         raise UnknownStop("\n".join([f"the lint of {head[:9]} against {base} is unknown, not a pass: the lint worktree lacks {', '.join(missing)}, so no step ran.",
                                      "Run again. If it keeps happening, the lint worktree made for this head is incomplete. --lint-unknown-ok does not lift this. " + LANE_LINT_REMEDY]))
 
-def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False):
+def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False, mutate_run=True, pre_join=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR, and a stacked PR (base other than main) whose head lacks its base's head stops first.
@@ -2835,6 +2982,10 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
     A PASS on a pull request number posts the lane-lint comment (lint_body) naming the head it read, which `--reviewed` and the join require; a failed post
     prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing.
+    A head whose diff touches a mutation test file runs the mutation test at the hand-off lint. The batch runner's pre-join lint (`pre_join`, a recorded
+    batch-runner role) skips it when a hand-off PASS comment names the live head, and runs it for any other head; a local batch runner records no role, so it always runs it.
+    `mutate_run` False skips the run. A skip prints MUTATE_SKIPPED.
+    The PR-number call on the integration PR has no hand-off PASS, so it runs the mutation test.
     `touched_tests` (--touched-tests): after a lint pass only, run_touched_tests runs the tests the head's diff touches in the same tree. A failing test refuses always;
     an unknown (timeout, unloadable selector, unreadable diff) refuses unless `unknown_ok` gives a reason. The PASS line then also names the run and skipped counts."""
     if target.isdigit():
@@ -2890,10 +3041,24 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes, head_sha=head)
         if state == "pass" and touched_tests:
             touched = run_touched_tests(wt, base, head)
+        mutate, mutate_fails, skipped = "", [], False
+        if state == "pass" or (liftable and unknown_ok.strip()):  # a lint that fails or stays unknown stops without the run's minutes
+            c, changed = git(root, "diff", "--no-renames", "--name-only", f"origin/{base}...{head}")  # no renames: a moved file lists its old path too, as CI's scope reads it
+            if c:  # no merge base to list from (the clash check above reads an unrelated history as unknown, so this is a rare read failure): unknown, never a guess
+                raise Stop(f"cannot list the files the head changes against {base}: {changed} {LANE_LINT_REMEDY}")
+            if any(MUTATE_TEST_FILE.fullmatch(f) for f in changed.splitlines()):
+                if mutate_run and not (pre_join and target.isdigit() and hand_off_pass(host, int(target), info, head)):
+                    mutate, mutate_fails = mutate_run_check(wt)
+                else:
+                    skipped = True
     finally:
         drop_worktree(root, tmp, wt)
     short = head[:9]
+    if mutate_fails:
+        raise Stop("\n".join([f"the lint of {short} against {base} FAILs: the diff touches a mutation test file, and its {mutate}:", *mutate_fails, LANE_LINT_REMEDY]))
     report_lines = ["merge: clashes with other PRs that this lint does not count (report only):", *reports] if reports else []
+    if skipped and (state == "pass" or (liftable and unknown_ok.strip())):
+        say(MUTATE_SKIPPED)
     if touched is not None:
         ran, skips, fails, unknowns = touched
         if skips:
@@ -2910,7 +3075,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
         counts = f"; touched tests: {touched[0]} run, {len(touched[1])} skipped" if touched is not None else ""
         tail = "The batch runner may take this head, or join it to a batch." if target.isdigit() else "No comment is posted for a ref or commit, so this does not satisfy the join."
-        say(f"PASS: lint of {short} against {base} passes{named}{counts}. {tail}", *pin_notes, *report_lines)
+        say(f"PASS: lint of {short} against {base} passes{named}{counts}{'; ' + mutate if mutate else ''}. {tail}", *pin_notes, *report_lines)
         if target.isdigit():  # a ref or commit has no pull request to carry the comment
             n = int(target)
             try:
@@ -2922,7 +3087,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     if state == "fail":
         raise LintFail("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]), lines, log)
     if liftable and unknown_ok.strip():
-        say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *lines, *log, *report_lines)
+        say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *lines, *log, *report_lines, *([mutate] if mutate else []))
         if touched_tests:  # the tests run only after a lint pass, so a lifted unknown must not read as if they had
             say(f"merge: the touched tests of {short} did not run, because the lint is unknown.")
         return 0
@@ -3479,7 +3644,7 @@ def stale_page_remedy(n, claim=""):
 
 READY_CHECKS_CITE = "(decision lanes-run-no-full-ci-job, the ready checks: a draft goes ready only when the repo's merge.readyChecks pass)"
 
-SCAFFOLD_NOTE = "unknown scaffold: not run (lives in checks-rest, ci-job --step reads one job)"  # the project-ops scaffold suite is in checks-rest, which readyChecks cannot name
+READY_JOB_PREFIX = re.compile(r"^([a-z][a-z0-9_-]*):(.+)$")  # a `<job>:<step>` ready check; a step name that does not open this way is a step of job `checks`
 
 STEP_LINE = re.compile(r"^(PASS|FAIL|SKIP|skipped|unknown|not run)\s+(.*)$")
 
@@ -3538,27 +3703,41 @@ def clash_verdict(root, n, base, host, info):
     more = [f"  and {len(reports) - len(shown)} more clash(es) not counted"] if len(reports) > len(shown) else []
     return "pass", name, "\n".join([f"{len(reports)} clash(es) not counted:", *shown, *more])
 
+def ready_job_groups(checks):
+    """-> {job: [(declared name, bare step name)]} of `merge.readyChecks` `checks`, jobs in first-appearance order. An entry `<job>:<step>` names its job;
+    any other entry is a step of job `checks`."""
+    groups = {}
+    for entry in checks:
+        m = READY_JOB_PREFIX.match(entry)
+        groups.setdefault(m.group(1) if m else "checks", []).append((entry, m.group(2) if m else entry))
+    return groups
+
 def pre_ready_rows(wt, n, base, checks, pre):
-    """The pre-ready run: one ci-job run of `merge.readyChecks` `checks` in the tree `wt`, then, when `pre` is (root, host, info), the debt-close lint on `wt` and the
-    open-PR clash of the PR's head, each once. Prints one verdict line per check, `pass NAME`, `fail NAME: why` or `unknown NAME: why`, all before any refusal.
-    -> (rows, (state, lines, log)): rows of (verdict, name, detail), and ci_job_run's own answer.
-    After the lines it prints SCAFFOLD_NOTE once (a coverage note that is no row, so no exit code moves with it).
-    Cost: one ci-job run, one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees."""
-    raw = []
-    args = ["checks", "--pinned", *[a for name in checks for a in ("--step", name)], "--base", f"origin/{base}"]
-    ci = ci_job_run(wt, *args, raw=raw)
-    rows = step_verdicts(raw, checks, ci[0])
+    """The pre-ready run: one ci-job run per job of `merge.readyChecks` `checks` in the tree `wt` (ready_job_groups), then, when `pre` is (root, host, info), the debt-close lint
+    on `wt` and the open-PR clash of the PR's head, each once. Prints one verdict line per check, `pass NAME`, `fail NAME: why` or `unknown NAME: why`, all before any
+    refusal; NAME is the declared entry.
+    -> (rows, (state, lines, log)): rows of (verdict, name, detail), and the jobs' ci_job_run answers combined: state fail over unknown over pass, lines and log joined.
+    Each job's steps are read from that job's own lines, so a step name two jobs hold reads only its own job.
+    Cost: one ci-job run per job, one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees."""
+    rows, states, lines, log = [], [], [], []
+    for job, group in ready_job_groups(checks).items():
+        raw = []
+        args = [job, "--pinned", *[a for _, bare in group for a in ("--step", bare)], "--base", f"origin/{base}"]
+        state, job_lines, job_log, _ = ci_job_run(wt, *args, raw=raw)
+        states.append(state)
+        lines += job_lines
+        log += job_log
+        rows += [(v, declared, d) for (v, _, d), (declared, _) in zip(step_verdicts(raw, [bare for _, bare in group], state), group)]
+    state = "fail" if "fail" in states else "unknown" if "unknown" in states else "pass"
     if pre:
         root, host, info = pre
         rows += [debt_verdict(wt, base, host, info), clash_verdict(root, n, base, host, info)]
     say(*[f"{v} {name}" + (f": {d}" if d else "") for v, name, d in rows])
-    if pre:
-        say(SCAFFOLD_NOTE)  # a coverage note, not a check: it is no row, so no exit code moves with it
-    return rows, ci[:3]
+    return rows, (state, lines, log)
 
 def run_ready_checks(wt, n, base, checks, remedy="Fix it on the branch, push, and run --confirm again.", pre=None):
     """The ready checks of the draft step: run the repo's `merge.readyChecks` through ci-job in the tree `wt`, which holds what the step
-    would push (the merge of the head with the base, for a PR whose base is not the default branch: open_merge_worktree). One ci-job run.
+    would push (the merge of the head with the base, for a PR whose base is not the default branch: open_merge_worktree). One ci-job run per job.
     Returns on a pass; a FAIL or an unknown raises Stop, and no flag lifts it. `checks` is a non-empty list.
     `remedy` is the route the refusal names: the draft step's by default.
     A FAIL is a LintFail, with the step lines and the log; an unknown is a plain Stop.
@@ -3604,7 +3783,7 @@ def fast_checks(root, cfg, n, host, info):
     posts no comment, and builds no records page. A repo with no merge.readyChecks prints one line `unknown pre-ready: no merge.readyChecks declared` and exits 1:
     a run that checked nothing is not a pass (the draft step keeps its "runs none" line). Works on a draft or a ready PR.
     Cost, "read-only" meaning no push, no lock, no ready mark, no comment, no ref: the fetch writes refs/remotes/origin/* and FETCH_HEAD (fetch_pr_head, merge_reason, cross_measure),
-    the dry merge adds merge-tree and commit-tree objects to the object store, and `git worktree add` writes .git/worktrees/<name> (removed at the end). Starts: one ci-job run,
+    the dry merge adds merge-tree and commit-tree objects to the object store, and `git worktree add` writes .git/worktrees/<name> (removed at the end). Starts: one ci-job run per job,
     one debt-close lint (a scratch worktree and one Retire test run for each closed debt: lint/check_debt_retire.py `scratch`), one open-PR clash (cross_measure's cost). Files: ci-job's log,
     the two temporary worktrees, nothing in the repo tree."""
     checks = cfg.get("merge", {}).get("readyChecks")
@@ -3628,7 +3807,7 @@ def draft_step(root, cfg, n, host, info):
     stop. So the branch is final at ready, and the ready confirm pushes nothing (decision records-index-at-merge).
     Takes no lock, claims no number and never merges: a claim stays at the ready confirm.
     A repo that declares merge.readyChecks also runs them first, on the tree the step would push, before any push and before the
-    ready mark, on every path (the ready checks, decision lanes-run-no-full-ci-job). One ci-job run, in one worktree."""
+    ready mark, on every path (the ready checks, decision lanes-run-no-full-ci-job). One ci-job run per job, in one worktree."""
     base = info["base"]
     red = head_check_red(host.head_state(n, info["head"]))  # a head that will not merge never goes ready; before any push
     if red:
@@ -3766,7 +3945,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         return draft_step(root, cfg, n, host, info)
     lock.holder = {"pr": n, "branch": info["branch"], "session": session}
     lifts = {}  # each reason flag that lifts a check in this run, for the merge commit message
-    token = lock.acquire(base, LOCK_TTL_SECONDS)
+    with timed_phase("lock"):
+        token = lock.acquire(base, LOCK_TTL_SECONDS)
     host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant), so the fixed TTL need not cover it
     tmp = wt = claim_sha = None
     judge = None  # the prose judge's plan, built under the lock and run after it is released
@@ -3784,7 +3964,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         if info["draft"]:  # it turned draft after the first read: the records step, never a merge
             return draft_step(root, cfg, n, host, info)
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
-        record_lift(lifts, RED_FLAG, red_base(root, host, base, red_ok))
+        with timed_phase("main-run"):
+            record_lift(lifts, RED_FLAG, red_base(root, host, base, red_ok))
         if express:  # the worktree opens early: the classifier reads the head's diff
             tmp, wt = open_worktree(root, info, base)
             no_express = express_refusal(root, wt, base_ref, info)
@@ -3797,7 +3978,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         extend_lock(lock, UNDO_CHECK_LOCK_SECONDS)
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), lane_head))
         extend_lock(lock, debt_check_lock_seconds())
-        debt_check(wt, base_ref, host, dict(info, head=lane_head))
+        with timed_phase("debt-check"):
+            debt_check(wt, base_ref, host, dict(info, head=lane_head))
         record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
         stale, stands = holds_base(wt, base_ref, info["head"])  # rule M3: a clean merge-tree against the tip, read before the claim
         if stale:
@@ -3808,13 +3990,14 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         resumed = own_claim(wt, stamp_cfg, base_ref) if base == cfg["defaultBranch"] else None
         claimed, trailer = bool(resumed), None  # claimed: the pushed commit holds a Record-claim
         pushed = False  # true once this run pushed a commit: the run stops there, and the next confirm reads that commit's checks
-        say("merge: checking the head's checks and runs ...")  # before the read, which can block
-        state = host.head_state(n, info["head"])  # a resumed claim is the head: the claim commit's own checks are read, never the head under it
-        not_green = head_not_green(state)
-        if not_green and state.startswith("unknown ("):  # a read that could not run, a network fault included, is not a verdict on the head
-            raise Stop(f"{not_green}. Nothing was claimed or pushed. {GREEN_CITE}")
-        if not_green:
-            raise Stop(f"the head's own checks are not green, so nothing was claimed or pushed {GREEN_CITE}: {not_green}.")
+        with timed_phase("head-checks"):
+            say("merge: checking the head's checks and runs ...")  # before the read, which can block
+            state = host.head_state(n, info["head"])  # a resumed claim is the head: the claim commit's own checks are read, never the head under it
+            not_green = head_not_green(state)
+            if not_green and state.startswith("unknown ("):  # a read that could not run, a network fault included, is not a verdict on the head
+                raise Stop(f"{not_green}. Nothing was claimed or pushed. {GREEN_CITE}")
+            if not_green:
+                raise Stop(f"the head's own checks are not green, so nothing was claimed or pushed {GREEN_CITE}: {not_green}.")
         if base != cfg["defaultBranch"]:
             if head_claim(wt):  # an old claim would put real ids into a branch that is not the default
                 raise Stop(f"{info['head'][:7]} on {branch} holds a Record-claim, and {base} is not the default branch {STAMP_CITE}. Revert that commit and run again.")
@@ -3926,7 +4109,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                     say(f"merge: {stands}. The green run stands.")
                 return proof
 
-            prove(fail)
+            with timed_phase("prove"):
+                prove(fail)
             if pushed:  # the first step of two: the pushed commit's own checks start now, and the merge call waits for the next confirm
                 say(f"merge: the claim is pushed to {branch} at {claim_sha[:9]}. Nothing was merged. Run --confirm again when the new head is green. {CLAIM_STEP_CITE}")
                 return 0
@@ -3937,7 +4121,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             rule_files = [x for x in names.split("\0") if x.lower() in RULE_FILES or x.lower().startswith(RULE_PREFIX)] if c == 0 else None
             host.commit_message = lift_message(lifts)
             merging = True
-            commit, msg = host.merge(n, m["method"], sha)
+            with timed_phase("merge-call"):
+                commit, msg = host.merge(n, m["method"], sha)
             merging = False
             if not commit:
                 fail("the merge was refused " + REFUSED_CITE + ":\n" + msg)
@@ -4004,6 +4189,14 @@ def lint_state(bodies, head):
             got = [m.group(1) for m in (re.fullmatch(r"Result: (PASS|FAIL)", l) for l in lines) if m]
             return got[0].lower() if got else "unknown"
     return "none"
+
+def hand_off_pass(host, n, info, head):
+    """True when a lane-lint PASS comment on pull request `n` names `head`, read as the join reads it. A failed read, no comment, another head and a non-PASS result are False."""
+    try:
+        lints = host.issue_comments(info.get("created") or "1970-01-01T00:00:00Z")[1]
+    except Stop:
+        return False
+    return lint_state(lints.get(n, []), head) == "pass"
 
 def lint_heads(bodies):
     """-> the distinct heads the lane-lint comments of `bodies` (oldest first) name, newest first."""
@@ -5043,7 +5236,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 raise Stop("not in a git checkout " + LANE_LINT_CITE)
             with release_on_signals():  # a signal ends the run through lane_lint's `finally`, which removes the worktree
                 with_prs = parse_with(a.with_prs, int(a.pr)) if a.with_prs is not None else ()  # a bad list stops before any read
-                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok, with_prs, a.touched_tests)  # before the role check and any lock: it merges and pushes nothing
+                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok, with_prs, a.touched_tests, pre_join=read_merge_role() == "batch-runner")  # before the role check and any lock: it merges and pushes nothing
         if a.release_check:
             try:
                 c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=a.repo_dir)  # -C names the checkout; None is the process directory's

@@ -49,7 +49,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `git-never-merge-failing-ci` | Never merge a PR whose own run is red, or onto a red main, except its revert. | [`CLAUDE.md`](../CLAUDE.md) |
 | `gh-write-cloud` | In a cloud session, a `gh` pr, issue or `gh api` write is refused: write through the GitHub MCP tools or the merge tool. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-red-main-reverts` | While main's newest finished run is red, only the revert of the blamed commit merges, with `--base-red-ok "<reason>"`, until the revert's run on main is green. | [`CLAUDE.md`](../CLAUDE.md) |
-| `git-ci-wait-checks-in` | A session that waits on CI sets a one-time check-in when it starts to wait, and again after each red job, each wider apart. | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-ci-wait-checks-in` | A session that waits on CI sets a one-time check-in when it starts to wait, and again after each red job, each wider apart, never past 55 minutes. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-ci-done-comment-wakes` | A run that ends red posts one PR comment, which wakes the session that watches the PR (decision `ci-wait-reads-run-status`). | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-discard-output` | Keep git write output. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-remedy-never-names-target` | A refusal's printed remedy never names the forbidden target. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -146,6 +146,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ci-job-caps` | Owner, 2026-11-01 18:44 CST: each owner repo raises its job caps generously, as a stopgap, until its time-pinned tests are gone. | [`docs/decisions/ci-job-caps.md`](../docs/decisions/ci-job-caps.md) |
 | `ci-step2-bar` | Owner, 2026-10-28 13:40 CDT (waiting page item 34, pick b), roadmap step c95, step 2: count the real Windows or Mac bugs that reach main, and weigh that count against what step 2 saves. | [`docs/decisions/ci-step2-bar.md`](../docs/decisions/ci-step2-bar.md) |
 | `ci-unknown-is-red` | A lint that cannot read its input prints UNKNOWN. | [`docs/decisions/ci-unknown-is-red.md`](../docs/decisions/ci-unknown-is-red.md) |
+| `ci-wait-cap-guard` | The guard refuses a `send_later` call that waits on CI for longer than the cap (rule `ci-wait-cap`, in `hooks/guard.py`). | [`docs/decisions/ci-wait-cap-guard.md`](../docs/decisions/ci-wait-cap-guard.md) |
 | `cite-by-id-refuses-unread-file` | Owner, 2026-10-17 11:40 CDT (guard audit, finding 7): the guard refuses `git commit -F <file>` when it cannot read the file at hook time. | [`docs/decisions/cite-by-id-refuses-unread-file.md`](../docs/decisions/cite-by-id-refuses-unread-file.md) |
 | `claude-md-shrink` | Owner, 2026-10-16 23:53 CDT and 2026-10-17 00:40 CDT: | [`docs/decisions/claude-md-shrink.md`](../docs/decisions/claude-md-shrink.md) |
 | `commit-hook-bypass-refused` | The guard refuses a `git commit`, `git merge` or `git push` that skips git hooks (rule `hook-bypass`). | [`docs/decisions/commit-hook-bypass-refused.md`](../docs/decisions/commit-hook-bypass-refused.md) |
@@ -206,6 +207,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `merge-deletes-batch-lanes` | Owner pick A for R42 part 2 (per-lane merge). | [`docs/decisions/merge-deletes-batch-lanes.md`](../docs/decisions/merge-deletes-batch-lanes.md) |
 | `merge-lock` | One lock holds each base branch while a merge run works on it. | [`docs/decisions/merge-lock.md`](../docs/decisions/merge-lock.md) |
 | `merge-needs-current-base` | Owner pick A for R42 part 2 (per-lane merge). | [`docs/decisions/merge-needs-current-base.md`](../docs/decisions/merge-needs-current-base.md) |
+| `merge-phase-timing` | Coordinator, 2026-11-14 06:51 CST, folded from step `merge-tool-phase-timing`: one merge run shows where its time goes. | [`docs/decisions/merge-phase-timing.md`](../docs/decisions/merge-phase-timing.md) |
 | `merge-practices` | Owner, page item 150, pick a, 2026-11-06 12:58 CST ("Build the small proof"): decision `test-practices` stays the testing chapter. | [`docs/decisions/merge-practices.md`](../docs/decisions/merge-practices.md) |
 | `mistake-means-missing-guard` | Owner, 2026-11-06 11:38 CST: AI sometimes assumes it broke something by accident. | [`docs/decisions/mistake-means-missing-guard.md`](../docs/decisions/mistake-means-missing-guard.md) |
 | `mockup-home` | Git is each artifact's home (owner ruling fb-1458-1, 2026-11-02 14:58 CST, option A). | [`docs/decisions/mockup-home.md`](../docs/decisions/mockup-home.md) |
@@ -439,6 +441,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `pinoff1-freshness-flaky` | Case pinoff1 expected one freshness line and got none, on a commit that changed only the records page (run 39080117103). | [`docs/debts/pinoff1-freshness-flaky.md`](../docs/debts/pinoff1-freshness-flaky.md) |
 | `playwright-rows-measure` | Unmeasured: whether the Playwright rows in the guard suite (family `kill`, `tests/guard/`) still stop a real mistake. | [`docs/debts/playwright-rows-measure.md`](../docs/debts/playwright-rows-measure.md) |
 | `pr-ready-unguarded` | The `draft-pr` guard rule reads only the create command and the MCP create tool. | [`docs/debts/pr-ready-unguarded.md`](../docs/debts/pr-ready-unguarded.md) |
+| `prejoin-skip-no-mutate-mark` | The batch runner's pre-join lint skips the mutation run when a hand-off lint PASS names the live head. | [`docs/debts/prejoin-skip-no-mutate-mark.md`](../docs/debts/prejoin-skip-no-mutate-mark.md) |
 | `press-clause-hides-owner-press` | The press-link check excuses a session-subject clause when it holds no `you` and no owner's name as subject of a present or future press or act verb. | [`docs/debts/press-clause-hides-owner-press.md`](../docs/debts/press-clause-hides-owner-press.md) |
 | `ps-assign-in-braces` | A PowerShell assignment inside braces is not read, so a write to a frozen path `T` through that variable is allowed. | [`docs/debts/ps-assign-in-braces.md`](../docs/debts/ps-assign-in-braces.md) |
 | `ps-command-misses-bash` | Guard rule `command-in-item` refuses a `powershell` string only for `&&`, `\|\|`, `<<`, `<<<`, `/dev/null` and `export`. | [`docs/debts/ps-command-misses-bash.md`](../docs/debts/ps-command-misses-bash.md) |
@@ -468,6 +471,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `session-start-bare-fetch` | The `SessionStart` hook in `settings.json` runs a bare `git fetch -q origin`, which fetches every branch (2,715 remote-tracking refs counted on 2026-11-12). | [`docs/debts/session-start-bare-fetch.md`](../docs/debts/session-start-bare-fetch.md) |
 | `session-start-handoff-text` | `hooks/session_start.sh` line 18 tells a session that wants a merge to hand the branch, head and PR to the batch runner. | [`docs/debts/session-start-handoff-text.md`](../docs/debts/session-start-handoff-text.md) |
 | `sharables-adopts-the-stamp` | claude-sharables claims record ids with its own `scripts/check_records.py --claim-ids --apply`. | [`docs/debts/sharables-adopts-the-stamp.md`](../docs/debts/sharables-adopts-the-stamp.md) |
+| `shard-stops-unpinned` | Three `raise Stop` in the mutation test run have no test that reaches them. | [`docs/debts/shard-stops-unpinned.md`](../docs/debts/shard-stops-unpinned.md) |
 | `short-copy-passes` | A child line that copies a claude-settings grant in under 12 words passes the restates group. | [`docs/debts/short-copy-passes.md`](../docs/debts/short-copy-passes.md) |
 | `silent-undo-rebase-no-merge` | `revived_notes` replays the branch's own commits and flags a note that a merge put back. | [`docs/debts/silent-undo-rebase-no-merge.md`](../docs/debts/silent-undo-rebase-no-merge.md) |
 | `skill-copy-no-typescript` | A copy of the skill folder outside the clone finds no `node_modules`, so `map-check.mjs` and `map-picture.mjs` cannot load `typescript` there. | [`docs/debts/skill-copy-no-typescript.md`](../docs/debts/skill-copy-no-typescript.md) |
