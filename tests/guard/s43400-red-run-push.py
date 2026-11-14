@@ -2,9 +2,9 @@
 FAMILY = "red-run"  # the push check on test commits (rule red-run, decision red-run-trailer-on-test-commits)
 
 # A Bash `git push` is refused when a commit the push sends adds lines to a test path and carries no valid
-# Red-run line. A valid line is `Red-run: <command> -> <N> failed on <sha>` (N 1 or more, sha 7 or more hex
-# digits) or `Red-run: none: <reason>`. A refusal names only acts the guard allows with no force push. A push
-# that sends no test commit makes no git spawn beyond the ones it made before the rule.
+# Red-run trailer. A valid trailer is `Red-run: <command> -> <N> failed on <sha>` (N 1 or more, sha 7 or more hex
+# digits) or `Red-run: none: <reason>`. A refusal names only acts the guard allows with no force push. The check
+# runs one `git log` per push and no diff.
 RR_RULE = "red-run"
 RR_TEST = "hooks/test_x.py"
 RR_TEST_TEXT = "def test_x():\n    assert 1 == 1\n"
