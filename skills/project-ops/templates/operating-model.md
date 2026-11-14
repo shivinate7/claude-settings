@@ -142,7 +142,7 @@ parent, or miss a message while busy.
   `Deferred (owner, <date>): <why>`, and waits. All other work runs, in roadmap order.
 - A lane that hits a question for the owner parks that part, and goes on.
 - A lane posts its review log on its PR after each round (claude-settings record
-  `pr-review-record`). The batch runner finds it. The lane first runs `merge --lane-lint <pr>`. The batch
+  `pr-review-record`). The batch runner finds it. The record's print (`merge <pr> --review-record`) first runs the lane lint on the head, and prints only on a PASS. A review log with at least one round, every line FAIL, prints with no lint. The batch
   runner runs it again on each lane head before the join, and refuses a red lane (claude-settings record
   `lanes-run-no-full-ci-job`). A lane never rebases onto main and never merges. After a batch merges, a handed-in PR that conflicts with the new main gets one main merge by its lane (step `post-batch-conflict-merge`; whether a review of only the resolved hunks suffices is the owner's open item 651).
 - A record that files an owner ruling gets a round 1 review before it merges. Round 1 checks two things only (claude-settings decision `docs-only-prs-skip-review`).
