@@ -24,6 +24,8 @@ A PostToolUse hook on Bash, PowerShell and the GitHub MCP `update_pull_request` 
 
 Why: sessions waited for CI with long background commands that ran on for hours.
 
+The CI wake is a named exception to rule `outcomes-mechanize-rules` (owner ruling, Cockpit item 180, pick a, 2026-11-06 12:19 CST; home `.claude/rules/hooks.md`). Status: ruled (`stall-watch-exceptions-180a`). The watch lives up to its 3300 s budget. Cost, per `outcomes-mechanize-rules`: each status read starts one `gh` child (`hooks/ci_wake.py`, `gh`), and that count is unpinned (note `ci-wake-gh-proxy`). The watch itself runs inside the hook process (`hooks/test_ci_wake.py`, class `CostTests`). The hook makes no model call. Each PR keeps a lock file, named by its URL, for the next watch of that PR (`hooks/test_ci_wake.py`, class `CostTests`). A second watch of the same PR exits at once and writes no file (same class). A run that never completes is read at most 35 times, up to the 3300 s budget (same class). The hook's own timeout is 3600 s. Whether the watch costs less than what it watches is unmeasured.
+
 ### The cloud wake
 
 A cloud session marks a PR ready by MCP `update_pull_request` with `draft: false`. The PostToolUse row for `ci_wake.py` covers that call, and python starts only for a ready call. Whether the hook and its `gh` reads run in a cloud session is unmeasured: no live cloud run exists yet. Until one does, the session also waits through the PR subscription. A watched PR wakes its session on a new comment, a review, and a run whose jobs all passed. A run with a red job sends no "all checks done" wake, and a green job alone wakes nobody. Why: a red job can go unseen for hours when no session sets a check-in (owner gripe, 2026-10-26: about 2.5 hours).

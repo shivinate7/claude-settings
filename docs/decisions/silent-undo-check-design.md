@@ -22,8 +22,17 @@
 
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses
-nothing. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
+nothing. Among commits the oldest reason for a path wins, and a later commit does not replace it. In the merge tool (the CLI and CI pass no body) a PR-body line wins over the commits. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
 reason. No switch turns the check off.
+
+A refusal prints the whole remedy, so the author can copy it: a commit message between the lines
+`--- begin commit message ---` and `--- end commit message ---`. The two marker lines are not part of the
+message, and the refusal says to drop them. Then it prints the command
+`git log -1 --format='%(trailers:key=Drops-lines)'` to run after the commit. Git reads trailers only in a
+message's last paragraph, so the `Drops-lines`, `Co-Authored-By` and `Claude-Session` lines sit together in
+one paragraph under the subject. `remedy_text()` in `lint/check_silent_undo.py` is the one home of that text.
+The CLI and both refusals of `merge/merge.py` `undo_check` (a finding, and an UNKNOWN that carries a finding) print it.
+A refusal for an UNKNOWN with no finding names no drop and prints no remedy.
 
 A deleted debt file has a second escape: a `Retire-run: <slug> -- <run URL>` in the PR body's last paragraph
 that the debt-close check accepts (decision `debt-close-runs-retire`). It excuses only that debt's path, never
@@ -71,7 +80,14 @@ changed lines are a new edit, so the reversal dial stays at one line until a mea
 - A rename git pairs (`-M`, 50% similar or more): the new file is judged on its edits, as if made in place. Below that it stays a delete and an add.
 - A re-wrapped prose line. A short line never passes as a re-wrap.
 - A rewrite by the resolver, when a line of the same hunk reads very much like the lost line. Adding
-  tokens to a line (a new argument) is a rewrite when it adds no negation.
+  tokens to a line (a new argument, a trailing clause) is a rewrite. A negation voids that only when it sits
+  inside the original words (`deploy now` became `deploy not now`). A negation after the last original word
+  is new text beside the old, so the line is not lost, but only in a prose file (.md, .txt, .rst, by lower-cased
+  extension). In any other file a negation anywhere in the new line counts (`retry = 3` became
+  `retry = 3 if not CI else 0`). Trailing punctuation of the old line is no word.
+  Two more cases keep the plain rule in prose, where a negation anywhere counts: an old line with no word (`}`), and a
+  new line with a comment opener (`#`, `//`, `--`, `/*`) that the old line lacks, since the old words may
+  sit inside a comment.
 - A stale value put back is a reversal, never a rewrite. A similar line excuses a drop only when it
   differs from both the lost line and the base line, and its operators and negation match the lost line.
   Numbers may differ only when both sides changed the base line (a third value).
