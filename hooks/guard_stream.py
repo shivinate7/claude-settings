@@ -336,7 +336,7 @@ def _ends_in_ampersand(stages, first: int) -> bool:
     `backgrounding_amp` reads it as none."""
     for segment in stages[first:]:
         tokens = segment_tokens(segment)
-        if tokens and backgrounding_amp(segment, tokens):
+        if tokens and backgrounding_amp(segment, tokens, _skip_assignments_and_keywords(tokens)):
             return True
     return False
 
@@ -347,7 +347,7 @@ def _list_ends_in_ampersand(segments, ends, after: int) -> bool:
     list runs on through `|`, `&&` and `||` and stops at `;` or a newline, or at the first `&`."""
     for segment, end in zip(segments[after:], ends[after:]):
         tokens = segment_tokens(segment)
-        if tokens and backgrounding_amp(segment, tokens):
+        if tokens and backgrounding_amp(segment, tokens, _skip_assignments_and_keywords(tokens)):
             return True
         if end not in ("|", "&&", "||"):
             return False
