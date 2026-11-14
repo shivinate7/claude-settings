@@ -1,0 +1,10 @@
+{
+  "at": "2026-11-13T19:42:37-06:00",
+  "title": "Sessions add a repo themselves with add_repo, and the mailbox work notes to always add it",
+  "ruling": "Owner 19:42 CST Nov 13, page item 763 (act-env-repo-list-mailbox), no option, note only: a session can add the repo itself if it tries, and this should be noted so sessions always add it. His words say nothing about push access: an attach with push stays the owner's word only (standing rule from his earlier rulings). Saved 19:42 CST; triage filed it at 21:15 CST.",
+  "quote": "sessions can just add it if they tried it shd just be noted to add it always",
+  "source": "Page answers/act-env-repo-list-mailbox, saved 2026-11-14T01:42:37Z; filed by triage.",
+  "step": "mail-send-cloud-auth",
+  "id": "own-763-add-repo-self",
+  "status": "open"
+}

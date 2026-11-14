@@ -1,0 +1,14 @@
+{
+ "id": "answered-open-check",
+ "title": "Triage lists every answered-but-open page item at the start of each turn, and a check fails when one has sat unfiled for an hour",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The owner asked why 101 items showed as answered. 39 were items he had answered that triage had not closed or routed; eight of his answers saved at 19:42 CST Nov 13 were filed 93 minutes later or not yet.",
+ "source": "Owner chat 21:1x CST Nov 13; triage measurement and an audit agent's table.",
+ "note": "Triage 21:13 CST Nov 13: measured 62 closed lines plus 39 open items with a saved answer = 101 (inferred from the data; the page code is unread). Audit of the 39: 7 close, 27 keep open, 5 unclear. Triage closed 7 + 2 (763, 738) with rulings and a ledger in the outbox; 775 stays open with a new reply. Cause: no read of the answers collection on open items runs on any trigger. Fix: the waiting-page skill's page-writer turn lists answered-but-open items first; a check flags one open more than an hour after its answer with no ruling or step naming its item number. Red case first.",
+ "updatedAt": "2026-11-13T21:13:52-06:00"
+}

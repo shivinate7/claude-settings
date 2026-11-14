@@ -1,0 +1,10 @@
+{
+  "at": "2026-11-13T19:42:37-06:00",
+  "title": "Do not pass the unknown lint on #3259; wait for #3282 to clear the cause",
+  "ruling": "Owner 19:42 CST Nov 13, page item 775 (act-lint-unknown-ok-3259), choice b: wait; #3282 merges right after #3290 and clears the cause. His note is a belief, not a measurement. Triage read both by REST at 21:15 CST: #3282 is CLOSED, not merged (closed 17:03 CST Nov 13, merged false; runner 10 closed it for #3302 per the roadmap record), and #3259 is an open draft (head bc340e9e2ca8). So the wait is moot, since #3282 will never merge. The unknown on #3259 stays unlifted; whether the cause is cleared by #3302 is unchecked. Saved 19:42 CST; triage filed it at 21:15 CST.",
+  "quote": "i think it alrdy merged",
+  "source": "Page answers/act-lint-unknown-ok-3259, saved 2026-11-14T01:42:37Z; REST read of PR 3259; filed by triage.",
+  "step": "operating-model-role-handoffs",
+  "id": "own-775-b-wait",
+  "status": "open"
+}

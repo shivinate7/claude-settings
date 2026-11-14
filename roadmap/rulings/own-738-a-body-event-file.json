@@ -1,0 +1,10 @@
+{
+  "at": "2026-11-13T19:42:37-06:00",
+  "title": "Keep ruling 411 a: the silent-undo check reads the PR body from the event file in CI",
+  "ruling": "Owner 19:42 CST Nov 13, page item 738 (pick-411a-body-event-file), choice a: keep 411 a, the body is read from the event file in CI. Saved at 19:42 CST; triage filed it at 21:15 CST, 93 minutes later, from the audit of answered-but-open items.",
+  "quote": "A: Keep 411 a, body read from the event file in CI (recommended)",
+  "source": "Page answers/pick-411a-body-event-file, saved 2026-11-14T01:42:37Z; filed by triage.",
+  "step": "silent-undo-ci-body",
+  "id": "own-738-a-body-event-file",
+  "status": "open"
+}
