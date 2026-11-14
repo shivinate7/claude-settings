@@ -1,0 +1,10 @@
+{
+ "id": "own-825-rush-grant-line-fix",
+ "at": "2026-11-14T15:04:29-06:00",
+ "title": "The fix for the blocked inbox line comes first; nobody edits around the refusal.",
+ "ruling": "Owner, page item 825 (pick-relabel-fb-0040-1), \"none of these\", saved on the page at 15:04 CST Nov 14, note verbatim: \"rush its fix\". Triage's reading, not his words: he picked none of a (wait), b (he edits) or c (override), and asks that the fix lane for step grant-line-not-grant-word go first, which is a with a priority. No override was typed. The classifier's refusal stands; no session edits line fb-0040-1 around it.",
+ "quote": "rush its fix",
+ "source": "waiting/answers/pick-relabel-fb-0040-1.json (21:04:29Z Nov 14, choice none). Owner.",
+ "status": "open",
+ "step": "grant-line-not-grant-word"
+}

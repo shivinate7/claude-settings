@@ -1,0 +1,10 @@
+{
+ "id": "own-823-b-revert-merge-lifts-red",
+ "at": "2026-11-14T15:04:29-06:00",
+ "title": "A revert merged with its tree already proven lifts red main.",
+ "ruling": "Owner, page item 823 (pick-revert-skipped-run-red-main), option b, saved on the page at 15:04 CST Nov 14 with no note: a revert merged with its tree already proven lifts red main (745 b made live). The option carried widens:true, so the owner chose the widening knowingly. The grant covers a revert only, whose tree is already proven; any other merge onto red main stays refused. Cost named in the option: a revert that does not fix the failure reads clear until the next full run. Options a and c are not chosen. Ruling own-745-b-resume-at-revert is now live, not a target.",
+ "quote": "b",
+ "source": "waiting/answers/pick-revert-skipped-run-red-main.json (21:04:29Z Nov 14, choice b, optionId revert-merge-lifts-red). Owner.",
+ "status": "open",
+ "step": "revert-merge-lifts-red-main"
+}
