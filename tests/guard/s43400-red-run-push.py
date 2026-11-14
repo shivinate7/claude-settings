@@ -41,6 +41,9 @@ RR_LANEREBASE = os.path.join(RRROOT, "rr-lanerebase")  # the same, then a rebase
 RR_CHAIN = os.path.join(RRROOT, "rr-chain")            # a fresh branch, no upstream, untracked test and docs files
 RR_NOBASE = os.path.join(RRROOT, "rr-nobase")          # no remote, no tracking ref, no main
 RR_GAPDOCS = os.path.join(RRROOT, "rr-gapdocs")        # an untrailered test commit, then a docs commit on top of it
+RR_HEREDOC = os.path.join(RRROOT, "rr-heredoc")        # test lines staged and not committed: the commit is in the call
+RR_BELOW = os.path.join(RRROOT, "rr-below")            # an untrailered test commit, then a docs commit on top of it
+RR_LIMIT = os.path.join(RRROOT, "rr-limit")            # an untrailered test commit, then a docs file staged for the commit forms below
 RR_TRAILER_FIXTURES = (
     (RR_PLAIN, None),
     (RR_RED, RR_RED_LINE),
@@ -218,6 +221,72 @@ rr_refuse("a commit --amend that gives the docs commit on top a Red-run line, wi
           VCS + ' commit --amend -m s -m "Red-run: none: x" && ' + VCS + " push", RR_GAPDOCS)
 
 
+def _build_red_run_heredoc_below_limit():
+    _cmk_pushed(RR_HEREDOC, RR_BASE)
+    write(os.path.join(RR_HEREDOC, RR_TEST), RR_TEST_TEXT)
+    _rr_run(RR_HEREDOC, "add", "-A")
+
+    _cmk_pushed(RR_BELOW, RR_BASE)
+    _rr_commit(RR_BELOW, {RR_TEST: RR_TEST_TEXT}, RR_SUBJECT)
+    _rr_commit(RR_BELOW, {"docs/x.md": "# X\n"}, "docs on top of an untrailered test commit")
+
+    _cmk_pushed(RR_LIMIT, RR_BASE)
+    _rr_commit(RR_LIMIT, {RR_TEST: RR_TEST_TEXT}, RR_SUBJECT)
+    write(os.path.join(RR_LIMIT, "docs", "y.md"), "# Y\n")
+    _rr_run(RR_LIMIT, "add", "-A")
+    write(os.path.join(RR_LIMIT, "msg.txt"), "docs y\n")
+
+
+lazy_fixture([RR_HEREDOC, RR_BELOW, RR_LIMIT], _build_red_run_heredoc_below_limit)
+
+# 9. A heredoc message is judged on its body, so a Red-run trailer in the body is a valid line. The bare heredoc is
+# the green control: a body with no trailer is refused.
+HEREDOC_HEAD = VCS + ' commit -m "$(cat <<\'EOF\'\n'
+HEREDOC_TAIL = '\nEOF\n)" && ' + VCS + " push"
+rr_allow("a heredoc commit message with a Red-run trailer in its body, then a push",
+         HEREDOC_HEAD + RR_SUBJECT + "\n\n" + RR_NONE_LINE + HEREDOC_TAIL, RR_HEREDOC)
+rr_refuse("a heredoc commit message with no Red-run trailer in its body, then a push",
+          HEREDOC_HEAD + RR_SUBJECT + HEREDOC_TAIL, RR_HEREDOC)
+
+# 10. A flagged commit below the tip. The refusal must print a git command that names that commit, and the guard must
+# allow each such command, run in the fixture. The push is left out: its range is the rewritten history, which the
+# fixture does not hold. Why: a remedy that amends only the tip does not reach the commit that was flagged.
+RR_BELOW_LACKS = ("git switch", "git checkout", "cherry-pick", "new branch", "replacement PR", "--force")
+RR_BELOW_LABEL = ("red-run: a flagged commit below the tip: the refusal prints a git command that names that commit, "
+                  "and each such command, run in the fixture, is allowed")
+LOG_FAMILY[RR_BELOW_LABEL] = FAMILY
+
+
+def rr_below_remedy_case():
+    """The refusal of a push that sends a flagged test commit below the tip prints a remedy that reaches that commit."""
+    materialize(RR_BELOW)
+    got, reason = decide(_rr_case(VCS + " push", RR_BELOW))
+    if got != "deny" or RR_RULE not in reason:
+        return False, "a push of an untrailered test commit below the tip is %s, want deny under %s: %s" % (
+            got, RR_RULE, reason[:100])
+    remedy = reason.split("Remedy:", 1)[-1]
+    lacked = [fragment for fragment in RR_BELOW_LACKS if fragment in remedy]
+    if lacked:
+        return False, "the refusal's remedy names %r, which is no act the guard allows with no force push" % lacked[0]
+    below = run_vcs(RR_BELOW, "rev-parse", "HEAD~1").stdout.strip()
+    short = below[:7]
+    commands = [span for span in re.findall(r"`([^`]*)`", remedy) if "git " in span]
+    names = [span for span in commands if "<sha>" in span or short in span]
+    if not names:
+        return False, "the refusal prints no git command that names the commit below the tip: %s" % remedy[:120]
+    for span in names:
+        if re.search(r"\bgit push\b", span):
+            continue
+        filled = span.replace("<sha>", short)
+        filled = re.sub(r"Red-run: \.\.\.", "Red-run: none: x", filled)
+        filled = re.sub(r"<[^>]*>", "s", filled)
+        got, reason = decide(_rr_case(filled, RR_BELOW))
+        if got != "allow":
+            return False, "the printed command `%s`, run in the fixture, is %s, want allow: %s" % (
+                filled, got, reason[:100])
+    return True, "the refusal prints a git command that names the commit below the tip, and each one is allowed"
+
+
 def rr_remedy_case():
     """The refusal of a test commit with no Red-run line prints only commit and push, and the amend it prints, run
     with a Red-run line and then a push, is allowed. Scope first: the push is refused under the rule. Why: a remedy
@@ -250,4 +319,4 @@ RR_REMEDY_LABEL = ("red-run: the refusal of a test commit names only commit and 
                    "run with a Red-run line, is allowed")
 LOG_FAMILY[RR_REMEDY_LABEL] = FAMILY
 # LOG_CHECKS_EXTRA joined LOG_CHECKS in section 40805, so this check joins LOG_CHECKS here, as section 42840 does.
-LOG_CHECKS = LOG_CHECKS + ((RR_REMEDY_LABEL, rr_remedy_case),)
+LOG_CHECKS = LOG_CHECKS + ((RR_REMEDY_LABEL, rr_remedy_case), (RR_BELOW_LABEL, rr_below_remedy_case))
