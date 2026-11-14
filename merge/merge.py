@@ -137,7 +137,7 @@
                           no push, no ready mark, no comment, no records page. Exit 0 only when every line is a pass. A repo with no readyChecks runs none.
                           The open-PR clash reads the open PRs through the host's open_pulls (GitHub REST `GET pulls`, the read a lane or runner has),
                           and a failed list read prints `unknown open-PR clash`, never a pass. A clash counts only with a PR that is not a draft; a clash
-                          with a draft is a report line naming the PR and the files (PRE_READY_CLASH_SCOPE: "ready", or "all" for every open PR).
+                          with a draft is a report line `#N shares files: a, b`, read from the changed files alone, with no merge-tree (PRE_READY_CLASH_SCOPE: "ready", or "all" for every open PR).
                           Cost: see run_ready_checks, pre_ready_rows, cross_measure.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
@@ -2512,7 +2512,8 @@ def is_unknown_reason(reason):
     return reason.startswith("unknown (")
 
 PROBE_WORKERS = 8  # parallel `git diff` starts of the open-PR clash's path read (cross_measure, scope "all" or "ready"); each is one short git process
-PRE_READY_CLASH_SCOPE = "ready"  # which open PRs the pre-ready run's clash counts (coordinator ruling, undoable): "ready" counts a clash only with a PR that is not a draft and reports the rest; "all" counts every open PR on the base
+PRE_READY_CLASH_SCOPE = "ready"  # which open PRs the pre-ready run's clash counts (coordinator ruling, undoable): "ready" counts a clash only with a PR that is not a draft and reports the shared files of each draft, with no merge-tree; "all" counts every open PR on the base
+PRE_READY_REPORT_FILES = 5  # shared files a draft's report line names, then "and N more"
 PRE_READY_REPORT_LINES = 5  # report lines the clash verdict prints under its line; a repo with hundreds of drafts would print one for each
 
 def changed_paths(root, base, head):
@@ -2540,13 +2541,13 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     A PR that --with names and that is not open is a Stop here: never a pass. --lint-unknown-ok lifts none of it. A PR posted under another
     session id is found only through --with.
     `scope` is "lane" (the lint's: the lane's PRs and --with), "all" (every other open PR on the same base) or "ready" (the same PRs, but a clash counts only with
-    one that is not a draft: a clash with a draft is a report line, and a draft's own merge with the base is not read). The pre-ready run passes PRE_READY_CLASH_SCOPE. The list is the
+    one that is not a draft: a draft is read by its changed files alone, no merge-tree, and a file it shares with this head is a report line `#N shares files: a, b`). The pre-ready run passes PRE_READY_CLASH_SCOPE. The list is the
     host's open_pulls, GitHub REST through the merge tool's own host, the route a lane or a runner has in a cloud session (no `gh` flag, no GraphQL).
     A failed list read is a Stop, which the pre-ready run reads as unknown, never a pass. In scope "all" or "ready" a PR whose changed paths (changed_paths) meet none of
     this head's (paths_meet) is skipped before any merge-tree: with hundreds open, only an overlap can clash. A diff git cannot read does not skip.
     A PR whose `draft` field is not true or false is an unknown in scope "ready", never a pass.
     Cost of scope "all" or "ready": one list read (a REST page per 100 PRs), one fetch of every branch head, then per other open PR on the base one `git diff`
-    start (PROBE_WORKERS at once), and for an overlap one merge-tree of the two heads (PROBE_WORKERS at once) and, for a clash only, merge_reason's. No file or process is kept."""
+    start (PROBE_WORKERS at once), and for an overlap with a counted PR one merge-tree of the two heads (PROBE_WORKERS at once) and, for a clash only, merge_reason's. No file or process is kept."""
     lane = set(LANE_SESSION.findall(body or ""))
     rows = {d["number"]: d for d in host.open_pulls() if d["number"] != n}
     for m in with_prs:
@@ -2572,11 +2573,22 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         other = rows[m]["head"]["sha"]
         if mine is not None and m not in with_prs and theirs[m] is not None and not paths_meet(mine, theirs[m]):
             continue  # no shared path: nothing to clash
+        if scope == "ready":
+            draft = rows[m].get("draft")
+            if not isinstance(draft, bool):
+                unknown.append(f"  #{m}: the open-PR list does not say whether it is a draft")
+                continue
+            if draft:  # a draft only reports, by the paths it shares: no head read, no merge-tree
+                shared = sorted(mine & theirs[m]) if mine is not None and theirs.get(m) is not None else None
+                if shared is None:
+                    reports.append(f"  #{m} is a draft whose changed files could not be read.")
+                else:
+                    files = ", ".join(shared[:PRE_READY_REPORT_FILES]) or "(a file against a folder of the same name)"
+                    more = f" and {len(shared) - PRE_READY_REPORT_FILES} more" if len(shared) > PRE_READY_REPORT_FILES else ""
+                    reports.append(f"  #{m} shares files: {files}{more}. Not counted: a draft.")
+                continue
         if git(root, "rev-parse", "--verify", "-q", f"{other}^{{commit}}")[0]:  # a fork's head is not on origin, so no fetch brings it
             unfetched.append(f"  #{m}: its head {other[:9]} could not be fetched from origin (a fork's head), so it cannot be compared")
-            continue
-        if scope == "ready" and not isinstance(rows[m].get("draft"), bool):
-            unknown.append(f"  #{m}: the open-PR list does not say whether it is a draft")
             continue
         held = head_holds(root, other, head)
         if held is False:
@@ -2587,16 +2599,15 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         if held:
             continue  # a stack pair
         todo.append(m)
-    drafts = {m for m in todo if rows[m].get("draft") is True} if scope == "ready" else set()  # no merge with the base is read for these: they only report
     if wide and todo and base not in fetched:
         merge_reason(root, n, base, head, fetched)  # the base is fetched once, before the workers below read `fetched`
 
     def read_pair(m):
         """-> ((state, files), why) for PR `m`. why: merge_reason of #m's head, which the lint reads for a clean pair too; scope "all" reads it only for a clash,
-        since whether #m's own head conflicts with the base decides if the clash counts; a draft's clash only reports, so it is never read."""
+        since whether #m's own head conflicts with the base decides if the clash counts."""
         sha = rows[m]["head"]["sha"]
         pair = conflicting_files(root, head, sha)
-        return pair, merge_reason(root, m, base, sha, fetched) if (not wide or pair[0] == "conflict") and m not in drafts else None
+        return pair, merge_reason(root, m, base, sha, fetched) if not wide or pair[0] == "conflict" else None
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:  # each merge-tree is its own git process, and writes only objects
         read = dict(zip(todo, pool.map(read_pair, todo)))
@@ -2610,8 +2621,6 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         named = f"  #{m}: {', '.join(files) or '(no file name read)'}"
         if not head_clean:
             reports.append(f"{named}. Not counted: this head conflicts with {base}, so the clash comes through {base}.")
-        elif m in drafts:
-            reports.append(f"{named}. Not counted: #{m} is a draft.")
         elif why is not None and is_unknown_reason(why):
             unknown.append(f"  #{m}: the clash with this head cannot be counted, because {why}")
         elif why is not None:
