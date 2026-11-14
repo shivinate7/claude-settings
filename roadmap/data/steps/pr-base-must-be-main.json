@@ -1,0 +1,14 @@
+{
+ "id": "pr-base-must-be-main",
+ "title": "A PR create (GitHub MCP or the merge tool) whose base is `stable` is refused at create",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Consultant 01:07 CST Nov 14 (relayed; unchecked by triage): PR #3349 was opened with base `stable`, so the merge tool refused it at merge time (runner 10, 01:05) and it lost an hour. Also named by the consultant: about 80 open drafts stack on lane branches whose bases may be merged or gone; the coordinator sorts those (not part of this step).",
+ "source": "Consultant 01:07 CST Nov 14 (relayed). Neighbours: lane-lint-stack-holds-base (ready: a stacked PR head holds its base), delete-refused-while-pr-base (todo), stacked-head-keeps-go (todo). A stacked lane PR legitimately has a lane branch as base; this step refuses only base `stable`.",
+ "note": "Triage 01:10 CST Nov 14: the mistake the guard would stop: a lane opening a PR against the stable branch instead of main. The harm: the PR is refused at merge, an hour lost. Fix: red first: a create-PR call (GitHub MCP `create_pull_request`, merge tool create) with base `stable` is refused, with a printed remedy that names the right base without naming the forbidden one; controls: base `main` and a stacked lane base pass. The lane first reads why the merge tool refused a `stable` base (the record, not the relay) and says whether the right base is main in every repo. A guard change: own lane, review rounds apply. Not started.",
+ "updatedAt": "2026-11-14T01:10:30-06:00"
+}

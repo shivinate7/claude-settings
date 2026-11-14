@@ -1,0 +1,14 @@
+{
+ "id": "merge-record-fix-check-then-r3",
+ "title": "The merge tool records a fix check after a PASS round, then round 3 with no round 2, the path roles-review-cap-three names for a guard or check change",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 01:06 and 01:07 CST Nov 14 (relayed from batch runner 12, mailaudit #328 head 9a73d3f47c4a; lane review-carries-by-tree says its build does not cover this shape). Rule roles-review-cap-three: a guard or check change that got a fix verifier waits for round 3, and a passing round ends review, so round 1 PASS then fix check PASS then round 3 has no round 2. The tool has no record shape for it. Printed refusals (word for word as relayed): (1) \"--round: the rounds must start at 1, rise by one at a time and stop at 3\"; (2) \"--fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line or a PASS one ...\"; (3) \"this record restarts the review: ... has no fix verifier. A new branch with a new PR is the only way out.\"",
+ "source": "Coordinator 01:06 and 01:07 CST Nov 14 (relayed). Runner 12 now runs three real review rounds on #328 (its option a), so #328 no longer waits on this step. Nearby steps: merge-tool-follows-r9 (done: no round 3 after a passing fix verifier, the opposite direction), merge-requires-guard-round3 (done), merge-lint-fix-no-round-3 (doing), record-replacement-pr-rounds (ready), fix-check-record-carries-rounds (todo), round-one-reset (ready). The lane reads those first and says whether this folds into one of them.",
+ "note": "Triage 01:10 CST Nov 14: the mistake the guard would stop: a runner labelling a fix check as a round that did not run. Fix: red first: the tool accepts the record sequence round 1 PASS, fix check PASS on that head, round 3 PASS on the newer head, and merges only then; controls: a skipped round 2 with no fix check still refuses; a fix check on a head that is not the newest log's head still refuses; a round 3 after a failed fix check still refuses. Label: triage reads this as the tool following a rule the owner already made (roles-review-cap-three names the path), not a repo exception or a widened allow list, so no owner question; the coordinator asked for triage's call, and the owner can overrule. One risk for the reviewer: it loosens what a shared tool accepts, so round 3 judges net safety value. A guard or check change: own lane, review rounds apply. Not started; the coordinator starts no lane for it for now.",
+ "updatedAt": "2026-11-14T01:10:30-06:00"
+}
