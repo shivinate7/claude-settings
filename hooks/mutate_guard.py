@@ -2624,7 +2624,7 @@ MUTATIONS = [
      '            return module.rsplit(".", 1)[-1] + ".py" if module else ""',
      "guard", 'check-tail: python3 -m lint.ste_lint piped to tail, then && git commit, is refused'),
     ('check-tail amp: a job & after a pipeline with a pid captured is no background',
-     '        if tokens and backgrounding_amp(segment, tokens):\n            return True\n    return False\n\n\ndef _list_ends',
+     '        if tokens and backgrounding_amp(segment, tokens, _skip_assignments_and_keywords(tokens)):\n            return True\n    return False\n\n\ndef _list_ends',
      '        if False:\n            return True\n    return False\n\n\ndef _list_ends',
      "guard", 'check-tail: ci-job checks --lint piped to grep FAIL & echo $!, a spaced & with the pid captured, is refused'),
     ('check-tail amp: an && list ended by a job & is no background',
