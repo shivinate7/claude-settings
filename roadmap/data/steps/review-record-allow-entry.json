@@ -1,0 +1,14 @@
+{
+ "id": "review-record-allow-entry",
+ "title": "The auto-mode allow list holds one entry for `merge --review-record` in lane sessions, so a lane posts its own review record",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Owner ruling own-839-a-review-record-allow-entry (page item 839, option a, 14:59 CST Nov 14, no note): add one allow entry for `merge --review-record` in lane sessions. The pattern comes from the lane, and a guard review checks it (the review is the check on the pattern). Home of the change: settings.json autoMode.allow, by a lane through a draft PR, as in the earlier entries (own-759-b-label-allow-entry, own-786-c-base-red-ok-settings); triage edits no settings. The grant covers this one command form and no other. Why: the classifier denied `merge --review-record` five times in the #3407 lane (with `--guard no`, with `--guard yes`, for a round 1 PASS and a round 1 FAIL; the fifth right after a fresh reviewer PASS) while the same form was allowed in the lanes of #3158, #3402, #3400, #3405, #3409 and #3411; coordinator's account, unchecked by triage; floor of 5 denied and 11 allowed calls, rate unmeasured. The cause of the denials is unknown, so the entry may not stop them: the lane that builds it says in its report whether #3407's record posts after the entry, and if it does not, the item returns to the owner. First act of a lane: read the earlier entries and their guard check, write the narrowest pattern that names `merge --review-record` and nothing else, red then green on a test that a nearby form (another merge flag) is still not allowed. Round 3 applies: it widens a guard. Until it merges, #3407 waits: no other form is tried.",
+ "source": "owner page item 839 (answers/pick-review-record-classifier, 14:59 CST Nov 14)",
+ "note": "Filed 15:00 CST Nov 14 by triage. Tracker: the coordinator. No lane yet. Home: record-after-each-round.",
+ "updatedAt": "2026-11-14T15:00:00"
+}

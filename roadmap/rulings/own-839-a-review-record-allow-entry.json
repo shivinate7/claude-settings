@@ -1,0 +1,10 @@
+{
+ "id": "own-839-a-review-record-allow-entry",
+ "at": "2026-11-14T14:59:19-06:00",
+ "title": "One allow entry lets a lane session run `merge --review-record`.",
+ "ruling": "Owner, page item 839 (pick-review-record-classifier), option a, saved on the page at 14:59 CST Nov 14 with no note: add one allow entry for `merge --review-record` in lane sessions; the pattern comes from the lane and a guard review checks it. The option text carried the line \"Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo\", so the owner chose the widening knowingly (as in own-759-b-label-allow-entry and own-786-c-base-red-ok-settings). The grant covers the one entry for `merge --review-record` and no other command or form. The cause of the five denials in the #3407 lane stays unknown, so the entry may not stop them.",
+ "quote": "a",
+ "source": "waiting/answers/pick-review-record-classifier.json (20:59:19Z Nov 14, choice a, optionId allow-entry-review-record). Owner.",
+ "status": "open",
+ "step": "review-record-allow-entry"
+}
