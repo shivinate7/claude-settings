@@ -6,14 +6,16 @@ Owner ruling Q1 a (the cutover), 2026-11-12 09:42 CST, relayed by the coordinato
 
 Owner ruling `own-degen-home-switch-now` (degen and home switch now), 2026-11-13 22:13 CST, is an exception to this decision. Degen and home switch to per-lane merge on the stable branch ahead of the drain. Every other child repo waits for the drain and switches together at the cutover.
 
-State: target, not live, for every other child repo. Degen and home are switched to per-lane merge on the stable branch. claude-settings still batches. The cutover lands with the removal act, act 4 of R42 part 2, which is a branch in progress.
+The exception overrides decision `uniform-over-variants` and ruling `own-act6-draft-prs-when-green` (child-repo draft PRs open once claude-settings main is green; the switch waits for the drain), for degen and home only.
 
-- The merge tool is one shared script that every repo runs (`merge/merge.py`). A cutover in one repo would give that tool two rule sets.
-- Decision `uniform-over-variants` forbids one rule set per repo. Q1 a applies it to the cutover.
+State: target, not live, for every other child repo. Degen and home switch to per-lane merge on the stable branch now. The cutover lands with the removal act, act 4 of R42 part 2, which is a branch in progress.
+
+- The merge tool is one shared script that every repo runs (`merge/merge.py`). A cutover in any repo except degen and home would give that tool two rule sets.
+- Decision `uniform-over-variants` forbids one rule set per repo. Q1 a applies it to the cutover, except for degen and home.
 - Child repos read the stable branch (decision `stable-branch`) and fall back as decision `stable-fallback-warn` says. Both land before the cutover.
 - Until the cutover, every repo except degen and home keeps its batch path, and a red main keeps the brake of decision `no-merge-onto-red-main`.
 
-Why: act 4 changes the shared merge tool. The other child repos would lose batching and get no stable branch or revert route if they cut over ahead of the drain. Refuter, 2026-11-11 22:58 CST, gap 3.
+Why: act 4 changes the shared merge tool. Every child repo except degen and home would lose batching and get no stable branch or revert route if it cut over ahead of the drain. Refuter, 2026-11-11 22:58 CST, gap 3.
 
 Kind: process
 Home: docs/decisions/uniform-over-variants.md
