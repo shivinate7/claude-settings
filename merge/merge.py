@@ -164,7 +164,7 @@ A list read asks for each page by number (`Host.pages`), so no `gh` flag beyond 
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, concurrent.futures, contextlib, datetime, fnmatch, functools, importlib.util, io, json, math, os, pathlib, re, shlex, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, contextlib, datetime, fnmatch, functools, importlib.util, io, json, math, os, pathlib, re, shlex, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -315,10 +315,49 @@ def shared_deadline(seconds):
     finally:
         _READ_DEADLINE = prior
 
-def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
+TREE_GRACE_SECONDS = 10  # end_tree: how long the child's own cleanup may run on SIGTERM before the group gets SIGKILL
+
+def end_tree(proc):
+    """End `proc` and what it started; `proc` leads a group of its own (sh's own_group). POSIX: SIGTERM to the group first, so a child with a handler (bin/ci-job's)
+    can end the process groups it started in sessions of their own, which no signal to this group reaches; then SIGKILL to the group after TREE_GRACE_SECONDS.
+    Windows: taskkill /T /F (its own tree kill, no handler to wait for)."""
+    try:
+        if os.name == "nt":
+            _nowindow.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=TREE_GRACE_SECONDS)
+        else:
+            os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                proc.wait(TREE_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                pass
+            os.killpg(proc.pid, signal.SIGKILL)  # a group member may outlive its leader's exit
+    except (OSError, subprocess.SubprocessError):
+        pass  # already gone
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
+def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False, own_group=False):
+    """Run `args`: -> (exit code, output). live_stderr: the child's stderr goes straight to ours, only its stdout is read.
+    own_group (with live_stderr): the child leads a process group of its own, and a run past `timeout` ends its whole tree (end_tree) before
+    subprocess.TimeoutExpired is raised, with the stdout it printed so far as the exception's `output` (str)."""
     args = [resolve_program(args[0], env), *args[1:]]
     limits = [t for t in (SH_TIMEOUT, timeout) if t is not None]
     timeout = max(0.05, _READ_DEADLINE - time.monotonic()) if _READ_DEADLINE is not None else min(limits) if limits else None
+    if live_stderr and own_group:
+        with _nowindow.Popen(args, cwd=cwd, env=env, stdin=subprocess.PIPE if input is not None else None, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+                             **({"start_new_session": True} if os.name != "nt" else {})) as proc:
+            try:
+                out, _ = proc.communicate(input, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                end_tree(proc)
+                out, _ = proc.communicate()
+                raise subprocess.TimeoutExpired(args, timeout, output=out) from None
+            except BaseException:  # an interrupt of this process: the child is in a group a terminal's ^C does not reach
+                end_tree(proc)
+                raise
+        return proc.returncode, out.strip()
     if live_stderr:  # the child's stderr goes straight to ours; only its stdout is read
         r = _nowindow.run(args, cwd=cwd, input=input, env=env, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", timeout=timeout)
         return r.returncode, r.stdout.strip()
@@ -2609,11 +2648,17 @@ PRE_READY_REPORT_FILES = 5  # shared files a draft's report line names, then "an
 PRE_READY_REPORT_LINES = 5  # report lines the clash verdict prints under its line; a repo with hundreds of drafts would print one for each
 # Bounds of the pre-ready run (margin x10 of the warm worst of 9 runs; a cold runner is unmeasured). A check past its bound reads unknown, never a pass.
 READY_CI_STEP_SECONDS = 300  # each ci-job step of merge.readyChecks: handed to ci-job as CI_JOB_STEP_SECONDS, which kills the step's process tree
-READY_CI_RUN_SECONDS = 900  # the whole ready ci-job run: the backstop under the per-step bound, in place of LINT_SECONDS
+READY_CI_RUN_MARGIN_SECONDS = 300  # a ci-job run's own start-up and wrap-up, over the sum of its steps' bounds
+
+def ready_ci_run_seconds(checks):
+    """The backstop of one ready ci-job run, in place of LINT_SECONDS: each of the `merge.readyChecks` `checks` may take READY_CI_STEP_SECONDS, plus the margin.
+    Computed from the list the run is given, so one more check moves it, and no copy of the count can go stale."""
+    return len(checks) * READY_CI_STEP_SECONDS + READY_CI_RUN_MARGIN_SECONDS
+
 READY_CLASH_SECONDS = 480  # clash_verdict: its merge read and its cross_measure together
 try:
     READY_DEBT_SECONDS = 3 * load_debt_retire().TIMEOUT  # three suites' worth of the debt lint's own per-suite cap, read from its one home, never copied
-except Exception:  # a lint module that cannot load stops only the debt check, as load_debt_retire says, never `import merge`. debt_check raises the same error at once, so it cannot hang; debt_verdict then runs unbounded
+except Exception:  # a lint module that cannot load stops only the debt check, as load_debt_retire says, never `import merge`. debt_read reads the same error as unknown at once, so the unbounded wait has nothing to wait on
     READY_DEBT_SECONDS = None
 
 def changed_paths(root, base, head):
@@ -2628,6 +2673,35 @@ def paths_meet(a, b):
     def dirs(paths):
         return {"/".join(p.split("/")[:i]) for p in paths for i in range(1, p.count("/") + 1)}
     return bool(a & b or a & dirs(b) or dirs(a) & b)
+
+def daemon_map(fn, items, workers=PROBE_WORKERS):
+    """-> [fn(item) for item in items], in the order of `items`, from up to `workers` daemon threads at once; the first exception in that order is raised, as
+    ThreadPoolExecutor.map does. Why not that pool: the interpreter joins a pool's workers at exit, so a worker stuck in a git read held the merge process
+    open after its bound ran out (bounded). A daemon thread holds nothing."""
+    items = list(items)
+    results, errors, todo = [None] * len(items), [None] * len(items), iter(range(len(items)))
+    take = threading.Lock()
+
+    def work():
+        while True:
+            with take:
+                i = next(todo, None)
+            if i is None:
+                return
+            try:
+                results[i] = fn(items[i])
+            except BaseException as e:  # carried to the caller's thread
+                errors[i] = e
+
+    threads = [threading.Thread(target=work, daemon=True) for _ in range(min(workers, len(items)))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    for e in errors:
+        if e is not None:
+            raise e
+    return results
 
 def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean, integration=False, scope="lane"):
     """Check `head` of PR `n` against each other open PR of its lane (a body with the same session URL) and each PR in `with_prs`, with
@@ -2665,8 +2739,7 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     wide = scope in ("all", "ready")
     mine, theirs = (changed_paths(root, base, head) if wide else None), {}
     if mine is not None:  # a diff that succeeds proves the head is in the clone; one that fails (None) falls through to the checks below
-        with concurrent.futures.ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:
-            theirs = dict(zip(picked, pool.map(lambda m: changed_paths(root, base, rows[m]["head"]["sha"]), picked)))
+        theirs = dict(zip(picked, daemon_map(lambda m: changed_paths(root, base, rows[m]["head"]["sha"]), picked)))
     todo = []  # the PRs whose pair is read by merge-tree
     for m in picked:
         other = rows[m]["head"]["sha"]
@@ -2708,8 +2781,7 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         pair = conflicting_files(root, head, sha)
         return pair, merge_reason(root, m, base, sha, fetched) if not wide or pair[0] == "conflict" else None
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:  # each merge-tree is its own git process, and writes only objects
-        read = dict(zip(todo, pool.map(read_pair, todo)))
+    read = dict(zip(todo, daemon_map(read_pair, todo)))  # each merge-tree is its own git process, and writes only objects
     for m in todo:
         (state, files), why = read[m]
         if state == "unknown":
@@ -2751,7 +2823,9 @@ def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None, bound=None, step_
     raw: a list the caller passes to receive every stdout line, for the pre-ready run's one verdict line per step (step_verdicts).
     head_sha: the pushed head, given to ci-job as CI_JOB_HEAD_SHA when the HEAD of `wt` is not that head (lane_lint's merge commit). With none, ci-job
     reads HEAD, and an inherited CI_JOB_HEAD_SHA is dropped, so it never names another tree's head.
-    bound: seconds the whole run may take, LINT_SECONDS when None. A run past it is unknown, and its line names the --step checks it ran, so a stall reads as which checks and how long.
+    bound: seconds the whole run may take, LINT_SECONDS when None. A run past it is unknown: ci-job ends with its steps' process trees (sh own_group, end_tree), and its line names
+    the --step checks it ran, so a stall reads as which checks and how long. What ci-job printed before is kept: a finished step's FAIL or unknown line is in the lines, and `raw` gets
+    every printed line, plus `unknown <step>: did not finish in N s` for each --step that printed none.
     step_seconds: handed to ci-job as CI_JOB_STEP_SECONDS, the bound of each --step step (ci-job kills a step's process tree past it)."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_") and k != CI_JOB_HEAD_SHA_ENV}  # as the merge's own lint run reads it
     if head_sha:
@@ -2760,10 +2834,16 @@ def ci_job_run(wt, *args, notes=None, raw=None, head_sha=None, bound=None, step_
         env["CI_JOB_STEP_SECONDS"] = str(step_seconds)
     seconds = LINT_SECONDS if bound is None else bound
     try:
-        c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=seconds, live_stderr=True)
-    except subprocess.TimeoutExpired:
+        c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=seconds, live_stderr=True, own_group=True)
+    except subprocess.TimeoutExpired as e:
         steps = [b for a, b in zip(args, args[1:]) if a == "--step"]
-        return "unknown", [f"ci-job ({', '.join(steps)}) did not finish in {seconds} s" if steps else f"ci-job did not finish in {seconds} s"], [], False
+        printed = (e.output.decode("utf-8", "replace") if isinstance(e.output, bytes) else e.output or "").splitlines()
+        hits = [m for m in map(STEP_LINE.match, printed) if m]
+        unfinished = [f"unknown {name}: did not finish in {seconds} s" for name in steps if not any(m.group(2) == name or m.group(2).startswith(name + ":") for m in hits)]
+        if raw is not None:
+            raw.extend(printed + unfinished)
+        done = [l.rstrip() for l in printed if l.startswith(("FAIL", "unknown"))]  # a step that finished keeps its verdict, a FAIL included
+        return "unknown", [*done, f"ci-job ({', '.join(steps)}) did not finish in {seconds} s" if steps else f"ci-job did not finish in {seconds} s"], [], False
     lines = out.splitlines()
     if raw is not None:
         raw.extend(lines)
@@ -3715,6 +3795,8 @@ def debt_read(wt, base, host, info):
     """debt_verdict without the bound."""
     try:
         debt_check(wt, f"origin/{base}", host, info)
+    except ImportError as e:  # the lint module (lint/check_debt_retire.py) did not load: only this check is unknown, and the verdict names the module
+        return "unknown", "debt retire", f"the debt-close lint (check_debt_retire) did not load: {' '.join(str(e).split())}"
     except Unread as e:
         return "unknown", "debt retire", " ".join(str(e).split())
     except Dropped as e:
@@ -3767,14 +3849,15 @@ def pre_ready_rows(wt, n, base, checks, pre):
     -> (rows, (state, lines, log)): rows of (verdict, name, detail), and the jobs' ci_job_run answers combined: state fail over unknown over pass, lines and log joined.
     Each job's steps are read from that job's own lines, so a step name two jobs hold reads only its own job.
     Each check has a bound of its own and prints `start: <check> (bound N s)` before it runs (ci-job prints its steps' lines): READY_CI_STEP_SECONDS per ci-job step,
-    READY_CI_RUN_SECONDS for each ci-job run, READY_DEBT_SECONDS, READY_CLASH_SECONDS. A check past its bound is unknown, never a pass.
+    ready_ci_run_seconds(checks) for each ci-job run, READY_DEBT_SECONDS, READY_CLASH_SECONDS. A check past its bound is unknown, never a pass.
     Cost: one ci-job run per job, one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees.
     A bounded check adds one thread; a check that outran its bound may linger until process exit, and a git or gh child it started may outlive the process."""
     rows, states, lines, log = [], [], [], []
+    run_bound = globals().get("READY_CI_RUN_SECONDS") or ready_ci_run_seconds(checks)  # globals(), not the name: the module attribute is computed on demand (__getattr__)
     for job, group in ready_job_groups(checks).items():
         raw = []
         args = [job, "--pinned", *[a for _, bare in group for a in ("--step", bare)], "--base", f"origin/{base}"]
-        state, job_lines, job_log, _ = ci_job_run(wt, *args, raw=raw, bound=READY_CI_RUN_SECONDS, step_seconds=READY_CI_STEP_SECONDS)
+        state, job_lines, job_log, _ = ci_job_run(wt, *args, raw=raw, bound=run_bound, step_seconds=READY_CI_STEP_SECONDS)
         states.append(state)
         lines += job_lines
         log += job_log
@@ -4286,10 +4369,18 @@ def review_round_model(n):
 
 def __getattr__(name):
     """REVIEW_FIX_GUARD_MODEL, the model every fix verifier runs (owner item 444 a; decision pr-review-record): the round row's fallback in the
-    guard, read on use so this file holds no copy and does not load the guard at import. The checks read review_round_model, which also reads the record's row."""
+    guard, read on use so this file holds no copy and does not load the guard at import. The checks read review_round_model, which also reads the record's row.
+    READY_CI_RUN_SECONDS: ready_ci_run_seconds of the `merge.readyChecks` of this repo's own stamp config, read when asked, never held as a number that could go stale.
+    The pre-ready run does not read it: pre_ready_rows computes the bound from the checks it is given. A value set in this module's namespace (a patch, a hand override) replaces that bound."""
     if name == "REVIEW_FIX_GUARD_MODEL":
         import guard as hook_guard
         return hook_guard.ROLE_ROUND_FALLBACK[(REVIEW_ROLES[0], REVIEW_FIX_ROW, "other")]
+    if name == "READY_CI_RUN_SECONDS":
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", DEFAULT_CONFIG), encoding="utf-8") as f:
+                return ready_ci_run_seconds(json.load(f)["merge"]["readyChecks"])
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 def grant_valid(cite):

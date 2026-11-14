@@ -64,8 +64,11 @@
 # start line reads `start: <name> (bound N s)`, and a step still running at N s is killed with its whole process tree (its own
 # session and a group SIGKILL on POSIX, `taskkill /T` on Windows) and prints `unknown <name>: did not finish in N s`, exit 2. Each
 # named step has its own bound, and the steps after it still run. A bound never turns a FAIL or unknown into a pass. A value that is
-# not a positive whole number is one unknown line, exit 2, never no bound. --lint and a plain run ignore it: a hung check must not
-# hold a merge, and the lint run has merge's whole-run bound. Cost: one timer thread per bounded step, cancelled when the step ends.
+# not a positive whole number, or past threading.TIMEOUT_MAX (the longest a timer waits), is one unknown line naming it, exit 2,
+# never no bound. --lint and a plain run ignore it: a hung check must not hold a merge, and the lint run has merge's whole-run bound.
+# Cost: one timer thread per bounded step, cancelled when the step ends.
+# SIGTERM or SIGINT to ci-job ends every running step's tree (end_on_signal), then exits 128 + the signal number, so no step outlives
+# ci-job: merge's whole-run backstop (merge.end_tree) signals ci-job and relies on it. Each verdict line is flushed as it prints.
 # Limit: a descendant that left the step's session or job escapes the kill.
 # --pinned is for merge's ready check: a step whose uses: is a remote `<owner>/claude-settings/actions/<code-check|zizmor>
 # @<40-hex sha>` runs that harness from a tree exported at the sha, so the child is judged by the code it pins, not the local
@@ -506,12 +509,15 @@ def lint_workers():
 
 def step_bound(environ=None):
     """The seconds CI_JOB_STEP_SECONDS gives each --step step: (seconds or None when unset, a reason when the value is not a
-    positive whole number). A bad value is never read as no bound: a caller that set a bound meant to have one."""
+    positive whole number no larger than threading.TIMEOUT_MAX, the longest a timer thread waits). A bad value is never read as no
+    bound: a caller that set a bound meant to have one."""
     raw = (os.environ if environ is None else environ).get(STEP_BOUND_ENV, "").strip()
     if not raw:
         return None, ""
     if raw.isascii() and raw.isdigit() and int(raw) > 0:
-        return int(raw), ""
+        if int(raw) <= threading.TIMEOUT_MAX:
+            return int(raw), ""
+        return None, "%s=%r is more than %d s, the longest a bound can be" % (STEP_BOUND_ENV, raw, int(threading.TIMEOUT_MAX))
     return None, "%s=%r is not a positive whole number of seconds" % (STEP_BOUND_ENV, raw)
 
 
@@ -529,6 +535,18 @@ def kill_tree(proc):
         proc.kill()
     except OSError:
         pass
+
+
+LIVE_STEPS = set()  # the step processes running now: end_on_signal ends each one's tree. A set is read by list(), never under a lock, so a handler cannot wait on one
+
+
+def end_on_signal(signum, frame):
+    """The handler of SIGTERM and SIGINT: end every running step's tree, then exit at once with the signal's conventional code (128 + number). Exiting here, not
+    returning, keeps run_step from printing a verdict for a step this kill ended. The step of a --step run sits in a session of its own, which no signal to ci-job
+    reaches, so only this handler ends it: merge's backstop signals ci-job and relies on it."""
+    for proc in list(LIVE_STEPS):
+        kill_tree(proc)
+    raise SystemExit(128 + signum)
 
 
 def run_step(name, step, install, detail, shell, env, cwd, ctx, log, suite=False, bound=None):
@@ -556,20 +574,22 @@ def run_step(name, step, install, detail, shell, env, cwd, ctx, log, suite=False
                              env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF", PIN_NOTE_ENV, HEAD_SHA_ENV, STEP_BOUND_ENV}},
                                   **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
                                   **env, "VERDICT_LOG": log}) as proc:
-            if bound:
-                def expire():
-                    expired.set()
-                    kill_tree(proc)
-                timer = threading.Timer(bound, expire)
-                timer.daemon = True
-                timer.start()
+            LIVE_STEPS.add(proc)
             try:
+                if bound:
+                    def expire():
+                        expired.set()
+                        kill_tree(proc)
+                    timer = threading.Timer(bound, expire)
+                    timer.daemon = True
+                    timer.start()
                 for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output
                     if line.startswith("verdict: still running"):
                         err_line(line)
                     else:
                         kept.append(line)
             finally:
+                LIVE_STEPS.discard(proc)
                 if timer:
                     timer.cancel()
         if expired.is_set():  # the bound ended it: whatever the step printed so far is no verdict
@@ -851,6 +871,13 @@ def main(argv):
 
 if __name__ == "__main__":
     try:
+        sys.stdout.reconfigure(line_buffering=True)  # each verdict line leaves at once: a caller that ends this run keeps the lines of the steps that finished
+    except (AttributeError, OSError, ValueError):
+        pass  # a stdout that cannot be reconfigured keeps its buffering
+    handlers = {s: signal.signal(s, end_on_signal) for s in (signal.SIGTERM, signal.SIGINT)}
+    try:
         sys.exit(main(sys.argv[1:]))
     finally:
+        for s, handler in handlers.items():
+            signal.signal(s, handler)
         drop_pin_trees()
