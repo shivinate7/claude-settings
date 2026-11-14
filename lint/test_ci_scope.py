@@ -12,6 +12,7 @@ Output names pinned (the `scope` job re-exports them as job outputs):
   STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags; shoot turns on the checks-shoot and checks-waiting-page jobs)
   LINT_FLAGS lint_red_run, lint_plan_refuter, lint_ruling_kind, lint_comment_narration (the four pull-request lint steps of
              the `checks` job; LintStepScope and LintStepWorkflow pin them)
+  records_only_skip  true exactly when the records-only shortcut forced the 13 flags off (RecordsOnlyPush pins it)
 
 Run with:  python3 lint/test_ci_scope.py -v
 """
@@ -635,6 +636,12 @@ class RecordsOnlyPush(unittest.TestCase):
         """The whole PR diff: `paths` in one head commit, with GREEN_HEAD empty."""
         return run(paths, contents=contents)
 
+    def assertSkipFlag(self, got, skipped):
+        """records_only_skip is 'true' when the shortcut forced the 13 flags off, and 'false' in every other case."""
+        self.assertIn("records_only_skip", got, f"ci-scope.sh writes no records_only_skip line: {got}")
+        want = "true" if skipped else "false"
+        self.assertEqual(got["records_only_skip"], want, f"records_only_skip is {got['records_only_skip']}, want {want}: {got}")
+
     # A sibling GREEN_HEAD is not an earlier head of HEAD. Its tree differs from HEAD's by docs/records.md alone, so the
     # delta lists exactly that path, and only the ancestry check tells it apart from a real earlier head. The flags must
     # follow the whole PR diff, never the shortcut.
@@ -647,6 +654,7 @@ class RecordsOnlyPush(unittest.TestCase):
                          f"scope: the delta from GREEN_HEAD to HEAD is not docs/records.md alone: {facts}")
         self.assertIs(facts.get("ancestor"), False, f"scope: GREEN_HEAD is an ancestor of HEAD: {facts}")
         self.assertEqual(differing(got, whole), [], f"a sibling GREEN_HEAD moved a flag off the whole PR diff: {got}")
+        self.assertSkipFlag(got, False)
 
     def test_records_only_delta_after_green_head_sets_all_13_flags_off(self):
         whole = self.whole_pr(self.CODE + [self.RECORDS])
@@ -661,6 +669,20 @@ class RecordsOnlyPush(unittest.TestCase):
         keep = list(LINT_FLAGS) + ["mutation_report"]
         self.assertEqual(differing(got, whole, keep), [], f"a lint flag or mutation_report moved off the whole PR diff: {got}")
 
+    # The skip flag is 'true' exactly when the shortcut forced the 13 flags off. In CI HEAD is the merge commit, so the merged
+    # shape is checked too. The facts are read before the flags and the flag (P7).
+    def test_records_only_skip_flag_is_true_when_the_shortcut_forces_the_flags_off(self):
+        for merged in (None, [self.BASE_CHANGE]):
+            with self.subTest(merged=merged):
+                facts = {}
+                got = run([self.RECORDS], green=self.CODE, merged=merged, facts=facts)
+                self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
+                self.assertEqual(facts.get("delta_pr_head"), [self.RECORDS],
+                                 f"scope: the delta to PR_HEAD is not docs/records.md alone: {facts}")
+                for n in self.OFF:
+                    self.assertEqual(got.get(n), "false", f"{n} stays on after a records-only push past a green head: {got}")
+                self.assertSkipFlag(got, True)
+
     # GREEN_HEAD empty: the earlier head is unknown or its run was red. The whole PR diff decides, as before.
     def test_records_only_green_head_empty_runs_as_before(self):
         whole = self.whole_pr(self.CODE + [self.RECORDS])
@@ -669,6 +691,7 @@ class RecordsOnlyPush(unittest.TestCase):
         got = run([self.RECORDS], green=self.CODE, green_head="", facts=facts)
         self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
         self.assertEqual(differing(got, whole), [], f"an empty GREEN_HEAD moved a flag off the whole PR diff: {got}")
+        self.assertSkipFlag(got, False)
 
     # GREEN_HEAD names a sha the repo lacks: git cannot read the delta from it, so the whole PR diff decides. Never green.
     def test_records_only_green_head_absent_from_repo_runs_as_before(self):
@@ -678,6 +701,7 @@ class RecordsOnlyPush(unittest.TestCase):
         got = run([self.RECORDS], green=self.CODE, green_head=self.ABSENT_SHA, facts=facts)
         self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the real earlier head's delta is not records only: {facts}")
         self.assertEqual(differing(got, whole), [], f"an absent GREEN_HEAD moved a flag off the whole PR diff: {got}")
+        self.assertSkipFlag(got, False)
 
     # Only docs/records.md skips. The delta must be exactly that path, so a second path, of any kind, runs the whole PR diff.
     def test_records_only_delta_with_one_other_path_runs_as_before(self):
@@ -689,6 +713,7 @@ class RecordsOnlyPush(unittest.TestCase):
                 got = run([self.RECORDS, other], green=self.CODE, facts=facts)
                 self.assertEqual(facts.get("delta"), sorted([self.RECORDS, other]), f"scope: the delta is not the two paths: {facts}")
                 self.assertEqual(differing(got, whole), [], f"a second delta path moved a flag off the whole PR diff: {got}")
+                self.assertSkipFlag(got, False)
 
     # The script judges no page content: the `checks` job runs hook_catalog.py --check on the page. So a hand-edited records
     # page skips the same jobs as a generated one, and the lint flags keep their whole-PR values.
@@ -712,6 +737,7 @@ class RecordsOnlyPush(unittest.TestCase):
         for n in JOB_FLAGS + DERIVED_FLAGS + STEP_FLAGS + list(LINT_FLAGS):
             self.assertEqual(got.get(n), "true", f"a push runs {n} whatever GREEN_HEAD says: {got}")
         self.assertEqual(got.get("mutation_report"), "true", f"a push turns mutation_report on: {got}")
+        self.assertSkipFlag(got, False)
 
     # An empty delta (no commit past GREEN_HEAD) is not records-only, so the whole PR diff decides.
     def test_records_only_empty_delta_runs_as_before(self):
@@ -721,6 +747,7 @@ class RecordsOnlyPush(unittest.TestCase):
         got = run([], green=self.CODE, facts=facts)
         self.assertEqual(facts.get("delta"), [], f"scope: the delta from GREEN_HEAD to HEAD is not empty: {facts}")
         self.assertEqual(differing(got, whole), [], f"an empty delta moved a flag off the whole PR diff: {got}")
+        self.assertSkipFlag(got, False)
 
     # Another docs page alone after a green head is not docs/records.md, so it runs the whole PR diff, as before.
     def test_records_only_other_docs_page_alone_runs_as_before(self):
@@ -731,6 +758,7 @@ class RecordsOnlyPush(unittest.TestCase):
         got = run([other], green=self.CODE, facts=facts)
         self.assertEqual(facts.get("delta"), [other], f"scope: the delta is not the one docs page: {facts}")
         self.assertEqual(differing(got, whole), [], f"a docs page other than records moved a flag: {got}")
+        self.assertSkipFlag(got, False)
 
     # In CI HEAD is the merge commit, which also holds a base change the pull request did not make. The delta must run to
     # PR_HEAD, the pull request's own head, or that base change keeps the jobs on. The delta is asserted before the flags.
@@ -757,6 +785,7 @@ class RecordsOnlyPush(unittest.TestCase):
         got = run([self.RECORDS, other], green=self.CODE, merged=[self.BASE_CHANGE], facts=facts)
         self.assertEqual(facts.get("delta_pr_head"), sorted([self.RECORDS, other]), f"scope: the delta to PR_HEAD is not the two paths: {facts}")
         self.assertEqual(differing(got, whole), [], f"a second delta path moved a flag off the whole PR diff: {got}")
+        self.assertSkipFlag(got, False)
 
 
 # The mod phase must run each mods check script (mods/**/check.mjs), not only *.test.mjs. The script cds to its own
