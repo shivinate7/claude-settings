@@ -23,8 +23,8 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 | Merge confirm (`merge/cloud_allow.json`, cloud only) | `~/.claude/bin/merge ... --confirm` | mechanics in `session-tiers` |
 | "Owner PR Housekeeping" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: close a PR the coordinator or batch runner named in the visible conversation as replaced, empty or batched. Mark ready only a PR that the visible conversation names as such: until the cutover, the batch's integration PR or a lone lane's, named by the coordinator or batch runner; after it, a lane PR the visible conversation names as ready after its last review and lane lint (Q2, decision `draft-until-reviewed`), or the one PR of a solo or one-lane session that no coordinator started, named by that session | this record |
 | "Owner Session Message" (`settings.json` `autoMode.allow`) | `send_message` to a session in the owner's own account, including the session that started this one (its parent or coordinator). A message that asks for no act is covered. A message that asks is limited to acts the owner already granted. A coordinator may send a batch runner it created a merge go (owner, 2026-11-03 15:58 CST) | this record |
-| "Relayed Merge Yes" (`settings.json` `autoMode.allow`) | `~/.claude/bin/merge <pr> --confirm --head <sha>` by a session tagged `cs-build:batch-runner`, for the one pull request that a session tagged `cs-build:coordinator` named when it relayed the owner's yes to merge it, under every merge check | this record |
-| "Batch Runner Merge" (`settings.json` `autoMode.allow`) | `~/.claude/bin/merge <pr> --confirm --head <sha>` by a session tagged `cs-build:batch-runner`, for a pull request its coordinator named in a merge go, under the coordinator's standing grant and every merge check | this record |
+| "Relayed Merge Yes" (`settings.json` `autoMode.allow`) | `~/.claude/bin/merge <pr> --confirm --head <sha> [--priority-rows <file>]` by a session tagged `cs-build:batch-runner`, for the one pull request that a session tagged `cs-build:coordinator` named when it relayed the owner's yes to merge it, under every merge check | this record |
+| "Batch Runner Merge" (`settings.json` `autoMode.allow`) | `~/.claude/bin/merge <pr> --confirm --head <sha> [--priority-rows <file>]` by a session tagged `cs-build:batch-runner`, for a pull request its coordinator named in a merge go, under the coordinator's standing grant and every merge check | this record |
 | "Session Installer" (`settings.json` `autoMode.allow`) | The session-start installer in three exact forms: `curl -fsSL <stable install.sh URL> \| CS_HOOK_INPUT="{}" bash -s -- --cloud`, and from a claude-settings checkout `bash install.sh` and `powershell -ExecutionPolicy Bypass -File .\install.ps1`. No env var, chaining, extra argument, other URL or ref | this record |
 | `mcp__claude-code-remote__add_repo` (`settings.json` `permissions.allow`) | Attach a GitHub repo to the session | this record |
 | `mcp__claude-code-remote__archive_session` (`settings.json` `permissions.allow`) | Archive a session in the owner's account | this record |
@@ -70,7 +70,7 @@ Coordinator, 2026-11-08 12:55 CST: in a session that recorded the batch-runner r
 
 Departs from: main, which lets `--confirm` through with no `--head`. Now a session that recorded the batch-runner role must pass `--head`.
 
-The entry now quotes the `--head <sha>` form: `~/.claude/bin/merge <pr> --confirm --head <sha>`.
+The entry now quotes the `--head <sha>` form, with one more flag granted by the owner (ruling `own-817-a-priority-rows`, owner, 00:19 CST Nov 14: both runner-merge entries, "Relayed Merge Yes" and "Batch Runner Merge", name the `--priority-rows` flag, and no other): `~/.claude/bin/merge <pr> --confirm --head <sha> [--priority-rows <file>]`.
 
 ### Relayed Merge Yes
 
