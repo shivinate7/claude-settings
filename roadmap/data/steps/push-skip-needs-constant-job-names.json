@@ -1,0 +1,14 @@
+{
+ "id": "push-skip-needs-constant-job-names",
+ "title": "The shared push-skip action only works on repos whose suite jobs have constant names; a repo that adopts it learns that where it is written",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane child-ci-q-max measured (coordinator 22:23 CST, relayed; the coordinator calls it checked): the shared action's suite list is every job key whose job-level `if` is true minus scope, all-jobs-passed, ci-done, push-skip, nightly-skip and the rollup's needs, matched by exact name. A matrix or reusable-call repo never matches: q_max needs `checks` without the base sha, `name: test` on 12 shards, and tiers inlined; degen needs a fan-in `app` job.",
+ "source": "Coordinator 22:23 CST Nov 13 (relayed), lane child-ci-q-max; ruling qmax-skips-push-suite; decision uniform-over-variants.",
+ "note": "Triage 22:23 CST Nov 13: the coordinator left it to triage whether this is a note or a step. A step: every repo that adopts the skip hits it, and today only each lane's own PR finds out. Ask: the adoption text (decision ci-once-per-batch or the action's own README, whichever the lane names) says in one paragraph that suite jobs need constant names and lists the three q_max renames and degen's fan-in as the worked cases; optionally a lint that names a suite job whose name carries a matrix or a call prefix. Not started; do after the two child lanes report, so the text carries what they found. No change to the action itself (ruling: a repo changes to fit the tool).",
+ "updatedAt": "2026-11-13T22:23:06-06:00"
+}
