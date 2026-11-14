@@ -1800,7 +1800,8 @@ def lanes_to_check(steps, slugs, body, raw, open_heads):
     open pull (it may raise: the read then counts as not read). It runs once, and only for a lane no earlier test skipped. Each line says to check the lane by hand, and none says to archive it: a stale file cannot prove
     the lane is done. No line for a lane that is still working (its row is not completed or review ready, a step is doing
     under it, or an open pull is on its head) or archived. A session in keepSessions (read at any age) prints one hold
-    line; a keepSessions that could not be read prints an unknown line. Reads only what the caller loaded."""
+    line; a keepSessions that could not be read, or a live file that could not be read (`raw` None), prints an unknown line for a lane not already
+    skipped as working. Reads only what the caller loaded."""
     keep, keep_why = keep_sessions(raw) if raw is not None else ({}, None)
     rows = {r["id"]: r for r in raw.get("sessions") or [] if isinstance(r, dict) and isinstance(r.get("id"), str)} \
         if raw is not None and isinstance(raw.get("sessions"), list) else {}
@@ -1832,20 +1833,19 @@ def lanes_to_check(steps, slugs, body, raw, open_heads):
         row = rows.get(sid)
         if row and (row.get("session_status") == ARCHIVED_SESSION or row.get("status_bucket") not in IDLE_BUCKETS):
             continue
-        if keep_why:
+        if any(running_under(d, sid) for d in steps.values()):
+            continue  # a lane still working needs no keep list
+        if raw is None or keep_why:  # an unreadable file has no keep list: the owner may keep this lane
             out.append("unknown (the keep list could not be read, so lane %s is not named)" % sid)
             continue
         if sid in keep:
             out.append(kept_hold(keep[sid], sid))
-            continue
-        if any(running_under(d, sid) for d in steps.values()):
             continue
         mine = {slug} | {k for k, d in steps.items() if isinstance(d.get("lane"), str) and d["lane"].strip() == sid}
         heads = heads_read()
         if heads is not None and {h for k in mine for h in lane_head_refs(k)} & heads:
             continue
         unread = [why for why, missing in (("its session state is not in the live file", row is None),
-                                          ("the keep list was not read", raw is None),
                                           ("open pull requests were not read", heads is None)) if missing]
         out.append("check this lane (step %s landed%s; lane %s)" % (slug, "; " + "; ".join(unread) if unread else "", sid))
     return out

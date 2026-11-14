@@ -300,12 +300,12 @@ After each build the roadmap build script prints the upkeep list for the triage 
   The live file's optional `keepSessions` (`[{id, reason}]`, the lanes the owner keeps) names the sessions to leave. A kept session that
   would be read as idle prints one `hold (kept: <reason>; lane <session id>)` line, never a lane line, and is not counted among the lanes to archive.
   An absent key keeps nothing. A `keepSessions` that is not a list of rows with a text `id` makes the whole list unknown, never an empty keep list.
-  A live lane row whose `unarchived_epoch` is an int below 0 also makes the whole list unknown.
+  A live lane row whose `unarchived_epoch` is an int below 0 also makes the whole list unknown, except a row of a kept session (keepSessions), which the owner holds and the check skips.
   After a landed merge onto the default branch, `merge --confirm` reads `roadmap/live/live.json` on origin's roadmap branch and prints this
   report when its `readAt` is later than the merge commit's time. Otherwise it prints one line saying the pass is owed because the file is stale
   or unread, then one `check this lane (...)` line for each lane behind the merged steps (the step record's `lane`, else the session link at the
   foot of the pull request body). A check line is not a lane to archive: the lane's session state, open pull requests and keep list decide that.
-  A lane still working prints no check line. `keepSessions` is read from the file at any age. With no roadmap branch on origin it prints nothing,
+  A lane still working prints no check line, whatever its keep list. A live file or `keepSessions` that cannot be read prints one unknown line for each lane not still working: the owner may keep it. `keepSessions` is read from the file at any age. With no roadmap branch on origin it prints nothing,
   and a merge onto another base prints nothing. The merge's exit code is unchanged.
 
   An idle lane not to archive now reads `hold (<reason>; lane <session id>)`. The reason is one of three, or `kept:` (above).

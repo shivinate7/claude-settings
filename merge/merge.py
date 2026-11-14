@@ -23,8 +23,10 @@
                           idle-lanes pass is owed because the file is stale or unread (a failed fetch is unread), and the merged step's lane (its record's `lane`,
                           else the session link at the foot of the PR body) prints as `check this lane`, never as a lane to archive. A lane still working prints
                           no line. A session in the file's keepSessions, read at any age, prints a `hold (` line. With no roadmap branch on origin it prints nothing.
-                          None of this changes the exit code. Cost: one fetch, two git reads, the step records read in one git cat-file and, on the owed path
-                          only, one open-pulls read; no file, timer or new process beyond those git reads (merge/test_merge.py ConfirmIdleLanes pins the reads and the files).
+                          None of this changes the exit code. Cost: one fetch, one git show of the live file and one of the merge commit's time. A fresh file then
+                          runs the full idle-lanes report (the roadmap build's record-branch and main reads, unmeasured). The owed path instead reads the merge's log, then the step
+                          records in three git ls-tree and one git cat-file, and one open-pulls read only for a lane no earlier test skipped. No file, timer or new process beyond those
+                          reads (merge/test_merge.py ConfirmIdleLanes pins that each git call is a read and that no file is made).
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
                           The batch runner's join (cloud) needs a lane-lint PASS for the head's sha. Only a batch integration PR skips it, when the all-jobs-passed rollup is green on that exact head:
                           then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
@@ -4377,8 +4379,9 @@ def idle_lanes_after_merge(root, commit, host, n, body):
     merge commit's time. Otherwise (stale, missing, unreadable, or origin unreadable) print one line saying the pass is owed, then the
     lanes to check from the merged step's record (idle_lanes_to_check). A repo whose origin has no roadmap branch has no live file and owes no pass:
     it prints nothing. The live file is passed in memory, never written. Never raises and never moves the exit code: the merge has landed.
-    Cost: one fetch, two git reads, the step records in one git cat-file, one log of the merge; on the owed path one open-pulls read; one more
-    `git ls-remote` only when the fetch fails."""
+    Cost: one fetch, one git show of the live file, one of the merge commit's time. Fresh path: the full idle-lanes report's reads (unmeasured).
+    Owed path: one log of the merge (a second only when its range cannot be read), the step records in three git ls-tree and one git cat-file,
+    and one open-pulls read only for a lane no earlier test skipped. One more `git ls-remote` only when the fetch fails."""
     owed = "merge: the idle-lanes pass is owed: the live file on origin/roadmap is %s. Run merge --idle-lanes --live FILE once triage has read it. " + IDLE_CITE
     try:
         try:
@@ -4428,7 +4431,8 @@ def idle_lanes_to_check(root, commit, host, n, body, raw):
     """The owed path's second source: each step the merge landed (Step trailers on the merge's commits) names a lane in its record on
     origin/roadmap; the roadmap build (lanes_to_check) says which of those lanes to check by hand. `raw` is the live file parsed, or None."""
     c, trailers = git(root, "log", "--format=%(trailers:key=Step,valueonly,separator=%x2C)", f"{commit}^1..{commit}")
-    if c:  # no first parent: the commit alone
+    if c:  # the range is unreadable (a shallow clone cut at the first parent): the commit alone, with a line that the merged steps may be missing
+        say("unknown (the commits the merge landed could not be read, so a merged step's lane may not be named)")
         c, trailers = git(root, "log", "-1", "--format=%(trailers:key=Step,valueonly,separator=%x2C)", commit)
     if c:
         say("unknown (the Step trailers of the merge could not be read, so its lane is not named)")
@@ -4436,8 +4440,12 @@ def idle_lanes_to_check(root, commit, host, n, body, raw):
     slugs = {s.strip() for line in trailers.splitlines() for s in line.split(",") if s.strip()}
     if not slugs:
         return
-    build = load_idle_build()
-    steps = build.load(build.Ref(pathlib.Path(root), "origin/roadmap"))["steps"]
+    try:
+        build = load_idle_build()
+        steps = build.load(build.Ref(pathlib.Path(root), "origin/roadmap"))["steps"]  # raises SystemExit when git cannot read the record branch
+    except (Exception, SystemExit) as e:
+        say(f"unknown (the step records could not be read: {type(e).__name__}: {e}, so the merged lane is not named)")
+        return
     lines = build.lanes_to_check(steps, slugs, body, raw, lambda: {p["head"]["ref"] for p in host.open_pulls() if p.get("number") != n})
     if lines:
         say(*lines)
