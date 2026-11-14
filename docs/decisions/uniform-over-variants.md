@@ -21,7 +21,7 @@ Incident:
 
 - 2026-10-27 12:51 CDT: a waiting-page item recommended loosening a shared tool so it would accept banchi's record titles.
 - 2026-11-01 11:43 CST: the card text quoted a bare topic id (rule `speak-cite-id-plus-gloss`). The card now says the ruling in plain words.
-- Before 2026-11-14 15:12 CST: the judge model called two options widening that keep what the shared tool accepts the same or narrow it. Page item 729 a put the tree-equal push skip in the shared CI form, so every repo gets it. Page item 835 a let a PR whose tree is byte-identical cite a reviewed record, read by tree sha. Both verdicts were judged false alarms. No owner ruling is cited for that reading; the work went ahead on the coordinator's go-ahead (coordinator, 2026-11-14 15:12 CST). The same-or-narrow condition on the every-repo carve-out comes from these sightings.
+- Time of the verdicts unknown: the judge model called two options widening that keep what the shared tool accepts the same or narrow it. Page item 729 a put the tree-equal push skip in the shared CI form, so every repo gets it. Page item 835 a let a PR whose tree is byte-identical cite a reviewed record, read by tree sha. Both verdicts were judged false alarms. No owner ruling is cited for that reading; the work went ahead on the coordinator's go-ahead (coordinator, 2026-11-14 15:12 CST).
 
 Kind: process
 Home: rule:style-question-form
