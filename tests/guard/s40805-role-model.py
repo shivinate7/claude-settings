@@ -900,6 +900,64 @@ for _label, _check in _BRIEF_MARKER_CHECKS:
     FIXTURELESS_CHECKS.add(_check)
 
 
+# ---- B3b: a code fence in a brief. A line-start row (the `Round N of 3` and `Try N of 3` rows) reads only the lines
+# outside a ``` fence, as review_guard_marked does: a pasted template block quotes a marker, it does not set one. A fence
+# opens and closes on a line whose stripped text starts with three backticks. An unclosed fence runs to the end of the
+# brief. The first-line rows read the first line alone, so a fence leaves them as they are. Every label starts with
+# `marker fence:`, so MUTATE_ONLY="marker fence:" runs these cases alone. The FENCE literal is built from parts, so
+# this file does not open a fence of its own.
+FENCE = "`" * 3
+
+
+def _fence_quote(text):
+    """A brief whose quoted block holds `text`, fenced on its own lines."""
+    return "\n".join([FENCE, text, FENCE])
+
+
+_FENCE_CHECKS = (
+    ("marker fence: a Round 3 of 3 line inside a fence is no round marker",
+     marker_rows_check(("Find X.\n" + _fence_quote("Round 3 of 3"), "round", "3", False))),
+    ("marker fence: a Try 3 of 3 line inside a fence is no try marker",
+     marker_rows_check(("Find X.\n" + _fence_quote("Try 3 of 3"), "try", "3", False))),
+    ("marker fence: an unfenced Round 3 of 3 line still counts as round 3",
+     marker_rows_check(("Find X.\nRound 3 of 3", "round", "3", True))),
+    ("marker fence: an unfenced Try 3 of 3 line still counts as try 3",
+     marker_rows_check(("Find X.\nTry 3 of 3", "try", "3", True))),
+    ("marker fence: a Round 3 of 3 line in a fence is out, and a Round 2 of 3 line after the closing fence counts",
+     marker_rows_check((_fence_quote("Round 3 of 3") + "\nRound 2 of 3", "round", "3", False),
+                       (_fence_quote("Round 3 of 3") + "\nRound 2 of 3", "round", "2", True))),
+    ("marker fence: a Round 3 of 3 line after a closed fence that holds no marker counts",
+     marker_rows_check((_fence_quote("quoted prose") + "\nRound 3 of 3", "round", "3", True))),
+    ("marker fence: a first-line Round 2 of 3 counts, and a fenced Round 3 of 3 below it does not",
+     marker_rows_check(("Builder, Round 2 of 3. Fix.\n" + _fence_quote("Round 3 of 3"), "round", "2", True),
+                       ("Builder, Round 2 of 3. Fix.\n" + _fence_quote("Round 3 of 3"), "round", "3", False))),
+    ("marker fence: an unclosed fence runs to the end of the brief, so a Round 3 of 3 line in it is no marker",
+     marker_rows_check(("Find X.\n" + FENCE + "\nRound 3 of 3", "round", "3", False))),
+    ("marker fence: a backtick span mid-line does not open a fence, so a Round 2 of 3 line after it counts",
+     marker_rows_check(("Run " + FENCE + "x" + FENCE + " now.\nRound 2 of 3", "round", "2", True))),
+)
+for _label, _check in _FENCE_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    FIXTURELESS_CHECKS.add(_check)
+
+# The step-up and the builder rows read the same scan, so the fence reaches each verdict. A reviewer on haiku with a fenced
+# quote of the second marker is not refused for it; unfenced, it keeps the Sonnet refusal. A builder on sonnet is not lifted by a
+# fenced quote of the third marker. The builder control keeps today's allow: no guard path reads a builder's marker.
+add("marker fence: reviewer on haiku, round 1, with a fenced Round 2 of 3 quote is allowed and not refused for round 2",
+    "allow", tool="Agent", config=ROLE_REAL_CFG, lacks=("Reviewer round 2 runs on Sonnet",),
+    **role_input("reviewer", "haiku", "Review the diff for PR 3286.\n" + _fence_quote("Round 2 of 3") + "\nCheck the cases."))
+add("marker fence: reviewer on haiku with an unfenced Round 2 of 3 line keeps the Sonnet refusal for round 2",
+    "deny", "roles-third-round-steps-up", tool="Agent", config=ROLE_REAL_CFG,
+    carries=("Reviewer round 2 runs on Sonnet",),
+    **role_input("reviewer", "haiku", "Review the diff for PR 3286.\nRound 2 of 3\nCheck the cases."))
+add("marker fence: builder on sonnet with a fenced Round 3 of 3 quote is allowed and not lifted to Opus",
+    "allow", tool="Agent", config=ROLE_REAL_CFG, lacks=("Opus",),
+    **role_input("builder", "sonnet", "Fix the failing case.\n" + _fence_quote("Round 3 of 3")))
+add("marker fence: builder on sonnet with an unfenced Round 3 of 3 line keeps today's allow",
+    "allow", tool="Agent", config=ROLE_REAL_CFG, lacks=("Opus",),
+    **role_input("builder", "sonnet", "Fix the failing case.\nRound 3 of 3"))
+
+
 # ---- B4: the fix check marker (owner item 444 a). A reviewer's fix check carries no round, so it
 # lifts to Sonnet on FIX_CHECK_MARKER. The marker counts only when the brief's first non-blank line starts with it, leading
 # spaces and tabs aside, and it is case-sensitive: text ahead of it on that line does not count. It lifts a reviewer on
