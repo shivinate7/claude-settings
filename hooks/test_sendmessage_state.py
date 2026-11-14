@@ -52,6 +52,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.environ.get("SENDMESSAGE_STATE_UNDER_TEST") or os.path.join(HERE, "sendmessage_state.py")
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+import test_ruled_store as fixture  # noqa: E402  the one home of the roadmap-ref fixtures (lint/test_ruled_store.py)
 ROOT = _test_temp.run_folder()  # every temp file of this run, fixture repos included, lives under it
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
@@ -807,6 +808,8 @@ def store(kind):
             STORES[kind] = make_repo("empty", None, ref="roadmap")
         elif kind == "absent":
             STORES[kind] = make_repo("absent", None, ref=None)
+        elif kind == "absent-stale-head":  # no roadmap ref anywhere; its FETCH_HEAD is set by its one case
+            STORES[kind] = make_repo("absent-stale-head", None, ref=None)
         elif kind == "stale-local":  # the local roadmap ref lacks r44, and origin/roadmap has it
             full = store_files()
             STORES[kind] = make_repo("stale-local", {k: v for k, v in full.items() if k != "r44.json"},
@@ -820,9 +823,30 @@ def store(kind):
     return STORES[kind]
 
 
+STORE_KINDS = ("full", "origin", "empty", "stale-local", "broken")  # the kinds whose repo holds a roadmap ref
+
+
+def prime(kind):
+    """A fresh roadmap read in the repo of store `kind`, primed by each run. One written at build time ages past
+    roadmap_ref.MAX_AGE on a slow runner, and the run then reads the ref as stale. A kind with no roadmap ref gets none,
+    so the freshness check finds no roadmap fetch on record for it."""
+    if kind in STORE_KINDS:
+        fixture.prime_roadmap(store(kind))
+
+
+def unprime(kind):
+    """Undoes prime(kind), so the shared store returns to its built state after the run."""
+    if kind in STORE_KINDS:
+        fixture.unprime_roadmap(store(kind))
+
+
 def past_run(text, kind, **kwargs):
     """Run the hook on `text`, the payload's cwd in store `kind`, the child's own cwd in the plain folder."""
-    return run_hook(hook_input(message=text, cwd=store(kind)), reader_mode="idle", cwd=store("plain"), **kwargs)
+    prime(kind)
+    try:
+        return run_hook(hook_input(message=text, cwd=store(kind)), reader_mode="idle", cwd=store("plain"), **kwargs)
+    finally:
+        unprime(kind)
 
 
 def denied(r):
@@ -952,6 +976,43 @@ def case_absent_store_allows_silently():
         r = past_run(settled_text(SETTLING[0][1], "`decision %s`" % SLUG), kind)
         check("absent store (%s): allow silently (exit 0, no output, no stderr), the send reaches the judge" % label,
               r.code == 0 and r.out == "" and r.err == "" and len(r.wording_calls) == 1, detail(r))
+
+
+def case_absent_store_with_a_stale_fetch_head_allows_silently():
+    """An absent store (no roadmap ref, no origin) whose FETCH_HEAD is an old fetch of main alone. No roadmap fetch is
+    on record and nothing is primed, so the store is absent: the read allows and says nothing on stderr."""
+    repo = store("absent-stale-head")
+    check("fixture: the absent-stale-head repo has no roadmap ref, local or origin",
+          not ref_resolves(repo, "roadmap") and not ref_resolves(repo, "origin/roadmap"))
+    head = fixture.fetch_head(repo)
+    fixture.write_fetch_head(repo, "main")
+    stamp = os.stat(head).st_mtime
+    os.utime(head, (stamp - 120, stamp - 120))  # 120 s old: past roadmap_ref.MAX_AGE
+    check("fixture: its FETCH_HEAD is an old fetch of main only",
+          "branch 'main' of" in read_text(head) and "branch 'roadmap' of" not in read_text(head))
+    r = past_run(settled_text(SETTLING[0][1], "`decision %s`" % SLUG), "absent-stale-head")
+    check("absent store, stale FETCH_HEAD: the send reaches the wording judge once", len(r.wording_calls) == 1,
+          detail(r))
+    check("absent store, stale FETCH_HEAD: allow silently (exit 0, no output, no stderr)",
+          r.code == 0 and r.out == "" and r.err == "", detail(r))
+
+
+def case_a_store_aged_by_a_slow_runner_reads_fresh():
+    """A slow runner can leave a store's FETCH_HEAD more than roadmap_ref.MAX_AGE old by the time a case reads it.
+    The run primes its own store first, so a FETCH_HEAD aged 61 s still reads fresh: the read denies, starts no fetch
+    and says nothing on stderr."""
+    repo = store("full")
+    fixture.prime_roadmap(repo)  # the FETCH_HEAD to age; past_run primes it again and undoes that after its run
+    head = fixture.fetch_head(repo)
+    last = os.stat(head).st_mtime
+    os.utime(head, (last - 61, last - 61))  # 61 s before its last write: stale by roadmap_ref.MAX_AGE
+    r = past_run(settled_text(SETTLING[0][1], "`decision %s`" % SLUG), "full")
+    reason = denied(r) or ""
+    check("aged store: the read reaches the store (deny naming %s and r44)" % SLUG,
+          reason.startswith("past-ruling: ") and SLUG in reason and "r44" in reason, detail(r))
+    check("aged store: no fetch starts, the run primed the ref", not [a for a in r.git_starts if "fetch" in a],
+          detail(r) + " git=%r" % r.git_starts)
+    check("aged store: nothing on stderr", r.err == "", detail(r))
 
 
 def case_broken_store_fails_open_with_one_stderr_line():
@@ -1190,6 +1251,8 @@ def case_hook_runs():
                  case_settled_citing_nothing_is_allowed_with_no_git,
                  case_cite_forms_are_caught,
                  case_absent_store_allows_silently,
+                 case_absent_store_with_a_stale_fetch_head_allows_silently,
+                 case_a_store_aged_by_a_slow_runner_reads_fresh,
                  case_broken_store_fails_open_with_one_stderr_line,
                  case_free_text_decision_is_not_superseded,
                  case_prefix_slug_does_not_match,

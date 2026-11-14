@@ -1,0 +1,678 @@
+#!/usr/bin/env python3
+"""Cases for lint/roadmap_ref.py, the one reader of origin/roadmap that fetches a stale ref before it judges.
+Standard library only.
+
+    python3 lint/test_roadmap_ref.py
+
+fresh_ref(repo_dir, now=None, fetch=None) returns "" when the ref is fresh or was just fetched, else the note
+"read as of HH:MM TZ" (US Central, the time of the last fetch). The ref is stale when .git/FETCH_HEAD is missing or
+older than MAX_AGE. A stale ref gets one `git fetch origin roadmap:refs/remotes/origin/roadmap`, bounded by
+FETCH_TIMEOUT. A fetch that fails, times out or has no origin gives the note and never raises. `fetch(repo_dir,
+timeout)` is the injected fetch: it returns True when the ref was fetched, and returns False or raises when not.
+
+The readers' own cases sit in lint/test_ruled_store.py (StaleRefReadTests) and hooks/test_feedback_inbox.py. This file
+holds the helper's cases and the scan that no other product file fetches the roadmap. Each case builds real git repos
+under this run's folder, with the fixtures of lint/test_ruled_store.py. No network: every origin is a local path.
+"""
+import ast
+import datetime
+import glob
+import os
+import re
+import shutil
+import subprocess
+import sys
+import json
+import signal
+import tempfile
+import time
+import unittest
+from unittest import mock
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.normpath(os.path.join(HERE, ".."))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(REPO, "hooks"))
+import test_ruled_store as fixture  # noqa: E402  the store and roadmap-ref fixtures (git plumbing, run folder)
+
+# A fixed clock, so no case reads the real one. NOW is 12:45 CST; LAST_FETCH is 11:05 CST.
+NOW = datetime.datetime(2026, 11, 13, 18, 45, tzinfo=datetime.timezone.utc).timestamp()
+LAST_FETCH = datetime.datetime(2026, 11, 13, 17, 5, tzinfo=datetime.timezone.utc).timestamp()  # 11:05 CST
+NOTE = "read as of 11:05 CST"
+NOTE_SHAPE = re.compile(r"^read as of \d{2}:\d{2} (CST|CDT)$")
+OLD_STORE = fixture.ruling_files({"old": fixture.entry("old")})
+
+
+def helper():
+    """The helper module, imported inside each case so that a case reads the module as it is when the case runs."""
+    import roadmap_ref  # noqa: E402
+    return roadmap_ref
+
+
+def counting_fetch(result=True):
+    """(fetch, calls): an injected fetch that records each call's repo dir and timeout, and returns `result`."""
+    calls = []
+
+    def fetch(repo_dir, timeout):
+        calls.append((repo_dir, timeout))
+        return result
+
+    return fetch, calls
+
+
+def fetches_roadmap(text):
+    """True when a string is a git fetch of the roadmap: it opens with `git fetch` or `fetch` and names roadmap."""
+    return re.match(r"\s*(?:git\s+)?fetch\b.*\broadmap", text, re.S) is not None
+
+
+def fetch_sites(source):
+    """Line numbers of the code in `source` that fetch the roadmap: a string literal that is a fetch command, or a list
+    or tuple of strings that holds `fetch` and a roadmap word. Docstrings are skipped: they describe, and run nothing.
+    Comments are not in the tree at all, so a comment never counts."""
+    tree = ast.parse(source)
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                docstrings.add(id(first.value))
+    sites = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if id(node) not in docstrings and fetches_roadmap(node.value):
+                sites.add(node.lineno)
+        elif isinstance(node, (ast.List, ast.Tuple)):
+            words = [e.value for e in node.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+            if "fetch" in words and any("roadmap" in word for word in words):
+                sites.add(node.lineno)
+    return sorted(sites)
+
+
+def product_files():
+    """The product sources: the Python files of lint/ and hooks/ that are not test files, as repo-relative names."""
+    found = []
+    for folder in ("lint", "hooks"):
+        for path in sorted(glob.glob(os.path.join(REPO, folder, "*.py"))):
+            name = os.path.basename(path)
+            if not name.startswith(("test_", "_test_")):
+                found.append("%s/%s" % (folder, name))
+    return found
+
+
+class FreshRefTests(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="roadmap_ref_", dir=fixture.run_folder())
+        self.addCleanup(shutil.rmtree, self.root, True)
+
+    def test_a_stale_ref_is_fetched_and_the_note_is_empty(self):
+        newer = fixture.ruling_files({"old": fixture.entry("old"), "new": fixture.entry("new")})
+        origin = fixture.bare_origin(self.root, "fetched", OLD_STORE)
+        repo = fixture.clone_with_origin(self.root, "stale", origin, OLD_STORE)
+        fixture.point_ref(origin, "refs/heads/roadmap", newer, self.root)
+        newest = fixture.git(origin, "rev-parse", "refs/heads/roadmap")
+        fixture.without_fetch_head(repo)
+        note = helper().fresh_ref(repo, now=NOW)
+        self.assertEqual(note, "", "a stale ref that could be fetched gave the note %r, want empty" % note)
+        self.assertEqual(fixture.ref_sha(repo), newest, "the stale ref did not move to origin's roadmap commit")
+
+    def test_a_stale_ref_with_no_origin_path_gives_the_note_and_does_not_raise(self):
+        repo = fixture.clone_with_origin(self.root, "offline", os.path.join(self.root, "gone.git"), OLD_STORE)
+        fixture.set_fetch_head(repo, LAST_FETCH)
+        before = fixture.ref_sha(repo)
+        note = helper().fresh_ref(repo, now=NOW)
+        self.assertEqual(note, NOTE, "a failed fetch gave %r, want %r" % (note, NOTE))
+        self.assertEqual(fixture.ref_sha(repo), before, "a failed fetch moved the ref")
+
+    def test_a_repo_with_no_origin_remote_gives_the_note(self):
+        repo = fixture.clone_with_origin(self.root, "no-remote", None, OLD_STORE)
+        fixture.set_fetch_head(repo, LAST_FETCH)
+        note = helper().fresh_ref(repo, now=NOW)
+        self.assertEqual(note, NOTE, "a repo with no origin gave %r, want %r" % (note, NOTE))
+
+    def test_a_fresh_ref_starts_no_fetch(self):
+        repo = fixture.clone_with_origin(self.root, "fresh", None, OLD_STORE)
+        fixture.set_fetch_head(repo, NOW - 30)
+        fetch, calls = counting_fetch()
+        note = helper().fresh_ref(repo, now=NOW, fetch=fetch)
+        self.assertEqual(calls, [], "a fresh ref started %d fetch(es), want none" % len(calls))
+        self.assertEqual(note, "", "a fresh ref gave the note %r, want empty" % note)
+
+    def test_the_age_limit_is_sixty_seconds_and_a_missing_fetch_head_is_stale(self):
+        module = helper()
+        self.assertEqual(module.MAX_AGE, 60, "MAX_AGE is %r, want 60 seconds" % module.MAX_AGE)
+        self.assertEqual(module.FETCH_TIMEOUT, 2.0, "FETCH_TIMEOUT is %r, want 2.0 seconds" % module.FETCH_TIMEOUT)
+        for label, age, starts in (("missing", None, 1), ("59 s old", 59, 0), ("61 s old", 61, 1)):
+            repo = fixture.clone_with_origin(self.root, "age-" + label.split()[0], None, OLD_STORE)
+            if age is None:
+                fixture.without_fetch_head(repo)
+            else:
+                fixture.set_fetch_head(repo, NOW - age)
+            fetch, calls = counting_fetch()
+            module.fresh_ref(repo, now=NOW, fetch=fetch)
+            self.assertEqual(len(calls), starts, "a FETCH_HEAD %s: %d fetch(es), want %d" % (label, len(calls), starts))
+
+    def test_a_fetch_cut_at_the_timeout_gives_the_note(self):
+        seen = []
+
+        def slow(repo_dir, timeout):
+            seen.append(timeout)
+            simulated = 10.0  # how long this fetch would take, in seconds; the case waits for nothing
+            if simulated > timeout:
+                raise subprocess.TimeoutExpired(["git", "fetch"], timeout)
+            return True
+
+        repo = fixture.clone_with_origin(self.root, "slow", None, OLD_STORE)
+        fixture.set_fetch_head(repo, LAST_FETCH)
+        note = helper().fresh_ref(repo, now=NOW, fetch=slow)
+        self.assertEqual(seen, [2.0], "the fetch was not bounded at FETCH_TIMEOUT: timeouts %r" % seen)
+        self.assertEqual(note, NOTE, "a fetch cut at the timeout gave %r, want %r" % (note, NOTE))
+
+    def test_a_fetch_that_reports_failure_or_raises_gives_the_note(self):
+        def refuses(repo_dir, timeout):
+            return False
+
+        def errors(repo_dir, timeout):
+            raise OSError("no git")
+
+        for label, fetch in (("returns False", refuses), ("raises OSError", errors)):
+            with self.subTest(fetch=label):
+                repo = fixture.clone_with_origin(self.root, "fail-" + label.split()[1], None, OLD_STORE)
+                fixture.set_fetch_head(repo, LAST_FETCH)
+                note = helper().fresh_ref(repo, now=NOW, fetch=fetch)
+                self.assertEqual(note, NOTE, "a fetch that %s gave %r, want %r" % (label, note, NOTE))
+
+    def test_the_note_names_the_last_fetch_in_central_time_with_dst(self):
+        summer = datetime.datetime(2026, 7, 1, 17, 5, tzinfo=datetime.timezone.utc).timestamp()  # 12:05 CDT
+        repo = fixture.clone_with_origin(self.root, "summer", None, OLD_STORE)
+        fixture.set_fetch_head(repo, summer)
+        fetch, _calls = counting_fetch(result=False)
+        note = helper().fresh_ref(repo, now=summer + 600, fetch=fetch)
+        self.assertEqual(note, "read as of 12:05 CDT", "a July fetch gave %r, want the CDT time" % note)
+
+    def test_a_missing_fetch_head_with_a_failed_fetch_gives_a_timed_note(self):
+        repo = fixture.clone_with_origin(self.root, "never", None, OLD_STORE)
+        fixture.without_fetch_head(repo)
+        fetch, _calls = counting_fetch(result=False)
+        note = helper().fresh_ref(repo, now=NOW, fetch=fetch)
+        self.assertRegex(note, NOTE_SHAPE, "a ref never fetched gave %r, want read as of HH:MM CST or CDT" % note)
+
+    def test_only_the_helper_fetches_the_roadmap(self):
+        scanned = product_files()
+        self.assertIn("lint/ruled_store.py", scanned, "the scan does not reach lint/ruled_store.py")
+        self.assertIn("hooks/feedback_guard.py", scanned, "the scan does not reach hooks/feedback_guard.py")
+        flagged = {}
+        for rel in scanned:
+            with open(os.path.join(REPO, rel), encoding="utf-8", errors="replace") as f:
+                sites = fetch_sites(f.read())
+            if sites:
+                flagged[rel] = sites
+        self.assertIn("lint/roadmap_ref.py", flagged, "lint/roadmap_ref.py holds no fetch of the roadmap")
+        extra = {rel: flagged[rel] for rel in flagged if rel != "lint/roadmap_ref.py"}
+        self.assertEqual(extra, {}, "product files outside the helper fetch the roadmap (file: lines): %r" % extra)
+
+    def test_the_scan_flags_a_fetch_argv_and_ignores_docstrings_comments_and_messages(self):
+        argv = "def f():\n    return ['git', 'fetch', 'origin', 'roadmap:refs/x']\n"
+        command = "CMD = 'git fetch origin roadmap:refs/x'\n"
+        docstring = "def f():\n    '''Reads the roadmap, never fetched: git fetch roadmap is not run here.'''\n    return 1\n"
+        message = "NOTE = 'run `git fetch origin %s` to refresh'\n"
+        comment = "# git fetch origin roadmap\nX = 1\n"
+        self.assertEqual(fetch_sites(argv), [2], "an argv fetch of the roadmap was not flagged")
+        self.assertEqual(fetch_sites(command), [1], "a fetch command string was not flagged")
+        self.assertEqual(fetch_sites(docstring), [], "a docstring that describes a fetch was flagged")
+        self.assertEqual(fetch_sites(message), [], "a message that names a fetch for the owner was flagged")
+        self.assertEqual(fetch_sites(comment), [], "a comment was flagged")
+
+
+LINT = HERE
+FAKE_GIT = r'''
+import json, os, subprocess, sys, time
+HERE = os.path.dirname(os.path.abspath(sys.argv[0]))
+with open(os.path.join(HERE, "conf.json"), encoding="utf-8") as handle:
+    conf = json.load(handle)
+argv = sys.argv[1:]
+verb = next((word for word in argv if word in ("fetch", "log")), "")
+try:
+    devnull = os.path.samestat(os.fstat(0), os.stat(os.devnull))
+except OSError:
+    devnull = None
+record = {"verb": verb, "stdin_devnull": devnull,
+          "env": {key: os.environ.get(key) for key in ("GIT_TERMINAL_PROMPT", "GIT_ASKPASS", "GIT_SSH_COMMAND")}}
+with open(conf["log"], "a", encoding="utf-8") as handle:
+    handle.write(json.dumps(record) + "\n")
+if verb == "fetch" and conf["hang"]:
+    if conf["grandchild"]:
+        child = subprocess.Popen(["sleep", "30"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+        with open(conf["pid"], "w", encoding="utf-8") as handle:
+            handle.write(str(child.pid))
+    time.sleep(30)
+sys.exit(1)
+'''
+
+
+def make_fake_git(folder, hang=False, grandchild=False):
+    """A `git` for one case, to put first on PATH. Each start appends its verb, its stdin and the git environment to
+    starts.log. A fetch with `hang` sleeps past FETCH_TIMEOUT; with `grandchild` it first starts a child and writes the
+    child's pid to grandchild.pid. Returns (folder, starts.log, grandchild.pid)."""
+    os.makedirs(folder)
+    log, pid = os.path.join(folder, "starts.log"), os.path.join(folder, "grandchild.pid")
+    with open(os.path.join(folder, "conf.json"), "w", encoding="utf-8") as handle:
+        json.dump({"log": log, "pid": pid, "hang": hang, "grandchild": grandchild}, handle)
+    path = os.path.join(folder, "git")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("#!%s\n" % sys.executable + FAKE_GIT)
+    os.chmod(path, 0o755)
+    return folder, log, pid
+
+
+def git_starts(log, verb):
+    """The records of the starts with `verb` that the fake git logged, oldest first."""
+    if not os.path.exists(log):
+        return []
+    with open(log, encoding="utf-8") as handle:
+        records = [json.loads(line) for line in handle if line.strip()]
+    return [record for record in records if record["verb"] == verb]
+
+
+def on_path(folder):
+    """The PATH with `folder` first, for mock.patch.dict."""
+    return {"PATH": folder + os.pathsep + os.environ.get("PATH", "")}
+
+
+def alive(pid):
+    """True while `pid` runs. A zombie, exited but not yet reaped, is not running."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    stat = "/proc/%d/stat" % pid
+    if os.path.exists(stat):
+        try:
+            return proc_state(pid) != "Z"
+        except OSError:  # reaped between the kill probe and the read
+            return False
+    return True
+
+
+def proc_state(pid):
+    """The state letter in /proc/<pid>/stat, or "no /proc entry" when there is none."""
+    try:
+        with open("/proc/%d/stat" % pid, encoding="utf-8") as handle:
+            return handle.read().rsplit(")", 1)[1].split()[0]
+    except OSError:
+        return "no /proc entry"
+
+
+# A group member that SIGKILL reaches leaves the running state within about a millisecond. The bound is for a loaded
+# runner: a process still running at the bound is the failure, and its state is named in the message.
+GONE_BOUND = 5.0  # seconds
+GONE_STEP = 0.02  # seconds between polls
+
+
+def wait_until_dead(pid, bound=GONE_BOUND):
+    """True once `pid` is no longer running (gone, or a zombie), polled every GONE_STEP seconds up to `bound` seconds."""
+    end = time.monotonic() + bound
+    while alive(pid):
+        if time.monotonic() >= end:
+            return False
+        time.sleep(GONE_STEP)
+    return True
+
+
+def kill_quietly(pid):
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass
+
+
+# A sha that no store in these cases names. A roadmap line that names it is behind the local ref.
+BEHIND_SHA = "1" * 40
+
+
+def roadmap_line_sha(repo):
+    """The sha on the roadmap line of the repo's FETCH_HEAD, or None when the file has no roadmap line."""
+    with open(fixture.fetch_head(repo), encoding="utf-8") as handle:
+        for line in handle:
+            if helper().ROADMAP_LINE in line:
+                return line.split("\t", 1)[0]
+    return None
+
+
+class FetchRuleTests(unittest.TestCase):
+    """The roadmap ref is fresh only when FETCH_HEAD's roadmap line names the ref's tip and is fresh by mtime. A fresh
+    FETCH_HEAD of another branch says nothing about the roadmap, so the roadmap is fetched. A plain fetch of the roadmap
+    in a single-branch clone moves FETCH_HEAD and not origin/roadmap: a fresh line that names another commit is stale."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="roadmap_rule_", dir=fixture.run_folder())
+        self.addCleanup(shutil.rmtree, self.root, True)
+
+    def test_a_fresh_fetch_head_of_another_branch_is_not_a_fresh_roadmap(self):
+        repo = fixture.clone_with_origin(self.root, "master-only", None, OLD_STORE)
+        fixture.write_fetch_head(repo, "master", NOW - 30)
+        fetch, calls = counting_fetch()
+        helper().fresh_ref(repo, now=NOW, fetch=fetch)
+        self.assertEqual(len(calls), 1, "a fresh FETCH_HEAD of master counted as a fresh roadmap: %d roadmap fetch(es),"
+                         " want 1" % len(calls))
+
+    def test_a_fresh_roadmap_line_at_the_ref_tip_starts_no_fetch(self):
+        repo = fixture.clone_with_origin(self.root, "roadmap-fresh", None, OLD_STORE)
+        fixture.write_fetch_head(repo, "roadmap", NOW - 30, sha=fixture.ref_sha(repo))
+        self.assertEqual(roadmap_line_sha(repo), fixture.ref_sha(repo),
+                         "control: the roadmap line does not name the ref's tip, so this case tests no fresh tip")
+        fetch, calls = counting_fetch()
+        note = helper().fresh_ref(repo, now=NOW, fetch=fetch)
+        self.assertEqual(calls, [], "a fresh roadmap line at the tip started %d fetch(es), want none" % len(calls))
+        self.assertEqual(note, "", "a fresh roadmap line at the tip gave the note %r, want empty" % note)
+
+    def test_a_roadmap_line_behind_the_ref_is_fetched_and_moves_the_ref(self):
+        newer = fixture.ruling_files({"old": fixture.entry("old"), "new": fixture.entry("new")})
+        origin = fixture.bare_origin(self.root, "behind-origin", OLD_STORE)
+        repo = fixture.clone_with_origin(self.root, "behind", origin, OLD_STORE)
+        # A single-branch clone: the plain fetch below writes FETCH_HEAD and does not move origin/roadmap.
+        fixture.git(repo, "config", "remote.origin.fetch", "+refs/heads/main:refs/remotes/origin/main")
+        newest = fixture.point_ref(origin, "refs/heads/roadmap", newer, self.root)
+        fixture.git(repo, "fetch", "--quiet", "origin", "roadmap")
+        os.utime(fixture.fetch_head(repo), (NOW - 30, NOW - 30))
+        stale = fixture.ref_sha(repo)
+        self.assertEqual(roadmap_line_sha(repo), newest, "control: FETCH_HEAD does not name the fetched roadmap commit")
+        self.assertNotEqual(stale, newest, "control: origin/roadmap already names the fetched commit, so it is not behind")
+        note = helper().fresh_ref(repo, now=NOW)
+        self.assertEqual(fixture.ref_sha(repo), newest, "a roadmap line behind the ref was judged fresh: origin/roadmap "
+                         "stayed at %s, want %s" % (stale, newest))
+        self.assertEqual(note, "", "a fetched ref gave the note %r, want empty" % note)
+
+    def test_a_roadmap_line_behind_the_ref_starts_one_fetch_and_gives_the_note_when_it_fails(self):
+        gone = os.path.join(self.root, "gone-behind.git")
+        repo = fixture.clone_with_origin(self.root, "behind-gone", gone, OLD_STORE)
+        fixture.write_fetch_head(repo, "roadmap", NOW - 30, sha=BEHIND_SHA)
+        self.assertNotEqual(roadmap_line_sha(repo), fixture.ref_sha(repo), "control: the roadmap line names the ref's tip")
+        fetch, calls = counting_fetch(result=False)
+        note = helper().fresh_ref(repo, now=NOW, fetch=fetch)
+        self.assertEqual(len(calls), 1, "a roadmap line behind the ref started %d fetch(es), want 1" % len(calls))
+        self.assertTrue(note.startswith("read as of "), "a failed fetch of a ref behind its roadmap line gave %r, want a"
+                        " read as of note" % note)
+
+    def test_the_roadmap_line_decides_not_the_first_line(self):
+        repo = fixture.clone_with_origin(self.root, "two-lines", None, OLD_STORE)
+        fixture.write_fetch_lines(repo, [(fixture.ref_sha(repo), "main"), (BEHIND_SHA, "roadmap")], when=NOW - 30)
+        self.assertEqual(roadmap_line_sha(repo), BEHIND_SHA, "control: the roadmap line does not name the behind sha")
+        fetch, calls = counting_fetch(result=False)
+        note = helper().fresh_ref(repo, now=NOW, fetch=fetch)
+        self.assertEqual(len(calls), 1, "a FETCH_HEAD whose first line names the tip, with a roadmap line behind it, "
+                         "started %d fetch(es), want 1" % len(calls))
+        self.assertTrue(note.startswith("read as of "), "a FETCH_HEAD with a roadmap line behind the ref gave %r, want a"
+                        " read as of note" % note)
+
+
+@unittest.skipUnless(os.name == "posix", "the fake git is a POSIX script, and a process group is a POSIX notion")
+class FetchProcessTests(unittest.TestCase):
+    """The fetch child runs in its own process group, which a timeout kills whole. It reads no prompt and no stdin."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="roadmap_proc_", dir=fixture.run_folder())
+        self.addCleanup(shutil.rmtree, self.root, True)
+
+    def test_a_timed_out_fetch_is_killed_with_its_process_group(self):
+        folder, _log, pid_file = make_fake_git(os.path.join(self.root, "hang-group"), hang=True, grandchild=True)
+        repo = fixture.clone_with_origin(self.root, "group", None, OLD_STORE)
+        with mock.patch.dict(os.environ, on_path(folder)):
+            helper().fresh_ref(repo, now=NOW)
+        self.assertTrue(os.path.exists(pid_file), "the fake fetch never started its grandchild")
+        with open(pid_file, encoding="utf-8") as handle:
+            grandchild = int(handle.read())
+        self.addCleanup(kill_quietly, grandchild)
+        self.assertTrue(wait_until_dead(grandchild), "the fetch's grandchild still ran %ss after the timeout: its process"
+                        " group was not killed; /proc state %s" % (GONE_BOUND, proc_state(grandchild)))
+
+    def fetch_env(self, name, preset=None):
+        """The environment one roadmap fetch starts with, after one fresh_ref with no value preset for the git
+        variables, or with `preset` (a dict) added to the environment."""
+        folder, log, _pid = make_fake_git(os.path.join(self.root, name))
+        repo = fixture.clone_with_origin(self.root, name + "-repo", None, OLD_STORE)
+        with mock.patch.dict(os.environ, dict(on_path(folder), **(preset or {}))):
+            if not preset:
+                for key in ("GIT_TERMINAL_PROMPT", "GIT_ASKPASS", "GIT_SSH_COMMAND"):
+                    os.environ.pop(key, None)
+            helper().fresh_ref(repo, now=NOW)
+        fetches = git_starts(log, "fetch")
+        self.assertEqual(len(fetches), 1, "control: the roadmap fetch starts: %r, want one" % fetches)
+        return fetches[0]["env"]
+
+    def test_the_fetch_never_prompts_for_a_password(self):
+        env = self.fetch_env("prompt")
+        self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0", "the fetch may prompt: GIT_TERMINAL_PROMPT is %r"
+                         % env["GIT_TERMINAL_PROMPT"])
+
+    def test_the_fetch_askpass_is_a_no_op(self):
+        env = self.fetch_env("askpass")
+        self.assertEqual(env["GIT_ASKPASS"], "true", "GIT_ASKPASS is %r, want the no-op true" % env["GIT_ASKPASS"])
+
+    def test_the_fetch_ssh_is_batch_mode(self):
+        env = self.fetch_env("batch")
+        self.assertIn("BatchMode=yes", env["GIT_SSH_COMMAND"] or "", "GIT_SSH_COMMAND is %r, want BatchMode=yes"
+                      % env["GIT_SSH_COMMAND"])
+
+    def test_a_preset_ssh_command_is_kept(self):
+        folder, log, _pid = make_fake_git(os.path.join(self.root, "ssh"))
+        repo = fixture.clone_with_origin(self.root, "ssh-repo", None, OLD_STORE)
+        with mock.patch.dict(os.environ, dict(on_path(folder), GIT_SSH_COMMAND="ssh -i /fixture/key")):
+            helper().fresh_ref(repo, now=NOW)
+        fetches = git_starts(log, "fetch")
+        self.assertEqual(len(fetches), 1, "control: the roadmap fetch did not start: %r" % fetches)
+        self.assertEqual(fetches[0]["env"]["GIT_SSH_COMMAND"], "ssh -i /fixture/key",
+                         "a preset GIT_SSH_COMMAND was replaced")
+
+    def test_the_fetch_child_reads_no_stdin_of_its_parent(self):
+        folder, log, _pid = make_fake_git(os.path.join(self.root, "stdin"))
+        repo = fixture.clone_with_origin(self.root, "stdin-repo", None, OLD_STORE)
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); import roadmap_ref; "
+                "roadmap_ref.fresh_ref(sys.argv[2], now=float(sys.argv[3]))")
+        env = dict(os.environ, PATH=folder + os.pathsep + os.environ.get("PATH", ""))
+        done = subprocess.run([sys.executable, "-c", code, LINT, repo, repr(NOW)], input=b"", env=env,
+                              capture_output=True, timeout=60)
+        self.assertEqual(done.returncode, 0, "the child that reads the ref failed: %s"
+                         % done.stderr.decode("utf-8", "replace")[-300:])
+        fetches = git_starts(log, "fetch")
+        self.assertEqual(len(fetches), 1, "control: the roadmap fetch did not start: %r" % fetches)
+        self.assertIs(fetches[0]["stdin_devnull"], True, "the fetch read its parent's stdin, not /dev/null")
+
+    def test_a_timed_out_fetch_is_not_followed_by_a_tip_read(self):
+        folder, log, _pid = make_fake_git(os.path.join(self.root, "tip"), hang=True)
+        repo = fixture.clone_with_origin(self.root, "tip-repo", None, OLD_STORE)
+        fixture.without_fetch_head(repo)
+        with mock.patch.dict(os.environ, on_path(folder)):
+            note = helper().fresh_ref(repo, now=NOW)
+        self.assertEqual(len(git_starts(log, "fetch")), 1, "control: the roadmap fetch did not start")
+        tips = git_starts(log, "log")
+        self.assertEqual(tips, [], "a timed-out fetch was followed by %d tip read(s): a second wait of up to"
+                         " FETCH_TIMEOUT" % len(tips))
+        self.assertTrue(note.startswith("read as of "), "the note is %r" % note)
+
+
+# The readers of the roadmap ref in the product files (product_files). A reader is a function whose own code names the
+# ref: a string holding origin/roadmap or refs/remotes/origin/, or a name or attribute of REF_NAMES. Three lists pin the
+# exact set of "file::function" names, so a reader added to either side fails until its list names it:
+#   DIRECT_CALLERS    the functions that call roadmap_ref.fresh_ref.
+#   ROUTED_READERS    the readers that reach fresh_ref through a call to a function of their file.
+#   UNROUTED_READERS  the readers that read the ref with no fresh check. They are the known gap of the debt
+#                     roadmap-fetch-other-readers. Routing one moves it to ROUTED_READERS, and that edit names it.
+REF_NAMES = ("STORE_REF", "STORE_REFS", "STEP_REF")  # the ref constants of lint/ruled_store.py and hooks/
+REF_PREFIX = "refs/remotes/origin/"
+DIRECT_CALLERS = {
+    "hooks/feedback_guard.py::Homes.roadmap_note",
+    "hooks/feedback_guard.py::roadmap_candidates",
+    "hooks/override.py::_take_step",
+    "hooks/question_form.py::_fresh_note",
+    "hooks/sendmessage_state.py::read_rulings",
+    "lint/ruled_store.py::_fresh_note",
+}
+ROUTED_READERS = {
+    "hooks/feedback_guard.py::roadmap_candidates",
+    "hooks/override.py::_take_step",
+    "hooks/sendmessage_state.py::read_rulings",
+    "lint/ruled_store.py::_fresh_note",
+    "lint/ruled_store.py::_list",
+    "lint/ruled_store.py::session_lines",
+}
+UNROUTED_READERS = {
+    "hooks/feedback_guard.py::Homes.filed_numbers",
+    "hooks/feedback_guard.py::Homes.step_names_template",
+    "hooks/feedback_guard.py::export_check",
+    "hooks/question_form.py::_read_steps_of",
+    "lint/check_artifact_cites.py::step_files",
+    "lint/compliance_probes.py::waiting_copy",
+    "lint/ruled_store.py::check_store",
+}
+
+
+def callee_names(nodes):
+    """The names a set of nodes calls: the function of each call, as a name or an attribute."""
+    names = set()
+    for node in nodes:
+        if isinstance(node, ast.Call):
+            func = node.func
+            names.add(func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", ""))
+    return names
+
+
+def names_ref(node):
+    """True when one node names the roadmap ref. The caller has already dropped the docstrings."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return "origin/roadmap" in node.value or REF_PREFIX in node.value
+    if isinstance(node, ast.Name):
+        return node.id in REF_NAMES
+    if isinstance(node, ast.Attribute):
+        return node.attr in REF_NAMES
+    return False
+
+
+def own_nodes(func, docstrings):
+    """The nodes of a function's code, nested functions included, with the docstrings (by id) left out."""
+    stack, found = list(func.body), []
+    while stack:
+        node = stack.pop()
+        if id(node) in docstrings:
+            continue
+        found.append(node)
+        stack.extend(ast.iter_child_nodes(node))
+    return found
+
+
+def ref_scan(source):
+    """(direct, routed readers, unrouted readers) of one module's source, as sets of function names (Class.method for a
+    method). `direct` holds the functions that call fresh_ref. A reader is routed when it reaches a fresh_ref call through
+    calls to functions of this module. A nested function belongs to its parent. The scan reads the tree the parser built,
+    so a comment never counts, and a string counts only as the string it is."""
+    tree = ast.parse(source)
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                docstrings.add(id(first.value))
+    funcs = {}
+
+    def visit(parent, prefix):
+        for child in ast.iter_child_nodes(parent):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                funcs[prefix + child.name] = child
+            elif isinstance(child, ast.ClassDef):
+                visit(child, prefix + child.name + ".")
+
+    visit(tree, "")
+    own = {name: own_nodes(node, docstrings) for name, node in funcs.items()}
+    calls = {name: callee_names(nodes) for name, nodes in own.items()}
+    direct = {name for name in own if "fresh_ref" in calls[name]}
+    routed = set(direct)
+    changed = True
+    while changed:
+        changed = False
+        reached = {name.rsplit(".", 1)[-1] for name in routed}
+        for name in own:
+            if name not in routed and calls[name] & reached:
+                routed.add(name)
+                changed = True
+    readers = {name for name in own if any(names_ref(node) for node in own[name])}
+    return direct, readers & routed, readers - routed
+
+
+def product_scan():
+    """(direct, routed, unrouted) over the product files, as "file::function" names. The helper itself is left out: it
+    is the one fetch of the roadmap, and it names the ref to run that fetch."""
+    found = (set(), set(), set())
+    for rel in product_files():
+        if rel == "lint/roadmap_ref.py":
+            continue
+        with open(os.path.join(REPO, rel), encoding="utf-8", errors="replace") as handle:
+            for into, names in zip(found, ref_scan(handle.read())):
+                into.update("%s::%s" % (rel, name) for name in names)
+    return found
+
+
+class ReaderScanTests(unittest.TestCase):
+    def assertPinned(self, found, pinned, what):
+        extra, missing = sorted(found - pinned), sorted(pinned - found)
+        self.assertFalse(extra or missing, "%s: found but not listed %r; listed but not found %r"
+                         % (what, extra, missing))
+
+    def test_the_scan_sees_a_call_and_no_mention(self):
+        direct, _routed, _unrouted = ref_scan("def f(repo):\n    roadmap_ref.fresh_ref(repo)\n")
+        self.assertEqual(direct, {"f"}, "a call in a function was not seen")
+        direct, _routed, _unrouted = ref_scan('def g():\n    """fresh_ref is read here."""\n    return 1\n')
+        self.assertEqual(direct, set(), "a docstring mention counted as a call")
+
+    def test_the_scan_reads_past_a_hash_in_a_string(self):
+        source = ('def reads():\n    label, ref = "# a hash in a string, not a comment", STORE_REF\n'
+                  '    return git("cat-file", ref)\n')
+        _direct, routed, unrouted = ref_scan(source)
+        self.assertEqual(unrouted, {"reads"}, "a hash in a string hid the read: routed %r, unrouted %r"
+                         % (routed, unrouted))
+
+    def test_a_multi_line_docstring_that_names_the_ref_is_no_reader(self):
+        source = ('def describes():\n    """Reads origin/roadmap and refs/remotes/origin/roadmap.\n\n'
+                  '    STORE_REF is named here too, in a docstring that runs on.\n    """\n    return 1\n')
+        _direct, routed, unrouted = ref_scan(source)
+        self.assertEqual(routed | unrouted, set(), "a multi-line docstring that names the ref counted as a reader")
+
+    def test_a_lone_quote_in_text_does_not_hide_the_read(self):
+        source = ('def reads():\n    note, ref = "the owner\'s note, with a lone quote", STORE_REF\n'
+                  '    return git("cat-file", ref)\n')
+        _direct, routed, unrouted = ref_scan(source)
+        self.assertEqual(unrouted, {"reads"}, "a lone quote in text hid the read: routed %r, unrouted %r"
+                         % (routed, unrouted))
+
+    def test_a_reader_that_calls_a_routed_helper_of_its_file_is_routed(self):
+        source = ('def fresh(repo):\n    return roadmap_ref.fresh_ref(repo)\n\n'
+                  'def routed(repo):\n    fresh(repo)\n    return git("cat-file", STORE_REF)\n\n'
+                  'def alone(repo):\n    return git("cat-file", STORE_REF)\n')
+        _direct, routed, unrouted = ref_scan(source)
+        self.assertEqual((routed, unrouted), ({"routed"}, {"alone"}), "a reader's route was not followed through its "
+                         "file's helper: routed %r, unrouted %r" % (routed, unrouted))
+
+    def test_the_scan_reaches_the_named_files(self):
+        scanned = product_files()
+        for rel in ("lint/ruled_store.py", "hooks/feedback_guard.py", "hooks/sendmessage_state.py",
+                    "hooks/override.py", "hooks/question_form.py"):
+            self.assertIn(rel, scanned, "scope: the scan does not reach %s" % rel)
+
+    def test_the_fresh_ref_callers_are_pinned(self):
+        self.assertPinned(product_scan()[0], DIRECT_CALLERS, "callers of roadmap_ref.fresh_ref")
+
+    def test_the_routed_readers_are_pinned(self):
+        self.assertPinned(product_scan()[1], ROUTED_READERS, "readers that reach fresh_ref")
+
+    def test_the_unrouted_readers_are_pinned(self):
+        self.assertPinned(product_scan()[2], UNROUTED_READERS, "readers that read the ref with no fresh check")
+
+
+def tearDownModule():
+    for folder in fixture._RUN:
+        shutil.rmtree(folder, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

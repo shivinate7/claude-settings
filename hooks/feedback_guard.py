@@ -21,9 +21,13 @@ a turn end in these cases:
     never count for these two kinds (rule building-memory-is-short-term). A home outside them is
     reported as "<path> is not a tracked <kind> home", with the homes listed (kind_homes). A task item,
     open or closed, may instead name `step:<slug>`: it passes when roadmap/data/steps/<slug>.json is a blob
-    on some ref, resolved as a closed note's step home is (Homes._held). A ruling never names a step. Cost:
-    the rev-parse, for-each-ref and cat-file reads a closed note runs, inside the Stop process, once per
-    task item homed to a step. When the cwd is in no git repo, or the layout cannot be read, these homes
+    on some ref, resolved as a closed note's step home is (Homes._held). A ruling never names a step. The
+    step file lives on origin/roadmap, so each repo's ref is first freshness-checked, once per Stop and shared
+    with the repeats read (Homes.roadmap_note, lint/roadmap_ref.py); a step home no ref holds after a failed
+    fetch ends its reason "(roadmap read as of HH:MM TZ)". A failed fetch whose note no reason or flag carries
+    adds one systemMessage line (ROADMAP_STALE). Cost: the rev-parse, for-each-ref and cat-file reads a closed
+    note runs, inside the Stop process, once per task item homed to a step, plus at most one `git fetch` per
+    repo per Stop, of up to FETCH_TIMEOUT seconds, when the ref is stale. When the cwd is in no git repo, or the layout cannot be read, these homes
     pass unchecked and a systemMessage says so;
   - an open page item (`[page] -> page:<n>`: the owner answers waiting-page item n; checked in
     every block that holds one, burst or not; a `[closed]` one is never checked) has a home that is not
@@ -52,8 +56,8 @@ a turn end in these cases:
     (layout.artifact_id), with no out_dir, whose tool_result is no error and returns a document whose data n
     equals the number (Pages.read_back; local_time._documents reads the result). A read-back skips the copy
     read. A number in neither blocks. The remedy says to ask the page writer to export the waiting copy and
-    to fetch the record branch, or to read the item back, and says the copy is read as of the last fetch: the
-    hook fetches nothing. A copy that cannot be read (no record branch ref, no items
+    to fetch the record branch, or to read the item back, and says the copy is read as of the last fetch: this
+    check fetches nothing (the repeats read of the same Stop may fetch it first, lint/roadmap_ref.py). A copy that cannot be read (no record branch ref, no items
     folder, an item file that is not a JSON object, the read fails) blocks nothing: a systemMessage "Feedback
     guard: page filing not checked" says so, and the send check decides alone. The check runs only after a
     proved send: a send the check stood down on skips it. Risk kind: likely risk. Rulings fb-1312-1 and
@@ -135,7 +139,9 @@ state file that predates the key counts every item there as judged. One model ca
 all new items (`invoke_model`, model REPEAT_MODEL, REPEAT_TIMEOUT seconds, no effort). The model
 compares each item's owner message by meaning with at most REPEAT_MAX candidates (REPEAT_SHARES per
 source) of REPEAT_CUT
-characters: roadmap steps at the local ref (one `git grep`, never fetched), the layout's backlog files
+characters: roadmap steps at the local ref (one `git grep`; the ref is first fetched when older than
+roadmap_ref.MAX_AGE, bounded at FETCH_TIMEOUT, else read as of its last fetch, and a repeat flag on a roadmap step
+then ends "(roadmap read as of HH:MM TZ)"; with no such flag the ROADMAP_STALE line says it), the layout's backlog files
 in the working tree, this inbox's other blocks, and the blocks of the REPEAT_INBOXES newest other
 inboxes whose sidecar `<sid>.inbox.repo` (local_time.bind_repo) names a folder in this repo. A hit
 appends ` repeats <ref>` to the item line (one rewrite of the inbox) and is named in the block reason,
@@ -162,6 +168,7 @@ import _transcript  # noqa: E402  the one home of the transcript readers and the
 import local_time  # noqa: E402  the one home of the inbox paths
 import override  # noqa: E402  the one home of the roadmap record ref and folder
 import ruling_home  # noqa: E402  the one home of "a branch's tree holds this file"
+import roadmap_ref  # noqa: E402  the one home of the roadmap fetch (lint/roadmap_ref.py)
 import precompact_handoff  # noqa: E402  the one home of the handoff path
 from shared_names import MACHINE_TAGS, SETTINGS_REPO, TEMPLATE_DIR  # noqa: E402  the one home of the machine notice tags, the repo, and the template dir
 from guard_core import SHELL_TOOLS  # noqa: E402  the one home of the shell tool names (Bash, PowerShell)
@@ -218,6 +225,7 @@ FAIL_OPEN_CLOSED = "Feedback guard: closed note homes not checked (%s)."
 FAIL_OPEN_FILING = "Feedback guard: page filing not checked (%s)."
 FAIL_OPEN_FORM = "Feedback guard: page form not checked (%s)."
 FAIL_OPEN_EXPORT = "Feedback guard: waiting copy export not checked (%s)."
+ROADMAP_STALE = "Feedback guard: roadmap %s (its fetch failed)."  # the note of a failed fetch no reason carries
 EXPORT_SCRIPT = "export_page.py"
 EXPORT_SAME = "same"  # the verdict export_page.py prints when nothing differs
 # A shell command that runs the export: an interpreter, then a path whose last part is export_page.py. A grep
@@ -401,6 +409,19 @@ class Homes:
         self._filed = None  # (numbers or None, branch, folder), read once per Stop
         self._top = None  # (the cwd's repo top or None,), read once per Stop
         self._templated = {}  # (branch, slug) -> whether the step file holds TEMPLATE_DIR, read once per Stop
+        self._fresh = {}  # repo top -> roadmap_ref.fresh_ref's note, one freshness check per repo per Stop
+
+    def roadmap_note(self, root):
+        """The freshness note of origin/roadmap in the repo at `root`: "" when fresh or just fetched, else "read as of
+        ...". The step homes and the repeats read share it, so a Stop checks each repo once and never retries a fetch
+        that failed."""
+        if root not in self._fresh:
+            self._fresh[root] = roadmap_ref.fresh_ref(root)
+        return self._fresh[root]
+
+    def roadmap_notes(self):
+        """The distinct notes of this Stop's roadmap reads whose fetch failed, in read order."""
+        return list(dict.fromkeys(n for n in self._fresh.values() if n))
 
     def _root(self, where):
         run = ruling_home._run_git(where, ["rev-parse", "--show-toplevel"])
@@ -434,24 +455,26 @@ class Homes:
             return [], None
         return [(root, os.path.normpath(found).replace(os.sep, "/")) for root in roots], None
 
-    def _held(self, path, closed=False):
-        """(error, held) for a repo-relative or absolute path: `held` is true when some branch's tree holds
+    def _held(self, path, closed=False, step=False):
+        """(error, held, note) for a repo-relative or absolute path: `held` is true when some branch's tree holds
         it in one of the repos, or when the check stood down. `error` is set when an absolute path is in no
         repo. The one read behind a task's or a closed note's `step:<slug>` home and a closed note's
-        file home."""
+        file home. A `step` home lives on origin/roadmap, so each repo's ref is freshness-checked first
+        (roadmap_note); `note` is the first failed fetch's "read as of ..." note, else ""."""
         places, err = self._locate(path, closed)
         if err:
-            return err, False
-        held, read, failed = not places, not places, None
+            return err, False, ""
+        held, read, failed, note = not places, not places, None, ""
         for root, rel in places:  # a repo git cannot read is skipped; a readable one still decides
             try:
+                note = note or (self.roadmap_note(root) if step else "")
                 held = ruling_home.value_resolves(rel, root) or held
                 read = True
             except ruling_home._GitFailure as e:
                 failed = failed or e
         if not read:  # no repo could be read: the caller stands the check down
             raise failed
-        return None, held
+        return None, held, note
 
     def problem(self, item_id, kind, rest, grant=False):
         """None when the home is good in some repo or the check stood down, else the reason text (the first
@@ -464,11 +487,12 @@ class Homes:
         try:
             step = step_home(rest) if kind == "task" else None
             if step:  # steps hold tasks, so only a task may name one; the step file is the proof
-                err, held = self._held(STEP_PATH % step.group(1))
+                err, held, note = self._held(STEP_PATH % step.group(1), step=True)
                 if held:
                     return None
                 return "%s [task] %s" % (item_id, err) if err else (
-                    "%s [task]: `step:%s` is no task home, as no branch holds its step file" % (item_id, step.group(1)))
+                    "%s [task]: `step:%s` is no task home, as no branch holds its step file%s"
+                    % (item_id, step.group(1), roadmap_clause(note)))
             places, err = self._locate(home_path(rest))
             if err:
                 return "%s [%s] %s" % (item_id, kind, err)
@@ -511,14 +535,14 @@ class Homes:
             return self._closed_reason(item_id)
         step = step_home(rest)
         try:
-            err, held = self._held(STEP_PATH % step.group(1) if step else home_path(rest), True)
+            err, held, note = self._held(STEP_PATH % step.group(1) if step else home_path(rest), True, bool(step))
             if err:
                 return "%s [note] %s" % (item_id, err)
             if held:
                 return None
         except ruling_home._GitFailure as e:
             return self._stand_down(e, True)
-        return self._closed_reason(item_id)
+        return self._closed_reason(item_id) + roadmap_clause(note)
 
     @staticmethod
     def _closed_reason(item_id):
@@ -803,8 +827,10 @@ def page_problem(item_id, rest, text, k, stamp, pages, homes=None):
             return None
         return ("%s [page] page:%s: the waiting copy at origin/%s, as of the last fetch, holds no item with n %s,"
                 " and the transcript shows no read-back of it; ask the page writer to export the waiting copy"
-                " into folder `%s` on that branch and push it, then run `git fetch origin %s` (this hook fetches"
-                " nothing); or read item %s back from the page (an ArtifactData get, list or query of collection"
+                " into folder `%s` on that branch and push it, then run `git fetch origin %s` (the filing check"
+                " fetches nothing; the repeats read fetches the record branch only when the FETCH_HEAD roadmap line is older"
+                " than 60 seconds, absent, or names a commit other than the tip of the roadmap ref); or read item %s back"
+                " from the page (an ArtifactData get, list or query of collection"
                 " `items` with no out_dir); then end the turn again"
                 % (item_id, n, branch, n, folder, branch, n))
     return ("%s [page] page:%s: the transcript shows no send of the owner's ruling to the page writer after"
@@ -1065,10 +1091,16 @@ def new_items(blocks, judged):
     return out
 
 
-def roadmap_candidates(root):
+def roadmap_candidates(root, homes=None):
     """[(ref, label, text)] for each step record at the local roadmap ref, from one `git grep` that
     prints every line of every step. Steps whose status is not `done` come first, so the share keeps
-    every open step. No ref, no hit or a git error: none."""
+    every open step. No ref, no hit or a git error: none. The ref is fetched first when it is older than
+    roadmap_ref.MAX_AGE (step roadmap-ref-fresh-before-verdict), through `homes` (Homes.roadmap_note, which
+    keeps the note of a failed fetch for the Stop) when given."""
+    if homes is not None:
+        homes.roadmap_note(root)
+    else:
+        roadmap_ref.fresh_ref(root)
     run = ruling_home._run_git(root, ["grep", "-I", "-e", ".", override.STEP_REF, "--", override.STEP_DIR])
     if run.returncode != 0:
         return []
@@ -1171,9 +1203,9 @@ def other_inbox_candidates(inbox, root):
     return out
 
 
-def candidates(homes, inbox, blocks, skip):
+def candidates(homes, inbox, blocks, skip, notes=None):
     """The (ref, label, text) of every older item to compare with, at most REPEAT_SHARES per source and
-    REPEAT_MAX in all, roadmap first.
+    REPEAT_MAX in all, roadmap first. A stale roadmap read leaves its note in `notes`.
     Each source fails open. Outside a git repo only this inbox's earlier blocks count."""
     found, root = [], None
     try:
@@ -1182,8 +1214,15 @@ def candidates(homes, inbox, blocks, skip):
         root = None
     own = os.path.basename(inbox)[:-len(INBOX_SUFFIX)]
     sources = [("inbox", lambda: inbox_candidates(blocks, own, skip))]
+
+    def roadmap():
+        steps = roadmap_candidates(root, homes)
+        if notes is not None and homes.roadmap_note(root):  # cached: no second check
+            notes.append(homes.roadmap_note(root))
+        return steps
+
     if root is not None:
-        sources = [("roadmap", lambda: roadmap_candidates(root)), ("backlog", lambda: backlog_candidates(root)),
+        sources = [("roadmap", roadmap), ("backlog", lambda: backlog_candidates(root)),
                    ("inbox", lambda: inbox_candidates(blocks, own, skip) + other_inbox_candidates(inbox, root))]
     for share, source in sources:
         try:
@@ -1193,10 +1232,10 @@ def candidates(homes, inbox, blocks, skip):
     return found[:REPEAT_MAX]
 
 
-def judge(homes, inbox, blocks, new):
+def judge(homes, inbox, blocks, new, notes=None):
     """Asks the model once which candidate each new item repeats. Returns ([(item id, ref, label)], why):
     `why` is None, or the reason the check could not run. Nothing to compare with: ([], None), no call."""
-    found = candidates(homes, inbox, blocks, {n for _, n in new})
+    found = candidates(homes, inbox, blocks, {n for _, n in new}, notes)
     if not found:
         return [], None
     labels = {ref: label for ref, label, _ in found}
@@ -1252,10 +1291,23 @@ def mark_items(inbox, blocks, hits):
     return placed
 
 
-def flag_text(item_id, ref, label, placed=True):
+def flag_text(item_id, ref, label, placed=True, note=""):
     what = "marked on the item" if placed else "not marked: its line was not found"
-    return "%s may repeat %s (\"%s\"); %s. Merge the work, or drop the mark if it is not a repeat." % (
+    text = "%s may repeat %s (\"%s\"); %s. Merge the work, or drop the mark if it is not a repeat." % (
         item_id, ref, label, what)
+    return text + (roadmap_clause(note) if ref.startswith("roadmap:") else "")
+
+
+def roadmap_clause(note):
+    """" (roadmap read as of ...)" for the note of a failed roadmap fetch, else ""."""
+    return " (roadmap %s)" % note if note else ""
+
+
+def roadmap_line(homes, said):
+    """The systemMessage line of a Stop whose roadmap fetch failed, once: ROADMAP_STALE with the notes that no block
+    reason or flag in `said` already carries; None when every fetch was fresh or each note is said."""
+    unsaid = [n for n in homes.roadmap_notes() if not any(n in s for s in said)]
+    return ROADMAP_STALE % "; ".join(unsaid) if unsaid else None
 
 
 def not_checked(why):
@@ -1269,12 +1321,13 @@ def judge_stop(homes, inbox, blocks, judged):
     new = [] if judged is None else new_items(blocks, judged)
     if not new:
         return [], None
+    notes = []
     try:
-        hits, why = judge(homes, inbox, blocks, new)
+        hits, why = judge(homes, inbox, blocks, new, notes)
         placed = mark_items(inbox, blocks, hits) if hits else set()
     except Exception as e:
         return [], not_checked(" ".join(str(e).split()) or type(e).__name__)
-    return [flag_text(*h, h[0] in placed) for h in hits], (None if why is None else not_checked(why))
+    return [flag_text(*h, h[0] in placed, notes[0] if notes else "") for h in hits], (None if why is None else not_checked(why))
 
 
 def _ts(rec):
@@ -1426,7 +1479,7 @@ def inbox_stop(hook):
             ids = [it[0] for b in blocks for it in map(item, b["items"]) if it is not None and it[2]]
             write_state(turns, len(blocks), burst, list(dict.fromkeys((judged or []) + ids)))
         if hook.get("stop_hook_active"):
-            msg = " ".join(flags + ([note] if note else []))
+            msg = " ".join(flags + [n for n in (note, roadmap_line(homes, flags)) if n])
             return {"systemMessage": msg} if msg else {}
         if blocks is None:
             reasons = found = ["the inbox file %s cannot be read" % os.path.basename(inbox)]
@@ -1449,6 +1502,9 @@ def inbox_stop(hook):
                 notes.append(FAIL_OPEN_FILING % homes.skip_filing)
             if homes.skip_form:
                 notes.append(FAIL_OPEN_FORM % homes.skip_form)
+            stale = roadmap_line(homes, reasons)
+            if stale:
+                notes.append(stale)
             if notes:
                 out["systemMessage"] = " ".join(notes)
         if reasons:

@@ -82,10 +82,21 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+import test_ruled_store as fixture  # noqa: E402  the one home of the FETCH_HEAD fixtures (lint/test_ruled_store.py)
 import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 ROOT = _test_temp.run_folder()
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)
 STUB_DIR = os.path.join(ROOT, "stub")
+# Each hook run goes through this probe, which installs the fetch guard (lint/test_ruled_store.py) before the hook's code.
+FETCH_PROBE = os.path.join(ROOT, "fetch_probe.py")
+FETCH_PROBE_SOURCE = r'''import os, runpy, sys
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
+import test_ruled_store
+test_ruled_store.refuse_real_origin_fetches(os.environ["FETCH_SPY_LOG"])
+sys.argv = [sys.argv[3]]
+runpy.run_path(sys.argv[0], run_name="__main__")
+'''
 FAILED = []
 RUNS = [0]
 SID_A, SID_B = "ses00001", "ses00002"
@@ -180,6 +191,7 @@ def origin_page_repo():
     repo = make_repo("page-origin", page=PAGE_URL)
     if not git(repo, "remote").stdout.strip():
         git(repo, "remote", "add", "origin", PAGE_ORIGIN_URL)
+    fixture.prime_origin(repo)  # each use primes its own read: the freshness window is short, so not once per build
     return repo
 
 
@@ -247,6 +259,9 @@ class _CountingPopen(_real_popen):
         if argv and os.path.basename(str(argv[0])).lower() in ("git", "git.exe"):
             with open(os.path.join(os.environ["CJ_LOADED_DIR"], "git.log"), "a", encoding="utf-8") as f:
                 f.write("git\n")
+            if "fetch" in argv:  # a roadmap or main refresh, one line each: the fetches a case counts
+                with open(os.path.join(os.environ["CJ_LOADED_DIR"], "fetch.log"), "a", encoding="utf-8") as f:
+                    f.write("fetch\n")
         _real_popen.__init__(self, args, *rest, **kwargs)
 
 
@@ -294,6 +309,8 @@ class Run:
                 self.calls = [json.loads(line) for line in f if line.strip()]
         gitlog = os.path.join(base, "git.log")
         self.git = len(open(gitlog, encoding="utf-8").read().split()) if os.path.exists(gitlog) else 0
+        fetchlog = os.path.join(base, "fetch.log")
+        self.fetches = len(open(fetchlog, encoding="utf-8").read().split()) if os.path.exists(fetchlog) else 0
         log = os.path.join(base, "config", "guard.log")
         self.log = open(log, encoding="utf-8").read() if os.path.exists(log) else ""
 
@@ -333,9 +350,31 @@ def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None):
                 "CJ_RECORD": os.path.join(base, "calls.jsonl"), "CJ_ANSWER": answer})
     if model_fail:
         env["CJ_MODEL_FAIL"] = "1"
-    proc = subprocess.run([sys.executable, HOOK], input=stdin_text, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", env=env, timeout=120)
+    env["FETCH_SPY_LOG"] = os.path.join(ROOT, fixture.FETCH_SPY)
+    # A hook reads origin/roadmap for the payload's folder. This run undoes only the priming it made, not a case's own.
+    payload_repo = payload_cwd(stdin_text)
+    owned = payload_repo is not None and payload_repo not in fixture.PRIMED
+    fixture.prime_origin(payload_repo)
+    if not os.path.exists(FETCH_PROBE):
+        with open(FETCH_PROBE, "w", encoding="utf-8") as f:
+            f.write(FETCH_PROBE_SOURCE)
+    try:
+        proc = subprocess.run([sys.executable, FETCH_PROBE, os.path.join(HERE, "..", "lint"), HERE, HOOK],
+                              input=stdin_text, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", env=env, timeout=120)
+    finally:
+        if owned:
+            fixture.unprime_roadmap(payload_repo)
     return Run(proc, base)
+
+
+def payload_cwd(stdin_text):
+    """The `cwd` of one hook payload, or None when the input is not a JSON object with one."""
+    try:
+        cwd = json.loads(stdin_text).get("cwd")
+    except (ValueError, AttributeError, TypeError):
+        return None
+    return cwd if isinstance(cwd, str) else None
 
 
 def spawn_input(kind="Explore", model="haiku", session=SID_A, agent=None, brief=None):
@@ -1575,19 +1614,41 @@ def case_past_ruling_cost():
     box = good_box(goal=CI_GOAL, problem=CI_PROBLEM, based=CI_BASED, options=CI_CHAT_OPTIONS)
     check("past ruling cost fixture: the box passes chat_hit", question_form.chat_hit(box) == ("", ""),
           question_form.chat_hit(box))
-    # Two git starts: the roadmap read, then the ruled store's ls-tree (one start when the store is absent).
+    # Each judged run starts with a fresh roadmap FETCH_HEAD line, so the roadmap read starts no fetch. The git starts
+    # left are its cat-file and the store's ls-tree (one start when the store is absent).
+    fixture.prime_roadmap(CI_REPO)
     r = run_hook(question_input(box=box, cwd=CI_REPO), answer=ALLOW)
     check("past ruling cost: a judged question runs two git processes, the roadmap read and the store's ls-tree",
           len(r.calls) == 1 and r.git == 2, detail(r))
     item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
+    fixture.prime_roadmap(CI_REPO)
     p = run_hook(page_input("set", item, doc_id="c133", cwd=CI_REPO), answer=ALLOW)
     check("past ruling cost: a judged page write runs two git processes", len(p.calls) == 1 and p.git == 2, detail(p))
+    fixture.without_fetch_head(BARE_REPO)  # never fetched: no roadmap ref, and no roadmap line in FETCH_HEAD
     q = run_hook(question_input(box=good_box(), cwd=BARE_REPO), answer=ALLOW)
-    check("past ruling cost: a judged question with no roadmap ref runs at most two git processes",
-          len(q.calls) == 1 and q.git <= 2, detail(q))
+    # A repo that never fetched its roadmap: the freshness check finds no line and no ref, so it runs one bounded fetch and
+    # one `git log` of the ref (the failed-fetch read). The count also holds the test's own real-origin guard, one
+    # `git config` per fetch attempt. The ruled store then reads `ls-tree` and `cat-file`: five git processes, at most one fetch.
+    check("past ruling cost: a judged question in a repo that never fetched its roadmap runs five git processes, "
+          "at most one fetch", len(q.calls) == 1 and q.git == 5 and q.fetches <= 1, detail(q))
+    # A stale roadmap ref (no roadmap line in FETCH_HEAD): the judged question fetches it exactly once. A fresh ref
+    # is the control: the same question then fetches nothing.
+    fixture.without_fetch_head(CI_REPO)
+    s = run_hook(question_input(box=good_box(), cwd=CI_REPO), answer=ALLOW)
+    check("past ruling cost: the stale-ref question reaches the model once", len(s.calls) == 1, detail(s))
+    check("past ruling cost: a stale roadmap ref is fetched exactly once per judged question", s.fetches == 1,
+          "fetches=%d; %s" % (s.fetches, detail(s)))
+    fixture.prime_roadmap(CI_REPO)
+    t = run_hook(question_input(box=good_box(), cwd=CI_REPO), answer=ALLOW)
+    check("past ruling cost: the fresh-ref question reaches the model once", len(t.calls) == 1, detail(t))
+    check("past ruling cost: a fresh roadmap ref is fetched by no judged question", t.fetches == 0,
+          "fetches=%d; %s" % (t.fetches, detail(t)))
+    fixture.without_fetch_head(CI_REPO)
+    fixture.without_fetch_head(BARE_REPO)
     f = run_hook(question_input(box=good_box(problem=None), cwd=CI_REPO), answer=ALLOW)
     check("past ruling cost: a box refused by the form makes no model call and no git process",
           f.calls == [] and f.git == 0 and (f.deny() or {}).get("permissionDecision") == "deny", detail(f))
+    fixture.unprime_roadmap(CI_REPO)
 
 
 # ------------------------------------------------------------------ unvetted marker and docs/debts
@@ -1721,6 +1782,30 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
           "Unvetted:" in r.reason(), detail(r))
 
 
+def case_hook_run_on_the_page_origin_fetches_nothing():
+    """A judged question at the waiting page's repo, whose origin is a real URL, reads its roadmap ref without a fetch.
+    The run primes that repo; unprimed, the hook's past-ruling read would fetch, and the guard would refuse the fetch."""
+    spy = os.path.join(ROOT, fixture.FETCH_SPY)
+    repo = origin_page_repo()
+    run_hook(question_input(box=good_box(), cwd=repo), answer=ALLOW)
+    installs, refused = fixture.spy_read(spy)
+    check("page origin hook run: scope, the guard was installed for the hook run", installs > 0,
+          "no guard install was logged")
+    fetched = [r for r in refused if r["refused"] == repo]
+    check("page origin hook run: the read fetched no real origin", not fetched,
+          "the hook read %s, which fetched its real origin %s, so its roadmap ref was not primed" % (repo, PAGE_ORIGIN_URL))
+
+
+def case_no_real_origin_fetch():
+    """No hook run fetched a real origin. A fetch of one reaches the network, and the guard refuses and logs it; the
+    guard's installs are the scope, so a dead guard cannot pass."""
+    name = "fetch guard: no hook run fetched a real origin"
+    installs, refused = fixture.spy_read(os.path.join(ROOT, fixture.FETCH_SPY))
+    check(name + ": scope, the guard was installed for the hook runs", installs > 0, "no guard install was logged")
+    check(name, not refused, "a hook fetched a real origin, so its roadmap ref was not primed: %s"
+          % "; ".join(sorted({"%s (origin %s)" % (r["refused"], r["origin"]) for r in refused})))
+
+
 # The cost of one fire of the judged tools: a question, a page write, an Agent spawn, and the two Opus reads.
 # A judged question or page write makes one model call, and its one child is the roadmap read, `git`. A tool
 # this hook does not judge, or a read of the page, starts nothing. The opus pair (opus_ask, then opus_scope, which
@@ -1736,9 +1821,22 @@ class CostTests(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.folder, ignore_errors=True)
 
-    def fire(self, stdin_text, answers=None):
+    def fire(self, stdin_text, answers=None, fresh=True):
+        """One hook run. Its repo (the payload's cwd) gets a fresh roadmap FETCH_HEAD first, so the past-ruling read is
+        the fresh read the claims count. fresh=False clears the ref, so the read is a stale one."""
         folder = tempfile.mkdtemp(dir=self.folder)
-        return cost_probe.run_hook(HOOK, stdin_text, folder, answers)
+        repo = payload_cwd(stdin_text)
+        if repo is not None:
+            if fresh:
+                fixture.prime_roadmap(repo)
+            else:
+                fixture.without_fetch_head(repo)
+        try:
+            return cost_probe.run_hook(HOOK, stdin_text, folder, answers)
+        finally:
+            if repo is not None:
+                fixture.unprime_roadmap(repo)
+                fixture.without_fetch_head(repo)
 
     def test_a_tool_this_hook_does_not_judge_starts_nothing(self):
         run = self.fire(json.dumps({"session_id": SID_A, "tool_name": "Bash", "tool_input": {"command": "ls"}}))
@@ -1773,6 +1871,17 @@ class CostTests(unittest.TestCase):
         self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
                          "the two children are the ruled-store ls-tree and the roadmap cat-file; got %r" % run["children"])
         self.assertEqual(run["files"], [], "an allowed question writes no file; got %r" % run["files"])
+
+    def test_a_stale_roadmap_ref_adds_one_fetch_to_a_judged_question(self):
+        box = good_box(goal=CI_GOAL, problem=CI_PROBLEM, based=CI_BASED, options=CI_CHAT_OPTIONS)
+        run = self.fire(question_input(box=box, cwd=CI_REPO), [[json.loads(ALLOW), None]], fresh=False)
+        self.assertEqual(len(run["models"]), 1, "one judged question, one model call; got %r" % run["models"])
+        verbs = cost_probe.verbs(run["children"])
+        self.assertEqual(verbs.count("fetch"), 1, "a stale roadmap ref is fetched once per judged question; got %r" % verbs)
+        # The fixture repo has no origin, so the fetch fails and the read falls back to the ref's tip time (one log).
+        self.assertEqual(verbs, ["fetch", "log", "ls-tree", "cat-file"],
+                         "the stale read starts the fetch, the tip-time log, then the two reads; got %r" % verbs)
+        self.assertEqual(run["files"], [], "a stale read writes no file under the config dir; got %r" % run["files"])
 
     def test_a_refused_page_write_adds_the_guard_log_line_and_no_other_file(self):
         item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
@@ -1830,7 +1939,8 @@ def main():
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
-                 case_page_absolute_file_path_is_judged):
+                 case_page_absolute_file_path_is_judged, case_hook_run_on_the_page_origin_fetches_nothing,
+                 case_no_real_origin_fetch):
         try:
             case()
         except Exception as exc:

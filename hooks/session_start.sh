@@ -69,8 +69,11 @@ bounded_git() {
 
 # bounded_fetch <dir>: one quiet, bounded `git fetch` in <dir> that names refs and never prunes or fetches all of
 # origin, so its cost does not grow with the remote's branch count (a prune fetch of a 429-branch remote did not finish
-# in 20 s; one ref takes well under a second). Returns 0 when the refresh ran, else not. The one home for every
-# freshness check below. The first call per checkout runs it; a later call for the same checkout (resolved with pwd -P)
+# in 20 s; one ref takes well under a second). Returns 0 when the refresh ran, else not. The one home of the
+# session start's checkout refreshes below: the grants read, the pointer checkout's behind check and the repo's
+# behind check, each of main, stable or the remote HEAD's target. It never fetches the roadmap branch: that fetch
+# is lint/roadmap_ref.py (fresh_ref), for the readers of origin/roadmap. The first call per checkout runs it; a
+# later call for the same checkout (resolved with pwd -P)
 # returns that status again, so a session start refreshes each checkout once, however many checks ask. The caller must
 # not run it in $( ), or the memo and fetch_target are lost with the subshell.
 # The refs come from the remote, not from local refs: one `git ls-remote --symref origin HEAD refs/heads/main refs/heads/stable`
@@ -534,10 +537,13 @@ fi
 
 # The owner's rulings that main has not yet taken in (the ruled store, decision ruled-store-one-home): lint/ruled_store.py
 # --session-line prints one header, up to five entry lines and a command line, or nothing. It reads origin/roadmap and
-# origin/main of the claude-settings clone ($d), else of this checkout, as the fetches above left them: no fetch of its
-# own. Any failure is silent and never changes the exit. Cost: once per SessionStart event, one python start and two
-# read-only git processes (ls-tree, cat-file --batch), plus a third cat-file when an open entry names the text it lands
-# in; no file written, no timer, no process kept.
+# origin/main of the claude-settings clone ($d), else of this checkout. It fetches the roadmap itself when FETCH_HEAD
+# holds no roadmap line within 60 s (lint/roadmap_ref.py, bounded at 2 s): the main refresh above rewrites FETCH_HEAD
+# with a main line only, so at nearly every start, resume and compaction that fetch runs; when it fails the header ends
+# "read as of <time>". Any failure is silent and never changes the exit. Cost: once per SessionStart event, one python
+# start, one git fetch of up to 2 s when the roadmap is stale, and two read-only git processes (ls-tree, cat-file
+# --batch), plus a third cat-file when an open entry names the text it lands in; no file written but git's own, no
+# timer, no process kept.
 if command -v python3 >/dev/null 2>&1; then
   rs_script="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/../lint/ruled_store.py"
   [ -f "$rs_script" ] || rs_script="$config_dir/lint/ruled_store.py"

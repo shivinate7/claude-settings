@@ -8,13 +8,17 @@ something that changes its work). Spec: docs/decisions/agent-model-cap.md, the t
 - The past-ruling check runs first and calls no model. A message that settles a question ("settled",
   "no owner item", "already ruled", "already decided"; not after `not` or `n't`) and cites a decision gets a
   read of the `"ref":` lines under roadmap/rulings, in the repo of the payload's cwd: one `ref` listing, then
-  one `grep` of the local ref `roadmap` and `origin/roadmap`, both when both exist; never a fetch. It refuses,
+  one `grep` of the local ref `roadmap` and `origin/roadmap`, both when both exist. `origin/roadmap` is first
+  fetched when its last roadmap fetch is older than roadmap_ref.MAX_AGE, bounded at roadmap_ref.FETCH_TIMEOUT
+  (lint/roadmap_ref.py); a read that could not be fetched fresh says "read as of <time>" on stderr, and a repo
+  with no roadmap ref and no roadmap branch on origin has nothing to be stale about and says nothing. It refuses,
   rule `past-ruling`, when a ruling's supersedes ref names a cited decision. A ref that quotes a sentence
   refuses only when the message shares two of its key words; a bare-slug or docs-path ref with no sentence
   refuses always, and prose that names a decision with no sentence after it refuses never. Why: a
   reply that settles a lane's question on a superseded decision sends the lane the wrong way (incident: a
   reply cited a decision a later ruling had replaced). Cost: two git processes, only for a settling message
-  that cites a decision; any other message starts none. A missing store allows silently; an unreadable
+  that cites a decision, plus one `git fetch` of up to FETCH_TIMEOUT seconds when the ref is stale; any other
+  message starts none. A missing store allows silently; an unreadable
   store, or a payload with no cwd, allows with one stderr line.
 - The wording judge reads every send, by wording only (WORDING_PROMPT). It lives here, not in a
   settings.json prompt hook: a prompt hook sees only the call's JSON, so it cannot read the override
@@ -55,12 +59,15 @@ READER_PARTS = ("mods", "session-board", "hooks", "receiver-state.mjs")
 OK_SHAPE = {"ok": (True, False)}
 # THE TIME BUDGET. The board read (READER_TIMEOUT, plus up to 5 s for kill_tree) then the busy call
 # (MODEL_TIMEOUT) run beside the wording call (WORDING_TIMEOUT, joined 5 s later at most), so the
-# longest path is 12 + 5 + 25 = 42 s, plus RULINGS_TIMEOUT = 5 s for the past-ruling read before them (one
-# shared deadline) = 47 s plus start-up. The settings.json PreToolUse entry for this hook
-# carries "timeout": 50.
+# longest path is 12 + 5 + 25 = 42 s. The past-ruling read runs before them: roadmap_ref.fresh_ref takes at most
+# 4 s (its fetch, FETCH_TIMEOUT = 2 s, then one bounded `git log`, 2 s, after a fetch that failed fast), then
+# RULINGS_TIMEOUT = 3 s for the two git starts (one shared deadline). Worst case 42 + 4 + 3 = 49 s plus start-up,
+# under the 50 s of the settings.json PreToolUse entry for this hook ("timeout": 50). A repo whose `.git` is
+# neither a folder nor a `gitdir:` file, or whose refs are not files, adds up to two more bounded `git rev-parse`
+# starts of 2 s each inside fresh_ref: that case can pass 50 s, and the hook is then cut by its timeout.
 READER_TIMEOUT = 12
 MODEL_TIMEOUT = 25
-RULINGS_TIMEOUT = 5  # one deadline for the whole past-ruling read (ref list, then one grep of about 150 small files)
+RULINGS_TIMEOUT = 3  # one deadline for the whole past-ruling read (ref list, then one grep of about 150 small files)
 WORDING_TIMEOUT = 30  # a prompt hook's default timeout
 WORDING_MODEL = "claude-sonnet-5-5"  # at the model's default effort (docs/decisions/agent-model-cap.md)
 RULE = "parallelism-no-mid-task-talk"
@@ -224,14 +231,26 @@ def key_words(text, slug=""):
     return {w for w in question_form._words(text) if len(w) >= KEY_MIN_LETTERS} - own
 
 
-def read_rulings(root):
+def read_rulings(root, notes=None):
     """({ruling id: [(slug, sentence)]}, state) from the `"ref":` lines under roadmap/rulings of the local ref
     `roadmap` and of `origin/roadmap`, both read when both exist, through ONE `git grep`. A first `git for-each-ref`
     says which exist. state is "ok", "absent" (no repo, or neither ref) or "unreadable: <why>". The file stem is
-    the ruling id. Never fetches. One deadline (RULINGS_TIMEOUT) covers both starts."""
+    the ruling id. Before the reads, `origin/roadmap` is fetched when stale (roadmap_ref.fresh_ref, once); the note
+    "read as of ..." of a fetch that failed, or "read as of unknown: <why>" when the check cannot run, is appended to
+    `notes` when it is given. One deadline (RULINGS_TIMEOUT) covers both git starts, not the fetch."""
     import question_form
     if question_form._git_root_of(root) is None:
         return {}, "absent"
+    try:
+        lint = os.path.join(HERE, "..", "lint")
+        if lint not in sys.path:
+            sys.path.append(lint)
+        import roadmap_ref
+        note = roadmap_ref.fresh_ref(root)
+    except Exception as exc:  # a read is never silent about how fresh it is
+        note = "read as of unknown: " + (" ".join(str(exc).split()) or type(exc).__name__)[:80]
+    if note and notes is not None:
+        notes.append(note)
     deadline = time.monotonic() + RULINGS_TIMEOUT
     env = dict(os.environ, LC_ALL="C")
 
@@ -279,8 +298,11 @@ def past_ruling_hit(payload, message):
     if not isinstance(cwd, str) or not cwd:
         print("sendmessage past-ruling check: the rulings store was not read (the payload has no cwd)", file=sys.stderr)
         return None
+    notes = []
     try:
-        rulings, state = read_rulings(cwd)
+        rulings, state = read_rulings(cwd, notes)
+        if notes:
+            print("sendmessage past-ruling check: the rulings store was %s" % notes[0], file=sys.stderr)
         if state == "ok":
             for slug in cited:
                 for rid, entries in sorted(rulings.items()):

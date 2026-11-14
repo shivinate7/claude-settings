@@ -1404,15 +1404,18 @@ class SessionStartGrantsFromMainTests(GitFixtureMixin, SessionStartAgentWorktree
     @unittest.skipIf(os.name == "nt", "the git shim is a POSIX sh script")
     def test_the_grant_check_starts_at_most_two_git_processes_when_origin_main_differs(self):
         self.point_origin_main(self.tip_with(GRANT_FRESH, GRANT_STALE_DOT))
+        fixture.prime_roadmap(self.primary)
         self.assert_grant_check_is_cheap()
 
     @unittest.skipIf(os.name == "nt", "the git shim is a POSIX sh script")
     def test_the_grant_check_starts_at_most_two_git_processes_when_only_origin_head_is_readable(self):
         self.point_origin_head_at(self.tip_with(GRANT_FRESH, GRANT_STALE_DOT))
+        fixture.prime_roadmap(self.primary)
         self.assert_grant_check_is_cheap()
 
     @unittest.skipIf(os.name == "nt", "the git shim is a POSIX sh script")
     def test_the_grant_check_starts_at_most_two_git_processes_when_no_origin_ref_is_readable(self):
+        fixture.prime_roadmap(self.primary)
         self.assert_grant_check_is_cheap()
 
     def test_the_grant_check_writes_no_file_in_the_checkout_or_git_dir(self):
@@ -1478,27 +1481,39 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
     def ls_remote_starts(starts):
         return [start for start in starts if start.split()[0] == "ls-remote"]
 
+    @staticmethod
+    def has_refspec(start, prefix):
+        return any(token.startswith(prefix) for token in start.split())
+
     def assert_one_origin_main_fetch(self, starts, branch=None):
-        """Exactly one git fetch: quiet and untagged, origin first among its names, and refspecs for origin/main alone,
-        plus one for `branch` when origin/HEAD names another branch. It never prunes and names no wildcard. Flag order
-        is not pinned."""
+        """One refresh of origin/main, at most one roadmap fetch, and no other fetch. The refresh is the fetch whose
+        refspecs name +refs/heads/main: quiet and untagged, origin first among its names, and refspecs for origin/main
+        alone, plus one for `branch` when origin/HEAD names another branch. It never prunes and names no wildcard. Flag
+        order is not pinned."""
         fetches = self.fetch_starts(starts)
-        self.assertEqual(len(fetches), 1, "want one git fetch at session start, got %r" % starts)
-        tokens = fetches[0].split()
+        refreshes = [start for start in fetches if self.has_refspec(start, "+refs/heads/main:")]
+        roadmaps = [start for start in fetches if self.has_refspec(start, "+roadmap:")]
+        others = [start for start in fetches if start not in refreshes and start not in roadmaps]
+        self.assertEqual(len(refreshes), 1, "want one origin/main refresh fetch at session start, got %r" % starts)
+        self.assertLessEqual(len(roadmaps), 1, "want at most one roadmap fetch at session start, got %r" % roadmaps)
+        self.assertEqual(others, [], "a git fetch that is neither the origin/main refresh nor the roadmap read: %r"
+                         % others)
+        fetch = refreshes[0]
+        tokens = fetch.split()
         flags = {token for token in tokens[1:] if token.startswith("-")}
         names = [token for token in tokens[1:] if not token.startswith("-")]
-        self.assertNotIn("--prune", flags, "the fetch prunes all of origin: %r" % fetches[0])
+        self.assertNotIn("--prune", flags, "the fetch prunes all of origin: %r" % fetch)
         self.assertEqual(flags, {"--quiet", "--no-tags"},
-                         "the fetch's flags are not --quiet and --no-tags: %r" % fetches[0])
-        self.assertEqual(names[:1], ["origin"], "the fetch does not name origin first: %r" % fetches[0])
+                         "the fetch's flags are not --quiet and --no-tags: %r" % fetch)
+        self.assertEqual(names[:1], ["origin"], "the fetch does not name origin first: %r" % fetch)
         refspecs = names[1:]
         self.assertEqual([token for token in refspecs if "*" in token], [],
-                         "the fetch names a wildcard refspec: %r" % fetches[0])
+                         "the fetch names a wildcard refspec: %r" % fetch)
         want = ["+refs/heads/main:refs/remotes/origin/main"]
         if branch is not None:
             want.append("+refs/heads/%s:refs/remotes/origin/%s" % (branch, branch))
         self.assertEqual(sorted(refspecs), sorted(want),
-                         "the fetch's refspecs are not the one-ref set: %r" % fetches[0])
+                         "the fetch's refspecs are not the one-ref set: %r" % fetch)
 
     def assert_local_main_line(self, lines, behind, ahead):
         found = [line for line in lines if LOCAL_MAIN.match(line)]
@@ -1703,10 +1718,20 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
     def test_no_origin_remote_starts_no_fetch_and_prints_no_refresh_line(self):
         vcs(self.primary, "remote", "remove", "origin")
         self.assertEqual(vcs(self.primary, "remote").stdout.strip(), "", "scope: a remote is still configured")
+        fixture.prime_roadmap(self.primary)
         lines, starts = self.run_traced()
         self.assertEqual(self.fetch_starts(starts), [], "a fetch ran with no origin: %r" % starts)
         self.assertEqual([line for line in lines if REFRESH_FAILED.match(line)], [],
                          "a refresh line printed with no origin: %r" % lines)
+
+    def test_a_stale_roadmap_ref_is_fetched_once_at_start(self):
+        # No origin, so the grants refresh starts no fetch and writes no FETCH_HEAD: the roadmap read is the only one.
+        long_ago = 1000000000  # an epoch second before any run, so the ref reads as stale
+        vcs(self.primary, "remote", "remove", "origin")
+        fixture.set_fetch_head(self.primary, when=long_ago)
+        _lines, starts = self.run_traced()
+        roadmap = [start for start in starts if start.split()[0] == "fetch" and "+roadmap:" in start]
+        self.assertEqual(len(roadmap), 1, "a stale roadmap ref: want one fetch of roadmap, got %r" % roadmap)
 
     # A refresh that fails: one line says so, and the grant line it leaves is marked unrefreshed.
 
@@ -1731,6 +1756,7 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
     def test_a_failed_fetch_is_one_refresh_attempt(self):
         # The one attempt is the ls-remote that reads origin's default. Once it fails, no fetch starts.
         self.stage_a_lane_grant_against_a_missing_origin()
+        fixture.prime_roadmap(self.primary)
         lines, starts = self.run_traced()
         self.assertEqual(len(self.ls_remote_starts(starts)), 1,
                          "want one refresh attempt, an ls-remote, got %r" % starts)
@@ -2092,6 +2118,7 @@ class SessionStartRulingLinesTests(SessionStartAgentWorktreeNoticeTests):
         vcs(clone, "add", "-A")
         vcs(clone, "commit", "-q", "-m", "claude-settings clone")
         fixture.point_ref(clone, fixture.STORE_REF, store, self.root)
+        fixture.set_fetch_head(clone)
         if main is not None:
             fixture.point_ref(clone, fixture.MAIN_REF, main, self.root)
         with open(os.path.join(self.config, "CLAUDE.md"), "w", encoding="utf-8") as handle:

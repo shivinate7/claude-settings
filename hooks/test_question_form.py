@@ -67,6 +67,7 @@ import re
 import inspect
 import shutil
 import sys
+import time
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1965,6 +1966,73 @@ def case_roadmap_broken_pipe_other_stderr_stays_unreadable():
           len(roadmap) == 1 and "unreadable" in roadmap[0] and "absent" not in roadmap[0], str(unknown)[:300])
 
 
+# ------------------------------------------------------------------ a failed fetch's note: once, and never as unsearched
+
+FETCH_NOTE = "read as of"  # the freshness note of a failed fetch of origin/roadmap (lint/roadmap_ref.py)
+STEP_OK_ID = "apps-step-keep"
+STEP_OK_SENTENCE = ("Ruling (owner, 2026-11-12): keep the GitHub apps' access to claude-settings as it is. "
+                    "Marker apps-step-5d1c.")
+
+
+def failed_fetch_repo(name, steps=None):
+    """A repo whose origin/roadmap holds the ruled store of RULED_ID and, with `steps` ({id: note}), those step notes.
+    Its origin is a local path with no repo behind it, so the freshness fetch fails. Its FETCH_HEAD is absent."""
+    tree = fixture.ruling_files({RULED_ID: fixture.entry(RULED_ID, at=RULED_AT, ruling=RULED_TEXT,
+                                                       supersedes=RULED_SUPERSEDES)})
+    for step_id, note in (steps or {}).items():
+        tree["roadmap/data/steps/%s.json" % step_id] = json.dumps({"note": note, "why": ""})
+    repo = tcj.make_repo(name, decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    tcj.git(repo, "remote", "add", "origin", os.path.join(RUN_FOLDER, name + "-gone.git"))
+    fixture.point_ref(repo, fixture.STORE_REF, tree, tcj.ROOT)
+    fixture.without_fetch_head(repo)
+    return repo
+
+
+def case_failed_fetch_note_reaches_the_verdict_once_with_steps_absent():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("failed fetch absent steps: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = failed_fetch_repo("past-fetch-absent")
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        result = fn(tcj.APPS_GOAL, repo)
+    check("failed fetch absent steps: scope, the ruled entry is a candidate", RULED_ID in ruled_ids(result[0]),
+          str(result)[:300])
+    count = str(result).count(FETCH_NOTE)
+    check("failed fetch absent steps: the read as of note reaches the verdict once, though the steps are absent",
+          count == 1, "the note appears %d times in %s" % (count, str(result)[:300]))
+
+
+def case_failed_fetch_note_once_and_no_searched_source_unknown():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("failed fetch steps ok: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = failed_fetch_repo("past-fetch-steps", steps={STEP_OK_ID: STEP_OK_SENTENCE})
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        result = fn(tcj.APPS_GOAL, repo)
+    check("failed fetch steps ok: scope, the step ruling is a candidate",
+          any(c.startswith(STEP_OK_ID + ": ") for c in result[0]), str(result)[:300])
+    count = str(result).count(FETCH_NOTE)
+    check("failed fetch steps ok: the read as of note reaches the verdict once", count == 1,
+          "the note appears %d times in %s" % (count, str(result)[:300]))
+    unknown = question_form.unknown_line(result[1])
+    check("failed fetch steps ok: no unknown source carries the note, since the steps were searched",
+          FETCH_NOTE not in unknown, unknown[:300])
+    # Control: a fetch record that names the ref's tip and is fresh says nothing, so the note above is the failed fetch's.
+    # The record and the clock are both pinned, so the control reads no real clock.
+    import roadmap_ref  # lint/roadmap_ref.py, imported by lint/test_ruled_store.py
+    pinned = 1800000000.0
+    fixture.set_fetch_head(repo, when=pinned)
+    clock = mock.Mock(wraps=time, time=mock.Mock(return_value=pinned + 1))
+    with mock.patch(POINTER_CHECKOUT, return_value=repo), mock.patch.object(roadmap_ref, "time", clock):
+        fresh = fn(tcj.APPS_GOAL, repo)
+    check("failed fetch steps ok: control, a fresh roadmap fetch adds no note", FETCH_NOTE not in str(fresh),
+          str(fresh)[:300])
+
+
 # ------------------------------------------------------------------ item 51's field: a picture's focus at the top level
 
 def case_item_51_stray_field():
@@ -2662,7 +2730,39 @@ def case_judged_mixed_writes_all_returned():
           "doc ids %r: the relative write p4 is read against the process cwd and dropped" % (ids,))
 
 
+def case_past_rulings_reads_the_page_repo_without_a_fetch():
+    """The waiting page's repo has a real origin, and a past-ruling read over it fetches nothing. origin_page_repo
+    primes the repo for this use, so the read takes the fresh path; unprimed, the read would fetch and the guard would
+    refuse the fetch."""
+    import question_form  # the one form check (hooks/question_form.py)
+    spy = os.path.join(RUN_FOLDER, fixture.FETCH_SPY)
+    fn = getattr(question_form, "past_rulings", None)
+    check("page repo past rulings: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.origin_page_repo()
+    installs, _refused = fixture.spy_read(spy)
+    check("page repo past rulings: scope, the guard is installed", installs > 0, "no guard install was logged")
+    fn(tcj.APPS_GOAL, repo)
+    _installs, refused = fixture.spy_read(spy)
+    fetched = [r for r in refused if r["refused"] == repo]
+    check("page repo past rulings: the read fetched no real origin", not fetched,
+          "the read of %s fetched its real origin %s, so its roadmap ref was not primed" % (repo, tcj.PAGE_ORIGIN_URL))
+
+
+def case_no_real_origin_fetch():
+    """No read in this process fetched a real origin. The page's origin is a real URL, and each use primes it
+    (tcj.origin_page_repo); a fetch that gets past the prime is refused and logged by the guard, which is installed
+    in main. The guard's install is the scope, so a dead guard cannot pass."""
+    name = "fetch guard: no read fetched a real origin"
+    installs, refused = fixture.spy_read(os.path.join(RUN_FOLDER, fixture.FETCH_SPY))
+    check(name + ": scope, the guard was installed in this process", installs > 0, "no guard install was logged")
+    check(name, not refused, "a read fetched a real origin, so its roadmap ref was not primed: %s"
+          % "; ".join(sorted({"%s (origin %s)" % (r["refused"], r["origin"]) for r in refused})))
+
+
 def main():
+    fixture.refuse_real_origin_fetches(os.path.join(RUN_FOLDER, fixture.FETCH_SPY))
     for case in (case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
                  case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
                  case_dismissed_reason_keeps_the_generic_remedy_for_other_fields,
@@ -2691,6 +2791,8 @@ def main():
                  case_ruled_store_marks_an_unread_entry_unchecked,
                  case_ruled_store_ranks_by_shared_words_before_recency,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
+                 case_failed_fetch_note_reaches_the_verdict_once_with_steps_absent,
+                 case_failed_fetch_note_once_and_no_searched_source_unknown,
                  case_task_why_cited_reds, case_task_why_cited_greens,
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
                  case_task_str_replace_removes_only_the_label, case_str_replace_blank_prose_line_passes,
@@ -2709,7 +2811,8 @@ def main():
                  case_cross_repo_writer_guard_path, case_cross_repo_writer_page_item_hit,
                  case_cross_repo_writer_call_judge, case_cross_repo_update_checked_with_needs_repo,
                  case_judged_relative_file_path_read_at_cwd, case_judged_absolute_and_empty_are_unchanged,
-                 case_judged_mixed_writes_all_returned):
+                 case_judged_mixed_writes_all_returned, case_past_rulings_reads_the_page_repo_without_a_fetch,
+                 case_no_real_origin_fetch):
         try:
             case()
         except Exception as exc:

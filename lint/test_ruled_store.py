@@ -8,7 +8,9 @@ The store is roadmap/rulings/<id>.json on origin/roadmap. Each case builds a rea
 the module's functions or runs its CLI. RULED_STORE_UNDER_TEST overrides the module path, as a mutant run needs.
 hooks/test_session_start.py and hooks/test_question_form.py import this file as `fixture` for the same helpers.
 """
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -25,6 +27,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import roadmap_ref  # noqa: E402  the freshness helper (lint/roadmap_ref.py); its UNKNOWN is the note a cut fetch leaves
 
 # The store helpers. A store is the folder roadmap/rulings on origin/roadmap, one JSON file per ruling. The helpers
 # point refs with git plumbing only (hash-object, update-index on a temp index, write-tree, commit-tree, update-ref),
@@ -70,6 +73,195 @@ def point_ref(repo, ref, files, scratch):
     commit = git(repo, "commit-tree", tree, "-m", "fixture for " + ref, env=env)
     git(repo, "update-ref", ref, commit, env=env)
     return commit
+
+
+def fetch_head(repo):
+    """The path of the repo's FETCH_HEAD, as git names it. The age of origin/roadmap is this file's mtime."""
+    return os.path.join(repo, git(repo, "rev-parse", "--git-path", "FETCH_HEAD"))
+
+
+FETCH_ORIGIN = "fixture-origin"  # the URL git names in a FETCH_HEAD line; the helper reads only the branch name
+
+
+ZERO_SHA = "0" * 40
+
+
+def ref_tip(repo, ref=STORE_REF):
+    """The sha that `ref` resolves to in repo, or None when it does not resolve. Never raises."""
+    answer = _nowindow.run([VCS, "-C", repo, "rev-parse", "--verify", "--quiet", ref], capture_output=True, text=True,
+                           env=ENV, timeout=60)
+    sha = answer.stdout.strip()
+    return sha if answer.returncode == 0 and sha else None
+
+
+def write_fetch_lines(repo, lines, when=None):
+    """Writes the repo's FETCH_HEAD with one line per (sha, branch) pair in `lines`, its mtime at `when` (an epoch
+    second) or now. Git writes one such line per fetched branch, in the order fetched."""
+    path = fetch_head(repo)
+    with open(path, "w", encoding="utf-8") as handle:
+        for sha, branch in lines:
+            handle.write("%s\t\tbranch '%s' of %s\n" % (sha, branch, FETCH_ORIGIN))
+    os.utime(path, None if when is None else (when, when))
+
+
+def write_fetch_head(repo, branch="roadmap", when=None, sha=None):
+    """Writes the repo's FETCH_HEAD as one fetch of `branch`, its line naming `sha`, with its mtime at `when` (an epoch
+    second) or now. `sha` defaults to the tip of origin/<branch> in repo when that resolves, else zeros, so a fresh
+    line names the ref it is fresh for. The roadmap ref is fresh only when the roadmap line names the roadmap's tip."""
+    if sha is None:
+        sha = ref_tip(repo, "refs/remotes/origin/%s" % branch) or ZERO_SHA
+    write_fetch_lines(repo, [(sha, branch)], when)
+
+
+def set_fetch_head(repo, when=None, sha=None):
+    """The repo's FETCH_HEAD as a fetch of the roadmap branch, its mtime at `when` or now, its line naming `sha`
+    (default: the tip of origin/roadmap)."""
+    write_fetch_head(repo, "roadmap", when, sha)
+
+
+def without_fetch_head(repo):
+    """Removes the repo's FETCH_HEAD, so origin/roadmap reads as never fetched."""
+    path = fetch_head(repo)
+    if os.path.exists(path):
+        os.remove(path)
+
+
+# A fetch of a real origin reaches a network host, and on some runners it outlives its bound and rewrites the fixture's
+# roadmap ref. A case that runs a reader on such a repo primes it, and the guard below refuses any fetch that gets through.
+REAL_ORIGIN = ("http://", "https://", "git@", "ssh://")
+FETCH_SPY = "fetch-spy.log"  # the file, in the run's folder, that names each guard install and each refused fetch
+
+
+def origin_url(repo):
+    """The URL a fetch of origin reaches: the remote's URL with the longest matching url.<base>.insteadOf prefix replaced,
+    as git does. A fixture may keep a GitHub URL in its config and send the fetch to a local bare repo. One `git config`
+    start reads the remote's URL and every insteadOf rule, and no network is reached. None when there is no origin URL.
+    The rules are read with -z: each record is key, newline, value, NUL. A line split at its first space would cut a key
+    whose subsection path holds a space, and that rule would be dropped."""
+    answer = _nowindow.run([VCS, "-C", repo, "config", "-z", "--get-regexp",
+                            r"^(remote\.origin\.url|url\..+\.insteadof)$"],
+                           capture_output=True, text=True, env=ENV, timeout=60)
+    if answer.returncode != 0:
+        return None
+    raw, rewrites = None, []
+    for record in answer.stdout.split("\0"):
+        key, _, value = record.partition("\n")
+        if not key:
+            continue
+        if key == "remote.origin.url":
+            raw = value
+        elif key.lower().endswith(".insteadof"):
+            rewrites.append((key[len("url."):-len(".insteadof")], value))
+    if not raw:
+        return None
+    matches = [(base, prefix) for base, prefix in rewrites if prefix and raw.startswith(prefix)]
+    if not matches:
+        return raw
+    base, prefix = max(matches, key=lambda match: len(match[1]))
+    return base + raw[len(prefix):]
+
+
+def real_origin(repo):
+    """True when a fetch of the repo's origin reaches a network host. A local origin, a path or file URL, is not real."""
+    url = origin_url(repo)
+    return url is not None and url.startswith(REAL_ORIGIN)
+
+
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # git's empty tree: every repo holds it, so no index is needed
+PRIMED = {}  # repo -> True when prime_roadmap created the ref, so unprime_roadmap removes it; a repo is in it while primed
+
+
+def prime_roadmap(repo):
+    """One run's fresh roadmap read of `repo`. A fresh FETCH_HEAD line names the ref's tip, and a missing ref is stale, so
+    when origin/roadmap does not resolve it is pointed at an empty-tree commit (no rulings, no steps). A ref that resolves
+    is never moved. FETCH_HEAD then gets a fresh line naming the tip (set_fetch_head). unprime_roadmap undoes this run's
+    part, so a shared repo returns to its built state for the cases after it."""
+    created = ref_tip(repo) is None
+    if created:
+        git(repo, "update-ref", STORE_REF, git(repo, "commit-tree", EMPTY_TREE, "-m", "primed roadmap ref"))
+    PRIMED.setdefault(repo, created)
+    set_fetch_head(repo)
+
+
+def unprime_roadmap(repo):
+    """Undoes prime_roadmap for `repo`: removes FETCH_HEAD, and the ref when prime_roadmap created it. A repo that was
+    never primed, or None, is left as it is."""
+    if repo is None or repo not in PRIMED:
+        return
+    created = PRIMED.pop(repo)
+    without_fetch_head(repo)
+    if created:
+        git(repo, "update-ref", "-d", STORE_REF)
+
+
+def prime_origin(repo):
+    """Primes the roadmap fetch of a repo whose origin is a real URL, so a reader reads origin/roadmap without a fetch.
+    The window is roadmap_ref.MAX_AGE, so each run calls this for its own repo, and unprime_roadmap after it. A repo with a
+    local origin is left as it is."""
+    if repo is not None and real_origin(repo):
+        prime_roadmap(repo)
+
+
+def _log_spy(spy, record):
+    with open(spy, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record) + "\n")
+
+
+def refuse_real_origin_fetches(spy):
+    """Patches the one fetch of origin/roadmap (roadmap_ref.fetch_roadmap) in this process. A fetch of a repo whose origin
+    is a real URL is refused and logged to `spy`, and never runs. Any other fetch runs as it did. The install is logged
+    too, so a case can tell that the guard was in place."""
+    real_fetch = roadmap_ref.fetch_roadmap
+
+    def refused(repo_dir, timeout):
+        if real_origin(repo_dir):
+            _log_spy(spy, {"refused": repo_dir, "origin": origin_url(repo_dir)})
+            raise OSError("fetch refused by the test guard: prime the roadmap ref before the read")
+        return real_fetch(repo_dir, timeout)
+
+    _log_spy(spy, {"install": os.getpid()})
+    roadmap_ref.fetch_roadmap = refused
+
+
+def spy_read(spy):
+    """(installs, refused) from the spy file: how many guards were installed, and each refused fetch as a dict."""
+    installs, refused = 0, []
+    if not os.path.exists(spy):
+        return installs, refused
+    with open(spy, encoding="utf-8") as handle:
+        for line in handle:
+            record = json.loads(line)
+            if "install" in record:
+                installs += 1
+            else:
+                refused.append(record)
+    return installs, refused
+
+
+def ref_sha(repo, ref=STORE_REF):
+    return git(repo, "rev-parse", ref)
+
+
+def bare_origin(scratch, name, files):
+    """A bare repo at scratch/<name>.git whose refs/heads/roadmap holds `files`. Returns its path."""
+    path = os.path.join(scratch, name + ".git")
+    git(scratch, "init", "--bare", "-q", path)
+    point_ref(path, "refs/heads/roadmap", files, scratch)
+    return path
+
+
+def clone_with_origin(root, name, origin, files, real_url=None):
+    """A repo whose origin/roadmap holds `files`, with `origin` as its origin remote when it is not None. With `real_url`,
+    the remote keeps that URL (a GitHub one, say) and an insteadOf rule sends its fetch to the local `origin`, as a
+    fixture does for a real repo. The rule's key takes the path with "/" for each separator, as the config file does."""
+    repo = init_repo(os.path.join(root, name))
+    point_ref(repo, STORE_REF, files, root)
+    if origin is not None and real_url is None:
+        git(repo, "remote", "add", "origin", origin)
+    elif origin is not None:
+        git(repo, "remote", "add", "origin", real_url)
+        git(repo, "config", "url.%s.insteadOf" % origin.replace(os.sep, "/"), real_url)
+    return repo
 
 
 def ruling_files(entries):
@@ -465,6 +657,7 @@ class SessionLinesTests(RepoCase):
         repo = self.make_repo("one", store=fixture.ruling_files({
             "r-1": fixture.entry("r-1", supersedes=[{"kind": "test", "ref": "lint/test_x.py::case_a"}]),
         }))
+        fixture.set_fetch_head(repo)
         lines = ruled_store.session_lines(repo)
         self.assertEqual(len(lines), 3, "want header, one entry, command; got %r" % lines)
         self.assertEqual(lines[0], HEADER % (1, 0), "header: %r" % lines[0])
@@ -499,6 +692,7 @@ class SessionLinesTests(RepoCase):
             for day in range(1, 13)
         }
         repo = self.make_repo("twelve", store=fixture.ruling_files(entries))
+        fixture.set_fetch_head(repo)
         lines = ruled_store.session_lines(repo)
         self.assertLessEqual(len(lines), 8, "session lines exceed 8: %d lines" % len(lines))
         self.assertEqual(lines[0], HEADER % (12, 0), "header: %r" % lines[0])
@@ -649,6 +843,7 @@ class CostAndCliTests(RepoCase):
     def test_reading_the_store_starts_one_ls_tree_and_one_cat_file(self):
         repo = self.make_repo("cost", store=fixture.ruling_files(
             {"r%d" % number: fixture.entry("r%d" % number) for number in range(6)}))
+        fixture.set_fetch_head(repo)
         trace = os.path.join(self.root, "git-trace.log")
         with mock.patch.dict(os.environ, {"GIT_TRACE": trace}):
             entries = ruled_store.ruled_entries(repo)
@@ -695,6 +890,188 @@ class CostAndCliTests(RepoCase):
         self.assertEqual(failed.returncode, 1, "check on a store with a migrated entry exited %d, want 1"
                          % failed.returncode)
         self.assertIn("migrated", failed.stdout + failed.stderr, "check did not name the entry it refused")
+
+
+NOTE_LINE = re.compile(r"read as of \d{2}:\d{2} (CST|CDT)")  # the note lint/roadmap_ref.py adds to a stale read
+
+
+class StaleRefReadTests(RepoCase):
+    """The store read fetches a stale origin/roadmap first, and says the read is as of a time when it cannot
+    (lint/roadmap_ref.py). The helper's own cases are in lint/test_roadmap_ref.py."""
+
+    def stale_pair(self):
+        """(older, newer) store trees: the newer one adds the ruling `new`."""
+        older = ruling_files({"old": entry("old")})
+        return older, ruling_files({"old": entry("old"), "new": entry("new")})
+
+    def test_a_stale_ref_is_fetched_before_the_store_is_read(self):
+        older, newer = self.stale_pair()
+        origin = bare_origin(self.root, "fetch-origin", older)
+        repo = self.make_repo("fetch", store=older)
+        git(repo, "remote", "add", "origin", origin)
+        point_ref(origin, "refs/heads/roadmap", newer, self.root)
+        without_fetch_head(repo)
+        self.assertIn("new", ids(ruled_store.ruled_entries(repo)),
+                      "the stale origin/roadmap was read without a fetch: the newer ruling is missing")
+
+    def test_a_stale_ref_with_no_network_says_read_as_of_in_the_session_block(self):
+        repo = self.make_repo("offline", store=ruling_files({"r-1": entry("r-1")}))
+        git(repo, "remote", "add", "origin", os.path.join(self.root, "gone.git"))
+        without_fetch_head(repo)
+        lines = ruled_store.session_lines(repo)
+        self.assertTrue(any(NOTE_LINE.search(line) for line in lines),
+                        "the session block did not say the ref was read as of a time: %r" % lines)
+
+    def test_a_fetch_cut_at_the_timeout_is_bounded_at_two_seconds_and_says_read_as_of(self):
+        older, _newer = self.stale_pair()
+        origin = bare_origin(self.root, "cut-origin", older)
+        repo = self.make_repo("cut", store=older)
+        git(repo, "remote", "add", "origin", origin)
+        without_fetch_head(repo)
+        real_popen = _nowindow.Popen
+        waits = []
+
+        class CutFetch:
+            """A fetch child whose wait times out. poll() reports it gone, so the group kill has nothing to reach."""
+            returncode = None
+
+            def communicate(self, timeout=None):
+                waits.append(timeout)
+                raise subprocess.TimeoutExpired(["git", "fetch"], timeout)
+
+            def poll(self):
+                return 1
+
+        def cut(argv, *rest, **kwargs):
+            if isinstance(argv, (list, tuple)) and "fetch" in argv:
+                return CutFetch()
+            return real_popen(argv, *rest, **kwargs)
+
+        with mock.patch.object(_nowindow, "Popen", cut):
+            lines = ruled_store.session_lines(repo)
+        self.assertEqual(waits, [2.0], "the fetch did not wait on its child with a 2.0 s timeout: %r" % waits)
+        self.assertTrue(any(roadmap_ref.UNKNOWN in line for line in lines),
+                        "a cut fetch with no roadmap fetch on record did not say read as of an unknown time: %r"
+                        % lines)
+
+    def test_a_fresh_ref_is_read_without_a_fetch(self):
+        older, newer = self.stale_pair()
+        origin = bare_origin(self.root, "fresh-origin", older)
+        repo = self.make_repo("fresh", store=older)
+        git(repo, "remote", "add", "origin", origin)
+        point_ref(origin, "refs/heads/roadmap", newer, self.root)
+        set_fetch_head(repo)
+        before = ref_sha(repo)
+        entries = ruled_store.ruled_entries(repo)
+        self.assertNotIn("new", ids(entries), "a fresh ref was fetched: the newer ruling was read")
+        self.assertEqual(ref_sha(repo), before, "a fresh ref moved")
+
+    def test_the_session_block_carries_the_note_the_helper_returns(self):
+        repo = self.make_repo("carry", store=ruling_files({"r-1": entry("r-1")}))
+        helper = mock.Mock()
+        helper.fresh_ref.return_value = "read as of 11:05 CST"
+        with mock.patch.dict(sys.modules, {"roadmap_ref": helper}):
+            lines = load_module().session_lines(repo)
+        self.assertTrue(any("read as of 11:05 CST" in line for line in lines),
+                        "the session block dropped the note the helper returned: %r" % lines)
+
+    def test_each_store_read_calls_the_helper_once(self):
+        repo = self.make_repo("once", store=ruling_files({"r-1": entry("r-1")}))
+        helper = mock.Mock()
+        helper.fresh_ref.return_value = ""
+        with mock.patch.dict(sys.modules, {"roadmap_ref": helper}):
+            module = load_module()
+            module.ruled_entries(repo)
+            once = helper.fresh_ref.call_count
+            module.read_store(repo)
+            twice = helper.fresh_ref.call_count
+        self.assertEqual(once, 1, "ruled_entries called the helper %d times, want 1" % once)
+        self.assertEqual(twice, 2, "read_store did not add one call to the helper: %d in all, want 2" % twice)
+
+    def test_an_offline_stale_ref_is_not_a_store_problem(self):
+        clean = self.make_repo("offline-clean", store=ruling_files({"ok": entry("ok")}))
+        git(clean, "remote", "add", "origin", os.path.join(self.root, "gone-clean.git"))
+        without_fetch_head(clean)
+        self.assertEqual(ruled_store.check_store(clean), [],
+                         "a stale ref with no network counted as a store problem")
+
+
+class StaleRefNoteTests(RepoCase):
+    """When the freshness check cannot run, because it raises or its module cannot be imported, the store read says so:
+    the session block carries "read as of unknown: <why>". A read is never silent about how fresh it is."""
+
+    def store_with_open_entry(self, name):
+        return self.make_repo(name, store=ruling_files({"r-1": entry("r-1")}))
+
+    def test_a_check_that_raises_is_said_in_the_session_block(self):
+        repo = self.store_with_open_entry("raises")
+        helper = mock.Mock()
+        helper.fresh_ref.side_effect = RuntimeError("boom")
+        with mock.patch.dict(sys.modules, {"roadmap_ref": helper}):
+            lines = load_module().session_lines(repo)
+        self.assertTrue(any("read as of unknown:" in line for line in lines),
+                        "a raising freshness check left the session block silent: %r" % lines)
+
+    def test_a_check_that_cannot_be_imported_is_said_in_the_session_block(self):
+        repo = self.store_with_open_entry("no-import")
+        with mock.patch.dict(sys.modules, {"roadmap_ref": None}):
+            lines = load_module().session_lines(repo)
+        self.assertTrue(any("read as of unknown:" in line for line in lines),
+                        "an unimportable freshness check left the session block silent: %r" % lines)
+
+
+class ListNoteTests(RepoCase):
+    """`lint/ruled_store.py list` prints the full entries, and a read is never silent about how fresh it is: after a
+    failed fetch the list says "read as of" too, as the session block does."""
+
+    def test_list_says_read_as_of_when_the_fetch_failed(self):
+        gone = os.path.join(self.root, "gone-list.git")  # no repo there, so the fetch fails
+        repo = fixture.clone_with_origin(self.root, "list-stale", gone, ruling_files({"r-list": entry("r-list")}))
+        fixture.without_fetch_head(repo)
+        printed, errors = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(errors):
+            code = ruled_store.main(["list", repo])
+        out = printed.getvalue() + errors.getvalue()
+        self.assertEqual(code, 0, "list exited %r" % (code,))
+        self.assertIn("r-list", out, "control: list printed no entry for the open ruling: %r" % out)
+        self.assertIn("read as of", out, "list did not say the store was read as of a time after a failed fetch: %r"
+                      % out)
+
+
+REAL_ORIGIN_URL = "https://github.com/shivinate7/claude-settings.git"  # a real origin's URL: its rule sends the fetch local
+
+
+class OriginUrlTests(RepoCase):
+    """origin_url reads the remote's URL through its insteadOf rules, so a local origin behind a real URL is not called
+    real. The path in a rule's key may hold a space, which a line-split read cuts, and then the rule is lost."""
+
+    def rewritten_repo(self, folder):
+        """(repo, origin): a repo whose origin is REAL_ORIGIN_URL, rewritten by an insteadOf rule to a bare origin made
+        under `folder`, a folder of this case's own."""
+        scratch = os.path.join(self.root, folder)
+        os.makedirs(scratch)
+        origin = fixture.bare_origin(scratch, "origin", {"README": "origin\n"})
+        repo = fixture.clone_with_origin(self.root, "repo", origin, {"README": "repo\n"}, real_url=REAL_ORIGIN_URL)
+        return repo, origin
+
+    def test_a_rule_whose_path_has_a_space_still_rewrites_origin(self):
+        repo, origin = self.rewritten_repo("a dir with space")
+        key = "url.%s.insteadOf" % origin.replace(os.sep, "/")
+        configured = fixture.git(repo, "config", "--get", key)
+        self.assertEqual(configured, REAL_ORIGIN_URL, "scope: the repo's config holds no insteadOf rule for %r: %r"
+                         % (origin, configured))
+        got = fixture.origin_url(repo)
+        self.assertEqual(got, origin.replace(os.sep, "/"), "origin_url read %r, not the local origin: the insteadOf rule "
+                         "whose path has a space was dropped" % (got,))
+        self.assertFalse(fixture.real_origin(repo), "real_origin called the local origin of a repo real, so its fetch "
+                         "would be refused")
+
+    def test_a_rule_whose_path_has_no_space_rewrites_origin(self):
+        repo, origin = self.rewritten_repo("a-dir")
+        got = fixture.origin_url(repo)
+        self.assertEqual(got, origin.replace(os.sep, "/"), "control: origin_url read %r, not the local origin %r"
+                         % (got, origin))
+        self.assertFalse(fixture.real_origin(repo), "control: real_origin called the local origin real")
 
 
 def tearDownModule():

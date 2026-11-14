@@ -69,8 +69,9 @@ rule's settings-write ask, and it reaches agents.
       min(s), minute(s). None: DEFAULT_ASK_LENGTH.
 A step grant also lifts that ask, and nothing else: the owner's grant that triage writes on the lane's
 roadmap step (decision agent-model-cap). take() reads it only on an Opus spawn refusal that no Opus override
-lifted, from the local ref origin/roadmap in the call's cwd, never fetched: one git grep for the lane id,
-one git show per hit. The lane id is session_<x> for env CLAUDE_CODE_REMOTE_SESSION_ID=cse_<x>, else the
+lifted, from the ref origin/roadmap in the call's cwd: first fetched when its last roadmap fetch is older than
+roadmap_ref.MAX_AGE, bounded at FETCH_TIMEOUT (lint/roadmap_ref.py; a fetch that fails reads the ref as it is and logs
+one `noted` line "step grant read as of <time>"), then one git grep for the lane id, one git show per hit. The lane id is session_<x> for env CLAUDE_CODE_REMOTE_SESSION_ID=cse_<x>, else the
 payload's session id. Exactly one step must bind the lane, with status not done and a grant whose role
 is null or the spawn's role. A record that names the lane and cannot be read logs STEP_UNREAD.
 A file that is missing, unreadable or corrupt is no override. take() never raises into the guard: an
@@ -162,7 +163,7 @@ OPUS_UNREAD = "opus-unread"  # the log decision when an Opus override file canno
 STEP_LIFTED = "step-grant"  # the log decision of an Opus spawn a grant on the lane's roadmap step lifted
 STEP_UNREAD = "step-grant-unread"  # the log decision when a step record that names the lane cannot be read
 LIFTS = (LIFTED, OPUS_LIFTED, STEP_LIFTED)  # the take() results that let the act through
-STEP_REF = "refs/remotes/origin/roadmap"  # the record branch as the lane last fetched it; never fetched here
+STEP_REF = "refs/remotes/origin/roadmap"  # the record branch as the lane last fetched it; take() fetches it when stale
 STEP_DIR = "roadmap/data/steps/"
 LANE_ENV, LANE_ENV_PREFIX, LANE_PREFIX = "CLAUDE_CODE_REMOTE_SESSION_ID", "cse_", "session_"
 _step_read = None  # the step id the last take() read for its step decision, for the log line
@@ -738,6 +739,16 @@ def _take_step(session_id, spawn_role, cwd):
     if lane is None or not isinstance(cwd, str) or not cwd:
         return None
     import git_reads  # lazy: only an Opus spawn refusal that no Opus override lifted needs it
+    try:
+        lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+        if lint not in sys.path:
+            sys.path.append(lint)
+        import roadmap_ref
+        note = roadmap_ref.fresh_ref(cwd)
+    except Exception as exc:  # a read is never silent about how fresh it is
+        note = "read as of unknown: " + (" ".join(str(exc).split()) or type(exc).__name__)[:80]
+    if note:
+        _log(session_id, "noted", "step grant " + note)
     hits = git_reads._git(cwd, "grep", "-l", "-F", "-e", lane, STEP_REF, "--", STEP_DIR)
     if hits is None or hits.returncode != 0:
         return None  # no ref, no repository, no hit or a git error: no lift

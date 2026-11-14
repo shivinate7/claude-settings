@@ -34,6 +34,7 @@ sys.path.insert(0, HOOKS)  # guard_core, loaded by path below, imports its sibli
 import ste_lint  # noqa: E402
 import report_guard as RG  # noqa: E402  session_wording, the one detector for an order to the session (lint/report_guard.py)
 import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (one home)
+import test_ruled_store as fixture  # noqa: E402  the FETCH_HEAD fixtures (one home, lint/test_ruled_store.py)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import test_refusal_note as hook_base  # noqa: E402  the route-rows seam name and fixture (one home, hooks/test_refusal_note.py)
@@ -4556,17 +4557,30 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         self.reset_calls()
         self.decided = tcj.make_repo("relay-decided", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
         self.bare = tcj.make_repo("relay-bare")
-        self.ci = tcj.CI_REPO  # a roadmap ref, so the one git process is the roadmap read
+        self.ci = tcj.CI_REPO  # the roadmap ref the relay cases judge against
 
     def reset_calls(self):
-        for name in ("calls.jsonl", "git.log"):
+        for name in ("calls.jsonl", "git.log", "fetch.log"):
             path = os.path.join(_ISOLATION["stub"], name)
             if os.path.exists(path):
                 os.remove(path)
 
+    def fresh_ci(self):
+        # A fresh roadmap read, so the roadmap read starts no fetch. Undone after the case.
+        fixture.prime_roadmap(self.ci)
+        self.addCleanup(fixture.unprime_roadmap, self.ci)
+
     def git_starts(self):
         # The git processes the guard spawned, counted by the stub's Popen (hooks/test_call_judge.py).
         path = os.path.join(_ISOLATION["stub"], "git.log")
+        if not os.path.exists(path):
+            return 0
+        with open(path, encoding="utf-8") as f:
+            return len(f.read().split())
+
+    def fetch_starts(self):
+        # The roadmap or main fetches the guard spawned, counted the same way.
+        path = os.path.join(_ISOLATION["stub"], "fetch.log")
         if not os.path.exists(path):
             return 0
         with open(path, encoding="utf-8") as f:
@@ -4657,16 +4671,32 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         out, _ = self.stop(self.decided, RELAY, answer=bogus)
         self.assertIn("Unvetted guard", self.reason(out), out)
 
-    # Two git starts: the one this claim already counted, and the ruled store's ls-tree (one start when the roadmap ref is absent).
+    # With a fresh roadmap ref the two git starts are the roadmap read's cat-file and the ruled store's ls-tree.
     def test_a_relayed_question_costs_two_git_processes_and_one_model_call(self):
+        self.fresh_ci()
         self.stop(self.ci, RELAY, answer=tcj.ALLOW)
         self.assertEqual(len(self.model_calls()), 1)
         self.assertEqual(self.git_starts(), 2)
 
     def test_a_prose_question_costs_two_git_processes_and_one_model_call(self):
+        self.fresh_ci()
         self.stop(self.ci, PROSE_Q, answer=tcj.ALLOW)
         self.assertEqual(len(self.model_calls()), 1)
         self.assertEqual(self.git_starts(), 2)
+
+    def test_a_stale_roadmap_ref_is_fetched_exactly_once_per_relayed_question(self):
+        fixture.without_fetch_head(self.ci)
+        self.stop(self.ci, RELAY, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1, "the relayed question did not reach the model once")
+        self.assertEqual(self.fetch_starts(), 1, "a stale roadmap ref was fetched %d times in one judged question, want 1"
+                         % self.fetch_starts())
+
+    def test_a_fresh_roadmap_ref_is_not_fetched_per_relayed_question(self):
+        self.fresh_ci()
+        self.stop(self.ci, RELAY, answer=tcj.ALLOW)
+        self.assertEqual(len(self.model_calls()), 1, "the relayed question did not reach the model once")
+        self.assertEqual(self.fetch_starts(), 0, "a fresh roadmap ref was fetched %d times in one judged question, want 0"
+                         % self.fetch_starts())
 
     def test_an_unvetted_line_elsewhere_in_the_reply_does_not_skip_the_check(self):
         out, _ = self.stop(self.decided, UNVETTED + "\n" + RELAY, answer=REFUSE_APPS)
@@ -5722,14 +5752,24 @@ class CostTests(unittest.TestCase):
         cls.decided = tcj.make_repo("cost-decided", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
         cls.ci = tcj.CI_REPO  # a roadmap ref, so the two git processes are the ruled-store ls-tree and the roadmap cat-file
 
-    def stop(self, repo, reply, answers, earlier=()):
-        """One Stop after the owner's message: the `earlier` replies, then `reply`, the one the hook reads."""
+    def stop(self, repo, reply, answers, earlier=(), fresh=True):
+        """One Stop after the owner's message: the `earlier` replies, then `reply`, the one the hook reads. The repo gets
+        a fresh roadmap FETCH_HEAD first, so the past-ruling read is the fresh read the claims count; fresh=False clears
+        it, so the read is a stale one."""
         folder = tempfile.mkdtemp(dir=RUN_FOLDER)
         texts = list(earlier) + [reply]
         path = write_transcript([human("decide")] + [assistant_text(text) for text in texts], folder)
         hook = json.dumps({"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
                            "cwd": repo})
-        return cost_probe.run_hook(REPORT_GUARD, hook, folder, answers)
+        if fresh:
+            fixture.prime_roadmap(repo)
+        else:
+            fixture.without_fetch_head(repo)
+        try:
+            return cost_probe.run_hook(REPORT_GUARD, hook, folder, answers)
+        finally:
+            fixture.unprime_roadmap(repo)
+            fixture.without_fetch_head(repo)
 
     def test_a_reply_with_no_question_starts_nothing(self):
         run = self.stop(self.ci, DONE_ONLY, [[{"ok": True}, None]])
@@ -5741,6 +5781,15 @@ class CostTests(unittest.TestCase):
         self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
                          "two children, the ruled-store ls-tree and the roadmap cat-file; got %r" % run["children"])
         self.assertEqual(run["files"], [], "an allow writes no file")
+
+    def test_a_stale_roadmap_ref_adds_one_fetch_to_a_reply_with_one_question(self):
+        run = self.stop(self.ci, RELAY, [[{"ok": True}, None]], fresh=False)
+        self.assertEqual(len(run["models"]), 1, "one question, one past-ruling call; got %r" % run["models"])
+        verbs = cost_probe.verbs(run["children"])
+        self.assertEqual(verbs.count("fetch"), 1, "a stale roadmap ref is fetched once per judged question; got %r" % verbs)
+        # The fixture repo has no origin, so the fetch fails and the read falls back to the ref's tip time (one log).
+        self.assertEqual(verbs, ["fetch", "log", "ls-tree", "cat-file"],
+                         "the stale read starts the fetch, the tip-time log, then the two reads; got %r" % verbs)
 
     def test_two_relayed_questions_cost_one_model_call_and_two_git_reads(self):
         run = self.stop(self.ci, TWO_QUESTIONS, [[{"ok": True}, None]])

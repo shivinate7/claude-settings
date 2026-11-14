@@ -43,7 +43,8 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   The homes come from `lint/layout.json` and the repo's extras file: layout keys `decisions`, `rules`,
   `claude-md`, `agents-md` for a ruling, and `todo` (a repo's extras key), `debts`, `debt-notes` for a
   task. A task may instead name `step:<slug>`, when a branch holds roadmap/data/steps/<slug>.json; a ruling
-  never does. `question` (answered in the reply): `answered`. `note` (context with no decision): `noted`, or
+  never does. The guard first checks `origin/roadmap` for freshness, once per repo per Stop (lint/roadmap_ref.py).
+  A step home that no ref holds after a failed fetch ends its reason "(roadmap read as of HH:MM TZ)". `question` (answered in the reply): `answered`. `note` (context with no decision): `noted`, or
   `not-a-grant` when the message holds a grant word that is no grant. `standing` (a session-only process):
   the handoff's process-only section, re-read after compaction. Promote it to a ruling to keep it.
   `repo` (feedback about another repo): home `repo:<owner>/<name>`. The session sends the owner's
@@ -115,7 +116,8 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   names the repo.
 - **Page filing.** In a repo with a waiting page, an open `page` item whose send is proved also needs its
   number filed. The guard reads the waiting copy, the `items/` folder of the waiting export on
-  `origin/<record branch>`, as of the last fetch. It fetches nothing. A read-back also proves the filing:
+  `origin/<record branch>`, as of the last fetch. The filing read fetches nothing, but a step home or the
+  repeats read of the same Stop may fetch `origin/roadmap` first. A read-back also proves the filing:
   an ArtifactData get, list or query of the waiting page's `items` collection, after the owner's message.
   Its result must return a document with `n` equal to the number. A read with `out_dir` does not count,
   because its result lists files. It blocks when neither holds the number. The remedy has two routes. Ask
@@ -137,9 +139,13 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   timeout is 60 s). Candidates are cut to 300 characters each, at most 400, roadmap first. Each
   source has its own share, so one cannot crowd out the rest: 200 roadmap steps, 100 backlog lines,
   100 inbox blocks. Within a source the share keeps the front: roadmap steps not marked done come
-  first, todo and notes lines go newest (last) line first, and inbox blocks newest first. They are: steps at `refs/remotes/origin/roadmap` (one `git grep`,
-  never fetched); the layout's debt, todo and notes files in the working tree; this inbox's other
-  blocks. They also include the blocks of the 50 newest other inboxes whose sidecar
+  first, todo and notes lines go newest (last) line first, and inbox blocks newest first. They are: steps at `refs/remotes/origin/roadmap`, read by one `git grep`. The ref is fetched
+  first when the roadmap's own fetch record (a `branch 'roadmap' of` line in FETCH_HEAD) is older
+  than 60 seconds, absent, or names a commit other than the tip of `origin/roadmap`. That fetch is bounded at 2 seconds. Otherwise, the ref is read as of its last
+  fetch. A repeat flag on a step then ends "(roadmap read as of HH:MM TZ)". When no reason or flag
+  carries that note, one systemMessage line reads: "Feedback guard: roadmap read as of HH:MM TZ (its
+  fetch failed)." The code is lint/roadmap_ref.py, step roadmap-ref-fresh-before-verdict. The other two
+  are the layout's debt, todo and notes files in the working tree, and this inbox's other blocks. They also include the blocks of the 50 newest other inboxes whose sidecar
   `<sid>.inbox.repo` holds a folder at or under the repo root. Capture writes that sidecar once per
   session, when its cwd is in a repo. It walks up for `.git` and starts no process. The model names
   at most one candidate per item. A hit appends ` repeats <ref>` to the item line (one inbox rewrite
@@ -147,7 +153,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   A line that cannot be found is reported as not marked. The session merges the work or drops the
   mark. A dropped mark is not judged again. A model error or odd answer marks nothing and adds one
   systemMessage line. The items count as judged, so there is no retry loop. Cost: a Stop with no new
-  item or no candidate makes no call. Otherwise it makes one call, one `git grep` and one rev-parse (unmeasured).
+  item or no candidate makes no call. Otherwise it makes one call, one `git grep` and one rev-parse (unmeasured). A stale roadmap ref adds one `git fetch` of at most 2 seconds, once per Stop (a failed fetch may add one `git log`). A fresh one adds none.
   It lists the handoffs folder and reads one sidecar per inbox there. It writes the turn state, and
   on a hit the inbox. Capture adds one small file per session and no process (unmeasured). Risk kind: named
   incident. On 2026-11-01 17:44 CST the owner said "carousel" in a repo whose code said "wheel", and

@@ -216,6 +216,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import test_ruled_store as fixture  # noqa: E402  the store fixtures, one home (lint/test_ruled_store.py)
 # settings.json env sets MAILBOX_REPO for every session; the hook under test would read the live mailbox and print a second
 # line. These cases check the Central line alone, so no child sees a store.
 for _name in ("MAILBOX_REPO", "MAILBOX_CACHE"):
@@ -230,6 +231,7 @@ ROOT = _test_temp.run_folder()
 FAILED = []
 RED_CASES = []
 CASE_COUNT = [0]
+FETCH_SPY = os.path.join(ROOT, fixture.FETCH_SPY)  # each guard install and each refused fetch is logged here
 
 CENTRAL = re.compile(r"Local time: (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) (CDT|CST) \(UTC-0[56]:00\)")
 # The printed line ends with the pointer hooks/local_time.py emits: the constant itself, read from that file, never a
@@ -353,7 +355,7 @@ def guard(cfg, sid, stop_active=False, cwd=None, transcript=None, extra_env=None
     if transcript is not None:
         obj["transcript_path"] = transcript
     log = os.path.join(os.path.dirname(cfg), "model-calls-guard.log")
-    env = {"FG_STUB_LOG": log}
+    env = {"FG_STUB_LOG": log, "FETCH_SPY_LOG": FETCH_SPY}
     env.update(extra_env or {})
     return run(probe_path(), payload(obj), cfg, args=(HERE, GUARD_PATH), extra_env=env)
 
@@ -872,12 +874,16 @@ def case_guard_reads_only_its_own_session():
 FAIL_OPEN = "Feedback guard: ruling and task homes not checked"
 
 
-def homed(cfg, sid, items, handoff_ids=(), cwd=None, text="homes burst"):
+def homed(cfg, sid, items, handoff_ids=(), cwd=None, text="homes burst", extra_env=None):
     """Writes one jotted message and a handoff that holds `handoff_ids`, then runs the guard. A
-    multi-line `text` makes the message a burst."""
+    multi-line `text` makes the message a burst. `extra_env` adds variables for this run, such as a spy's log."""
     write_file(inbox_of(cfg, sid), render_block(text, items=items))
     write_file(handoff_of(cfg, sid), "# Handoff\n" + "".join("- %s\n" % i for i in handoff_ids))
-    return guard(cfg, sid, cwd=cwd)
+    fixture.prime_origin(cwd)
+    try:
+        return guard(cfg, sid, cwd=cwd, extra_env=extra_env)
+    finally:
+        fixture.unprime_roadmap(cwd)
 
 
 def fail_open_line(p):
@@ -1119,15 +1125,25 @@ def send_rec(message):
     return used_rec(SEND, {"to": "coordinator", "message": message})
 
 
-def page_run(cfg, sid, blocks, records, cwd=None, extra_env=None):
+def page_run(cfg, sid, blocks, records, cwd=None, extra_env=None, prime=False):
     """Writes one inbox block per (text, items) pair, with minutes 04, 05, ... of one hour, then the
     transcript `records`, then runs the guard with the transcript's path in the payload. `cwd` is the
-    session's folder, the shared fixture repo unless a case names another. `extra_env` goes to the run."""
+    session's folder, the shared fixture repo unless a case names another. `extra_env` goes to the run.
+    `prime` writes a fresh roadmap fetch on record (FETCH_HEAD) just before the run, so the roadmap ref reads
+    fresh: no fetch runs and no roadmap note is said. It is removed after the run, so a shared repo returns to
+    its built state for the cases after it."""
     write_file(inbox_of(cfg, sid), "".join(
         render_block(text, header="2026-10-13 10:%02d CDT (UTC-05:00)" % (4 + n), items=items)
         for n, (text, items) in enumerate(blocks)))
     write_transcript(cfg, sid, records)
-    return guard(cfg, sid, cwd=cwd, transcript=transcript_of(cfg, sid), extra_env=extra_env)
+    if not prime:
+        return guard(cfg, sid, cwd=cwd, transcript=transcript_of(cfg, sid), extra_env=extra_env)
+    repo = cwd or fixture_repo()
+    fixture.set_fetch_head(repo)
+    try:
+        return guard(cfg, sid, cwd=cwd, transcript=transcript_of(cfg, sid), extra_env=extra_env)
+    finally:
+        fixture.without_fetch_head(repo)
 
 
 def expect_unproved(name, p, item_id):
@@ -1540,7 +1556,7 @@ def case_page_filed_number_passes():
     """A page item whose number the waiting copy holds passes with its send, and no filing message. Green on
     today's guard, which the send check alone already passes: this pins a filed item as a pass."""
     p = page_run(new_cfg(), "page-filed", [(NEUTRAL, (PAGE_ITEM,))],
-                 [owner_rec(NEUTRAL), send_rec(SENT)], cwd=record_repo("filed", copy_files(FILED)))
+                 [owner_rec(NEUTRAL), send_rec(SENT)], cwd=record_repo("filed", copy_files(FILED)), prime=True)
     expect_silent("page filing: n 98 filed, with its send, passes with no systemMessage", p)
 
 
@@ -1626,13 +1642,13 @@ def case_page_filing_reads_do_not_grow_with_the_copy():
         cfg = new_cfg()
         env = git_counter(cfg)
         p = page_run(cfg, "page-cost", [(NEUTRAL, (PAGE_ITEM,))], [owner_rec(NEUTRAL), send_rec(SENT)],
-                     cwd=repo, extra_env=env)
+                     cwd=repo, extra_env=env, prime=True)
         expect_silent("page filing cost: %s, n 98 filed, passes" % label, p)
         page_starts = len(git_lines(env))
         cfg = new_cfg()
         env = git_counter(cfg)
         page_run(cfg, "page-cost-note", [(NEUTRAL, ("- fb-0958-7 [note] -> noted",))],
-                 [owner_rec(NEUTRAL), said_rec("Noted.")], cwd=repo, extra_env=env)
+                 [owner_rec(NEUTRAL), said_rec("Noted.")], cwd=repo, extra_env=env, prime=True)
         extra[label] = page_starts - len(git_lines(env))
     counts = list(extra.values())
     check("page filing cost: the same extra git starts for 2 items and for 40 (%s)" % extra,
@@ -1692,6 +1708,7 @@ def case_page_stale_origin_ref_names_the_fetch():
     """A filed number that the clone's origin ref lacks is refused, and the remedy names the fetch. The copy is
     read as of the last fetch. The hook fetches nothing: the origin ref is the same after the run."""
     repo = stale_origin_repo()
+    fixture.set_fetch_head(repo)
     before = git(repo, "rev-parse", "refs/remotes/origin/" + RECORD_BRANCH).strip()
     source = git(os.path.join(ROOT, "repos", "stale-origin-src"), "rev-parse", RECORD_BRANCH).strip()
     check("page filing: the remote's record branch is past the clone's origin ref", source != before,
@@ -1748,7 +1765,7 @@ def case_page_read_back_proves_the_filing():
     for label, inp, docs, form in reads:
         p = page_run(new_cfg(), "page-readback", [(NEUTRAL, (PAGE_ITEM,))],
                      [owner_rec(NEUTRAL), send_rec(SENT), used_rec("ArtifactData", inp, tool_id="rb1"),
-                      result_rec("rb1", response_of(docs, form=form))], cwd=repo)
+                      result_rec("rb1", response_of(docs, form=form))], cwd=repo, prime=True)
         expect_silent("page filing: n 98 proved by %s, with its send" % label, p)
 
 
@@ -2385,6 +2402,94 @@ def case_task_closed_step_home_passes():
     expect_step_on_lane_only("closed task step home", repo)
     p = homed(new_cfg(), "task-step-closed", ("- fb-0958-7 [task] -> step:%s [closed]" % STEP_SLUG,), cwd=repo)
     expect_silent("task step home: a closed task homed to a step on a lane branch passes", p)
+
+
+# The step cases of a stale roadmap ref: a task homed to a step file that sits on origin's roadmap branch only.
+ORIGINS = os.path.join(ROOT, "origins")  # the bare origins these cases fetch from: local paths, never a URL
+STEP_REL = "roadmap/data/steps/%s.json" % STEP_SLUG
+READ_AS_OF = re.compile(r"read as of (\d{2}:\d{2} (CST|CDT)|an unknown time)")
+
+
+def origin_only_step_repo(name, reachable=True, local=False, stale=True):
+    """A repo whose step file sits on origin's roadmap branch only. The local origin/roadmap ref is stale: it holds no
+    step, unless `local` puts the step on it too. FETCH_HEAD holds a roadmap fetch, 120 s old when `stale` (past
+    roadmap_ref.MAX_AGE), else written now. With `reachable` False the origin path names no repo, so the fetch fails,
+    and the step is found only where `local` put it."""
+    repo = make_repo(name, tracked=("debts/a-task.md",))
+    os.makedirs(ORIGINS, exist_ok=True)
+    origin = fixture.bare_origin(ORIGINS, name, fixture.step_file(STEP_SLUG, "todo"))
+    git(repo, "remote", "add", "origin", origin if reachable else origin + ".gone")
+    files = fixture.step_file(STEP_SLUG, "todo") if local else {"README.md": "stale\n"}
+    fixture.point_ref(repo, fixture.STORE_REF, files, ORIGINS)
+    fixture.write_fetch_head(repo, "roadmap")
+    if stale:
+        head = fixture.fetch_head(repo)
+        stamp = os.stat(head).st_mtime
+        os.utime(head, (stamp - 120, stamp - 120))  # 120 s old: past roadmap_ref.MAX_AGE
+    return repo
+
+
+def stop_with_step_home(name, repo, ids=("fb-0958-12",)):
+    """One Stop, whose items are the tasks `ids`, each homed to the step. The turns state predates its `judged` key, so
+    every item counts as judged and the repeat judge, with its roadmap read, does not run: the step home is the only
+    read of the ref. Returns (Proc, the freshness checks the Stop ran)."""
+    spy = os.path.join(ROOT, "fresh-ref-%s.log" % name)
+    cfg, sid = new_cfg(), "task-%s" % name
+    write_file(os.path.join(cfg, "handoffs", sid + ".inbox.turns"), json.dumps({"seen": 0, "burst": []}))
+    p = homed(cfg, sid, tuple("- %s [task] -> step:%s" % (item_id, STEP_SLUG) for item_id in ids), cwd=repo,
+              extra_env={"FRESH_REF_LOG": spy})
+    return p, len(read_or_empty(spy).splitlines())
+
+
+def case_task_step_only_on_origin_is_found_after_the_fetch():
+    """A task homed to `step:<slug>` passes when the step file is on origin's roadmap branch only. The local ref is
+    stale and FETCH_HEAD is old, so the Stop runs one freshness check, which fetches, and reads the step after it. Red
+    today: the step home reads the local refs with no check, so the task blocks."""
+    name = "step-origin-stale"
+    repo = origin_only_step_repo(name)
+    local = git(repo, "ls-tree", "-r", "--name-only", fixture.STORE_REF).split("\n")
+    check("step origin-only: the local origin/roadmap ref lacks the step file", STEP_REL not in local, "\n".join(local))
+    p, calls = stop_with_step_home(name, repo)
+    expect_silent("step origin-only: a task homed to a step on origin passes after the fetch", p)
+    check("step origin-only: the Stop runs one freshness check", calls == 1, "%d calls" % calls)
+
+
+def case_task_step_fetch_fails_names_the_read_as_of():
+    """The same task with origin unreachable: the step is on no ref the Stop can read, so the task blocks, and the block
+    reason says how fresh the read was. Red today: the step home's refusal carries no freshness note."""
+    name = "step-origin-gone"
+    repo = origin_only_step_repo(name, reachable=False)
+    p, calls = stop_with_step_home(name, repo)
+    reason = block_reason(p) or ""
+    check("step fetch fails: the Stop blocks the task (scope)", p.code == 0 and block_reason(p) is not None, p.desc())
+    check("step fetch fails: the Stop runs one freshness check", calls == 1, "%d calls" % calls)
+    check("step fetch fails: the block reason says read as of a time", READ_AS_OF.search(reason) is not None,
+          reason or p.desc())
+
+
+def case_roadmap_line_once_when_the_fetch_failed_never_when_fresh():
+    """A Stop whose roadmap fetch failed says so once, as a systemMessage line, when no reason or flag carries the note.
+    Two tasks homed to a step on the local ref both pass, so no reason carries the note, and the line says it once,
+    though two reads share it. The same Stop with a fresh roadmap ref says nothing. With every task passing, this line
+    is the only place a reader sees a failed fetch, so the case checks that it appears once, and only on a failed
+    fetch."""
+    ids = ("fb-0958-12", "fb-0958-13")
+    stale = origin_only_step_repo("step-line-stale", reachable=False, local=True)
+    check("step line: the step is on the local ref, the read the Stop judges",
+          STEP_REL in git(stale, "ls-tree", "-r", "--name-only", fixture.STORE_REF).split("\n"), STEP_REL)
+    p, _calls = stop_with_step_home("step-line-stale", stale, ids=ids)
+    check("step line: both tasks pass, so no reason carries the note", p.code == 0 and block_reason(p) is None,
+          p.desc())
+    msg = (guard_json(p) or {}).get("systemMessage") or ""
+    stale_line = re.compile(r"Feedback guard: roadmap read as of (?:\d{2}:\d{2} (?:CST|CDT)|an unknown time)"
+                            r" \(its fetch failed\)\.")
+    check("step line: a failed fetch says the roadmap read as of a time, exactly once",
+          len(stale_line.findall(msg)) == 1, msg or p.desc())
+    fresh = origin_only_step_repo("step-line-fresh", reachable=False, local=True, stale=False)
+    check("step line fresh: the step is on the local ref, the read the Stop judges",
+          STEP_REL in git(fresh, "ls-tree", "-r", "--name-only", fixture.STORE_REF).split("\n"), STEP_REL)
+    p, _calls = stop_with_step_home("step-line-fresh", fresh, ids=ids)
+    expect_silent("step line fresh: a fresh roadmap ref says nothing, so no line", p)
 
 
 def case_task_missing_step_home_blocks():
@@ -3127,6 +3232,21 @@ ANSWER_NONE = json.dumps({"repeats": []})
 PROBE_SOURCE = r"""import json, os, runpy, subprocess, sys
 sys.path.insert(0, sys.argv[1])
 import decision_watch
+if os.environ.get("FETCH_SPY_LOG"):
+    sys.path.insert(0, os.path.join(sys.argv[1], "..", "lint"))
+    import test_ruled_store
+    test_ruled_store.refuse_real_origin_fetches(os.environ["FETCH_SPY_LOG"])
+if os.environ.get("FRESH_REF_LOG"):  # one line per freshness check the guard runs: the spy of the step cases
+    sys.path.insert(0, os.path.join(sys.argv[1], "..", "lint"))
+    import roadmap_ref
+    real_fresh_ref = roadmap_ref.fresh_ref
+
+    def counted_fresh_ref(repo_dir, now=None, fetch=None):
+        with open(os.environ["FRESH_REF_LOG"], "a", encoding="utf-8") as f:
+            f.write(repo_dir + "\n")
+        return real_fresh_ref(repo_dir, now, fetch)
+
+    roadmap_ref.fresh_ref = counted_fresh_ref
 
 
 def stub(prompt, model=decision_watch.MODEL, timeout=decision_watch.MODEL_TIMEOUT, shape=None,
@@ -3215,7 +3335,7 @@ def stop(cfg, sid, cwd, answer=None, error=None, stop_active=False, extra_env=No
     `drop` = (file, line prefix): the stub removes those lines from the file while the model runs."""
     JUDGE_RUNS[0] += 1
     log = os.path.join(os.path.dirname(cfg), "model-calls-%d.log" % JUDGE_RUNS[0])
-    env = dict(extra_env or {}, FG_STUB_LOG=log)
+    env = dict(extra_env or {}, FG_STUB_LOG=log, FETCH_SPY_LOG=FETCH_SPY)
     if answer is not None:
         env["FG_STUB_ANSWER"] = answer
     if error is not None:
@@ -3501,6 +3621,7 @@ def case_repeat_cost_one_call_one_grep_and_two_files():
     Stop with nothing to judge. A flagged judging Stop writes the turn state and the inbox only. A Stop
     with no new item makes no call, starts no grep, and writes the turn state only."""
     root = repeat_repo("repeat-cost", step=True, debt=True)
+    fixture.set_fetch_head(root)
     cfg, sid = new_cfg(), "repeat-cost"
     env = git_counter(cfg)
     capture(cfg, sid, MSG_ONE, cwd=root)
@@ -4088,14 +4209,21 @@ def record_step(root, slug):
         return None
 
 
-def page_comment_run(cfg, sid, wake, items, url=PAGE_CODE_URL, cwd=None, writer=None):
+def page_comment_run(cfg, sid, wake, items, url=PAGE_CODE_URL, cwd=None, writer=None, prime=True):
     """Captures one page comment through the capture hook, jots its item lines, names `writer` as the page writer
-    (this session when None), and runs the guard at its Stop. Returns the guard's Proc."""
+    (this session when None), and runs the guard at its Stop. `prime` False leaves the repo's roadmap ref as the case
+    built it, for a case whose premise is that the ref does not resolve. Returns the guard's Proc."""
     capture(cfg, sid, PAGE_COMMENT.format(url=url, wake=wake), cwd=cwd)
     for line in items:
         add_item(cfg, sid, line)
     write_transcript(cfg, sid, writer_records(sid if writer is None else writer))
-    return guard(cfg, sid, cwd=cwd, transcript=transcript_of(cfg, sid))
+    if prime:
+        fixture.prime_origin(cwd)
+    try:
+        return guard(cfg, sid, cwd=cwd, transcript=transcript_of(cfg, sid))
+    finally:
+        if prime:
+            fixture.unprime_roadmap(cwd)
 
 
 def page_comment_facts(cfg, sid, root, url, wake):
@@ -4231,10 +4359,15 @@ def case_page_form_not_the_writer_passes():
 
 def claude_settings_no_record_repo():
     """The claude-settings fixture with no record branch on origin: the step file sits on a lane branch, so the step
-    home resolves, but origin's record branch does not, so the template read fails."""
+    home resolves, but origin's record branch does not, so the template read fails. The config keeps the GitHub URL,
+    which names the repo's slug; insteadOf sends the fetch to a local bare origin with no roadmap branch, so a
+    fetch reaches no network and the guard's real-origin check passes it."""
     def build():
         root = make_repo("claude-settings-no-record", tracked=("decisions/a-ruling.md",), extras=filing_extras())
         git(root, "remote", "add", "origin", CLAUDE_SETTINGS_ORIGIN)
+        origin = os.path.join(ROOT, "origin-claude-settings-no-record.git")
+        git(ROOT, "init", "-q", "--bare", origin)
+        git(root, "config", "url.%s.insteadOf" % origin.replace(os.sep, "/"), CLAUDE_SETTINGS_ORIGIN)
         lane_file(root, "roadmap/data/steps/%s.json" % PLAIN_STEP)
         return root
     return shared_repo("claude-settings-no-record", build)
@@ -4246,7 +4379,7 @@ def case_page_form_failed_record_read_stands_down():
     cfg, sid = new_cfg(), "page-form-no-record"
     root = claude_settings_no_record_repo()
     name = "page-form stand-down: origin's record branch does not resolve"
-    p = page_comment_run(cfg, sid, ASKED_WAKE, ["- fb-0961-5 [task] -> step:%s" % PLAIN_STEP], cwd=root)
+    p = page_comment_run(cfg, sid, ASKED_WAKE, ["- fb-0961-5 [task] -> step:%s" % PLAIN_STEP], cwd=root, prime=False)
     check(name + ": scope the record branch's step file does not resolve", record_step(root, PLAIN_STEP) is None,
           record_step(root, PLAIN_STEP))
     if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, ASKED_WAKE), SCOPE_IN):
@@ -4296,6 +4429,36 @@ def case_page_form_closed_not_page_form_passes():
         check(name + ": not blocked", p.code == 0 and block_reason(p) is None, p.desc())
 
 
+def case_repeat_stale_roadmap_read_carries_the_read_as_of_note():
+    """The REPEAT read judges from the roadmap ref. This repo has no origin to fetch, so the read is stale and the
+    fetch fails. The block reason names the item and says the read is as of a time (lint/roadmap_ref.py)."""
+    root = repeat_repo("repeat-stale-note", step=True)
+    cfg, sid = new_cfg(), "repeat-stale-note"
+    check("stale note: the message is saved", ran_central(capture(cfg, sid, MSG_ONE, cwd=root)))
+    add_item(cfg, sid)
+    p, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+    reason = block_reason(p) or ""
+    check("stale note: the block reason names the item and says read as of a time",
+          "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in reason
+          and re.search(r"read as of \d{2}:\d{2} (CST|CDT)", reason) is not None, p.desc())
+
+
+def case_repeat_roadmap_read_calls_the_helper_once():
+    """The REPEAT read of the roadmap ref calls the one helper once, and still reads the step from that ref."""
+    from unittest import mock
+    root = repeat_repo("repeat-helper-once", step=True)
+    helper = mock.Mock()
+    helper.fresh_ref.return_value = ""
+    with mock.patch.dict(sys.modules, {"roadmap_ref": helper}):
+        sys.modules.pop("feedback_guard", None)
+        feedback_guard = importlib.import_module("feedback_guard")
+        found = feedback_guard.roadmap_candidates(root)
+    check("helper once: the roadmap read still finds the step",
+          any(STEP_TEXTS[0] in text for _ref, _label, text in found), found[:1])
+    check("helper once: the roadmap read calls fresh_ref once", helper.fresh_ref.call_count == 1,
+          "%d calls" % helper.fresh_ref.call_count)
+
+
 def case_fixture_git_has_no_wall_clock_bound():
     """The fixture helpers git(), run() and in_a_repo() carry no wall-clock bound: a slow runner can pass any
     fixed one, and a fixed timeout then fails a case that is correct. A fake runner records each call's kwargs
@@ -4332,6 +4495,17 @@ def case_fixture_git_has_no_wall_clock_bound():
     check(name + ": no call passes a timeout", all(kw.get("timeout") is None for kw in calls),
           "timeouts passed: %s" % [kw.get("timeout") for kw in calls])
     check(name + ": no call times out", not timed_out, "; ".join(timed_out))
+
+
+def case_stops_never_fetch_from_a_real_origin():
+    """A Stop never fetches from a repo whose origin is a real URL. Such a fetch reaches the network, and on some
+    runners it outlives its bound and overwrites the fixture's roadmap ref. Each Stop runs under the guard in
+    lint/test_ruled_store.py, which refuses and logs such a fetch. The guard's installs are the scope."""
+    name = "stops: no Stop fetches from a real origin"
+    installs, refused = fixture.spy_read(FETCH_SPY)
+    check(name + ": scope, the guard was installed for the Stops", installs > 0, "no guard install was logged")
+    check(name, not refused, "a Stop fetched a real origin, so its roadmap ref was not primed: %s"
+          % "; ".join(sorted({"%s (origin %s)" % (r["refused"], r["origin"]) for r in refused})))
 
 
 CASES = (
@@ -4459,6 +4633,9 @@ CASES = (
     case_closed_note_with_a_home_passes,
     case_task_open_step_home_passes,
     case_task_closed_step_home_passes,
+    case_task_step_only_on_origin_is_found_after_the_fetch,
+    case_task_step_fetch_fails_names_the_read_as_of,
+    case_roadmap_line_once_when_the_fetch_failed_never_when_fresh,
     case_task_missing_step_home_blocks,
     case_ruling_step_home_still_blocks,
     case_task_backtick_step_home_passes,
@@ -4503,6 +4680,8 @@ CASES = (
     case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit,
     case_repeat_spaced_inbox_mark_is_recognised_on_a_second_judging,
     case_repeat_repo_item_is_never_judged_as_a_repeat,
+    case_repeat_stale_roadmap_read_carries_the_read_as_of_note,
+    case_repeat_roadmap_read_calls_the_helper_once,
     case_one_shot_grant_passes_with_its_home_and_blocks_without_one,
     case_guard_ruling_home_is_judged_in_the_repo_the_session_worked_in,
     case_step_path_is_derived_from_override_step_dir,
@@ -4529,6 +4708,7 @@ CASES = (
     case_page_form_saved_wake_with_a_note_blocks,
     case_page_form_closed_not_page_form_passes,
     case_page_form_undone_wake_passes,
+    case_stops_never_fetch_from_a_real_origin,
 )
 
 
@@ -4546,16 +4726,21 @@ def run_case(case):
 # what it leaves out: the one git start that is not the grep, and a quiet Stop that starts no git at all.
 
 class CostTests(unittest.TestCase):
-    def judging_stop(self, name, answer=None):
+    def judging_stop(self, name, answer=None, fresh=True):
         """One capture, one new item, then the judging Stop. `answer` is the model's answer, and by default it names
-        the item as a repeat. Returns (exit codes of the capture and the Stop, the Stop's model calls, its git starts,
-        the relative paths whose bytes it changed under the config folder)."""
+        the item as a repeat. The Stop's repo gets a fresh roadmap FETCH_HEAD first, so its read is the fresh read the
+        claims count; fresh=False clears it, so the read is a stale one. Returns (exit codes of the capture and the Stop,
+        the Stop's model calls, its git starts, the relative paths whose bytes it changed under the config folder)."""
         root = repeat_repo(name, step=True, debt=True)
         cfg, sid = new_cfg(), name
         env = git_counter(cfg)
         captured = capture(cfg, sid, MSG_ONE, cwd=root)
         add_item(cfg, sid, ITEM_LINE)
         before = snapshot(cfg)
+        if fresh:
+            fixture.set_fetch_head(root)
+        else:
+            fixture.without_fetch_head(root)
         start = len(git_lines(env))
         answer = repeat_answer(ITEM_ID) if answer is None else answer
         stopped, calls = stop(cfg, sid, root, answer=answer, extra_env=env)
@@ -4571,6 +4756,18 @@ class CostTests(unittest.TestCase):
         self.assertEqual(len(others), 1, "one other git start; got %r" % others)
         self.assertIn("rev-parse", others[0].split(), "the other start reads the repo root: %r" % others)
         self.assertIn("--show-toplevel", others[0].split(), "the other start reads the repo root: %r" % others)
+
+    def test_a_stale_roadmap_ref_adds_one_fetch_to_a_judging_stop(self):
+        codes, calls, lines, _ = self.judging_stop("cost-stale", fresh=False)
+        self.assertEqual(codes, (0, 0), "the capture and the judging Stop both exit 0; got %r" % (codes,))
+        self.assertEqual(len(calls), 1, "the judging Stop makes one model call; got %d" % len(calls))
+        self.assertEqual(grep_starts(lines), 1, "the judging Stop starts one git grep; got %r" % lines)
+        verbs = cost_probe.verbs([ln.split() for ln in lines])
+        self.assertEqual(verbs.count("fetch"), 1, "a stale roadmap ref is fetched once per judging Stop; got %r" % lines)
+        # The probe's fetch guard reads the origin URL before the fetch (a `config` start of the test, not the product's).
+        self.assertEqual(verbs, ["rev-parse", "config", "fetch", "log", "grep"],
+                         "the stale Stop starts the root read, the guard's origin read, the fetch, the tip-time log, and the "
+                         "one grep; got %r" % verbs)
 
     def test_a_judging_stop_writes_the_turn_state_and_the_inbox_and_no_other_file(self):
         codes, _, _, changed = self.judging_stop("cost-files")

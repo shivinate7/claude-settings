@@ -22,8 +22,14 @@ unchecked. guard_ruling_line(entry) words the note a guard prints when it lets t
 every entry text only. A guard rule id is the first token of the ref, with a trailing ":" cut, in kebab-case
 (guard_rule_id); a ref with no such token names no rule.
 
-Cost: this module keeps no process and no timer and writes no file. ruled_entries starts two read-only git processes
-(one ls-tree, one cat-file --batch). open_entries starts one more cat-file --batch, and only when an open entry
+Freshness (step roadmap-ref-fresh-before-verdict): a read of STORE_REF (read_store, ruled_entries, session_lines)
+first calls lint/roadmap_ref.py, which fetches origin/roadmap when its last fetch is older than MAX_AGE, bounded at
+FETCH_TIMEOUT, and else reads it as of that fetch. When the fetch failed, session_lines adds "read as of <time>" to its
+header, `list` prints it on one stderr line, and read_store appends it to the caller's `notes`. check_store and a read of any other ref fetch nothing.
+
+Cost: this module keeps no timer and writes no file of its own. A fresh ref adds no process (roadmap_ref reads one
+stat); a stale one adds one `git fetch` of at most FETCH_TIMEOUT seconds, and git writes FETCH_HEAD and the ref.
+ruled_entries starts two read-only git processes (one ls-tree, one cat-file --batch). open_entries starts one more cat-file --batch, and only when an open entry
 names `lands_in`. check_store adds one more cat-file --batch, only when an open entry names a `step`. A missing ref, a
 missing folder or a failed git start gives [], never an error.
 
@@ -146,15 +152,46 @@ def _load(repo_dir, ref):
         return [], "unreadable", []
 
 
-def read_store(repo_dir, ref=STORE_REF):
+def _fresh_note(repo_dir, ref):
+    """The note "read as of HH:MM TZ" when `ref` is the store ref and could not be fetched fresh, else "". When the
+    freshness check itself cannot run (it raises, or its module cannot be imported) the note is "read as of unknown:
+    <why>": a read is never silent about how fresh it is. Imported at call time: lint/roadmap_ref.py is the one home of
+    the roadmap fetch, and a case may swap it."""
+    if ref != STORE_REF:
+        return ""
+    try:
+        if HERE not in sys.path:
+            sys.path.append(HERE)
+        import roadmap_ref
+        return roadmap_ref.fresh_ref(repo_dir)
+    except Exception as exc:
+        return "read as of unknown: " + (" ".join(str(exc).split()) or type(exc).__name__)[:80]
+
+
+def _read(repo_dir, ref, note=None):
+    """(entries, state, bad, note): _load after one fresh_ref call. The one place a read of the store ref fetches. A
+    caller that already ran the freshness check for repo_dir passes its `note` ("" for none), and no second check runs."""
+    if note is None:
+        note = _fresh_note(repo_dir, ref)
+    return _load(repo_dir, ref) + (note,)
+
+
+def read_store(repo_dir, ref=STORE_REF, note=None, notes=None):
     """(entries, state) of the store at `ref` in repo_dir, oldest first by instant. state is "ok" (also an empty
     folder that exists), "absent" (no such ref, folder or repo) or "unreadable" (git cannot start, or fails after the
-    listing worked). A file that is not a JSON object is skipped. Never raises."""
-    return _load(repo_dir, ref)[:2]
+    listing worked). A file that is not a JSON object is skipped. When `ref` is STORE_REF the read first fetches
+    origin/roadmap if it is older than roadmap_ref.MAX_AGE, bounded at roadmap_ref.FETCH_TIMEOUT; a fetch that fails
+    reads the ref as it is, and its note "read as of <time>" is appended to `notes` when given. A caller that already
+    ran the check for repo_dir passes `note` (its result, "" for none) to skip a second one. Never raises."""
+    entries, state, _bad, said = _read(repo_dir, ref, note)
+    if said and notes is not None:
+        notes.append(said)
+    return entries, state
 
 
 def ruled_entries(repo_dir, ref=STORE_REF):
-    """The entries of the store at `ref`, oldest first by instant; [] when the store is absent or unreadable."""
+    """The entries of the store at `ref`, oldest first by instant; [] when the store is absent or unreadable. Fetches
+    a stale STORE_REF as read_store does."""
     return read_store(repo_dir, ref)[0]
 
 
@@ -286,14 +323,17 @@ def _one_line(entry, cut=RULING_CUT):
 
 def session_lines(repo_dir):
     """The session-start block: [] when no entry is open, else a header, up to five entry lines (newest first) and the
-    command line. Never raises."""
+    command line. The store ref is fetched when older than MAX_AGE (read_store); when that fetch fails, the header
+    ends "read as of HH:MM TZ". Never raises."""
     try:
-        opened = open_entries(ruled_entries(repo_dir), repo_dir)
+        entries, _state, _bad, note = _read(repo_dir, STORE_REF)
+        opened = open_entries(entries, repo_dir)
         if not opened:
             return []
         newest = sorted(opened, key=entry_instant, reverse=True)
         unread = sum(1 for e in opened if is_unchecked(e))
-        lines = ["rulings not on main: %d open (%d with no supersedes read yet), newest first" % (len(opened), unread)]
+        lines = ["rulings not on main: %d open (%d with no supersedes read yet), newest first" % (len(opened), unread)
+                 + (", " + note if note else "")]
         for entry in newest[:SESSION_ENTRIES]:
             lines.append("  %s %s: %s | supersedes %s" % (entry.get("id", "?"), entry.get("at", "?"), _one_line(entry),
                                                           supersedes_text(entry, REF_CUT)))
@@ -305,7 +345,13 @@ def session_lines(repo_dir):
 
 
 def _list(repo_dir):
-    for entry in sorted(open_entries(ruled_entries(repo_dir), repo_dir), key=entry_instant, reverse=True):
+    """Prints every open entry in full. A failed fetch of the store ref adds one stderr line: a read is never silent
+    about how fresh it is."""
+    notes = []
+    entries, _state = read_store(repo_dir, notes=notes)
+    if notes:
+        print("ruled store: %s %s" % (STORE_REF, notes[0]), file=sys.stderr)
+    for entry in sorted(open_entries(entries, repo_dir), key=entry_instant, reverse=True):
         print("%s  %s" % (entry.get("id", "?"), entry.get("at", "?")))
         print("  ruling: %s" % _norm(str(entry.get("ruling", ""))))
         print("  supersedes: %s" % supersedes_text(entry))

@@ -1,0 +1,6 @@
+# A repo with no roadmap branch refetches on every read
+
+- **What.** In a repo with no roadmap branch, every read starts a roadmap fetch. The fetch fails, and `fetch_roadmap` puts FETCH_HEAD back as it was. That copy never has a roadmap line, so `fresh_ref` never finds the ref fresh, and the next read fetches again. Incident class: stale ref refusal (incident fb-0950-4, a refusal at 09:53 CST Nov 13). Harm: each such read waits up to 2 s per fetch, for a ref that never gets a roadmap line.
+- **Where.** `lint/roadmap_ref.py` (`fetch_roadmap`, `fresh_ref`). Callers: `hooks/override.py`, `hooks/feedback_guard.py`, `hooks/question_form.py`, `hooks/sendmessage_state.py`, `lint/ruled_store.py`. `hooks/question_form.py` (`past_rulings`) checks the repo root once and passes the note to both reads. A second root adds one more check, so one read repeats the refetch only for a second root, not the repo root.
+- **Decision.** Step `roadmap-ref-fresh-before-verdict` (the step that fetches a stale roadmap ref before a verdict; its round 3 review named this limit). Decision `ruled-store-one-home` (the one home for the ruled store; its freshness paragraph names this helper).
+- **Retire.** A case in `lint/test_roadmap_ref.py` shows that repeated reads in a repo with no roadmap branch do not each start a fetch.

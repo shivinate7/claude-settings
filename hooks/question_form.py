@@ -1838,6 +1838,8 @@ PAST_RULING_RULE = "past-ruling"
 UNVETTED_LINE = re.compile(r"^[ \t>*+-]*Unvetted:[ \t]*\S", re.I | re.M)
 UNREADABLE = "unreadable"
 CLOSED_ITEMS = "closed page items"
+# A candidate line that says how fresh a read was: `<id>: <note> (<what it covers>; a freshness note, not a ruling)`.
+FRESH_LINE = "%s: %s (%s; a freshness note, not a ruling)"
 INDEX_CAP, STEP_TOP, STEP_GIT_TIMEOUT, RULED_TOP = 800, 30, 10, 8
 RULING_HEADING = re.compile(r"^##[ \t]+The ruling[ \t]*$", re.I | re.M)
 RULING_WORDS = re.compile(r"ruling|owner|shiv", re.I)
@@ -1917,12 +1919,37 @@ def _tree_names(body, hash_size):
     return out
 
 
-def _read_steps(root):
+def _fresh_note(root):
+    """The freshness note of origin/roadmap in `root` (roadmap_ref.fresh_ref: "" when fresh or just fetched, else "read as
+    of ..."); "read as of unknown: <why>" when the check cannot run. A read is never silent about how fresh it is."""
+    try:
+        lint = os.path.join(HERE, "..", "lint")
+        if lint not in sys.path:
+            sys.path.append(lint)
+        import roadmap_ref
+        return roadmap_ref.fresh_ref(root)
+    except Exception as exc:
+        return "read as of unknown: " + (" ".join(str(exc).split()) or type(exc).__name__)[:80]
+
+
+def _read_steps(root, note=None):
     """({step id: (note, why)}, state) from roadmap/data/steps of the local ref `roadmap`, else `origin/roadmap`,
     through ONE `git cat-file --batch` process. state is "ok", "absent" (no repo, no ref or no folder) or
-    "unreadable: <why>" (git failed, odd answer, bad JSON). Never fetches."""
+    "unreadable: <why>" (git failed, odd answer, bad JSON). Before the read, `origin/roadmap` is fetched when its last
+    roadmap fetch is older than roadmap_ref.MAX_AGE, bounded at FETCH_TIMEOUT (lint/roadmap_ref.py, once). When the
+    fetch failed, or the check could not run, an "ok" state reads "ok, read as of <time>" (or "ok, read as of
+    unknown: <why>"). A caller that already ran the check for `root` passes its `note` ("" for none), and no
+    second check runs."""
     if _git_root_of(root) is None:
         return {}, "absent"
+    if note is None:
+        note = _fresh_note(root)
+    steps, state = _read_steps_of(root)
+    return (steps, state + ", " + note) if note and state == "ok" else (steps, state)
+
+
+def _read_steps_of(root):
+    """_read_steps without the fetch: the one `git cat-file --batch` read."""
     import subprocess
     import _nowindow  # the one home of a no-window child start
     try:
@@ -2001,14 +2028,16 @@ def _step_rulings(steps, words):
     return [line for _, _, line in sorted(scored)[:STEP_TOP]]
 
 
-def _ruled_candidates(roots, unknown, words):
+def _ruled_candidates(roots, unknown, words, note=None, fresh=None):
     """The open entries of the ruled store (lint/ruled_store.py, the one reader) whose ruling shares a word with the
     question (`words`, the step rulings' word test), as
     `ruled:<id>: <ruling> (owner <at>; open, not on main; supersedes <refs>)`, the most shared words first and the
     newest first among equal counts, at most RULED_TOP. An unchecked entry (supersedes_none starts with "unread") ends
     with " (unchecked, not law)". The store is read from the first root that has one: the repo, else the
     claude-settings checkout. No store anywhere adds "ruled store (absent)"; a store git failed to read adds
-    "ruled store (unreadable: git)"."""
+    "ruled store (unreadable: git)". `note` is the freshness note of the first root, when the caller ran the
+    check for it already. The freshness note of a later root's store is appended to `fresh`, never to `unknown`:
+    a store read as of a time was searched."""
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
@@ -2019,7 +2048,11 @@ def _ruled_candidates(roots, unknown, words):
         return []
     state = "absent"
     for root in roots:
-        entries, state = ruled_store.read_store(root)
+        notes = []
+        entries, state = ruled_store.read_store(root, note=note if root == roots[0] else None, notes=notes)
+        if notes and root != roots[0] and fresh is not None:  # the caller already holds the first root's note
+            fresh.append(FRESH_LINE % ("roadmap-read-claude-settings", notes[0],
+                                       "the roadmap branch of the claude-settings checkout: its ruled store"))
         if state == "ok":
             opened = ruled_store.open_entries(entries, root)
             lines = []
@@ -2042,7 +2075,7 @@ def _ruled_candidates(roots, unknown, words):
 
 def past_rulings(question_text, repo_root):
     """(candidates, unknown). `candidates` are lines `<id>: <text>`: the (up to eight) open ruled-store entries that share words with the question, as `ruled:<id>`, every decision and debt record, then the step
-    rulings that share words with the question. `unknown` lists each source not searched: "<source> (absent)"
+    rulings that share words with the question, then one `roadmap-read` line (`roadmap-read-claude-settings` for the checkout) per failed fetch of the roadmap branch, whatever the state of the step read: "<id>: read as of <time> ...". It is a freshness note, never an unknown source. `unknown` lists each source not searched: "<source> (absent)"
     for a source the repo does not have, "<source> (unreadable: ...)" for one that exists and failed, and always
     "closed page items". Absent sources never refuse; unreadable ones do (see unreadable_sources)."""
     candidates, unknown, seen = [], [], set()
@@ -2056,7 +2089,10 @@ def past_rulings(question_text, repo_root):
         unknown.append("claude-settings decision records (absent)")
     elif os.path.realpath(other) != os.path.realpath(repo_root):
         roots.append(other)
-    candidates += _ruled_candidates(roots, unknown, _words(question_text))
+    # One freshness check for the repo, shared by the ruled store read and the step read: a failed fetch is not retried.
+    note = _fresh_note(repo_root) if _git_root_of(repo_root) is not None else ""
+    fresh = []  # one line per failed roadmap fetch: how stale the reads of that root's origin/roadmap are
+    candidates += _ruled_candidates(roots, unknown, _words(question_text), note, fresh)
     for folder, label in (("decisions", "decision records"), ("debts", "debt records")):
         found = False
         for root in roots if folder == "decisions" else roots[:1]:
@@ -2065,15 +2101,17 @@ def past_rulings(question_text, repo_root):
             candidates += lines
         if not found:
             unknown.append("%s (absent)" % label)
-    steps, state = _read_steps(repo_root)
-    if state == "ok":
+    steps, state = _read_steps(repo_root, note)
+    if state.startswith("ok"):  # "ok, read as of ..." was searched; `note` says how fresh, once, below
         candidates += _step_rulings(steps, _words(question_text))
     elif state == "absent":
         unknown.append("roadmap step notes (absent)")
     else:
         unknown.append("roadmap step notes (%s)" % state)
+    if note:
+        fresh.insert(0, FRESH_LINE % ("roadmap-read", note, "the roadmap branch of this repo: its ruled store and step notes"))
     unknown.append(CLOSED_ITEMS)
-    return candidates, unknown
+    return candidates + fresh, unknown
 
 
 def unreadable_sources(unknown) -> list:

@@ -6,6 +6,7 @@ home of each counter. A case calls it; no case keeps its own copy.
 
   children()          context manager: lists the argv of every child process started in its block.
                       subprocess.run and the _nowindow wrappers start children through Popen, so they count too.
+  names, verbs        the program of each argv ('git'), and the git subcommand of each ('fetch', 'log', ...).
   StubRun             stands in for _nowindow.run: records each call, then returns or raises.
   CountingModel       stands in for a caller's model call: records each prompt and its kwargs, returns one answer.
   snapshot, written   the files a run created or changed under a folder.
@@ -62,6 +63,19 @@ def children():
 def names(argvs):
     """The program name of each argv, without its folder: 'claude', 'git', ..."""
     return [os.path.basename(argv[0]).lower() for argv in argvs]
+
+
+def verbs(argvs):
+    """The git subcommand of each git argv, past `--literal-pathspecs` and `-C <dir>`: 'fetch', 'log', 'rev-parse', ..."""
+    found = []
+    for argv in argvs:
+        rest = list(argv[1:])
+        if rest[:1] == ["--literal-pathspecs"]:
+            rest = rest[1:]
+        if rest[:1] == ["-C"]:
+            rest = rest[2:]
+        found.append(rest[0] if rest else "")
+    return found
 
 
 def stop_group(proc):
