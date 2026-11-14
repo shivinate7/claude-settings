@@ -1958,7 +1958,7 @@ jobs:
         run: python hooks/test_question_form_option_gap.py
 
       - name: Question form task-options suite
-        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
         run: python hooks/test_question_form_task_options.py
 
       - name: Remove-prompt answer fixture suite
