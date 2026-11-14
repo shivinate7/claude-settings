@@ -230,6 +230,12 @@ class LocalRoleProof(SessionRoleCase):
         self.put_role(SID + ".json", SID, "triage")
         self.assertFalse(self.proves(("triage",), None), "a push with no target repo was proved")
 
+    def test_a_reader_that_cannot_run_refuses_with_false(self):
+        # Injected fault: the reader raises, so the proof is refused with False, not with None, which a caller reads the same way.
+        self.put_role(SID + ".json", SID, "triage")
+        with mock.patch.object(session_role, "own_record", side_effect=RuntimeError("injected")):
+            self.assertIs(self.proves(("triage",), "o/r"), False, "a reader that cannot run did not refuse the push with False")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -18832,6 +18832,13 @@ class LocalSessionRoleCheck(CloudSession):
     def test_no_file_and_no_id_keeps_the_local_confirm_as_it_is(self):
         self.assert_reaches_host("7", "--confirm", CLAUDE_CODE_SESSION_ID=None)
 
+    def test_a_role_reader_that_raises_gives_no_role(self):
+        # Injected fault: the local reader raises. The merge reads no role, so it is refused the batch-runner gate, never granted one.
+        import session_role  # on sys.path: merge.py puts hooks/ there
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": LOCAL_SID}), \
+                unittest.mock.patch.object(session_role, "own_role", side_effect=RuntimeError("injected")):
+            self.assertIsNone(merge.read_merge_role(), "a role reader that raised gave a role")
+
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
