@@ -471,8 +471,9 @@ sh("check-tail: ci-job checks --lint piped to tail in the foreground is allowed"
    "~/.claude/bin/ci-job checks --lint 2>&1 | tail -20", "allow", cwd=NOGIT)
 sh("verdict-pipe: a verdict call piped to tail in the foreground is refused",
    "verdict merge --lane-lint 1476 | tail -3", "deny", "verdict-pipe", cwd=NOGIT)
-sh("check-tail: a verdict call with no pipe in the foreground is allowed",
-   "verdict merge --lane-lint 1476", "allow", cwd=NOGIT)
+add("check-tail: a verdict call with no pipe, backgrounded with the limit, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, timeout=CHECK_TIMEOUT_MS, description=TAIL_BG_UNTIL,
+    command="verdict merge --lane-lint 1476")
 # `merge --release-check` prints one verdict line per pull request, so tail or head cuts it like a lint verdict.
 # The lane-lint row is the control: its refusal is the one these rows must match.
 sh("check-tail: merge --lane-lint 5 piped to tail -2 in the foreground is refused (control)",
