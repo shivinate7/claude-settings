@@ -24,7 +24,8 @@ Spec: docs/decisions/precompact-handoff.md, items 9 and 16. Two flag files per s
       handoff path while the audit flag is set, the re-read flag is already cleared and the call is
       the main session's, else "".
   audit_spawn(payload, spawn_tools) (import)  true for a spawn from the main session whose brief's
-      first non-blank line starts with `Audit:`. audit_clear(payload) drops the audit flag.
+      first non-blank line carries the audit marker (shared_names.EXPLORE_AUDIT_MARKER, `Audit:`).
+      audit_clear(payload) drops the audit flag; the guard calls it once the spawn has passed every rule.
   --stop (Stop)  with the flag set and the handoff file present, prints
       {"decision": "block", "reason": ...} naming the handoff path. Exits quietly on
       stop_hook_active, so it cannot loop. The flag stays set until the handoff is read,
@@ -36,6 +37,7 @@ other failure exit 0. Importing this module never exits: without the sibling,
 """
 import json
 import os
+import re
 import sys
 
 try:
@@ -45,8 +47,15 @@ except Exception as e:
     ph = None
     sys.stderr.write("reread_check: cannot import precompact_handoff: %s\n" % e)
 
-
-AUDIT_MARKER = "Audit:"   # the first words of the audit brief, as step 3 of precompact_handoff_prompt.md says
+try:
+    # The audit marker's one home is shared_names.py: its first-line audit row of BRIEF_MARKERS, which the guard's
+    # marker_hits reads too. This reader compiles that row, so the two cannot drift.
+    from shared_names import BRIEF_MARKERS, EXPLORE_AUDIT_MARKER
+    AUDIT_ROW = re.compile(next(rx for kind, rx, position in BRIEF_MARKERS
+                                if kind == "audit" and position == "first-line"))
+except Exception as e:
+    AUDIT_ROW = EXPLORE_AUDIT_MARKER = None
+    sys.stderr.write("reread_check: cannot read the audit marker from shared_names: %s\n" % e)
 
 
 def names_handoff(file_path, session_id):
@@ -91,8 +100,9 @@ def audit_pending(payload):
 
 def audit_spawn(payload, spawn_tools):
     """True when the call is a spawn (its tool is in `spawn_tools`, the guard's SPAWN_TOOLS) from the
-    main session whose brief's first non-blank line, stripped, starts with `Audit:`. A line quoted
-    further down does not count. Never raises."""
+    main session whose brief's first non-blank line carries the audit marker, as the one home reads it
+    (shared_names.BRIEF_MARKERS, the first-line audit row: case-sensitive, text or markup may stand ahead of it).
+    A line quoted further down does not count. Never raises."""
     try:
         if not isinstance(payload, dict) or payload.get("agent_id") or payload.get("tool_name") not in spawn_tools:
             return False
@@ -100,8 +110,8 @@ def audit_spawn(payload, spawn_tools):
         prompt = tool_input.get("prompt") if isinstance(tool_input, dict) else None
         if not isinstance(prompt, str):
             return False
-        first = next((line.strip() for line in prompt.splitlines() if line.strip()), "")
-        return first.startswith(AUDIT_MARKER)
+        first = next((line for line in prompt.split("\n") if line.strip()), "")   # the guard's brief_first_line pick
+        return AUDIT_ROW is not None and AUDIT_ROW.search(first) is not None
     except Exception:
         return False
 
@@ -117,9 +127,9 @@ def audit_clear(payload):
 def audit_reason(handoff):
     """The Stop block's text. The guard's refusal has its own constant, COMPACTION_AUDIT_REASON."""
     return ("Context was compacted and the handoff audit is still owed. Spawn one Explore agent on "
-            "Sonnet whose brief's first line is `Audit:`, as step 3 of the handoff prompt says "
+            "Sonnet whose brief's first line is `%s`, as step 3 of the handoff prompt says "
             "(it reads the transcript from the last compaction marker and compares it with %s), "
-            "then repeat. (decision precompact-handoff, item 16)" % handoff)
+            "then repeat. (decision precompact-handoff, item 16)" % (EXPLORE_AUDIT_MARKER or "Audit:", handoff))
 
 
 def main():
@@ -132,10 +142,10 @@ def main():
     sid = payload.get("session_id") if isinstance(payload, dict) else None
     if not sid or not isinstance(sid, str):
         return 0
-    flag = ph.reread_flag_path(sid)
-    audit_flag = ph.audit_flag_path(sid)
     args = sys.argv[1:]
     try:
+        flag = ph.reread_flag_path(sid)
+        audit_flag = ph.audit_flag_path(sid)   # inside the try: a stale sibling without it must still exit 0
         if "--post-compact" in args:
             os.makedirs(os.path.dirname(flag), exist_ok=True)
             with open(flag, "w", encoding="utf-8") as f:
