@@ -15387,7 +15387,8 @@ class ReviewNoRestart(ReviewEnv):
     below REVIEW_LAST_ROUND without a --fix-check. A record with no round line and a --fix-check is no restart: its fix check passes, or fails and
     needs a new lane (owner, page item 741, 14:01 CST). A record may open at the last round after a failed second round, or after a failed fix
     check with no second round written, and then holds that last round alone. A comment that does not parse, or that names another pull request, is skipped. A refusal exits 2 and prints
-    nothing on stdout. Each accepted case is a control: it prints a record on main and after the change."""
+    nothing on stdout. A record with no round line is refused after an earlier record whose last design reviewer line is FAIL or PARTIAL, since it holds
+    no design reviewer line to clear that hold. Each accepted case is a control: it prints a record on main and after the change."""
 
     EARLIER_FIX_FROM = "1e" * 20  # the head a fix check's fix diff started from: a fix check line never names its own record's Head
     GRANT = REVIEW_GRANT_TEXT  # the owner's grant of a fourth review pass, bound to this pull request
@@ -15641,6 +15642,64 @@ class ReviewNoRestart(ReviewEnv):
         self.assert_refused_with_no_record(rc, out, err)
         self.assertIn("needs a failed round 1", err, "the refusal does not name the failed first round it needs")
 
+    def design_only_argv(self):
+        """The argv of a record with no round line and one fix verifier that PASSes at REVIEW_OLD_HEAD, the head of the earlier record."""
+        return self.review_argv(fix=f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS")
+
+    def design_line_values(self, text):
+        """-> the verdicts of the design reviewer lines of a parsed record, in position order, so a case checks its own fixture."""
+        return [v for _, role, _, v in parse_text(self, text)["rounds"] if role == "design-reviewer"]
+
+    def assert_refused_naming_design(self, rc, out, err):
+        """A refusal of a record that would clear an earlier design reviewer hold: exit 2, nothing on stdout, no traceback, and the design reviewer named."""
+        self.assertEqual(rc, 2, "a record with no round line cleared an earlier design reviewer hold, and was accepted:\n" + out + err)
+        self.assertEqual(out, "", "a refused record printed to stdout")
+        self.assertNotIn("Traceback", err)
+        self.assertIn(merge.REVIEW_CITE, err)
+        self.assertRegex(err, r"design[ -]reviewer", "the refusal does not name the design reviewer")
+
+    def test_a_fix_verifier_only_record_after_an_earlier_design_line_fail_is_refused(self):
+        # A record with no round line holds no design reviewer line, so it cannot answer the earlier record's design reviewer line. The earlier
+        # record reads open on its own (scope), so the refusal is the design line's. A FAIL and a PARTIAL both refuse.
+        for verdict in ("FAIL", "PARTIAL"):
+            with self.subTest(verdict=verdict):
+                earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, PASS", f"Round 1: design-reviewer, opus, {verdict}"))
+                state, why = record_verdict(self, earlier, head=REVIEW_OLD_HEAD)
+                self.assertEqual(state, "open", f"scope: an earlier record whose design reviewer line is {verdict} must read open: {why!r}")
+                rc, out, err = self.run_args(*self.design_only_argv(), host=self.chain_host(earlier))
+                self.assert_refused_naming_design(rc, out, err)
+
+    def test_a_fix_verifier_only_record_after_an_earlier_design_line_pass_is_accepted(self):
+        # Control for the refusal above: the earlier record's last design reviewer line is PASS, or the record holds no design reviewer line, so the
+        # same record is accepted and prints the record.
+        cases = (("PASS", ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, PASS"), ["PASS"]),
+                 ("absent", ("Round 1: reviewer, sonnet, PASS",), []))
+        for label, rounds, values in cases:
+            with self.subTest(design_line=label):
+                earlier = record_text(head=REVIEW_OLD_HEAD, rounds=rounds)
+                self.assertEqual(self.design_line_values(earlier), values, "scope: the earlier record's design reviewer lines")
+                rc, out, err = self.run_args(*self.design_only_argv(), host=self.chain_host(earlier))
+                self.assert_accepted(rc, out, err)
+
+    def test_the_last_design_line_by_position_decides_a_fix_verifier_only_record(self):
+        # The newest earlier record's last design reviewer line decides, by position across its rounds. A later PASS line clears an earlier FAIL,
+        # and a later FAIL keeps an earlier PASS from clearing the hold, so no earlier line alone decides.
+        cases = (
+            (("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS",
+              "Round 2: design-reviewer, opus, PASS"), "PASS"),
+            (("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, PASS", "Round 2: reviewer, sonnet, PASS",
+              "Round 2: design-reviewer, opus, FAIL"), "FAIL"),
+        )
+        for rounds, last in cases:
+            with self.subTest(last=last):
+                earlier = record_text(head=REVIEW_OLD_HEAD, rounds=rounds)
+                self.assertEqual(self.design_line_values(earlier)[-1], last, "scope: the last design reviewer line of the earlier record")
+                rc, out, err = self.run_args(*self.design_only_argv(), host=self.chain_host(earlier))
+                if last == "PASS":
+                    self.assert_accepted(rc, out, err)
+                else:
+                    self.assert_refused_naming_design(rc, out, err)
+
 class ReviewFixAfterRoundThree(ReviewEnv):
     """The chain of a Guard or check change: a failed first round (haiku), a failed second round (sonnet), a passing third round (sonnet, net value
     zero), then a sonnet fix check that PASSes at a later head. A fix check after a passing last round is accepted, as a fix after a merge of main
@@ -15879,6 +15938,62 @@ class ReviewedList(ReviewEnv):
         older = record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))
         newest = record_text(rounds=REVIEW_PASS).rstrip("\n") + REVIEW_FOOTER
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, older), review_comment(2, 7, newest), lint_of(7, REVIEW_HEAD)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+
+    MID_HEAD = "3e" * 20  # the head of a record that a later fix verifier starts from
+
+    def chain_listing(self, *bodies):
+        """The `--reviewed` listing of the stored chain `bodies`, oldest first, at REVIEW_HEAD with its lane lint PASS, so a done record reads done."""
+        comments = [review_comment(i, 7, body) for i, body in enumerate(bodies, 1)] + [lint_of(7, REVIEW_HEAD)]
+        return self.listing([batch_pull(7, REVIEW_HEAD)], comments)
+
+    def test_a_fix_verifier_only_record_does_not_read_done_over_an_earlier_design_line_fail(self):
+        # A stored chain: an earlier record whose last design reviewer line is FAIL or PARTIAL, then a record with no round line whose fix verifier
+        # PASSes at that record's head. The newest record reads done on its own (scope), so the earlier design hold must keep the line from done.
+        newest = record_text(head=REVIEW_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="PASS"),))
+        self.assertEqual(record_state(self, newest, head=REVIEW_HEAD), "done", "scope: the newest record alone must read done")
+        for verdict in ("FAIL", "PARTIAL"):
+            with self.subTest(verdict=verdict):
+                earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, PASS", f"Round 1: design-reviewer, opus, {verdict}"))
+                self.assertEqual(record_state(self, earlier, head=REVIEW_OLD_HEAD), "open", "scope: the earlier record must read open on its own")
+                host, rc, out, err = self.chain_listing(earlier, newest)
+                self.assertEqual(rc, 0, out + err)
+                self.assertNotRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ",
+                                    f"the newest record read done over an earlier design reviewer {verdict}, so the design hold was dropped")
+
+    def test_a_fix_verifier_only_record_reads_done_over_an_earlier_design_line_pass_or_none(self):
+        # Control for the chain above: the earlier record's last design reviewer line is PASS, or it holds none, so the newest record reads done.
+        newest = record_text(head=REVIEW_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="PASS"),))
+        cases = (("PASS", ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, PASS")),
+                 ("absent", ("Round 1: reviewer, sonnet, PASS",)))
+        for label, rounds in cases:
+            with self.subTest(design_line=label):
+                earlier = record_text(head=REVIEW_OLD_HEAD, rounds=rounds)
+                host, rc, out, err = self.chain_listing(earlier, newest)
+                self.assertEqual(rc, 0, out + err)
+                self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+
+    def test_a_design_line_fail_holds_through_two_fix_verifier_only_records(self):
+        # The hold passes each record with no design reviewer line, not only the one before the newest. The middle record is a fix verifier on the
+        # earlier head, and the newest is a fix verifier on the middle head. Alone, each of the two reads done (scope).
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL"))
+        middle = record_text(head=self.MID_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="PASS"),))
+        newest = record_text(head=REVIEW_HEAD, rounds=(), fix=(fix_verifier_line(head=self.MID_HEAD, verdict="PASS"),))
+        self.assertEqual(record_state(self, middle, head=self.MID_HEAD), "done", "scope: the middle record alone must read done")
+        self.assertEqual(record_state(self, newest, head=REVIEW_HEAD), "done", "scope: the newest record alone must read done")
+        host, rc, out, err = self.chain_listing(earlier, middle, newest)
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ",
+                            "the newest record read done over an earlier design reviewer FAIL, through a fix verifier-only record")
+
+    def test_a_later_design_line_pass_ends_the_hold_through_fix_verifier_only_records(self):
+        # Control for the chain above: a full record at the middle head whose design reviewer PASSes ends the hold, so the newest reads done.
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL"))
+        passed = record_text(head=self.MID_HEAD, rounds=("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, PASS"))
+        newest = record_text(head=REVIEW_HEAD, rounds=(), fix=(fix_verifier_line(head=self.MID_HEAD, verdict="PASS"),))
+        self.assertEqual(record_state(self, passed, head=self.MID_HEAD), "done", "scope: the middle record alone must read done")
+        host, rc, out, err = self.chain_listing(earlier, passed, newest)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
 
