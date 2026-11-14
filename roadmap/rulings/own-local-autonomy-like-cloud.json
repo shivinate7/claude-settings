@@ -1,0 +1,10 @@
+{
+  "id": "own-local-autonomy-like-cloud",
+  "at": "2026-11-13T20:28:00-06:00",
+  "title": "Local sessions are as autonomous as cloud sessions",
+  "ruling": "Owner 20:28 CST Nov 13, relayed by the consultant (chat; triage did not see it), after learning that cloud sessions get three merge allows from merge/cloud_allow.json that local ones do not (session-tiers line 123): local should have been as autonomous as the cloud. Every allow, autoMode entry and setting that cloud sessions get, local sessions get too, on Mac and Windows. The role-file and merge-role-proof guards still bound who merges. Rewrites session-tiers line 123.",
+  "quote": "im never there on the computer either, local should have always been as autonomous as the cloud .. no wonder on local i get asked to create sessions and not in the cloud",
+  "source": "Consultant 20:29 CST Nov 13 (quoting the owner's chat 20:28 CST); filed by triage.",
+  "status": "open",
+  "step": "local-autonomy-equals-cloud"
+}
