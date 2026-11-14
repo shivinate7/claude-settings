@@ -1,0 +1,14 @@
+{
+ "id": "roadmap-skill-md-claims-match-code",
+ "title": "skills/roadmap/SKILL.md says three things the code does not: a wrong text rule, a tool not on main, and a lint error",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Found by the lane on #3319 (step-done-check-field) and relayed by the coordinator 20:57 CST Nov 13; triage has read none of the lines.",
+ "source": "Coordinator 20:57 CST Nov 13, from the lane on #3319 (head 8e1b49c72583).",
+ "note": "Triage 20:56 CST Nov 13: (1) SKILL.md:331 says \"text with a word in it\" but the code needs non-blank text. (2) SKILL.md:56 names the brief tool that lives in #3261, not on main. (3) An ste_lint error at SKILL.md:85 is on main too. Rule fresh-prose: bind each claim to a check. Do after #3319 and #3261 land, so the lines do not move. All unchecked by triage.",
+ "updatedAt": "2026-11-13T20:56:44-06:00"
+}

@@ -1,0 +1,14 @@
+{
+ "id": "grant-marker-one-constant",
+ "title": "The Stop hook pattern and the once_home/barred check read the grant marker from shared_names.LANE_GRANT_MARKER, and tests cover lowercase, CRLF and the root-home flag",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane grant-line-not-grant-word (PR #3318, head ed338cbf2c18) left three notes: the Stop hook pattern hardcodes \"Grant:\" (a copy of a constant), the once_home/barred check still reads the Grant line, and no test covers lowercase \"grant:\", CRLF, or the root-home flag.",
+ "source": "Coordinator 20:57 CST Nov 13, from lane session_013NEJL44d7wfp23LocBDTYR (lint PASS, round 1 PASS).",
+ "note": "Triage 20:56 CST Nov 13: rule building-allow-list-is-the-constant says a guard points at the constant, never a copy. Lane notes, relayed; head frozen; triage has read none of the code. Fix after #3318 merges: the Stop hook reads shared_names.LANE_GRANT_MARKER; decide whether once_home/barred should read the Grant line; add the three tests, red first.",
+ "updatedAt": "2026-11-13T20:56:44-06:00"
+}
