@@ -165,6 +165,7 @@ FAMILIES = {
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
     "agent-remote-tools": "an agent's call to an outward claude-code-remote tool is refused; the session's own call, an agent_type with no agent_id, and the read tools keep their verdict",
+    "ci-wait-cap": "the CI-wait cap: a send_later whose message says it waits on CI (the word CI or checks, or PR run or workflow run) is refused past the cap in cap_minutes(), by delay_minutes or an at time; a call that is not about CI, a CI call at the cap, and a copy whose data file moves the limit are judged against that cap",
     "workflow-args": "a Workflow call whose args is, or holds as an array or object value, a placeholder (an all-caps word with an underscore, or __X__) is refused, naming it and the fix; an absent, empty or real args passes, and so does a short all-caps word or a sentence with an env var name",
     "sections": "the section files: a set the loader refuses (no section file, two files with one number, a log check appended after the LOG_CHECKS_EXTRA join) stops a run before any case",
     "misc": "anything outside a tagged section",
