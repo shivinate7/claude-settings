@@ -118,7 +118,7 @@ def api(a):
         items = S["open"]
         if params.get("state") == "closed":
             owner, _, ref = params.get("head", "").rpartition(":")
-            items = [x for x in S.get("closed", []) if (not ref or x["head"]["ref"] == ref) and (not owner or owner == S["repo"].split("/")[0])]
+            items = [x for x in S.get("closed", []) if ref and x["head"]["ref"] == ref and (not owner or owner == S["repo"].split("/")[0])]  # an empty head ref matches no PR
         size = max(1, min(int(params.get("per_page", 30)), 100))
         last = max(1, -(-len(items) // size))
         n = int(params.get("page", 1))
@@ -655,6 +655,88 @@ class PriorityRowsCli(unittest.TestCase):
             self.assert_flag(self.row_line(out, err, SLUG), "no pull request has the head")
             self.assertEqual(len(self.closed_reads()), 1, "no open pr matches, so exactly one closed read: %s" % self.paths())
             self.assertEqual(len(self.paths()), 2, "the open list, then the one closed read: %s" % self.paths())
+
+    def test_a_blocked_head_reads_its_runs_before_it_is_judged(self):
+        # The live shape: GitHub reads BLOCKED while a required run, such as all-jobs-passed, is still going.
+        cases = (
+            ("a pending run", [run_for(SHA_A, "all-jobs-passed", "in_progress", None, 4)], "waiting", None),
+            ("a red run", [run_for(SHA_A, "checks", "completed", "failure", 3)], "flag", "checks"),
+            ("every run green", green(SHA_A), "flag", "blocked"),
+            ("no run", [], "unknown", None),
+        )
+        for name, runs, verdict, reason in cases:
+            with self.subTest(runs=name):
+                self.reset_state()
+                self.reset_calls()
+                self.put_pr(3302, SHA_A, runs=runs, mergeable=True, mergeable_state="blocked")
+                code, out, err = self.wake(ROW_3302)
+                line = self.row_line(out, err, SLUG)
+                if verdict == "waiting":
+                    self.assertIn("waiting", words(line), "want waiting on this line: " + line)
+                elif verdict == "flag":
+                    self.assert_flag(line, reason)
+                else:
+                    self.assert_unknown(line)
+                self.assertEqual(code, 0 if verdict == "waiting" else 1, "the row exits by its verdict: " + err)
+                self.assertLessEqual(len(self.paths()), 2, "a pr row reads at most two: %s" % self.paths())
+
+    def test_a_branch_merged_into_main_is_done_only_when_origin_does_not_name_another_sha(self):
+        main_sha = roadmap.git(self.repo, "rev-parse", "main").strip()
+        other_sha = roadmap.git(self.repo, "rev-parse", "roadmap").strip()
+        self.assertNotEqual(main_sha, other_sha, "the fixture needs two commits")
+        cases = (
+            ("origin names the merged head", main_sha, "done", None),
+            ("origin names another sha", other_sha, "flag", "branch reused after merge, no open PR"),
+            ("origin has no such ref", None, "done", None),
+        )
+        for name, origin_sha, verdict, reason in cases:
+            with self.subTest(origin=name):
+                self.reset_state()
+                self.reset_calls()
+                self.put_closed(41, main_sha, "feat-x", base="main", merged=True)
+                roadmap.git(self.repo, "update-ref", "-d", "refs/remotes/origin/feat-x")
+                if origin_sha:
+                    roadmap.git(self.repo, "update-ref", "refs/remotes/origin/feat-x", origin_sha)
+                code, out, err = self.wake("priority: %s | branch: feat-x\n" % SLUG)
+                line = self.row_line(out, err, SLUG)
+                if verdict == "done":
+                    self.assertIn("done", words(line), "want done on this line: " + line)
+                    self.assertEqual(code, 0, "a done row exits 0: " + err)
+                else:
+                    self.assert_flag(line, reason)
+                    self.assertEqual(code, 1, "a flagged row exits 1: " + err)
+                self.assertEqual(len(self.paths()), 2, "the origin ref is read locally: only the open list and the closed read reach gh: %s" % self.paths())
+
+    def test_an_empty_branch_or_repo_value_is_unknown_and_reads_nothing(self):
+        self.put_open((41, SHA_A, "feat-x"))
+        self.put_pr(41, SHA_A, runs=green(SHA_A), mergeable=True, mergeable_state="clean")
+        cases = {
+            "an empty branch value": "priority: %s | branch:\n" % SLUG,
+            "an empty repo value": "priority: %s | branch: feat-x | repo:\n" % SLUG,
+        }
+        for name, row in cases.items():
+            with self.subTest(row=name):
+                self.reset_calls()
+                code, out, err = self.wake(row)
+                line = self.row_line(out, err, SLUG)
+                self.assert_unknown(line)
+                self.assertIn("row names an empty value", line)
+                self.assertEqual(code, 1, "an unknown row exits 1: " + err)
+                self.assertEqual(self.paths(), [], "an empty value is refused before any read: %s" % self.paths())
+
+    def test_a_branch_row_is_unknown_when_this_repo_cannot_be_named(self):
+        self.put_open((41, SHA_A, "feat-x"))
+        self.put_pr(41, SHA_A, runs=green(SHA_A), mergeable=True, mergeable_state="clean")
+        roadmap.git(self.repo, "remote", "set-url", "origin", "https://example.com/not-github/checkout.git")
+        cases = {"a branch row": "priority: %s | branch: feat-x\n" % SLUG, "a pr row": "priority: %s | pr: %s#41\n" % (SLUG, REPO)}
+        for name, row in cases.items():
+            with self.subTest(row=name):
+                self.reset_calls()
+                code, out, err = self.wake(row)
+                line = self.row_line(out, err, SLUG)
+                self.assert_unknown(line)
+                self.assertEqual(code, 1, "an unknown row exits 1: " + err)
+                self.assertEqual(self.paths(), [], "this repo cannot be named, so nothing is read: %s" % self.paths())
 
     def test_stdin_dash_reads_the_rows_as_the_file_does(self):
         self.put_pr(3302, SHA_A, runs=green(SHA_A), mergeable=True, mergeable_state="clean")
