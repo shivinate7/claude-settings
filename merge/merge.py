@@ -1371,13 +1371,17 @@ class Host:
     DRAFT_TOUCHED = "touched"  # the job of lane-touched-tests.yml that runs the touched tests on Linux
     DRAFT_TEST_JOB = re.compile(r"run \((windows|macos)")  # its Windows and macOS jobs, which the Linux-only lane lint never runs
     DRAFT_OK = ("success", "skipped", "neutral")
+    MACOS_UNKNOWN = "macOS leg selected, row not there yet: rerun the lane lint once the run shows a macOS row"
 
     def draft_run_state(self, sha):
-        """-> (state, lines): the verdict of the draft's lane-touched-tests run on the head `sha`, from ONE read of its check runs (no statuses).
+        """-> (state, lines): the verdict of the draft's lane-touched-tests run on the head `sha`, from ONE read of its check runs (no statuses), plus one read of the
+        touched job's log only when no macOS row succeeded (the log says whether a macOS test was selected; a green macOS row already proves it).
         "fail": the `touched` job or a Windows or macOS test job finished with a conclusion other than success, skipped or neutral; `lines` name each job and its link.
         "wait": one of those jobs has not finished. "unknown": no `touched` job is on `sha`, so no run was judged for this head (a run of an older head is never read),
         or `touched` was skipped, as a never-drafted or ready lane's is: no touched test ran, so there is no proof.
-        "pass": `touched` succeeded and every test job that ran succeeded or was skipped. Of rows that share a name (a re-run), the newest id counts: a re-run that passed clears the old failure."""
+        "pass": `touched` succeeded and every test job that ran succeeded or was skipped. Of rows that share a name (a re-run), the newest id counts: a re-run that passed clears the old failure.
+        With no macOS row that succeeded, the touched log decides: a `run <test> on ... macos` line is "unknown" (the leg was selected and its row is missing, skipped or unread: this Linux lint never
+        sees a macOS red), an unreadable or empty log is "unknown", a `skip <test> on macos: not a macOS subject` line is "pass" with one note line (the batch's macOS run covers it), and neither is "pass"."""
         newest = {}
         for r in self.pages(f"commits/{sha}/check-runs", "check_runs"):
             name = r.get("name") or ""
@@ -1395,6 +1399,19 @@ class Host:
             return "unknown", [f"no `{self.DRAFT_TOUCHED}` job (lane-touched-tests) has run on {sha[:9]}"]
         if newest[self.DRAFT_TOUCHED].get("conclusion") == "skipped":
             return "unknown", [f"the `{self.DRAFT_TOUCHED}` job (lane-touched-tests) was skipped on {sha[:9]}, so no touched test ran: {newest[self.DRAFT_TOUCHED].get('html_url') or newest[self.DRAFT_TOUCHED].get('details_url') or '(no link)'}"]
+        if any(n.startswith("run (macos") and r.get("conclusion") == "success" for n, r in newest.items()):
+            return "pass", []
+        c, out = self.api(f"actions/jobs/{newest[self.DRAFT_TOUCHED]['id']}/logs")
+        if c:
+            return "unknown", [f"{self.MACOS_UNKNOWN}; the touched job's log could not be read, so no macOS leg can be ruled out: {out}"]
+        lines = [LOG_PREFIX.sub("", t, count=1).rstrip() for t in out.splitlines()]
+        if not any(t.strip() for t in lines):
+            return "unknown", [f"{self.MACOS_UNKNOWN}; the touched job's log was empty, so no macOS leg can be ruled out"]
+        ran = next((t for t in lines if re.match(r"run .+ on .*\bmacos\b", t)), None)
+        if ran:
+            return "unknown", [f"{self.MACOS_UNKNOWN} (touched log: {ran})"]
+        if any(re.match(r"skip .+ on macos: not a macOS subject", t) for t in lines):
+            return "pass", ["macOS left to batch CI: the touched log skips a test that is not a macOS subject on the macOS leg, so this head has no macOS run of its own"]
         return "pass", []
 
     def superseded(self, items, sha):
@@ -2892,6 +2909,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             draft, draft_lines = ("pass", []) if is_integration_pr(info) else host.draft_run_state(head)
             if draft == "fail":
                 fails.append(f"its draft run of lane-touched-tests failed on {head[:9]}: " + "; ".join(draft_lines))
+            elif draft == "pass" and draft_lines:
+                say(f"merge: draft run of {head[:9]} passes, with a note:", *draft_lines)
             elif draft != "pass" and not (fails or stop):
                 if not unknown_ok.strip():
                     raise Liftable("\n".join([f"the draft run of lane-touched-tests on {head[:9]} is {'not finished' if draft == 'wait' else 'unknown'}, not a pass:", *draft_lines,

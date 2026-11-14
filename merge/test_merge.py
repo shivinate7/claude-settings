@@ -266,17 +266,30 @@ def draft_row(name, conclusion="success", status="completed", job=1):
     return {"id": 4000 + job, "name": name, "status": status, "conclusion": conclusion if done else None, "html_url": link, "details_url": link}
 
 class DraftRunReads(merge.Host):
-    """The real Host with its one read scripted: `pages` answers `commits/<sha>/check-runs` from `rows` (a head with no entry has no runs) and
-    records each read's path in `reads`. Any other read answers []. The judge is merge.Host.draft_run_state itself, never a copy of it."""
+    """The real Host with its reads scripted: `pages` answers `commits/<sha>/check-runs` from `rows` (a head with no entry has no runs) and
+    records each read's path in `reads`. `api` answers `actions/jobs/<id>/logs` (a touched job's log) from `logs` (job id -> text; a job with no
+    entry has an empty log), or with `log_error` (a (code, output) pair) for every log read, and records each job id in `log_reads`. Any other
+    api read raises: the judge reads no other route. The judge is merge.Host.draft_run_state itself, never a copy of it."""
 
-    def __init__(self, rows, reads):
+    def __init__(self, rows, reads, logs=None, log_error=None, log_reads=None):
         super().__init__(required=["checks"], base="main", minute=60, now=lambda: 0.0, pause=lambda s: None)
         self.rows, self.reads = rows, reads
+        self.logs, self.log_error = logs or {}, log_error
+        self.log_reads = [] if log_reads is None else log_reads
 
     def pages(self, rel, key=None, fields=None):
         self.reads.append(rel)
         m = re.fullmatch(r"commits/([0-9a-f]+)/check-runs", rel)
         return list(self.rows.get(m.group(1), [])) if m else []
+
+    def api(self, rel, *extra, **kw):
+        m = re.fullmatch(r"actions/jobs/(\d+)/logs", rel)
+        if not m:
+            raise AssertionError(f"the judge read {rel!r} through api: only a job's log is scripted")
+        self.log_reads.append(int(m.group(1)))
+        if self.log_error:
+            return self.log_error
+        return 0, self.logs.get(int(m.group(1)), "")
 
 def check_run_reads(reads):
     """The shas whose check runs were read, in the order read. A read of any other path is not in it."""
@@ -19339,23 +19352,51 @@ def unit_failed_line(name):
     return f"FAIL: {name} (merge.test_merge.TouchesRead.{name})"
 
 
+def draft_log(*lines):
+    """A touched job's log as the touched-tests selector prints it: one line each, in order."""
+    return "\n".join(lines) + "\n"
+
 class DraftRunJudge(unittest.TestCase):
     """merge.Host.draft_run_state judges one head's draft rows (decision lanes-run-no-full-ci-job; workflow lane-touched-tests.yml). A touched job
     that was skipped, as a ready pull request's is, proves no touched test ran, so the verdict is unknown. Rows that share a name are one job's
     runs, and the newest id decides, whatever order the rows come in. Each case scripts its rows and reads them through DraftRunReads, which runs
-    the real judge."""
+    the real judge. A touched log that selects the macOS leg with no macOS row that succeeded is unknown, never a pass: the lint never passes a
+    macOS run it did not see. A touched log that names the leg left to batch CI passes, with one line that says so."""
 
     SHA = "c" * 40
+    TOUCHED_ID = draft_row("touched")["id"]  # the touched job's id: the one its log is read by, as failed_lines reads a job's log
+    TEST = "hooks/test_guard.py"
+    TOUCHED = f"touched hooks/guard.py -> {TEST}"
+    RUN_BOTH = f"run {TEST} on windows and macos"
+    RUN_MACOS = f"run {TEST} on macos"
+    RUN_WINDOWS = f"run {TEST} on windows"
+    SKIP_MACOS = f"skip {TEST} on macos: not a macOS subject (hooks/test_*.py), so a lane's macOS leg leaves it to the batch's macOS run"
+    BATCH_SKIP = "batch-macos-skip: a batch checks run is in progress, so the macOS job is skipped"
+    MACOS_WORDS = "macOS leg selected, row not there yet: rerun the lane lint once the run shows a macOS row"  # the exact words of that unknown line
+    LEFT = "macOS left to batch CI"  # the one visible line of a macOS leg the batch runs
+    SPACED = "tests/test foo.py"  # a test path with a space: its selector line names the whole path
 
     def judge(self, rows):
         return DraftRunReads({self.SHA: rows}, []).draft_run_state(self.SHA)
+
+    def judged(self, rows, text="", log_error=None, log_reads=None):
+        """-> (state, lines): one judge of `rows` at SHA. The touched job's log is `text`, or `log_error` (a (code, output) pair) for every read.
+        Each log read's job id lands in `log_reads` when a list is given."""
+        logs = {self.TOUCHED_ID: text}
+        return DraftRunReads({self.SHA: rows}, [], logs=logs, log_error=log_error, log_reads=log_reads).draft_run_state(self.SHA)
+
+    def assertUnknownForMacos(self, state, lines, reads, case):
+        """`case` is a macOS leg selected with no macOS row that succeeded: unknown, a line holds the exact words, and the touched log was read once."""
+        self.assertEqual(state, "unknown", f"{case} was judged {state!r}, not unknown: {lines}")
+        self.assertTrue(any(self.MACOS_WORDS in t for t in lines), f"{case}: no line holds {self.MACOS_WORDS!r}: {lines}")
+        self.assertEqual(reads, [self.TOUCHED_ID], f"{case}: the touched job's log was read {reads}, not once")
 
     def test_a_touched_row_skipped_with_no_test_rows_is_unknown_not_a_pass(self):
         state, lines = self.judge([draft_row("touched", "skipped")])
         self.assertEqual(state, "unknown", "a skipped touched job with no test rows was judged %r, a pass with no proof a touched test ran: %s" % (state, lines))
 
     def test_a_touched_row_that_succeeded_with_no_test_rows_passes(self):  # control: green on the old code
-        state, lines = self.judge([draft_row("touched")])
+        state, lines = self.judged([draft_row("touched")], draft_log(self.TOUCHED))
         self.assertEqual(state, "pass", "a touched job that succeeded with no test rows was judged %r: %s" % (state, lines))
 
     def test_a_failed_older_run_and_a_passed_newer_run_of_one_job_pass_in_either_order(self):  # control: green on the old code
@@ -19363,7 +19404,7 @@ class DraftRunJudge(unittest.TestCase):
         self.assertLess(older["id"], newer["id"], "precondition: the passed run is not the newer one, so the case probes nothing")
         for rows in ([draft_row("touched"), older, newer], [draft_row("touched"), newer, older]):
             with self.subTest(order=[r["id"] for r in rows]):
-                state, lines = self.judge(rows)
+                state, lines = self.judged(rows, draft_log(self.TOUCHED))
                 self.assertEqual(state, "pass", "a re-run that passed after a failed run was judged %r, not pass: %s" % (state, lines))
 
     def test_a_passed_older_run_and_a_failed_newer_run_of_one_job_fail_in_either_order_and_name_the_newer_link(self):  # control: green on the old code
@@ -19374,6 +19415,146 @@ class DraftRunJudge(unittest.TestCase):
                 state, lines = self.judge(rows)
                 self.assertEqual(state, "fail", "a re-run that failed after a passed run was judged %r, not fail: %s" % (state, lines))
                 self.assertIn(job_link(DRAFT_RUN, 5), "\n".join(lines), "the failure does not name the newer run's link: %s" % lines)
+
+    def test_a_macos_leg_selected_with_no_macos_row_is_unknown_not_a_pass(self):
+        reads = []
+        state, lines = self.judged([draft_row("touched")], draft_log(self.TOUCHED, self.RUN_MACOS), log_reads=reads)
+        self.assertUnknownForMacos(state, lines, reads, "a macOS run line with no macOS row")
+
+    def test_a_macos_leg_selected_beside_a_green_windows_leg_is_unknown_not_a_pass(self):
+        reads = []
+        rows = [draft_row("touched"), draft_row("run (windows-latest)", job=2)]
+        state, lines = self.judged(rows, draft_log(self.TOUCHED, self.RUN_BOTH), log_reads=reads)
+        self.assertUnknownForMacos(state, lines, reads, "a macOS run line beside a green windows row")
+
+    def test_a_macos_leg_selected_with_a_skipped_macos_row_is_unknown_not_a_pass(self):
+        reads = []
+        rows = [draft_row("touched"), draft_row("run (macos-latest)", "skipped", job=3)]
+        state, lines = self.judged(rows, draft_log(self.TOUCHED, self.RUN_BOTH), log_reads=reads)
+        self.assertUnknownForMacos(state, lines, reads, "a macOS run line with a skipped macOS row")
+
+    def test_a_macos_leg_selected_with_a_neutral_macos_row_is_unknown_not_a_pass(self):
+        reads = []
+        rows = [draft_row("touched"), draft_row("run (macos-latest)", "neutral", job=3)]
+        state, lines = self.judged(rows, draft_log(self.TOUCHED, self.RUN_MACOS), log_reads=reads)
+        self.assertUnknownForMacos(state, lines, reads, "a macOS run line with a neutral macOS row")
+
+    def test_an_unreadable_touched_log_with_no_macos_row_is_unknown_not_a_pass(self):
+        reads = []
+        state, lines = self.judged([draft_row("touched")], log_error=(1, "HTTP 500: the log could not be read"), log_reads=reads)
+        self.assertEqual(state, "unknown", f"an unreadable touched log with no macOS row was judged {state!r}, not unknown: {lines}")
+        self.assertTrue(lines, "the unknown verdict names no reason")
+        self.assertEqual(reads, [self.TOUCHED_ID], f"the touched job's log was read {reads}, not once")
+
+    def test_an_empty_touched_log_with_no_macos_row_is_unknown_not_a_pass(self):
+        reads = []  # the selector printed nothing: no line rules a macOS leg out
+        state, lines = self.judged([draft_row("touched")], "", log_reads=reads)
+        self.assertEqual(state, "unknown", f"an empty touched log with no macOS row was judged {state!r}, not unknown: {lines}")
+        self.assertTrue(lines, "the unknown verdict for an empty touched log names no reason")
+        self.assertEqual(reads, [self.TOUCHED_ID], f"the touched job's log was read {reads}, not once")
+
+    def test_timestamped_log_lines_still_select_the_macos_leg(self):
+        stamp = "2026-11-14T14:20:01.1234567Z "
+        text = draft_log(stamp + self.TOUCHED, stamp + self.RUN_BOTH)
+        self.assertFalse(any(t.startswith("run ") for t in text.splitlines()), "precondition: every line is stamped, so the case probes the strip")
+        reads = []
+        state, lines = self.judged([draft_row("touched")], text, log_reads=reads)
+        self.assertUnknownForMacos(state, lines, reads, "a timestamped macOS run line")
+
+    def test_a_macos_run_line_at_the_end_of_a_long_log_is_still_read(self):
+        text = draft_log(*[f"touched hooks/file_{i:03d}.py -> no test file maps to it" for i in range(300)], self.RUN_MACOS)
+        self.assertGreater(text.count("\n"), 300, "precondition: the log is short, so the case probes nothing")
+        reads = []
+        state, lines = self.judged([draft_row("touched")], text, log_reads=reads)
+        self.assertUnknownForMacos(state, lines, reads, "a macOS run line after 300 lines")
+
+    def test_a_macos_leg_selected_for_a_path_with_a_space_is_unknown_not_a_pass(self):
+        reads = []
+        self.assertIn(" ", self.SPACED, "precondition: the path has no space, so the case probes nothing")
+        rows = [draft_row("touched"), draft_row("run (windows-latest)", job=2)]
+        state, lines = self.judged(rows, draft_log(self.TOUCHED, f"run {self.SPACED} on windows and macos"), log_reads=reads)
+        self.assertUnknownForMacos(state, lines, reads, "a macOS run line for a path with a space")
+
+    def test_a_macos_row_that_lands_after_an_unknown_read_passes_with_no_second_log_read(self):
+        reads = []
+        rows = [draft_row("touched"), draft_row("run (windows-latest)", job=2)]
+        text = draft_log(self.TOUCHED, self.RUN_BOTH)
+        state, lines = self.judged(rows, text, log_reads=reads)
+        self.assertUnknownForMacos(state, lines, reads, "the first read, before the macOS row lands")
+        rows2 = rows + [draft_row("run (macos-latest)", job=3)]  # the same head and the same log, with the macOS row now green
+        state, lines = self.judged(rows2, text, log_reads=reads)
+        self.assertEqual(state, "pass", f"the same log with a green macOS row was judged {state!r}, not pass: {lines}")
+        self.assertEqual(lines, [], f"a green macOS row names a line: {lines}")
+        self.assertEqual(reads, [self.TOUCHED_ID], f"the second read read the touched log again: {reads}")
+
+    def test_a_batch_dropped_macos_leg_with_its_run_line_is_unknown(self):
+        reads = []
+        rows = [draft_row("touched"), draft_row("run (windows-latest)", job=2)]
+        state, lines = self.judged(rows, draft_log(self.TOUCHED, self.RUN_BOTH, self.BATCH_SKIP), log_reads=reads)
+        self.assertUnknownForMacos(state, lines, reads, "a batch-dropped macOS leg with its run line")
+
+    def test_a_macos_leg_left_to_batch_passes_with_one_visible_line(self):
+        reads = []
+        rows = [draft_row("touched"), draft_row("run (windows-latest)", job=2)]
+        state, lines = self.judged(rows, draft_log(self.TOUCHED, self.RUN_WINDOWS, self.SKIP_MACOS), log_reads=reads)
+        self.assertEqual(state, "pass", f"a macOS leg left to batch CI was judged {state!r}, not pass: {lines}")
+        self.assertEqual(len(lines), 1, f"the left-to-batch note is {len(lines)} lines, not one: {lines}")
+        self.assertIn(self.LEFT, lines[0], f"the one line does not name the limit: {lines[0]!r}")
+        self.assertEqual(reads, [self.TOUCHED_ID], f"the touched job's log was read {reads}, not once")
+
+    def test_a_macos_row_success_passes_with_no_lines_and_no_log_read(self):  # control: green on the old code
+        reads = []
+        rows = [draft_row("touched"), draft_row("run (windows-latest)", job=2), draft_row("run (macos-latest)", job=3)]
+        state, lines = self.judged(rows, draft_log(self.TOUCHED, self.RUN_BOTH), log_reads=reads)
+        self.assertEqual(state, "pass", f"a green macOS row was judged {state!r}, not pass: {lines}")
+        self.assertEqual(lines, [], f"a green macOS row names a line: {lines}")
+        self.assertEqual(reads, [], f"a green macOS row read the touched log {reads}, not zero times")
+
+    def test_a_macos_row_failure_fails_and_names_its_link(self):  # control: green on the old code
+        rows = [draft_row("touched"), draft_row("run (macos-latest)", "failure", job=3)]
+        state, lines = self.judged(rows, draft_log(self.TOUCHED, self.RUN_BOTH))
+        self.assertEqual(state, "fail", f"a failed macOS row was judged {state!r}, not fail: {lines}")
+        self.assertIn(job_link(DRAFT_RUN, 3), "\n".join(lines), f"the failure does not name the macOS row's link: {lines}")
+
+    def test_a_touched_row_skipped_is_unknown_even_with_a_macos_run_line(self):  # control: green on the old code
+        state, lines = self.judged([draft_row("touched", "skipped")], draft_log(self.TOUCHED, self.RUN_BOTH))
+        self.assertEqual(state, "unknown", f"a skipped touched job was judged {state!r}, not unknown: {lines}")
+
+    def test_a_macos_row_still_running_waits(self):  # control: green on the old code
+        rows = [draft_row("touched"), draft_row("run (macos-latest)", status="in_progress", job=3)]
+        state, lines = self.judged(rows, draft_log(self.TOUCHED, self.RUN_BOTH))
+        self.assertEqual(state, "wait", f"a running macOS row was judged {state!r}, not wait: {lines}")
+
+    def test_a_windows_only_run_line_with_no_skip_line_passes_with_no_lines(self):  # control: green on the old code
+        rows = [draft_row("touched"), draft_row("run (windows-latest)", job=2)]
+        state, lines = self.judged(rows, draft_log(self.TOUCHED, self.RUN_WINDOWS))
+        self.assertEqual(state, "pass", f"a windows-only leg was judged {state!r}, not pass: {lines}")
+        self.assertEqual(lines, [], f"a windows-only leg names a line: {lines}")
+
+    def test_a_windows_only_run_line_for_a_path_with_no_space_passes_with_no_lines(self):  # control: green on the old code
+        rows = [draft_row("touched"), draft_row("run (windows-latest)", job=2)]
+        state, lines = self.judged(rows, draft_log(self.TOUCHED, "run tests/test_a.py on windows"))
+        self.assertEqual(state, "pass", f"a windows-only run line was judged {state!r}, not pass: {lines}")
+        self.assertEqual(lines, [], f"a windows-only run line names a line: {lines}")
+
+    def test_a_touched_log_that_names_no_test_passes_with_no_lines(self):  # control: green on the old code
+        state, lines = self.judged([draft_row("touched")], draft_log("touched docs/x.md -> no test file maps to it"))
+        self.assertEqual(state, "pass", f"a touched log with no test was judged {state!r}, not pass: {lines}")
+        self.assertEqual(lines, [], f"a touched log with no test names a line: {lines}")
+
+    def test_a_skipped_template_row_with_a_windows_only_log_passes_with_no_lines(self):  # control: green on the old code
+        rows = [draft_row("touched"), draft_row("run (${{ matrix.os }})", "skipped", job=4)]
+        state, lines = self.judged(rows, draft_log(self.TOUCHED, self.RUN_WINDOWS))
+        self.assertEqual(state, "pass", f"a skipped template row was judged {state!r}, not pass: {lines}")
+        self.assertEqual(lines, [], f"a skipped template row names a line: {lines}")
+
+    def test_a_green_macos_leg_after_a_batch_skip_line_passes_with_no_log_read(self):  # control: green on the old code
+        reads = []
+        rows = [draft_row("touched"), draft_row("run (windows-latest)", job=2), draft_row("run (macos-latest)", job=3)]
+        state, lines = self.judged(rows, draft_log(self.TOUCHED, self.RUN_BOTH, self.BATCH_SKIP), log_reads=reads)
+        self.assertEqual(state, "pass", f"a green macOS leg after a batch skip line was judged {state!r}, not pass: {lines}")
+        self.assertEqual(lines, [], f"a green macOS leg after a batch skip line names a line: {lines}")
+        self.assertEqual(reads, [], f"a green macOS row read the touched log {reads}, not zero times")
 
 
 class TouchesHost(PullsHost):
