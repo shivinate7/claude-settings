@@ -23,7 +23,8 @@ from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_refspecs, push_target,
+    ARCHIVE_COPY_SUFFIX, ARCHIVE_PREFIX, DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_refspecs,
+    push_target,
 )
 
 
@@ -1725,7 +1726,7 @@ def _covered(module, host, branch: str, tip, rows, pool) -> bool:
         heads = [str(row["head"]["sha"]) for row in [*rows, *pool] if row["state"] == "open" or _is_merged(row)]
         if any(sha == tip or _compare_status(module, host, sha, tip) in _CONTAINED for sha in dict.fromkeys(heads)):
             return True
-    copy_name = re.compile(re.escape("archive/" + branch) + r"(-[0-9]+)?")
+    copy_name = re.compile(re.escape(ARCHIVE_PREFIX + branch) + ARCHIVE_COPY_SUFFIX)
     for ref in host.pages("git/matching-refs/heads/archive/" + branch):
         name = str(ref["ref"])[len("refs/heads/"):]
         if copy_name.fullmatch(name) and _compare_status(module, host, name, tip, missing_ok=True) in _CONTAINED:
