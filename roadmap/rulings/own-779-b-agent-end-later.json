@@ -1,0 +1,10 @@
+{
+  "id": "own-779-b-agent-end-later",
+  "at": "2026-11-13T18:24:00-06:00",
+  "title": "Build the agent-end read for the Opus grant; switch the grant end to it only once it works well",
+  "ruling": "Owner 18:24 CST Nov 13, page item 779, \"none of these\": \"build B but lets only implement it after we get it working well\". Triage reading, unconfirmed: build the agent-end read (option b; ruling own-761-d, the grant ends when the granted agents end, stays), but do not switch the grant end over to it until it reads reliably. Until then main keeps what it does today. PR #2850 keeps its place; PR #2928 (ends the grant at the next typed prompt or 2 hours) is not merged.",
+  "quote": "build B but lets only implement it after we get it working well",
+  "source": "Owner answer saved on the waiting page 18:24 CST Nov 13, thread 5d63b6e5; filed by triage.",
+  "status": "open",
+  "step": "opus-ask-grants-one-spawn"
+}
