@@ -154,6 +154,37 @@ add("coordinator-scope: a call carrying agent_id is not the coordinator's own ca
     "allow", tool="Edit", cwd=REPO, env=COORD_ENV, config=COORD_CFG, agent_id="coord-sub1",
     file_path=COORD_REPO_FILE)
 
+# --- shell false alarms: a heredoc operator, an input, a mode or size word and an install source write nothing ---
+# Each allow is a write to a record home, or to a path outside every repository, judged on its real target. Each deny
+# writes a path that is no record home, so an allow above cannot pass by ignoring every target.
+SCRATCH_FILE = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "s.sh")  # this session's scratchpad, in no repository
+sh("coordinator-scope: a cloud coordinator's tee -a of a heredoc into the debt notes is allowed",
+   "tee -a docs/debts/notes.md <<'EOF'\nnote text\nEOF", "allow", cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's heredoc into a path that is no record home is refused",
+   "tee hooks/x.py <<'EOF'\nnote text\nEOF", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's tee into a record home from a repository file it reads is allowed",
+   "tee docs/decisions/x.md < src/app.py", "allow", cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's tee into a path that is no record home from a file it reads is refused",
+   "tee hooks/x < src/app.py", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's sed -i on the debt notes with input from /dev/null is allowed",
+   "sed -i s/a/b/ docs/debts/notes.md < /dev/null", "allow", cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's sed -i on a non-record path with input from /dev/null is refused",
+   "sed -i s/a/b/ hooks/guard.py < /dev/null", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's chmod +x of a script in /tmp is allowed",
+   "chmod +x /tmp/s.sh", "allow", cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's chmod +x of a repository file that is no record home is refused",
+   "chmod +x hooks/guard.py", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's chmod 755 of a scratchpad file is allowed",
+   "chmod 755 " + SCRATCH_FILE, "allow", cwd=REPO, env=COORD_ENV, config=COORD_CFG, session=FAKE_SESSION)
+sh("coordinator-scope: a cloud coordinator's truncate -s 0 of a scratchpad file is allowed",
+   "truncate -s 0 " + SCRATCH_FILE, "allow", cwd=REPO, env=COORD_ENV, config=COORD_CFG, session=FAKE_SESSION)
+sh("coordinator-scope: a cloud coordinator's truncate -s 0 of a repository file that is no record home is refused",
+   "truncate -s 0 hooks/guard.py", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's install -m 644 into a decision record is allowed",
+   "install -m 644 a docs/decisions/b.md", "allow", cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+sh("coordinator-scope: a cloud coordinator's install -m 644 into a repository file that is no record home is refused",
+   "install -m 644 a hooks/b.py", "deny", COORD_RULE, cwd=REPO, env=COORD_ENV, config=COORD_CFG)
+
 # --- no role file: the role is the cs-build tag the session's own get_session record holds, after its own tag calls ---
 add("coordinator-scope: with no role file, a coordinator record's role refuses an Edit of a repository path", "deny",
     COORD_RULE, tool="Edit", cwd=REPO, env=COORD_ENV, config=COORD_NOROLE,
