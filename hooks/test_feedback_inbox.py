@@ -4288,6 +4288,38 @@ def case_page_form_closed_not_page_form_passes():
         check(name + ": not blocked", p.code == 0 and block_reason(p) is None, p.desc())
 
 
+def case_fixture_git_has_no_wall_clock_bound():
+    """The fixture git helper carries no wall-clock bound: a slow runner can pass any fixed one, and a fixed
+    timeout then fails a case that is correct. A fake runner records each call's kwargs and raises
+    TimeoutExpired for any call with a timeout, as a slow runner would. Both calls must reach the fake, and
+    neither may time out."""
+    name = "fixture git: no wall-clock bound"
+    calls, timed_out = [], []
+    real_run = subprocess.run
+
+    def slow_runner(argv, *args, **kwargs):
+        calls.append(kwargs)
+        if kwargs.get("timeout") is not None:
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return subprocess.CompletedProcess(argv, 0, stdout=b"", stderr=b"")
+
+    subprocess.run = slow_runner
+    try:
+        for label, args, stdin in (("hash-object", ("hash-object", "-w", "--stdin-paths"), b"x\n"),
+                                   ("status", ("status",), None)):
+            try:
+                git(ROOT, *args, stdin=stdin)
+            except subprocess.TimeoutExpired as exc:
+                timed_out.append("%s after %ss" % (label, exc.timeout))
+    finally:
+        subprocess.run = real_run
+    check(name + ": scope, both calls reached the fake runner", len(calls) == 2,
+          "%d calls reached the fake" % len(calls))
+    check(name + ": no call passes a timeout", all(kw.get("timeout") is None for kw in calls),
+          "timeouts passed: %s" % [kw.get("timeout") for kw in calls])
+    check(name + ": no call times out", not timed_out, "; ".join(timed_out))
+
+
 CASES = (
     case_every_owner_message_is_captured,
     case_notices_are_never_captured,
@@ -4453,6 +4485,7 @@ CASES = (
     case_repeat_word_repeats_in_an_item_still_gets_the_mark,
     case_repeat_cap_keeps_the_newest_notes_lines,
     case_repeat_cap_keeps_the_open_roadmap_steps,
+    case_fixture_git_has_no_wall_clock_bound,
     case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit,
     case_repeat_spaced_inbox_mark_is_recognised_on_a_second_judging,
     case_repeat_repo_item_is_never_judged_as_a_repeat,
