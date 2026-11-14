@@ -1,0 +1,14 @@
+{
+ "id": "archive-sweep-runs-per-merge",
+ "title": "Find out why no archive ran after 10:44 CST although steps idle-lane-archive and idle-lane-archive-at-merge are done",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 22:39 CST Nov 13 (relayed, unchecked): archives have not run since 10:44 CST; the owner asked for status on archivals at 22:37 CST.",
+ "source": "Coordinator 22:39 CST Nov 13 (relayed); plan part 7.",
+ "note": "Triage 22:38 CST Nov 13: both earlier steps read done, yet no archive followed the merges since 10:44 CST. Read first, change later: is the merge-time archive list built and handed to the runner, does the runner run it, and what did its last run report. Mistake it stops: idle sessions piling up. Harm: clutter and spend. Guard candidate, not built: the final report after a merge says how many sessions were archived, and a merge with none says why. The first sweep is plan part 7 (runner 10); this step is the cause. Needs a past-ruling and record read before any build.",
+ "updatedAt": "2026-11-13T22:38:48-06:00"
+}
