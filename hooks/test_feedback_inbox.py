@@ -2464,8 +2464,9 @@ def case_task_step_fetch_fails_names_the_read_as_of():
 def case_roadmap_line_once_when_the_fetch_failed_never_when_fresh():
     """A Stop whose roadmap fetch failed says so once, as a systemMessage line, when no reason or flag carries the note.
     Two tasks homed to a step on the local ref both pass, so no reason carries the note, and the line says it once,
-    though two reads share it. The same Stop with a fresh roadmap ref says nothing. Red on 46cf97aba5, which writes
-    no such line."""
+    though two reads share it. The same Stop with a fresh roadmap ref says nothing. With every task passing, this line
+    is the only place a reader sees a failed fetch, so the case checks that it appears once, and only on a failed
+    fetch."""
     ids = ("fb-0958-12", "fb-0958-13")
     stale = origin_only_step_repo("step-line-stale", reachable=False, local=True)
     check("step line: the step is on the local ref, the read the Stop judges",
