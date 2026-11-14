@@ -43,10 +43,12 @@ Part 2, hooks/reread_check.py (new file):
                  Flags are per session.
 
 Part 4, the compaction audit (hooks/reread_check.py and hooks/guard.py, rule compaction-audit,
-decision precompact-handoff, item 9). After a compaction the main session must spawn one Agent whose
+decision precompact-handoff, item 16). After a compaction the main session must spawn one Agent whose
 prompt's first non-blank line starts with `Audit:` before the guard passes its next call. Until then
 the guard refuses each call the main session makes under compaction-audit, and --stop blocks once
 after the handoff is read, naming the same remedy. The flag is <config dir>/state/handoff/<sid>.audit.
+A spawn that a later guard rule refuses has not run, so it clears nothing. The marker is read as the
+one home reads it (hooks/shared_names.py, EXPLORE_AUDIT_MARKER and BRIEF_MARKERS).
 The guard is a seam too: one JSON payload on stdin, the decision on stdout. An agent's payload
 (`agent_id`) is never refused and clears nothing.
 
@@ -65,6 +67,7 @@ The /safe-stop pin guards a signature that already works, so it passes on the un
 Each negative case carries a positive twin on a separate session. So a pass cannot come from
 a hook that does nothing. The Read spelling cases and the twin use the same live check.
 """
+import ast
 import collections
 import json
 import os
@@ -818,6 +821,22 @@ def case_read_by_8dot3_spelling_clears_flag():
             c.cleanup()
 
 
+def sibling_dir(c, tag, sibling):
+    """A scratch dir with a copy of reread_check.py, and a precompact_handoff.py beside it holding
+    `sibling` (text). `sibling` None leaves the sibling out. The one home of these copies."""
+    d = c.dir("sib_" + tag)
+    shutil.copy(READ_CHECK, os.path.join(d, "reread_check.py"))
+    if sibling is not None:
+        put(os.path.join(d, "precompact_handoff.py"), sibling)
+    return d
+
+
+def real_sibling():
+    """The text of the real hooks/precompact_handoff.py."""
+    with open(PRECOMPACT, encoding="utf-8") as f:
+        return f.read()
+
+
 def case_sibling_import_failure_exits_zero():
     """reread_check.py imports its sibling precompact_handoff.py. With the sibling missing, or
     present but raising on import, each reread_check mode exits 0. Live control: a copy that
@@ -827,20 +846,16 @@ def case_sibling_import_failure_exits_zero():
         probe = {"session_id": "imp-1", "hook_event_name": "Stop", "stop_hook_active": False,
                  "tool_name": "Read", "tool_input": {"file_path": c.handoff("imp-1")},
                  "cwd": c.proj}
-        for tag, variant in (("missing", "no sibling"), ("raises", "sibling raises on import")):
-            d = c.dir("sib_" + tag)
-            shutil.copy(READ_CHECK, os.path.join(d, "reread_check.py"))
-            if tag == "raises":
-                put(os.path.join(d, "precompact_handoff.py"),
-                    "raise ImportError('test stub: sibling import fails')\n")
+        for tag, variant, sibling in (
+                ("missing", "no sibling", None),
+                ("raises", "sibling raises on import",
+                 "raise ImportError('test stub: sibling import fails')\n")):
+            d = sibling_dir(c, tag, sibling)
             for flag in ("--post-compact", "--pre-read", "--stop"):
                 proc = c.run(os.path.join(d, "reread_check.py"), flag, probe)
                 check("%s, %s: exits 0" % (variant, flag), proc.returncode == 0,
                       "rc=%r err=%r" % (proc.returncode, tail(proc.stderr)))
-        d = c.dir("sib_real")
-        shutil.copy(READ_CHECK, os.path.join(d, "reread_check.py"))
-        shutil.copy(PRECOMPACT, os.path.join(d, "precompact_handoff.py"))
-        mod = os.path.join(d, "reread_check.py")
+        mod = os.path.join(sibling_dir(c, "real", real_sibling()), "reread_check.py")
         c.seed_handoff("imp-1")
         c.run(mod, "--post-compact", probe)
         stop = c.run(mod, "--stop", probe)
@@ -1093,6 +1108,10 @@ QUOTED_SPAWN = {"description": "look", "subagent_type": "Explore", "model": "son
                 "prompt": "Read the repo.\n\nAudit: this line is quoted, not the first one."}
 BLANK_SPAWN = {"description": "audit", "subagent_type": "Explore", "model": "sonnet",
                "prompt": "\n\n   Audit: check after blank lines\nmore text"}
+# An Explore may run Haiku (HAIKU_ROLES in hooks/guard.py), so an Explore spawn on Haiku passes every rule.
+# A general-purpose spawn on Haiku is refused by agent-model-floor, a rule that runs after compaction-audit.
+HAIKU_AUDIT_SPAWN = {"description": "audit", "subagent_type": "general-purpose", "model": "haiku",
+                     "prompt": "Audit: check the handoff against the repo."}
 
 
 def step(name, why):
@@ -1368,6 +1387,166 @@ def case_audit_marker_after_blank_lines_clears():
         c.cleanup()
 
 
+def cut_function(text, name):
+    """The source `text` with its top-level `def name` removed, or None when it has none. ast finds
+    the lines, so the cut follows the parser, not a text pattern."""
+    lines = text.splitlines(True)
+    for node in ast.parse(text).body:
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            first = min([node.lineno] + [d.lineno for d in node.decorator_list])
+            return "".join(lines[:first - 1] + lines[node.end_lineno:])
+    return None
+
+
+def case_refused_audit_spawn_keeps_flag():
+    """An Audit: spawn that a later guard rule refuses (agent-model-floor) has not run, so it clears
+    nothing: the audit flag stays, the next Bash call is still refused by compaction-audit, and Stop
+    still blocks with the Audit: remedy."""
+    c = Case("refused-keeps")
+    try:
+        post, rd = compact(c, SID)
+        if not step("--post-compact and the Read exit 0", exit_why(post) or exit_why(rd)):
+            return
+        refused = guard_call(c, SID, "Agent", HAIKU_AUDIT_SPAWN)
+        if not step("the Audit: spawn on Haiku is refused by agent-model-floor, a later rule",
+                    refused_by(refused, "agent-model-floor")):
+            return
+        step("the refused Audit: spawn leaves the audit flag set",
+             "" if os.path.isfile(audit_flag(c, SID)) else "the audit flag is gone after the refused Audit: spawn")
+        step("after the refused spawn, a Bash call is still refused by compaction-audit",
+             refused_by(guard_call(c, SID, "Bash", BASH), AUDIT_RULE))
+        stop = c.stop(SID)
+        step("after the refused spawn, Stop still blocks and names the Audit: remedy",
+             "" if audit_blocks(stop) else "Stop did not block for the audit: rc=%r out=%r"
+             % (stop.returncode, tail(stop.stdout)))
+    finally:
+        c.cleanup()
+
+
+def case_refused_then_accepted_audit_spawn_clears():
+    """After a refused Audit: spawn, the same spawn on Sonnet is allowed, clears the audit flag, and
+    the next Bash call passes. Only the flag check is red on the current head: the refused spawn
+    clears the flag, so the accepted spawn has nothing left to clear. The other checks are green."""
+    c = Case("refused-then-ok")
+    try:
+        post, rd = compact(c, SID)
+        if not step("--post-compact and the Read exit 0", exit_why(post) or exit_why(rd)):
+            return
+        refused = guard_call(c, SID, "Agent", HAIKU_AUDIT_SPAWN)
+        if not step("the Audit: spawn on Haiku is refused by agent-model-floor, a later rule",
+                    refused_by(refused, "agent-model-floor")):
+            return
+        step("the refused Audit: spawn leaves the audit flag set, for the accepted spawn to clear",
+             "" if os.path.isfile(audit_flag(c, SID)) else "the audit flag is gone after the refused Audit: spawn")
+        accepted = dict(HAIKU_AUDIT_SPAWN, model="sonnet")
+        step("the same Audit: spawn on Sonnet is allowed", allowed_why(guard_call(c, SID, "Agent", accepted)))
+        step("the accepted Audit: spawn clears the audit flag",
+             "" if not os.path.isfile(audit_flag(c, SID)) else "the audit flag is still set after the accepted spawn")
+        step("after the accepted spawn, a Bash call passes", allowed_why(guard_call(c, SID, "Bash", BASH)))
+    finally:
+        c.cleanup()
+
+
+def case_audit_marker_judged_like_the_home():
+    """A brief whose first non-blank line opens `**Audit:**` carries the Audit: marker, as the one home
+    reads it (hooks/shared_names.py: the first-line audit row of BRIEF_MARKERS, case-sensitive). Its
+    spawn clears the audit flag. A lowercase `audit:` first line does not carry it: its spawn is refused
+    by compaction-audit and clears nothing. The lowercase case is a green control."""
+    bold = {"description": "audit", "subagent_type": "Explore", "model": "sonnet",
+            "prompt": "**Audit:** check the handoff against the repo."}
+    c = Case("bold-audit")
+    try:
+        compact(c, SID)
+        step("a `**Audit:**` first line is the Audit: marker: its spawn is allowed",
+             allowed_why(guard_call(c, SID, "Agent", bold)))
+        step("a `**Audit:**` first line: its spawn clears the audit flag",
+             "" if not os.path.isfile(audit_flag(c, SID)) else "the audit flag is still set after the bold Audit: spawn")
+    finally:
+        c.cleanup()
+    lower = dict(bold, prompt="audit: check the handoff against the repo.")
+    d = Case("lower-audit")
+    try:
+        compact(d, SID)
+        got = guard_call(d, SID, "Agent", lower)
+        step("a lowercase `audit:` first line is not the marker: its spawn is refused by compaction-audit",
+             refused_by(got, AUDIT_RULE) or names_remedy(got))
+        step("a lowercase `audit:` spawn leaves the audit flag set",
+             "" if os.path.isfile(audit_flag(d, SID)) else "the audit flag is gone after the lowercase spawn")
+    finally:
+        d.cleanup()
+
+
+def case_reader_follows_the_home_constant():
+    """audit_spawn reads the marker from hooks/shared_names.py, the one home, and keeps no copy of it.
+    Scratch copies of shared_names.py and reread_check.py, with the home's constant set to `Probe:`:
+    `Probe:` opens an audit brief and `Audit:` does not."""
+    c = Case("home-pin")
+    try:
+        names = os.path.join(HERE, "shared_names.py")
+        with open(names, encoding="utf-8") as f:
+            home = f.read()
+        line = 'EXPLORE_AUDIT_MARKER = "Audit:"'
+        if not step("the home sets EXPLORE_AUDIT_MARKER to `Audit:`, so there is one line to change",
+                    "" if home.count(line) == 1 else "shared_names.py has %d such lines" % home.count(line)):
+            return
+        d = c.dir("home_probe")
+        put(os.path.join(d, "shared_names.py"), home.replace(line, 'EXPLORE_AUDIT_MARKER = "Probe:"'))
+        shutil.copy(READ_CHECK, os.path.join(d, "reread_check.py"))
+        shutil.copy(PRECOMPACT, os.path.join(d, "precompact_handoff.py"))
+        code = ("import json, sys; import reread_check as r; "
+                "print(json.dumps(r.audit_spawn(json.loads(sys.argv[1]), ('Agent', 'Task'))))")
+
+        def judged(prompt):
+            body = {"session_id": SID, "tool_name": "Agent", "tool_input": {"prompt": prompt}}
+            proc = subprocess.run([sys.executable, "-c", code, json.dumps(body)], cwd=d,
+                                  capture_output=True, text=True, env=c.env(), timeout=120)
+            return proc.returncode, proc.stdout.strip(), proc.stderr
+
+        rc, out, err = judged("Probe: check the handoff.")
+        step("the reader follows the home: `Probe:` opens an audit brief once the home says `Probe:`",
+             "" if (rc == 0 and out == "true") else "rc=%r out=%r err=%r" % (rc, out, tail(err)))
+        rc, out, err = judged("Audit: check the handoff.")
+        step("the reader follows the home: `Audit:` opens no audit brief once the home says `Probe:`",
+             "" if (rc == 0 and out == "false") else "rc=%r out=%r err=%r" % (rc, out, tail(err)))
+    finally:
+        c.cleanup()
+
+
+def case_stale_sibling_without_audit_flag_path_exits_zero():
+    """reread_check.py reads audit_flag_path from its sibling. A stale sibling that lacks that name
+    (an older copy) must not make a mode exit non-zero: each mode exits 0. Live control: the real
+    sibling, copied the same way, still blocks."""
+    c = Case("stale-sibling")
+    try:
+        stale = cut_function(real_sibling(), "audit_flag_path")
+        if not step("the real sibling defines audit_flag_path, so there is a name to remove",
+                    "" if stale is not None else "hooks/precompact_handoff.py defines no audit_flag_path"):
+            return
+        d = sibling_dir(c, "stale", stale)
+        probe_import = subprocess.run(
+            [sys.executable, "-c", "import precompact_handoff as p; "
+             "print(hasattr(p, 'reread_flag_path'), hasattr(p, 'audit_flag_path'))"],
+            cwd=d, capture_output=True, text=True, env=c.env(), timeout=120)
+        if not step("the stale sibling imports, keeps reread_flag_path and lacks audit_flag_path",
+                    "" if probe_import.returncode == 0 and probe_import.stdout.strip() == "True False"
+                    else "rc=%r out=%r err=%r" % (probe_import.returncode, probe_import.stdout.strip(),
+                                                   tail(probe_import.stderr))):
+            return
+        probe = {"session_id": "stale-1", "hook_event_name": "Stop", "stop_hook_active": False,
+                 "tool_name": "Read", "tool_input": {"file_path": c.handoff("stale-1")}, "cwd": c.proj}
+        for flag in ("--post-compact", "--pre-read", "--stop"):
+            proc = c.run(os.path.join(d, "reread_check.py"), flag, probe)
+            step("stale sibling, %s: exits 0" % flag, exit_why(proc))
+        real = os.path.join(sibling_dir(c, "stale_real", real_sibling()), "reread_check.py")
+        c.seed_handoff("stale-1")
+        c.run(real, "--post-compact", probe)
+        stop = c.run(real, "--stop", probe)
+        step("live control, the real sibling copied the same way: Stop still blocks",
+             "" if blocks(c, stop, "stale-1") else "rc=%r out=%r" % (stop.returncode, tail(stop.stdout)))
+    finally:
+        c.cleanup()
+
+
 def main() -> int:
     print("Part 1: SessionEnd pointer, SessionStart reorient (hooks/precompact_handoff.py)")
     case_session_end_clear_writes_pointer()
@@ -1414,6 +1593,11 @@ def main() -> int:
     case_stop_blocks_for_audit_after_read()
     case_stop_quiet_without_compaction()
     case_audit_marker_after_blank_lines_clears()
+    case_refused_audit_spawn_keeps_flag()
+    case_refused_then_accepted_audit_spawn_clears()
+    case_audit_marker_judged_like_the_home()
+    case_reader_follows_the_home_constant()
+    case_stale_sibling_without_audit_flag_path_exits_zero()
 
     if FAILED:
         print()
