@@ -833,7 +833,9 @@ ROLE_MODEL_RE = re.compile(
     r"\b(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(haiku|sonnet|opus|fable)\b",
     re.I)
 ROLE_RE = re.compile(_ROLE, re.I)
-AGENTS_DIR = os.path.join(HERE, "..", "agents")
+# A test hook: REPORT_GUARD_AGENTS_DIR points agent_pin at a fixture folder. Read once at import; unset or empty keeps the
+# repo's agents folder. Cost: one environment read per process start, no process, no file.
+AGENTS_DIR = os.environ.get("REPORT_GUARD_AGENTS_DIR") or os.path.join(HERE, "..", "agents")
 
 
 def model_family(text):

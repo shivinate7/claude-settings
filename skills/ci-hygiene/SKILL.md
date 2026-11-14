@@ -125,6 +125,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    `no-merge-during-batch-ci` (no merge while a batch runs) holds the rule. A merge needs a green
    run on the current base (decision `merge-needs-current-base`). A head that lacks the base tip is
    refused, except a small move.
+   Ready express lanes share one express batch, ahead of every other lane (decision `express-batch`).
    "No conflicts" does not prove the lanes work together. A green integration run does not prove that
    no line was lost either. Run `lint/check_silent_undo.py` before the merge. First run `git fetch origin <base>`. Then pass `--upstream origin/<base>`, the PR's base branch, `--head <head SHA>`, the PR's head commit, and `--strict`, as CI does. Without `--strict`, a local run exits 0 on UNKNOWN, so a skipped check reads as clean.
    GitHub's merge queue needs an organization-owned repo. A personal repo batches by hand or through
