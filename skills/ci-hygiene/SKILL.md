@@ -22,7 +22,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 2. **Check what exists.** Read the current workflow and the log before you build a speedup. The
    CI step may already run in parallel, or be cached.
 3. **Run slow checks only on their inputs.** Run a slow check after a change to the files it reads.
-   Detect the change with `git diff` against the base commit. Add a nightly full run and a manual
+   Detect the change with `git diff` against the base commit. Add a manual full-run
    trigger. If detection cannot read the diff, run the check. That fails safe. A check that cannot
    read its own input exits non-zero in CI, never 0. CI reads the exit code as the verdict (decision
    `ci-unknown-is-red`, an unknown read is red in CI).
@@ -200,11 +200,21 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     `shell:` and `!cancelled()`, with no env override. The `MERGE_TESTS` gap, found in review of
     PR 293 (the Windows merge-test slice), is the case for it. A CI step's `if:` names only its own
     scope flag, or a non-PR event (step 19).
-17. **Slice tests on a slow platform.** On PRs, run a platform-specific test slice. Run the full suite
-    on main and nightly, except on macOS (R61): every macOS run takes the slice, and a push to main
-    starts no macOS job (a job-level `github.event_name != 'push'`, since a step-level skip still starts
-    the runner). The nightly skips when main's head has a green push run and the newest completed
-    nightly is green (the `nightly-skip` job), and `scope` waits on that job, so nothing is cancelled.
+17. **CI runs once per batch.** The integration PR run is the proof for its tree. Rulings: R61 (macOS
+    CI once per batch), R62 (Linux and Windows CI once per batch), R63 (install.sh tests on Linux
+    and macOS). On PRs, a slow platform runs a platform-specific slice. Every macOS run takes the
+    slice, never full guard shards: `checks-macos` and `checks-macos-b` run a mac-tagged slice. A push
+    to main starts no macOS job (a job-level `github.event_name != 'push'`, since a step-level skip
+    still starts the runner). It starts no suite on a tree that a green integration PR run tested.
+    A lane's touched-tests macOS leg runs only for files whose subject is macOS. Windows keeps its full guard and merge
+    shards, once, in the integration PR run. Dropping them to a tagged slice is held (R62 part 4).
+    The install.sh tests run on both Linux and macOS. The nightly skips when main's head has a green
+    push run and the newest completed nightly is green (the `nightly-skip` job), and `scope` waits on
+    that job, so nothing is cancelled. Owner ruling 22:19 CST Nov 12 (page item 683): claude-settings
+    keeps no nightly CI schedule, only a manual run. That holds once its schedule is removed.
+    Unverified: whether the no-merge-onto-red-main check reads the integration PR run (R62 part 3).
+    Steps: ci-mac-once-per-batch (macOS side) and ci-linux-windows-once (Linux and Windows side).
+    Child repos adopt this later (R64, the rule goes into this skill first).
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If the saving is
     under 20%, stop.
 19. **Run one scope job first.** Make it a cheap Linux job named `scope`. Every other job needs it.
@@ -215,8 +225,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     A job-level `if:` holds only the draft guard. A job that runs only off pull
     requests, such as a push-only job, also skips at its CI steps. A job-level trigger guard would
     skip a needed job on every PR, and the rollup would fail on it. Each scoped CI step's `if:` names
-    its scope flag and `|| github.event_name != 'pull_request'`, so push, nightly and dispatch runs
-    start it. See `snippets.md`, section 19.
+    its scope flag and `|| github.event_name != 'pull_request'`, so push and dispatch runs
+    start it, except where step 17 skips a run. See `snippets.md`, section 19.
     Two jobs may share a flag. A docs-only PR skips the code suites. Lint CI steps still run. An
     unreadable diff or an unmapped path runs everything.
 20. **Skip a push whose tree a PR run already proved.** The `push-skip` job runs the shared action
