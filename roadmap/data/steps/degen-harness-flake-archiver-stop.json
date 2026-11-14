@@ -1,0 +1,14 @@
+{
+ "id": "degen-harness-flake-archiver-stop",
+ "title": "Degen test flake: tests/server/harness.py:390 \"archiver.start outlived stop.set()\" (one sighting, test_share_lanes)",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 02:44 CST Nov 14 (relayed from runner 11; unchecked by triage, degen is outside this session's GitHub scope): on degen #705's run, job `server (2)` failed once with test_share_lanes; it passed on rerun. The failing line is named as tests/server/harness.py:390 `archiver.start outlived stop.set()`.",
+ "source": "Possibly the same thing as degen debt archiver-start-no-join (named in step lint-before-record-push; match by name only, unread by triage): the lane reads that debt first and says whether it is the same, then ties this step to it. Neighbour: red-job-wakes-runner (a flake that costs a rerun).",
+ "note": "Triage 02:46 CST Nov 14: done check: the lane reads the debt and harness.py:390, says whether the failure is a real race (archiver thread not joined) or a slow-runner timing limit, and either fixes it (a test that fails red on the old harness, green after) or ties it to the debt with a count of reruns it cost. Cost seen: one rerun of about 9 min (attempt 1 took 9.6 min), n=1. Child repo degen: runner 11 lanes it. Not started.",
+ "updatedAt": "2026-11-14T02:46:00-06:00"
+}
