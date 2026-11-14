@@ -116,6 +116,9 @@ def api(a):
         if S.get("open_fail"):
             raise Refused(api_error(404, "Not Found"))
         items = S["open"]
+        if params.get("state") == "closed":
+            owner, _, ref = params.get("head", "").rpartition(":")
+            items = [x for x in S.get("closed", []) if (not ref or x["head"]["ref"] == ref) and (not owner or owner == S["repo"].split("/")[0])]
         size = max(1, min(int(params.get("per_page", 30)), 100))
         last = max(1, -(-len(items) // size))
         n = int(params.get("page", 1))
@@ -156,9 +159,9 @@ def green(sha):
     return [run_for(sha, "checks", "completed", "success", 2)]
 
 
-def pull_for(n, head, **fields):
-    """The pull request `GET pulls/N` returns: its head branch is feat-N, into main."""
-    return REST.pull(n, head, "feat-%d" % n, "main", **fields)
+def pull_for(n, head, branch=None, base="main", **fields):
+    """The pull request `GET pulls/N` returns: its head branch is feat-N unless `branch` names it, and it lands on `base`."""
+    return REST.pull(n, head, branch or "feat-%d" % n, base, **fields)
 
 
 def words(line):
@@ -202,6 +205,14 @@ class PriorityRowsCli(unittest.TestCase):
         self.state["open"] = [REST.list_item(n, head, branch, "main") for n, head, branch in rows]
         self.save()
 
+    def put_closed(self, n, head, branch, base="main", merged=True):
+        """A closed pull request on `branch`, as the closed list read answers it (merged_at set when merged), and its own GET pulls/N answer."""
+        item = dict(REST.list_item(n, head, branch, base, state="closed"), merged_at="2026-11-13T18:40:00Z" if merged else None)
+        self.state["closed"] = self.state.get("closed", []) + [item]
+        self.state["pulls"][str(n)] = {"pull": pull_for(n, head, branch=branch, base=base, state="closed", merged=merged,
+                                                        mergeable=None, mergeable_state="unknown")}
+        self.save()
+
     def env(self):
         env = _test_git.apply({**os.environ, **roadmap.GIT_ENV})
         env["PATH"] = str(self.bin) + os.pathsep + os.environ.get("PATH", "")
@@ -227,6 +238,10 @@ class PriorityRowsCli(unittest.TestCase):
     def paths(self):
         """The route of each call of the last wake: `<repo>/<route>`, the query and fields left out."""
         return [line.split()[1] for line in self.calls()]
+
+    def closed_reads(self):
+        """The calls of the last wake that read the closed pull list (its state=closed query), one line each."""
+        return [line for line in self.calls() if line.split()[1] == PULLS and "state=closed" in line.split()]
 
     def reset_calls(self):
         (self.state_dir / "calls.log").unlink(missing_ok=True)
@@ -546,15 +561,100 @@ class PriorityRowsCli(unittest.TestCase):
         self.assertNotIn("old-step", out + err, "a commented row is no row")
         self.assertNotIn(REPO + "/pulls/9", self.paths(), "a commented row is never read")
 
-    def test_a_blocked_or_unstable_head_with_every_run_green_is_ok(self):
-        for state in ("blocked", "unstable"):
+    def test_a_blocked_head_is_flagged_and_an_unstable_one_is_judged_by_its_runs(self):
+        # GitHub refuses a BLOCKED merge whatever its runs say, so BLOCKED is a flag. UNSTABLE is judged by its runs.
+        for state, verdict in (("blocked", "flag"), ("unstable", "ok")):
             with self.subTest(merge_state=state):
                 self.reset_state()
                 self.put_pr(3302, SHA_A, runs=green(SHA_A), mergeable=True, mergeable_state=state)
                 code, out, err = self.wake(ROW_3302)
                 line = self.row_line(out, err, SLUG)
-                self.assert_ok(line)
-                self.assertEqual(code, 0, "an ok row exits 0: " + err)
+                if verdict == "flag":
+                    self.assert_flag(line, "blocked")
+                else:
+                    self.assert_ok(line)
+                self.assertEqual(code, 1 if verdict == "flag" else 0, "the row exits by its verdict: " + err)
+
+    def test_a_pr_merged_into_a_base_other_than_main_is_flagged(self):
+        self.put_pr(3302, SHA_A, runs=green(SHA_A), state="closed", merged=True, base="batch/x", mergeable=None, mergeable_state="unknown")
+        code, out, err = self.wake(ROW_3302)
+        line = self.row_line(out, err, SLUG)
+        self.assert_flag(line, "merged into batch/x, not on main")
+        self.assertEqual(code, 1, "a flagged row exits 1: " + err)
+
+    def test_a_row_naming_more_than_one_target_is_unknown_and_reads_neither(self):
+        self.put_open((3302, SHA_A, "feat-x"), (3303, SHA_B, "feat-y"))
+        self.put_pr(3302, SHA_A, runs=green(SHA_A), mergeable=True, mergeable_state="clean")
+        self.put_pr(3303, SHA_B, runs=green(SHA_B), mergeable=True, mergeable_state="clean")
+        rows = {
+            "two pr tokens": "priority: %s | pr: %s#3302 | pr: %s#3303" % (SLUG, REPO, REPO),
+            "two branch tokens": "priority: %s | branch: feat-x | branch: feat-y" % SLUG,
+            "a pr token and a branch token": "priority: %s | pr: %s#3302 | branch: feat-x" % (SLUG, REPO),
+        }
+        for name, row in rows.items():
+            with self.subTest(row=name):
+                self.reset_calls()
+                code, out, err = self.wake(row + "\n")
+                line = self.row_line(out, err, SLUG)
+                self.assert_unknown(line)
+                self.assertIn("row names more than one target", line)
+                self.assertEqual(code, 1, "an unknown row exits 1: " + err)
+                self.assertEqual(self.paths(), [], "neither target is read")
+
+    def test_a_branch_row_naming_another_repo_is_unknown_and_reads_nothing(self):
+        self.put_open((41, SHA_A, "feat-x"))
+        self.put_pr(41, SHA_A, runs=green(SHA_A), mergeable=True, mergeable_state="clean")
+        code, out, err = self.wake("priority: %s | branch: feat-x | repo: someone/else\n" % SLUG)
+        line = self.row_line(out, err, SLUG)
+        self.assert_unknown(line)
+        self.assertEqual(code, 1, "an unknown row exits 1: " + err)
+        self.assertEqual(self.paths(), [], "a branch row on another repo reads nothing, this repo's open list included")
+
+    def test_a_branch_whose_pr_merged_is_judged_by_its_base_and_the_closed_list(self):
+        cases = (
+            ("merged into main", dict(base="main", merged=True), "done", None),
+            ("merged into another base", dict(base="batch/x", merged=True), "flag", "merged into batch/x, not on main"),
+            ("closed without a merge", dict(base="main", merged=False), "flag", "closed, not on main"),
+        )
+        for name, closed, verdict, reason in cases:
+            with self.subTest(pr=name):
+                self.reset_state()
+                self.put_open((40, SHA_B, "feat-other"))
+                self.put_closed(41, SHA_A, "feat-x", **closed)
+                code, out, err = self.wake("priority: %s | branch: feat-x\n" % SLUG)
+                line = self.row_line(out, err, SLUG)
+                if verdict == "done":
+                    self.assertIn("done", words(line), "want done on this line: " + line)
+                    self.assertEqual(code, 0, "a done row exits 0: " + err)
+                else:
+                    self.assert_flag(line, reason)
+                    self.assertEqual(code, 1, "a flagged row exits 1: " + err)
+
+    def test_a_branch_with_no_pr_at_all_is_flagged_no_pull_request_has_the_head(self):
+        self.put_open((40, SHA_B, "feat-other"))
+        code, out, err = self.wake("priority: %s | branch: feat-x\n" % SLUG)
+        line = self.row_line(out, err, SLUG)
+        self.assert_flag(line, "no pull request has the head")
+        self.assertEqual(code, 1, "a flagged row exits 1: " + err)
+
+    def test_a_branch_row_reads_the_closed_list_only_when_no_open_pr_matches(self):
+        with self.subTest(open_pr="matches"):
+            self.reset_state()
+            self.put_open((41, SHA_A, "feat-x"))
+            self.put_pr(41, SHA_A, runs=green(SHA_A), mergeable=True, mergeable_state="clean")
+            self.reset_calls()
+            code, out, err = self.wake("priority: %s | branch: feat-x\n" % SLUG)
+            self.assert_ok(self.row_line(out, err, SLUG))
+            self.assertEqual(self.closed_reads(), [], "an open pr that matches costs no closed read: %s" % self.paths())
+            self.assertEqual(len(self.paths()), 3, "the open list, then the pull and the runs on its head: %s" % self.paths())
+        with self.subTest(open_pr="none"):
+            self.reset_state()
+            self.put_open((40, SHA_B, "feat-other"))
+            self.reset_calls()
+            code, out, err = self.wake("priority: %s | branch: feat-x\n" % SLUG)
+            self.assert_flag(self.row_line(out, err, SLUG), "no pull request has the head")
+            self.assertEqual(len(self.closed_reads()), 1, "no open pr matches, so exactly one closed read: %s" % self.paths())
+            self.assertEqual(len(self.paths()), 2, "the open list, then the one closed read: %s" % self.paths())
 
     def test_stdin_dash_reads_the_rows_as_the_file_does(self):
         self.put_pr(3302, SHA_A, runs=green(SHA_A), mergeable=True, mergeable_state="clean")
