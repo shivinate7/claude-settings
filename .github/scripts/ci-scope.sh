@@ -3,7 +3,7 @@
 #   per job: checks_guard (set when code and guard are both set, or directly by a path the checks-guard job installs from: actions/playwright-setup, .github/shoot), checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep (the janitor sweep suites, set with checks_windows_rest) checks_macos shell_macos pointer_windows, and shoot (below)
 #   per suite: code (any non-docs file changed), mods (a path under mods/, or a .md path under skills/plain-english-map/: the mod tests and the
 #   map skill tests, one CI step in each of the `checks`, `checks-windows` and `checks-macos` jobs), guard (guard mutation test), sweep (janitor mutation test), shoot (the checks-shoot and checks-waiting-page jobs: the bin/shoot suite and the page suites, which install a browser).
-#   The `checks` lint job and the checks-merge-install job always run, so they have no flag (their suites carry `code`).
+#   The `checks` lint job and the checks-merge-install, checks-install-checkout and checks-merge-git jobs always run, so they have no flag (their suites carry `code`).
 #   checks_macos gates both checks-macos and checks-macos-b.
 #   per lint step (the four pull-request steps of the `checks` job; each runs only when a file its lint reads changed):
 #     lint_red_run (Red-run trailer: any non-.md path, and a .md path under a test folder, since lint/check_red_run.py asks hooks/guard.py is_test_rel),
