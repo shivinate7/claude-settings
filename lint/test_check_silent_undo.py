@@ -736,21 +736,27 @@ class Value(unittest.TestCase):
 class Flips(unittest.TestCase):
     """Lines that look alike but state something else must not pass as a rewrite."""
     T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
+    S0 = "The batch runner merges a pull request after the owner yes, and records the merge in the pending record."
+    S1 = S0[:-1] + ", for an unproven push, not for a proven one."  # every original word, then a clause with a negation
+
+    @staticmethod
+    def cfg_text(v):
+        """cfg.txt: five lines, then the line v (no line when v is empty), then a tail."""
+        return "".join("l%d\n" % i for i in range(1, 6)) + (v + "\n" if v else "") + "tail\n"
 
     def resolve(self, base_line, a_line, result_line):
         """main changes base_line to a_line (A). The branch merges main by hand and writes result_line."""
         r = self.r = Repo()
-        text = lambda v: "".join("l%d\n" % i for i in range(1, 6)) + (v + "\n" if v else "") + "tail\n"
-        r.commit("base", date="2025-12-01T10:00:00", cfg_txt=text(base_line))
+        r.commit("base", date="2025-12-01T10:00:00", cfg_txt=self.cfg_text(base_line))
         r.push()
         r.sh("checkout", "-q", "-b", "feat")
         r.commit("feat", date=self.T0, other_txt="x\n")
         r.sh("checkout", "-q", "main")
-        r.commit("A", date=self.T1, cfg_txt=text(a_line))
+        r.commit("A", date=self.T1, cfg_txt=self.cfg_text(a_line))
         r.push()
         r.sh("checkout", "-q", "feat")
         r.sh("merge", "--no-commit", "--no-ff", "main")
-        r.put("cfg.txt", text(result_line))
+        r.put("cfg.txt", self.cfg_text(result_line))
         r.sh("add", "-A")
         r.sh("commit", "-q", "-m", "Merge main", date=self.T2)
         return r.verdict()
@@ -758,6 +764,20 @@ class Flips(unittest.TestCase):
     def red(self, *case):
         got = self.resolve(*case)
         self.assertTrue(any("cfg.txt" in p for p in got), (case, got))
+
+    def in_place(self, main_line, branch_line):
+        """PR 1 merges main with cfg.txt holding main_line. PR 2, cut after it, rewrites that line in place to branch_line. -> the verdict."""
+        r = self.r = Repo()
+        r.commit("base", date="2025-12-01T10:00:00", cfg_txt=self.cfg_text(""))
+        r.push()
+        r.sh("checkout", "-q", "-b", "pr1")
+        r.commit("main adds the line", date=self.T1, cfg_txt=self.cfg_text(main_line))
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", "pr1", date=self.T1)
+        r.push()
+        r.sh("checkout", "-q", "-b", "pr2")
+        r.commit("rewrite the line", date=self.T2, cfg_txt=self.cfg_text(branch_line))
+        return r.verdict()
 
     def test_a_stale_value_with_trailing_tokens_is_the_base_line(self):
         for tail in (" #s", ",", ";"):
@@ -780,6 +800,28 @@ class Flips(unittest.TestCase):
 
     def test_a_third_value_still_passes(self):
         self.assertEqual(self.resolve("RULE_FLOOR = 80", "RULE_FLOOR = 91", "RULE_FLOOR = 94"), [])
+
+    def test_an_appended_negation_clause_is_not_a_merge_drop(self):
+        """main adds the sentence; the merge keeps every original word and appends a clause that holds a negation."""
+        self.assertEqual(self.resolve("", self.S0, self.S1), [], "a negation clause appended after every original word read as a drop")
+
+    def test_an_appended_negation_clause_is_not_an_in_place_reversal(self):
+        """PR 1 merges the sentence; PR 2, cut after it, rewrites the sentence in place by appending the clause."""
+        self.assertEqual(self.in_place(self.S0, self.S1), [], "a negation clause appended in place read as an undo")
+
+    def test_an_appended_negation_clause_on_a_short_line_passes(self):  # control: green on the old code, a guard for the fix
+        self.assertEqual(self.resolve("deploy now", "deploy now fast", "deploy now fast, never past 55 minutes"), [])
+
+    def test_a_real_dropped_line_is_still_flagged(self):  # control
+        self.red("", self.S0, "")
+        self.red("deploy now", "deploy now fast", "")
+        self.assertTrue(any("cfg.txt" in p for p in self.in_place(self.S0, "")), "an in-place delete of the line was not flagged")
+
+    def test_a_negation_inside_the_original_words_is_still_flagged(self):  # control
+        inside = self.S0.replace("merges a pull", "does not merge a pull")
+        self.red("", "deploy now", "deploy not now")
+        self.red("", self.S0, inside)
+        self.assertTrue(any("cfg.txt" in p for p in self.in_place(self.S0, inside)), "an in-place negation inside the words was not flagged")
 
 
 class MainLineDrop:
