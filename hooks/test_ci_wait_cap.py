@@ -45,7 +45,7 @@ RULE = "git-ci-wait-checks-in"
 FALLBACK_START = "- The fallback:"
 TEMPLATE_START = "- A session that waits on CI sets a one-time check-in"
 CAP_PHRASE = re.compile(r"never\s+past\s+(\d+)\s+minutes")
-INT_FIELDS = ("cache_lifetime_seconds", "overage_lifetime_seconds", "cap_minutes")
+INT_FIELDS = ("cache_lifetime_seconds", "cap_minutes")
 
 
 def read_text(path):
@@ -63,7 +63,7 @@ def record(cap, **changes):
     data = {"claim": "A check-in that waits on CI waits at most the cap.",
             "source": "Claude Code docs: prompt cache lifetime, 1 hour; 5 minutes in overage.",
             "read": "2026-11-12", "cache_lifetime_seconds": 3600,
-            "overage_lifetime_seconds": 300, "cap_minutes": cap}
+            "cap_minutes": cap}
     data.update(changes)
     return data
 
