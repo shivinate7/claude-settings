@@ -161,6 +161,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_REF: ${{ github.head_ref }}
           GREEN_HEAD: ${{ steps.green.outputs.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
         run: bash .github/scripts/ci-scope.sh
 
   checks:

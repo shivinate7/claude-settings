@@ -15,9 +15,9 @@
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
-# BASE_SHA, HEAD_REF, GREEN_HEAD (optional: the sha green-head.sh prints, the pull request's newest earlier fully green head).
-# GREEN_HEAD turns the 13 job and suite flags off on a pull request when it is an ancestor of HEAD and the delta from it to HEAD
-# is docs/records.md alone; the lint flags and mutation_report keep their whole-PR values. Any unreadable read: no skip.
+# BASE_SHA, HEAD_REF, GREEN_HEAD (optional: the sha green-head.sh prints, the pull request's newest earlier fully green head), PR_HEAD
+# (optional: the pull request's head sha; HEAD when unset). GREEN_HEAD turns the 13 job and suite flags off on a pull request when it is an
+# ancestor of PR_HEAD and the delta from it to PR_HEAD is docs/records.md alone; the lint flags and mutation_report keep their whole-PR values. Any unreadable read: no skip.
 set -u
 JOBS="checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos pointer_windows"
 LINTS="lint_red_run lint_plan_refuter lint_ruling_kind lint_comment_narration"
@@ -162,9 +162,16 @@ case "$on" in *" code "*) case "$on" in *" guard "*) on="$on checks_guard " ;; e
 # A records-only push after a fully green head: the earlier head's run proved everything but the lints and the mutation report,
 # so only docs/records.md moved since. The whole PR diff was read above (whole_read); every other case keeps its flags.
 # The delta must be exactly one path: an empty or longer delta, an unreadable one or a head that is not an ancestor keeps `on`.
+# The delta runs to PR_HEAD, the pull request's own head: HEAD in CI is the merge commit, which also holds every base change since.
+# PR_HEAD counts only when it is a full hex sha, a commit, and an ancestor of HEAD; otherwise the delta runs to HEAD.
+end=HEAD
+if [[ "${PR_HEAD:-}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] && git cat-file -e "$PR_HEAD^{commit}" 2>/dev/null &&
+   git merge-base --is-ancestor "$PR_HEAD" HEAD 2>/dev/null; then
+  end=$PR_HEAD
+fi
 if [ "$whole_read" = 1 ] && [[ "${GREEN_HEAD:-}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] &&
-   git merge-base --is-ancestor "$GREEN_HEAD" HEAD 2>/dev/null &&
-   delta=$(git diff --name-only --no-renames "$GREEN_HEAD" HEAD 2>/dev/null) && [ "$delta" = docs/records.md ]; then
+   git merge-base --is-ancestor "$GREEN_HEAD" "$end" 2>/dev/null &&
+   delta=$(git diff --name-only --no-renames "$GREEN_HEAD" "$end" 2>/dev/null) && [ "$delta" = docs/records.md ]; then
   kept=" "
   for t in $on; do
     case " $JOBS checks_guard code mods guard sweep shoot " in *" $t "*) ;; *) kept="$kept$t " ;; esac
