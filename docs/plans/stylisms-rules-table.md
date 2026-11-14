@@ -11,7 +11,7 @@ Refuter: refuter opus, 2026-11-13, PARTIAL (5 findings, all fixed in the revisio
 
 - Real rule count in `output-styles/shiv-stylisms.md` on main: **29** (counted with `grep -o 'rule:[a-z0-9-]*'`; each mark appears once). The older text says 23, so it is stale.
 - Verdicts: **23 keep, 6 change, 0 drop** (29 total). Owner ruling `own-800-stylisms-two-keeps` (22:24 CST Nov 13) turned two rows to keep: `style-offer-screen-takeover` and `style-press-has-link`. Owner ruling `own-807-a` (22:28 CST Nov 13, via triage) signed the six changes. The 23 keeps stand as the table's verdicts.
-- Prior audit: restart-plan R41 (owner 13:36 CST Nov 11, "r41 yes on all") found the output style "in the right folders" and earning "their place": a placement check. R44 part 3 sends the content (are its rules still right) to R35's review, which the owner signs. This table is that review's rule-by-rule read.
+- Prior audit: restart-plan R41 (owner 13:36 CST Nov 11, "r41 yes on all") found the output style "in the right folders" and earning "their place": a placement check. R44 part 3 sends the content ("are its 23 rules still right"; 23 is the stale count) to R35's review, which the owner signs. This table is that review's rule-by-rule read.
 - The file is 92 lines and 1144 words. Four rules hold 40% of the words: `style-question-form` 210, `output-never-hand-off-doable-step` 116, `style-hand-off-runs-as-is` 67, `style-hand-off-irreversible` 61 (454 of 1144; the sum of those four counts).
 - Cloud limits: this session's `guard.log` holds 8 lines, all from this one session, so no rule's fire rate is measured. Every "unmeasured" below means that. Mechanism and size are read from `lint/rule_mechanisms.json` and the file.
 
