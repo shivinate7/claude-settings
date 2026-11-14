@@ -1,4 +1,4 @@
-# start_session is not gated at PreToolUse
+# start_session is not judged at PreToolUse
 
 ## The ruling
 
@@ -11,7 +11,7 @@ Owner, typed in the triage chat 00:12 CST Nov 14, 2026 (ruling `own-809-reopen-h
 
 ## Why (b)
 
-(a), the next gated call, catches only an unread handoff, and only on a tool the matcher lists; it never sees a model below the floor. (c), dropping the checks, would let a Haiku session start and run unflagged, and the triage brief reports real denies on these checks in `guard.log` (handoff-unread and agent-model-floor; unmeasured here, the cloud has no `guard.log`). (b) keeps both of those checks, at the cost of acting after the start, not before it.
+(a), the next call the guard judges, catches only an unread handoff, and only on a tool the matcher lists; it never sees a model below the floor. (c), dropping the checks, would let a Haiku session start and run unflagged, and the triage brief reports real denies on these checks in `guard.log` (handoff-unread and agent-model-floor; unmeasured here, the cloud has no `guard.log`). (b) keeps both of those checks, at the cost of acting after the start, not before it.
 
 ## Checks lost at PreToolUse
 
@@ -26,7 +26,7 @@ Read in `hooks/guard.py`: `judge` refuses before the call. `start_session` was n
 
 `SESSION_TOOL`, `START_TOOLS` and the `start_session` branch of `floor_hit` stay in `hooks/guard.py`. The audit calls `floor_hit`, and the guard's cases call `judge` on a `start_session` payload. No PreToolUse call reaches them.
 
-Why: a hook on a tool the owner must answer a card for makes every start an interruption. The audit gives the same two checks with no card.
+Why: a hook on a tool the owner must answer a card for makes every start an interruption. The audit runs the same two checks after the call. Unknown, until the owner's Bypass test settles each: whether a PostToolUse hook on `start_session` raises the card (the owner's test had no hook on the tool, and the code reading names PreToolUse only); whether the start result carries a `session_` id; whether the desktop app delivers PostToolUse `additionalContext` for this tool; and whether `interrupt_session` and `archive_session` (claude-code-remote tools) reach a desktop-made session. An agent caller cannot call them (decision `agent-no-remote-tools`).
 
 Cost, per `outcomes-mechanize-rules`: process starts, one per `start_session` call, none on any other call. Files written, none. It reads the handoff flag file (one existence check, and the handoff file only when the flag exists) and imports the guard module once per start. No timer and no watcher. `lint/test_settings_matcher.py` and the `start-session-audit` family pin the wiring and the verdicts.
 
