@@ -95,7 +95,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     "Departs from: <file>:<symbol> — <what changes>" and never has `holds`. The writer refuses it otherwise
     (guard rule `port-question`). The existing app answers every other question: read it, never ask.
   - `widens: true` on an option marks one that widens what a shared tool accepts: a second accepted form,
-    an allow entry in settings.local.json, a per-repo exception or a widening in another repo. One global allow entry in claude-settings' own shared settings.json is not widening: it never carries the mark and may be recommended. Its card shows "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo": a repo
+    an allow entry in settings.local.json, a per-repo exception or a widening in another repo. One global allow entry that names no repo, in claude-settings' own shared settings.json, is not widening: it never carries the mark and may be recommended. Its card shows "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo": a repo
     that differs from a shared format changes to match it. `recommended` never names such an option, and a list `recommended` never holds its key (the old name `pick` is read the same way). The writer refuses
     it (guard rule `uniform-pick`). An update that sets `recommended` carries `options` again: the guard cannot see the stored field.
   - An option may carry `links` (a list of `{label, url}`): its card shows them, and each opens in a new tab. An option that

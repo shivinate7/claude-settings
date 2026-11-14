@@ -42,7 +42,7 @@ Short and plain are one goal. Never trade one for the other.
   option's description says `Gain:` and `Lose:`, as effects on the user. An option that widens
   what a shared tool accepts, such as a second form, an allow entry in settings.local.json, a per-repo exception or a widening in another repo,
   carries "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo" and is never the recommended option.
-  One global allow entry in claude-settings' own shared settings.json is not widening, never carries the label and may be recommended. On the
+  One global allow entry that names no repo, in claude-settings' own shared settings.json, is not widening, never carries the label and may be recommended. On the
   waiting page the same lines go in `context`, with a `gain` and a `lose` on each option and `widens:
   true` on a widening one. `hooks/question_form.py` checks the box and the page
   (decisions `question-form` and `port-keeps-behaviour`).<!-- rule:style-question-form -->
