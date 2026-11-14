@@ -40,7 +40,7 @@ UNKNOWN_LINE = "repo caution: unknown, the level could not be read"  # the hook'
 HOOK_WAIT = 120
 
 
-def hook_tier_line():
+def hook_role_line():
     """The tier line's text as the hook file holds it, so a wording change in the hook edits no test."""
     with open(HOOK, encoding="utf-8") as handle:
         found = TIER_PRINTF.findall(handle.read())
@@ -155,7 +155,7 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             handle.write("@%s/CLAUDE.md\n" % pointer.replace("\\", "/"))
 
     def hook_launch(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False,
-                    remote_session_id=None, path_dir=None, trace_file=None):
+                    remote_session_id=None, path_dir=None, trace_file=None, ref=None):
         """The hook's argv, environment, stdin payload and cwd, as the harness starts it. The arguments are run_hook's,
         and run_hook and the cut-off runs both start here, so the environment is built in one place."""
         where = self.primary if session_cwd is None else session_cwd
@@ -172,6 +172,9 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         # The test runner may itself be a cloud session, so each run sets the variable it means.
         env.pop("CLAUDE_CODE_REMOTE", None)
         env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+        env.pop("CLAUDE_SETTINGS_REF", None)
+        if ref is not None:
+            env["CLAUDE_SETTINGS_REF"] = ref
         if remote is not None:
             env["CLAUDE_CODE_REMOTE"] = remote
         if remote_session_id is not None:
@@ -179,7 +182,7 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         return sh_argv(path_dir, HOOK), env, payload, where
 
     def run_hook(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False,
-                 remote_session_id=None, path_dir=None, trace_file=None):
+                 remote_session_id=None, path_dir=None, trace_file=None, ref=None):
         """The hook's stdout lines. Its stderr lands in self.last_stderr.
 
         remote: the CLAUDE_CODE_REMOTE value, or None to unset it as a non-cloud runner does.
@@ -189,11 +192,12 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         compact: send the payload with no spaces after its separators, the way the hook's sed must also read it.
         path_dir: a folder put first on PATH, such as a git shim's folder, or None for the runner's own PATH.
         trace_file: a file git appends its own trace to (GIT_TRACE), or None for no trace.
+        ref: the CLAUDE_SETTINGS_REF value, or None to unset it (the recovery is off unless a case turns it on).
         """
         argv, env, payload, where = self.hook_launch(remote=remote, fetch_timeout=fetch_timeout,
                                                      session_cwd=session_cwd, source=source, compact=compact,
                                                      remote_session_id=remote_session_id, path_dir=path_dir,
-                                                     trace_file=trace_file)
+                                                     trace_file=trace_file, ref=ref)
         answer = subprocess.run(argv, input=payload, capture_output=True, text=True, env=env, cwd=where,
                                 timeout=120)
         self.last_stderr = answer.stderr
@@ -278,7 +282,7 @@ class SessionStartTierLineTests(SessionStartAgentWorktreeNoticeTests):
     # The 51-worktree case builds 51 worktrees; this class does not repeat it.
     test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
 
-    def tier_lines(self, lines):
+    def role_lines(self, lines):
         return [line for line in lines if line.startswith("session tier:")]
 
     def outside_a_git_tree(self):
@@ -292,47 +296,47 @@ class SessionStartTierLineTests(SessionStartAgentWorktreeNoticeTests):
         return outside
 
     def test_cloud_prints_the_tier_line_once_right_after_the_checkout_line(self):
-        expected = hook_tier_line()
+        expected = hook_role_line()
         lines = self.run_hook(remote="true")
         self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line first: %r" % lines)
-        self.assertEqual(self.tier_lines(lines), [expected])
+        self.assertEqual(self.role_lines(lines), [expected])
         self.assertEqual(lines.index(expected), 1, "the tier line is not after the checkout line: %r" % lines)
 
     def test_no_tier_line_unless_the_variable_is_exactly_true(self):
-        expected = hook_tier_line()
+        expected = hook_role_line()
         # None is a runner that never sets it; the rest are values the hook must not treat as cloud.
         for remote in (None, "", "false", "1", "TRUE"):
             with self.subTest(remote=remote):
                 lines = self.run_hook(remote=remote)
                 self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line: %r" % lines)
-                self.assertEqual(self.tier_lines(lines), [])
+                self.assertEqual(self.role_lines(lines), [])
                 self.assertNotIn(expected, lines)
 
     def test_the_tier_line_prints_with_no_remote_and_a_tiny_fetch_timeout(self):
         # The line needs no network, so a fetch bound too short for the bounded git calls still leaves it.
         lines = self.run_hook(remote="true", fetch_timeout="0.01")
-        self.assertEqual(self.tier_lines(lines), [hook_tier_line()])
+        self.assertEqual(self.role_lines(lines), [hook_role_line()])
 
     def test_cloud_prints_the_tier_line_once_outside_any_git_tree(self):
         # The line needs no git, so a cloud session whose cwd is no checkout still gets it, with no stderr.
         outside = self.outside_a_git_tree()
-        expected = hook_tier_line()
+        expected = hook_role_line()
         lines = self.run_hook(remote="true", session_cwd=outside)
         self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
-        self.assertEqual(self.tier_lines(lines), [expected], "the tier line is not printed once: %r" % lines)
+        self.assertEqual(self.role_lines(lines), [expected], "the tier line is not printed once: %r" % lines)
 
     # A local lane session sets CLAUDE_CODE_REMOTE_SESSION_ID and not CLAUDE_CODE_REMOTE, so the id alone must print the line.
     def test_a_session_id_alone_prints_the_tier_line_in_a_git_tree(self):
         lines = self.run_hook(remote_session_id="cse_abc")
         self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line first: %r" % lines)
-        self.assertEqual(self.tier_lines(lines), [hook_tier_line()],
+        self.assertEqual(self.role_lines(lines), [hook_role_line()],
                          "no tier line in a git tree with CLAUDE_CODE_REMOTE unset and a session id set: %r" % lines)
 
     def test_a_session_id_alone_prints_the_tier_line_outside_a_git_tree(self):
         outside = self.outside_a_git_tree()
         lines = self.run_hook(session_cwd=outside, remote_session_id="cse_abc")
         self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
-        self.assertEqual(self.tier_lines(lines), [hook_tier_line()],
+        self.assertEqual(self.role_lines(lines), [hook_role_line()],
                          "no tier line outside a git tree with CLAUDE_CODE_REMOTE unset and a session id set: %r"
                          % lines)
 
@@ -340,18 +344,18 @@ class SessionStartTierLineTests(SessionStartAgentWorktreeNoticeTests):
     def test_no_tier_line_with_both_variables_unset_in_a_git_tree(self):
         lines = self.run_hook()
         self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line first: %r" % lines)
-        self.assertEqual(self.tier_lines(lines), [], "a tier line printed with both variables unset: %r" % lines)
+        self.assertEqual(self.role_lines(lines), [], "a tier line printed with both variables unset: %r" % lines)
 
     def test_no_tier_line_with_both_variables_unset_outside_a_git_tree(self):
         outside = self.outside_a_git_tree()
         lines = self.run_hook(session_cwd=outside)
         self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
-        self.assertEqual(self.tier_lines(lines), [], "a tier line printed with both variables unset: %r" % lines)
+        self.assertEqual(self.role_lines(lines), [], "a tier line printed with both variables unset: %r" % lines)
 
     def test_no_tier_line_with_an_empty_session_id_in_a_git_tree(self):
         lines = self.run_hook(remote_session_id="")
         self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line first: %r" % lines)
-        self.assertEqual(self.tier_lines(lines), [], "a tier line printed with an empty session id: %r" % lines)
+        self.assertEqual(self.role_lines(lines), [], "a tier line printed with an empty session id: %r" % lines)
 
 
 class SessionStartSessionHomeTests(SessionStartAgentWorktreeNoticeTests):
@@ -461,45 +465,94 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         """True when the sentence names the lane session: its cs-build:lane tag, or the words `lane session`."""
         return "cs-build:lane" in sentence or "lane session" in sentence
 
+    # the heads a term binds to, the clause breaks and the other verbs that end a binding, and the session kinds (for the helpers below)
+    SKIP_VERB = r"\bskip\w*"
+    NAME_VERB = r"\b(?:names?|naming)\b"
+    CLAUSE_BREAK = re.compile(r"[,;:.()]")
+    OTHER_VERB = re.compile(r"\b(?:archiv\w*|runs?|names?|naming|reports?)\b", re.IGNORECASE)
+    SESSION_KIND = re.compile(r"\b(?:sessions?|tiers?|coordinators?|solo|one-lanes?|lanes?)\b", re.IGNORECASE)
+
+    @staticmethod
+    def binds(sentence, head, term):
+        """True when the head (a regex) comes before the term (a regex), with no clause break and no other verb between them."""
+        found = re.search(term, sentence)
+        if found is None:
+            return False
+        for hit in re.compile(head, re.IGNORECASE).finditer(sentence, 0, found.start()):
+            between = sentence[hit.end():found.start()]
+            if not SessionStartMergeRoleTests.CLAUSE_BREAK.search(between) and not SessionStartMergeRoleTests.OTHER_VERB.search(between):
+                return True
+        return False
+
+    @staticmethod
+    def archive_follows_get_session(sentence):
+        """True when the archive comes after the get_session call: get_session first, or the archive set `after` its get_session."""
+        get, archive = sentence.find("get_session"), sentence.find("archive")
+        if get < 0 or archive < 0:
+            return False
+        if get < archive:
+            return True
+        return re.search(r"archiv\w*[^,;.()]*\bafter\b[^,;.()]*get_session", sentence) is not None
+
+    @staticmethod
+    def runner_subject_only(sentence):
+        """True when the words before the verb `runs` name the batch runner tag and no other session kind."""
+        verb = re.search(r"\bruns?\b", sentence)
+        if verb is None:
+            return False
+        subject = sentence[:verb.start()]
+        return "cs-build:batch-runner" in subject and len(SessionStartMergeRoleTests.SESSION_KIND.findall(subject)) == 1
+
+    @staticmethod
+    def idle_lanes_sentences(line):
+        """The tier line's sentences that name the idle-lanes command, by its verb and flag."""
+        return [s for s in sentences(line) if "merge --idle-lanes" in s]
+
+    def idle_lanes_sentence(self):
+        """The one sentence that names the idle-lanes command. Asserts that scope before any content."""
+        found = self.idle_lanes_sentences(hook_role_line())
+        self.assertEqual(len(found), 1, "expected one sentence naming merge --idle-lanes, found %d: %r" % (len(found), found))
+        return found[0]
+
     def test_the_tier_line_names_the_role_writer(self):
-        self.assertIn("merge --role", hook_tier_line())
+        self.assertIn("merge --role", hook_role_line())
 
     def test_the_merge_role_sentence_names_the_command_by_its_home_path(self):
         # Bare `merge` is not on a cloud session's PATH, so the sentence gives the shim's full path.
-        self.assertIn("~/.claude/bin/merge --role", merge_role_sentence(hook_tier_line()))
+        self.assertIn("~/.claude/bin/merge --role", merge_role_sentence(hook_role_line()))
 
     # decision session-tiers: re-pointed from both tiers to the batch runner alone
     def test_the_merge_role_sentence_names_only_the_batch_runner_tag(self):
-        role = [s for s in sentences(hook_tier_line()) if "merge role" in s.lower()]
+        role = [s for s in sentences(hook_role_line()) if "merge role" in s.lower()]
         self.assertEqual(len(role), 1, role)
         self.assertIn("cs-build:batch-runner", role[0])
         self.assertNotIn("coordinator", role[0].lower(), role[0])
 
     # decision session-tiers: no sentence of the tier line says a coordinator merges; "never merges" is not a merge
     def test_no_sentence_of_the_tier_line_says_a_coordinator_merges(self):
-        told = [s for s in sentences(hook_tier_line()) if self.says_coordinator_merges(s)]
+        told = [s for s in sentences(hook_role_line()) if self.says_coordinator_merges(s)]
         self.assertEqual(told, [], "the tier line says a coordinator merges: %r" % told)
 
     # decision session-tiers: the coordinator never merges, so one sentence of the tier line says so
     def test_some_sentence_of_the_tier_line_says_the_coordinator_never_merges(self):
-        told = [s for s in sentences(hook_tier_line()) if self.says_coordinator_never_merges(s)]
+        told = [s for s in sentences(hook_role_line()) if self.says_coordinator_never_merges(s)]
         self.assertTrue(told, "no sentence of the tier line says the coordinator never merges")
 
     # decision session-tiers: a session the owner started (no parent) merges its own PR under the merge grant, affirmatively
     def test_a_session_with_no_parent_merges_its_own_pr_under_the_merge_grant(self):
-        told = [s for s in sentences(hook_tier_line()) if self.is_no_parent_merge(s)]
+        told = [s for s in sentences(hook_role_line()) if self.is_no_parent_merge(s)]
         self.assertTrue(told, "no affirmative sentence says a session with no parent merges its own PR under the merge grant")
 
     # decision session-tiers: only a solo or one-lane session the owner started merges its own PR, so its sentence names that shape
     def test_the_no_parent_merge_sentence_names_solo_or_one_lane(self):
-        told = [s for s in sentences(hook_tier_line()) if self.is_no_parent_merge(s)]
+        told = [s for s in sentences(hook_role_line()) if self.is_no_parent_merge(s)]
         self.assertTrue(told, "no affirmative sentence says a session with no parent merges its own PR under the merge grant")
         for sentence in told:
             self.assertIn("solo or one-lane", sentence, "the no-parent merge sentence does not name solo or one-lane: %r" % sentence)
 
     def hand_off_sentence(self):
         """The tier line's one sentence that hands a branch to the batch runner. Asserts that scope before any content."""
-        found = [s for s in sentences(hook_tier_line()) if "hands" in s and "batch runner" in s]
+        found = [s for s in sentences(hook_role_line()) if "hands" in s and "batch runner" in s]
         self.assertEqual(len(found), 1, "expected one hand-off sentence, found %d: %r" % (len(found), found))
         return found[0]
 
@@ -518,11 +571,11 @@ class SessionStartMergeRoleTests(unittest.TestCase):
 
     def test_the_tier_line_says_the_role_is_recorded_again_after_a_resume(self):
         # A resumed session keeps its id, but the role file may be gone (a fresh container): the line must not say the call is a one-time act.
-        sentence = merge_role_sentence(hook_tier_line())
+        sentence = merge_role_sentence(hook_role_line())
         self.assertIn("resume", sentence.lower(), sentence)
 
     def test_the_tier_line_does_not_say_once(self):
-        self.assertNotRegex(hook_tier_line(), r"(?i)\bonce\b")
+        self.assertNotRegex(hook_role_line(), r"(?i)\bonce\b")
 
     def test_the_merge_role_sentence_is_found_by_its_edges(self):
         # The helper cuts at ". ": from the one before `merge --role` to the one after it, or to the line's ends.
@@ -553,6 +606,106 @@ class SessionStartMergeRoleTests(unittest.TestCase):
                                            "runner (list_sessions, tag cs-build:batch-runner, same repo) and never merges."))
         self.assertTrue(self.names_a_lane("A lane session (tag cs-build:lane) hands its reviewed branch, head and PR to the batch "
                                           "runner and never merges."))
+
+    # batch-runner-start-names-idle-lanes: the scope comes first, so a missing sentence fails the scope, never passes empty
+    def test_one_sentence_of_the_role_line_names_the_idle_lanes_command(self):
+        found = self.idle_lanes_sentences(hook_role_line())
+        self.assertEqual(len(found), 1, "expected one sentence naming merge --idle-lanes, found %d: %r" % (len(found), found))
+
+    def test_the_idle_lanes_sentence_names_the_batch_runner_tag(self):
+        sentence = self.idle_lanes_sentence()
+        self.assertIn("cs-build:batch-runner", sentence, "the idle-lanes sentence names no cs-build:batch-runner tag: %r" % sentence)
+
+    def test_the_idle_lanes_sentence_has_the_batch_runner_tag_as_its_only_subject(self):
+        sentence = self.idle_lanes_sentence()
+        self.assertTrue(self.runner_subject_only(sentence), "the words before `runs` do not name only the batch runner tag: %r" % sentence)
+
+    def test_the_idle_lanes_sentence_does_not_name_the_coordinator(self):
+        sentence = self.idle_lanes_sentence()
+        self.assertNotIn("coordinator", sentence.lower(), "the idle-lanes sentence names the coordinator: %r" % sentence)
+
+    def test_the_idle_lanes_sentence_does_not_name_a_lane(self):
+        sentence = self.idle_lanes_sentence()
+        self.assertFalse(self.names_a_lane(sentence),
+                         "the idle-lanes sentence names a lane session or the cs-build:lane tag: %r" % sentence)
+
+    def test_the_idle_lanes_command_is_named_by_its_home_path(self):
+        # Bare `merge` is not on a cloud session's PATH, so the sentence gives the shim's full path, as the merge role sentence does.
+        told = [s for s in sentences(hook_role_line()) if "~/.claude/bin/merge --idle-lanes --live FILE" in s]
+        self.assertTrue(told, "no sentence names ~/.claude/bin/merge --idle-lanes --live FILE")
+
+    def test_the_idle_lanes_sentence_says_to_run_it_after_each_merge(self):
+        told = [s for s in self.idle_lanes_sentences(hook_role_line()) if re.search(r"after (?:each|every) merge", s, re.IGNORECASE)]
+        self.assertTrue(told, "no sentence says to run merge --idle-lanes after each merge")
+
+    def test_the_idle_lanes_sentence_says_to_run_get_session_on_each_listed_lane_alone(self):
+        told = [s for s in self.idle_lanes_sentences(hook_role_line()) if self.binds(s, r"get_session", r"\balone\b")]
+        self.assertTrue(told, "no sentence says to run get_session on each listed lane alone")
+
+    def test_the_idle_lanes_sentence_says_to_archive_each_lane_after_its_get_session(self):
+        told = [s for s in self.idle_lanes_sentences(hook_role_line()) if self.archive_follows_get_session(s)]
+        self.assertTrue(told, "no sentence says to archive each lane after its get_session")
+
+    def test_the_idle_lanes_sentence_says_to_skip_a_lane_with_a_hold_marker(self):
+        told = [s for s in self.idle_lanes_sentences(hook_role_line()) if self.binds(s, self.SKIP_VERB, r"\bHOLD\b")]
+        self.assertTrue(told, "no sentence says to skip a lane that carries a HOLD marker")
+
+    def test_the_idle_lanes_sentence_says_to_skip_a_lane_that_needs_judgment(self):
+        told = [s for s in self.idle_lanes_sentences(hook_role_line()) if self.binds(s, self.SKIP_VERB, r"\bjudgment\b")]
+        self.assertTrue(told, "no sentence says to skip a lane that needs judgment")
+
+    def test_the_idle_lanes_sentence_says_to_name_each_skipped_lane_in_its_report(self):
+        told = [s for s in self.idle_lanes_sentences(hook_role_line())
+                if self.binds(s, self.NAME_VERB, r"\bskipped\b") and self.binds(s, self.NAME_VERB, r"\breport\b")]
+        self.assertTrue(told, "no sentence says to name each skipped lane in its report")
+
+    def test_the_idle_lanes_sentence_names_the_livework_readme_that_builds_the_live_file(self):
+        told = [s for s in self.idle_lanes_sentences(hook_role_line()) if "roadmap/livework/README.md" in s]
+        self.assertTrue(told, "no idle-lanes sentence names roadmap/livework/README.md as the builder of the live file")
+
+    def test_the_livework_readme_is_named_on_the_record_branch(self):
+        told = [s for s in self.idle_lanes_sentences(hook_role_line())
+                if "roadmap/livework/README.md" in s and "record branch" in s.lower()]
+        self.assertTrue(told, "no idle-lanes sentence says roadmap/livework/README.md is on the record branch")
+
+    # green controls (P2): the helpers pass on the current code, so a red above is the sentence, not a broken helper
+    def test_the_binding_helper_binds_a_head_to_its_term_only_with_no_clause_break_or_verb_between(self):
+        skip, name = self.SKIP_VERB, self.NAME_VERB
+        self.assertTrue(self.binds("archives that lane, but skips any lane that shows a HOLD marker.", skip, r"\bHOLD\b"),
+                        "a skip verb before HOLD in its clause is not read")
+        self.assertFalse(self.binds("archives any lane that shows a HOLD marker, skipping nothing.", skip, r"\bHOLD\b"),
+                         "a skip verb after a comma is read as governing HOLD")
+        self.assertFalse(self.binds("archives any lane that shows a HOLD marker; skipped lanes are named in its report.", skip, r"\bHOLD\b"),
+                         "a skip verb after HOLD is read as governing it")
+        self.assertFalse(self.binds("skips any lane that shows a HOLD marker or archives any lane that needs judgment.", skip,
+                                    r"\bjudgment\b"), "an archive verb between skip and judgment is not blocked")
+        self.assertTrue(self.binds("names each skipped lane in its report.", name, r"\bskipped\b"),
+                        "a name verb before skipped is not read")
+        self.assertFalse(self.binds("archives each listed lane, but skips each one in its report.", name, r"\breport\b"),
+                         "a report with no name verb is read as named")
+        self.assertTrue(self.binds("runs get_session alone on each listed lane.", r"get_session", r"\balone\b"),
+                        "alone right after get_session is not read")
+        self.assertFalse(self.binds("runs get_session on each listed lane, and archives that lane; "
+                                    "names each skipped lane alone in its report.", r"get_session", r"\balone\b"),
+                         "an alone after a comma in the report is read as the get_session one")
+
+    def test_the_archive_order_helper_takes_both_allowed_wordings_and_rejects_archive_first(self):
+        self.assertTrue(self.archive_follows_get_session("runs get_session on each listed lane alone and archives that lane."),
+                        "archive after get_session is not read")
+        self.assertTrue(self.archive_follows_get_session("archives each lane after its get_session."),
+                        "archive set after its get_session is not read")
+        self.assertFalse(self.archive_follows_get_session("archives that lane, then runs get_session on it."),
+                         "archive before get_session is read as in order")
+        self.assertFalse(self.archive_follows_get_session("archives each lane and runs get_session on it."),
+                         "archive before get_session with no after is read as in order")
+
+    def test_the_runner_subject_helper_passes_one_runner_subject_and_rejects_a_second_one(self):
+        self.assertTrue(self.runner_subject_only("A session tagged cs-build:batch-runner, and no other, runs `x`."),
+                        "the one batch runner subject is rejected")
+        self.assertFalse(self.runner_subject_only("A session tagged cs-build:batch-runner, and any session, runs `x`."),
+                         "a second session subject is accepted")
+        self.assertFalse(self.runner_subject_only("A session tagged cs-build:batch-runner, and a solo session does too, runs `x`."),
+                         "a solo session subject is accepted")
 
 
 class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
@@ -2132,6 +2285,89 @@ class SessionStartStopHookPatchTests(SessionStartAgentWorktreeNoticeTests):
         noise = [line for line in lines if STOP_MARKER in line or "not applied" in line or "stop-hook" in line]
         self.assertEqual(noise, [], "the hook printed about a missing platform script: %r" % noise)
         self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+
+
+# The freshness line for the pointer checkout, once origin has a stable branch (the pin follows it; decision
+# merge-reinstalls-from-main). A pin behind origin/stable is counted against it. A pin at its tip counts as on main.
+# With no origin/stable the count stays against origin/main, as before stable existed.
+STALE_LINE = re.compile(r"^claude-settings: .+ is (\d+) commits behind (origin/\S+); global rules and hooks are stale$")
+
+
+class SessionStartStableFreshnessTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTests):
+    """The primary checkout is the pointer, detached or on main, with a local origin. Each case fixes what origin's
+    main and stable hold, then runs the hook once and reads its stale line."""
+
+    # The 51-worktree case builds 51 worktrees; this class does not repeat it.
+    test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
+
+    def setUp(self):
+        super().setUp()
+        self.origin_repo = os.path.join(self.root, "origin.git")
+        vcs(self.root, "init", "-q", "--bare", "-b", "main", "origin.git")
+        vcs(self.primary, "remote", "add", "origin", self.origin_repo)
+        vcs(self.primary, "push", "-q", "origin", "main")
+        self.put(os.path.join(self.config, "CLAUDE.md"), "@%s/CLAUDE.md\n" % self.primary.replace("\\", "/"))
+
+    def other_commit(self, message, refspec):
+        """Another clone commits once and pushes HEAD to `refspec` on origin. Returns the new commit's sha."""
+        other = os.path.join(self.root, "other")
+        if not os.path.isdir(other):
+            vcs(self.root, "clone", "-q", self.origin_repo, other)
+        vcs(other, "commit", "-q", "--allow-empty", "-m", message)
+        vcs(other, "push", "-q", "origin", "HEAD:%s" % refspec)
+        return vcs(other, "rev-parse", "HEAD").stdout.strip()
+
+    def stale_lines(self, lines):
+        return [(found.group(1), found.group(2)) for found in map(STALE_LINE.match, lines) if found]
+
+    def test_a_pin_behind_origin_stable_prints_the_count_against_origin_stable(self):
+        stable = self.other_commit("stable", "stable")
+        self.other_commit("main moves on", "main")
+        vcs(self.primary, "checkout", "-q", "--detach")
+        self.assertIsNone(self.resolve("origin/stable"), "scope: the primary already holds origin/stable")
+        self.assertEqual(self.resolve("origin/main"), self.resolve("main"), "scope: the hook's fetch already moved origin/main")
+        lines = self.run_hook()
+        self.assertEqual(self.resolve("origin/stable"), stable, "the hook did not fetch origin's stable")
+        self.assertEqual(self.stale_lines(lines), [("1", "origin/stable")],
+                         "want one stale line counting the pin 1 behind origin/stable, got %r" % lines)
+
+    def test_a_pin_at_origin_stable_tip_counts_as_main_and_prints_no_stale_line(self):
+        stable = self.other_commit("stable", "stable")
+        self.other_commit("main moves on", "main")
+        vcs(self.primary, "fetch", "-q", "origin", "stable")
+        vcs(self.primary, "checkout", "-q", "--detach", stable)
+        self.assertEqual(self.head_sha(), self.resolve("origin/stable"), "scope: the pin is not at origin/stable")
+        self.assertEqual(self.resolve("origin/main"), self.resolve("main"), "scope: the hook's fetch already moved origin/main")
+        lines = self.run_hook()
+        self.assertEqual([line for line in lines if "not main" in line], [],
+                         "the pin at origin/stable's tip printed a pointer-not-main line: %r" % lines)
+        self.assertEqual(self.stale_lines(lines), [],
+                         "the pin at origin/stable's tip printed a stale line: %r" % lines)
+
+    def test_no_origin_stable_counts_the_pin_behind_origin_main(self):
+        # Characterization of the fallback (the builder's; a reviewer rules on it): with no origin/stable the stale
+        # line counts main..origin/main, as it did before stable existed.
+        self.other_commit("main one", "main")
+        self.other_commit("main two", "main")
+        self.assertIsNone(self.resolve("origin/stable"), "scope: origin has a stable branch")
+        self.assertEqual(self.resolve("origin/main"), self.resolve("main"), "scope: the hook's fetch already moved origin/main")
+        lines = self.run_hook()
+        self.assertEqual(self.stale_lines(lines), [("2", "origin/main")],
+                         "want one stale line counting main 2 behind origin/main, got %r" % lines)
+
+    def test_under_ref_main_the_stale_line_counts_against_origin_main_though_stable_exists(self):
+        # CLAUDE_SETTINGS_REF=main, the recovery, makes main the ref the pin follows, so the count is against origin/main,
+        # even though origin has a stable branch that the pin sits at.
+        vcs(self.primary, "push", "-q", "origin", "main:refs/heads/stable")
+        vcs(self.primary, "checkout", "-q", "--detach")
+        pin = self.head_sha()
+        self.assertEqual(self.resolve("origin/stable"), pin, "scope: origin/stable is not the pin's commit")
+        main_next = self.other_commit("main moves on", "main")
+        self.assertNotEqual(main_next, pin, "scope: origin's main did not move past the pin")
+        lines = self.run_hook(ref="main")
+        self.assertEqual(self.resolve("origin/main"), main_next, "scope: the hook did not fetch origin's main")
+        self.assertEqual(self.stale_lines(lines), [("1", "origin/main")],
+                         "under CLAUDE_SETTINGS_REF=main want one stale line counting the pin 1 behind origin/main, got %r" % lines)
 
 
 if __name__ == "__main__":
