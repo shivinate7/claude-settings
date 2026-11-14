@@ -71,7 +71,6 @@ NO_MD = [
     'Stall watch fixture suite',
     'Stall watch stop suite',
     'Simulator boot-record fixture suite',
-    'Deny checks never raise suite',
     'Session start notice suite',
     'Directory before a segment suite',
     'Refusal settle fixture suite',
@@ -119,7 +118,6 @@ NO_MD = [
     'Shared resource declaration fixture suite',
     'Shared resource declaration check',
     'iPhone mockup check fixture suite',
-    'CLAUDE.md size fixture suite',
     'ios-apps skill starter suite',
     'Unknown-read contract fixture suite',
     'Python 3.9 floor check',
@@ -131,15 +129,9 @@ NO_MD = [
 
 # The audit's NAMES-ONLY steps: each names a file, or copies only hooks/ and lint/ files, which already set `code`.
 NAMES_ONLY = [
-    'Shared names suite',
-    'Guard probe helper fixture suite',
-    'Job runner fixture suite (bin/ci-job)',
     'Windows split guard',
     'Mutation replay fixture suite',
     'Mutation CI report fixture suite',
-    'Hook stub fixture suite',
-    'Record slug fixture suite',
-    'Red-run trailer fixture suite',
     'Hook stub check',
 ]
 
@@ -202,6 +194,14 @@ MUST_STAY_UNSCOPED = [
     'Nightly skip fixture suite',  # not audited yet, so it stays unscoped (fail safe)
     'Proc env read suite',  # not audited yet, so it stays unscoped (fail safe)
     'Stable workflow move job suite',  # not audited yet, so it stays unscoped (fail safe)
+    'Hook stub fixture suite',  # copies hooks/precompact_handoff_prompt.md into its fixture tree (audit hook, run-time open)
+    'Record slug fixture suite',  # copies hooks/precompact_handoff_prompt.md into its fixture tree (audit hook, run-time open)
+    'Red-run trailer fixture suite',  # copies hooks/precompact_handoff_prompt.md into its fixture tree (audit hook, run-time open)
+    'Shared names suite',  # copies hooks/precompact_handoff_prompt.md into its fixture tree (audit hook, run-time open)
+    'Guard probe helper fixture suite',  # copies hooks/precompact_handoff_prompt.md into its fixture tree (audit hook, run-time open)
+    'Job runner fixture suite (bin/ci-job)',  # copies hooks/precompact_handoff_prompt.md into its fixture tree (audit hook, run-time open)
+    'Deny checks never raise suite',  # opens hooks/precompact_handoff_prompt.md at run time (audit hook, run-time open)
+    'CLAUDE.md size fixture suite',  # opens CLAUDE.md at run time (audit hook, run-time open)
 ]
 
 # The steps that run only on a pull request, each with its own `if:`. The scope condition does not touch them.
@@ -394,7 +394,6 @@ MAIN_STEPS = [
 ALLOWED = {
     "actions/stamp/test_stamp.mjs": (["CLAUDE.md", "README.md"], "written into each case's temp root"),
     "hooks/test_call_judge.py": (["README.md", "docs/design/last-answer-notes.md"], "README.md is written into a temp repo; the other name is in comments"),
-    "hooks/test_checks_never_raise.py": (["CLAUDE.md"], "written into a temp CLAUDE_CONFIG_DIR"),
     "hooks/test_decision_watch.py": (["CLAUDE.md", "decisions/reply-judge-samples-never-refuses.md"], "CLAUDE.md is written into temp repos; the record name is in a comment"),
     "hooks/test_feedback_inbox.py": ([".claude/CLAUDE.md", "CLAUDE.md", "README.md", "docs/todo.md"], "fixture repos track or write these names in temp dirs"),
     "hooks/test_mutate_replay.py": (["README.md"], "the base file of each temp repo"),
@@ -403,11 +402,7 @@ ALLOWED = {
     "hooks/test_session_start.py": ([".claude/CLAUDE.md", "CLAUDE.md"], "written into temp config and checkout dirs"),
     "hooks/test_waiting_export.py": (["README.md"], "a fixture tool result line"),
     "lint/check_python_floor.py": (["README.md"], "named in the module docstring; the check does not open it"),
-    "lint/test_check_claude_md_size.py": ([".claude/CLAUDE.md", "CLAUDE.md"], "written into a temp tree"),
-    "lint/test_check_hook_stubs.py": (["README.md"], "committed into temp git repos"),
-    "lint/test_check_record_slugs.py": (["debts/README.md", "debts/notes.md"], "folder files the check skips, named as constants"),
     "lint/test_all_jobs_passed.py": (["README.md"], "a changed path handed to the scope detector as a fixture; the file is never read"),
-    "lint/test_ci_job.py": (["AGENTS.md", "CLAUDE.md"], "written into temp roots"),
     "lint/test_ci_scope.py": ([
         "README.md", "reference/copies-and-accounts.md", "reference/repo-pages.md", "skills/ci-hygiene/SKILL.md",
         "CLAUDE.md", "output-styles/shiv-stylisms.md", "skills/waiting-page/SKILL.md", "skills/waiting-page/reference/copies-and-accounts.md",
@@ -441,6 +436,7 @@ TRANSITIVE_MD_READERS = ["skills/impeccable/SKILL.md", "test_guard.py", "drive_t
 # A reader named in a file that does not read it at run time, with one reason. The ALLOWED rule, for these names.
 TRANSITIVE_ALLOWED = {
     "lint/test_ci_scope.py": (["test_guard.py"], "a changed path the scope detector is given; no file is run"),
+    "hooks/guard.py": (["skills/impeccable/SKILL.md"], "impeccable_command_verbs opens it only when a command verb check runs; an in-process audit hook over the 83 scoped python suites saw no open (read 13:32 CST Nov 14; a suite's own child processes were not watched)"),
     "lint/rule_audit.py": (["test_guard.py"], "section_dir and _with_sections only parse hooks/test_guard.py and tests/guard/*.py as Python; nothing runs them or opens skills/impeccable"),
     "lint/test_rule_audit.py": (["test_guard.py", "tests/guard"], "builds its own hooks/test_guard.py and tests/guard fixture in a temp tree"),
     "hooks/mutate_guard.py": (["test_guard.py"], "strace, round 1 review: no open of skills/impeccable at run time"),
@@ -580,6 +576,10 @@ def scan_file(rel, text, index):
             elif isinstance(node, ast.Call) and callee(node) in READ_CALLS:
                 for arg in node.args + [k.value for k in node.keywords]:
                     names.extend(read_strings(arg))
+                if callee(node) != "join":
+                    continue
+            if isinstance(node, ast.Call) and callee(node) == "join":
+                names.extend(read_strings(node))  # a join held in a constant and opened later still names its path
     for name in names:
         for token in CODE_TOKEN.findall(name):
             reaches |= targets(token)
@@ -788,7 +788,7 @@ class ScopedEntriesNameNoUnlistedMd(ChecksStepBase):
 
 
 class AllowanceNamesAfterAMove(unittest.TestCase):
-    ENTRY = "lint/test_check_claude_md_size.py"  # a scoped entry that ALLOWED lists with its names
+    ENTRY = "hooks/test_call_judge.py"  # a scoped entry that ALLOWED lists with its names
     GONE = "docs/renamed-away-for-test.md"  # not tracked, as after a rename
 
     def failures_with(self, names):
@@ -835,6 +835,12 @@ class TransitiveWalkFixtures(unittest.TestCase):
                  "hooks/test_guard.py": "x = 1\n"}
         hits, _ = self.walk(files)
         self.assertIn("a/helper.py", [rel for _, rel, _ in hits], "the read in the imported file is not seen")
+
+    def test_a_path_joined_into_a_constant_and_opened_later_is_a_hit(self):
+        files = {"a/entry.py": "import helper\n",
+                 "a/helper.py": "import os\nSKILL = os.path.join(HERE, '..', 'skills', 'impeccable', 'SKILL.md')\nopen(SKILL)\n"}
+        hits, _ = self.walk(files)
+        self.assertIn("a/helper.py", [rel for _, rel, _ in hits], "a path held in a constant is not seen")
 
     def test_a_read_three_hops_out_is_a_hit(self):
         files = {"a/entry.py": "import one\n", "a/one.py": "import two\n", "a/two.py": "import three\n",
