@@ -222,7 +222,7 @@ FIRST_RED_RERUN = re.compile(rf"`{RERUN_REMEDY} (\d+) --failed`")  # base_state 
 DROP_CITE = "(decision silent-undo-check-design, a branch that silently undoes earlier work does not merge)"
 BATCH_CITE = "(decision main-branch-protection, the merge tool reads the required checks from the ruleset or the protection and never merges with none)"
 EXPRESS_CITE = "(decision owner-override, ruling R59 part 5 of 15:05 CST Nov 12, a ruled prose change skips the batch queue and runs only the checks that read its files)"
-FREEZE_CITE = "(decision no-merge-during-batch-ci, nothing merges while another ready pull request's CI runs, and the required checks are never empty)"  # the frozen-block refusals keep their own cite: BATCH_CITE now names the required-checks home, which does not govern them
+FREEZE_CITE = "(decision batch-freeze-lane-set, a batch's lane set freezes when its build starts)"  # the frozen-block refusals and the duplicate-head stop keep their own cite: BATCH_CITE names the required-checks home, which does not govern them
 DRAFT_CITE = "(decision draft-until-reviewed, every pull request opens as a draft and only the one integration PR goes ready)"
 STAMP_RUN_CITE = "(decision one-shared-record-stamp, the claim runs before the merge, on the pull request branch, in the merge tool)"
 STAMP_CFG_CITE = "(decision one-shared-record-stamp, each repo keeps its config in its own tree, and the tool never guesses a config field)"
@@ -506,12 +506,17 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_h
     if problems:
         raise Dropped("the branch silently undoes earlier work:\n  " + "\n  ".join(problems) + f"\nPut it back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message. {UNDO_CITE}")
 
+def load_debt_retire():
+    """The debt-close lint module (lint/check_debt_retire.py), the one home of its TIMEOUT. Imported late: a missing module stops only a debt check."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    import check_debt_retire
+    return check_debt_retire
+
 def debt_check(wt, base_ref, host, info):
     """The debt-close lint (lint/check_debt_retire.py): each debt the branch closes has its Retire check run on the head.
     A finding, red or unknown or prose, refuses. No reason flag lifts it. A cited run is judged against the PR head, never the worktree
     HEAD: the claim commit goes on top of the PR head, and a run on the head is still the run of this PR."""
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
-    import check_debt_retire as debt
+    debt = load_debt_retire()
     try:
         found = debt.check(wt, base_ref, info["head"], pr_body=info.get("body", ""), run_state=lambda url: host.cited_run(url), isolate=True)
     except debt.Unknown as e:
@@ -1927,7 +1932,7 @@ READY_ROUTES = ("Mark ready in cloud by MCP update_pull_request draft=false; on 
 DRAFT_ROUTES = ("Return to draft in cloud by MCP update_pull_request draft=true; on a computer by `gh pr ready --undo` "
                 "(route pr-draft-mcp-cloud, route pr-draft-gh-cli-local)")
 DRAFT_SKIP_CHECK = REQUIRED_CHECK  # the one required check a draft run skips (actions/all-jobs-passed): its skip means the ready run is still to come, not green
-LINT_SECONDS = 3600  # Interim stopgap (owner 12:11 CST Nov 10, decision ci-job-caps; ends with step time-pinned-tests-go). The bound on the lint run of the merge result, and again on the suites it hits; the lock is extended to cover each, and LOCK_MAX_HOLD still covers both
+LINT_SECONDS = 3600  # Interim stopgap (owner 12:11 CST Nov 10, decision ci-job-caps; ends with step time-pinned-tests-go). The bound on the lint run of the merge result, and again on the suites it hits. Both run before the lock is taken, so neither extends it; confirm extends the lock only for a rate wait and before the debt and undo checks (LOCK_TTL_SECONDS)
 
 def merge_read(wt, base_ref, sha):
     """-> (state, files) of the merge of `sha` into the tip of `base_ref` (merge_tree): "clean", "conflict" with its paths, or "unknown" with one
@@ -3215,7 +3220,18 @@ def ready_page_state(root, n, host):
         with shared_deadline(READY_PAGE_CLEANUP_SECONDS):
             drop_worktree(root, tmp, wt)
 
-LOCK_TTL_SECONDS = 1200  # unmeasured. confirm holds no check wait under the lock and extend_for lengthens it for a rate wait, so a crashed run frees the lock in 20 minutes at any merge.deadlineMinutes
+LOCK_TTL_SECONDS = 1200  # unmeasured. confirm waits on no CI run under the lock. extend_for lengthens it for a rate wait and before each debt check and undo check (UNDO_CHECK_LOCK_SECONDS and debt_check_lock_seconds), so a crashed run frees the lock in 20 minutes at any merge.deadlineMinutes
+UNDO_CHECK_LOCK_SECONDS = 3600  # unmeasured: undo_check has no time bound of its own. The lock covers this long before each call of it
+
+def debt_check_lock_seconds():
+    """The lock covers one Retire suite's bound before each debt_check: lint/check_debt_retire.py TIMEOUT, read at call time, never a copy."""
+    return load_debt_retire().TIMEOUT
+
+def extend_lock(lock, wait):
+    """Before a long check under the lock: lengthen it to cover `wait` s. A lock with no extend_for (a backend that never extends) is left alone."""
+    extend = getattr(lock, "extend_for", None)
+    if extend:
+        extend(wait)
 
 def relayed_head_holds(root, branch, relayed, live):
     """True when the live head is the head a relayed yes named, or sits on it with only this tool's own commits between: a Record-claim
@@ -3295,7 +3311,9 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         if wt is None:
             tmp, wt = open_worktree(root, info, base)
         lane_head = head_under_claims(wt, cfgrel, base, info["head"]) if base == cfg["defaultBranch"] else info["head"]  # the head a cited run and the relayed yes name
+        extend_lock(lock, UNDO_CHECK_LOCK_SECONDS)
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), lane_head))
+        extend_lock(lock, debt_check_lock_seconds())
         debt_check(wt, base_ref, host, dict(info, head=lane_head))
         record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
         stale, stands = holds_base(wt, base_ref, info["head"])  # rule M3: a clean merge-tree against the tip, read before the claim
@@ -3368,7 +3386,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         try:  # after the push only a Stop may leave. A read that could not run is unknown (Unproven); any other error reverts the claim first
             def prove(stop):
                 """Read the branch against the base tip fetched now. -> the records proof, or None off the default base.
-                stop(why) refuses. It waits on no check."""
+                stop(why) refuses. It waits on no CI run; the undo and debt checks run under a lock extended before each."""
                 c, out, _ = retry_net(lambda: git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}"), getattr(host, "pause", time.sleep), what=f"the fetch of {base}")
                 if is_net(c, out):  # a network error is not a refusal: the claim stays
                     raise NetStop(f"network error on the fetch of origin {base}, still failing after {NET_RETRIES} retries. The claim stays on {branch}. Run again to resume.\n{out}")
@@ -3376,13 +3394,17 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                     unproven(f"cannot fetch origin {base}, so the claim cannot be proved fresh {BASE_CITE}", out)
                 if not os.path.exists(os.path.join(wt, ".git")):  # before the reads below: on a missing tree they fail as unknown
                     unproven("the worktree is gone, so the claim cannot be proved fresh " + BASE_CITE, "")
-                try:  # main may have moved during the wait: read the branch against the tip fetched just now
-                    record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), lane_head))
-                    debt_check(wt, base_ref, host, dict(info, head=lane_head))
-                except (Liftable, Unread) as e:  # a history read that could not run; a finding is Dropped, and refuses
-                    unproven("a check could not read the history", str(e))
-                except Stop as e:
-                    stop(str(e))
+                def checked(call):  # main may have moved during the wait: read the branch against the tip fetched just now
+                    try:
+                        call()
+                    except (Liftable, Unread) as e:  # a history read that could not run; a finding is Dropped, and refuses
+                        unproven("a check could not read the history", str(e))
+                    except Stop as e:
+                        stop(str(e))
+                extend_lock(lock, UNDO_CHECK_LOCK_SECONDS)  # outside checked: a lock that cannot be extended is a NetStop, and the claim stays
+                checked(lambda: record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), lane_head)))
+                extend_lock(lock, debt_check_lock_seconds())
+                checked(lambda: debt_check(wt, base_ref, host, dict(info, head=lane_head)))
                 try:  # the config is the base tip's, read just after the fetch
                     stamp_cfg = base_stamp_config(wt, tmp, cfgrel, base_ref)
                 except Unread as e:
@@ -3819,7 +3841,8 @@ def reviewed_read(h, cfgrel=None):
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
     the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request.
     The same list holds the lane-lint comments: a done record counts as done only with a lane-lint PASS at the live head (lint_state), else its line
-    names `merge --lane-lint <n>`; no extra call. Each record's clean-merge walk judges against the host's base at entry, the repo's default branch, never the pull
+    names `merge --lane-lint <n>`; no extra call. A ready pull request with no such PASS adds one rollup_green read (the check runs and the commit
+    statuses, two more `gh` calls): a green all-jobs-passed on the live head reads `lint skipped`, as the join (lint_check) does, and the state stays done. Each record's clean-merge walk judges against the host's base at entry, the repo's default branch, never the pull
     request's own base. A claim commit on the reviewed head carries both the record and the lint (claim_only, with the stamp config `cfgrel`), as
     the join reads it; that reads git in the host's checkout, and fetches a pull request head it lacks."""
     main, cfgrel, root = h.base, cfgrel or DEFAULT_CONFIG, h.cwd or "."
@@ -3841,7 +3864,9 @@ def reviewed_read(h, cfgrel=None):
             lint = lint_state(lints.get(n, []), sha)
             if lint == "none" and lint_carried(root, cfgrel, d["base"]["ref"], n, lint_passed(lints.get(n, [])), sha):
                 lint = "pass"
-            if lint != "pass":  # a done record is not ready without the lane's lint at this head (decision lanes-run-no-full-ci-job)
+            if lint != "pass" and not d.get("draft") and rollup_green(h, n, sha):  # CI proved this head, so the join skips the lint (lint_check). A draft reads no head checks
+                why = f"{why}; lint skipped: {ROLLUP_JOB} is green on {sha[:9]}, so CI already proved this head"
+            elif lint != "pass":  # a done record is not ready without the lane's lint at this head (decision lanes-run-no-full-ci-job)
                 state, why = LINT_NOT_READY[lint][0], f"{LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`"
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
         lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
