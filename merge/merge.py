@@ -4342,7 +4342,7 @@ def freeze_lines(name, lanes, dropped=(), on=None, base=None, blamed=(), linted=
             *(f"Lane: #{n} {lanes[n]}" for n in sorted(lanes)),
             *(f"Dropped: #{n}" for n in dropped), *(f"Blamed: #{n}" for n in sorted(blamed)), *([f"Linted: {linted}"] if linted else []), BATCH_END]
 
-REPLACES_LINE = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?\**(?:Replaces|Carries)\**:?\**[ \t]+(?:PR[ \t]+)?(#\d+(?:[ \t]*(?:,[ \t]*(?:and|&)?|and|&)[ \t]*(?:PR[ \t]+)?#\d+)*)(?=\**[ \t]*(?:$|[.!?;](?:[ \t]|$)))", re.I)
+REPLACES_LINE = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?\**(?:Replaces|Carries)\**:?\**[ \t]+(?:PR[ \t]+)?(#\d+(?:(?:[ \t]*,[ \t]*(?:and[ \t]+|&[ \t]*)?|[ \t]+and[ \t]+|[ \t]*&[ \t]*)(?:PR[ \t]+)?#\d+)*)(?=\**[ \t]*(?:$|[.!?;](?:[ \t]|$)))", re.I)
 
 def replaced_names(info, n):
     """-> the numbers of the pull requests that the body of pull request `n` (`info`: its "branch" and "body") names as replaced, in order, once each.
