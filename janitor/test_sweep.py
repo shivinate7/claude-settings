@@ -223,7 +223,7 @@ def _wait_for_pidport_file(path, timeout=10.0):
                 pass
             pid_text, port_text = data.split(",")
             return int(pid_text), int(port_text)
-        time.sleep(0.05)
+        time.sleep(0.05)  # poll step: the fixture's file is a condition, and the timeout above caps the wait
     require(False, "listener fixture never wrote its pid/port file: %r" % path)
 
 
@@ -278,7 +278,7 @@ def spawn_plain_listener(cwd):
         port = sock.getsockname()[1]
         os.write(write_fd, str(port).encode())
         os.close(write_fd)
-        time.sleep(120)
+        time.sleep(120)  # the listener must outlive the case; cleanup() kills it, so 120 s is only a ceiling
         os._exit(0)
     os.close(write_fd)
     port = int(os.read(read_fd, 32).decode())
@@ -323,7 +323,7 @@ def spawn_orphaned_listener(cwd):
             port = sock.getsockname()[1]
             os.write(write_fd, ("%d,%d" % (os.getpid(), port)).encode())
             os.close(write_fd)
-            time.sleep(120)
+            time.sleep(120)  # the orphan must outlive the case; the sweep or cleanup kills it, so 120 s is a ceiling
             os._exit(0)
         os.close(write_fd)
         os._exit(0)  # the immediate child exits now; pid 1 adopts the grandchild
@@ -1436,7 +1436,7 @@ class ListenerDecisionTests(unittest.TestCase):
         # gives, then check the real OS-level pid.
         deadline = time.time() + 5
         while time.time() < deadline and sweep.pid_alive(self.reap_pid):
-            time.sleep(0.2)
+            time.sleep(0.2)  # poll step: the reap is a condition on the pid, and the deadline above caps the wait
         self.assertFalse(sweep.pid_alive(self.reap_pid),
                           "sweep_repo(confirm=True) must have actually signalled the orphan")
         # Respawn it under the SAME worktree so tearDownClass's cleanup still has something
@@ -1592,7 +1592,7 @@ def _read_when_ready(path, timeout=10.0):
         if os.path.exists(path) and os.path.getsize(path) > 0:
             with open(path, encoding="utf-8") as handle:
                 return handle.read().strip()
-        time.sleep(0.05)
+        time.sleep(0.05)  # poll step: the fixture's pid file is a condition, and the timeout above caps the wait
     require(False, "fixture never wrote its pid file: %r" % path)
 
 
@@ -2314,6 +2314,9 @@ class OptOutTests(unittest.TestCase):
 
 
 class TombstoneTests(unittest.TestCase):
+    # a fixed wall-clock second: the restore log must hold this value, whatever the real time is
+    PINNED_WALL_CLOCK = 1_900_000_000.0
+
     def test_reap_writes_a_tombstone_and_a_restore_log_line_before_deleting(self):
         root = os.path.join(ROOT, "tomb-repo")
         make_repo(root, {"f.txt": "x\n"})
@@ -2327,7 +2330,11 @@ class TombstoneTests(unittest.TestCase):
         self.assertTrue(tip)
 
         log_path = os.path.join(ROOT, "tomb-restore.jsonl")
-        result = sweep.sweep_repo(root, confirm=True, restore_log_path=log_path)
+        # pinned, so the log line is checked against that value and not the real time
+        pinned = mock.MagicMock(wraps=time)
+        pinned.time.return_value = self.PINNED_WALL_CLOCK
+        with mock.patch.object(sweep, "time", pinned):
+            result = sweep.sweep_repo(root, confirm=True, restore_log_path=log_path)
         self.assertIsNone(result["refused"])
         decision = next(b for b in result["branches"] if b["name"] == "old-topic")
         self.assertEqual(decision["action"], "reap")
@@ -2344,7 +2351,8 @@ class TombstoneTests(unittest.TestCase):
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0]["commit"], tip)
         self.assertIsInstance(matches[0]["time_ms"], int)
-        self.assertLessEqual(abs(int(time.time() * 1000) - matches[0]["time_ms"]), 60_000)
+        self.assertEqual(matches[0]["time_ms"], int(self.PINNED_WALL_CLOCK * 1000),
+                         "the restore log line is not the sweep's own clock reading")
 
     def test_a_failed_delete_still_leaves_the_tombstone_and_the_branch(self):
         """The tombstone and the log line land BEFORE the delete. If the delete then fails, the
@@ -3315,16 +3323,20 @@ class ParallelPreviewTests(unittest.TestCase):
         self.assertEqual(peak, 1)
         self.assertNotIn("empty-a", sweep.list_local_branches(root))
 
-    def _peak_concurrency(self, name, run):
+    def _peak_concurrency(self, name, run, hold=1.0):
         """Highest number of calls to `sweep.<name>` in flight at once during `run()`, in a
-        preview."""
+        preview. A call holds until another call is in flight, or HOLD seconds pass: an overlap is
+        seen by condition, and a serial run only pays the bound."""
         real, lock, state = getattr(sweep, name), threading.Lock(), {"now": 0, "peak": 0}
+        overlapped = threading.Event()
 
         def wrapped(*a, **k):
             with lock:
                 state["now"] += 1
                 state["peak"] = max(state["peak"], state["now"])
-            time.sleep(0.2)
+                if state["now"] > 1:
+                    overlapped.set()
+            overlapped.wait(hold)  # the bound only ends a hold that no second call came to
             try:
                 return real(*a, **k)
             finally:
@@ -3943,7 +3955,7 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
             if holder.poll() is not None or time.time() > deadline:
                 self.stop_holder(holder)
                 self.fail("the holder never took the payload log lock")
-            time.sleep(0.02)
+            time.sleep(0.02)  # poll step: the holder's ready file is a condition, and the deadline above caps the wait
         return holder
 
     @staticmethod
@@ -6537,7 +6549,7 @@ class BuildDirReapTests(unittest.TestCase):
         """Bounded wait for a detached child to delete PATH. Capped at SECONDS; never unbounded."""
         deadline = time.monotonic() + seconds
         while os.path.exists(path) and time.monotonic() < deadline:
-            time.sleep(0.2)
+            time.sleep(0.2)  # poll step: a detached child's delete is a condition, and the seconds cap above bounds it
         return not os.path.exists(path)
 
     def test_native_build_bare_build_at_depth_and_derived_data_are_reaped(self):
@@ -6862,8 +6874,9 @@ class BuildDirReapTests(unittest.TestCase):
         tree = self.add_agent(primary, "bdrSafe")
         write(os.path.join(tree, "f.txt"), "edited\n")
         write(os.path.join(tree, "Sources", "x.swift"), "let x = 1\n")
-        later = time.monotonic() + 60
-        self.assertIsNotNone(self.reap.edit_idle(tree, later), "control: a readable tree reads")
+        # no clock read: a deadline no walk passes (the control), and one every walk has already passed
+        never, spent = float("inf"), float("-inf")
+        self.assertIsNotNone(self.reap.edit_idle(tree, never), "control: a readable tree reads")
         real = os.lstat
 
         def refused(target, *args, **kwargs):
@@ -6872,9 +6885,9 @@ class BuildDirReapTests(unittest.TestCase):
             return real(target, *args, **kwargs)
 
         with self.subTest(arm="an unreadable stat"), mock.patch.object(os, "lstat", new=refused):
-            self.assertIsNone(self.reap.edit_idle(tree, later))
+            self.assertIsNone(self.reap.edit_idle(tree, never))
         with self.subTest(arm="a walk past the deadline"):
-            self.assertIsNone(self.reap.edit_idle(tree, time.monotonic() - 1))
+            self.assertIsNone(self.reap.edit_idle(tree, spent))
 
     def test_a_build_started_during_the_hook_keeps_its_build_folders(self):
         # A build that starts after the hook's first process read must still keep its folders.
@@ -6946,13 +6959,21 @@ class BuildDirReapTests(unittest.TestCase):
         _age_admin_files(tree, 31 * 60)
         real = sweep.decide_agent_end_worktree
 
+        # The stage clock is a counter, so no case waits in real time. `slow` moves it 2 s past the stage
+        # deadline (WORKTREE_SECONDS is 1 s); a sleep in the stage moves it the same way.
+        clock = {"now": 1000.0}
+        pinned = mock.MagicMock(wraps=time)
+        pinned.monotonic.side_effect = lambda: clock["now"]
+        pinned.sleep.side_effect = lambda seconds: clock.__setitem__("now", clock["now"] + seconds)
+
         def slow(*args, **kwargs):
             # The tree's decision ends past the stage deadline, so its build pass is not reached.
             decision = real(*args, **kwargs)
-            time.sleep(1.2)
+            clock["now"] += 2.0
             return decision
 
         with mock.patch.object(self.reap, "WORKTREE_SECONDS", 1), \
+                mock.patch.object(self.reap, "time", pinned), \
                 mock.patch.object(sweep, "decide_agent_end_worktree", new=slow):
             record = self.run_in_process(ender)
         self.assert_all_kept(tree, "a tree past the stage deadline lost its build folders")
@@ -7021,10 +7042,16 @@ class BuildDirReapTests(unittest.TestCase):
         write(os.path.join(base, "DerivedData", "payload.bin"), "x\n")
         link = os.path.join(primary, ".claude", "worktrees", "agent-x")
         make_junction(link, base)
-        self.assertEqual(self.reap.reap_build_dirs(link, []), [])
-        deadline = time.monotonic() + 2  # a detached child, if one ran, would act inside this window
-        while time.monotonic() < deadline:
-            time.sleep(0.2)
+        spawned = []
+
+        def refuse(argv, **kwargs):
+            # a start is recorded and refused: a detached child can act on the target only once started
+            spawned.append(argv)
+            return mock.MagicMock()
+
+        with mock.patch.object(self.reap._nowindow, "Popen", side_effect=refuse):
+            self.assertEqual(self.reap.reap_build_dirs(link, []), [])
+        self.assertEqual(spawned, [], "a junction worktree path started a detached child")
         self.assertEqual(os.listdir(base), ["DerivedData"], "the target was renamed or gained a trash name")
         self.assertTrue(os.path.isfile(os.path.join(base, "DerivedData", "payload.bin")),
                         "the target's DerivedData lost its file")
@@ -7042,7 +7069,7 @@ class BuildDirReapTests(unittest.TestCase):
             deadline = time.monotonic() + 10
             while time.monotonic() < deadline and any(
                     self.reap.is_trash_name(n) for n in os.listdir(wt)):
-                time.sleep(0.2)
+                time.sleep(0.2)  # poll step: the trash folder's removal is a condition, and the 10 s deadline above caps it
             self.assertFalse([n for n in os.listdir(wt) if self.reap.is_trash_name(n)],
                              "the trash folder was not deleted in 10 s")
         with self.subTest(arm="the junction target"):
