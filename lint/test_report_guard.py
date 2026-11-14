@@ -5896,6 +5896,17 @@ class MistakeNamesGuardTests(unittest.TestCase):
     def test_mg_green_backticked_guard_label_after_dash_passes(self):
         self.assert_allowed(mg_report("The builders broke the lint check — `Guard: future briefs run it`."))
 
+    # A spaced hyphen is a dash for a label after it, in the colon form.
+    def test_mg_red_guard_label_after_hyphen_blocks(self):
+        self.assert_blocked(mg_report("The builders broke the check - Guard: future briefs run it first."))
+
+    def test_mg_green_guard_label_after_hyphen_with_step_passes(self):
+        self.assert_allowed(mg_report("The builders broke the check - Guard: step:lint-precheck."))
+
+    # A ref after a mid-line label counts, with a ref before the label on the same line.
+    def test_mg_green_guard_label_after_comma_ref_before_and_after_passes(self):
+        self.assert_allowed(mg_report("none", done="> **Done** BUILT #1183, guard: step:x-y"))
+
 
 if __name__ == "__main__":
     unittest.main()
