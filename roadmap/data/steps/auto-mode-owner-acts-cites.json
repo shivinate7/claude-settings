@@ -1,0 +1,14 @@
+{
+ "id": "auto-mode-owner-acts-cites",
+ "title": "Add cites for two unbacked claims in docs/decisions/auto-mode-owner-acts.md",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Follow-up of step reinstall-from-stable-allow (#3323 merged), relayed by the coordinator 22:45 CST Nov 13: two claims in the decision text have no cite (unchecked by triage).",
+ "source": "Coordinator 22:45 CST Nov 13 (relayed); PR #3323.",
+ "note": "Triage 22:45 CST Nov 13: a small docs PR; the lane that wrote #3323 or a fresh docs lane reads the two claims and either cites them or removes them. Docs only, one round. Not started.",
+ "updatedAt": "2026-11-13T22:45:08-06:00"
+}
