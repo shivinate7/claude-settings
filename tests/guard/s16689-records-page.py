@@ -185,6 +185,38 @@ REC_UNREL_LANE = os.path.join(RECMORE, "unrelated-lane")
 # page is MERGE_HEAD's.
 REC_NOORIGIN = os.path.join(RECMORE, "noorigin")
 REC_NOORIGIN_LANE = os.path.join(RECMORE, "noorigin-lane")
+# A rows page: a full-size page of 30 rows, so that two edits in different regions merge cleanly. The lane commits a
+# row after row 01; origin/main appends a row after row 30. Rows 02 to 30 stay unchanged between the two edits, so git
+# does not call them adjacent. The clean merge is neither HEAD's, the base's nor MERGE_HEAD's page: it is the one page
+# these two edits can give.
+REC_ROWS = os.path.join(RECMORE, "rows")
+REC_ROWS_LANES = {name: os.path.join(RECMORE, "rows-" + name) for name in ("merge", "hand", "quit", "solo", "wt")}
+REC_ROW_LINES = ["row %02d: decision %d" % (i, i) for i in range(1, 31)]
+# An older base tip: origin/main moves to T1, the lanes merge T1, then origin/main moves on to T2, which adds row 32.
+# A lane's MERGE_HEAD is then T1, a past first-parent tip, and the clean merge with T2 is a different page.
+REC_OLD = os.path.join(RECMORE, "oldtip")
+REC_OLD_LANES = {name: os.path.join(RECMORE, "oldtip-" + name) for name in ("merge", "latest", "conflict", "deleted")}
+# The conflict lanes edit src/app.py, and T1 edits it too, so the merge of T1 conflicts there and nowhere else.
+REC_OLD_APP_T1 = "x = 3\n"
+REC_OLD_APP_LANE = "x = 2\n"
+
+
+def _rec_rows_page(*rows):
+    return "# Records index\n" + "".join(row + "\n" for row in rows)
+
+
+REC_ROWS_CUT = _rec_rows_page(*REC_ROW_LINES)
+REC_ROWS_LANE = _rec_rows_page(REC_ROW_LINES[0], "row 01a: the lane's own row", *REC_ROW_LINES[1:])
+REC_ROWS_MAIN = _rec_rows_page(*REC_ROW_LINES, "row 31: main's own row")
+REC_ROWS_MERGED = _rec_rows_page(REC_ROW_LINES[0], "row 01a: the lane's own row", *REC_ROW_LINES[1:],
+                                 "row 31: main's own row")
+# The clean merge, then a row rewritten by hand in a region the merge did not touch.
+REC_ROWS_HAND = _rec_rows_page(REC_ROW_LINES[0], "row 01a: the lane's own row", *REC_ROW_LINES[1:14],
+                               "row 15: rewritten by hand", *REC_ROW_LINES[15:], "row 31: main's own row")
+REC_ROWS_T2 = _rec_rows_page(*REC_ROW_LINES, "row 31: main's own row", "row 32: main's later row")
+# The clean merge of the lane's row with T2 (rows 31 and 32): the page a hand-written merge with the newer tip would hold.
+REC_ROWS_LATEST = _rec_rows_page(REC_ROW_LINES[0], "row 01a: the lane's own row", *REC_ROW_LINES[1:],
+                                 "row 31: main's own row", "row 32: main's later row")
 
 
 def _build_records_more():
@@ -516,10 +548,121 @@ def _build_records_more():
     need(run_vcs(REC_NOORIGIN, "rev-list", "--first-parent", "origin/main").returncode != 0,
          "the noorigin fixture: rev-list --first-parent origin/main does not fail")
 
+    # The rows repository: each lane is cut from the stale local main. The merge lane holds the clean merge. The
+    # hand, quit and solo lanes hold a rewritten row, a merge after `merge --quit`, and a row staged with no merge. The wt
+    # lane holds a hand-written page in the index and the clean merge in the working tree.
+    make_repo(REC_ROWS, {"docs/records.md": REC_ROWS_CUT, "src/app.py": "x = 1\n"})
+    advance(REC_ROWS, {"docs/records.md": REC_ROWS_MAIN}, "refs/remotes/origin/main")
+    need(run(REC_ROWS, "show", "origin/main:docs/records.md") == REC_ROWS_MAIN.strip()
+         and run(REC_ROWS, "show", "main:docs/records.md") == REC_ROWS_CUT.strip(),
+         "the rows repository is not 'local main at the cut, origin/main with main's row'")
+    for name, where in REC_ROWS_LANES.items():
+        run(REC_ROWS, "worktree", "add", "-q", "-b", "lane-rows-" + name, where, "main")
+    for name in ("merge", "hand", "quit", "wt"):
+        lane = REC_ROWS_LANES[name]
+        write(page(lane), REC_ROWS_LANE)                  # the lane's own row, committed
+        run(lane, "add", "docs/records.md")
+        run(lane, "commit", "-q", "-m", "lane row")
+        run(lane, "merge", "-q", "--no-commit", "--no-ff", "origin/main")   # git merges both rows, no conflict
+    run(REC_ROWS_LANES["quit"], "merge", "--quit")       # MERGE_HEAD removed; the index keeps the clean merge
+    write(page(REC_ROWS_LANES["hand"]), REC_ROWS_HAND)   # a row rewritten after the merge, staged
+    run(REC_ROWS_LANES["hand"], "add", "docs/records.md")
+    write(page(REC_ROWS_LANES["solo"]), REC_ROWS_LANE)   # the lane's row staged, cut from the base, no merge
+    run(REC_ROWS_LANES["solo"], "add", "docs/records.md")
+    # The wt lane: a hand-written page staged, and the clean merge left in the working tree, unstaged.
+    write(page(REC_ROWS_LANES["wt"]), REC_ROWS_HAND)
+    run(REC_ROWS_LANES["wt"], "add", "docs/records.md")
+    write(page(REC_ROWS_LANES["wt"]), REC_ROWS_MERGED)
 
-lazy_fixture([REC_DANGLE, REC_NEW, REC_ADOPT, REC_PLAIN, *REC_DANGLE_LANES.values(), REC_NEW_LANE,
-              REC_ADOPT_LANE, *REC_PLAIN_LANES.values(), REC_MOVED, *REC_MOVED_LANES.values(),
-              REC_ANC, REC_ANC_LANE, REC_STACK, *REC_STACK_LANES.values(),
+    def staged_blob(lane):
+        return run(lane, "ls-files", "-s", "--", "docs/records.md").split()[1]
+
+    merged = REC_ROWS_LANES["merge"]
+    need(run(merged, "rev-parse", "MERGE_HEAD") == run(REC_ROWS, "rev-parse", "origin/main")
+         and run(merged, "diff", "--name-only", "--diff-filter=U") == "",
+         "the rows merge lane: MERGE_HEAD is not origin/main's tip, or the merge left a conflict")
+    need(run(merged, "show", ":docs/records.md") == REC_ROWS_MERGED.strip(),
+         "the rows merge lane: the staged page is not the clean merge of the two rows")
+    need(staged_blob(merged) not in {run(merged, "rev-parse", rev) for rev in (
+        "HEAD:docs/records.md", "origin/main:docs/records.md", "MERGE_HEAD:docs/records.md")},
+         "the rows merge lane: the staged page is the blob of HEAD, origin/main or MERGE_HEAD, not a new merge")
+    need(run(REC_ROWS_LANES["hand"], "show", ":docs/records.md") == REC_ROWS_HAND.strip()
+         and run_vcs(REC_ROWS_LANES["hand"], "rev-parse", "--verify", "-q", "MERGE_HEAD").returncode == 0,
+         "the rows hand lane: a merge is not in progress, or the staged page is not the hand-written one")
+    need(run_vcs(REC_ROWS_LANES["quit"], "rev-parse", "--verify", "-q", "MERGE_HEAD").returncode != 0
+         and run(REC_ROWS_LANES["quit"], "show", ":docs/records.md") == REC_ROWS_MERGED.strip(),
+         "the rows quit lane: a merge is still in progress, or the staged page is not the clean merge")
+    need(run_vcs(REC_ROWS_LANES["solo"], "rev-parse", "--verify", "-q", "MERGE_HEAD").returncode != 0
+         and run(REC_ROWS_LANES["solo"], "show", "HEAD:docs/records.md") == REC_ROWS_CUT.strip()
+         and run(REC_ROWS_LANES["solo"], "show", ":docs/records.md") == REC_ROWS_LANE.strip(),
+         "the rows solo lane: a merge is in progress, or HEAD is not the cut, or the staged page is not the row")
+    need(run(REC_ROWS_LANES["wt"], "show", ":docs/records.md") == REC_ROWS_HAND.strip()
+         and open(page(REC_ROWS_LANES["wt"]), encoding="utf-8").read() == REC_ROWS_MERGED
+         and run_vcs(REC_ROWS_LANES["wt"], "rev-parse", "--verify", "-q", "MERGE_HEAD").returncode == 0,
+         "the rows wt lane: the index is not the hand page, the working tree is not the clean merge, or no merge")
+
+    # The older base tip and the conflicted merges. origin/main moves to T1 (row 31, and src/app.py). Each lane is cut
+    # from the stale local main and merges T1. Then origin/main moves on to T2 (row 32), so a lane's MERGE_HEAD is T1, a
+    # past first-parent tip. Each lane holds one state:
+    #   merge:    the clean merge of its row and T1. Allowed: MERGE_HEAD is T1, and the page is that merge's.
+    #   latest:   the clean merge of its row and T2, written by hand. Refused: the newer tip's merge, not this one's.
+    #   conflict: T1 and the lane both edit src/app.py. The page merges cleanly, and merge-tree exits 1. Refused.
+    #   deleted:  the conflict lane with the page removed from the index. Refused.
+    make_repo(REC_OLD, {"docs/records.md": REC_ROWS_CUT, "src/app.py": "x = 1\n"})
+    advance(REC_OLD, {"docs/records.md": REC_ROWS_MAIN, "src/app.py": REC_OLD_APP_T1}, "refs/remotes/origin/main")
+    t1 = run(REC_OLD, "rev-parse", "origin/main")
+    need(run(REC_OLD, "show", "origin/main:docs/records.md") == REC_ROWS_MAIN.strip()
+         and run(REC_OLD, "show", "main:docs/records.md") == REC_ROWS_CUT.strip(),
+         "the oldtip repository is not 'local main at the cut, origin/main with T1'")
+    for name, where in REC_OLD_LANES.items():
+        run(REC_OLD, "worktree", "add", "-q", "-b", "lane-oldtip-" + name, where, "main")
+    for name, lane in REC_OLD_LANES.items():
+        code_edit = name in ("conflict", "deleted")
+        write(page(lane), REC_ROWS_LANE)                              # the lane's own row, committed
+        if code_edit:
+            write(os.path.join(lane, "src", "app.py"), REC_OLD_APP_LANE)   # an app.py edit that T1's conflicts with
+        run(lane, "add", "-A")
+        run(lane, "commit", "-q", "-m", "lane row")
+        run_vcs(lane, *IDENT, "merge", "--no-commit", "--no-ff", "origin/main")   # a conflict exits 1: that state is the point
+        need(run(lane, "rev-parse", "MERGE_HEAD") == t1
+             and run(lane, "diff", "--name-only", "--diff-filter=U") == ("src/app.py" if code_edit else ""),
+             "the oldtip lane %r: MERGE_HEAD is not T1, or the conflict is not where the lane says" % name)
+    write(page(REC_OLD_LANES["latest"]), REC_ROWS_LATEST)             # the page a merge with the newer tip would hold
+    run(REC_OLD_LANES["latest"], "add", "docs/records.md")
+    run(REC_OLD_LANES["deleted"], "rm", "-f", "docs/records.md")     # the conflicted merge's page removed from the index
+    advance(REC_OLD, {"docs/records.md": REC_ROWS_T2}, "refs/remotes/origin/main",
+            start="refs/remotes/origin/main")                         # origin/main moves on: T2, on T1
+    need(run(REC_OLD, "show", "origin/main:docs/records.md") == REC_ROWS_T2.strip()
+         and run(REC_OLD, "rev-parse", "origin/main^") == t1
+         and run(REC_OLD, "show", "main:docs/records.md") == REC_ROWS_CUT.strip(),
+         "the oldtip repository: origin/main is not T2 on T1, or local main moved")
+
+    def clean_page(lane):
+        """The page git's clean merge of a lane's HEAD and origin/main (the newer tip) holds, from merge-tree."""
+        tree = run(lane, "merge-tree", "--write-tree", "HEAD", "origin/main").split()[0]
+        return run(lane, "rev-parse", tree + ":docs/records.md")
+
+    old_merge = REC_OLD_LANES["merge"]
+    need(run(old_merge, "show", ":docs/records.md") == REC_ROWS_MERGED.strip()
+         and clean_page(old_merge) != run(old_merge, "rev-parse", ":docs/records.md"),
+         "the oldtip merge lane: the staged page is not the clean merge with T1, or the clean merge with T2 is that page")
+    need(run(REC_OLD_LANES["latest"], "show", ":docs/records.md") == REC_ROWS_LATEST.strip()
+         and clean_page(REC_OLD_LANES["latest"]) == run(REC_OLD_LANES["latest"], "rev-parse", ":docs/records.md"),
+         "the oldtip latest lane: the staged page is not the clean merge with T2")
+    need(run(REC_OLD_LANES["conflict"], "diff", "--name-only", "--diff-filter=U") == "src/app.py"
+         and run(REC_OLD_LANES["conflict"], "show", ":docs/records.md") == REC_ROWS_MERGED.strip()
+         and run_vcs(REC_OLD_LANES["conflict"], "merge-tree", "--write-tree", "HEAD", "MERGE_HEAD").returncode == 1,
+         "the oldtip conflict lane: app.py is not the one conflict, the page is not the clean merge, or merge-tree is clean")
+    need(run(REC_OLD_LANES["deleted"], "ls-files", "--", "docs/records.md") == ""
+         and run(REC_OLD_LANES["deleted"], "diff", "--name-only", "--diff-filter=U") == "src/app.py"
+         and run_vcs(REC_OLD_LANES["deleted"], "merge-tree", "--write-tree", "HEAD", "MERGE_HEAD").returncode == 1,
+         "the oldtip deleted lane: the page is still in the index, or app.py is not the one conflict")
+
+
+lazy_fixture([REC_ROWS, *REC_ROWS_LANES.values(), REC_OLD, *REC_OLD_LANES.values(), REC_DANGLE, REC_NEW, REC_ADOPT,
+              REC_PLAIN,
+              *REC_DANGLE_LANES.values(), REC_NEW_LANE, REC_ADOPT_LANE, *REC_PLAIN_LANES.values(),
+              REC_MOVED, *REC_MOVED_LANES.values(), REC_ANC, REC_ANC_LANE, REC_STACK, *REC_STACK_LANES.values(),
               REC_CRISS, *REC_CRISS_LANES.values(), REC_UNREL, REC_UNREL_LANE,
               REC_NOORIGIN, REC_NOORIGIN_LANE], _build_records_more)
 
@@ -790,6 +933,50 @@ records_refuse("a lane's merge of an unrelated unmerged branch, whose merge base
 # read that answered.
 records_refuse("a lane's merge of a feature page, with no origin/main, so the is-ancestor read fails",
                VCS + " commit -m x", REC_NOORIGIN_LANE)
+
+# The clean merge. The lane committed its row, origin/main added another in a region the lane did not touch, and git
+# auto-merged both rows into the index. The page the merge commit holds is the clean merge of HEAD's and MERGE_HEAD's
+# pages, so it is allowed: the merge brings nothing that the two parents do not carry. Judged from the index, and from
+# the working tree a `commit -am` reads.
+records_allow("a merge commit of the clean merge of two rows, auto-merged by git", VCS + " commit -m x",
+              REC_ROWS_LANES["merge"])
+records_allow("a merge commit of the clean merge of two rows, auto-merged by git, under PowerShell",
+              VCS + " commit -m x", REC_ROWS_LANES["merge"], tool="PowerShell")
+# `commit -am` stages the working tree first, so the commit holds the working tree's page. The wt lane holds the clean merge in
+# the working tree and a hand-written page in the index: the allow reads the working tree, and a read of the index refuses it.
+records_allow("a merge commit -am of the clean merge of two rows, the index holding a hand-written page", VCS + " commit -am x",
+              REC_ROWS_LANES["wt"])
+# Refused: the same lane with `commit -m`, which holds the index's hand-written page.
+records_refuse("a merge commit -m of the clean merge of two rows, the index holding a hand-written page", VCS + " commit -m x",
+               REC_ROWS_LANES["wt"])
+# Refused: the clean merge, then a row rewritten by hand and staged. The page is neither the clean merge nor any
+# parent's page, so the commit is the lane's own page change.
+records_refuse("a merge commit of the clean merge with a row rewritten by hand and staged", VCS + " commit -m x",
+               REC_ROWS_LANES["hand"])
+# Refused: a row staged with no merge in progress. A commit that is no merge carries no page the rule accepts.
+records_refuse("a commit of a staged row change with no merge in progress", VCS + " commit -m x",
+               REC_ROWS_LANES["solo"])
+# Refused: the clean merge, held in the index after `merge --quit`. No MERGE_HEAD, so `merged` is '' and the rule's
+# `not merged` gate returns before any clean-merge read. This case pins the no-merge refusal only, not `_clean_merge_page`.
+records_refuse("a commit of the clean merge after merge --quit, no merge in progress", VCS + " commit -m x",
+               REC_ROWS_LANES["quit"])
+# The older base tip. The lane merged T1, and origin/main moved on to T2. The page is the clean merge of HEAD and T1, the
+# merge MERGE_HEAD brought, so it passes. The clean merge with T2 is a different page: a `_clean_merge_page` that reads
+# origin/main, not MERGE_HEAD, refuses this commit.
+records_allow("a merge commit of the clean merge of HEAD and an older base tip, origin/main moved on", VCS + " commit -m x",
+              REC_OLD_LANES["merge"])
+# Refused: the clean merge with the newer tip T2, which the merge did not bring. Its page is neither MERGE_HEAD's nor the
+# clean merge with MERGE_HEAD, so a `_clean_merge_page` that reads origin/main would allow it.
+records_refuse("a merge commit of the clean merge with the newer base tip, which the merge did not bring", VCS + " commit -m x",
+               REC_OLD_LANES["latest"])
+# Refused: the page merges cleanly, but a code file conflicts. merge-tree exits 1, so `_clean_merge_page` gives no pass,
+# though the page is the one the merge would write.
+records_refuse("a merge commit whose page merges cleanly while a code file conflicts", VCS + " commit -m x",
+               REC_OLD_LANES["conflict"])
+# Refused: the conflicted merge, with the page removed from the index. `_clean_merge_page` gives '' here, so the
+# absent-page check (`not page_id`) is the one that refuses it.
+records_refuse("a conflicted merge that deletes the records page from the index", VCS + " commit -m x",
+               REC_OLD_LANES["deleted"])
 
 # =========================================================================== 5d. conflict markers
 #

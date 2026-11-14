@@ -3282,19 +3282,37 @@ MUTATIONS = [
      '"rev-list", origin)',
      "guard", "off its first-parent line"),
     ("records-page: the page is not compared with MERGE_HEAD's, so a rebuilt page is allowed",
-     '            if not page_id or page_id != _merge_head_page(top, base):',
-     '            if not page_id or not _merge_head_page(top, base):',
+     '            if not page_id or not merged or page_id not in (merged, _clean_merge_page(top)):',
+     '            if not page_id or not merged:',
      "guard", "a test-author commit of a page rebuilt after the merge, origin/main moved on"),
     ("records-page: MERGE_HEAD's page is never read, so the merge's own page is refused",
-     '            if not page_id or page_id != _merge_head_page(top, base):',
+     '            if not page_id or not merged or page_id not in (merged, _clean_merge_page(top)):',
      '            if True:',
      "guard", "a test-author commit of the merge's own page, after origin/main moved on"),
-    # An absent page (a deletion staged in the index) is refused unless no merge brings one. Without the check, a
-    # deleted page with no merge in progress compares '' with '' and is allowed.
-    ("records-page: the absent-page check is dropped, so a commit that deletes the page is allowed with no merge",
-     '            if not page_id or page_id != _merge_head_page(top, base):',
-     '            if page_id != _merge_head_page(top, base):',
-     "guard", "a commit that deletes the page, with no merge in progress"),
+    # An absent page (a deletion staged in the index) is refused. `not merged` already refuses it with no merge in progress.
+    # The absent-page check decides only when a merge is in progress and `_clean_merge_page` gives '' (a conflicted
+    # merge-tree): then '' is `in` (merged, ''). Without the check, a page deleted during that conflicted merge is allowed.
+    ("records-page: the absent-page check is dropped, so a page deleted during a conflicted merge is allowed",
+     '            if not page_id or not merged or page_id not in (merged, _clean_merge_page(top)):',
+     '            if not merged or page_id not in (merged, _clean_merge_page(top)):',
+     "guard", "a conflicted merge that deletes the records page from the index"),
+    # The clean merge is read with MERGE_HEAD, so an older base tip's merge passes. Read with origin/main, its page differs.
+    ("records-page: the clean merge reads origin/main, not MERGE_HEAD, so an older base tip's merge is refused",
+     '    done = _git(top, "merge-tree", "--write-tree", "HEAD", "MERGE_HEAD")',
+     '    done = _git(top, "merge-tree", "--write-tree", "HEAD", "origin/main")',
+     "guard", "a merge commit of the clean merge of HEAD and an older base tip"),
+    # A conflicted merge-tree (exit 1) gives no pass. Read as clean, the conflicted tree's page passes.
+    ("records-page: the clean merge reads merge-tree's exit 1 as clean, so a conflicted code file passes",
+     '    done = _git(top, "merge-tree", "--write-tree", "HEAD", "MERGE_HEAD")\n'
+     '    lines = done.stdout.split() if done is not None and done.returncode == 0 else []',
+     '    done = _git(top, "merge-tree", "--write-tree", "HEAD", "MERGE_HEAD")\n'
+     '    lines = done.stdout.split() if done is not None and done.returncode in (0, 1) else []',
+     "guard", "a merge commit whose page merges cleanly while a code file conflicts"),
+    # `commit -am` is judged on the working tree, not the index: the index read refuses the wt lane's clean merge.
+    ("records-page: a commit -am reads the index, not the working tree, so the clean merge in the working tree is refused",
+     '        page_id = _commit_page_id(top, working)',
+     '        page_id = _commit_page_id(top, False)',
+     "guard", "a merge commit -am of the clean merge of two rows, the index holding a hand-written page"),
     # The stacked clause of `_merge_head_page` (guard_merge.py): a lane stacked on an unmerged base passes for
     # MERGE_HEAD's page. Each label starts "records-page: stacked clause", so that prefix selects these three.
     ("records-page: stacked clause, an is-ancestor exit of 0 or an error passes, so a failed read is a pass",

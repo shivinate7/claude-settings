@@ -467,6 +467,11 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
 # base's first-parent line. A failed rev-parse or rev-list read refuses. The stacked clause cannot tell the
 # lane's base from a sibling lane that shares its unmerged history: a sibling's page passes the same way,
 # and the merge tool rebuilds the page before ready.
+# In that same merge, the page also passes when it is the clean three-way merge of HEAD's and MERGE_HEAD's
+# pages (the page blob of `git merge-tree --write-tree HEAD MERGE_HEAD`): a lane that committed its row and
+# merges the base gets git's auto-merge of both, which is neither parent's page and carries nothing the two
+# parents lack. A conflicted merge-tree (exit 1) or a failed read gives no pass. A hand edit on top of the
+# merge is a different blob and is refused.
 # A rebuilt page, a page of a merge of any other commit, and a page taken after the merge state is gone
 # are refused.
 # The hook runs BEFORE the shell chain, so `commit -a` (a tracked page), `commit <page>` and a `git add`
@@ -616,6 +621,19 @@ def _merge_head_page(top, base):
     return ids[1] if line is not None and line.returncode == 0 and ids[0] in line.stdout.split() else ""
 
 
+def _clean_merge_page(top):
+    """The blob id of the page in the clean three-way merge of HEAD and MERGE_HEAD (`git merge-tree
+    --write-tree`), else ''. A conflicted merge (exit 1), a failed read, a merge with no page and an
+    unexpected output give ''. `--write-tree` writes the merged tree and any new blobs into the object
+    store as loose objects. It writes no ref and changes neither the working tree nor the index."""
+    done = _git(top, "merge-tree", "--write-tree", "HEAD", "MERGE_HEAD")
+    lines = done.stdout.split() if done is not None and done.returncode == 0 else []
+    if not lines:
+        return ""
+    page = _git(top, "rev-parse", "--verify", "-q", lines[0] + ":" + RECORDS_PAGE)
+    return page.stdout.strip() if page is not None and page.returncode == 0 else ""
+
+
 def _commit_page_id(top, working):
     """The blob id of the page the commit will hold: the working tree's (as `git add` would store
     it) or the index's. '' for no page, None for a failed read or an unmerged page."""
@@ -634,7 +652,8 @@ def _commit_page_id(top, working):
 
 def records_page_hit(stripped: str, cwd: str) -> str:
     """Return the commit when it would hold a records page that is none of HEAD's, the base tip's,
-    origin/<base>'s and MERGE_HEAD's (`_merge_head_page` says when MERGE_HEAD's page counts), else ''. Each segment is judged from its own command word."""
+    origin/<base>'s, MERGE_HEAD's and the clean merge of HEAD's and MERGE_HEAD's (`_merge_head_page` says
+    when a merge counts), else ''. Each segment is judged from its own command word."""
     staged = generated = False   # an earlier `git add` reaches the page / an earlier segment rewrites it
     for segment in split_segments(stripped):
         call = git_call_of(segment) if segment.strip() else None
@@ -671,7 +690,8 @@ def records_page_hit(stripped: str, cwd: str) -> str:
             return "git commit " + RECORDS_PAGE
         page_id = _commit_page_id(top, working)
         if page_id is not None and page_id not in (head_id, base_id, origin_id):
-            if not page_id or page_id != _merge_head_page(top, base):
+            merged = _merge_head_page(top, base)
+            if not page_id or not merged or page_id not in (merged, _clean_merge_page(top)):
                 return "git commit " + RECORDS_PAGE
     return ""
 
