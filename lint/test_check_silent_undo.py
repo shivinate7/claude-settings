@@ -836,6 +836,25 @@ class Flips(unittest.TestCase):
                 self.assertNotIn("Merge now.", result)  # the line is lost, never a substring of the merge
                 self.assertEqual(self.resolve("", "Merge now.", result), [])
 
+    def test_a_quoted_last_word_that_gains_an_argument_passes(self):
+        """A line that ends in a quoted word gains an argument. The quote after the word opens the tail, and the tail
+        holds no negation, so it is an appended argument, never a split contraction."""
+        for a_line, result in (("print('hi')", "print('hi', flush=True)"),
+                               ("subprocess.run('a', 'b')", "subprocess.run('a', 'b', timeout=T)")):
+            with self.subTest(result=result):
+                self.assertNotIn(a_line, result)  # the line is lost, never a substring of the merge
+                self.assertEqual(self.resolve("", a_line, result), [])
+
+    def test_an_uppercase_contraction_stays_a_reversal(self):
+        """`DON'T` is `don't` in capitals: the negation count reads it, so the tail strip must too."""
+        self.assertNotIn("Merge now.", "Merge now, DON'T.")  # the line is lost, never a substring of the merge
+        self.red("", "Merge now.", "Merge now, DON'T.")
+
+    def test_a_word_split_by_a_digit_stays_a_change(self):
+        """`now2` is one split word, not `now` followed by a clause: the digit is the same word as the one it follows."""
+        self.assertNotIn("Merge now.", "Merge now2 never.")  # the line is lost, never a substring of the merge
+        self.red("", "Merge now.", "Merge now2 never.")
+
 
 class MainLineDrop:
     """The one home of the fixture for a case that merges main into a feat branch and drops lines main added to
