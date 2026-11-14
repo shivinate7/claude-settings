@@ -1437,7 +1437,7 @@ def case_watch_run_makes_no_read_while_the_quota_is_low():
           "%d reads between the first read and the reset, at %r s after the first" % (len(window), window[:5]))
 
 
-def case_watch_run_with_the_quota_full_keeps_its_cadence():  # control: green on main
+def case_watch_run_with_the_quota_full_keeps_its_cadence():  # control: a full quota keeps the 30 s read cadence, so only a low quota changes the reads
     """The quota is full: the reads keep the schedule of a never-ending run, 30 s apart for the first four minutes."""
     label = "watch_run, quota full, run completes at 1200 s"
     mod, raised, clock, calls, direct = watch_run_on_fakes(completes_at(RUN_ENDS), WATCH_BUDGET, quota=quota_full)
@@ -1448,7 +1448,7 @@ def case_watch_run_with_the_quota_full_keeps_its_cadence():  # control: green on
     check("%s: the first four gaps between reads are 30 s" % label, gaps[:4] == [30, 30, 30, 30], detail + " gaps=%r" % gaps[:6])
 
 
-def case_watch_run_with_the_quota_unreadable_still_ends_at_its_deadline():  # control: green on main
+def case_watch_run_with_the_quota_unreadable_still_ends_at_its_deadline():  # control: an unreadable quota still ends at the deadline, so no reset wait holds the run past it
     """The quota reads empty with no reset header, so no reset is known: the watch holds no wait past the rate cap, and
     it still ends at its deadline."""
     label = "watch_run, quota empty with no reset header, run never completes, 30 min budget"
@@ -1533,7 +1533,7 @@ def case_watch_run_on_a_host_qualified_repo_names_the_host():
           "gh %s" % " ".join(argv))
 
 
-def case_watch_run_on_owner_repo_keeps_the_route():  # control: green on main
+def case_watch_run_on_owner_repo_keeps_the_route():  # control: the owner/repo status route is pinned, so the quota change cannot reroute it
     label = "watch_run, repo o/r"
     mod, raised, clock, calls, direct = watch_run_on_fakes([status_reply("completed")], WATCH_BUDGET, repo="o/r")
     detail = watch_detail(raised, clock, calls, direct)
@@ -1542,7 +1542,7 @@ def case_watch_run_on_owner_repo_keeps_the_route():  # control: green on main
           [a for _, a in calls] == [["api", "-i", "repos/o/r/actions/runs/7"]], detail)
 
 
-def case_watch_run_prints_one_quota_line_for_its_low_spell():  # control: green on main
+def case_watch_run_prints_one_quota_line_for_its_low_spell():  # control: one low line for a whole low spell, not one per read
     """One watch, read as low from the first read to the reset: one low line on stderr, not one per read."""
     label = "watch_run, quota empty until 900 s, run completes at 1200 s"
     with stderr_bytes() as err:

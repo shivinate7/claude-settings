@@ -147,7 +147,7 @@ class QuotaRead(unittest.TestCase):
         self.assertEqual(len(lines), 1, f"{len(lines)} lines printed before the next call, want one: {lines}")
         self.assertRegex(lines[0], r"(?i)quota|rate limit", "the one line does not name the low quota")
 
-    def test_a_read_with_the_quota_full_waits_for_nothing(self):  # control: green on main
+    def test_a_read_with_the_quota_full_waits_for_nothing(self):  # control: a full quota adds no pause, no hold and no quota line
         g = QuotaGh(self, quota=full)
         host, buf = g.host(), io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
@@ -164,7 +164,7 @@ class QuotaRead(unittest.TestCase):
         self.assertEqual(len(g.calls), 1, f"one read made {len(g.calls)} gh calls")
         self.assertIn("-i", g.calls[0][1], "the read asked for no headers, so the quota cannot be read from it")
 
-    def test_a_read_makes_one_gh_call_and_writes_no_file(self):  # cost control: green on main
+    def test_a_read_makes_one_gh_call_and_writes_no_file(self):  # cost control: a quota read adds exactly one gh call and writes no file
         g = QuotaGh(self, quota=low_until_reset)
         before = tree(g.cwd)
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -185,7 +185,7 @@ UNKNOWN_HEADERS = {
 class QuotaUnknown(unittest.TestCase):
     """Headers that cannot be read as a quota read as unknown: a read still returns, and no wait is longer than the rate cap."""
 
-    def test_unknown_quota_headers_hold_no_read_past_the_rate_cap(self):  # control: green on main
+    def test_unknown_quota_headers_hold_no_read_past_the_rate_cap(self):  # control: unreadable quota headers read as unknown, so no wait passes the rate cap
         for label, keys in UNKNOWN_HEADERS.items():
             with self.subTest(headers=label):
                 g = QuotaGh(self, quota=lambda now, keys=keys: keys)
@@ -197,7 +197,7 @@ class QuotaUnknown(unittest.TestCase):
                 waits = g.clock.pauses
                 self.assertTrue(all(0 <= w <= tm.merge.RATE_LADDER[-1] for w in waits), f"a wait past the cap: {waits}")
 
-    def test_a_rate_limit_403_with_a_far_reset_waits_no_longer_than_the_cap(self):  # control: green on main
+    def test_a_rate_limit_403_with_a_far_reset_waits_no_longer_than_the_cap(self):  # control: a 403 with a far reset waits no longer than the rate cap
         far = {"X_RateLimit_Limit": LIMIT, "X_RateLimit_Remaining": "0", "X_RateLimit_Reset": str(int(NOW + 86400))}
         g = QuotaGh(self, first=[(1, tm.RATE_API_403, far)])
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -219,7 +219,7 @@ class QuotaCiWait(unittest.TestCase):
         reads = g.reads_between(NOW, RESET)
         self.assertEqual(reads, [], f"{len(reads)} gh reads while the quota was low, from {NOW:.0f} s to the reset at {RESET:.0f} s")
 
-    def test_a_ci_wait_with_the_quota_full_keeps_its_poll_rhythm(self):  # control: green on main
+    def test_a_ci_wait_with_the_quota_full_keeps_its_poll_rhythm(self):  # control: a full quota keeps the CI poll rhythm, at least four polls in five minutes
         g = QuotaGh(self, quota=full, checks_at=pending_past_reset)
         with contextlib.redirect_stdout(io.StringIO()):
             ok, why = g.host().wait_checks(7, HEAD, 120)
@@ -287,7 +287,7 @@ class QuotaInsideDeadline(unittest.TestCase):
         self.assertEqual(out.getvalue(), "", f"the low line is on the guard's stdout, which holds its JSON decision: {out.getvalue()!r}")
         self.assertRegex(err.getvalue(), r"(?i)quota", "the low line is not on stderr")
 
-    def test_inside_shared_deadline_a_low_quota_never_sleeps(self):  # control: green on main
+    def test_inside_shared_deadline_a_low_quota_never_sleeps(self):  # control: a low quota never sleeps inside shared_deadline, which has no room for a pause
         g = QuotaGh(self, quota=low_until_reset)
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), tm.merge.shared_deadline(60):
             code, _ = g.host().api("pulls/7")
@@ -305,18 +305,18 @@ class QuotaMark(unittest.TestCase):
     makes before the reset, one every `pace` seconds. The pace is each caller's own, passed in, and has no default a caller could copy.
     Every case here passes its pace. The exact edges of the mark are pinned, so a mutant of `>=` or of the bounds fails a row."""
 
-    def test_the_pace_has_no_default(self):  # red on 878cc8433: pace defaults to POLL_PACE
+    def test_the_pace_has_no_default(self):  # the pace has no default, so a caller cannot copy POLL_PACE by leaving it out
         pace = inspect.signature(gh_quota.read).parameters["pace"]
         self.assertIs(pace.default, inspect.Parameter.empty,
                       f"gh_quota.read's pace defaults to {pace.default!r}: a caller that leaves it out copies that constant")
 
-    def test_the_same_quota_is_low_at_a_30_s_pace_and_not_at_a_120_s_pace(self):  # control: green on main
+    def test_the_same_quota_is_low_at_a_30_s_pace_and_not_at_a_120_s_pace(self):  # control: the same quota reads low at a 30 s pace and not at 120 s, so pace sets the mark
         now = 1000.0
         headers = quota_headers(100, 3600, now)
         self.assertIsNotNone(gh_quota.read(headers, now, 30), "a 30 s caller reads 100 left against 3600 s to the reset as low (100 x 30 < 3600)")
         self.assertIsNone(gh_quota.read(headers, now, 120), "a 120 s caller reads 100 left against 3600 s to the reset as not low (100 x 120 >= 3600)")
 
-    def test_the_mark_edges_are_exact(self):  # control: green on main
+    def test_the_mark_edges_are_exact(self):  # control: the low mark's edges are exact, so an off-by-one at the mark fails a row
         now = 1000.0
         rows = [
             ("at the mark: 100 reads at 30 s cover 3000 s exactly", 100, 3000, False),
@@ -336,20 +336,20 @@ class QuotaMark(unittest.TestCase):
                 else:
                     self.assertIsNone(got, f"{label}: read as low, want not low or unknown: {got!r}")
 
-    def test_a_wait_to_a_reset_past_the_cap_is_the_cap(self):  # control: green on 9640fa9a6, its mutant without the cap is the red
+    def test_a_wait_to_a_reset_past_the_cap_is_the_cap(self):  # control: a wait to a reset past the cap is the cap, so a far reset cannot hold a read past WAIT_CAP
         now = 1000.0
         got = gh_quota.read(quota_headers(0, 3600, now), now, 30)
         self.assertIsNotNone(got, "Remaining 0 with the reset 3600 s on read as not low")
         self.assertEqual(got[2], gh_quota.WAIT_CAP, f"the wait is {got[2]} s, want the cap of {gh_quota.WAIT_CAP} s, not the 3600 s to the reset")
 
-    def test_a_fractional_wait_rounds_up_to_whole_seconds(self):  # control: green on 9640fa9a6, its mutant that truncates is the red
+    def test_a_fractional_wait_rounds_up_to_whole_seconds(self):  # control: a fractional wait rounds up to whole seconds, so 600.5 s waits 601 s
         now = 1000.5   # the reset is a whole epoch, so a fractional wait comes from a fractional now
         headers = {"x-ratelimit-limit": "15000", "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1601"}
         got = gh_quota.read(headers, now, 30)
         self.assertIsNotNone(got, "Remaining 0 with the reset 600.5 s on read as not low")
         self.assertEqual(got[2], 601, f"the wait is {got[2]} s, want 601: 600.5 s to the reset rounds up")
 
-    def test_the_merge_read_paces_by_its_own_settle_pause(self):  # control: green on main
+    def test_the_merge_read_paces_by_its_own_settle_pause(self):  # control: the merge read paces its quota check by SETTLE_SECONDS, its own settle pause
         g = QuotaGh(self, quota=low_until_reset)
         host = g.host()
         with unittest.mock.patch.object(tm.merge.gh_quota, "read", wraps=gh_quota.read) as spy, \
