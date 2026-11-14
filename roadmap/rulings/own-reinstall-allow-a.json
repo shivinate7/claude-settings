@@ -6,5 +6,5 @@
   "quote": "My sessions shudda known better the rignt answer is obviously a: add an allow rule for exactly the reinstall command.",
   "source": "Consultant 20:20 CST Nov 13 (quoting the owner's chat 20:16 CST); filed by triage.",
   "status": "open",
-  "step": "reinstall-from-stable-allow"
+  "step": "installer-allow-rule"
 }

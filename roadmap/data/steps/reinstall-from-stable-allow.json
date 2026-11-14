@@ -1,7 +1,7 @@
 {
  "id": "reinstall-from-stable-allow",
  "title": "One shared allow entry lets every session run the session-start installer mid-session",
- "status": "todo",
+ "status": "folded",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "The auto-mode classifier refused a mid-session reinstall in the coordinator and runner 10 at 20:12-20:13; both kept the old copy.",
  "source": "Consultant 20:20 CST Nov 13, relaying the owner's chat 20:16 CST; triage did not see the chat. Refusal text and the classifier's reason are the consultant's read.",
- "note": "Filed 20:17 CST Nov 13. Owner ruling (a), relayed by the consultant (ruling own-reinstall-allow-a): add one autoMode.allow entry in the shared settings.json, for every repo, for exactly the session-start installer command (the curl of stable/install.sh piped to bash -s -- --cloud, and the Windows and Mac installer forms), by PR. Not a per-repo exception. settings.json autoMode.allow had no reinstall entry (consultant read). A permission-rule change: a lane builds it, test or check first where the repo tests allow lines, reviewer; a lane first checks the open allow-entry PRs for a duplicate. Needs a lane.",
- "updatedAt": "2026-11-13T20:17:22-06:00"
+ "note": "Filed 20:17 CST Nov 13. Owner ruling (a), relayed by the consultant (ruling own-reinstall-allow-a): add one autoMode.allow entry in the shared settings.json, for every repo, for exactly the session-start installer command (the curl of stable/install.sh piped to bash -s -- --cloud, and the Windows and Mac installer forms), by PR. Not a per-repo exception. settings.json autoMode.allow had no reinstall entry (consultant read). A permission-rule change: a lane builds it, test or check first where the repo tests allow lines, reviewer; a lane first checks the open allow-entry PRs for a duplicate. Needs a lane. Triage 20:18 CST Nov 13: duplicate of installer-allow-rule, which the coordinator's lane already carries (session_013NEJL3YNCiqjptXwDXqVrt, started 20:17). Folded there.",
+ "updatedAt": "2026-11-13T20:18:12-06:00"
 }
