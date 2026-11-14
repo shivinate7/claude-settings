@@ -55,7 +55,7 @@ def steppr_create(name, expected, env_path, prompt=LANE_PROMPT, tags=STEPPR_TAGS
     lane start that passes the lane rules, so only this rule decides it. An allow must print nothing."""
     add("lane-step-dup: " + name, expected, rule=None if expected == "allow" else STEPPR_RULE, tool=CREATE_SESSION,
         cwd=NOGIT, transcript=role_path("stepdup-create-empty"), env=ROLE_ENV, silent=expected == "allow",
-        carries=carries, env_path=env_path, title="a lane session", tags=list(tags), prompt=prompt,
+        carries=carries, env_path=env_path, title="Lane dup-step: do the step", tags=list(tags), prompt=prompt,
         effort=LANE_EFFORT_FIELD, model="sonnet", source_url=LANE_SOURCE_URL)
 
 

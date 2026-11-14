@@ -143,7 +143,7 @@ def stepdup_create(name, expected, transcript, tags, prompt=LANE_PROMPT, carries
     model and source), so only lane-step-dup decides it. An allow must print nothing."""
     add("lane-step-dup: " + name, expected, rule=None if expected == "allow" else STEPDUP_RULE, tool=CREATE_SESSION,
         cwd=NOGIT, transcript=transcript, env=ROLE_ENV, silent=expected == "allow", carries=carries, lacks=lacks,
-        env_path=env_path, title="a lane session", tags=list(tags), prompt=prompt, effort=LANE_EFFORT_FIELD,
+        env_path=env_path, title="Lane dup-step: do the step", tags=list(tags), prompt=prompt, effort=LANE_EFFORT_FIELD,
         model="sonnet", source_url=LANE_SOURCE_URL)
 
 
