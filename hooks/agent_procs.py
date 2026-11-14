@@ -1,10 +1,12 @@
 """The one home of the per-agent process record (step agent-owned-processes, ruling own-agent-owned-processes).
 
 A record lists the processes one agent started: `<dir>/<agent_id>.json` = {"agent": id, "procs": [{"pid", "start",
-"owner", "kind"}]}. `dir` is $CLAUDE_AGENT_PROCS_DIR, else `<CLAUDE_CONFIG_DIR or ~/.claude>/agent-procs`. `start` is
-the process's start ticks (field 22 of /proc/<pid>/stat), so a reused pid never reads as the recorded one. Where the
-ticks cannot be read (macOS, Windows) a start is None and the record proves nothing: every reader treats that as "no
-record", so those platforms keep the behaviour they had. `kind` is "background" (a marked process the SubagentStop scan
+"owner", "kind", "ended"}]}. `dir` is $CLAUDE_AGENT_PROCS_DIR, else `<CLAUDE_CONFIG_DIR or ~/.claude>/agent-procs`.
+`start` is the process's start ticks (field 22 of /proc/<pid>/stat), so a reused pid never reads as the recorded one.
+Where the ticks cannot be read (macOS, Windows) a start is None; a sim-lease start is `ps` text. Such a start cannot
+prove a reuse, so the entry still holds the pid for its owner against other agents (`lists_pid`). An entry stops naming
+its owner only when its start is ticks that differ from the pid's now, or when `ended` is true (the owner's stop ended
+the process, or a sim-lease give released it). `kind` is "background" (a marked process the SubagentStop scan
 found), "sim-lease" (bin/sim-lease writes it), "office" (the Windows adapter) or "unclear" (the recorded start no
 longer matches, or the start cannot be read: reported, never ended).
 
@@ -22,13 +24,15 @@ three Office images at SubagentStart (`mark_office_start`) and again at Subagent
 (`office_started`). It exits at once off Windows, and when no Office process runs, and it records nothing when the
 start list could not be read, so an unread list never makes the user's own Excel the agent's. A new Office pid that
 another agent also saw start is shared, so none ends it, in either stop order (`office_also_seen`): the other agent is
-open and its start list lacks the pid, or it stopped and its record holds the pid as kind "office". A pid only this agent
-saw ends at its stop, even when a later agent's start list holds it. The Windows
+open and its start list lacks the pid, or it stopped and its record holds the pid as a kind "office" entry not marked
+ended. An ended entry names no owner, so a pid reused since is not shared by it. A pid only this agent saw ends at its
+stop, even when a later agent's start list holds it. The Windows
 window read (`visible_office_pids`) is unmeasured: a failed read counts every pid as visible.
 
 Cost (rule outcomes-mechanize-rules): zero process starts and zero files written per tool call. This module is not
 imported on the tool-call path (hooks/stall_watch.py only writes the marker line). It runs at SubagentStop, at a `kill`
-command's guard check, in a sweep's stop list and in a sim-lease take: file reads and one record write each. On
+command's guard check, in a sweep's stop list and in a sim-lease take and give: file reads and one record write each
+(a give writes only when the agent's record holds the pid as a live sim-lease entry). On
 Windows only, SubagentStart and SubagentStop each start one `tasklist` (none when the platform is not Windows).
 hooks/test_agent_procs.py pins the tool-call number.
 
@@ -133,6 +137,20 @@ def add_entry(agent, entry) -> bool:
     record = read_record(agent) or {"procs": []}
     record["procs"] = [e for e in record["procs"] if e.get("pid") != entry.get("pid")] + [entry]
     return write_record(agent, record)
+
+
+def end_entry(agent, pid, kind) -> bool:
+    """Mark the agent's live KIND entry for `pid` ended, so it names no owner (`lists_pid`). bin/sim-lease's give calls
+    it: a released lease is no longer the agent's. Writes nothing when no live entry matches; never raises."""
+    try:
+        record = read_record(agent)
+        hits = [e for e in (record or {}).get("procs", [])
+                if e.get("pid") == pid and e.get("kind") == kind and e.get("ended") is not True]
+        for entry in hits:
+            entry["ended"] = True
+        return bool(hits) and write_record(agent, record)
+    except Exception:
+        return False
 
 
 def all_records():
@@ -269,13 +287,15 @@ def visible_office_pids():
 
 def office_also_seen(pid, agent, others) -> bool:
     """True when an agent other than AGENT also saw Office pid `pid` start in its own run: an open agent whose start
-    list lacks it (the pid was new to it too), or an agent that stopped and recorded it as a kind "office" entry. An
-    open agent whose start list holds the pid started after it, so it never saw the pid as new."""
+    list lacks it (the pid was new to it too), or an agent that stopped and recorded it as a kind "office" entry not
+    marked ended. An open agent whose start list holds the pid started after it, so it never saw the pid as new. An
+    ended entry's process is gone, so a pid that names it now is a reuse the other agent never saw."""
     for other in others.values():
         before = other.get("office_before")
         if isinstance(before, dict) and str(pid) not in before:
             return True
-        if any(e.get("pid") == pid and e.get("kind") == "office" for e in other["procs"]):
+        if any(e.get("pid") == pid and e.get("kind") == "office" and e.get("ended") is not True
+               for e in other["procs"]):
             return True
     return False
 

@@ -756,7 +756,7 @@ def end_agent_processes(payload: dict):
         time.sleep(SETTLE_POLL_SECONDS)
     gone = [pid for pid in ends if not agent_procs.is_running(pid)]
     for pid, entry in entries.items():
-        entry["ended"] = pid in gone
+        entry["ended"] = pid in gone or entry.get("ended") is True  # keep a sim-lease give's mark
     had_office = record.pop("office_before", None) is not None  # a later agent's stop no longer waits on this one
     record["procs"] = sorted(entries.values(), key=lambda e: e["pid"])
     if entries or had_office:
