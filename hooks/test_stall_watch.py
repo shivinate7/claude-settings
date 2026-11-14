@@ -43,6 +43,9 @@ those processes themselves.
 """
 
 import atexit
+import contextlib
+import importlib.util
+import io
 import json
 import os
 import re
@@ -53,12 +56,16 @@ import subprocess
 import sys
 import tempfile
 import time
+import unittest
+from unittest import mock
 
 from case_runner_test import Skip, run_cases
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 MODULE = os.environ.get("STALL_WATCH_MODULE") or os.path.join(HERE, "stall_watch.py")
 PY = sys.executable
 VERDICT = os.path.join(os.path.dirname(HERE), "bin", "verdict")
@@ -1194,6 +1201,99 @@ def table_parity_and_exit_codes():
     return problems
 
 
+# What one background call costs (decision stall-watch). The hook runs in process, so cost_probe.children() counts
+# each child it starts. The watch's ps reads run on a fake clock.
+
+class CostTests(unittest.TestCase):
+    """What one background call costs (rule outcomes-mechanize-rules)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.folder = os.path.join(SCRATCH, "cost")  # a subfolder of this run's SCRATCH: the run removes SCRATCH, not this
+        os.makedirs(cls.folder, exist_ok=True)
+        spec = importlib.util.spec_from_file_location("stall_watch_cost", MODULE)
+        cls.mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.mod)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.folder, ignore_errors=True)
+
+    def hook_in_process(self, command):
+        """The hook on one background call, in process, with its temp folder of its own.
+        -> (rc, stdout text, child log, files the hook left in its folder)."""
+        folder = tempfile.mkdtemp(dir=self.folder)
+        payload = json.dumps({"session_id": "cost-stall", "hook_event_name": "PreToolUse", "tool_name": "Bash",
+                              "tool_input": {"command": command, "description": "cost", "run_in_background": True}})
+        out = io.StringIO()
+        with cost_probe.children() as log, mock.patch.object(sys, "stdin", io.StringIO(payload)), \
+                mock.patch.object(tempfile, "tempdir", folder), contextlib.redirect_stdout(out):
+            rc = self.mod.hook()
+        return rc, out.getvalue(), log, cost_probe.leftovers(folder)
+
+    def test_a_plain_background_call_starts_no_child_and_the_hook_writes_no_file(self):
+        rc, text, log, left = self.hook_in_process("sleep 1")
+        self.assertEqual(rc, 0)
+        self.assertIn("updatedInput", text, "the call is rewritten")
+        self.assertEqual(log.argvs, [], "a plain command starts no child; got %r" % log.argvs)
+        self.assertEqual(left, [], "the hook writes no file; the job makes its files when it runs; got %r" % left)
+
+    def test_a_command_ending_in_an_odd_backslash_starts_one_sh_probe(self):
+        rc, text, log, left = self.hook_in_process("echo hi\\")
+        self.assertEqual(rc, 0)
+        self.assertEqual(cost_probe.names(log.argvs), ["sh"],
+                         "the one child is the shell probe for a trailing backslash; got %r" % log.argvs)
+        self.assertEqual(left, [])
+
+    def test_the_rewritten_command_carries_one_watch_pid_flag_per_background_call(self):
+        rc, text, log, left = self.hook_in_process("sleep 1")
+        cmd = json.loads(text)["hookSpecificOutput"]["updatedInput"]["command"]
+        self.assertEqual(cmd.count("--watch-pid"), 1,
+                         "one --watch-pid flag per background call; the rewrite carries %d" % cmd.count("--watch-pid"))
+
+    def test_the_watch_reads_ps_at_most_about_once_a_second_on_a_fake_clock(self):
+        clock = cost_probe.FakeClock(start=1000.0, cap=5000)
+        folder = tempfile.mkdtemp(dir=self.folder)
+        log = os.path.join(folder, "job.log")
+        open(log, "w").close()
+        reads = []
+
+        def job_state(pid):
+            reads.append(clock.now)
+            return "S"
+
+        with mock.patch.object(self.mod, "time", clock), mock.patch.object(self.mod, "job_state", job_state), \
+                mock.patch.object(self.mod, "report", lambda *args, **kwargs: None):
+            rc = self.mod.watch(4242, log, 30)
+        span = clock.now - 1000.0
+        self.assertEqual(rc, self.mod.STALL_EXIT, "a silent job stalls at its 30 s quiet time")
+        self.assertLessEqual(len(reads), span + 1,
+                             "ps at most about once a second: %d reads in %.1f s" % (len(reads), span))
+        self.assertGreaterEqual(len(reads), span / 2,
+                                "the watch does check the job: %d reads in %.1f s" % (len(reads), span))
+
+    def test_one_state_read_starts_one_ps_child(self):
+        # Each read of a job's state is one `ps` start, the one child the watch starts per check. The read is real here,
+        # on this process's own pid, so ps answers and the state is not empty.
+        if os.name != "posix":
+            self.skipTest("the watch is posix only")
+        with cost_probe.children() as log:
+            state = self.mod.job_state(os.getpid())
+        self.assertNotEqual(state, "", "ps answers for a live pid")
+        self.assertEqual(cost_probe.names(log.argvs), ["ps"],
+                         "one state read is one ps child; got %r" % log.argvs)
+
+    def test_a_job_makes_two_files_and_neither_is_left_when_it_ends(self):
+        rc, text, secs, cmd = run_rewritten("echo ok")
+        log, beat = job_files(cmd)
+        self.assertEqual((rc, text), (0, "ok\n"), "the job runs and its output is relayed")
+        self.assertEqual((log[-4:], beat[-5:]), (".log", ".beat"), "two files per job: the log and the beat")
+        base = log[:-4]
+        self.assertEqual(beat, base + ".beat", "both files share one name")
+        left = [n for n in os.listdir(os.path.dirname(log)) if n.startswith(os.path.basename(base))]
+        self.assertEqual(left, [], "the job removes its files when it ends; left: %r" % left)
+
+
 # The agent marker. A valid agent_id is 17 lowercase hex. A background agent call's command gets
 # `export CLAUDE_AGENT_ID=<id>` ahead of its wrapper, so every process the job starts holds the tag in
 # its exec-time environment. A foreground call is not rewritten.
@@ -1361,4 +1461,7 @@ def settings_add_no_bash_hook_process():
 
 
 if __name__ == "__main__":
-    sys.exit(run_cases(CASES))
+    code = run_cases(CASES)
+    if not cost_probe.run_class(CostTests):
+        code = 1
+    sys.exit(code)
