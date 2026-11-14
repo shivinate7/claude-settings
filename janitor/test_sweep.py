@@ -5766,6 +5766,33 @@ class AgentOwnedProcessTests(_AgentEndFixture):
             stops = self.stop_list([proc.pid], self.AGENT)
         self.assertIsNone(stops, "the stop list is %r with an unreadable marker, not a keep" % (stops,))
 
+    def test_a_pid_another_agent_also_lists_is_kept_at_subagent_stop(self):
+        """Item 5 at SubagentStop: a marked pid that another agent's record also lists is kept. The stop list has its own
+        case; this one is the hook's end, which is what the SubagentStop path actually ends."""
+        proc = self.spawn(self.AGENT)
+        self.assertEqual(sweep.agent_mark(proc.pid), self.AGENT, "scope: pid %d does not read as the agent's marker" % proc.pid)
+        self.write_record(self.OTHER, [{"pid": proc.pid, "start": self.host_start_ticks(proc.pid),
+                                        "owner": self.OTHER, "kind": "background"}])
+        self.run_stop(self.AGENT)
+        self.assertIsNone(proc.poll(), "pid %d, which another agent's record also lists, was ended at SubagentStop" % proc.pid)
+
+    def test_a_sim_lease_or_unclear_record_kind_is_kept_at_subagent_stop(self):
+        """Item 6 at SubagentStop: a pid the record reads as kind sim-lease (bin/sim-lease holds it), or as unclear, is kept
+        even when its recorded start matches the pid now. Each arm is its own pid, so a kill of one does not hide the other."""
+        lease = self.spawn(self.AGENT)
+        unclear = self.spawn(self.AGENT)
+        self.assertEqual(sweep.agent_mark(lease.pid), self.AGENT, "scope: pid %d does not read as the agent's marker" % lease.pid)
+        self.assertEqual(sweep.agent_mark(unclear.pid), self.AGENT, "scope: pid %d does not read as the agent's marker" % unclear.pid)
+        self.write_record(self.AGENT, [
+            {"pid": lease.pid, "start": self.host_start_ticks(lease.pid), "owner": self.AGENT, "kind": "sim-lease"},
+            {"pid": unclear.pid, "start": self.host_start_ticks(unclear.pid), "owner": self.AGENT, "kind": "unclear"},
+        ])
+        self.run_stop(self.AGENT)
+        with self.subTest(arm="sim-lease"):
+            self.assertIsNone(lease.poll(), "pid %d, a simulator lease, was ended at SubagentStop" % lease.pid)
+        with self.subTest(arm="unclear"):
+            self.assertIsNone(unclear.poll(), "pid %d, which the record reads as unclear, was ended at SubagentStop" % unclear.pid)
+
 
 def _sigkill_quietly(pid):
     """SIGKILL PID if it is still there. A test's cleanup: the process may be gone already."""
