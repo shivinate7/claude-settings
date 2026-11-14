@@ -2541,16 +2541,16 @@ class ClaimSurvivesUnknown(Env):
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
         self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
 
-    def test_a_debt_check_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        import check_debt_retire  # the lint the merge tool's debt check runs; its read fails below, only after the claim push
+    def test_an_undo_history_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        """Confirm runs no Retire check: CI's verdict is the gate. The history read that runs again after the claim push is the silent-undo check's."""
         claimed = []
         self.host.on_claim = lambda: claimed.append(self.head())
-        real_check = check_debt_retire.check
-        def check_unknown(*a, **k):
-            if claimed:  # prove() runs the debt check after the claim push
-                raise check_debt_retire.Unknown("the debt history could not be read")
-            return real_check(*a, **k)
-        with unittest.mock.patch.object(check_debt_retire, "check", check_unknown):
+        real_undo = merge.undo_check
+        def history_unreadable(*a, **k):
+            if claimed:  # prove() reads the history again after the claim push
+                raise merge.Unread("the history could not be read")
+            return real_undo(*a, **k)
+        with unittest.mock.patch.object(merge, "undo_check", history_unreadable):
             rc, out = self.run_merge("7", "--confirm")
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
         self.assertIn("could not read the history", out, "the stop does not name the failed history read")
@@ -6244,7 +6244,6 @@ class SilentUndo(Env):
 
 DEBT_FIXTURE = "# Retire target\n\n- **What.** A fixture debt for the merge tests.\n- **Where.** None.\n- **Decision.** none\n- **Retire.** %s\n"
 RETIRE_TEST = "Delete the fixture. Check: `tests/test_retire_target.py`."
-PROSE_RETIRE = "Confirm it on a phone."  # names no runnable check: the close needs a cited run
 
 
 def names_kind(test, out, slug, kind):
@@ -6282,16 +6281,22 @@ class DebtRetire(Env):
 
     def test_preview_refuses_a_closed_debt_whose_retire_check_is_red(self):
         self.pr_on_debt(1)
+        self.host.state = "red: checks: fail"  # the head's CI is not green, so preview runs the Retire check itself
         rc, out = self.run_merge("7")
         self.assertEqual(rc, 1, out)
         names_kind(self, out, "retire-target", "red")
 
-    def test_confirm_refuses_a_closed_debt_whose_retire_check_is_red_before_any_claim_or_push(self):
+    def test_confirm_with_red_ci_refuses_at_the_head_wait_before_any_claim_or_push(self):
+        """CI's verdict on the head is the gate at confirm. A red head read refuses before the claim, and confirm runs no Retire check."""
         self.pr_on_debt(1)
+        calls = self.stub_retire_check()
+        self.host.state = "red: checks: fail"  # the head reads red: refused before any claim
         before = self.refs()
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
-        names_kind(self, out, "retire-target", "red")
+        self.assertIn("nothing was claimed or pushed", out)
+        self.assertIn("checks: fail", out, "the stop does not print the red check")
+        self.assertEqual(calls, [], "confirm called the Retire check")
         self.assertEqual(self.refs(), before, "a refused confirm pushed")
         self.assertEqual(self.claims(), 0, "a refused confirm claimed a record number")
         self.assertFalse(getattr(self.host, "merged", False), "a refused confirm merged")
@@ -6317,64 +6322,66 @@ class DebtRetire(Env):
         self.assertIn("PREVIEW", out)
         self.assertNotIn("BLOCKED", out)
 
-    def test_confirm_with_a_claim_keeps_a_cited_run_on_the_pr_head(self):
-        """The claim commit goes on top of the PR head. The cited run is on that head, so the re-check after the claim must accept it."""
-        self.pr_on_debt(0, retire=PROSE_RETIRE)
-        run_head = self.head()  # the run was on this head; the claim pushes the branch past it
-        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
-        self.host.cited_run = lambda url: ("success", run_head)
+    def stub_retire_check(self):
+        """Stand in for check_debt_retire.check: each call is recorded, and it finds nothing. -> the list of recorded calls."""
+        import check_debt_retire
+        calls = []
+
+        def check(*args, **kwargs):
+            calls.append((args, kwargs))
+            return []
+
+        patch = unittest.mock.patch.object(check_debt_retire, "check", check)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return calls
+
+    def ci_closes_a_debt(self, state):
+        """Scope: feat deletes the debt file, and the host reports `state` on the head."""
+        self.assertIn("D\tdocs/debts/retire-target.md", sh(self.co, "git", "diff", "--name-status", "origin/main", "origin/feat"),
+                      "scope: feat does not close the debt, so there is no close to judge")
+        self.host.state = state
+        self.assertEqual(self.host.head_state(7), state, "scope: the host does not report %s CI" % state)
+
+    def green_ci_closes_a_debt(self):
+        """Scope: feat deletes the debt file, and the host reports green CI on the head."""
+        self.ci_closes_a_debt("green")
+
+    def test_confirm_with_green_ci_never_calls_the_retire_check(self):
+        """The Retire run moved into CI, so a host that reports green CI is not asked for the check at confirm, before the claim or after its wait."""
+        self.pr_on_debt(1)  # the close's own Retire test is red: merge would refuse it if it still ran the check
+        self.green_ci_closes_a_debt()
+        calls = self.stub_retire_check()
         rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertEqual(self.claims(), 1, out)
-        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(rc, 0, "scope: confirm did not reach its merge: " + out)
+        self.assertTrue(getattr(self.host, "merged", False), "scope: confirm did not merge")
+        self.assertEqual(calls, [], "confirm called the Retire check with green CI")
 
-    def test_confirm_claim_does_not_carry_a_file_the_retire_test_wrote(self):
-        """The Retire test runs in the merge worktree, before the claim's `git add -A`. A file the test leaves there is no part of the claim."""
-        self.pr_on_debt(0, test_text="import sys\nopen('junk-from-test.txt', 'w').write('x')\nsys.exit(0)\n")
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertEqual(self.claims(), 1, out)
-        names = sh(self.co, "git", "log", "origin/main", "--format=", "--name-only")  # the claim is a parent of the merge: its files are in the log
-        self.assertNotIn("junk-from-test.txt", names, "the claim commit holds a file the Retire test wrote into the merge folder")
+    def test_preview_with_green_ci_never_calls_the_retire_check(self):
+        self.pr_on_debt(1)
+        self.green_ci_closes_a_debt()
+        calls = self.stub_retire_check()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, "scope: preview did not reach its verdict: " + out)
+        self.assertEqual(calls, [], "preview called the Retire check with green CI")
 
+    def test_preview_runs_the_retire_check_when_head_ci_is_pending(self):
+        """Pending CI is not green, so preview runs the Retire check on the head. The close's own Retire test is red, so a real run would refuse it."""
+        self.pr_on_debt(1)
+        self.ci_closes_a_debt("pending: checks")
+        calls = self.stub_retire_check()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, "scope: preview did not reach its verdict: " + out)
+        self.assertEqual(len(calls), 1, "preview did not call the Retire check once with pending CI")
 
-    def cited_run_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self, error):
-        """The PR closes a debt by a prose check and cites a run on its head. The run reads green before the claim push; after it, the read raises."""
-        self.pr_on_debt(0, retire=PROSE_RETIRE)
-        run_head = self.head()
-        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
-        claimed = []
-        def read(url):
-            if claimed:
-                raise error
-            return "success", run_head
-        self.host.cited_run = read
-        self.host.on_claim = lambda: claimed.append(self.head())
-        rc, out = self.run_merge("7", "--confirm")
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
-        self.assertIn("could not be read", out, "the stop does not name the cited run that could not be read")
-        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
-
-    def test_a_cited_run_read_that_fails_with_a_network_error_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        self.cited_run_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(merge.NetStop("the run's reply was cut short"))
-
-    def test_a_cited_run_read_that_fails_with_an_error_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        self.cited_run_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(RuntimeError("boom"))
-
-    def test_a_cited_run_that_is_red_after_the_claim_push_still_reverts(self):
-        """A real finding: the cited run reads green before the claim push and red after it. A red finding refuses, so the claim reverts."""
-        self.pr_on_debt(0, retire=PROSE_RETIRE)
-        run_head = self.head()
-        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
-        claimed = []
-        self.host.on_claim = lambda: claimed.append(self.head())
-        self.host.cited_run = lambda url: ("failure", run_head) if claimed else ("success", run_head)
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("reverted on feat", out)
-        self.assertIn("closes a debt without proof", out)
-        self.assertEqual(self.show("feat", "docs/decisions/second.md"), record("pending", "second").strip())
-        self.assertFalse(self.lock_ref(), "the merge lock was left on origin")
+    def test_preview_runs_the_retire_check_when_head_ci_is_unknown(self):
+        """An unknown read of the head's CI is not green, so preview runs the Retire check on the head. The close's own Retire test is red."""
+        self.pr_on_debt(1)
+        self.ci_closes_a_debt("unknown (a read of the head's checks failed)")
+        calls = self.stub_retire_check()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, "scope: preview did not reach its verdict: " + out)
+        self.assertEqual(len(calls), 1, "preview did not call the Retire check once with unknown CI")
 
 class DraftPreview(Env):
     """`merge <pr>` with no --confirm: a draft is previewed, not refused. The silent-undo check runs on the head

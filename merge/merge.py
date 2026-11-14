@@ -461,8 +461,8 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_h
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import check_silent_undo as undo
     # The scan is slow on a merge-heavy branch and merge runs it twice. Its answer depends only on the head, the base tip, the PR body,
-    # the default refs it reads, and the cited runs (through the PR head). The key holds no run answer. Reuse is still safe: debt_check
-    # judges each close again after every scan, and reads again any run that a Retire-run excuse rests on. So the second call reuses the first when the key is unchanged.
+    # the default refs it reads, and the cited runs (through the PR head). The key holds no run answer, so the second call reuses
+    # the first when the key is unchanged, also for a run that a Retire-run excuse rests on (a run is tied to the PR head, and the checks wait reads CI's verdict on the pushed head).
     try:
         key = (wt, *(git(wt, "rev-parse", "--verify", "-q", r + "^{commit}")[1].strip() for r in ("HEAD", base_ref, "origin/HEAD", "origin/main", "main")), pr_body, retire_head)
         if not (key[1] and key[2]) or key not in UNDO_MEMO:  # a head or base that does not resolve is never reused; a hit skips the scan and its beat
@@ -506,10 +506,14 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_h
     if problems:
         raise Dropped("the branch silently undoes earlier work:\n  " + "\n  ".join(problems) + f"\nPut it back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message. {UNDO_CITE}")
 
-def debt_check(wt, base_ref, host, info):
+def debt_check(wt, base_ref, host, info, n):
     """The debt-close lint (lint/check_debt_retire.py): each debt the branch closes has its Retire check run on the head.
+    CI runs it on every pull request (checks.yml), so confirm does not run it: its checks wait reads CI's verdict. The preview calls this
+    and skips it when the head's CI reads green; on any other read (red, pending, unknown) it runs, so the preview names the finding.
     A finding, red or unknown or prose, refuses. No reason flag lifts it. A cited run is judged against the PR head, never the worktree
     HEAD: the claim commit goes on top of the PR head, and a run on the head is still the run of this PR."""
+    if host.head_state(n) == "green":
+        return
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import check_debt_retire as debt
     try:
@@ -1112,15 +1116,16 @@ class Host:
 
     def cited_run(self, url):
         """-> (conclusion, head sha) of the workflow run at `url`, one read. A failed read is a Stop, never a green run."""
-        m = RUN_URL_ID.search(url)
-        if not m:
+        import check_debt_retire as debt  # the one home of the run read's route and reply (lint/check_debt_retire.py); the lint dir is on sys.path from the records import
+        try:
+            route = debt.run_route(url)
+        except ValueError:
             raise Stop(f"{url} is not a workflow run URL {DEBT_CITE}")
-        c, out = self.api(f"actions/runs/{m.group(1)}")
+        c, out = self.api(route)
         try:
             if c:
                 raise ValueError(out)
-            d = json.loads(out)
-            return d["conclusion"], d["head_sha"]
+            return debt.parse_run(out)
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
@@ -3085,7 +3090,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     try:
         try:
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"])
-            debt_check(wt, f"origin/{base}", host, info)
+            debt_check(wt, f"origin/{base}", host, info, n)
             refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok)
             stale, stands = holds_base(wt, f"origin/{base}", info["head"])
             current = stale and ("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " --confirm refuses it."
@@ -3308,7 +3313,6 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             tmp, wt = open_worktree(root, info, base)
         lane_head = head_under_claims(wt, cfgrel, base, info["head"]) if base == cfg["defaultBranch"] else info["head"]  # the head a cited run and the relayed yes name
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), lane_head))
-        debt_check(wt, base_ref, host, dict(info, head=lane_head))
         record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
         stale, stands = holds_base(wt, base_ref, info["head"])  # rule M3: a clean merge-tree against the tip, read before the claim
         if stale:
@@ -3390,7 +3394,6 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                     unproven("the worktree is gone, so the claim cannot be proved fresh " + BASE_CITE, "")
                 try:  # main may have moved during the wait: read the branch against the tip fetched just now
                     record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), lane_head))
-                    debt_check(wt, base_ref, host, dict(info, head=lane_head))
                 except (Liftable, Unread) as e:  # a history read that could not run; a finding is Dropped, and refuses
                     unproven("a check could not read the history", str(e))
                 except Stop as e:
