@@ -1,0 +1,14 @@
+{
+ "id": "touched-tests-read-text-files",
+ "title": "A test that reads a file's text runs whenever that file changes",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 23:53 CST Nov 13 (relayed; from lane cloud-snapshot-age-check, message 23:52; not re-read by the coordinator or triage): the touched-tests selection did not pick hooks/test_auto_mode_allow.py though that test reads install.sh's text. Same file class as the installer form that broke #3356.",
+ "source": "Coordinator message 23:53 CST Nov 13 (relayed). Related: shared-job-finder part (4) (same principle across places).",
+ "note": "Triage 23:53 CST Nov 13: selection rule: a test that reads a file's text (open, read_text, a path constant) is selected when that file changes. A lane first reproduces the miss (change install.sh, list the selected tests), then finds how the selection maps tests to files today (ci-scope.sh or the touched-tests script) and extends that one home. Red case first. Not started.",
+ "updatedAt": "2026-11-13T23:53:00-06:00"
+}
