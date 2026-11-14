@@ -2820,6 +2820,13 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         self.assert_blocked(out, "Pick guard")
         self.assertNotIn("Lane pick guard", out.get("reason", ""))
 
+    def test_ln_red_lane_and_consultant_tags_together_stay_a_lane(self):
+        # Catches: the consultant exemption widened past its bug, so a record with the lane tag too passes
+        # a question that main refuses.
+        record = self.lane_record(tags=("cs-build:lane", "cs-build:consultant"))
+        out = self.stop([*record, peer_msg("pick?"), assistant_text(self.reply(self.PROMISE))], env_id=self.LANE_ENV)
+        self.assert_blocked(out, "Lane pick guard", "its parent")
+
     def test_ln_red_box_or_items_write_blocks(self):
         # Catches: a lane's box or items write read as its send. Neither passes a lane.
         for label, act in (("box", self.box()), ("items", self.items_write("set"))):
