@@ -8306,6 +8306,12 @@ a = sys.argv[1:]
 root = a[a.index("--root") + 1]
 with open(os.environ["RECORDS_CALLS"], "a") as f:
     f.write(json.dumps(a) + "\\n")
+mode = os.environ.get("RECORDS_MODE", "")  # set by RecordsEnv.generator_mode, for one run
+if mode == "fail":
+    print("records: the generator failed")
+    sys.exit(1)
+if mode == "silent":
+    sys.exit(0)  # writes nothing, so the tree is the same after the run
 if os.path.exists(os.path.join(root, "debts", "bad.md")):
     print("records: debts/bad.md has no What")
     sys.exit(1)
@@ -8335,6 +8341,17 @@ class RecordsEnv(Env):
         for p in (unittest.mock.patch.object(merge, "RECORDS", self.prog, create=True),  # create: a missing name is a failure, not an error
                   unittest.mock.patch.dict(os.environ, {"RECORDS_CALLS": self.calls})):
             p.start(); self.addCleanup(p.stop)
+
+    def generator_mode(self, mode):
+        """Run the fake generator in `mode` for as long as the returned context lasts: "fail" exits 1, "silent" writes nothing (FAKE_RECORDS reads RECORDS_MODE)."""
+        return unittest.mock.patch.dict(os.environ, {"RECORDS_MODE": mode})
+
+    def generator_runs(self):
+        """-> how many times the fake generator has run in this case: its call log has one line a run."""
+        if not os.path.exists(self.calls):
+            return 0
+        with open(self.calls) as f:
+            return sum(1 for _ in f)
 
     def kinds_off(self):
         """The base holds claude-settings' own config: no stamp kinds, so no claim."""
@@ -16506,18 +16523,25 @@ class PageOnlyRecordCarry(ReviewEnv, RecordsEnv):
         super().setUp()
         self.use_fake_records()
 
-    def tool_page(self, parent, changes=None, hand=""):
+    def tool_page(self, parent, changes=None, hand="", rebuild=True):
         """-> the sha of the commit the merge tool writes for a records-page rebuild on `parent`. The tool's own rebuild and commit run in a worktree
-        of this run's folder. `changes` are written before the rebuild, so they join the commit. `hand` is text added to the page after the rebuild."""
+        of this run's folder. `changes` are written before the rebuild, so they join the commit. `hand` is text added to the page after the rebuild.
+        `rebuild=False` makes a page the tool did not write: the page is `hand` alone, or removed when `hand` is None."""
         wt = os.path.join(self.t, "page-wt")
         sh(self.co, "git", "worktree", "add", "-q", "--detach", wt, parent)
         try:
+            page_path = os.path.join(wt, *merge.RECORDS_PAGE.split("/"))
             for path, text in (changes or {}).items():
                 put_lf(os.path.join(wt, *path.split("/")), text)
-            merge.rebuild_records(wt)
-            if hand:
-                with open(os.path.join(wt, *merge.RECORDS_PAGE.split("/")), "a", newline="\n") as f:
-                    f.write(hand)
+            if rebuild:
+                merge.rebuild_records(wt)
+                if hand:
+                    with open(page_path, "a", newline="\n") as f:
+                        f.write(hand)
+            elif hand is None:
+                os.remove(page_path)
+            else:
+                put_lf(page_path, hand)
             return merge.commit_claim(wt, None)
         finally:
             sh(self.co, "git", "worktree", "remove", "--force", wt)
@@ -16667,6 +16691,86 @@ class PageOnlyRecordCarry(ReviewEnv, RecordsEnv):
         self.assert_page_scope(page, fx.clean)
         self.reviewed_line(self.record_at(fx, page, fx.fixed), page, "done",
                            "a records page the tool wrote over a clean merge of main must carry the record, but the page commit reads stale")
+
+    def test_m_a_generator_that_cannot_rebuild_the_page_reads_stale_and_unknown(self):  # control: green on the old code
+        fx = self.real_commits()
+        page = self.tool_page(fx.fixed)
+        self.facts(fx, [page])
+        self.assert_page_scope(page, fx.fixed)
+        with self.subTest("the generator exits 1"):
+            runs = self.generator_runs()
+            with self.generator_mode("fail"):
+                out = self.reviewed_line(self.record_at(fx, page, fx.fixed), page, "stale",
+                                         "a generator that exits 1 on a records-page commit must not carry the record")
+            self.assertEqual(self.generator_runs() - runs, 1, "fixture: the failing generator did not run once, on the page commit")
+            line = list_line(self, out, 7)
+            self.assertIn("unknown", line, "the stale line does not say unknown, though the generator failed: the verdict is unknown, not a plain stale")
+            self.assertIn("records: the generator failed", line, "the stale line does not carry the generator's own failure")
+        with self.subTest("merge.RECORDS names a file that is not there"):
+            with unittest.mock.patch.object(merge, "RECORDS", os.path.join(self.t, "no-such-records.py")):
+                out = self.reviewed_line(self.record_at(fx, page, fx.fixed), page, "stale",
+                                         "a generator that cannot start on a records-page commit must not carry the record")
+            line = list_line(self, out, 7)
+            self.assertIn("unknown", line, "the stale line does not say unknown, though the generator could not run")
+            self.assertIn("cannot be rebuilt", line, "the stale line does not carry the rebuild's own failure")
+
+    def test_n_a_hand_written_page_the_generator_leaves_alone_does_not_carry_the_record(self):
+        fx = self.real_commits()
+        pc = self.tool_page(fx.fixed, rebuild=False, hand="hand-written page\n")
+        self.facts(fx, [pc])
+        self.assert_page_scope(pc, fx.fixed)
+        self.assertNotEqual(sh(self.co, "git", "show", f"{pc}:{merge.RECORDS_PAGE}"), page().strip(),
+                            "fixture: the hand-written page equals the generator's output, so a silent generator proves nothing")
+        runs = self.generator_runs()
+        with self.generator_mode("silent"):
+            self.reviewed_line(self.record_at(fx, pc, fx.fixed), pc, "stale",
+                               "a hand-written page must not carry the record when the generator writes nothing: no file changes, so nothing is proved")
+        self.assertGreater(self.generator_runs() - runs, 0, "fixture: the generator did not run on the page commit")
+
+    def test_o_a_deleted_records_page_the_generator_leaves_alone_does_not_carry_the_record(self):
+        fx = self.real_commits()
+        page = self.tool_page(fx.fixed)
+        gone = self.tool_page(page, rebuild=False, hand=None)
+        self.facts(fx, [page, gone])
+        self.assert_page_scope(gone, page)
+        self.assertNotEqual(subprocess.run(["git", "cat-file", "-e", f"{gone}:{merge.RECORDS_PAGE}"], cwd=self.co, capture_output=True).returncode, 0,
+                            "fixture: the deleting commit still holds the records page")
+        runs = self.generator_runs()
+        with self.generator_mode("silent"):
+            self.reviewed_line(self.record_at(fx, gone, fx.fixed), gone, "stale",
+                               "a commit that deletes the records page must not carry the record when the generator writes nothing: no file changes, so nothing is proved")
+        self.assertGreater(self.generator_runs() - runs, 0, "fixture: the generator did not run on the page commit")
+
+    def test_p_a_page_the_tool_did_not_write_that_equals_the_generator_output_carries_the_record(self):  # control: green on the old code
+        fx = self.real_commits()
+        pc = self.tool_page(fx.fixed, rebuild=False, hand=page())
+        self.facts(fx, [pc])
+        self.assert_page_scope(pc, fx.fixed)
+        raw = subprocess.run(["git", "show", f"{pc}:{merge.RECORDS_PAGE}"], cwd=self.co, capture_output=True).stdout
+        self.assertEqual(raw, page().encode(), "fixture: the committed page is not the generator's output, byte for byte")
+        self.reviewed_line(self.record_at(fx, pc, fx.fixed), pc, "done",
+                           "a page equal to the generator's output, byte for byte, must carry the record, however it was written")
+
+    def test_q_a_walk_over_two_generated_pages_runs_the_generator_once_per_page(self):  # control: green on the old code
+        fx = self.real_commits()
+        first = self.tool_page(fx.fixed)  # the empty state: no debts
+        debt_main = self.git_commit(fx.seed, self.debts(60))  # the full-size state: 60 debts, as test d lists them
+        self.base_tip(debt_main)
+        fx.on_main[(debt_main, "main")] = "identical"
+        merged = self.git_commit(first, self.debts(60), debt_main)  # git's clean merge of first and main: it brings the debts in
+        second = self.tool_page(merged)
+        self.facts(fx, [first, merged, second])
+        self.assert_page_scope(first, fx.fixed)
+        self.assert_page_scope(second, merged)
+        self.assertEqual(sh(self.co, "git", "show", f"{second}:{merge.RECORDS_PAGE}"), page(*[f"gap-{i:02d}" for i in range(1, 61)]).strip(),
+                         "fixture: the second page does not list the 60 debts")
+        real, runs = merge.add_worktree, self.generator_runs()
+        with unittest.mock.patch.object(merge, "add_worktree", wraps=real) as worktrees:
+            self.reviewed_line(self.record_at(fx, second, fx.fixed), second, "done",
+                               "a walk over two records-page commits must carry the record to the reviewed head")
+        self.assertEqual(self.generator_runs() - runs, 2, "the generator did not run once per records-page commit of the walk")
+        self.assertEqual([c.args[1] for c in worktrees.call_args_list], [second, first],
+                         "a records-page commit of the walk got a worktree more or less than once, or for another commit")
 
 class ReplacementCarry(ReviewEnv):
     """`merge --reviewed` reads a replacement pull request (its body names `Replaces #6`) with the newest record on #6 and #6's lane-lint PASS,
