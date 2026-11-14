@@ -3680,30 +3680,33 @@ class StepCheckRow(UpkeepFixture):
 
 
 class StepCheckDocs(unittest.TestCase):
-    """SKILL.md names the two step fields in its `## Lane and grants` section, the section that holds the
-    "Two step fields serve the guard" list. It reads that one section, as skills/waiting-page/test_skill_park_relay.py
+    """SKILL.md documents the two step fields in their own section, `## Step check fields`. The guard fields keep
+    their section, `## Lane and grants`. Each case reads one section, as skills/waiting-page/test_skill_park_relay.py
     does."""
 
-    HEADING = "## Lane and grants"
+    FIELDS = "## Step check fields"
+    GUARD = "## Lane and grants"
 
-    def section(self):
+    def section(self, heading):
+        """The text of the SKILL.md section whose heading is the whole line `heading`, up to the next `## ` heading."""
         text = (HERE / "SKILL.md").read_text(encoding="utf-8")
-        start = text.find(self.HEADING)
-        self.assertNotEqual(start, -1, "SKILL.md has no '%s' section" % self.HEADING)
-        end = text.find("\n## ", start + len(self.HEADING))
-        return text[start:] if end == -1 else text[start:end]
+        found = re.search(r"^%s[ \t]*$" % re.escape(heading), text, re.M)
+        self.assertIsNotNone(found, "SKILL.md has no '%s' heading line" % heading)
+        end = text.find("\n## ", found.end())
+        return text[found.start():] if end == -1 else text[found.start():end]
 
-    def test_the_section_names_done_check(self):
-        self.assertIn("`done_check`", self.section(), "SKILL.md's Lane and grants section does not name done_check")
+    def test_the_fields_section_names_done_check(self):
+        self.assertIn("`done_check`", self.section(self.FIELDS),
+                      "the step check fields section does not name done_check")
 
-    def test_the_section_names_ci_only(self):
-        self.assertIn("`ci_only`", self.section(), "SKILL.md's Lane and grants section does not name ci_only")
+    def test_the_fields_section_names_ci_only(self):
+        self.assertIn("`ci_only`", self.section(self.FIELDS), "the step check fields section does not name ci_only")
 
-    def test_the_section_still_names_the_guard_fields(self):
-        # Control, green on main: the guard fields stay documented in the section.
-        section = self.section()
-        self.assertIn("`lane`", section, "SKILL.md's Lane and grants section no longer names lane")
-        self.assertIn("`grants`", section, "SKILL.md's Lane and grants section no longer names grants")
+    def test_the_guard_section_still_names_the_guard_fields(self):
+        # Control, green on main: the guard fields stay documented in their section.
+        section = self.section(self.GUARD)
+        self.assertIn("`lane`", section, "the Lane and grants section no longer names lane")
+        self.assertIn("`grants`", section, "the Lane and grants section no longer names grants")
 
 
 def baked(text, key):
