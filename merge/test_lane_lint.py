@@ -1721,8 +1721,8 @@ class CrossMeasure(LaneFixture):
 
 class CombinedMarkerLine(unittest.TestCase):
     """merge.has_combined_marker (ruling own-811-c-marker-line): the combined-PR marker is the body line COMBINED_MARKER, alone on its line, and it
-    counts only as the one such line outside a fenced code block. CRLF line ends count. Two such lines, a line with other text, or a marker in a fence
-    is no marker. The cases call the function directly: until it exists they error on the missing name, and the CrossMeasure cases' red is the real cause."""
+    counts only as the one such line outside a fenced code block. CRLF line ends count. Two such lines, a line with other text, indent or trailing
+    whitespace, or a marker in a fence is no marker. The cases call the function directly: until it exists they error on the missing name, and the CrossMeasure cases' red is the real cause."""
 
     def test_combined_marker_a_lone_marker_line_counts(self):
         self.assertTrue(merge.has_combined_marker("Lane work.\n\n" + COMBINED_MARKER + "\n\nsession\n"))
@@ -1747,6 +1747,26 @@ class CombinedMarkerLine(unittest.TestCase):
 
     def test_combined_marker_a_marker_with_leading_text_is_no_marker(self):
         self.assertFalse(merge.has_combined_marker("see below " + COMBINED_MARKER + "\n"))
+
+    def _assert_padded_marker_is_no_marker(self, line, cause):
+        """`line` is the marker with whitespace around it (the precondition, so the case probes whitespace only), and a body holding it between prose is no marker."""
+        self.assertEqual(line.strip(), COMBINED_MARKER, "precondition: the line is the marker with whitespace around it, so the case probes whitespace only")
+        self.assertFalse(merge.has_combined_marker("Lane work.\n\n" + line + "\n\nsession\n"), cause)
+
+    def test_combined_marker_a_marker_indented_two_spaces_is_no_marker(self):
+        self._assert_padded_marker_is_no_marker("  " + COMBINED_MARKER, "a marker indented two spaces counts: the compare must not strip the line")
+
+    def test_combined_marker_a_marker_indented_four_spaces_is_no_marker(self):
+        self._assert_padded_marker_is_no_marker("    " + COMBINED_MARKER, "a marker indented four spaces counts: the compare must not strip the line")
+
+    def test_combined_marker_a_marker_indented_with_a_tab_is_no_marker(self):
+        self._assert_padded_marker_is_no_marker("\t" + COMBINED_MARKER, "a marker indented with a tab counts: the compare must not strip the line")
+
+    def test_combined_marker_a_marker_with_a_trailing_space_is_no_marker(self):
+        self._assert_padded_marker_is_no_marker(COMBINED_MARKER + " ", "a marker with a trailing space counts: the compare must not strip the line")
+
+    def test_combined_marker_a_marker_with_a_trailing_tab_is_no_marker(self):
+        self._assert_padded_marker_is_no_marker(COMBINED_MARKER + "\t", "a marker with a trailing tab counts: the compare must not strip the line")
 
     def test_combined_marker_an_empty_body_is_no_marker(self):  # the empty state
         self.assertFalse(merge.has_combined_marker(""))
