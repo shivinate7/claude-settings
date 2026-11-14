@@ -1814,6 +1814,60 @@ def brief_hit(tool: str, tool_input, transcript: str):
     return topic_hit(first, tags)
 
 
+# ---- A lane brief names a slug or a role, never a session id (rule brief-ids-in-roster)
+# A session id as a brief types it, in any case. SESSION_ID_RE (guard_shared_tree) is a full match, so this scans: the id
+# is `session_`, a digit, then letters and digits, so a parameter name such as `session_id` is no id, and a `.md`, a dot or
+# a dash after the id is not part of it.
+_BRIEF_ID = re.compile(r"(?<![A-Za-z0-9_])session_[0-9][A-Za-z0-9]*", re.IGNORECASE)
+_DATA_QUOTES = "`\""  # an id with one of these right before it and right after it is data (an incident quote)
+# A line that opens a brief: an optional markdown lead, then Grant: or Lane brief:. The lead is _MARKDOWN_LEAD plus the
+# list dash, which the other readers of the lead do not take.
+_BRIEF_LEAD = r"[-#*_>\s]*"
+_BRIEF_OPENER = re.compile(_BRIEF_LEAD + r"(?:" + re.escape(LANE_GRANT_MARKER) + r"|(?i:" + re.escape(LANE_BRIEF_MARKER) + r"))")
+BRIEF_ID_REASON = (
+    "this brief names a session id. A hand-typed id can wake the wrong session or none. Name the lane's slug or the "
+    "session's role instead, and the lane looks the id up in the roster. "
+    "(decision brief-ids-in-roster, a lane brief names a slug or a role, never a session id)"
+)
+
+
+def _bare_ids_in(text: str) -> list[str]:
+    """The ids not wrapped in a quote on both sides. A quote elsewhere on the line hides nothing."""
+    bare = []
+    for found in _BRIEF_ID.finditer(text):
+        before = text[found.start() - 1] if found.start() else ""
+        after = text[found.end()] if found.end() < len(text) else ""
+        if not (before and before in _DATA_QUOTES and after and after in _DATA_QUOTES):
+            bare.append(found.group(0).lower())
+    return bare
+
+
+def brief_roster_hit(tool: str, tool_input, cwd: str):
+    """Return (matched, reason) when a lane brief names a bare session id, else None. Read: a create_session that tags a
+    lane (its prompt), and a send_message with a line that starts LANE_GRANT_MARKER or LANE_BRIEF_MARKER (its message). An
+    id inside backticks or double quotes is data and passes. The send_message target is not judged. No git read and no
+    file written: the text alone decides. Fails open on any error in the read. `cwd` is unused; the call site passes it."""
+    if not isinstance(tool_input, dict):
+        return None
+    if tool == BRIEF_TOOL:
+        text = tool_input.get("message")
+        if not isinstance(text, str) or not any(_BRIEF_OPENER.match(ln) for ln in text.splitlines()):
+            return None
+    elif is_lane_create_session(tool, tool_input):
+        text = tool_input.get("prompt")
+    else:
+        return None
+    if not isinstance(text, str) or "session_" not in text.lower():
+        return None
+    try:
+        bare = _bare_ids_in(text)
+    except Exception:
+        return None
+    if not bare:
+        return None
+    return "lane brief naming " + ", ".join(sorted(set(bare))), BRIEF_ID_REASON
+
+
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)
 STAMP_LIMIT_MINUTES = 1  # a header stamp this far ahead of the clock passes; one more minute ahead is refused
 STAMP_QUOTE_MINUTES = 60  # an undated stamp more than this far ahead reads as a quote from an earlier day, and passes
