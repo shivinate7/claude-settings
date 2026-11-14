@@ -12361,12 +12361,15 @@ class PullsHost(merge.Host):
     per 100), and `files_error` fails that read. `changed_files` is the count `pulls/<n>` reports (None: the length of `files`). `repo` is the
     OWNER/NAME the host names its repo by (Host.repo): the header of a `--reviewed --root` block reads it. `commits` maps a commit sha to its
     parent shas: `gh` answers `commits/<sha>` with them, and a sha not listed is a 404, as GitHub answers an unknown commit. `trees` maps a
-    commit sha to its tree sha, which the same answer names under commit.tree.sha."""
+    commit sha to its tree sha, which the same answer names under commit.tree.sha. `bodies` maps a pull request number to its body, as `pulls/<n>`
+    and the open list give it (a replacement names its source pull request in that body)."""
     def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
                  base_compare_error=None, comments=(), comments_error=None, count_gh=False, files=None, files_error=None, changed_files=None, repo=None,
-                 commits=None, trees=None):
+                 commits=None, trees=None, bodies=None):
         super().__init__(list(required), base="main", minute=60, pause=lambda s: None, ignore=ignore, repo=repo)
-        self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
+        self.bodies = dict(bodies or {})  # pull request number -> its body
+        self.pulls = [{**d, "body": self.bodies[d["number"]]} if d["number"] in self.bodies else d for d in pulls]
+        self.check_rows, self.pulls_error = check_rows, pulls_error
         self.comments, self.comments_error = list(comments), comments_error  # the repo-wide issue comments, oldest first
         self.files = list(files) if files is not None else [pr_file("README.md")]  # the changed files of every pull request, as `pulls/<n>/files` lists them
         self.files_error = files_error  # the (code, output) text of a failed files read
@@ -12425,7 +12428,7 @@ class PullsHost(merge.Host):
         if not found:
             return 1, "gh: Not Found (HTTP 404)"
         count = len(self.files) if self.changed_files is None else self.changed_files
-        return 0, json.dumps({**found[0], "state": "open", "merged": False, "mergeable": True, "mergeable_state": "clean", "body": "",
+        return 0, json.dumps({**found[0], "state": "open", "merged": False, "mergeable": True, "mergeable_state": "clean", "body": self.bodies.get(n, ""),
                               "changed_files": count})
 
     def files_reply(self, rel, params, flags):
@@ -13804,6 +13807,13 @@ def no_record_numbers(out):
 
 REVIEW_FIX_PASS = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS")  # the parsed fix check tuple: reviewed head, role, model, verdict; every fix check runs on that model (owner item 444 a)
 REVIEW_FIX_FAIL = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "FAIL")
+# A replacement pull request (live head REVIEW_HEAD) names its source in its body. Its source is #6: the record and the lane lint of
+# #6's head carry to the replacement when the two heads hold the same tree. Trees are compared, never heads (step review-carries-by-tree).
+REPLACES_SOURCE = 6
+REPLACES_BODY = "Replaces #6\n\nThe same change, re-cut as a new commit.\n"
+SOURCE_HEAD = "3a" * 20  # the source's head: the Head of its record and the head its lint read
+SOURCE_TREE = "7c" * 20  # the tree of SOURCE_HEAD, which the replacement holds too when it is a re-cut
+OTHER_TREE = "9d" * 20  # a tree no record reviewed
 
 def fix_state(test, fix, **kw):
     """-> (state, why) of a record built without a fix line, with `fix` set on its parsed dict. review_state runs without the parser, so a
@@ -14879,6 +14889,35 @@ class ReviewFixBase(ReviewEnv):
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
         self.assert_refused(rc, out, err)
 
+    def replacement_host(self, tree, body=REPLACES_BODY, comments=()):
+        """Pull request 7 at REVIEW_HEAD, whose tree is `tree`, with its body and the comments given. Its source head SOURCE_HEAD holds SOURCE_TREE.
+        Both heads are root commits, so the commit reads name no parent."""
+        return self.record_host(*comments, bodies={7: body}, commits={REVIEW_HEAD: [], SOURCE_HEAD: []},
+                                trees={REVIEW_HEAD: tree, SOURCE_HEAD: SOURCE_TREE})
+
+    def source_record(self):
+        """The record of the source pull request, #6, at SOURCE_HEAD and passing, on the source's own issue."""
+        return review_comment(1, REPLACES_SOURCE, record_text(n=REPLACES_SOURCE, head=SOURCE_HEAD, rounds=REVIEW_PASS))
+
+    def test_replacement_7a_a_same_tree_source_log_is_the_earlier_log_for_the_fix_check(self):
+        # The tree compared is the replacement's live head's (the record's Head). Its tree equals the source head's, so #6's newest log is the
+        # earlier log, and a fix check that starts from SOURCE_HEAD is accepted.
+        rc, out, err = self.review_with_base(SOURCE_HEAD, self.replacement_host(SOURCE_TREE, comments=[self.source_record()]))
+        self.assertEqual(rc, 0, "a replacement whose tree matches its source's was refused the fix check from the source head:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (SOURCE_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS"))
+
+    def test_replacement_7b_a_different_tree_from_the_source_is_still_refused(self):
+        # the same record and fix check as 7a, with the replacement's tree changed: the source's log is not the earlier log, so the fix check is refused
+        rc, out, err = self.review_with_base(SOURCE_HEAD, self.replacement_host(OTHER_TREE, comments=[self.source_record()]))
+        self.assert_refused(rc, out, err)
+
+    def test_replacement_7c_a_same_tree_without_a_replaces_line_is_still_refused(self):
+        # the same tree and record as 7a, with no line that names #6: a shared tree alone carries nothing
+        for label, body in (("no body", ""), ("a body that names #6 without Replaces", "Fixes #6\n")):
+            with self.subTest(label=label):
+                rc, out, err = self.review_with_base(SOURCE_HEAD, self.replacement_host(SOURCE_TREE, body=body, comments=[self.source_record()]))
+                self.assert_refused(rc, out, err)
+
 class ReviewRoundOneCompletes(ReviewEnv):
     """--review-record accepts a record that ends at a passing first round, alone or with a fix verifier, on a guard or check change, and its printed body
     parses. parse_review still reads a final round in a record posted before the rule."""
@@ -15499,6 +15538,54 @@ class ReviewNoRestart(ReviewEnv):
         self.assert_refused(rc, out, err)
         rc, out, err = self.run_args(*self.review_argv(*self.THREE_FAILED_ARGV), host=self.host_with(earlier))
         self.assert_accepted(rc, out, err)
+
+    # the remedies' wording, each searched case-free. The refusal's cause already says "has no fix verifier", so remedy (b) is matched by its own
+    # words, a fix verifier on the delta; the old message does not carry them.
+    REMEDY_CARRY, REMEDY_FIX, REMEDY_RECUT = r"carr\w* by tree", r"fix verifier on the delta", r"new branch"
+
+    def host_with_trees(self, trees, *bodies):
+        """host_with, with the trees of the heads (`trees`: sha -> tree sha). Each head is a root commit, so the commit reads name no parent."""
+        return self.record_host(*(review_comment(i, 7, body) for i, body in enumerate(bodies, 1)), head=self.head(), trees=trees,
+                                commits={sha: [] for sha in trees})
+
+    def at(self, text, pattern):
+        """The offset of the first case-free match of `pattern` in `text`, or -1."""
+        m = re.search(pattern, text, re.I)
+        return m.start() if m else -1
+
+    def test_replacement_8a_the_restart_refusal_offers_carry_by_tree_before_the_recut_when_the_trees_match(self):
+        # the earlier record reviewed REVIEW_OLD_HEAD, and the live head holds the same tree: remedy (a) is carrying by tree, before any re-cut
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_FAILED_THREE)
+        host = self.host_with_trees({REVIEW_OLD_HEAD: SOURCE_TREE, self.head(): SOURCE_TREE}, earlier)
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS"), host=host)
+        self.assert_refused(rc, out, err)
+        carry, recut = self.at(err, self.REMEDY_CARRY), self.at(err, self.REMEDY_RECUT)
+        self.assertGreaterEqual(carry, 0, "the restart refusal does not offer carry by tree when the trees match:\n" + err)
+        self.assertLess(carry, recut, "the restart refusal names the new branch before carry by tree:\n" + err)
+        self.assertIn("last resort", err, "the restart refusal does not name the new branch as the last resort:\n" + err)
+
+    def test_replacement_8b_the_restart_refusal_offers_a_fix_verifier_before_the_recut_when_the_trees_differ(self):
+        # the same earlier record, and a live head with another tree: carry by tree does not apply, and remedy (b) is a fix verifier on the delta
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_FAILED_THREE)
+        host = self.host_with_trees({REVIEW_OLD_HEAD: SOURCE_TREE, self.head(): OTHER_TREE}, earlier)
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS"), host=host)
+        self.assert_refused(rc, out, err)
+        self.assertEqual(self.at(err, self.REMEDY_CARRY), -1, "the restart refusal offers carry by tree though the trees differ:\n" + err)
+        fix, recut = self.at(err, self.REMEDY_FIX), self.at(err, self.REMEDY_RECUT)
+        self.assertGreaterEqual(fix, 0, "the restart refusal does not offer a fix verifier on the delta when the trees differ:\n" + err)
+        self.assertLess(fix, recut, "the restart refusal names the new branch before the fix verifier:\n" + err)
+        self.assertIn("last resort", err, "the restart refusal does not name the new branch as the last resort:\n" + err)
+
+    def test_replacement_8c_the_restart_refusal_offers_only_the_recut_when_neither_carry_nor_a_fix_verifier_applies(self):
+        # the earlier record's fix check failed, so no fix verifier can start from it, and the trees differ: only the re-cut is left
+        failed_fix = fix_verifier_line(verdict="FAIL", head="1e" * 20)
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_FAILED_THREE, fix=(failed_fix,))
+        host = self.host_with_trees({REVIEW_OLD_HEAD: SOURCE_TREE, self.head(): OTHER_TREE}, earlier)
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS"), host=host)
+        self.assert_refused(rc, out, err)
+        self.assertEqual(self.at(err, self.REMEDY_CARRY), -1, "the restart refusal offers carry by tree though the trees differ:\n" + err)
+        self.assertEqual(self.at(err, self.REMEDY_FIX), -1, "the restart refusal offers a fix verifier after a failed fix check:\n" + err)
+        self.assertIn("last resort", err, "the restart refusal does not name the new branch as the last resort:\n" + err)
 
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
@@ -16276,6 +16363,29 @@ class ReleaseCheck(ReviewEnv):
         self.assertEqual(rc, 1, err)
         self.assert_fails_alone(self.line_of(lines, 7), 7, r"^the lint ran on ")
 
+    def replacement_release(self, tree_of_source):
+        """`--release-check 7` where #7 is a replacement of #6 (its body names `Replaces #6`), at the feature head, and #6's record and lint sit at
+        SOURCE_HEAD, whose tree is `tree_of_source`. -> (rc, lines, err) of the run. The lint is a --lint flag, as the check reads it."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        feat = self.head("feat")
+        tree = sh(self.co, "git", "rev-parse", f"{feat}^{{tree}}")
+        source = review_comment(1, REPLACES_SOURCE, record_text(n=REPLACES_SOURCE, head=SOURCE_HEAD, rounds=REVIEW_PASS))
+        rc, lines, err, _ = self.release([7], lint=["--lint", f"7@{SOURCE_HEAD}:PASS"], comments=[source], bodies={7: REPLACES_BODY},
+                                         commits={feat: [], SOURCE_HEAD: []}, trees={feat: tree, SOURCE_HEAD: tree_of_source(tree)})
+        return rc, lines, err
+
+    def test_replacement_release_a_same_tree_source_record_and_lint_carry_to_the_release_check(self):
+        rc, lines, err = self.replacement_release(lambda tree: tree)
+        line = self.line_of(lines, 7)
+        self.assertNotIn("no review record", line, "the source's record did not carry to #7 by tree:\n" + err)
+        self.assertNotIn("the lint ran on ", line, "the source's lane-lint PASS did not carry to #7 by tree:\n" + line)
+        self.assertEqual((rc, line), (0, "#7 PASS"), err)
+
+    def test_replacement_release_b_a_different_tree_source_is_not_carried_to_the_release_check(self):  # control: green on the old code
+        rc, lines, err = self.replacement_release(lambda tree: OTHER_TREE)
+        self.assertEqual(rc, 1, err)
+        self.assertIn("no review record", self.line_of(lines, 7), "a source whose tree differs carried its record to #7")
+
 # The guard's changed-path check of `--review-record`. One home for its examples: GUARD_EXAMPLES holds one changed path under each folder entry
 # of merge.GUARD_PATHS and under each file entry of merge.GUARD_FILES. The cases read the entries from merge and check them against these keys,
 # so an entry with no example fails.
@@ -16324,6 +16434,81 @@ class ClaimOnlyReviewed(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertNotIn(" done: ", list_line(self, out, 7), "a code-file commit carried the lint of its parent:\n" + out)
         self.assertIn("merge --lane-lint 7", out, out)
+
+class ReplacementCarry(ReviewEnv):
+    """`merge --reviewed` reads a replacement pull request (its body names `Replaces #6`) with the newest record on #6 and #6's lane-lint PASS,
+    when the tree of #6's record head equals the tree of the replacement's live head (step review-carries-by-tree; decision pr-review-record).
+    The carried record reads as it reads at its own head: a carry changes the head test only. #6 is in no open-pull-request list here, so the
+    carry must not need #6 to be open. Every host holds root commits and the trees the case names, so no git read runs.
+    Case 1 is the control for 2 to 4, which change one thing each; 6a is the control for 6b."""
+
+    def carry_host(self, *comments, body=REPLACES_BODY, tree=SOURCE_TREE):
+        """Pull request 7 at REVIEW_HEAD, tree `tree`, with its body and the comments given. The source's head SOURCE_HEAD holds SOURCE_TREE."""
+        return PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments=list(comments), bodies={7: body}, commits={REVIEW_HEAD: [], SOURCE_HEAD: []},
+                         trees={REVIEW_HEAD: tree, SOURCE_HEAD: SOURCE_TREE})
+
+    def source_record(self, **kw):
+        """The record of the source, #6, at SOURCE_HEAD, on #6's own issue. `kw` goes to record_text (rounds, net, fix)."""
+        return review_comment(1, REPLACES_SOURCE, record_text(n=REPLACES_SOURCE, head=SOURCE_HEAD, **{"rounds": REVIEW_PASS, **kw}))
+
+    def source_lint(self):
+        """The lane-lint PASS of the source at SOURCE_HEAD."""
+        return lint_of(REPLACES_SOURCE, SOURCE_HEAD)
+
+    def assert_not_done(self, out, msg):
+        """Pull request 7's line does not read done."""
+        self.assertNotRegex(out, r"(?m)^#7 .* done: ", msg + ":\n" + out)
+
+    def test_replacement_1_a_same_tree_takes_the_source_record_and_lint_and_reads_done(self):
+        host = self.carry_host(self.source_record(), self.source_lint())
+        self.reviewed_line(host, REVIEW_HEAD, "done", "a same-tree replacement did not take its source's record and lint PASS")
+
+    def test_replacement_2_a_different_tree_is_not_carried(self):
+        host = self.carry_host(self.source_record(), self.source_lint(), tree=OTHER_TREE)
+        rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assert_not_done(out, "a replacement whose tree differs from its source's read done")
+
+    def test_replacement_3_a_same_tree_without_a_replaces_line_is_not_carried(self):
+        for label, body in (("no body", ""), ("a body that names #6 without Replaces", "Fixes #6\n"), ("a body that names itself", "Replaces #7\n")):
+            with self.subTest(label=label):
+                rc, out, err = self.run_args("--reviewed", host=self.carry_host(self.source_record(), self.source_lint(), body=body))
+                self.assertEqual(rc, 0, out + err)
+                self.assert_not_done(out, f"a same-tree replacement with {label} read done")
+
+    def test_replacement_4_a_source_record_whose_pr_line_names_another_number_is_not_carried(self):
+        misfiled = review_comment(1, REPLACES_SOURCE, record_text(n=9, head=SOURCE_HEAD, rounds=REVIEW_PASS))  # on #6's issue, but PR: #9
+        rc, out, err = self.run_args("--reviewed", host=self.carry_host(misfiled, self.source_lint()))
+        self.assertEqual(rc, 0, out + err)
+        self.assert_not_done(out, "a source record whose PR line names #9 was carried to #7")
+
+    def test_replacement_5a_a_held_or_failed_source_never_reads_done_on_the_replacement(self):
+        failed_fix = fix_verifier_line(verdict="FAIL", head="1e" * 20)
+        for label, record in (("held", self.source_record(net="negative")), ("a failed fix check", self.source_record(fix=(failed_fix,)))):
+            with self.subTest(label=label):
+                rc, out, err = self.run_args("--reviewed", host=self.carry_host(record, self.source_lint()))
+                self.assertEqual(rc, 0, out + err)
+                self.assert_not_done(out, f"a replacement read done from a source whose record is {label}")
+
+    def test_replacement_5b_a_held_source_record_reads_held_on_the_replacement(self):
+        self.reviewed_line(self.carry_host(self.source_record(net="negative"), self.source_lint()), REVIEW_HEAD, "held",
+                           "the carried record does not read its own verdict, held, on the replacement")
+
+    def test_replacement_5c_a_failed_fix_check_on_the_source_reads_open_on_the_replacement(self):
+        failed_fix = fix_verifier_line(verdict="FAIL", head="1e" * 20)
+        self.reviewed_line(self.carry_host(self.source_record(fix=(failed_fix,)), self.source_lint()), REVIEW_HEAD, "open",
+                           "the carried record does not read its own verdict, open, on the replacement")
+
+    def test_replacement_6a_a_same_tree_source_lint_pass_counts_for_the_replacement(self):
+        # the replacement has its own done record at its live head, so only the lint differs between 6a and 6b
+        own = review_comment(2, 7, record_text(head=REVIEW_HEAD, rounds=REVIEW_PASS))
+        self.reviewed_line(self.carry_host(own, self.source_lint()), REVIEW_HEAD, "done",
+                           "a same-tree source's lane-lint PASS did not count for the replacement's head")
+
+    def test_replacement_6b_a_different_tree_source_lint_pass_does_not_count(self):
+        own = review_comment(2, 7, record_text(head=REVIEW_HEAD, rounds=REVIEW_PASS))
+        self.reviewed_line(self.carry_host(own, self.source_lint(), tree=OTHER_TREE), REVIEW_HEAD, "no lint",
+                           "a lint PASS on a source whose tree differs counted for the replacement")
 
 class ReviewGuardPaths(unittest.TestCase):
     """merge.GUARD_PATHS: the rule dirs of lint/stale_cites.py, then merge/ and githooks/, folder prefixes only. merge.GUARD_FILES: settings.json,
