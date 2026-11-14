@@ -1031,6 +1031,11 @@ def _segment_with_vars(segments, number: int) -> str:
     return _resolve_vars(mark.join(segments[:number + 1])).split(mark)[-1]
 
 
+class HandMadeHit(str):
+    """The refused target, which also carries the primary checkout the refusal judged against."""
+    primary = ""
+
+
 def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=None) -> str:
     """The new-tree path when `segments[number]` is a real worktree add whose tree lands
     outside `<primary>/.claude/worktrees/`, else "". The primary is the one of the repo the call
@@ -1065,6 +1070,8 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=Non
     primary = primary_checkout(where)
     if not primary:
         return ""
+    target = HandMadeHit(target)   # every refusal below returns it, so the reason can name the primary
+    target.primary = primary
     import tempfile   # lazy: only a real worktree add reaches here
     if path_is_inside(primary, tempfile.gettempdir()):
         return ""
@@ -1101,6 +1108,21 @@ WORKTREE_HAND_MADE_REASON = (
     "message. A guard refusal starts \"Rule (\" and names its rule. Any other refusal is the "
     "harness's."
 )
+
+
+def hand_made_worktree_reason(payload, primary: str = "") -> str:
+    """The one reason for a hand-made worktree. A call with a valid `agent_id` also learns the one tree it
+    may make by hand: its own red-run checkout, named by its absolute path under `primary`, since
+    EnterWorktree may be refused for an agent and a relative path would nest inside the agent's home.
+    Any other call, or one with no primary, gets `WORKTREE_HAND_MADE_REASON` unchanged. The reason never
+    names a sibling's id or a refused tree."""
+    agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
+    if not primary or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
+        return WORKTREE_HAND_MADE_REASON
+    own = os.path.join(primary, ".claude", "worktrees", "agent-" + agent_id + "-red").replace("\\", "/")
+    return (WORKTREE_HAND_MADE_REASON + " One exception to that stop: EnterWorktree may be refused for an agent, "
+            "and your own red-run checkout is the one tree you make by hand. Make it with "
+            "`git worktree add --detach <path> <sha>`, where <path> is written out in full as `" + own + "`.")
 
 
 SILENT_WRITE_REDIRECT_REASON = (
@@ -4584,7 +4606,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if segment.strip():
             matched = hand_made_worktree_hit(segments, number, cwd, ends, payload)
             if matched:
-                refuse(tool, "deny", "hand-made-worktree", WORKTREE_HAND_MADE_REASON, matched)
+                refuse(tool, "deny", "hand-made-worktree", hand_made_worktree_reason(payload, getattr(matched, "primary", "")), matched)
 
     # 1e. The impeccable skill's build and settings-writer commands (design-skills record).
     matched = impeccable_command_hit(raw)
