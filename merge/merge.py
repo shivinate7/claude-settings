@@ -17,7 +17,7 @@
                           the step would push, before any push and before the ready mark, on every path (default base, other base,
                           Record-claim head). A FAIL or an unknown stops the step with the step lines and the log: nothing pushed, not
                           marked ready, and no flag lifts it. A repo with no list runs no ready check, and one line says so.
-                          Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
+                          Cost per draft-step ready: one ci-job run per job of the list, and one worktree; the run time is unmeasured for a step subset
                           (the 3600 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
                           A confirm in the cloud needs a lane-lint PASS for the head's sha. Any pull request skips it, a lane PR included, when the all-jobs-passed rollup is green on that exact head:
@@ -3410,7 +3410,7 @@ def fast_checks(root, cfg, n, host, info):
     posts no comment, and builds no records page. A repo with no merge.readyChecks prints one line `unknown pre-ready: no merge.readyChecks declared` and exits 1:
     a run that checked nothing is not a pass (the draft step keeps its "runs none" line). Works on a draft or a ready PR.
     Cost, "read-only" meaning no push, no lock, no ready mark, no comment, no ref: the fetch writes refs/remotes/origin/* and FETCH_HEAD (fetch_pr_head, merge_reason, cross_measure),
-    the dry merge adds merge-tree and commit-tree objects to the object store, and `git worktree add` writes .git/worktrees/<name> (removed at the end). Starts: one ci-job run,
+    the dry merge adds merge-tree and commit-tree objects to the object store, and `git worktree add` writes .git/worktrees/<name> (removed at the end). Starts: one ci-job run per job,
     one debt-close lint (a scratch worktree and one Retire test run for each closed debt: lint/check_debt_retire.py `scratch`), one open-PR clash (cross_measure's cost). Files: ci-job's log,
     the two temporary worktrees, nothing in the repo tree."""
     checks = cfg.get("merge", {}).get("readyChecks")
@@ -3434,7 +3434,7 @@ def draft_step(root, cfg, n, host, info):
     stop. So the branch is final at ready, and the ready confirm pushes nothing (decision records-index-at-merge).
     Takes no lock, claims no number and never merges: a claim stays at the ready confirm.
     A repo that declares merge.readyChecks also runs them first, on the tree the step would push, before any push and before the
-    ready mark, on every path (the ready checks, decision lanes-run-no-full-ci-job). One ci-job run, in one worktree."""
+    ready mark, on every path (the ready checks, decision lanes-run-no-full-ci-job). One ci-job run per job, in one worktree."""
     base = info["base"]
     red = head_check_red(host.head_state(n, info["head"]))  # a head that will not merge never goes ready; before any push
     if red:
