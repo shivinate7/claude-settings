@@ -1119,15 +1119,25 @@ def send_rec(message):
     return used_rec(SEND, {"to": "coordinator", "message": message})
 
 
-def page_run(cfg, sid, blocks, records, cwd=None, extra_env=None):
+def page_run(cfg, sid, blocks, records, cwd=None, extra_env=None, prime=False):
     """Writes one inbox block per (text, items) pair, with minutes 04, 05, ... of one hour, then the
     transcript `records`, then runs the guard with the transcript's path in the payload. `cwd` is the
-    session's folder, the shared fixture repo unless a case names another. `extra_env` goes to the run."""
+    session's folder, the shared fixture repo unless a case names another. `extra_env` goes to the run.
+    `prime` writes a fresh roadmap fetch on record (FETCH_HEAD) just before the run, so the roadmap ref reads
+    fresh: no fetch runs and no roadmap note is said. It is removed after the run, so a shared repo returns to
+    its built state for the cases after it."""
     write_file(inbox_of(cfg, sid), "".join(
         render_block(text, header="2026-10-13 10:%02d CDT (UTC-05:00)" % (4 + n), items=items)
         for n, (text, items) in enumerate(blocks)))
     write_transcript(cfg, sid, records)
-    return guard(cfg, sid, cwd=cwd, transcript=transcript_of(cfg, sid), extra_env=extra_env)
+    if not prime:
+        return guard(cfg, sid, cwd=cwd, transcript=transcript_of(cfg, sid), extra_env=extra_env)
+    repo = cwd or fixture_repo()
+    fixture.set_fetch_head(repo)
+    try:
+        return guard(cfg, sid, cwd=cwd, transcript=transcript_of(cfg, sid), extra_env=extra_env)
+    finally:
+        fixture.without_fetch_head(repo)
 
 
 def expect_unproved(name, p, item_id):
@@ -1540,7 +1550,7 @@ def case_page_filed_number_passes():
     """A page item whose number the waiting copy holds passes with its send, and no filing message. Green on
     today's guard, which the send check alone already passes: this pins a filed item as a pass."""
     p = page_run(new_cfg(), "page-filed", [(NEUTRAL, (PAGE_ITEM,))],
-                 [owner_rec(NEUTRAL), send_rec(SENT)], cwd=record_repo("filed", copy_files(FILED)))
+                 [owner_rec(NEUTRAL), send_rec(SENT)], cwd=record_repo("filed", copy_files(FILED)), prime=True)
     expect_silent("page filing: n 98 filed, with its send, passes with no systemMessage", p)
 
 
@@ -1626,13 +1636,13 @@ def case_page_filing_reads_do_not_grow_with_the_copy():
         cfg = new_cfg()
         env = git_counter(cfg)
         p = page_run(cfg, "page-cost", [(NEUTRAL, (PAGE_ITEM,))], [owner_rec(NEUTRAL), send_rec(SENT)],
-                     cwd=repo, extra_env=env)
+                     cwd=repo, extra_env=env, prime=True)
         expect_silent("page filing cost: %s, n 98 filed, passes" % label, p)
         page_starts = len(git_lines(env))
         cfg = new_cfg()
         env = git_counter(cfg)
         page_run(cfg, "page-cost-note", [(NEUTRAL, ("- fb-0958-7 [note] -> noted",))],
-                 [owner_rec(NEUTRAL), said_rec("Noted.")], cwd=repo, extra_env=env)
+                 [owner_rec(NEUTRAL), said_rec("Noted.")], cwd=repo, extra_env=env, prime=True)
         extra[label] = page_starts - len(git_lines(env))
     counts = list(extra.values())
     check("page filing cost: the same extra git starts for 2 items and for 40 (%s)" % extra,
@@ -1749,7 +1759,7 @@ def case_page_read_back_proves_the_filing():
     for label, inp, docs, form in reads:
         p = page_run(new_cfg(), "page-readback", [(NEUTRAL, (PAGE_ITEM,))],
                      [owner_rec(NEUTRAL), send_rec(SENT), used_rec("ArtifactData", inp, tool_id="rb1"),
-                      result_rec("rb1", response_of(docs, form=form))], cwd=repo)
+                      result_rec("rb1", response_of(docs, form=form))], cwd=repo, prime=True)
         expect_silent("page filing: n 98 proved by %s, with its send" % label, p)
 
 
