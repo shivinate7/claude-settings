@@ -68,7 +68,7 @@ def cap_case(name, expected, message, delay=None, at=None, guard=None, carries=(
         carries=carries, lacks=lacks, **fields)
 
 
-def ci_deny(name, message):
+def ci_refuse(name, message):
     """A CI check-in of 90 minutes, which is over any cap the data file can hold."""
     cap_case(name, "deny", message, delay=90, carries=CAP_REMEDY)
 
@@ -79,16 +79,16 @@ cap_case("ci-wait-cap: a CI check-in one minute over the cap, %d minutes, is ref
 cap_case("ci-wait-cap: a CI check-in of 90 minutes is refused", "deny", CI_MESSAGE, delay=90, carries=CAP_REMEDY)
 
 # ---- Refused: each CI form the reading names, at 90 minutes.
-ci_deny("ci-wait-cap: a 90-minute check-in that waits on the checks is refused", "Waiting on the checks for PR 2839")
-ci_deny("ci-wait-cap: a 90-minute check-in on a PR run is refused", "PR run for the draft is still red")
-ci_deny("ci-wait-cap: a 90-minute check-in on a workflow run is refused", "workflow run 4411 is still going")
-ci_deny("ci-wait-cap: a 90-minute check-in with CI in lower case is refused", "ci run 4411 is still going")
+ci_refuse("ci-wait-cap: a 90-minute check-in that waits on the checks is refused", "Waiting on the checks for PR 2839")
+ci_refuse("ci-wait-cap: a 90-minute check-in on a PR run is refused", "PR run for the draft is still red")
+ci_refuse("ci-wait-cap: a 90-minute check-in on a workflow run is refused", "workflow run 4411 is still going")
+ci_refuse("ci-wait-cap: a 90-minute check-in with CI in lower case is refused", "ci run 4411 is still going")
 # Scanner insurance: a lone quote and comment openers are plain text in a message, so each still counts.
-ci_deny("ci-wait-cap: a CI word beside a lone quote is refused", "CI run isn't done yet")
-ci_deny("ci-wait-cap: a CI word beside comment openers in text is refused", "CI run // still going /* ok */")
-ci_deny("ci-wait-cap: a CI word on the second line is refused: the whole message is read",
-        "Check-in on PR 2839.\nCI still running")
-ci_deny("ci-wait-cap: a full-size message with the CI word last is refused", LONG_CI)
+ci_refuse("ci-wait-cap: a CI word beside a lone quote is refused", "CI run isn't done yet")
+ci_refuse("ci-wait-cap: a CI word beside comment openers in text is refused", "CI run // still going /* ok */")
+ci_refuse("ci-wait-cap: a CI word on the second line is refused: the whole message is read",
+          "Check-in on PR 2839.\nCI still running")
+ci_refuse("ci-wait-cap: a full-size message with the CI word last is refused", LONG_CI)
 
 # ---- Refused: a CI wait over the cap, by an `at` time. The offset form and the Z form name the same instant.
 cap_case("ci-wait-cap: a CI check-in at a time one minute over the cap, offset form, is refused", "deny",
