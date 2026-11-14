@@ -143,6 +143,14 @@ class LocalJudgement(SessionRoleCase):
         self.assertEqual(self.judge("batch-runner"), (True, {"session": SID, "role": "batch-runner", "repo": "o/r"}),
                          "an own file that agrees with the launcher role lost its record")
 
+    def test_no_id_with_a_launcher_role_is_judged_with_no_record(self):
+        with mock.patch.dict(os.environ, {"CS_SESSION_ROLE": "batch-runner"}):
+            self.assertEqual(session_role.local_judgement(None), (True, None), "a launcher session with no id was not judged")
+
+    def test_no_id_and_no_launcher_role_is_not_judged(self):
+        with mock.patch.dict(os.environ, {"CS_SESSION_ROLE": ""}):
+            self.assertEqual(session_role.local_judgement(None), (False, None), "a session with no id and no launcher role was judged")
+
 
 class PruneStale(SessionRoleCase):
     def stamp(self, name, mtime):
@@ -229,6 +237,13 @@ class LocalRoleProof(SessionRoleCase):
         self.assertFalse(self.proves(("triage",), "o/r"), "a file with no repo proved this repo")
         self.put_role(SID + ".json", SID, "triage")
         self.assertFalse(self.proves(("triage",), None), "a push with no target repo was proved")
+
+    def test_the_hook_session_id_names_the_file_when_the_env_id_differs(self):
+        # RED on 34345f092: the proof needs the env id to equal the hook's session_id, so a differing env id refuses it.
+        self.put_role(SID + ".json", SID, "triage")
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": OTHER}):
+            self.assertTrue(guard_merge._local_role_proves(SID, ("triage",), "o/r"),
+                            "the hook's own file did not prove a push when the env id differs")
 
     def test_a_reader_that_cannot_run_refuses_with_false(self):
         # Injected fault: the reader raises, so the proof is refused with False, not with None, which a caller reads the same way.
