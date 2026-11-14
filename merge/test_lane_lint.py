@@ -861,6 +861,9 @@ class LaneLint(LaneFixture):
 # (session_of, same_lane): the session URL line of the PR body.
 OWN = "session_01OwnLaneSeven"  # the session that opened the lane's PR, PR 7
 OTHER = "session_01OtherLaneSeven"  # another session's PR
+COMBINER = "session_01CombinerLaneSeven"  # the session that cuts a combined PR and merges the member heads into it
+THIRD = "session_01ThirdLaneSeven"  # a third session: a plain commit pushed onto a combined PR
+COMBINED = "combined"  # the branch a combined PR's head sits on, cut from origin/main
 SESSION_URL = "https://claude.ai/code/%s"  # the line a PR body carries for its session
 
 
@@ -987,6 +990,19 @@ class CrossMeasure(LaneFixture):
     def own_writes(self, files, session=None):
         """The lane's head gains a commit with `files`, carrying `session`'s trailer when given. -> its sha."""
         return self.commit_on("feat", files, "origin/feat", session)
+
+    def combine_members(self, refs, session=None):
+        """A combined PR's head: branch COMBINED cut from origin/main, with each of `refs` merged in by a merge commit. --no-ff keeps each member on
+        its merge commit's second parent: a plain merge of the first member would fast-forward onto main and put its commits on the first-parent path.
+        `session` puts that session's trailer on each merge commit; None writes none. Pushed, and PR 7 reads that branch. -> the head sha."""
+        o, sh = self.other, tm.sh
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", COMBINED, "origin/main")
+        for ref in refs:
+            sh(o, "git", "merge", "-q", "--no-ff", "-m", with_session("merge %s into %s" % (ref, COMBINED), session), ref)
+        sh(o, "git", "push", "-q", "origin", COMBINED)
+        self.host.branch = COMBINED
+        return self.head(COMBINED)
 
     def listing(self, n, head, body, state="open", draft=False):
         """PR n on `head` with `body`, as the fake host's open-PR list and its PR read carry it. -> the head."""
@@ -1643,16 +1659,18 @@ class CrossMeasure(LaneFixture):
                 self.assertEqual(pass_lines(text), [], "a lane PR on branch %s printed a PASS line: %s" % (branch, text))
                 self.assertEqual(lints, 0, "the ci-job lint ran past the FAIL on branch %s: %s" % (branch, text))
 
-    # One owner per open pull request (roadmap step one-owner-per-pr: each open PR has one session). Each commit a PR adds (origin/<base>..head) carries a Claude-Session
-    # trailer. Two session ids on those commits mean two sessions worked the PR, and `merge --lane-lint <pr>` refuses it. A batch integration
-    # PR is exempt: its commits come from many lanes by design. The ids are read from git log in the second clone, not from merge.py.
+    # One owner per open pull request (roadmap step one-owner-per-pr: each open PR has one session). The owner check reads the PR's own commits: the
+    # first-parent path of origin/<base>..head. A combined PR (ruling own-767-a-combined-pr) merges reviewed member heads with merge commits, so each
+    # member's commits sit on a merge commit's second parent and are not the PR's own. Two session ids on the own commits mean two sessions worked
+    # the PR, and `merge --lane-lint <pr>` refuses it. A batch integration PR is exempt: its commits come from many lanes by design.
 
-    def session_ids_of(self, head, base="origin/main"):
+    def session_ids_of(self, head, base="origin/main", first_parent=False):
         """-> the sorted, distinct Claude-Session ids on the commits of base..head, read in the second clone after a fetch. A trailer is the
-        line `Claude-Session: <session URL>`; a session id named anywhere else in a message does not count."""
+        line `Claude-Session: <session URL>`; a session id named anywhere else in a message does not count. first_parent reads only the
+        first-parent path, the PR's own commits; the default reads every commit in the range, which a precondition uses to show the members' ids."""
         o = self.other
         tm.sh(o, "git", "fetch", "-q", "origin")
-        out = tm.sh(o, "git", "log", "--format=%B", "%s..%s" % (base, head))
+        out = tm.sh(o, "git", "log", *(["--first-parent"] if first_parent else []), "--format=%B", "%s..%s" % (base, head))
         return sorted(set(re.findall(r"^Claude-Session: https://claude\.ai/code/(session_[A-Za-z0-9_-]+)$", out, re.M)))
 
     def two_session_pr(self):
@@ -1692,7 +1710,7 @@ class CrossMeasure(LaneFixture):
     def test_a_long_pr_worked_by_three_sessions_is_refused_and_names_each_id(self):  # the full-size state
         """Why: twelve commits from three sessions, four each, the PR's largest realistic shape. Every session is named. Without the check the lint
         passes."""
-        sessions = [OWN, OTHER, "session_01ThirdLaneSeven"]
+        sessions = [OWN, OTHER, THIRD]
         for i in range(12):
             self.own_writes({"long-%02d.txt" % i: "commit %d\n" % i}, session=sessions[i % 3])
         self.assertEqual(self.session_ids_of(self.head("feat")), sorted(sessions), "precondition: the PR's commits do not name three sessions, so the case probes nothing")
@@ -1737,7 +1755,7 @@ class CrossMeasure(LaneFixture):
         self.assertEqual(len(pass_lines(text)), 1, text)
 
     def test_a_commit_on_main_from_another_session_does_not_count_against_this_pr(self):  # control: the base's history is not the PR's
-        """Why: a PR's own commits are origin/main..head. Main's history holds many sessions' trailers, and none of them is this PR's. The control pins that the check reads the PR's range, not the base's history."""
+        """Why: a PR's own commits are the first-parent path of origin/main..head. Main's history holds many sessions' trailers, and none of them is this PR's. The control pins that the check reads the PR's own path, not the base's history."""
         self.commit_on("main", {"main-other.txt": "merged by another session\n"}, "origin/main", session=OTHER)
         self.assertEqual(self.session_ids_of("origin/main", "origin/main~1"), [OTHER], "precondition: main's new commit does not name the other session, so the case probes nothing")
         self.own_writes({"own-a.txt": "lane 7\n"}, session=OWN)
@@ -1745,6 +1763,94 @@ class CrossMeasure(LaneFixture):
         self.use_ci_job(PASSING, 0)
         rc, text, lints, _, _ = self.measured("--lane-lint", "7")
         self.assertEqual(rc, 0, "a session's commit on main refused a PR that names only its own session: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+
+    def test_a_lane_that_merged_main_with_no_trailer_passes_with_its_one_session(self):  # control: a merge of main is outside the PR's range
+        """Why: a lane merges main onto itself with an ordinary merge commit, which names no session. Main's new commit, another session's, sits on the
+        merge's second parent and outside origin/main..head. The check reads the lane's own path, so the lane names its one session and passes."""
+        self.commit_on("main", {"main-other.txt": "merged by another session\n"}, "origin/main", session=OTHER)
+        self.own_writes({"own-a.txt": "lane 7\n"}, session=OWN)
+        head = self.merge_into_feat("origin/main")
+        self.assertEqual(self.second_parent(head), tm.sh(self.other, "git", "rev-parse", "origin/main"), "precondition: the head's second parent is not main's new commit, so the case probes no merge of main")
+        self.assertEqual(self.session_ids_of(head, first_parent=True), [OWN], "precondition: the PR's own commits do not name one session, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a lane that merged main without a trailer refused the lane: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+
+    def test_a_combined_pr_whose_merges_name_one_combiner_session_passes_with_one_pass_line(self):
+        """Why: a combined PR merges reviewed member lanes into one branch (ruling own-767-a-combined-pr). The members' commits sit on the combiner's merge
+        commits' second parents, so the PR's own commits name the combiner alone and the check passes. Without the first-parent read, the members'
+        two sessions FAIL the PR."""
+        self.commit_on("member-a", {"member-a.txt": "lane A\n"}, "origin/main", session=OWN)
+        self.commit_on("member-b", {"member-b.txt": "lane B\n"}, "origin/main", session=OTHER)
+        head = self.combine_members(["origin/member-a", "origin/member-b"], session=COMBINER)
+        self.assertEqual(self.session_ids_of(head), sorted([OWN, OTHER, COMBINER]), "precondition: the PR's commits do not name three sessions, so the case probes nothing")
+        self.assertEqual(self.session_ids_of(head, first_parent=True), [COMBINER], "precondition: the PR's own commits do not name the combiner alone, so the case probes nothing")
+        self.assertEqual(self.second_parent(head), tm.sh(self.other, "git", "rev-parse", "origin/member-b"), "precondition: the head's second parent is not member B's head, so the case probes no member merge")
+        self.assertFalse(merge.is_integration_pr({"body": self.host.body, "branch": COMBINED}), "precondition: the PR is a batch integration PR, so the exemption passes it for the wrong reason")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a combined PR whose merges name one combiner session refused the lane: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        self.assertEqual(lints, 1, "the ci-job lint did not run once on the passing combined PR: " + text)
+
+    def test_a_combined_pr_whose_merges_carry_no_trailer_names_no_session_and_passes(self):
+        """Why: a combiner's merge commit with no trailer names no session, the known limit commit_sessions states. The members' commits sit on those
+        merge commits' second parents, so the PR's own commits name none and the PR passes with no session named. Without the first-parent read,
+        the members' two sessions FAIL it."""
+        self.commit_on("member-a", {"member-a.txt": "lane A\n"}, "origin/main", session=OWN)
+        self.commit_on("member-b", {"member-b.txt": "lane B\n"}, "origin/main", session=OTHER)
+        head = self.combine_members(["origin/member-a", "origin/member-b"])
+        self.assertEqual(self.session_ids_of(head), sorted([OWN, OTHER]), "precondition: the members' commits do not name two sessions, so the case probes nothing")
+        self.assertEqual(self.session_ids_of(head, first_parent=True), [], "precondition: the PR's own commits name a session, so the case probes no trailerless merge")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a combined PR whose merges carry no trailer refused the lane: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+
+    def combined_with_a_third_session(self):
+        """A combined PR (COMBINER's merge commits over members OWN and OTHER) with one plain commit by THIRD on top. -> the head sha, after the
+        case's first-parent precondition."""
+        self.commit_on("member-a", {"member-a.txt": "lane A\n"}, "origin/main", session=OWN)
+        self.commit_on("member-b", {"member-b.txt": "lane B\n"}, "origin/main", session=OTHER)
+        self.combine_members(["origin/member-a", "origin/member-b"], session=COMBINER)
+        head = self.commit_on(COMBINED, {"plain-c.txt": "third session\n"}, "origin/" + COMBINED, session=THIRD)
+        self.assertEqual(self.session_ids_of(head, first_parent=True), sorted([COMBINER, THIRD]), "precondition: the PR's own commits do not name two sessions, so the case probes nothing")
+        return head
+
+    def test_a_combined_pr_whose_own_commits_name_two_sessions_is_refused_and_names_both_ids(self):  # control: the first-parent path still counts
+        """Why: a combined PR's own commits are its first-parent path: the combiner's merge commits and a plain commit a third session pushed on top.
+        Two sessions on that path FAIL the PR, and the refusal names both."""
+        self.combined_with_a_third_session()
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assert_owner_refusal(text, rc, lints, [COMBINER, THIRD])
+
+    def test_a_combined_pr_refusal_names_no_member_session(self):
+        """Why: a member's commits sit on a merge commit's second parent, so they are not the PR's own. The refusal of a combined PR names the
+        sessions on the PR's own path only. Without the first-parent read it also names the two members' sessions."""
+        head = self.combined_with_a_third_session()
+        self.assertEqual(self.session_ids_of(head), sorted([OWN, OTHER, COMBINER, THIRD]), "precondition: the PR's commits do not name four sessions, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the combined PR with a third session's commit passed the lane lint: " + text)
+        self.assertNotIn(OWN, text, "the refusal of a combined PR names member A's session, which is on a second parent: " + text)
+        self.assertNotIn(OTHER, text, "the refusal of a combined PR names member B's session, which is on a second parent: " + text)
+
+    def test_a_lane_that_merged_another_open_pr_head_counts_only_its_own_commits(self):
+        """Why: the clash remedy merges another open PR's head into this lane. That head's commits sit on the merge commit's second parent, so they
+        are that PR's, not this lane's. The owner's pick accepts this limit: the lane's own merge commit counts, and the other head's commits do not."""
+        self.own_writes({"own-a.txt": "lane 7\n"}, session=OWN)
+        other = self.commit_on(branch_of(8), {"other-b.txt": "lane 8\n"}, "origin/main", session=OTHER)
+        self.listing(8, other, lane_body(OTHER))
+        head = self.merge_into_feat("origin/" + branch_of(8), session=OWN)
+        self.assertEqual(self.session_ids_of(head), sorted([OWN, OTHER]), "precondition: the PR's commits do not name two sessions, so the case probes nothing")
+        self.assertEqual(self.second_parent(head), other, "precondition: the head's second parent is not the other PR's head, so the case probes no clash merge")
+        self.assertEqual(self.session_ids_of(head, first_parent=True), [OWN], "precondition: the PR's own commits do not name the lane's session alone, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a lane that merged another open PR's head refused the lane: " + text)
         self.assertEqual(len(pass_lines(text)), 1, text)
 
     @contextlib.contextmanager
