@@ -248,10 +248,12 @@ def extends(line, g):
     an appended tail, so a line pasted into a comment is not one: the merge only added to the line
     (`subprocess.run(a, b)` became `subprocess.run(a, b, timeout=T)`; `Keep CI waits short.` became `Keep CI waits
     short, never past 55 minutes.`). The tail is what follows the match of the line's last word token, so the line's
-    own closing `.` re-matching after the clause is no part of it. That word must end a whole word in g, so `can.`
-    to `can't.` (a split word) is a change. The head, up to that word, may hold no more negation than the line. A tail
-    that adds a negation also holds a word beside the negation words and whole contractions (`don't`, `can't`), so
-    `now.` to `now, never.` or `now, don't.` stays a change. Known gap: an appended clause that contradicts the line
+    own closing `.` re-matching after the clause is no part of it. That word must end a whole word in g: a letter,
+    digit or `_` after it, or an apostrophe then a letter, splits it, so `can.` to `can't.` or `now.` to `now2.` is a
+    change, while a closing quote (`print('hi')` to `print('hi', flush=True)`) is not. The head, up to that word, may
+    hold no more negation than the line. A tail that adds a negation also holds a word beside the negation words and
+    whole contractions in any case (`don't`, `DON'T`), so `now.` to `now, never.` or `now, don't.` stays a change.
+    Known gap: an appended clause that contradicts the line
     (`Keep CI waits short; do not keep them short.`) passes: a word-level check cannot tell a narrowing clause from a
     contradiction (lane ruling)."""
     lt, spans = TOKEN.findall(line), [(m.group(), m.end()) for m in TOKEN.finditer(g)]
@@ -271,13 +273,13 @@ def extends(line, g):
     if last < 0:
         return len(NEGATION.findall(g)) <= have
     head, tail = g[:spans[last][1]], g[spans[last][1]:]
-    if tail[:1].isalpha() or tail[:1] == "'":
+    if tail[:1].isalnum() or tail[:1] == "_" or (tail[:1] == "'" and tail[1:2].isalpha()):
         return False
     if len(NEGATION.findall(head)) > have:
         return False
     if len(NEGATION.findall(g)) <= have:
         return True
-    return any(WORD.search(t) for t in TOKEN.findall(NEGATION.sub(" ", re.sub(r"\w+n't\b", " ", tail))))
+    return any(WORD.search(t) for t in TOKEN.findall(NEGATION.sub(" ", re.sub(r"\w+n't\b", " ", tail, flags=re.I))))
 
 
 def wrapped(line, new):
