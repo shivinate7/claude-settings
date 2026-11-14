@@ -2,20 +2,19 @@
 """Cases for rule task-options in hooks/question_form.py. The rule refuses a page task item that carries a
 non-empty `options` list. The page draws options only for kind decision: the item render's task branch draws the
 steps, the command and the links, and never the options (skills/waiting-page/page.html). So an option's `how` and
-`links` on a task never reach the owner. Each red case below passes on main and fails by its own assert.
+`links` on a task never reach the owner. Each red case below fails on its own assert while the rule is missing.
 
 Red cases (the rule is missing):
   task with options that carry how and links (the shape of items 626 and 661), task with options and no how,
   an update with kind task and options, and a full-size task with four options that carry how and links.
   The refusal text names the fix (PAGE_REASONS["task-options"]: kind decision, or the command field).
 
-Green controls, passing on main and after the build:
+Green controls, each passing with the rule missing and still passing once it exists:
   a decision with options, a task with a command and no options, a task with options: [], a task with no options
   key, an update with no kind key and options, a non-list `options` on a task (not this rule's), and a task with
   options on a page that is not this repo's (the scope pin).
 
-Round 2 rulings, red on the round 1 build (e5dd50014) and green once the rule takes them: the rule fires only on an
-explicit kind task, so a set with no kind key and options passes (a missing kind reads as a decision, as in
+Scope of the rule: it fires only on an explicit kind task, so a set with no kind key and options passes (a missing kind reads as a decision, as in
 decision_form_hit and _open_decision); and a closed item is not refused, so a closed task with options passes on a
 set and on an update.
 
@@ -91,10 +90,11 @@ def scoped_page(name, op, entry, want):
     before the verdict is read, so a pass cannot come from a write off this repo's page. Then tqf.page judges the
     write by item_hit and by the guard."""
     call = dict(entry, url=tqf.PAGE_URL, action=op)
-    check("scope: %s, the cwd's page reads as this repo's page" % name,
-          layout.waiting_page(tqf.PAGE_REPO) == tqf.PAGE_URL,
-          "layout.waiting_page reads %r" % (layout.waiting_page(tqf.PAGE_REPO),))
-    check("scope: %s, the write is on this repo's page" % name, question_form.is_waiting_page(call, tqf.PAGE_REPO))
+    read = layout.waiting_page(tqf.PAGE_REPO)  # glossary-ok: layout.waiting_page is the product's own function name, kept as defined
+    check("scope: %s, the cwd's page reads as this repo's page" % name, read == tqf.PAGE_URL,
+          "the page key reads %r" % (read,))
+    check("scope: %s, the write is on this repo's page" % name,
+          question_form.is_waiting_page(call, tqf.PAGE_REPO))  # glossary-ok: question_form.is_waiting_page is the product's own name, kept as defined
     tqf.page(name, op, entry, want)
 
 
@@ -102,34 +102,34 @@ def scoped_page(name, op, entry, want):
 
 def case_task_options_with_how_and_links_refused():
     """Red: a set of a task with options that carry how and links, the 626/661 shape. The page never draws a task's
-    options, so the prompt in `how` never reaches the owner. On main the write passes."""
+    options, so the prompt in `how` never reaches the owner. Without the rule the write passes."""
     scoped_page("a task with options that carry how and links is refused as task-options", "set",
                 tqf.entry_of(task_options(incident_options())), REFUSED)
 
 
 def case_task_options_without_how_refused():
     """Red: a set of a task with options and no how and no links. The page draws no option on a task, so the
-    options are hidden whatever they carry. On main the write passes."""
+    options are hidden whatever they carry. Without the rule the write passes."""
     scoped_page("a task with options and no how is refused as task-options", "set",
                 tqf.entry_of(task_options(plain_options())), REFUSED)
 
 
 def case_task_update_with_options_refused():
     """Red: an update that writes kind task and options. The stored item is not read: the write names the kind, so
-    the rule judges it. On main the write passes."""
+    the rule judges it. Without the rule the write passes."""
     scoped_page("an update with kind task and options is refused as task-options", "update",
                 tqf.entry_of(tcj.with_frozen_fields({"kind": "task", "options": plain_options()})), REFUSED)
 
 
 def case_full_size_task_options_refused():
-    """Red: the full-size task, four options each with how and links. On main the write passes."""
+    """Red: the full-size task, four options each with how and links. Without the rule the write passes."""
     scoped_page("a task with four options that carry how and links is refused as task-options", "set",
                 tqf.entry_of(task_options(full_options())), REFUSED)
 
 
 def case_refusal_names_the_fix():
     """Red: the refusal text names both fixes, kind decision and the command field. The text sits in the page reason
-    table, keyed by rule id. On main the table has no entry for the rule, so each check fails by its own name."""
+    table, keyed by rule id. Without the rule the table has no entry for it, so each check fails by its own name."""
     reasons = getattr(question_form, "PAGE_REASONS", {}) or {}
     reason = reasons.get(RULE) or ""
     check("refusal text: PAGE_REASONS has a reason for task-options", bool(reason), NO_REASON)
@@ -193,27 +193,26 @@ def case_task_options_on_another_page_passes():
     gap.judge_both("pass: a task with options on another repo's page passes", call, cwd, PASS)
 
 
-# ------------------------------------------------------------------ the round 2 rulings
+# ------------------------------------------------------------------ the scope of the rule
 
 def case_set_no_kind_with_options_passes():
-    """Ruling: a set with no kind key and options passes. A missing kind is a decision, so the rule does not judge
-    it as a task. The round 1 build reads a missing kind as task (command_in_item_hit does), so it refuses this
-    write: red on e5dd50014."""
+    """A set with no kind key and options passes. A missing kind is a decision, so the rule does not judge it as a
+    task. command_in_item_hit reads a missing kind as a task, so a rule built on that reader would refuse this write."""
     item = tcj.good_page_item()
     item.pop("kind")
     scoped_page("a set with no kind and options passes", "set", tqf.entry_of(item), PASS)
 
 
 def case_closed_task_with_options_passes_on_set():
-    """Ruling: a closed task with options passes on a set. A closed item records what was decided, so the rule does
-    not refuse it. The round 1 build refuses it: red on e5dd50014."""
+    """A closed task with options passes on a set. A closed item records what was decided, so the rule does
+    not refuse it."""
     scoped_page("a closed task with options passes on a set", "set",
                 tqf.entry_of(task_options(incident_options(), status="closed")), PASS)
 
 
 def case_closed_task_update_with_options_passes():
-    """Ruling: an update that writes kind task, status closed and options passes. The write names the closed status,
-    so the rule judges the closed item, which it does not refuse. The round 1 build refuses it: red on e5dd50014."""
+    """An update that writes kind task, status closed and options passes. The write names the closed status,
+    so the rule judges the closed item, which it does not refuse."""
     scoped_page("a closed task with options passes on an update", "update",
                 tqf.entry_of(tcj.with_frozen_fields({"kind": "task", "status": "closed", "options": plain_options()})),
                 PASS)
