@@ -791,5 +791,16 @@ class PermissionsAllow(unittest.TestCase):
         self.assertFalse(held, "ArtifactComments is on permissions.allow, but it posts visible text and must stay asking")
 
 
+class CoordinatorAutoMergeMatcher(unittest.TestCase):
+    def test_first_guard_matcher_names_enable_pr_auto_merge(self):
+        # Rule coordinator-scope (decision session-tiers): arming auto-merge is a merge, so the first guard matcher
+        # must name it, or the guard never judges a coordinator's arming call. The tool name is typed here as data.
+        matchers = guard_matchers()
+        self.assertTrue(matchers, "no guard matcher in settings.json")
+        tool = "mcp__github__enable_pr_auto_merge"
+        self.assertTrue(re.fullmatch(matchers[0], tool),
+                        "%s is not in the first guard matcher, so a coordinator's arming call is never judged" % tool)
+
+
 if __name__ == "__main__":
     unittest.main()

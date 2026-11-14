@@ -161,6 +161,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # required_check, pin_note and git_reads, loaded below
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
+from shared_names import MERGE_ROLES, read_merge_role, role_path  # noqa: E402,F401  the one home of the role reader; the guard's coordinator-scope rule reads it too
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 
@@ -4230,25 +4231,6 @@ def freeze_lines(name, lanes, dropped=(), on=None, base=None, blamed=(), linted=
             *(f"Lane: #{n} {lanes[n]}" for n in sorted(lanes)),
             *(f"Dropped: #{n}" for n in dropped), *(f"Blamed: #{n}" for n in sorted(blamed)), *([f"Linted: {linted}"] if linted else []), BATCH_END]
 
-MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
-
-def role_path():
-    return pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")) / "state" / "merge-role.json"
-
-def read_merge_role():
-    """This session's recorded merge role, or None: no session id, no file, unreadable or malformed, another session's, or a tier outside MERGE_ROLES.
-    Every failure is None, so the check fails closed. An absent id never equals an absent record."""
-    sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
-    if not sid:
-        return None
-    try:
-        data = json.loads(role_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):  # UnicodeDecodeError and JSONDecodeError are ValueErrors
-        return None
-    if not isinstance(data, dict) or data.get("session") != sid:
-        return None
-    role = data.get("role")
-    return role if isinstance(role, str) and role in MERGE_ROLES else None  # a list is unhashable: test the type first
 
 def write_merge_role(tier):
     """Record `tier` as this cloud session's merge role. Refuses outside the cloud, with no session id, or for a tier outside MERGE_ROLES; nothing is written then."""

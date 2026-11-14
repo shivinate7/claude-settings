@@ -535,6 +535,155 @@ def case_guard_merge_binds_tag_prefixes_to_shared_names():
     return not problems, "; ".join(problems) or "both prefixes read the shared tags"
 
 
+def _imports_from_shared_names(tree):
+    """The names a module binds by importing from shared_names, under their own or an alias."""
+    return {alias.asname or alias.name for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "shared_names" for alias in node.names}
+
+
+def _module_level_bindings(tree, names):
+    """The names in `names` that a module defines: a def, a class, or a plain assignment, at any depth."""
+    defined = {node.name for node in ast.walk(tree)
+               if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name in names}
+    assigned = {target.id for node in ast.walk(tree) if isinstance(node, ast.Assign)
+                for target in node.targets if isinstance(target, ast.Name) and target.id in names}
+    return sorted(defined | assigned)
+
+
+def case_merge_role_reader_is_imported_not_copied():
+    """merge/merge.py takes the merge roles, the role reader and the role path from shared_names and defines none of them.
+    The coordinator-scope rule and the merge tool read one role file, so one reader must serve both."""
+    with open(os.path.join(HERE, "..", "merge", "merge.py"), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    want = {"MERGE_ROLES", "read_merge_role", "role_path"}
+    problems = []
+    missing = sorted(want - _imports_from_shared_names(tree))
+    if missing:
+        problems.append("not imported from shared_names: %s" % ", ".join(missing))
+    copies = _module_level_bindings(tree, want)
+    if copies:
+        problems.append("merge.py defines its own: %s" % ", ".join(copies))
+    return not problems, "; ".join(problems) or "merge.py imports the role reader and defines none of it"
+
+
+def case_guard_merge_reads_the_shared_merge_roles():
+    """hooks/guard_merge.py tests a session's merge role against MERGE_ROLES from shared_names. It binds no role tuple of
+    its own (ROLE_TIERS), which would drift from the merge tool's set."""
+    with open(os.path.join(HERE, "guard_merge.py"), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    problems = []
+    if "MERGE_ROLES" not in _imports_from_shared_names(tree):
+        problems.append("MERGE_ROLES is not imported from shared_names")
+    copies = _module_level_bindings(tree, {"ROLE_TIERS", "MERGE_ROLES"})
+    if copies:
+        problems.append("guard_merge.py binds its own: %s" % ", ".join(copies))
+    return not problems, "; ".join(problems) or "guard_merge reads MERGE_ROLES from shared_names and binds no role tuple"
+
+
+ROLE_SESSION = "cse_role_reader_check"  # a made-up environment session id (the form hooks/override.py reads)
+
+
+def _role_config(label, text):
+    """This run's config folder for one role case: state/merge-role.json holds `text`, or no file when `text` is None."""
+    cfg = os.path.join(RUN, "role-config", label)
+    os.makedirs(os.path.join(cfg, "state"), exist_ok=True)
+    if text is not None:
+        with open(os.path.join(cfg, "state", "merge-role.json"), "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+    return cfg
+
+
+def _role_file(session, role):
+    return json.dumps({"session": session, "role": role})
+
+
+def _role_read(cfg, session, reader):
+    """`reader()` with CLAUDE_CONFIG_DIR set to `cfg` (None: unset) and the session id set to `session` (None: unset).
+    The environment is restored after."""
+    keys = ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_REMOTE_SESSION_ID")
+    saved = {key: os.environ.get(key) for key in keys}
+    try:
+        for key, value in (("CLAUDE_CONFIG_DIR", cfg), ("CLAUDE_CODE_REMOTE_SESSION_ID", session)):
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        return reader()
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def case_read_merge_role_returns_the_batch_runner_for_its_own_record():
+    """Control for the merge-role cases below: the session's own batch-runner record is read as the merge role."""
+    shared = _shared()
+    cfg = _role_config("own-batch-runner", _role_file(ROLE_SESSION, "batch-runner"))
+    got = _role_read(cfg, ROLE_SESSION, shared.read_merge_role)
+    return got == "batch-runner", "read_merge_role on its own batch-runner record = %r" % (got,)
+
+
+def case_read_merge_role_refuses_the_coordinator_role():
+    """The coordinator never merges (decision session-tiers): its own coordinator record reads as no merge role."""
+    shared = _shared()
+    cfg = _role_config("own-coordinator", _role_file(ROLE_SESSION, "coordinator"))
+    got = _role_read(cfg, ROLE_SESSION, shared.read_merge_role)
+    return got is None, "read_merge_role on its own coordinator record = %r, want None" % (got,)
+
+
+def case_read_merge_role_refuses_another_sessions_record():
+    shared = _shared()
+    cfg = _role_config("other-session", _role_file("cse_someone_else", "batch-runner"))
+    got = _role_read(cfg, ROLE_SESSION, shared.read_merge_role)
+    return got is None, "read_merge_role on another session's batch-runner record = %r, want None" % (got,)
+
+
+def case_read_merge_role_is_none_with_no_session_id():
+    """An absent id never equals an absent record: with no session id, a record that holds no session key reads as no role."""
+    shared = _shared()
+    cfg = _role_config("no-session-key", json.dumps({"role": "batch-runner"}))
+    got = _role_read(cfg, None, shared.read_merge_role)
+    return got is None, "read_merge_role with no session id and a record with no session key = %r, want None" % (got,)
+
+
+def case_read_merge_role_is_none_for_an_empty_malformed_or_list_role_record():
+    """Fails closed: an empty file, a file that is not JSON, and a role that is a list each read as no merge role."""
+    shared = _shared()
+    problems = []
+    for label, text in (("empty", ""), ("not-json", "{not json"), ("list-role", _role_file(ROLE_SESSION, ["batch-runner"]))):
+        try:
+            got = _role_read(_role_config("bad-" + label, text), ROLE_SESSION, shared.read_merge_role)
+        except Exception as error:  # a raise here is a fail-open risk, so the case names it
+            problems.append("%s raised %s" % (label, type(error).__name__))
+            continue
+        if got is not None:
+            problems.append("%s read as %r" % (label, got))
+    return not problems, "; ".join(problems) or "empty, malformed and list-role records all read as no merge role"
+
+
+def case_read_recorded_role_returns_the_coordinator_role_of_its_own_record():
+    """The guard reads a session's role whatever it is, so the coordinator's record reads as 'coordinator' here.
+    Only read_merge_role narrows to the merge roles."""
+    shared = _shared()
+    cfg = _role_config("own-coordinator-any-role", _role_file(ROLE_SESSION, "coordinator"))
+    got = _role_read(cfg, ROLE_SESSION, shared.read_recorded_role)
+    return got == "coordinator", "read_recorded_role on its own coordinator record = %r" % (got,)
+
+
+def case_role_path_is_state_merge_role_under_the_config_folder():
+    """role_path is <config folder>/state/merge-role.json, and ~/.claude/state/merge-role.json when no config folder is set."""
+    shared = _shared()
+    cfg = os.path.join(RUN, "role-config", "path-probe")
+    got = str(_role_read(cfg, None, shared.role_path))
+    want = os.path.join(cfg, "state", "merge-role.json")
+    unset = str(_role_read(None, None, shared.role_path))
+    default = os.path.join(os.path.expanduser("~"), ".claude", "state", "merge-role.json")
+    ok = got == want and unset == default
+    return ok, "role_path with a config folder = %r (want %r); with none = %r (want %r)" % (got, want, unset, default)
+
+
 CASES = [
     ("(a) shared_names.py exists", case_module_exists),
     ("(a) shared_names.py imports only the standard library", case_stdlib_only),
@@ -572,6 +721,24 @@ CASES = [
      case_scan_flags_a_copy_whose_default_sits_in_a_helper),
     ("(q) a fallback copy whose .claude default sits in a helper is not flagged",
      case_scan_passes_a_fallback_copy_whose_default_sits_in_a_helper),
+    ("(r1) merge.py imports the role reader, MERGE_ROLES and role_path from shared_names and defines none of them",
+     case_merge_role_reader_is_imported_not_copied),
+    ("(r2) guard_merge reads MERGE_ROLES from shared_names and binds no role tuple of its own",
+     case_guard_merge_reads_the_shared_merge_roles),
+    ("(r3) read_merge_role returns batch-runner for this session's own batch-runner record",
+     case_read_merge_role_returns_the_batch_runner_for_its_own_record),
+    ("(r4) read_merge_role refuses the coordinator's own record: the coordinator never merges",
+     case_read_merge_role_refuses_the_coordinator_role),
+    ("(r5) read_merge_role refuses another session's batch-runner record",
+     case_read_merge_role_refuses_another_sessions_record),
+    ("(r6) read_merge_role is None with no session id, even for a record that holds no session",
+     case_read_merge_role_is_none_with_no_session_id),
+    ("(r7) read_merge_role is None for an empty, malformed or list-role record",
+     case_read_merge_role_is_none_for_an_empty_malformed_or_list_role_record),
+    ("(r8) read_recorded_role returns the coordinator role of this session's own record",
+     case_read_recorded_role_returns_the_coordinator_role_of_its_own_record),
+    ("(r9) role_path is state/merge-role.json under the config folder, and under ~/.claude when none is set",
+     case_role_path_is_state_merge_role_under_the_config_folder),
 ]
 
 

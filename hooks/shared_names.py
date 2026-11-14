@@ -6,7 +6,10 @@ guard or any sibling hook.
 
 import os
 import re
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    import pathlib
 
 # The project's own settings files, with the leading slash the guard matches a path suffix on.
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
@@ -162,6 +165,42 @@ def config_dir() -> str:
     return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(
         os.path.expanduser("~"), ".claude"
     )
+
+
+# The one role that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges. The merge tool and the
+# guard's coordinator-scope rule read the same role file for the same session, so the reader lives here once.
+MERGE_ROLES = {"batch-runner"}
+
+
+def role_path() -> "pathlib.Path":
+    import pathlib  # inside the function: the config watch's fast exit imports this module and needs neither pathlib nor json
+    return pathlib.Path(config_dir()) / STATE_DIR_NAME / "merge-role.json"
+
+
+def read_recorded_role() -> Optional[str]:
+    """The role string this session's own role file records, any role, or None: no session id, no file, unreadable or
+    malformed, another session's, or a role that is no string. The id is the environment's
+    CLAUDE_CODE_REMOTE_SESSION_ID (cse_<id>), never a hook payload's session_id."""
+    import json
+    sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
+    if not sid:
+        return None
+    try:
+        data = json.loads(role_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # UnicodeDecodeError and JSONDecodeError are ValueErrors
+        return None
+    if not isinstance(data, dict) or data.get("session") != sid:
+        return None
+    role = data.get("role")
+    return role if isinstance(role, str) else None
+
+
+def read_merge_role() -> Optional[str]:
+    """This session's recorded merge role, or None: no session id, no file, unreadable or malformed, another session's,
+    or a role outside MERGE_ROLES. Every failure is None, so the check fails closed. An absent id never equals an
+    absent record."""
+    role = read_recorded_role()
+    return role if role in MERGE_ROLES else None
 
 
 def refusals_path(session_id: object) -> Optional[str]:

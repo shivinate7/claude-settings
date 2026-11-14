@@ -268,6 +268,38 @@ class LayoutFile(Tree):
         with self.assertRaises(self.layout.LayoutError):
             self.layout.kinds(self.tree)
 
+    def test_named_candidates_for_a_listed_repo_puts_its_own_path_first(self):
+        self.assertIn("shivinate7/q_max", self.layout.legacy_repos(), "scope: q_max is not a legacy-repos entry")
+        self.assertEqual(self.layout.named_candidates("shivinate7/q_max", "todo"), ("specs/todo.md", "docs/todo.md"),
+                         "a listed repo's own path for todo does not come first")
+
+    def test_named_candidates_matches_the_repo_name_in_any_case(self):
+        self.assertEqual(self.layout.named_candidates("Shivinate7/Q_Max", "todo"), ("specs/todo.md", "docs/todo.md"),
+                         "a repo name in another case misses its legacy-repos entry")
+
+    def test_named_candidates_for_a_listed_repo_with_no_entry_for_the_kind_takes_the_legacy_then_layout_spelling(self):
+        self.assertNotIn("decisions", self.layout.legacy_repos()["shivinate7/q_max"], "scope: q_max names decisions")
+        self.assertEqual(self.layout.named_candidates("shivinate7/q_max", "decisions"), ("decisions", "docs/decisions"),
+                         "a listed repo with no entry for the kind loses the legacy spelling")
+
+    def test_named_candidates_for_an_unlisted_repo_is_the_layout_path_only(self):
+        """A checkout of another repo cannot read a rollout it does not hold, so no legacy spelling is a home for it."""
+        self.assertNotIn("shivinate7/degen", self.layout.legacy_repos(), "scope: degen is a legacy-repos entry")
+        self.assertEqual(self.layout.named_candidates("shivinate7/degen", "decisions"), ("docs/decisions",),
+                         "an unlisted repo is given the legacy spelling of a kind")
+
+    def test_named_candidates_for_no_repo_gets_the_legacy_spelling_then_the_layout_path(self):
+        self.assertEqual(self.layout.named_candidates(None, "decisions"), ("decisions", "docs/decisions"),
+                         "a call that names no repo misses the legacy spelling of decisions")
+        self.assertEqual(self.layout.named_candidates(None, "debt-notes"), ("debts/notes.md", "docs/debts/notes.md"),
+                         "a call that names no repo misses the legacy spelling of debt-notes")
+
+    def test_named_candidates_drops_a_spelling_it_already_holds(self):
+        self.assertEqual(self.layout.named_candidates(None, "todo"), ("docs/todo.md",),
+                         "a spelling that repeats the layout path is listed twice")
+        self.assertEqual(self.layout.named_candidates("shivinate7/home", "todo"), ("records", "docs/todo.md"),
+                         "the layout path repeats after a listed repo's own path")
+
 
 class WaitingPage(Tree):
     """The waiting page's URL is one key in a repo's extras file (skill waiting-page)."""
