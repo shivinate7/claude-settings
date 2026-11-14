@@ -13,6 +13,15 @@ From "<old session title>" at <the limit hit, or the slip>. Checked: main <commi
 waits), the home of the list: a page collection, a roadmap ref, a git ref or a GitHub query. Add only
 the items that have no home, each with whom it is handed to. Never copy a list that has a home.>
 
+## Priorities
+
+<One row for each owner ruling that ranks work, copied from that ruling, in this form:>
+
+priority: <slug> | pr: <owner>/<repo>#<N>
+priority: <slug> | branch: <name> | repo: <owner>/<repo>
+
+<A branch row may leave out `repo:`; it then means this repo, and a `repo:` of another repo is not read. A row names one pr or one branch, never two. The batch runner runs `merge --priority-rows FILE` on these rows in each wake. A row that names no pr and no branch is a flag, because the check cannot read it. Drop a row when its pull request has merged and the owner has seen it.>
+
 ## Deferred for the owner
 
 <The home of the list of deferred steps: a page collection, a roadmap ref, a git ref or a GitHub
