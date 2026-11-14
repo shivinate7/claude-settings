@@ -35,6 +35,10 @@ ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the wr
 An ask with `re` is a reply to an answer. The writer routes it to the `owner` of `asks/<re>`, the session that gave that answer.
 If that session has ended, the writer takes it. The reply ask is answered like any ask, with steps 1 and 2.
 
+An ask with `item` is a reply on an item's reply. The writer routes it to the `owner` of `items/<item>`, the session that asked the item.
+If that session has ended, or the item is gone, the writer takes it. It is answered like any ask, with steps 1 and 2. The answer is the ask's own
+`reply`, never a write to the item's `reply`. The page shows it in the item's card as "Reply from <owner>".
+
 The owner may Mark read a routed ask: its root has a `home` and a `reply`, and no record in the thread waits. That sets `dismissed` on its
 root ask. The page draws Mark read only on a routed ask. An ask with no `home` stays a full card. The writer never rewrites `dismissed`, and a record with it is routed and answered as any other, with `update`.
 

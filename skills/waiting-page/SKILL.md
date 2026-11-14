@@ -198,15 +198,21 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   "Answered, filing pending" and the save time; with `filed`, "Answered, filed in <home>" (the item's `home`) and the
   filed time. In the Answered section, the same two read "Filing pending, sent" and "Filed in <home>". With only
   `read`, the card also says "Read by <owner>" and the time.
-- `asks/<id>`: one per ask typed in the page's Ask box, and one per reply the owner writes under an answer, never an item. The owner stacks asks with Add to list (nothing is
+- `asks/<id>`: one per ask typed in the page's Ask box, one per reply the owner writes under an answer, and one per reply he writes on an item's reply. The owner stacks asks with Add to list (nothing is
   written), then one Send writes every stacked ask and the typed box. The page writes `id` (the key,
   `ask-<base36 ms><2 chars>`), `text` (4000 characters or fewer, line breaks kept) and `at` (ISO time) once, at Send. A reply
-  also gets `re`, the id of the answered ask it follows, written once at Send. No session writes `re`. The page writes one more
+  also gets `re`, the id of the answered ask it follows, written once at Send. No session writes `re`. A reply on an item gets `item`
+  instead, the id of that item, written once at Send. It never has `re` as well. No session writes `item`. The page writes one more
   field later, at the owner's press: `dismissed` (ISO time), on a thread's root ask only, with `update` (Mark read). Mark unread writes
   `dismissed: null` (the runtime has no field delete). It never deletes or replaces the owner's `text` or a `reply`. No session writes
   `dismissed`. A session answering a dismissed record uses `update`, which keeps it (see "Route an ask"). A reply goes through the same
   Send, Undo and wake comment as an ask. Its comment reads "Replied on the waiting page. Writer: <writer>. Ask <id> re <re id>,
-  answered by <owner of the ask `re` names>: <text>." The asks
+  answered by <owner of the ask `re` names>: <text>." An item reply's comment reads "Replied on the waiting page. Writer: <writer>.
+  Ask <id> on item No. <n>, owned by <owner of the item>: <text>." While the item or its line is on the page, the page shows an item reply in its
+  item's card, or in its line when the item is one (a closed item, or an answered and filed one). While it is there, the reply never shows in the Asks list
+  or its count. While a reply waits, the line's Mark read is off, and an answer to a reply later than the Mark read brings the line back.
+  Once the item is no longer on the page, the reply is its own Asks row, "Re: an item no longer on this page",
+  and it counts while it has no `reply`. The asks
   of one Send share one `at`, and their ids rise in the order the owner typed them, so the id breaks the tie: the highest
   id is the last typed. One Undo (8 seconds) deletes every ask of that Send; it checks the 8 seconds before each delete, and a Send waits until the Undo ends. One wake comment tells of the whole Send: "N asks:
   <id>: <text>; …", or "Ask <id>: <text>" for one. A session writes only `owner` (the session that has the ask), `read` (ISO time),
@@ -430,7 +436,8 @@ exception: on an item with `lane`, the writer tells the receiver the act is with
 report (see the park branch below). A `none` answer on this path gets no new options.
 
 - Already routed. The owning session reads `answers/` at each turn start, so a kept answer looks new. An answer whose item
-  already has `lane` and a `lastAnswer` with the same `at` is routed. Skip it until the done report.
+  already has `lane` and a `lastAnswer` with the same `at` is routed. Skip it until the done report. A held close (step 2) is routed too:
+  its item is open with a `lastAnswer` of the same `at`. Skip it until the close.
 - Changed. A kept answer with no `act: "park"` and a new `at` is a new answer: the owner changed it. Route it again, relay it with the new `at`,
   and rewrite `lastAnswer`.
 - Withdrawn. If a kept answer is gone from an open item at the owning session's re-read, the owner withdrew it. The session drops `lane`
@@ -472,7 +479,13 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
 2. Close the item: `ArtifactData update items/<id> {"status": "closed", "closed": "<now, ISO UTC with a trailing Z>"}`, pinned to the version
    you read (`if_version`). If the close conflicts, the owner marked the item read in the meantime: read it again and retry the close. Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
    in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page shows a closed
-   item as one line, with its home and its reply, until the owner marks it read. The page shows `lastAnswer` as the answer on the opened line, and on an item left open (steps 3, 4 and a busy lane).
+   item as one line, with its home and its reply, until the owner marks it read. The page shows `lastAnswer` as the answer on the opened line, and on an item left open (steps 3, 4, a busy lane and a held close).
+   The session that closes the item holds this close while a record in `asks/` with `item` set to this item has no `reply`. The hold only delays the close (effect unmeasured),
+   because the page keeps the reply on the closed line. While the close waits, the session writes `lastAnswer` at once and keeps `answers/<id>`, so the
+   page still shows the item as answered. Only `status: "closed"`, `closed` and the delete of `answers/<id>` wait. A later turn start skips the kept answer (see "Already routed"), so nothing is filed twice.
+   The same session reads the `at` of each such record at each of its turn starts: no timer and no new process. It closes the item once no record has a missing `reply`, or 7 days after the oldest `at`.
+   A chat answer's close is not held, because it has no `answers/<id>` to keep. The session closes the item at once, and the waiting reply stays on the closed line.
+   Before a late close, read `answers/<id>` again. If it is gone or has a new `at`, the owner withdrew or changed it: do not close (see "Withdrawn" and "Changed").
 3. If the answer is `none` with no clear direction, and you can write new `options`, `recommended` and `why` from the
    note in this same turn, act in this order. A `multi` item's new `recommended` is a list. First ask the chat
    question again with the new options, citing `Page item: <id>` and writing one `a) <label>` line per new option.
