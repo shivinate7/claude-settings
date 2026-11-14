@@ -8,6 +8,8 @@ Bypass-mode sessions must not wait on the owner for Claude Code's critical-path 
    - `${NAME:?}`, only when the guard can see that each such name is safe. Safe means that each binding of the name in the command is `NAME=<literal>`, `for NAME in <literal words>`, or `NAME=$(mktemp …)`. A literal does not start with `.`, and holds no `..`, `~`, `$`, backtick or glob. With the values put in, the target is not `/`, home, a home parent, the cwd or a cwd parent, and not a glob directly under one of them. The command holds no `cd`, `pushd` or `popd`. The other conditions are in `hooks/guard_rm_var.py`.
    - Otherwise: name the one directory as a literal path. This covers inherited names such as `$OLDPWD`, positionals, `read` loops, and every other binding. The remedy never computes a path, because a computed path such as `/Users/<you>/*` could wipe the home folder.
 
+   The guard tries each combination of the values a target's names can hold, up to 64 (`_rm_word_safe`). That is a work bound. Past it the guard cannot call the target safe, so the target is "literal path only" and the refusal gives the literal-path reason. Unknown means refuse.
+
    If the guard cannot read a target, the refusal gives the literal-path reason. A read error never lets a command through unjudged. The agent retries, and the owner sees no prompt. This is an allow-list, because a deny-list of unsafe sources missed classes through many review rounds.
 2. `hooks/rm_prompt_answer.py`, a `PermissionRequest` hook on Bash, answers the prompt that remains. It answers allow only when all of these hold:
    - The session is in bypass mode: `permission_mode` is `bypassPermissions`.

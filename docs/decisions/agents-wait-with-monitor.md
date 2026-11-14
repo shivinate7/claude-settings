@@ -6,7 +6,7 @@ Owner, 2026-10-11 and 2026-10-12: the `Monitor` tool, Claude Code's own wait-onc
 
 - a loop that pauses, in bash or PowerShell;
 - two or more pauses in one command, the sleep-then-poll form;
-- one pause of 25 s or more;
+- one pause of 25 s or more. The 25 s copies the Claude CLI's own leading-sleep block (claude 2.1.322 holds 25; origin commit `ca4f96d2e`). A guard that disagreed with the CLI would refuse what the CLI allows, or the reverse;
 - `gh pr checks --watch` in the foreground;
 - `gh run watch` in the foreground or the background (`ci-wait-reads-run-status`, CI waits read the run status);
 - `timeout /t`, which the ruling did not name.

@@ -376,8 +376,9 @@ def _ampersand_split(segment: str):
     return parts
 
 
-# The deepest nest of substitutions the guard reads. A command nested deeper is REFUSED: a nest that
-# no honest command needs is a way to make the reader give up, and giving up must not allow it.
+# The deepest nest of substitutions the guard reads. A command nested deeper is REFUSED: a nest this
+# deep is far more likely a runaway than a command Claude writes, and an unbounded read would hit
+# Python's recursion limit. A crash fails open, so past the bound the guard refuses instead.
 ENV_MAX_DEPTH = 64
 ENV_DEPTH_REASON = "substitutions are nested too deep for the guard to read"
 
