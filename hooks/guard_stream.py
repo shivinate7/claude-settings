@@ -302,7 +302,6 @@ CHECK_TAIL_REASON = (
 # The bound is read from the merge tool, never copied. The tool caps a foreground limit below the bound,
 # so a foreground lane lint is refused at any limit. A call with no `timeout` gets the tool's default,
 # which is under the bound too. An unloadable merge tool gives an unknown bound: nothing is refused.
-FOREGROUND_DEFAULT_TIMEOUT_MS = 120000
 BACKGROUND_DEFAULT_TIMEOUT_MS = 1800000
 
 
