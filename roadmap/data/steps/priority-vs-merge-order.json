@@ -1,14 +1,14 @@
 {
  "id": "priority-vs-merge-order",
  "title": "A runner's merge order is checked against the owner's priority rulings",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJKzPki46QeHmV8zxLAh",
  "owner": "triage",
  "blockedBy": [],
  "why": "Runner 10 followed the coordinator's 18:42 CST \"stack after combined PR\" against the owner's 15:56 CST top priority; #3302 sat as a draft 18:40-20:27.",
  "source": "Consultant 20:27 CST Nov 13, quoting its own reads; the owner's ask 20:25 CST: \"how has the ci speed stack with top prio still not landed?\". Triage did not verify the order, the times or the rulings.",
- "note": "Filed 20:28 CST Nov 13. Gap: nothing sets the owner's priority rulings against the order in which a runner places PRs. Fix: a line (a check in the merge tool or the runner's wake) that names each tracked owner priority with its branch or PR and refuses or warns when the runner places a lower-priority PR first; priority-table-reads-pr supplies the PR state. A check change: lane measures first (which rulings carry a priority, how many are open), then test-author red case with the #3302 sequence, builder, reviewer. Answer owed to the owner on his 20:25 question: the coordinator or runner 10 says why the stack with top priority had not landed; triage has not found the cause. Needs a lane.",
- "updatedAt": "2026-11-13T20:28:11-06:00"
+ "note": "Filed 20:28 CST Nov 13. Gap: nothing sets the owner's priority rulings against the order in which a runner places PRs. Fix: a line (a check in the merge tool or the runner's wake) that names each tracked owner priority with its branch or PR and refuses or warns when the runner places a lower-priority PR first; priority-table-reads-pr supplies the PR state. A check change: lane measures first (which rulings carry a priority, how many are open), then test-author red case with the #3302 sequence, builder, reviewer. Answer owed to the owner on his 20:25 question: the coordinator or runner 10 says why the stack with top priority had not landed; triage has not found the cause. Needs a lane. Coordinator 20:30 CST Nov 13 (20:29): lane started (Sonnet, medium; searches open PRs for a duplicate first), session_013NEJKzPki46QeHmV8zxLAh. Coordinator's answer to the owner's 20:25 question (his sources; triage unchecked): (1) its 18:42 CST order put the ci speed stack after the combined PR, known from runner 10's message of 20:26; it was wrong against the owner's 15:56 CST priority and was withdrawn at 20:26; (2) #3302 was dirty against main (REST 20:26, head 723e54e9787e) after main moved, #3303 having merged at 19:30 CST; its lane merged main in, new head c5ec7112fd8f, REST clean at 20:27; (3) main's newest finished run was red until push run 43540952042 finished green about 20:11 CST, and no go goes out on a red main (rule git-red-main-reverts). Unmeasured: how long the lane took to rebuild after each move of main. The go for #3302 went to runner 10 at 20:28.",
+ "updatedAt": "2026-11-13T20:30:16-06:00"
 }
