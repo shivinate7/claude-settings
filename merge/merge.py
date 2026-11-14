@@ -1090,7 +1090,7 @@ class Host:
         """-> the pr() fields of pull request n, one read, with no change to this Host. A failed read is a Stop."""
         c, out = self.api(f"pulls/{self.pr_number(n)}")
         if c:
-            raise Stop("reading the pull request failed: " + out)
+            raise Stop("reading the pull request failed " + READ_CITE + ": " + out)
         return self.info(json.loads(out))
 
     def pr(self, n):
