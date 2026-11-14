@@ -26,6 +26,7 @@ import report_guard
 
 REPORT_GUARD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "report_guard.py")
 CLAUSE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_clause.py")
+NARRATION_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check_comment_narration.py")
 
 
 def clause_with(name, value):
@@ -77,6 +78,17 @@ def writer_words(source):
             if WRITER_WORDS.search(node.value):
                 hits.append((node.lineno, node.value))
     return scanned, hits
+
+
+def imports_of(source):
+    """The module names `source` imports, read from its Import and ImportFrom nodes. A comment or a string names none."""
+    names = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.add(node.module)
+    return names
 
 
 def calls_of(fn):
@@ -343,6 +355,135 @@ class SeparatorFieldTests(unittest.TestCase):
         self.assertEqual(parse(sentence)[0].sent_end, len(sentence), "sent_end: no stop follows the clause")
 
 
+class ClauseCutTests(unittest.TestCase):
+    """The clause cut at a period with no space after it. A period inside a token (report_guard.py, v1.2) cuts nothing."""
+
+    def test_a_period_with_no_space_before_a_capital_ends_a_clause(self):
+        # Catches: a period with no space after it is read as part of a token, so the clause holding "did not" also holds
+        # the claim after the period, and the claim is read as negated.
+        sentence = "It did not fail on main.The failure is pre-existing."
+        found = parse(sentence)
+        self.assertEqual(len(found), 2, "clauses: no cut at the period before The")
+        self.assertEqual(sentence[found[1].start:found[1].end], "The failure is pre-existing",
+                         "clauses: the clause after the glued period is wrong")
+        self.assertFalse(found[1].negated, "negated: the negator before the glued period reaches the claim")
+
+    def assert_glued_cut(self, sentence, claim, mask=None):
+        """A period with no space after it, that the parser must cut at: two clauses, the second is `claim`, and the
+        negator before the period does not reach it."""
+        found = clause.clauses(sentence, mask if mask is not None else none(sentence))
+        self.assertEqual(len(found), 2, "clauses: no cut at the glued period in %r" % sentence)
+        self.assertEqual(sentence[found[1].start:found[1].end], claim, "clauses: the clause after the glued period is wrong")
+        self.assertFalse(found[1].negated, "negated: the negator before the glued period reaches the claim in %r" % sentence)
+
+    def test_a_dot_inside_a_file_or_version_name_cuts_no_clause(self):
+        # Catches: every period with no space after it cuts a clause, so report_guard.py and v1.2 split in two.
+        for sentence in ("Lint fails in report_guard.py on main too.", "It fails at v1.2 on main too."):
+            with self.subTest(sentence=sentence):
+                self.assertEqual(len(parse(sentence)), 1, "clauses: a dot inside a token cut the clause")
+
+    def test_a_glued_period_after_a_code_span_ends_a_clause(self):
+        # Catches: a period after a code span cuts no clause, so "did not" reaches the claim after it. The span is masked.
+        sentence = "It did not fail on `main`.The failure is pre-existing."
+        self.assert_glued_cut(sentence, "The failure is pre-existing", code_mask(sentence))
+
+    def test_a_glued_period_after_a_close_paren_ends_a_clause(self):
+        # Catches: a period after a close paren cuts no clause, so "did not" reaches the claim after it.
+        self.assert_glued_cut("It did not fail (see the log).The failure is pre-existing.", "The failure is pre-existing")
+
+    def test_a_glued_period_before_a_capital_i_ends_a_clause(self):
+        # Catches: a period before "I" cuts no clause, so "did not" reaches the claim after it.
+        self.assert_glued_cut("It did not fail on main.I think the failure is pre-existing.", "I think the failure is pre-existing")
+
+    def test_a_glued_period_after_an_upper_case_word_ends_a_clause(self):
+        # Catches: a period after an upper-case word cuts no clause, so "did not" reaches the claim after it.
+        self.assert_glued_cut("It did not fail on CI.The failure is pre-existing.", "The failure is pre-existing")
+
+    def test_a_glued_period_before_a_lower_case_determiner_ends_a_clause(self):
+        # Catches: a period before "the" cuts no clause, so "did not" reaches the claim after it. report_guard.py has the
+        # same letter-dot-letter shape and cuts none, so the word after the period decides.
+        self.assert_glued_cut("It did not fail on main.the failure is pre-existing.", "the failure is pre-existing")
+
+    def test_a_glued_period_before_a_digit_after_a_letter_ends_a_clause(self):
+        # Catches: a period between a letter and a digit cuts no clause, so "did not" reaches the claim after it.
+        self.assert_glued_cut("It did not fail on it.2 failures are pre-existing.", "2 failures are pre-existing")
+
+    def test_a_dotted_pascal_name_cuts_no_clause(self):
+        # Catches: the period in a dotted name (Console.WriteLine, Foo.Bar) cuts the clause, so the name splits in two.
+        for sentence, reason in (("I could not push because Console.WriteLine returned 403.",
+                                  "because Console.WriteLine returned 403"),
+                                 ("I could not push because Foo.Bar is red.", "because Foo.Bar is red")):
+            with self.subTest(sentence=sentence):
+                found = parse(sentence)
+                self.assertEqual(len(found), 2, "clauses: the dotted name cut the clause")
+                self.assertEqual(sentence[found[1].start:found[1].end], reason, "clauses: the reason clause is wrong")
+
+
+class LeadOpensClauseTests(unittest.TestCase):
+    """_clause.lead_opens_clause: whether a lead-in word opens a clause of its own. "as" and "yet" double as other words,
+    so the words after them decide. A clause opened by a subject and a verb is a clause; a bare phrase is not."""
+
+    def setUp(self):
+        # The scope before the subject (P7): a parser without this function fails each case here by name, not by a crash.
+        self.assertTrue(hasattr(clause, "lead_opens_clause"),
+                        "lead_opens_clause: _clause has no lead_opens_clause, so no lead-in word is read by the parser")
+
+    def test_as_before_a_pronoun_and_a_plain_verb_opens_a_clause(self):
+        # Catches: "as" before "it also fails" reads as no clause, so the negator before it reaches the claim after it.
+        self.assertTrue(clause.lead_opens_clause("as", " it also fails on 32b5f8b8e"),
+                        "lead_opens_clause: as + pronoun + plain verb opens no clause")
+
+    def test_as_before_a_noun_subject_and_a_plain_verb_opens_a_clause(self):
+        # Catches: "as" before "the failure seems" reads as no clause, so the negator before it reaches the claim after it.
+        self.assertTrue(clause.lead_opens_clause("as", " the failure seems pre-existing"),
+                        "lead_opens_clause: as + noun subject + plain verb opens no clause")
+
+    def test_as_before_a_be_verb_after_a_subject_still_opens_a_clause(self):
+        # Control: "as" before a subject and a be-verb opens a clause on the current code, and keeps opening one.
+        self.assertTrue(clause.lead_opens_clause("as", " the failure is pre-existing"),
+                        "lead_opens_clause: as + noun subject + is no longer opens a clause")
+
+    def test_as_before_pre_existing_opens_no_clause_for_a_later_be_verb(self):
+        # Catches: "as" before "pre-existing" opens a clause because a later "is" in the same phrase reads as its verb.
+        self.assertFalse(clause.lead_opens_clause("as", " pre-existing and the CI is red"),
+                         "lead_opens_clause: as + pre-existing opens a clause for a later is")
+
+    def test_as_before_being_opens_no_clause(self):
+        # Catches: "as" before "being" opens a clause because "being" is a form of be, so the negator never reaches the claim.
+        self.assertFalse(clause.lead_opens_clause("as", " being pre-existing"),
+                         "lead_opens_clause: as + being opens a clause")
+
+    def test_as_yet_opens_no_clause(self):
+        # Catches: "as" before "yet that" opens a clause, so "not" never reaches the claim after "yet".
+        self.assertFalse(clause.lead_opens_clause("as", " yet that the failure is pre-existing"),
+                         "lead_opens_clause: as + yet opens a clause")
+
+    def test_yet_before_a_bare_verb_is_an_adverb(self):
+        # Catches: "yet" before the bare verb "know" opens a clause, so "don't" never reaches the claim after it.
+        self.assertFalse(clause.lead_opens_clause("yet", " know the failure is pre-existing"),
+                         "lead_opens_clause: yet + bare verb opens a clause")
+
+    def test_yet_before_a_participle_known_is_an_adverb(self):
+        # Catches: "yet" before "known" opens a clause, since "known" is no participle to the parser.
+        self.assertFalse(clause.lead_opens_clause("yet", " known to be pre-existing"),
+                         "lead_opens_clause: yet + known opens a clause")
+
+    def test_yet_before_an_adjective_is_an_adverb(self):
+        # Catches: "yet" before the adjective "sure" opens a clause, so "not" never reaches the claim after it.
+        self.assertFalse(clause.lead_opens_clause("yet", " sure whether the failure is pre-existing"),
+                         "lead_opens_clause: yet + sure opens a clause")
+
+    def test_yet_before_that_is_an_adverb(self):
+        # Catches: "yet" before "that" opens a clause, so "no" never reaches the claim after it.
+        self.assertFalse(clause.lead_opens_clause("yet", " that the failure is pre-existing"),
+                         "lead_opens_clause: yet + that opens a clause")
+
+    def test_yet_before_a_determiner_still_opens_a_clause(self):
+        # Control: "yet" before "the" is a join on the current code, and stays one: the pin "did not start yet the failure" holds.
+        self.assertTrue(clause.lead_opens_clause("yet", " the failure is pre-existing"),
+                        "lead_opens_clause: yet + the no longer opens a clause")
+
+
 class LexiconTests(unittest.TestCase):
     def test_negators_are_the_negation_words(self):
         # Catches: a negation word dropped from NEGATORS, or a non-negator added to it.
@@ -450,6 +591,16 @@ class ReasonTests(unittest.TestCase):
         self.assertEqual(clause.reasons("I can't merge PR 12 because the branch is protected. Also because the CI is red."),
                          ["the branch is protected", "the CI is red"], "reasons: the second sentence's reason is lost")
 
+    def test_a_dotted_pascal_name_stays_inside_its_reason(self):
+        # Catches: the period in a dotted name ends the reason, so "Console" alone is read and no verb reaches it.
+        self.assertEqual(clause.reasons("I could not push because Console.WriteLine returned 403."),
+                         ["Console.WriteLine returned 403"], "reasons: the dotted name cut the reason")
+
+    def test_a_plain_name_stays_inside_its_reason_control(self):
+        # Control: the same reason with no dot reads whole on the current code, and stays whole.
+        self.assertEqual(clause.reasons("I could not push because Console returned 403."),
+                         ["Console returned 403"], "reasons: a plain name cut the reason")
+
 
 class IsReasonTests(unittest.TestCase):
     def test_a_weren_t_form_is_a_verb_of_a_reason(self):
@@ -544,6 +695,23 @@ TEXT = "it's a plain string, not a pattern: this session"
                 self.assertEqual(getattr(probe, name), ("zqxvlead",), "scope: the probe does not read the sentinel %s" % name)
                 self.assertIn("zqxvlead", probe._LEAD_RE.pattern, "_LEAD_RE does not read %s" % name)
                 self.assertIn("zqxvlead", probe._WRITER_START.pattern, "_WRITER_START does not read %s" % name)
+
+    def test_comment_narration_reads_the_clause_parser_by_import(self):
+        # Catches: check_comment_narration.py imports no _clause, so ReviewRound.gloss_ids reads its own words and not the
+        # parser's (the shared clause parser decision, checks-share-the-clause-parser). The scope is the gloss_ids method;
+        # the control is that a comment or a string names no import, and that report_guard.py, which reads the parser,
+        # imports _clause.
+        with open(NARRATION_PATH, encoding="utf-8") as handle:
+            source = handle.read()
+        gloss = [fn for node in ast.walk(ast.parse(source)) if isinstance(node, ast.ClassDef) and node.name == "ReviewRound"
+                 for fn in node.body if isinstance(fn, ast.FunctionDef) and fn.name == "gloss_ids"]
+        self.assertEqual(len(gloss), 1, "scope: check_comment_narration.py has no ReviewRound.gloss_ids to read")
+        self.assertEqual(imports_of('import re  # from _clause import JOINERS\nTEXT = "import _clause"\n'), {"re"},
+                         "control: a comment or a string is read as an import")
+        with open(REPORT_GUARD, encoding="utf-8") as handle:
+            self.assertIn("_clause", imports_of(handle.read()), "control: report_guard.py does not import _clause")
+        self.assertIn("_clause", imports_of(source),
+                      "check_comment_narration.py imports no _clause, so gloss_ids reads its own words, not the parser's")
 
 
 if __name__ == "__main__":

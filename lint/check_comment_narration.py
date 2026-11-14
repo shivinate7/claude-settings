@@ -34,6 +34,14 @@ sys.path.insert(0, HERE)
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import layout  # noqa: E402  the one home of where a repo keeps its decisions (lint/layout.py)
 import diff_moves  # noqa: E402  the one home of a moved line (lint/diff_moves.py)
+import _clause  # noqa: E402  the one home of the clause lead-in words (lint/_clause.py)
+
+
+def _parser_words(lexicon, wanted):
+    """The words of `wanted` that the parser's `lexicon` holds, in the parser's order. A check that reads a word the parser
+    lists takes it from the list, and not from a copy. The lists hold words this check does not read, so `wanted` narrows them."""
+    return tuple(w for w in lexicon if w in wanted)
+
 
 class DatedText:
     """A date pattern that skips a date a rule or a limit runs on: the word effective, valid, until or expires,
@@ -56,7 +64,8 @@ class ReviewRound:
     "(decision <id>, ...)" or "(`<id>`, ...)", or the parentheses right after the id, as in "Decision <id> (...)".
     Anything else stays flagged: the same words outside the gloss, an id with no decision file, an id holding
     another number, and parentheses that hold the id later on."""
-    ROUND = re.compile(r"\b(?:in|after|from)\s+round\s*\d+"
+    LEADS = "|".join(_parser_words(_clause.PREPOSITIONS, ("in", "from")) + ("after",))
+    ROUND = re.compile(r"\b(?:%s)\s+round\s*\d+" % LEADS +
                        r"|\bround\s*\d+(?!\d)(?!\s*(?:decimals?|places?|digits?)\b)"
                        r"|\breview\s+(?:round|finding|points?)\b", re.I)
     ID = r"(?P<id>[a-z0-9][a-z0-9-]*)"
@@ -146,7 +155,9 @@ class HistoryPhrase:
         + r"|\b" + VERB + PLACE + CODE_AFTER
         + r"|\b(?:was|were|went|been|turned|stayed)\s+(?:red|green|passing|failing)\s+before\b"
         r"|\b(?:" + COLOUR + "|" + VERB + r")\s+before\s+(?:this|the)\s+(?:change|fix)\b", re.I)
-    CONDITION = re.compile(r"\b(?:when|if|unless|until|while|once)\b", re.I)
+    CONDITION = re.compile(r"\b(?:%s)\b" % "|".join(
+        _parser_words(_clause.CONDITIONALS, ("if", "unless")) + _parser_words(_clause.SUBORDINATORS, ("while",))
+        + ("when", "until", "once")), re.I)
 
     def finditer(self, text):
         run = (m for m in self.RUN.finditer(text)
