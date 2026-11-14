@@ -1817,12 +1817,30 @@ def brief_hit(tool: str, tool_input, transcript: str):
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)
 STAMP_LIMIT_MINUTES = 1  # a header stamp this far ahead of the clock passes; one more minute ahead is refused
 STAMP_QUOTE_MINUTES = 60  # an undated stamp more than this far ahead reads as a quote from an earlier day, and passes
-# A header is a label of 1 to 4 words, then `,` or `:` or a dash spaced on both sides, an optional date, then
-# `H:MM` or `HH:MM`, an optional `:SS`, and `CST` or `CDT` in any case. Anything may follow.
+# A header is a label of 1 to 4 words, then `H:MM` or `HH:MM`, an optional `:SS`, and `CST` or `CDT` in any case.
+# Anything may follow. A label joins the time in one of three ways. A bracketed or parenthesised label needs no
+# mark. A bare label needs `,` or `:` or a dash spaced on both sides before the time, and then an optional
+# `YYYY-MM-DD` date. Or it needs a `Mon D` date after the zone, then a `:`. A `Mon D` date after the zone also
+# dates a bracketed label's stamp. Any other bare form is prose and passes: `Deadline 15:00 CST for the merge`, `Done at 12:53 CST - see PR`, `Coordinator 13:40 CST: pick 1 taken`.
+# A bracketed label closes at its bracket, so words after `]` or `)` are prose; only a time right after the bracket
+# stamps it. A `Mon D` date takes a real month name only. Named limit: `label H:MM CST: text` passes as prose
+# (existing tests pin `Coordinator 13:40 CST: pick 1 taken`).
+_STAMP_LABEL = r"[^\s,:]+(?:\s+[^\s,:]+){0,3}"
+# A bracket label word is never a `YYYY-MM-DD` date: a date there would hide the stamp's date from the date group,
+# and the stamp would read as undated, inside the quote window instead of compared as an instant.
+_STAMP_NOT_DATE = r"(?!\d{4}-\d{2}-\d{2}\s)"
+_STAMP_BRACKET_LABEL = _STAMP_NOT_DATE + r"[^\s,:\])]+(?:\s+" + _STAMP_NOT_DATE + r"[^\s,:\])]+){0,3}"
+_STAMP_TIME = r"\d{1,2}:\d{2}(?::\d{2})?\s+(?:CST|CDT)\b"
+_STAMP_MONTH_NAMES = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+_STAMP_MONTH = r"(?:" + "|".join(_STAMP_MONTH_NAMES) + r")"
+_STAMP_DAY = r"(?:[12]\d|3[01]|0?[1-9])"
 _STAMP_HEADER = re.compile(
-    _MARKDOWN_LEAD + r"[^\s,:]+(?:\s+[^\s,:]+){0,3}(?:[,:]|\s[-\u2014\u2013])\s*"
+    _MARKDOWN_LEAD + r"(?:[\[(]\s*" + _STAMP_BRACKET_LABEL + r"(?:[\])]?(?:[,:]|\s[-\u2014\u2013])|(?=\s)|[\])](?=\s+" + _STAMP_TIME + r"))"
+    r"|" + _STAMP_LABEL + r"(?:[,:]|\s[-\u2014\u2013])"
+    r"|" + _STAMP_LABEL + r"\s(?=" + _STAMP_TIME + r"\s+" + _STAMP_MONTH + r"\s+" + _STAMP_DAY + r"\b\s*:))\s*"
     r"(?:(?P<date>\d{4}-\d{2}-\d{2})\s+)?"
-    r"(?P<hour>\d{1,2}):(?P<minute>\d{2})(?::\d{2})?\s+(?P<zone>CST|CDT)\b", re.IGNORECASE)
+    r"(?P<hour>\d{1,2}):(?P<minute>\d{2})(?::\d{2})?\s+(?P<zone>CST|CDT)\b"
+    r"(?:\s+(?P<mon>" + _STAMP_MONTH + r")\s+(?P<day>" + _STAMP_DAY + r")\b(?!:\d))?", re.IGNORECASE)
 _STAMP_OFFSET_HOURS = {"CST": -6, "CDT": -5}
 STAMP_REASON = (
     "this message's header stamp is wrong for the clock: {why}. "
@@ -1842,11 +1860,34 @@ def _minutes_ahead(then, now) -> int:
     return int((then.replace(second=0, microsecond=0) - now.replace(second=0, microsecond=0)).total_seconds() // 60)
 
 
+def _stamp_instant(found, hour: int, minute: int, zone, now):
+    """The instant a header stamp names, in its zone, or None when its date is impossible. An ISO date carries its
+    year. A `Mon D` date takes the year, among the clock's year and its neighbours, that lands nearest the clock, so a
+    stamp across New Year's day reads as minutes from the clock, not a year. No date: None."""
+    if found.group("date"):
+        return datetime.fromisoformat(found.group("date")).replace(hour=hour, minute=minute, tzinfo=zone)
+    if not found.group("mon"):
+        return None
+    month = _STAMP_MONTH_NAMES.index(found.group("mon").lower()) + 1
+    year = now.astimezone(zone).year
+    nearest = None
+    for candidate in (year - 1, year, year + 1):
+        try:
+            stamped = datetime(candidate, month, int(found.group("day")), hour, minute, tzinfo=zone)
+        except ValueError:  # Feb 29 in a common year, or a day the month lacks
+            continue
+        if nearest is None or abs(stamped - now) < abs(nearest - now):
+            nearest = stamped
+    if nearest is None:
+        raise ValueError("no year gives the stamp's date")
+    return nearest
+
+
 def stamp_hit(tool: str, tool_input):
     """Return (matched, reason) when this send_message opens with a header stamp that is wrong for the clock, else
     None. Only the first non-blank line is read, and only its header stamp. Wrong means one of three things. The
     zone name is not the clock's own (local_time's DST rule names the current zone), whatever the minutes. A dated
-    stamp is more than STAMP_LIMIT_MINUTES ahead, compared as an instant with its zone's offset, with no upper limit.
+    stamp, an ISO date before the time or a `Mon D` date after the zone, is more than STAMP_LIMIT_MINUTES ahead, compared as an instant with its zone's offset, with no upper limit.
     An undated stamp is between STAMP_LIMIT_MINUTES (exclusive) and STAMP_QUOTE_MINUTES (inclusive) ahead, as a
     signed minute-of-day offset modulo 1440 in [-720, 720). An undated stamp further ahead is read as a quote from
     an earlier day and passes, as does any stamp behind the clock.
@@ -1872,8 +1913,8 @@ def stamp_hit(tool: str, tool_input):
             why = STAMP_ZONE_WHY.format(zone=stamp_zone, name=clock_zone)
         else:
             zone = timezone(timedelta(hours=_STAMP_OFFSET_HOURS[stamp_zone]))
-            if found.group("date"):
-                stamped = datetime.fromisoformat(found.group("date")).replace(hour=hour, minute=minute, tzinfo=zone)
+            stamped = _stamp_instant(found, hour, minute, zone, now)
+            if stamped is not None:
                 off = _minutes_ahead(stamped, now)
                 late = off > STAMP_LIMIT_MINUTES
             else:

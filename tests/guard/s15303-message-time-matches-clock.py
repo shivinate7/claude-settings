@@ -3,8 +3,10 @@ FAMILY = "message-time-matches-clock"
 #
 # Rule message-time-matches-clock. A send_message whose first non-blank line, after its markdown lead chars, opens
 # with a header stamp is refused when the stamp is wrong for the clock. A header stamp is `<label>` (1 to 4 words),
-# then `,`, `:`, or a dash spaced on both sides (` - `, ` — `), then an optional date `YYYY-MM-DD `, then `H:MM` or
-# `HH:MM`, an optional `:SS`, then the zone `CST` or `CDT` in any letter case. Anything may follow it. The zone must
+# then an optional date `YYYY-MM-DD ` and `H:MM` or `HH:MM`, an optional `:SS`, then the zone `CST` or `CDT` in any
+# letter case. Anything may follow it. A bracketed or parenthesised label, closed by its bracket, needs no mark before
+# the time. A bare label needs `,`, `:`, or a dash spaced on both sides before the time, or a `Mon D` date, with a real
+# month name, and a colon after the zone. The zone must
 # be the clock's own: a CDT stamp in CST season and a CST stamp in CDT season are refused, whatever the minutes.
 # A dated stamp is an instant with its zone's offset, refused when it is more than 1 minute ahead, with no upper
 # limit. An undated stamp is a signed minute-of-day offset mod 1440, refused only when it is 2 to 60 minutes ahead:
@@ -213,6 +215,184 @@ mtc_allow("a header 61 minutes ahead at 07:08 is allowed: past 60 minutes it rea
 # Refused: a dated stamp has no window. 16:36 on the same day is 9 hours 28 minutes ahead at 07:08, and is refused.
 mtc_refuse("a dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated stamp has no window",
            "Coordinator, 2026-11-08 16:36 CST: x", clock=MTC_MORNING)
+
+
+# ---- a label that does not join the time: prose after a closed bracket or paren, and a word after the zone that is not a
+# month. Each stamp is 20 minutes ahead of MTC_LABEL_CLOCK, so each would be refused by a header reader. A bracket closes
+# its label, so the words after it are prose. A `Mon D` date counts only with a real month name, so `and`, `for` and
+# `Foo` are not dates.
+MTC_LABEL_CLOCK = "2026-11-13T13:40:00-06:00"  # 13:40 CST, the clock of the cases in this block
+# Passes: the bracket closes its label before the time, so `ready by` is prose after the bracket.
+mtc_allow("a bracket closed before the time, [PR #3177] ready by 14:00 CST, is allowed: prose after the bracket",
+          "[PR #3177] ready by 14:00 CST", clock=MTC_LABEL_CLOCK)
+mtc_allow("a bracket closed before the time, [Note] Standup moved to 14:00 CST, is allowed: prose after the bracket",
+          "[Note] Standup moved to 14:00 CST", clock=MTC_LABEL_CLOCK)
+mtc_allow("a paren closed before the time, (done) merged PR at 14:00 CST, is allowed: prose after the paren",
+          "(done) merged PR at 14:00 CST", clock=MTC_LABEL_CLOCK)
+mtc_allow("a one-letter bracket closed before the time, [x] done 14:00 CST, is allowed: prose after the bracket",
+          "[x] done 14:00 CST", clock=MTC_LABEL_CLOCK)
+mtc_allow("a one-letter paren closed before the time, (a) merge at 14:00 CST, is allowed: prose after the paren",
+          "(a) merge at 14:00 CST", clock=MTC_LABEL_CLOCK)
+mtc_allow("a bracket of three words closed before the time, [batch runner 11] ETA 14:00 CST for merge, is allowed",
+          "[batch runner 11] ETA 14:00 CST for merge", clock=MTC_LABEL_CLOCK)
+# Refused: the time follows the closed bracket directly, so the bracket is the label and the stamp is its header. This
+# pins the edge of the allow cases above: a closed bracket with the time right after it still stamps its label.
+mtc_refuse("a closed bracket label with the time right after it, [PR #3177] 14:00 CST ready, is refused: the bracket is the label",
+           "[PR #3177] 14:00 CST ready", clock=MTC_LABEL_CLOCK, carries=("13:40 CST",))
+# Passes: `and` and `for` are three letters, but neither is a month, so the second time is prose, not a `Mon D` date.
+mtc_allow("a bare label with a second time after a three-letter word, Meet 14:00 CST and 15:00 CST for review, is allowed: and is not a month",
+          "Meet 14:00 CST and 15:00 CST for review", clock=MTC_LABEL_CLOCK)
+mtc_allow("a bare label with a second time after and, Standup 14:00 CST and 14:30 CST both moved, is allowed: and is not a month",
+          "Standup 14:00 CST and 14:30 CST both moved", clock=MTC_LABEL_CLOCK)
+mtc_allow("a bare label with a day after for, Window opens 14:00 CST for 2: reviewers, is allowed: for is not a month",
+          "Window opens 14:00 CST for 2: reviewers", clock=MTC_LABEL_CLOCK)
+# Passes: `Foo` is three letters and no month, so `Foo 3:` after the zone is not a `Mon D` date.
+mtc_allow("a bare label with a non-month word and a day after the zone, Coordinator 14:00 CST Foo 3: hi, is allowed: Foo is not a month",
+          "Coordinator 14:00 CST Foo 3: hi", clock=MTC_LABEL_CLOCK)
+# Refused: Dec is a real month, so `Dec 3:` after the zone is the date of a header 20 minutes ahead.
+mtc_refuse("a bare label with a real month and a day after the zone, coordinator 14:00 CST Dec 3: hi, is refused: Dec is a month",
+           "coordinator 14:00 CST Dec 3: hi", clock=MTC_LABEL_CLOCK, carries=("13:40 CST",))
+
+# ---- the forms with no separator: a bracket, a paren, or a bare label. A bracket or a paren is a header stamp with no
+# mark before the time. A bare label with no mark before the time is a header stamp only when a `Mon D` date and a
+# colon follow the zone, so the bare row is prose and stays allowed. Main reads none of these forms. Each
+# The 10-minutes-ahead refusals below pin the header form: a stamp 10 minutes ahead is refused. Every other case is
+# prose, and 10 minutes ahead must pass, so widening the header form cannot start refusing prose. The group's clock is
+# 12:43 CST, so 12:53 is 10 minutes ahead.
+MTC_FORM_CLOCK = "2026-11-13T12:43:00-06:00"  # 12:43 CST, the clock of the 10-minutes-ahead refusals
+MTC_FORMS = (  # (name, template, quote, header): {t} is the stamp's time, 12:53 in every form below
+    ("bracket with a date", "[coordinator {t} CST Nov 13] hi", False, True),
+    ("bracket", "[coordinator {t} CST] x", True, True),
+    ("bold bracket", "**[coordinator {t} CST]** hi", True, True),
+    ("paren", "(coordinator {t} CST) x", True, True),
+    # A bare label, time and zone with no mark is indistinguishable from prose (`Deadline 15:00 CST for the merge`).
+    ("bare label", "coordinator {t} CST x", True, False),
+    ("bare label with a date after the zone", "coordinator {t} CST Nov 13: hi", False, True),
+)
+# quote is False for the two forms with `Nov 13` after the zone. The rule puts a date before the time, so whether that
+# date counts is open, and a dated stamp has no quote window. Their 70-minute case is not pinned here.
+
+
+def mtc_form_cases():
+    """Each form, at the clock's own minute, 1 minute ahead, 10 minutes behind, and, if undated, 70 ahead."""
+    for form, template, quote, header in MTC_FORMS:
+        msg = template.format(t="12:53")
+        if header:
+            # Refused at 10 minutes ahead, and the reason prints the real time, 12:43 CST.
+            mtc_refuse("a %s header 10 minutes ahead is refused: 12:53 CST at 12:43" % form, msg,
+                       clock=MTC_FORM_CLOCK, carries=("12:43 CST",))
+        else:
+            # STAYS GREEN: prose, so 10 minutes ahead passes too, as it does on main.
+            mtc_allow("a %s is prose, not a header, so 10 minutes ahead is allowed: 12:53 CST at 12:43" % form, msg,
+                      clock=MTC_FORM_CLOCK)
+        # STAYS GREEN: passes at the clock's own minute, 1 minute ahead, and behind.
+        mtc_allow("a %s header at the clock's own minute is allowed: 12:53 CST at 12:53" % form, msg,
+                  clock="2026-11-13T12:53:00-06:00")
+        mtc_allow("a %s header 1 minute ahead is allowed: 12:53 CST at 12:52" % form, msg,
+                  clock="2026-11-13T12:52:00-06:00")
+        mtc_allow("a %s header 10 minutes behind is allowed: 12:53 CST at 13:03" % form, msg,
+                  clock="2026-11-13T13:03:00-06:00")
+        # STAYS GREEN: undated and more than 60 minutes ahead, so it reads as a quote from an earlier day.
+        if quote:
+            mtc_allow("a %s header 70 minutes ahead is allowed: undated, past the quote window" % form, msg,
+                      clock="2026-11-13T11:43:00-06:00")
+
+
+mtc_form_cases()
+
+# CONTROL, refused on main and must stay refused: the comma header, 10 minutes ahead. It differs from the bare form
+# only by its comma.
+mtc_refuse("a comma header 10 minutes ahead stays refused: Coordinator, 12:53 CST at 12:43",
+           "Coordinator, 12:53 CST: hi", clock=MTC_FORM_CLOCK, carries=("12:43 CST",))
+# STAYS GREEN, false alarms: a time in prose, not a header. Each sits 10 minutes before its own stamp, so a matcher that
+# reads the first words as a label refuses it.
+mtc_allow("a prose line, Done at 12:53 CST - see PR, 10 minutes ahead is allowed: prose, not a header",
+          "Done at 12:53 CST - see PR", clock=MTC_FORM_CLOCK)
+mtc_allow("a prose line, Deadline 15:00 CST for the merge, 10 minutes ahead is allowed: prose, not a header",
+          "Deadline 15:00 CST for the merge", clock="2026-11-13T14:50:00-06:00")
+mtc_allow("a prose line, Meet at 14:00 CST tomorrow, 10 minutes ahead is allowed: prose, not a header",
+          "Meet at 14:00 CST tomorrow", clock="2026-11-13T13:50:00-06:00")
+
+# ---- a `Mon D` date after the zone is the stamp's date. It reads as the clock's year, or as the year that puts the date
+# nearest the clock, and the stamp is compared as an instant with no quote window, like an ISO date. Undated, the stamp
+# would read as an earlier day past 60 minutes ahead and pass. The clock is 11:38 CST on the day the date names.
+MTC_DATE_CLOCK = "2026-11-13T11:38:00-06:00"  # 11:38 CST, the clock of the cases in this block
+# Refused: 12:46 on the clock's own day is 68 minutes ahead, past the 60-minute quote window an undated stamp gets.
+mtc_refuse("a bare label with a date after the zone, triage 12:46 CST Nov 13: x, is refused: 68 minutes ahead that day",
+           "triage 12:46 CST Nov 13: x", clock=MTC_DATE_CLOCK, carries=("68 minutes ahead", "11:38 CST"))
+mtc_refuse("a bracket with a date after the zone, [triage 12:46 CST Nov 13] x, is refused: 68 minutes ahead that day",
+           "[triage 12:46 CST Nov 13] x", clock=MTC_DATE_CLOCK, carries=("68 minutes ahead", "11:38 CST"))
+# Refused: the date is a week ahead. Undated, 11:50 is 12 minutes ahead and refused too, so this case alone does not show
+# the date at work. The next case, 13:50 on the same day, is 132 minutes ahead undated and passes, so it does.
+mtc_refuse("a bare label with a date days ahead, Freeze 11:50 CST Nov 20: x, is refused: 10092 minutes ahead",
+           "Freeze 11:50 CST Nov 20: x", clock=MTC_DATE_CLOCK, carries=("10092 minutes ahead", "11:38 CST"))
+mtc_refuse("a bare label with a date days ahead, Freeze 13:50 CST Nov 20: x, is refused: 10212 minutes ahead",
+           "Freeze 13:50 CST Nov 20: x", clock=MTC_DATE_CLOCK, carries=("10212 minutes ahead", "11:38 CST"))
+# Allowed: a stamp on the day before the clock's day is behind it. Undated, its 11:48 reads 10 minutes ahead and is refused.
+mtc_allow("a bare label with a date after the zone, triage 11:48 CST Nov 12: x, is allowed: the day before is behind",
+          "triage 11:48 CST Nov 12: x", clock=MTC_DATE_CLOCK)
+# Allowed: the clock's own minute, and 1 minute ahead of it, as for every dated stamp.
+mtc_allow("a dated bare label at the clock's own minute, triage 11:38 CST Nov 13: x, is allowed",
+          "triage 11:38 CST Nov 13: x", clock=MTC_DATE_CLOCK)
+mtc_allow("a dated bare label 1 minute ahead, triage 11:39 CST Nov 13: x, is allowed: the limit is inclusive",
+          "triage 11:39 CST Nov 13: x", clock=MTC_DATE_CLOCK)
+# Year rollover. At 23:55 on the last day of the year, the stamp 00:20 on the first day is 25 minutes ahead, and 01:20 is
+# 85 minutes ahead: both are refused, and the 85-minute one passes undated.
+MTC_YEAR_END_CLOCK = "2026-12-31T23:55:00-06:00"  # 23:55 CST on the last day of the year
+mtc_refuse("a bare label across the new year, triage 00:20 CST Jan 1: x, is refused: 25 minutes ahead",
+           "triage 00:20 CST Jan 1: x", clock=MTC_YEAR_END_CLOCK, carries=("25 minutes ahead", "23:55 CST"))
+mtc_refuse("a bare label across the new year, triage 01:20 CST Jan 1: x, is refused: 85 minutes ahead",
+           "triage 01:20 CST Jan 1: x", clock=MTC_YEAR_END_CLOCK, carries=("85 minutes ahead", "23:55 CST"))
+# Allowed: the day before the new year is behind a clock just past midnight. Read in the clock's own year, it would fall
+# nearly a year ahead and be refused, so these two pin the year reading.
+MTC_NEW_YEAR_CLOCK = "2027-01-01T00:05:00-06:00"  # 00:05 CST on the first day of the year
+mtc_allow("a dated bare label on the last day of the year, triage 23:50 CST Dec 31: x, is allowed: behind",
+          "triage 23:50 CST Dec 31: x", clock=MTC_NEW_YEAR_CLOCK)
+mtc_allow("a dated bare label a day behind across midnight, triage 00:20 CST Dec 31: x, is allowed: behind",
+          "triage 00:20 CST Dec 31: x", clock=MTC_NEW_YEAR_CLOCK)
+
+# ---- a dated header in a bracket, a paren, or a dash form. The date sits in the label, before the time, so the stamp is
+# a dated instant with no window: 16:36 on the clock's own day is 9 hours 28 minutes ahead at 07:08, and is refused.
+MTC_DATED_CLOCK = "2026-11-13T07:08:00-06:00"  # 07:08 CST, the clock of the dated cases below
+MTC_DATED_NOON_CLOCK = "2026-11-13T12:43:00-06:00"  # 12:43 CST, the clock of the next-day case below
+mtc_refuse("a bracket dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated stamp has no window",
+           "[coordinator 2026-11-13 16:36 CST] x", clock=MTC_DATED_CLOCK, carries=("07:08 CST",))
+mtc_refuse("a paren dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated stamp has no window",
+           "(coordinator 2026-11-13 16:36 CST) x", clock=MTC_DATED_CLOCK, carries=("07:08 CST",))
+mtc_refuse("a dash dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated stamp has no window",
+           "[coordinator - 2026-11-13 16:36 CST] x", clock=MTC_DATED_CLOCK, carries=("07:08 CST",))
+# Refused: the stamp, 12:30 CST on the next day, is 23 hours 47 minutes ahead at 12:43 CST.
+mtc_refuse("a bracket dated header on the next day, 2026-11-14 12:30 CST at 12:43 on 2026-11-13, is refused",
+           "[coordinator 2026-11-14 12:30 CST] x", clock=MTC_DATED_NOON_CLOCK, carries=("12:43 CST",))
+# Refused, a control: the comma form keeps its date, so it is refused 9 hours 28 minutes ahead at 07:08.
+mtc_refuse("a comma dated header in a bracket 9 hours 28 minutes ahead at 07:08 stays refused",
+           "[coordinator, 2026-11-13 16:36 CST] x", clock=MTC_DATED_CLOCK, carries=("07:08 CST",))
+# Passes: each dated form stamped at the clock's own minute, 1 minute ahead, and 1 minute behind. A dated stamp is
+# refused only when more than 1 minute ahead, so 1 minute ahead passes.
+mtc_allow("a bracket dated header at the clock's own minute, 07:08 CST at 07:08 on 2026-11-13, is allowed",
+          "[coordinator 2026-11-13 07:08 CST] x", clock=MTC_DATED_CLOCK)
+mtc_allow("a bracket dated header 1 minute ahead is allowed: 07:09 CST at 07:08 on 2026-11-13",
+          "[coordinator 2026-11-13 07:09 CST] x", clock=MTC_DATED_CLOCK)
+mtc_allow("a bracket dated header 1 minute behind is allowed: 07:07 CST at 07:08 on 2026-11-13",
+          "[coordinator 2026-11-13 07:07 CST] x", clock=MTC_DATED_CLOCK)
+mtc_allow("a paren dated header at the clock's own minute, 07:08 CST at 07:08 on 2026-11-13, is allowed",
+          "(coordinator 2026-11-13 07:08 CST) x", clock=MTC_DATED_CLOCK)
+mtc_allow("a paren dated header 1 minute ahead is allowed: 07:09 CST at 07:08 on 2026-11-13",
+          "(coordinator 2026-11-13 07:09 CST) x", clock=MTC_DATED_CLOCK)
+mtc_allow("a paren dated header 1 minute behind is allowed: 07:07 CST at 07:08 on 2026-11-13",
+          "(coordinator 2026-11-13 07:07 CST) x", clock=MTC_DATED_CLOCK)
+mtc_allow("a dash dated header at the clock's own minute, 07:08 CST at 07:08 on 2026-11-13, is allowed",
+          "[coordinator - 2026-11-13 07:08 CST] x", clock=MTC_DATED_CLOCK)
+mtc_allow("a dash dated header 1 minute ahead is allowed: 07:09 CST at 07:08 on 2026-11-13",
+          "[coordinator - 2026-11-13 07:09 CST] x", clock=MTC_DATED_CLOCK)
+mtc_allow("a dash dated header 1 minute behind is allowed: 07:07 CST at 07:08 on 2026-11-13",
+          "[coordinator - 2026-11-13 07:07 CST] x", clock=MTC_DATED_CLOCK)
+mtc_allow("a bracket dated header at the clock's own minute, 12:43 CST at 12:43 on 2026-11-13, is allowed",
+          "[coordinator 2026-11-13 12:43 CST] x", clock=MTC_DATED_NOON_CLOCK)
+mtc_allow("a bracket dated header 1 minute ahead is allowed: 12:44 CST at 12:43 on 2026-11-13",
+          "[coordinator 2026-11-13 12:44 CST] x", clock=MTC_DATED_NOON_CLOCK)
+mtc_allow("a bracket dated header 1 minute behind is allowed: 12:42 CST at 12:43 on 2026-11-13",
+          "[coordinator 2026-11-13 12:42 CST] x", clock=MTC_DATED_NOON_CLOCK)
 
 
 # ---- the written values: ArtifactData `added`, a roadmap step's `updatedAt`, a literal `updatedAt` in Bash
