@@ -56,9 +56,9 @@ An item with `waits` keeps its one line. The word is
 malformed `waits`; also an item past the WAIT_CAP-th call, which is not asked). The exit code stays the page verdict's.
 --answers, with --items, names the answers the session saved with `ArtifactData list answers`, in the same two shapes, read by the same
 loader (a list entry names its item in `item`, or is {"id", "data"}; a folder doc by its file name). After the wait and lane lines, one line per closed item,
-in item order, whose answer is still kept: `kept-answer: item <n> (<id>) is closed and answers/<id> is kept`, then the remedy (delete
-the answer, or reopen the item with `lane` and `lastAnswer`). A closed item with `waits` prints `kept-answer: item <n> (<id>) is closed with waits and
-answers/<id> is kept`, then the remedy: when its wait has ended, drop `waits` and delete the answer; no gh call. Never named: an open item or one with no status,
+in item order, whose answer is still kept: `kept-answer: item <n> (<id>) is closed and answers/<id> is kept`, then the remedy (the close keeps the
+answer on purpose; never delete it unless the item is reworded). A closed item with `waits` prints `kept-answer: item <n> (<id>) is closed
+with waits and answers/<id> is kept`, then the remedy: when its wait has ended, drop `waits` and keep the answer; no gh call. Never named: an open item or one with no status,
 an item with `arbiter` true, a park answer (`park.<id>`, `parked: true` or `act: "park"`), an answer with no item. An unreadable file, a folder without the marker,
 unreadable items, an items folder without the marker, or --answers without --items print one `kept-answer: unknown (...)` line, with no other kept-answer line.
 The folder loader is export_page.docs_in, the one home of reading that folder.
@@ -549,9 +549,9 @@ def wait_lines(items, complete=True):
 
 
 def kept_answer_lines(items, answers, complete=True, answers_complete=True):
-    """One line per closed item, in item order, whose answer is still kept: the writer re-reads answers/<id>, then deletes it or reopens the item
+    """One line per closed item, in item order, whose answer is still kept: the close keeps answers/<id> on purpose, and the writer deletes it only when it rewords the item
     (SKILL.md, "Route and close"). `items` and `answers` are (doc id, data) pairs from load_docs. A closed item with `waits` and a kept answer (a chat
-    answer can close an item during a wait) gets its own line, "is closed with waits", whose remedy waits for the wait to end; no gh call. Never an open
+    answer can close an item during a wait) gets its own line, "is closed with waits", whose remedy waits for the wait to end and then drops `waits`, never the answer; no gh call. Never an open
     item, an arbiter ruling (its overturn answer is read by its own route), a park answer or an answer with no item.
     With `complete` or `answers_complete` False (that folder may be cut short), one unknown line naming it."""
     if not (complete and answers_complete):
@@ -573,11 +573,11 @@ def kept_answer_lines(items, answers, complete=True, answers_complete=True):
         if item.get("status") != "closed" or item.get("arbiter") is True or item_id not in kept:
             continue
         if "waits" in item:
-            lines.append('kept-answer: item %s (%s) is closed with waits and answers/%s is kept; when its wait has ended, drop waits and delete '
-                         'answers/%s (SKILL.md, "Route and close")' % (item.get("n", item_id), item_id, item_id, item_id))
+            lines.append('kept-answer: item %s (%s) is closed with waits and answers/%s is kept; when its wait has ended, drop waits and keep '
+                         'the answer (SKILL.md, "Route and close")' % (item.get("n", item_id), item_id, item_id))
         else:
-            lines.append('kept-answer: item %s (%s) is closed and answers/%s is kept; re-read answers/%s, then delete it, or reopen the item with '
-                         'lane and lastAnswer (SKILL.md, "Route and close")' % (item.get("n", item_id), item_id, item_id, item_id))
+            lines.append('kept-answer: item %s (%s) is closed and answers/%s is kept; the close keeps it on purpose, so never delete it '
+                         'unless the item is reworded (SKILL.md, "Route and close")' % (item.get("n", item_id), item_id, item_id))
     return lines
 
 
