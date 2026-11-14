@@ -7,7 +7,8 @@ success and its `scope` and `all-jobs-passed` jobs did too. Every other case pri
 Each case serves canned REST JSON through a stub `gh` on PATH, so no case reaches GitHub. Inputs (env): REPO, PR, HEAD_SHA,
 GH_TOKEN. CI_GREEN_HEAD overrides the script path. The stub answers `gh api` by its arguments: a path with
 `/actions/runs/<id>/jobs` gets that run's job list, and any other `gh api` call gets the run list. It honours `--jq FILTER`
-through jq, so the reader may parse the JSON either way.
+through jq, so the reader may parse the JSON either way. It logs each call's arguments, so a case can check the URL the reader
+asks for: read(calls=[]) fills the list with the log's lines.
 
 Each negative case first checks that the green fixture prints its sha, so an empty line means the case's own cause.
 
@@ -20,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -41,6 +43,7 @@ RUN_DIR = None
 STUB = r"""#!/bin/sh
 # Stub gh for lint/test_green_head.py. Answers `gh api` from the canned files in $GH_STUB_DIR. Never reaches GitHub.
 d="$GH_STUB_DIR"
+printf '%s\n' "$*" >> "$d/calls.log"
 if [ -e "$d/fail" ]; then echo "gh: HTTP 500 (stub)" >&2; exit 1; fi
 filter=""
 prev=""
@@ -84,8 +87,8 @@ def green_fixture():
             "job_lists": {2: jobs()}}
 
 
-def read(runs=None, job_lists=None, fail=False, raw=None):
-    """Run the reader with the stub gh first on PATH. -> the CompletedProcess."""
+def read(runs=None, job_lists=None, fail=False, raw=None, calls=None):
+    """Run the reader with the stub gh first on PATH. `calls`, a list, is filled with the stub's call log. -> the CompletedProcess."""
     case = tempfile.mkdtemp(dir=RUN_DIR)
     bin_dir = os.path.join(case, "bin")
     os.makedirs(bin_dir)
@@ -102,8 +105,17 @@ def read(runs=None, job_lists=None, fail=False, raw=None):
         open(os.path.join(case, "fail"), "w").close()
     env = dict(os.environ, PATH=os.pathsep.join([bin_dir, os.environ.get("PATH", "")]), GH_STUB_DIR=case,
                REPO=REPO, PR=PR, HEAD_SHA=HEAD_SHA, GH_TOKEN="stub-token")
-    return subprocess.run([BASH, os.path.abspath(SCRIPT)], cwd=case, env=env, capture_output=True, text=True,
+    proc = subprocess.run([BASH, os.path.abspath(SCRIPT)], cwd=case, env=env, capture_output=True, text=True,
                           timeout=120)
+    if calls is not None and os.path.exists(os.path.join(case, "calls.log")):
+        with open(os.path.join(case, "calls.log"), encoding="utf-8") as f:
+            calls.extend(f.read().splitlines())
+    return proc
+
+
+def api_paths(calls):
+    """-> the path of each `gh api` call in a call log, in order. The path is the argument that starts with `repos/`."""
+    return [t for c in calls for t in c.split() if t.startswith("repos/")]
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
@@ -179,6 +191,21 @@ class GreenHead(unittest.TestCase):
               "job_lists": {2: jobs()}}
         self.assert_prints(read(**fx), [""],
                            "the only earlier green run lists no pull requests, so it is not this pull request's run")
+
+    # The reader reads the `scope` and `all-jobs-passed` jobs of the run, which exist only in checks.yml. So the runs read
+    # must name that workflow and ask for pull request runs, or it may read the run of another workflow.
+    def test_the_runs_read_names_the_checks_workflow_and_the_pull_request_event(self):
+        calls = []
+        self.assert_prints(read(calls=calls, **green_fixture()), [GREEN_SHA],
+                           "control: the green fixture does not print its sha")
+        runs = [p for p in api_paths(calls) if "/jobs" not in p]
+        self.assertTrue(runs, f"the reader makes no runs read: {calls}")
+        for path in runs:
+            url = urllib.parse.urlsplit(path)
+            self.assertTrue(url.path.endswith("/actions/workflows/checks.yml/runs"),
+                            f"the runs read does not name the checks.yml workflow: {path}")
+            self.assertEqual(urllib.parse.parse_qs(url.query).get("event"), ["pull_request"],
+                             f"the runs read does not ask for event=pull_request: {path}")
 
 
 if __name__ == "__main__":
