@@ -2680,8 +2680,9 @@ class LaneLintRepoDir(tm.RepoDirRuns, LaneFixture):
 class DraftRun(LaneFixture):
     """`merge --lane-lint <pr>` reads the draft's touched-tests run at the lane's live head (decision lanes-run-no-full-ci-job; workflow
     lane-touched-tests.yml). A failed `run (windows-latest)` or `run (macos-latest)` row refuses the lane and names its link. A row not yet
-    finished, or no touched row on the head, is unknown: refused, and lifted only by --lint-unknown-ok. A run on an older head is never read
-    for the live one. A ref or commit target reads nothing. Each case scripts the rows of each head in self.host.draft_rows (FakeHost's
+    finished, or no touched row on the head, is unknown: refused, and lifted only by --lint-unknown-ok. A skipped touched row, as a ready PR's
+    run leaves, never hides a draft run that ran on the head: a draft's pass stands, and a draft's failure refuses. A run on an older head is
+    never read for the live one. A ref or commit target reads nothing. Each case scripts the rows of each head in self.host.draft_rows (FakeHost's
     default is a pass, so the other cases keep their lane). The cases read the scripted rows through the real Host judge (tm.DraftRunReads)."""
 
     def run_case(self, rows, *argv):
@@ -2833,6 +2834,45 @@ class DraftRun(LaneFixture):
         rc, out = self.run_case(rows, "--lane-lint", "7", "--lint-unknown-ok", "the skipped touched job is accepted")
         self.assertEqual(rc, 0, "a reason did not lift a skipped touched job (exit %s):\n%s" % (rc, out))
         self.assertIn("the skipped touched job is accepted", out, "the reason that lifted a skipped touched job is not logged:\n" + out)
+
+    def test_a_ready_pr_whose_draft_touched_run_passed_and_a_newer_skipped_one_reaches_the_ci_job(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.head("feat")
+        self.host.draft = False  # the ready PR: its draft flag is clear
+        passed, skipped = tm.draft_row("touched", job=1), tm.draft_row("touched", "skipped", job=5)
+        self.assertLess(passed["id"], skipped["id"], "precondition: the skipped row is not the newer one, so the case probes nothing")
+        rc, out = self.run_case({head: [passed, skipped]}, "--lane-lint", "7")
+        self.assertEqual(tm.check_run_reads(self.host.draft_reads), [head], "the lint did not read the ready PR's head once:\n" + out)
+        self.assertEqual(rc, 0, "a ready PR whose draft touched run passed was refused by its newer skipped touched row (exit %s):\n%s" % (rc, out))
+        self.assertEqual(len(self.lint_calls()), 1, "the lint did not reach the ci-job step once:\n" + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_draft_touched_failure_and_a_newer_skipped_touched_row_refuse_with_fails_even_with_a_reason(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.head("feat")
+        failed, skipped = tm.draft_row("touched", "failure", job=1), tm.draft_row("touched", "skipped", job=5)
+        self.assertLess(failed["id"], skipped["id"], "precondition: the skipped row is not the newer one, so the case probes nothing")
+        rc, out = self.run_case({head: [failed, skipped]}, "--lane-lint", "7", "--lint-unknown-ok", "the touched job was skipped on the ready run")
+        self.assertEqual(rc, 1, "a ready run's skipped touched row lifted a draft's failed touched run (exit %s):\n%s" % (rc, out))
+        self.assertIn("FAILs:", out, "the refusal of a failed touched run does not read as a FAIL:\n%s" % out)
+        self.assertIn(tm.job_link(tm.DRAFT_RUN, 1), out, "the refusal does not name the failed touched run's link:\n%s" % out)
+        self.assertEqual(self.lint_calls(), [], "the lint ran past a failed touched run:\n%s" % out)
+
+    def test_a_never_drafted_ready_pr_whose_draft_jobs_are_all_skipped_is_unknown_and_is_lifted_only_by_a_reason(self):  # control: green on the old code
+        self.use_ci_job(PASSING, 0)
+        head = self.head("feat")
+        self.host.draft = False  # the ready PR: its draft flag is clear
+        rows = {head: [tm.draft_row("touched", "skipped", job=1), tm.draft_row("run (windows-latest)", "skipped", job=2),
+                       tm.draft_row("run (macos-latest)", "skipped", job=3)]}
+        rc, out = self.run_case(rows, "--lane-lint", "7")
+        self.assertEqual(tm.check_run_reads(self.host.draft_reads), [head], "the lint did not read the ready PR's head once:\n" + out)
+        self.assertEqual(rc, 1, "a never-drafted ready PR with every draft job skipped passed the lint with no proof a touched test ran (exit %s):\n%s" % (rc, out))
+        self.assertNotIn("FAILs:", out, "a skipped draft job was read as a failed lint:\n" + out)
+        self.assertIn("--lint-unknown-ok", out, "the refusal of a never-drafted ready PR cannot be lifted by name:\n" + out)
+        self.assertEqual(self.lint_calls(), [], "the lint ran past a never-drafted ready PR:\n" + out)
+        rc, out = self.run_case(rows, "--lane-lint", "7", "--lint-unknown-ok", "the draft jobs are skipped on a ready PR")
+        self.assertEqual(rc, 0, "a reason did not lift a never-drafted ready PR (exit %s):\n%s" % (rc, out))
+        self.assertEqual(len(self.lint_calls()), 1, "the lint did not run once after the never-drafted ready PR was lifted:\n" + out)
 
     def test_a_batch_integration_pr_reads_no_draft_run_and_its_queued_or_missing_touched_row_does_not_refuse_it(self):
         self.use_ci_job(PASSING, 0)

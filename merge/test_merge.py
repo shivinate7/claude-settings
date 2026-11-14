@@ -18210,9 +18210,10 @@ def unit_failed_line(name):
 
 class DraftRunJudge(unittest.TestCase):
     """merge.Host.draft_run_state judges one head's draft rows (decision lanes-run-no-full-ci-job; workflow lane-touched-tests.yml). A touched job
-    that was skipped, as a ready pull request's is, proves no touched test ran, so the verdict is unknown. Rows that share a name are one job's
-    runs, and the newest id decides, whatever order the rows come in. Each case scripts its rows and reads them through DraftRunReads, which runs
-    the real judge."""
+    that was skipped, as a ready pull request's is, proves no touched test ran, so the verdict is unknown when no other touched row is on the head.
+    A skipped row never replaces a row of its name that ran: a draft's pass stands, and a draft's failure stays red. Rows that share a name are one
+    job's runs. Of the rows that ran, the newest id decides, whatever order the rows come in. Each case scripts its rows and reads them through
+    DraftRunReads, which runs the real judge."""
 
     SHA = "c" * 40
 
@@ -18243,6 +18244,89 @@ class DraftRunJudge(unittest.TestCase):
                 state, lines = self.judge(rows)
                 self.assertEqual(state, "fail", "a re-run that failed after a passed run was judged %r, not fail: %s" % (state, lines))
                 self.assertIn(job_link(DRAFT_RUN, 5), "\n".join(lines), "the failure does not name the newer run's link: %s" % lines)
+
+    def test_a_skipped_touched_row_newer_than_a_passed_one_is_not_read_over_it(self):
+        passed, skipped = draft_row("touched", job=1), draft_row("touched", "skipped", job=5)
+        self.assertLess(passed["id"], skipped["id"], "precondition: the skipped row is not the newer one, so the case probes nothing")
+        for rows in ([passed, skipped], [skipped, passed]):
+            with self.subTest(order=[r["id"] for r in rows]):
+                state, lines = self.judge(rows)
+                self.assertEqual(state, "pass", "a ready run's skipped touched row replaced the draft's passed touched run, judged %r: %s" % (state, lines))
+
+    def test_a_skipped_touched_row_newer_than_a_failed_one_does_not_clear_the_failure(self):
+        failed, skipped = draft_row("touched", "failure", job=1), draft_row("touched", "skipped", job=5)
+        self.assertLess(failed["id"], skipped["id"], "precondition: the skipped row is not the newer one, so the case probes nothing")
+        for rows in ([failed, skipped], [skipped, failed]):
+            with self.subTest(order=[r["id"] for r in rows]):
+                state, lines = self.judge(rows)
+                self.assertEqual(state, "fail", "a ready run's skipped touched row cleared the draft's failed touched run, judged %r: %s" % (state, lines))
+                self.assertIn(job_link(DRAFT_RUN, 1), "\n".join(lines), "the failure does not name the draft's touched link: %s" % lines)
+
+    def test_a_skipped_test_job_row_newer_than_a_failed_run_does_not_clear_the_failure(self):
+        for name in ("run (windows-latest)", "run (macos-latest)"):
+            failed, skipped = draft_row(name, "failure", job=2), draft_row(name, "skipped", job=5)
+            self.assertLess(failed["id"], skipped["id"], "precondition: the skipped row is not the newer one, so the case probes nothing")
+            for rows in ([draft_row("touched"), failed, skipped], [draft_row("touched"), skipped, failed]):
+                with self.subTest(job=name, order=[r["id"] for r in rows]):
+                    state, lines = self.judge(rows)
+                    self.assertEqual(state, "fail", "a skipped %s row cleared its failed run, judged %r: %s" % (name, state, lines))
+                    self.assertIn(job_link(DRAFT_RUN, 2), "\n".join(lines), "the failure of %s does not name its link: %s" % (name, lines))
+
+    def test_a_ready_run_with_its_skipped_rows_newer_than_a_draft_that_passed_is_a_pass(self):
+        draft = [draft_row("touched", job=1), draft_row("run (windows-latest)", job=2), draft_row("run (macos-latest)", job=3)]
+        ready = [draft_row("touched", "skipped", job=4), draft_row("run (windows-latest)", "skipped", job=5), draft_row("run (macos-latest)", "skipped", job=6)]
+        self.assertLess(max(r["id"] for r in draft), min(r["id"] for r in ready), "precondition: the skipped rows are not the newer ones, so the case probes nothing")
+        for rows in (draft + ready, ready + draft):
+            with self.subTest(order=[r["id"] for r in rows]):
+                state, lines = self.judge(rows)
+                self.assertEqual(state, "pass", "a draft that passed, then a ready run's skipped rows, judged %r: %s" % (state, lines))
+
+    def test_a_skipped_touched_row_older_than_a_passed_one_passes_in_either_order(self):  # control: green on the old code
+        skipped, passed = draft_row("touched", "skipped", job=1), draft_row("touched", job=5)
+        self.assertLess(skipped["id"], passed["id"], "precondition: the passed row is not the newer one, so the case probes nothing")
+        for rows in ([skipped, passed], [passed, skipped]):
+            with self.subTest(order=[r["id"] for r in rows]):
+                state, lines = self.judge(rows)
+                self.assertEqual(state, "pass", "a passed touched run with an older skipped row was judged %r: %s" % (state, lines))
+
+    def test_two_skipped_touched_rows_with_no_draft_run_are_still_unknown_in_either_order(self):  # control: green on the old code
+        first, second = draft_row("touched", "skipped", job=1), draft_row("touched", "skipped", job=5)
+        self.assertLess(first["id"], second["id"], "precondition: the rows do not differ by id, so the case probes nothing")
+        for rows in ([first, second], [second, first]):
+            with self.subTest(order=[r["id"] for r in rows]):
+                state, lines = self.judge(rows)
+                self.assertEqual(state, "unknown", "two skipped touched rows with no draft run were judged %r, not unknown: %s" % (state, lines))
+
+    def test_of_the_touched_runs_that_ran_the_newest_decides_in_either_order(self):  # control: green on the old code
+        failed, passed = draft_row("touched", "failure", job=1), draft_row("touched", job=5)
+        self.assertLess(failed["id"], passed["id"], "precondition: the passed row is not the newer one, so the case probes nothing")
+        for rows in ([failed, passed], [passed, failed]):
+            with self.subTest(order=[r["id"] for r in rows], newest="passed"):
+                state, lines = self.judge(rows)
+                self.assertEqual(state, "pass", "a failed touched run older than a passed one was judged %r: %s" % (state, lines))
+        passed_old, failed_new = draft_row("touched", job=1), draft_row("touched", "failure", job=5)
+        self.assertLess(passed_old["id"], failed_new["id"], "precondition: the failed row is not the newer one, so the case probes nothing")
+        for rows in ([passed_old, failed_new], [failed_new, passed_old]):
+            with self.subTest(order=[r["id"] for r in rows], newest="failed"):
+                state, lines = self.judge(rows)
+                self.assertEqual(state, "fail", "a passed touched run older than a failed one was judged %r: %s" % (state, lines))
+
+    def test_a_skipped_touched_row_newer_than_an_unfinished_one_is_not_a_pass(self):
+        # The spec says a completed row, so an unfinished row under a skip is not pinned to wait or unknown: the case pins only that no pass is read.
+        unfinished, skipped = draft_row("touched", status="in_progress", job=1), draft_row("touched", "skipped", job=5)
+        self.assertLess(unfinished["id"], skipped["id"], "precondition: the skipped row is not the newer one, so the case probes nothing")
+        for rows in ([unfinished, skipped], [skipped, unfinished]):
+            with self.subTest(order=[r["id"] for r in rows]):
+                state, lines = self.judge(rows)
+                self.assertNotEqual(state, "pass", "an unfinished touched run under a newer skipped row was judged a pass: %s" % lines)
+
+    def test_an_unfinished_touched_row_newer_than_a_passed_one_waits_in_either_order(self):  # control: green on the old code
+        passed, unfinished = draft_row("touched", job=1), draft_row("touched", status="in_progress", job=5)
+        self.assertLess(passed["id"], unfinished["id"], "precondition: the unfinished row is not the newer one, so the case probes nothing")
+        for rows in ([passed, unfinished], [unfinished, passed]):
+            with self.subTest(order=[r["id"] for r in rows]):
+                state, lines = self.judge(rows)
+                self.assertEqual(state, "wait", "an unfinished touched run newer than a passed one was judged %r, not wait: %s" % (state, lines))
 
 
 class TouchesHost(PullsHost):
