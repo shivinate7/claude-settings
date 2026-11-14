@@ -2118,7 +2118,7 @@
 
 ## Watcher cost and test-proxy notes
 
-- stall-cost-proxies: `CostTests` in hooks/test_stall_watch.py counts `job_state` reads, not `ps` starts, and checks the `--watch-pid` text, not watcher starts (test_one_watcher_is_started_in_the_foreground_per_background_call). The class has no case for the per-log stat or the per-beat append. Decision: stall-watch.
+- stall-cost-proxies: `CostTests` in hooks/test_stall_watch.py counts `job_state` reads, not `ps` starts, and checks the `--watch-pid` text, not watcher starts (test_the_rewritten_command_carries_one_watch_pid_flag_per_background_call). The class has no case for the per-log stat or the per-beat append. Decision: stall-watch.
 - ci-wake-gh-proxy: each status read starts one `gh` child (hooks/ci_wake.py `gh`), and that count is unpinned. `CostTests` in hooks/test_ci_wake.py stubs `gh`, so it counts `gh` calls, not `gh` starts. Decision: ci-wait-reads-run-status.
 - janitor-log-dir-cost: install_launchd.py creates a log folder in the config folder. The install cost line names only the job file, and the test counts the folder only as a leftover. Decision: the-janitor-is-one-machine-wide-sweep.
 - load-brake-cost-unpinned: the load brake's record names family `load-brake` in hooks/test_guard.py for its read counts. This lane did not confirm that the family pins them. Decision: machine-load-brake.
