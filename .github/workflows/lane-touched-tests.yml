@@ -30,9 +30,13 @@ jobs:
     if: ${{ github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # actions: read lets the skip step list the checks runs.
+    permissions:
+      contents: read
+      actions: read
     outputs:
-      any: ${{ steps.select.outputs.any }}
-      matrix: ${{ steps.select.outputs.matrix }}
+      any: ${{ steps.skip.outputs.any }}
+      matrix: ${{ steps.skip.outputs.matrix }}
       commands_windows: ${{ steps.select.outputs.commands_windows }}
       commands_macos: ${{ steps.select.outputs.commands_macos }}
     steps:
@@ -94,6 +98,17 @@ jobs:
               exit 0 ;;
           esac
           python .github/scripts/touched-tests.py
+
+      # R58 point 3: the macOS job skips while a batch's checks run is queued or in progress (decision no-merge-during-batch-ci).
+      - name: Skip the macOS job while an integration PR run is going
+        id: skip
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          MATRIX: ${{ steps.select.outputs.matrix }}
+          ANY: ${{ steps.select.outputs.any }}
+        run: python .github/scripts/batch-macos-skip.py
 
   run:
     name: run (${{ matrix.os }})

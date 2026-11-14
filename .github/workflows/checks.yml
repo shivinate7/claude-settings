@@ -127,6 +127,7 @@ jobs:
       sweep: ${{ steps.scope.outputs.sweep }}
       shoot: ${{ steps.scope.outputs.shoot }}
       mutation_report: ${{ steps.scope.outputs.mutation_report }}
+      mac_runner: ${{ steps.mac.outputs.mac_runner }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -141,6 +142,19 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_REF: ${{ github.head_ref }}
         run: bash .github/scripts/ci-scope.sh
+
+      # R58: an integration PR's CI run's macOS jobs go to the owner's Mac when it is online, else to macos-latest. The secret may be
+      # absent; the script then picks macos-latest.
+      - name: Pick the macOS runner
+        id: mac
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+          RUNNER_TOKEN: ${{ secrets.MAC_RUNNER_READ_TOKEN }}
+        run: python3 .github/scripts/mac-runner.py
 
   checks:
     runs-on: ubuntu-latest
@@ -1101,7 +1115,7 @@ jobs:
   # checkout-detection suite, the ios-ship suite, the sim-test suite and the duo-fold suite (bash 3.2 scripts for macOS) are the only checks
   # whose result depends on either. checks-macos below covers the rest of the suite, so this job stays narrow, on purpose.
   shell-macos:
-    runs-on: macos-latest
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON('["macos-latest"]') || fromJSON(needs.scope.outputs.mac_runner) }}
     needs: scope
     if: ${{ github.event_name != 'push' && (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') }}
     # A push to main starts no macOS runner, and a pull_request starts it only when its own flags are true: a step-level skip still starts a runner (R61).
@@ -1160,7 +1174,7 @@ jobs:
   # above -- a job that stops at its first red step proves nothing about the suites
   # behind it.
   checks-macos:
-    runs-on: macos-latest
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON('["macos-latest"]') || fromJSON(needs.scope.outputs.mac_runner) }}
     needs: scope
     if: ${{ github.event_name != 'push' && (needs.scope.outputs.checks_macos == 'true' || needs.scope.outputs.sweep == 'true' || github.event_name != 'pull_request') }}
     # A push to main starts no macOS runner, and a pull_request starts it only when its own flags are true: a step-level skip still starts a runner (R61).
@@ -1407,7 +1421,7 @@ jobs:
   # runs in checks-macos alone, so this job has no guard step, and the slow CI steps are shared out between the jobs. Same scope flag, same `if:`
   # on every CI step as checks-macos. The scope flag decides whether the job and its steps run, so a pull request with no macOS-scoped change starts no macOS runner.
   checks-macos-b:
-    runs-on: macos-latest
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON('["macos-latest"]') || fromJSON(needs.scope.outputs.mac_runner) }}
     needs: scope
     if: ${{ github.event_name != 'push' && (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') }}
     # A push to main starts no macOS runner, and a pull_request starts it only when its own flags are true: a step-level skip still starts a runner (R61).
