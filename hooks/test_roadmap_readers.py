@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cases for the readers of origin/roadmap that fetch a stale ref before they judge: hooks/sendmessage_state.py
 (the past-ruling check, read_rulings), hooks/override.py (the Opus step grant, take) and hooks/question_form.py
-(the roadmap steps, _read_steps). Standard library only.
+(the roadmap steps, _read_steps; the ruled store of each root, past_rulings). Standard library only.
 
     python3 hooks/test_roadmap_readers.py
 
@@ -103,6 +103,25 @@ class RulingsReadTests(unittest.TestCase):
         self.assertEqual(hit, (OLD_DECISION, RULING), "control: the local superseding ruling was not found: %r" % (hit,))
         self.assertIn("read as of", said.getvalue(), "the refusal's read said nothing about a fetch that failed: %r"
                       % said.getvalue())
+
+    def test_the_second_root_checks_its_own_roadmap_ref(self):
+        # past_rulings reads the ruled store of each root, in order. The first root has no store, so the read reaches
+        # the second root, and that root's own roadmap ref is freshness-checked.
+        first = fixture.init_repo(os.path.join(self.root, "second-root-first"))
+        second = fixture.clone_with_origin(self.root, "second-root-settings", None,
+                                           fixture.ruling_files({RULING: fixture.entry(RULING)}))
+        helper = fresh_helper(mock.Mock())
+        with mock.patch("guard_pointer.pointer_checkout", return_value=second), \
+                mock.patch.dict(sys.modules, {"roadmap_ref": helper}):
+            candidates, _unknown = question_form.past_rulings("Should we keep the store to one place?", first)
+        checked = [os.path.realpath(call.args[0]) for call in helper.fresh_ref.call_args_list]
+        self.assertIn(os.path.realpath(first), checked, "control: the first root's roadmap ref was not checked: %r"
+                      % (checked,))
+        self.assertTrue(any(c.startswith("ruled:%s:" % RULING) for c in candidates),
+                        "the second root's ruling is not a candidate, so the read did not reach that root: %r"
+                        % (candidates,))
+        self.assertIn(os.path.realpath(second), checked, "the second root's roadmap ref was not checked: %r"
+                      % (checked,))
 
 
 class StepGrantTests(unittest.TestCase):
