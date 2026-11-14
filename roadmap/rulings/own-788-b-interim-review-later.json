@@ -1,0 +1,10 @@
+{
+  "id": "own-788-b-interim-review-later",
+  "at": "2026-11-13T19:58:00-06:00",
+  "title": "PR 3231 check reads only a PR's own lane commits, as an interim pick the owner reviews later",
+  "ruling": "Owner 19:58 CST Nov 13, page item 788, \"none of these\": \"just pick a recommended easy option for now and we review again later\". Triage took option b (the check reads only the PR's own lane commits; a combined PR's member commits do not count). Interim: the owner reviews it again later and may pick another option. Option a (exempt combined PRs) widens a shared check and is not taken.",
+  "quote": "just pick a recommended easy option for now and we review again later",
+  "source": "Owner answer saved on the waiting page 19:58 CST Nov 13, thread c22fb4ec; triage took the pick; filed by triage.",
+  "status": "open",
+  "step": "one-owner-per-pr"
+}

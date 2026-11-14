@@ -1,0 +1,10 @@
+{
+  "id": "own-771-b-not-yet",
+  "at": "2026-11-13T19:58:00-06:00",
+  "title": "No ruleset on the stable branch yet",
+  "ruling": "Owner 19:58 CST Nov 13, page item 771, option b \"Not yet\": nobody runs protect.py on stable for now. The standing grant stays as written (main only).",
+  "quote": "Not yet",
+  "source": "Owner answer saved on the waiting page 19:58 CST Nov 13, thread c22fb4ec; filed by triage.",
+  "status": "open",
+  "step": "stable-ruleset-protect-test"
+}
