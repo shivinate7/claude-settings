@@ -1,7 +1,7 @@
 {
  "id": "dead-host-free-on-win-mac",
  "title": "The janitor sweep frees a dead host's agent worktree on Windows and Mac too, or the measured reason is recorded",
- "status": "todo",
+ "status": "folded",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "The sweep keeps a dead host's tree off Linux, so the owner's Windows and Mac keep stale trees; testing only on Linux hides it.",
  "source": "Consultant 18:37 CST Nov 13, relaying the owner at 18:31 CST (\"we still deem it fine by just testing on linux and avoid testing it on windows? thats a good idea for an outcome?\"); unchecked by triage.",
- "note": "Filed 18:33 CST Nov 13. Fact (consultant): janitor/sweep.py _ticks_lock_stale returns None off Linux, so a dead host's tree is kept. Wanted: measure on the owner's Windows and Mac which lock form a dead host leaves; build the platform read where the ticks form occurs, with tests on that platform's CI job; else record the measured reason. #3303 is the bandaid that turns main green meanwhile. Relation: sweep-mutants-windows-skip. Past rulings not checked. Needs a session on the owner's computers for the measure. Not started.",
- "updatedAt": "2026-11-13T18:33:58-06:00"
+ "note": "Filed 18:33 CST Nov 13. Fact (consultant): janitor/sweep.py _ticks_lock_stale returns None off Linux, so a dead host's tree is kept. Wanted: measure on the owner's Windows and Mac which lock form a dead host leaves; build the platform read where the ticks form occurs, with tests on that platform's CI job; else record the measured reason. #3303 is the bandaid that turns main green meanwhile. Relation: sweep-mutants-windows-skip. Past rulings not checked. Needs a session on the owner's computers for the measure. Not started. Folded 18:35 CST Nov 13 into dead-host-lock-form-off-linux (coordinator's id, lane session_013NEJL3bEqxFdEfAWbkzjvJ).",
+ "updatedAt": "2026-11-13T18:35:00-06:00"
 }

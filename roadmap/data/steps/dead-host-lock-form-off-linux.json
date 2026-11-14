@@ -1,0 +1,14 @@
+{
+ "id": "dead-host-lock-form-off-linux",
+ "title": "Measure the dead-host lock form on Windows and Mac, then build the platform read or record the measured reason",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL3bEqxFdEfAWbkzjvJ",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The janitor sweep keeps a dead host's tree off Linux; the owner uses Windows and Mac, and testing only on Linux hides it.",
+ "source": "Coordinator 18:33 CST Nov 13: lane started (session_013NEJL3bEqxFdEfAWbkzjvJ), relaying the owner at 18:31 via the consultant; unchecked by triage.",
+ "note": "Filed 18:35 CST Nov 13. Replaces dead-host-free-on-win-mac (folded; same question, the coordinator's id kept). Fact (consultant): janitor/sweep.py _ticks_lock_stale returns None off Linux, so a dead host's tree is kept. Wanted: measure which lock form a dead host leaves on Windows and Mac; build the platform read where the ticks form occurs with tests on that platform's CI job; else record the measured reason. Bandaid: #3303 turns main green. Relation: sweep-mutants-windows-skip.",
+ "updatedAt": "2026-11-13T18:35:00-06:00"
+}

@@ -1,0 +1,14 @@
+{
+ "id": "allow-merge-base-red-ok",
+ "title": "Merge main into PR #3097 (allow merge --base-red-ok), re-lint, and join a combine group",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJKzyVUbeFsmoQeuaUP2",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The PR was dropped after a red CI run at 06:52 CST and the red-main revert flow needs it.",
+ "source": "Coordinator 18:33 CST Nov 13: lane started (session_013NEJKzyVUbeFsmoQeuaUP2), owner via the consultant at 18:37; consultant said #3097 was dropped after a red run at 06:52 CST. Unchecked by triage.",
+ "note": "Filed 18:35 CST Nov 13. Lane session_013NEJKzyVUbeFsmoQeuaUP2 merges main into #3097, re-lints, and the coordinator puts it in a combine group. Done check: lane lint read and a green PR run that ran its suites. Past rulings not checked.",
+ "updatedAt": "2026-11-13T18:35:00-06:00"
+}
