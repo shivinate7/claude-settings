@@ -2,7 +2,7 @@
  "id": "own-812-a-judge-suite-runs",
  "at": "2026-11-13T23:40:00-06:00",
  "title": "The red-main check judges only runs that ran the tests",
- "ruling": "Owner, saved on the waiting page 23:38 CST Nov 13, item 812, pick a: the red-main check judges only runs that ran the tests; the cover signal for a skipped run is dropped. No extra full run on main when the judged run is old (that was option b). Ruling own-769 (the skip itself) stays. PR #3297 proceeds on this.",
+ "ruling": "Owner, saved on the waiting page 23:38 CST Nov 13, item 812, pick a: the red-main check judges only runs that ran the tests; the cover signal for a skipped run is dropped. No extra full run on main when the judged run is old (that was option b). Ruling own-769 (the skip itself) stays. PR #3297 proceeds on this. Premise flag (coordinator 00:08 CST Nov 14, relayed; triage did not re-run it): the number behind the question (302 push runs in 30 days, 2 skipped, 290 at 0 back) came from an Explore read with no recorded query or date; the lane reviewer read REST and found 179 completed push runs on main in retained history. The number is unmeasured. The pick stands. PR #3297 fails review round 3 (it counts a skipped push run's two bookkeeping successes as suites); lane gate-reads-suite-run replaces it.",
  "quote": "A: Judge only runs that ran the tests (recommended by the coordinator)",
  "source": "Owner page save 23:38 CST Nov 13 (05:38:01Z), read by triage in the answers store; filed by triage.",
  "status": "open",

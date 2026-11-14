@@ -1,0 +1,14 @@
+{
+ "id": "owner-question-measure-has-query",
+ "title": "A measured number in an owner question carries its query and date",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 00:08 CST Nov 14 (relayed; unchecked by triage): item 812 rested on \"302 push runs in 30 days, 2 skipped, 290 at 0 back\" from an Explore read whose query and date were not recorded. The lane reviewer read REST and found 179 completed push runs on main in retained history.",
+ "source": "Coordinator message 00:08 CST Nov 14 (relayed). Rule building-mistake-names-its-guard; ruling own-812-a-judge-suite-runs.",
+ "note": "Triage 00:10 CST Nov 14: a question to the owner that quotes a measured number (a count, a duration, a rate) records the query and the date beside the number, or says \"unmeasured\". The guard checks the question form on the page and in the box. A lane builds it; check first what hooks/question_form.py already reads. Not started.",
+ "updatedAt": "2026-11-14T00:10:30-06:00"
+}

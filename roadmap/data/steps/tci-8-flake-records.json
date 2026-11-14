@@ -2,8 +2,8 @@
   "title": "Each known flake has a record with a cause and a deadline",
   "phase": "now",
   "status": "ready",
-  "order": 103.3375008,
+  "order": 103.337492,
   "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 8 of 12, ranked by harm avoided.",
   "note": "Repos: banchi, home, mailaudit, joyous (joyous first makes its debt store). home waits on the owner's go. Ready for the rest. Port: yes. Doing, Nov 1 18:33 CST: child-repo parts sent to each repo's roll-out lane; home held. Scope (coordinator, 18:35 CST): banchi, home, mailaudit, joyous only; q_max and degen have no part. Back to todo Nov 2 13:10 CST: its lane wound down at the owner's 12:31 CST instruction; no live lane (roadmap build upkeep). The lane's branch and handoff carry its state. Held: the coordinator starts one CI-hygiene lane per child repo (home waits on the owner's go) (Nov 3 16:57 CST). Per-repo CI-hygiene lanes, started by the coordinator Nov 3 17:00 CST: mailaudit [ended:lane:-mailaudit-ci-hygiene]; banchi [ended:lane:-banchi-ci-hygiene]; joyous [ended:lane:-joyous-ci-hygiene]. home waits on the owner's go. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator 03:49 CST Nov 10: not started here; it goes to the several repos coordinator.",
-  "updatedAt": "2026-11-10T03:49:00-06:00"
+  "updatedAt": "2026-11-14T00:10:30-06:00"
 }

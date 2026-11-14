@@ -2,8 +2,8 @@
   "title": "The shared Playwright setup works on Ubuntu 26.04 in every repo",
   "phase": "now",
   "status": "ready",
-  "order": 103.3375001,
+  "order": 103.337493,
   "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 1 of 12, ranked by harm avoided.",
   "note": "Repo: degen first, then claude-settings if the shared action needs it. Done when degen main is green and each other repo (mailaudit included) has a green browser run, or a recorded check that its Playwright version supports Ubuntu 26.04. Related: playwright-cache-os-key landed in PR #977; callers still move their pins. Ready. Port: yes. Doing, Nov 1 18:33 CST: child-repo parts sent to each repo's roll-out lane; home held. Back to todo Nov 2 13:10 CST: its lane wound down at the owner's 12:31 CST instruction; no live lane (roadmap build upkeep). The lane's branch and handoff carry its state. Held: the coordinator starts one CI-hygiene lane per child repo (home waits on the owner's go) (Nov 3 16:57 CST). Per-repo CI-hygiene lanes, started by the coordinator Nov 3 17:00 CST: degen [ended:lane:-degen-ci-hygiene]. home waits on the owner's go. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator 03:49 CST Nov 10: not started here; it goes to the several repos coordinator.",
-  "updatedAt": "2026-11-10T03:49:00-06:00"
+  "updatedAt": "2026-11-14T00:10:30-06:00"
 }

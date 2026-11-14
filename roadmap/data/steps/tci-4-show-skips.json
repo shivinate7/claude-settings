@@ -2,8 +2,8 @@
   "title": "Skipped tests show as a count, so CI cannot look green while tests never run",
   "phase": "now",
   "status": "ready",
-  "order": 103.3375004,
+  "order": 103.337495,
   "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 4 of 12, ranked by harm avoided.",
   "note": "Nov 6 14:40 CST (triage audit): banchi and ios-adblock CI-hygiene lane sessions tagged cs-step:tci-4-show-skips (they had cs-step:tci-4).\nRepos: claude-settings (verdict prints SKIP), then ios-adblock and banchi CI steps print a skip count. Ready. Port: yes. Doing, Nov 1 18:31 CST: lane [ended:lane:-tci-4-show-skips]. Per-repo half, waiting (Nov 1 19:36 CST): ios-adblock .github/workflows/ci.yml step \"Test on iOS Simulator\" (xcodebuild test) prints the XCTest skip count (\"with N tests skipped\") through claude-settings verdict or a grep step; skips come from XCTSkip in ProblemSitesTests.swift and BlockerListTests.swift. The coordinator starts its lane once the claude-settings half, PR #1006, merges. Nov 3 17:10 CST: claude-settings half merged as PR #1006; lane session archived. The per-repo half (ios-adblock, banchi skip counts) is not started; it goes with the per-repo CI-hygiene lanes. Per-repo CI-hygiene lanes, started by the coordinator Nov 3 17:00 CST: banchi [ended:lane:-banchi-ci-hygiene]; ios-adblock [ended:lane:-ios-adblock-ci-hygiene]. home waits on the owner's go. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator 03:49 CST Nov 10: not started here; it goes to the several repos coordinator.",
-  "updatedAt": "2026-11-10T03:49:00-06:00"
+  "updatedAt": "2026-11-14T00:10:30-06:00"
 }
