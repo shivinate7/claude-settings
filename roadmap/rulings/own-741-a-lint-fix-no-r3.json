@@ -1,10 +1,10 @@
 {
- "id": "own-741-a-lint-fix-no-r3",
- "at": "2026-11-13T13:21:00-06:00",
- "title": "A lint-only fix after a round-1 PASS skips round 3",
- "ruling": "Owner 13:21 CST Nov 13, page item 741 a: if round 1 passed and the only later edits fix lint (no finding fixed), the change is done at the passing fix check, and `merge --reviewed` stops saying it owes the final round. He added: \"pretty sure all skip after the round that passes them? message retrospective\" (asks whether every change skips round 3 once a round passes it; sent to the retrospective).",
- "quote": "741 a (pretty sure all skip after the round that passes them? message retrospective)",
- "source": "Owner saved answers on the waiting page, comment thread 56da503a (sent 13:21 CST Nov 13). Filed by triage.",
- "status": "open",
- "step": "rounds-rules-one-record"
+  "id": "own-741-a-lint-fix-no-r3",
+  "at": "2026-11-13T13:21:00-06:00",
+  "title": "A lint-only fix after a round-1 PASS skips round 3",
+  "ruling": "Owner 13:21 CST Nov 13, page item 741 a: if round 1 passed and the only later edits fix lint (no finding fixed), the change is done at the passing fix check, and `merge --reviewed` stops saying it owes the final round. He added: \"pretty sure all skip after the round that passes them? message retrospective\" (asks whether every change skips round 3 once a round passes it; sent to the retrospective). Owner 18:35 CST Nov 13 (relayed by the consultant): \"that's correct\" to the consultant's R9 reading; a lint-only fix after a pass ends review at the fix verifier's pass. See r9.",
+  "quote": "741 a (pretty sure all skip after the round that passes them? message retrospective)",
+  "source": "Owner saved answers on the waiting page, comment thread 56da503a (sent 13:21 CST Nov 13). Filed by triage.",
+  "status": "open",
+  "step": "rounds-rules-one-record"
 }
