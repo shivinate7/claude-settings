@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Fails when text names an owner ruling that no record backs. Standard library only.
+"""Fails when text claims a ruling by the owner that no record backs. Standard library only.
 
     python3 lint/check_ruling_claims.py [--base REF] [--root DIR] [--rulings-dir DIR] [file ...]
     python3 lint/check_ruling_claims.py [--root DIR] [--rulings-dir DIR] --brief FILE [FILE ...]
 
-A session's own call has passed as an owner ruling. The mistake reached tests and code comments until a reviewer
+A session's own call has passed as a ruling by the owner. The mistake reached tests and code comments until a reviewer
 found no record. This check reads text, prose, comment or string alike, with no parser. A claim cannot hide
 in a string or after a lone quote.
 
-Time claims. The lead is `owner ruling`, `owner's ruling` or `ruled at`. A joiner may follow: `,` `(` `:` `at` `of`
+Time claims. The lead is `ruled at`, or `ruling` after `owner` or `owner's`. A joiner may follow: `,` `(` `:` `at` `of`
 or `on`. Then comes a time, `H:MM` or `H.MM`, with an optional zone. A date makes it a dated claim. The date is
 `YYYY-MM-DD` or `Mon D`, before the time or after it and its zone. A `T` or `at` may join a date to the time that
 follows. A month is a whole month word or its short form, never the head of a longer word. A house cite, the form
@@ -20,7 +20,7 @@ joined with its next line, within one file. A zone and a leading zero are ignore
 decision records and CLAUDE.md. A ruling entry's `at` that holds both also backs it. It is read alone, as one line.
 
 Id claims. An id is a kebab slug of two or more words. It is read in backticks after `ruling`, after `ruling:`,
-after `owner ruling`, or after a capital `Ruling` or `RULING` that starts a line. A lowercase `ruling` followed by a
+after the `owner` lead, or after a capital `Ruling` or `RULING` that starts a line. A lowercase `ruling` followed by a
 word is prose. The word `decision` starts no claim. A slug followed by `item <digits>` is a house cite, not an id. An
 id has a record when a decision file stem, a ruling entry's `id` or a CLAUDE.md rule marker (`<!-- rule:<id> -->`)
 equals it.
@@ -44,6 +44,8 @@ NAMED LIMITS.
 - A claim that wraps from an unchanged line into an added line is read only from the added lines.
 - CI runs base mode only. A brief is read only when a person or a caller passes it with --brief.
 - No guard reads a brief when a session spawns an agent.
+- A grant recorded only in .claude/CLAUDE.md is not read; only the root CLAUDE.md is. Its escape is
+  `no record: <reason>`.
 
 Cost: writes nothing. File mode starts no process when it finds no claim, or with --rulings-dir. With a claim, it
 reads the store with two git processes (ls-tree, cat-file --batch), or one when the store folder is absent. Base
