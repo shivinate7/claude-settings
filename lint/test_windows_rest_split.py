@@ -13,7 +13,7 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from test_windows_split import CHECKS, all_jobs, eval_if, step_if  # noqa: E402  the one home of the checks.yml reader
+from test_windows_split import CHECKS, GATED_JOBS, all_jobs, eval_if, gate_problem  # noqa: E402  the one home of the checks.yml reader
 from all_jobs_passed_rules import needs_of  # noqa: E402  the one home of the needs reader
 from workflow_steps import job_block  # noqa: E402  the one home of the job parser
 
@@ -24,22 +24,13 @@ PROVISIONAL_CAP = 60
 # The Windows full shards that must stay in checks.yml. The held-shard case fails if one is dropped, which would leave its untagged cases unrun.
 HELD_SHARDS = ("checks-windows-guard-2", "checks-windows-guard-3", "checks-windows-merge-2", "checks-windows-merge-3",
                "checks-windows-merge-4", "checks-windows-merge-5")
-# The records-only skip turns off the test steps of these jobs: a records-only push after a green head already proved them.
-GATE = "needs.scope.outputs.records_only_skip != 'true'"
-GATED_JOBS = ("checks-hooks", "checks-windows-guard", "checks-windows-merge", "checks-windows-rest", "checks-windows-rest-2") + HELD_SHARDS
 SKIP_EVENTS = ("push", "pull_request", "schedule", "workflow_dispatch")
 
 
-def status_today(job):
-    """The status check a gated job's steps run under today. checks-hooks' steps have no if:, so GitHub reads success() for
-    them. Every other gated step names !cancelled()."""
-    return "success()" if job == "checks-hooks" else "!cancelled()"
-
-
-def gated_if(expr, value, event, flag, draft=False):
-    """eval_if of a step's if: with records_only_skip set to `value` and every other scope output set to `flag`. None is no
+def gated_if(raw, value, event, flag, draft=False):
+    """eval_if of a step's raw if: with records_only_skip set to `value` and every other scope output set to `flag`. None is no
     if:, which GitHub reads as success(). eval_if sets every scope output to one value, so records_only_skip is pinned first."""
-    pinned = (expr if expr is not None else "success()").replace("needs.scope.outputs.records_only_skip", repr(value))
+    pinned = (raw if raw is not None else "success()").replace("needs.scope.outputs.records_only_skip", repr(value))
     return eval_if(pinned, event, flag, draft=draft)
 
 
@@ -93,8 +84,8 @@ class WindowsRestSplit(unittest.TestCase):
 
 
 class RecordsOnlySkipGate(unittest.TestCase):
-    """The records-only skip reaches the test steps of GATED_JOBS. The scope job declares the output. Each run step carries the
-    gate, is off when the gate is shut, runs as today when it is open, and keeps its status check."""
+    """The records-only skip reaches the test steps of GATED_JOBS. The scope job declares the output. Each run step ends in the
+    gate, is off when the gate is shut, and runs as today when it is open."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
@@ -116,13 +107,14 @@ class RecordsOnlySkipGate(unittest.TestCase):
         self.assertIn("steps.scope.outputs.records_only_skip", m.group(1),
                       f"the scope job's records_only_skip output reads {m.group(1)!r}, not steps.scope.outputs.records_only_skip")
 
-    def test_each_gated_run_step_carries_the_gate(self):
+    def test_each_gated_run_step_ends_in_the_gate(self):
         for name in GATED_JOBS:
             with self.subTest(job=name):
                 for st in self.run_steps(name):
                     label = st.get("name") or st["run"]
                     with self.subTest(job=name, step=label):
-                        self.assertIn(GATE, step_if(st) or "", f"{name} / {label}: the if: lacks {GATE}; it reads {step_if(st)!r}")
+                        problem = gate_problem(name, st)
+                        self.assertIsNone(problem, problem)
 
     def test_the_gate_turns_each_gated_run_step_off_on_every_event(self):
         for name in GATED_JOBS:
@@ -131,7 +123,7 @@ class RecordsOnlySkipGate(unittest.TestCase):
                     label = st.get("name") or st["run"]
                     with self.subTest(job=name, step=label):
                         runs_on = [f"{ev} flags={fl} draft={dr}" for ev in SKIP_EVENTS for fl in ("true", "false") for dr in (False, True)
-                                   if gated_if(step_if(st), "true", ev, fl, draft=dr)]
+                                   if gated_if(st.get("if"), "true", ev, fl, draft=dr)]
                         self.assertEqual(runs_on, [], f"{name} / {label} still runs with records_only_skip true: {runs_on}")
 
     # The control: with the gate open, each step runs as it does today on a ready pull request, a push, a schedule and a dispatch.
@@ -142,19 +134,8 @@ class RecordsOnlySkipGate(unittest.TestCase):
                     label = st.get("name") or st["run"]
                     with self.subTest(job=name, step=label):
                         skipped = [ev for ev in ("push", "schedule", "workflow_dispatch", "pull_request")
-                                   if not gated_if(step_if(st), "false", ev, "true")]
+                                   if not gated_if(st.get("if"), "false", ev, "true")]
                         self.assertEqual(skipped, [], f"{name} / {label} does not run with the gate open on: {skipped}")
-
-    def test_each_gated_run_step_keeps_the_status_check_it_runs_under_today(self):
-        for name in GATED_JOBS:
-            with self.subTest(job=name):
-                for st in self.run_steps(name):
-                    label = st.get("name") or st["run"]
-                    with self.subTest(job=name, step=label):
-                        status = status_today(name)
-                        self.assertIn(status, step_if(st) or "",
-                                      f"{name} / {label}: the if: lacks {status}, which the step runs under today; it reads {step_if(st)!r}")
-
 
 if __name__ == "__main__":
     unittest.main()

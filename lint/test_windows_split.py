@@ -464,9 +464,49 @@ def unwrap(raw):
     return s[3:-2].strip() if s.startswith("${{") and s.endswith("}}") else s
 
 
+# The records-only skip (ci-scope.sh's records_only_skip output, read as needs.scope.outputs.records_only_skip) turns off the
+# test steps of these jobs. Each run step ends in the gate: `(E) && GATE`, or `success() && GATE` when it has no if:.
+GATE = "needs.scope.outputs.records_only_skip != 'true'"
+GATED_JOBS = ("checks-hooks", "checks-rest", "checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3",
+              "checks-windows-merge", "checks-windows-merge-2", "checks-windows-merge-3", "checks-windows-merge-4",
+              "checks-windows-merge-5", "checks-windows-rest", "checks-windows-rest-2")
+
+
+def ungate(expr):
+    """An `if:` expression without the records-only gate: `(E) && GATE` gives E, and `success() && GATE` gives None, the
+    no-if: default. Any other expression, or None, comes back as it is."""
+    if expr == f"success() && {GATE}":
+        return None
+    m = re.fullmatch(rf"\((.+)\) && {re.escape(GATE)}", expr or "")
+    return m.group(1) if m else expr
+
+
 def step_if(st):
-    """A step's `if:` expression, or None when the step has none."""
-    return unwrap(st.get("if"))
+    """A step's `if:` expression with the records-only gate taken off, or None when the step has none. The pins read a step's
+    own condition this way, and gate_problems pins the gate."""
+    return ungate(unwrap(st.get("if")))
+
+
+def gate_problem(name, st):
+    """None when run step `st` of job `name` ends in the gate, `(E) && GATE` or `success() && GATE`; else the problem, named."""
+    raw = unwrap(st.get("if"))
+    if raw == f"success() && {GATE}" or re.fullmatch(rf"\(.+\) && {re.escape(GATE)}", raw or ""):
+        return None
+    return f"{name} / {st.get('name') or st.get('run')}: the if: is not `(E) && {GATE}` (or `success() && {GATE}` with no if:): {raw!r}"
+
+
+def gate_problems(text, jobs=GATED_JOBS):
+    """gate_problem for each run step of each job in `jobs`, and one problem for each named job the workflow lacks."""
+    found = all_jobs(text)
+    problems = []
+    for name in jobs:
+        if name not in found:
+            problems.append(f"{name}: no such job in checks.yml")
+            continue
+        for st in found[name]["steps"]:
+            if "run" in st and gate_problem(name, st):
+                problems.append(gate_problem(name, st))
+    return problems
 
 
 def paren_prefix(expr):
@@ -871,7 +911,7 @@ def split_homes(text, jobs, cmd):
 
 def pin_problems(name, st, cmd, want_if, want_shell, want_env=None):
     """A suite's step keeps the `if:` and `shell:` pinned for it, and its env: none, or the shard value (want_env)."""
-    got_if, got_env = unwrap(step_key(st, "if")), step_env(st)
+    got_if, got_env = ungate(unwrap(step_key(st, "if"))), step_env(st)
     problems = []
     if got_if != want_if:
         problems.append(f"{name}: {cmd!r} if is {got_if!r}, want {want_if!r}")
@@ -1098,6 +1138,7 @@ class WindowsSplit(unittest.TestCase):
 
     def test_scope_job_checks_every_other_job(self):
         self.assertEqual(scope_problems(self.text), [])
+        self.assertEqual(gate_problems(self.text), [], "a gated job's run step does not end in the records-only gate")
         # The guard and mutate jobs skip on the
         # guard flag. Named failure: a cut job runs or never runs on push, schedule and dispatch.
         jobs = all_jobs(self.text)
@@ -1165,6 +1206,7 @@ class WindowsSplit(unittest.TestCase):
 
     def test_suites_keep_their_conditions(self):
         self.assertEqual(hardening_problems(self.text), [])
+        self.assertEqual(gate_problems(self.text), [], "a gated job's run step does not end in the records-only gate")
 
     def test_a_comment_that_names_a_shard_value_is_no_home(self):
         # Rows: a full-line comment, a trailing comment on a shard key, and a comment after a lone apostrophe.
@@ -1290,6 +1332,8 @@ class WindowsSplit(unittest.TestCase):
 
     def test_the_guard_suite_has_its_own_windows_job(self):
         self.assertEqual(guard_problems(self.text), [])
+        guard_jobs = [n for n in GATED_JOBS if n.startswith(GUARD_JOB)]
+        self.assertEqual(gate_problems(self.text, guard_jobs), [], "a guard job's run step does not end in the records-only gate")
 
     def test_checks_sets_no_guard_family(self):
         self.assertEqual([p for p in guard_problems(self.text) if "GUARD_FAMILY" in p], [])
@@ -1416,6 +1460,8 @@ class SplitJobs(unittest.TestCase):
 
     def test_each_linux_suite_runs_once_in_its_split(self):
         self.assertEqual(linux_split_problems(self.text), [])
+        split_gated = [n for n in GATED_JOBS if n in LINUX_SPLIT]
+        self.assertEqual(gate_problems(self.text, split_gated), [], "a gated Linux job's run step does not end in the records-only gate")
 
     def test_every_lint_form_step_stays_in_the_checks_job(self):
         """`merge --lane-lint` runs the `checks` job by name (bin/ci-job checks --lint), so a lint step moved into another Linux
@@ -1454,6 +1500,7 @@ class SplitJobs(unittest.TestCase):
         # The shard values are counted as homes in hardening_problems, so a stray one (here at job level) is a named problem.
         leak = self.text.replace("    steps:\n", "    env:\n      GUARD_SHARD: 1/2\n    steps:\n", 1)
         self.assertEqual(hardening_problems(self.text), [])
+        self.assertEqual(gate_problems(self.text), [], "a gated job's run step does not end in the records-only gate")
         self.assertTrue([p for p in hardening_problems(leak) if "GUARD_SHARD appears" in p])
 
     def test_checker_sees_the_linux_split_defects(self):
@@ -1983,6 +2030,17 @@ def runs_on(job, st, event, flag_value, draft):
     return expr is None or eval_if(expr, event, flag_value, draft=draft)
 
 
+def runs_with_gate(job, st, event, flag_value, draft, gate):
+    """runs_on with the records-only gate set to `gate`. It reads the raw `if:` texts, since runs_on reads each step's
+    condition with the gate taken off."""
+    def pin(raw):
+        return None if raw is None else raw.replace("needs.scope.outputs.records_only_skip", repr(gate))
+    if job["if"] is not None and not eval_if(pin(job["if"]), event, flag_value, draft=draft):
+        return False
+    expr = pin(st.get("if"))
+    return expr is None or eval_if(expr, event, flag_value, draft=draft)
+
+
 def eval_with(expr, event, values, default="false", draft=False):
     """eval_if with one value per scope flag: `values` maps a flag to its value, and every other flag reads `default`."""
     rewritten = re.sub(r"needs\.scope\.outputs\.(\w+)", lambda m: repr(values.get(m.group(1), default)), expr)
@@ -2083,6 +2141,8 @@ class ReadyPullShards(unittest.TestCase):
                 want = read_scope_condition(jobs[base])
                 self.assertIsNotNone(want, f"{base} steps carry no one scope condition")
                 self.assertEqual(read_scope_condition(jobs[name]), want, f"{name} scope condition is not {base}'s")
+        # A shard's run steps end in the records-only gate, as its base job's do.
+        self.assertEqual(gate_problems(self.text, shards), [], "a shard's run step does not end in the records-only gate")
 
     def test_the_windows_guard_job_keeps_its_full_suite_and_has_no_slice_step(self):
         # Named failure: checks-windows-guard still runs the windows-slice guard step, so a ready PR runs its cases twice.
@@ -2125,12 +2185,17 @@ class ReadyPullFullSuite(unittest.TestCase):
 
     def test_a_docs_only_ready_pull_request_runs_every_step_of_the_full_suite_jobs(self):
         # Named failure: a step of a full-suite job is gated on a scope flag or on code, which a docs-only PR leaves false.
+        # The records-only gate is the one condition a ready pull_request does not meet: with it shut, no run step runs.
         for name in self.suite_jobs():
             job = self.jobs[name]
             for st in job["steps"]:
                 with self.subTest(job=name, step=step_label(st)):
                     self.assertTrue(runs_on(job, st, "pull_request", "false", draft=False),
                                     f"{name} step {step_label(st)!r} does not run on a ready pull_request with every scope flag false")
+                if "run" in st:
+                    with self.subTest(job=name, step=step_label(st), gate="shut"):
+                        self.assertFalse(runs_with_gate(job, st, "pull_request", "false", draft=False, gate="true"),
+                                         f"{name} step {step_label(st)!r} runs on a ready pull_request with the records-only gate shut")
 
     def test_a_shard_job_skips_a_draft_pull_request_at_job_level_and_runs_a_ready_one(self):
         # Control, green on the old code: the draft skip is the shard job's own if, and it stays.
