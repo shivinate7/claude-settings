@@ -2061,12 +2061,15 @@ def _vetoed() -> bool:
         return True  # a veto that cannot be read is a veto: the refusal stands
 
 
-def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None) -> None:
+def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None,
+           offer_override=True) -> None:
     """Print a deny or an ask and exit, unless an owner override lifts it (decision
     owner-override). A lifted act prints nothing, so the normal permission flow runs. The
     veto runs before the override is taken, so a call that also holds a never-lifted act spends no override.
     spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift.
-    on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands."""
+    on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands.
+    offer_override=False prints no override line: an ask whose approver answers at the prompt, and whose remedy is a
+    shared-file change, not a lift (rule local-allow-global). The override itself still lifts the act."""
     vetoed = _vetoed()
     if not vetoed:
         try:  # an import or read failure is no override: the refusal stands
@@ -2086,7 +2089,8 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
     try:  # the line the owner types to lift this refusal, or the words that none does; last in the reason
         import override
         line = override.NO_OVERRIDE if vetoed else override.offer(rule, spawn_role, _override_who[1])
-        reason = reason.rstrip() + " " + line
+        if offer_override:
+            reason = reason.rstrip() + " " + line
     except Exception:
         pass
     print(json.dumps({

@@ -253,6 +253,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        design-reviewer, refuter, a builder's third-round marker or an Explore's `Audit:` marker
                        covers it. The general override, `opus [role] <time>` or a step grant lifts the
                        spawn refusal; none lifts the settings-write ask.
+  local-allow-global   ask. A write that adds an allow rule to a `settings.local.json`: the rules the write leaves
+                       less the rules on disk. The ask names the shared `settings.json` first. No override line prints.
+                       A rule already on disk, a deny or ask rule and every other key pass. (local-allow-global)
   ask-alone            deny. An ask command chained with other commands. (ask-commands-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
 
@@ -482,7 +485,9 @@ role and model guards (the settings-write ask of `agent-model-cap`,
 `agent-model-floor`, the no-model refusal of `agent-role-model`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
 or `worktree-home`. No override check reaches the missing-module deny, the `settings.json` deny list
 or the `bin/rm` and `bin/merge` shims; each of those refusals says that no override lifts it. Every
-refusal that goes through refuse() ends with the line the owner types, or with that same sentence.
+refusal that goes through refuse() ends with the line the owner types, or with that same sentence,
+except a refusal that passes `offer_override=False` (`local-allow-global`): it prints neither, and an
+owner override still lifts it.
 The model judges (hooks/call_judge.py, hooks/prose_judge.py, hooks/sendmessage_state.py) refuse through
 refuse() too, so an override lifts them.
 """
@@ -1592,6 +1597,187 @@ def cap_ask_reason(change: str, where: str) -> str:
     """
     return CAP_ASK_REASON.format(change=cap_safe(change, CAP_MAX_CHANGE),
                                  where=cap_safe(where, CAP_MAX_PATH))
+
+
+# ---- rule local-allow-global: an allow rule written to a project's settings.local.json
+# THE MISTAKE: a session writes a permission it needs into the project's settings.local.json, where it helps
+# one checkout of one repo, when the rule belongs in the shared settings.json that every session reads. The
+# ask names the shared file first; the owner approves when the rule is for this project alone. The answer is
+# `ask`, never `deny`: a project may truly want a rule of its own.
+# THE ADDED RULES are the allow entries the write leaves minus the allow entries the file holds now, so a
+# re-write of a rule already on disk asks nothing. Text that parses is read with the JSON parser. Text that
+# does not parse (an Edit fragment, a file the edit leaves broken) is read by `_local_allow_fragment`, a
+# string-aware tokenizer, so `//`, `/*`, `#`, a lone quote and a multi-line body inside a string never end or
+# start anything.
+LOCAL_SETTINGS_BASENAME = "settings.local.json"
+LOCAL_ALLOW_READ_MAX = 8 << 20          # bytes of the existing file the rule reads
+LOCAL_ALLOW_SHOWN = 3                   # rules the ask prints
+LOCAL_ALLOW_MAX_RULE = 80               # characters of each printed rule
+LOCAL_ALLOW_RULE_SHAPE = re.compile(r"(?:[A-Z][A-Za-z]*|mcp__[\w-]+(?:__[\w*-]+)?)(?:\(.*\))?", re.S)
+LOCAL_ALLOW_REASON = (
+    "Rule (configuration): this write adds an allow rule to a project's local settings file, where it "
+    "helps this project only. A rule that every session needs may belong in the shared `settings.json`, "
+    "which every session in every repo reads: put it there by a lane PR on claude-settings. "
+    "Approve this write only when the rule is for this project alone. Added: {added}. File: {where}. "
+    "(decision local-allow-global, a permission every session needs goes in the shared settings)"
+)
+
+
+def is_local_settings_file(path: str, cwd: str = "") -> bool:
+    """True when the path, or the path it resolves to, has the basename settings.local.json. Cannot raise."""
+    if not path or not isinstance(path, str):
+        return False
+    if basename(path) == LOCAL_SETTINGS_BASENAME:
+        return True
+    try:
+        return basename(_resolved(path, cwd)) == LOCAL_SETTINGS_BASENAME
+    except Exception:
+        return False
+
+
+def _json_allow(text):
+    """The allow rules (strings) of a settings text that parses as a JSON object, or None when it does not."""
+    try:
+        data = json.loads(text)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    permissions = data.get("permissions")
+    allow = permissions.get("allow") if isinstance(permissions, dict) else None
+    return [item for item in allow if isinstance(item, str)] if isinstance(allow, list) else []
+
+
+def _fragment_strings(text):
+    """The tokens of a JSON-like fragment as (kind, value): a double-quoted string ("s", unescaped) or one
+    structural character ("p"). A string ends at its closing quote; one that meets a raw newline or the end
+    of the text first is a lone quote, dropped with the rest of its line. Everything else is skipped, so a
+    `//`, `/*` or `#` outside a string starts nothing and one inside a string is part of it."""
+    tokens, at, size = [], 0, len(text)
+    while at < size:
+        char = text[at]
+        if char == '"':
+            end, closed = at + 1, False
+            while end < size and text[end] != "\n":
+                if text[end] == "\\":
+                    end += 2
+                    continue
+                if text[end] == '"':
+                    closed = True
+                    break
+                end += 1
+            if closed:
+                raw = text[at + 1:end]
+                try:
+                    raw = json.loads('"' + raw + '"')
+                except Exception:
+                    pass
+                tokens.append(("s", raw))
+                at = end + 1
+            else:
+                at = end   # a lone quote: the rest of its line is dropped
+            continue
+        if char in "[]{}:,":
+            tokens.append(("p", char))
+        at += 1
+    return tokens
+
+
+def _local_allow_fragment(text):
+    """Allow rules a JSON-like fragment holds: a string element of an `"allow": [...]` list, or, in a list or
+    at the top of a fragment that names no list key, a string shaped like a permission rule. An element under
+    a `deny` or `ask` key is never one."""
+    tokens = _fragment_strings(text)
+    found, stack = [], []   # stack: the key of each open `[`, "" for a list of unknown key, None for `{`
+    for index, (kind, value) in enumerate(tokens):
+        before = tokens[index - 1] if index else ("p", ",")
+        after = tokens[index + 1] if index + 1 < len(tokens) else ("p", ",")
+        if kind == "p":
+            if value == "[":
+                key = tokens[index - 2][1] if before == ("p", ":") and index > 1 and tokens[index - 2][0] == "s" else ""
+                stack.append(key)
+            elif value == "{":
+                stack.append(None)
+            elif value in "]}" and stack:
+                stack.pop()
+            continue
+        if after == ("p", ":") or before == ("p", ":"):
+            continue   # a key, or the value of one
+        if stack and stack[-1] is None:
+            continue   # a string inside an object that is not a key or a value
+        key = stack[-1] if stack else ""
+        if key in ("deny", "ask"):
+            continue
+        if key == "allow" or LOCAL_ALLOW_RULE_SHAPE.fullmatch(value):
+            found.append(value)
+    return found
+
+
+def _apply_edits(text, tool, tool_input):
+    """The text an Edit or MultiEdit leaves, or None when an old_string is not found (the edit would fail)."""
+    edits = tool_input.get("edits") if tool == "MultiEdit" else [tool_input]
+    if not isinstance(edits, list):
+        return None
+    for edit in edits:
+        if not isinstance(edit, dict):
+            return None
+        old, new = edit.get("old_string"), edit.get("new_string")
+        if not isinstance(old, str) or not isinstance(new, str) or old not in text:
+            return None
+        text = text.replace(old, new) if edit.get("replace_all") is True else text.replace(old, new, 1)
+    return text
+
+
+def _read_existing(target, cwd):
+    """The text of the file on disk, or None when it is absent or unreadable."""
+    try:
+        path = _resolved(target, cwd)
+        if os.path.getsize(path) > LOCAL_ALLOW_READ_MAX:
+            return None
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+    except Exception:
+        return None
+
+
+def local_allow_added(tool, tool_input, target, cwd):
+    """The allow rules this write adds to a settings.local.json: the rules it leaves minus the rules on disk."""
+    existing = _read_existing(target, cwd)
+    held_rules = _json_allow(existing) if existing is not None else None
+    held = set(held_rules or ())
+    if tool == "Write":
+        content = tool_input.get("content")
+        if not isinstance(content, str):
+            return []
+        after = _json_allow(content)
+        if after is None:
+            after = _local_allow_fragment(content)
+        return [rule for rule in dict.fromkeys(after) if rule not in held]
+    if existing is not None:
+        result = _apply_edits(existing, tool, tool_input)
+        after = _json_allow(result) if result is not None else None
+        if after is not None:
+            return [rule for rule in dict.fromkeys(after) if rule not in held]
+    # No file, a file the edit does not fit, or a result that is not JSON: read the fragments, less any
+    # rule the edit's old_string already holds.
+    edits = tool_input.get("edits") if tool == "MultiEdit" else [tool_input]
+    found = []
+    for edit in edits if isinstance(edits, list) else ():
+        if not isinstance(edit, dict) or not isinstance(edit.get("new_string"), str):
+            continue
+        old = edit.get("old_string")
+        left = set(_local_allow_fragment(old)) if isinstance(old, str) else set()
+        found.extend(rule for rule in _local_allow_fragment(edit["new_string"]) if rule not in left and rule not in held)
+    return list(dict.fromkeys(found))
+
+
+def local_allow_reason(added, where):
+    """The ask, BOUNDED BY CONSTRUCTION: a fixed template, at most LOCAL_ALLOW_SHOWN rules each cut at
+    LOCAL_ALLOW_MAX_RULE, a count for the rest, and the path cut at CAP_MAX_PATH."""
+    shown = ", ".join(cap_safe(rule, LOCAL_ALLOW_MAX_RULE) for rule in added[:LOCAL_ALLOW_SHOWN])
+    if len(added) > LOCAL_ALLOW_SHOWN:
+        shown += " and %d more" % (len(added) - LOCAL_ALLOW_SHOWN)
+    return LOCAL_ALLOW_REASON.format(added=shown, where=cap_safe(where, CAP_MAX_PATH))
 
 
 # ---- a message that cites a record by path
@@ -7132,6 +7318,15 @@ def judge(payload) -> None:
             if change:
                 refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target),
                        log_path_and_text(target, change))
+        # 8a. An allow rule written to a project's settings.local.json (rule local-allow-global). Asks, never
+        # refuses. Fails open: a rule that cannot read the write adds nothing.
+        try:
+            added = local_allow_added(tool, tool_input, target, cwd) if is_local_settings_file(target, cwd) else []
+        except Exception:
+            added = []
+        if added:
+            refuse(tool, "ask", "local-allow-global", local_allow_reason(added, target),
+                   log_path_and_text(target, " ".join(added)), offer_override=False)
     scratchpad_owner_write(payload, tool, tool_input, cwd)   # every refusal above passed: refuse an overwrite, else record the writer
 
 
