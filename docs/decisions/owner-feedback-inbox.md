@@ -114,20 +114,19 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   Landed 2026-11-01. Known gap: the guard cannot tell the send went to that repo's triage, only that it
   names the repo.
 - **Page filing.** In a repo with a waiting page, an open `page` item whose send is proved also needs its
-  number filed. The guard reads the waiting copy, the `items/` folder of the waiting export on
-  `origin/<record branch>`, as of the last fetch. It fetches nothing. A read-back also proves the filing:
-  an ArtifactData get, list or query of the waiting page's `items` collection, after the owner's message.
-  Its result must return a document with `n` equal to the number. A read with `out_dir` does not count,
-  because its result lists files. It blocks when neither holds the number. The remedy has two routes. Ask
-  the page writer to export the waiting copy into its folder on the record branch and push it, then fetch
-  that branch. Or read the item back from the page. A send the check stood down on skips this check. A copy that
-  cannot be read blocks nothing; a systemMessage starts "Feedback guard: page filing not checked", and
-  the send check decides alone (rulings fb-1312-1 and fb-1313-1, the owner's grant for this check; fb-1311-3,
-  verify each filing on origin or by read-back). Cost: one `git rev-parse` and one `git grep` of the copy's
-  items, inside the Stop process. They run once per Stop with an open page item whose send is proved and
-  whose number no read-back returns (unmeasured). The read-back uses the transcript read Pages makes. No file written,
-  no process left running. Risk kind: likely risk. Landed 2026-11-02. Known gap: it proves that item n exists in the copy
-  or on the page, not that this answer was filed on it.
+  number read back from the page. The page database is the one store and no hook can read it live, so the proof
+  is the transcript: after the owner's message, an ArtifactData get, list or query of the waiting page's
+  `items` collection. Its result is no error and returns a document with `n` equal to the number. A read
+  with `out_dir` does not count, because its result lists files. No read-back refuses the Stop, whatever the
+  backup copy holds: the backup copy, the waiting export on `origin/<record branch>`, is never read by this
+  check. The remedy says to read the item back from the page. A send the check stood down on skips this check.
+  A layout or git that cannot be read stands the check down: a systemMessage reads "Feedback guard: page
+  filing not checked: waiting page not known", and the send check decides alone (rulings fb-1312-1 and
+  fb-1313-1, the owner's grant for this check; fb-1311-3, verify each filing; owner, 12:40 CST Nov 12,
+  decision waiting-page-one-store). Cost: one `git rev-parse` per Stop with a proved page send, inside the
+  Stop process; the read-back uses the transcript read Pages makes. No file written, no process left
+  running. Risk kind: likely risk. Landed 2026-11-02. Known gap: it proves that item n exists on the page,
+  not that this answer was filed on it.
 - **Repeats.** A model matches each new item's owner message, by meaning, against older feedback and
   work, so the owner's words meet the code's names ("carousel" for code that says "wheel") with no
   glossary to keep up. It runs in the Stop guard, on every Stop including `stop_hook_active`. New

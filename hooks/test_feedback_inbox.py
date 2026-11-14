@@ -138,17 +138,14 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     checked" for a repo item, and names the reason, as the homes check does. An absent,
     missing or unreadable transcript stands down every block the same way. A stand-down of one block
     never turns off the checks of the other blocks.
-  - Filing (the waiting copy). In a repo that names a waiting page (layout.waiting_page), a page item's
-    number must also be filed: the repo's waiting copy holds an item file under the `waiting` kind's
-    `items/` folder, read with git from `origin/<record branch>` (layout.record_branch, else `roadmap`),
-    whose numeric field `n` equals the number. A filed number passes the filing check, and the send check
-    still applies. A number that is not filed blocks, and the reason names the item id, `page:<n>`, and
-    the act: export the page copy. A copy that cannot be read (no record branch, no waiting folder, a git
-    error) is unknown, never clear: stdout carries a systemMessage that starts "Feedback guard: page
-    filing not checked", and the send check decides the item alone. A repo with no waiting page runs the
-    send check alone, with no filing message. A malformed home is refused before the filing check runs.
-    Cost: one to four git starts over a note item, inside the Stop process, per page item in a
-    waiting-page repo, whatever the copy's size. The cost case proves both figures.
+  - Filing (the read-back). In a repo that names a waiting page (layout.waiting_page), a page item whose send
+    is proved needs a read-back of the page: an ArtifactData get, list or query of collection `items` of the
+    waiting page (layout.artifact_id), with no out_dir, whose result is no error and returns the item's number
+    (Pages.read_back). Without one the item blocks, whatever the waiting copy holds, and the reason names the
+    item id, `page:<n>`, and says to read item n back from the page. The waiting copy is a backup: the guard
+    never reads it, so a stale or unreadable copy has no effect and prints no filing message. A repo with no
+    waiting page runs the send check alone, with no filing message. A malformed home is refused before the
+    filing check runs. Cost: no git start reads the waiting copy, whatever its size. The cost case proves it.
   - Repos. `- <id> [repo] -> repo:<owner>/<name>` says the owner's feedback is about another repo, not
     the session's own. The home is cleaned as a ruling home is: one pair of backticks or quotes comes
     off when both ends match, a `#anchor` drops, and trailing `:,;.` strips. Each part of what is left
@@ -1458,16 +1455,22 @@ def case_page_queued_owner_record_anchors():
     expect_silent("page: a queued owner record with a later send passes", p)
 
 
-# --------------------------------------------------------------------------- page filing (the waiting copy)
+# --------------------------------------------------------------------------- page filing (the read-back)
 
-# A page item's number must be filed: the repo's waiting copy holds an item whose numeric n is that number.
-# The copy is read from the record branch the layout names. Only a repo that names a waiting page is
-# checked; the send check alone decides every other repo. An unreadable copy is unknown, never clear.
-PAGE_FILING_FAIL_OPEN = "Feedback guard: page filing not checked"
+# A page item whose send is proved needs a read-back of the waiting page: an ArtifactData read of collection
+# `items`, after the owner's message, that returns its number. The waiting copy is a backup and is never read,
+# so a proved send with no read-back blocks whatever the copy holds. Only a repo that names a waiting page is
+# checked; the send check alone decides every other repo.
+PAGE_FILING_FAIL_OPEN = "Feedback guard: page filing not checked"  # printed only when the waiting page is not known
+# The one pattern of that stand-down line, for the positive and the negative checks alike. A trailing period is
+# allowed (the house FAIL_OPEN lines end with one). The reason may hold parentheses, such as "(char 1)": the
+# reason ends at the first ")" that closes the line or the note.
+FILING_NOTE = re.compile(re.escape(PAGE_FILING_FAIL_OPEN) + r": waiting page not known \((.+?)\)\.?(?=\s|$)")
 RECORD_BRANCH = "roadmap"  # layout.DEFAULT_RECORD_BRANCH: the branch a repo reads with no record-branch key
 FILED = (("disk-cleanup", 98), ("sweep-notes", 99))  # the copy holds item 98
 UNFILED = (("near-97", 97), ("near-980", 980), ("near-198", 198))  # no item with n 98
-FORTY = (("disk-cleanup", 98),) + tuple(("filler-%02d" % i, 100 + i) for i in range(39))
+FORTY = (("disk-cleanup", 98),) + tuple(("filler-%02d" % i, 100 + i) for i in range(39))  # full size, holds 98
+FORTY_UNFILED = tuple(("filler-%02d" % i, 100 + i) for i in range(40))  # full size, no item 98
 NEUTRAL = "rename item 98 now"  # no pick: "98 n" is no answer letter, so only the page item needs proof
 SENT = "Ruling on item 98 now"  # a send that names 98 as a whole token
 
@@ -1483,6 +1486,11 @@ def filing_extras(record_branch=None):
 def copy_files(items):
     """{path: text} for a waiting copy: one waiting/items/<id>.json per (id, n), each with the numeric field n."""
     return {"waiting/items/%s.json" % item_id: json.dumps({"id": item_id, "n": n}) for item_id, n in items}
+
+
+def docs_of(items):
+    """(doc_id, data) pairs of a read-back result, for (id, n) items."""
+    return [(item_id, {"id": item_id, "n": n}) for item_id, n in items]
 
 
 def record_repo(key, files, branch=RECORD_BRANCH, extras=None, torn=False, origin=None):
@@ -1512,34 +1520,67 @@ def record_repo(key, files, branch=RECORD_BRANCH, extras=None, torn=False, origi
     return shared_repo(key, build)
 
 
-def expect_filing_unknown(name, p):
-    """No block, and a systemMessage that starts with PAGE_FILING_FAIL_OPEN: the copy could not be read."""
-    obj = guard_json(p) or {}
-    msg = obj.get("systemMessage") or ""
-    check(name + ": exit 0, no block", p.code == 0 and not is_block(obj), p.desc())
-    check("%s: a systemMessage starts with %r" % (name, PAGE_FILING_FAIL_OPEN),
-          msg.startswith(PAGE_FILING_FAIL_OPEN), p.desc())
+def filing_notes(p):
+    """(reasons, msg): the reason of each filing stand-down line in the run's systemMessage, and the message. Notes are
+    joined with spaces after other notes, so the line is searched for, never matched from the start."""
+    msg = (guard_json(p) or {}).get("systemMessage") or ""
+    return [m.group(1) for m in FILING_NOTE.finditer(msg)], msg
 
 
-def expect_unfiled(name, p, item_id, number):
-    """A block that names the item and page:<n>, and whose remedy says to export the page copy. The send is
-    there, so the reason is the filing one, and it names no forbidden target (main, --admin)."""
+def no_filing_stand_down(name, p):
+    """No filing stand-down line. A proved send in a waiting-page repo whose waiting page is known is read back, never
+    stood down: the copy is not read, and the layout is known."""
+    reasons, msg = filing_notes(p)
+    check("%s: no page filing stand-down" % name, not reasons and PAGE_FILING_FAIL_OPEN not in msg, msg)
+
+
+def expect_filing_stand_down(name, p):
+    """One filing stand-down line, and the send check passed: exit 0 and no block. The line reads `Feedback guard:
+    page filing not checked: waiting page not known (<reason>)`, with a reason. Returns the reason."""
+    reasons, msg = filing_notes(p)
+    check("%s: exit 0, no block" % name, p.code == 0 and block_reason(p) is None, p.desc())
+    check("%s: one line reads 'page filing not checked: waiting page not known (<reason>)'" % name,
+          len(reasons) == 1 and reasons[0].strip() != "", msg)
+    return reasons[0] if reasons else None
+
+
+def expect_read_back_remedy(name, p, item_id, number):
+    """A block for a proved send with no read-back of the waiting page, whatever the copy holds. The reason names the
+    item and page:<n>, and says to read item n back from the page: an ArtifactData get, list or query of collection
+    `items`, with no out_dir. It sends the writer to no copy: no export, no git fetch, no record branch. Returns the
+    reason."""
     reason = expect_unproved(name, p, item_id)
     check("%s: names page:%s" % (name, number), "page:%s" % number in reason, reason)
-    check("%s: the remedy says to export the page copy" % name,
-          "export" in reason.lower() and "page" in reason.lower(), reason)
     check("%s: the send check passed, so the reason is not the send reason" % name,
           "no send" not in reason, reason)
+    check("%s: the remedy reads the item back with ArtifactData" % name, "ArtifactData" in reason, reason)
+    check("%s: the remedy names collection `items`" % name, "collection `items`" in reason, reason)
+    check("%s: the remedy says the read has no out_dir" % name, "with no out_dir" in reason, reason)
+    check("%s: the remedy says to read the item back" % name, "read it back" in reason, reason)
+    check("%s: the remedy does not name an export" % name, "export" not in reason.lower(), reason)
+    check("%s: the remedy does not name a git fetch" % name, "fetch" not in reason.lower(), reason)
+    check("%s: the remedy does not name the record branch" % name, "record branch" not in reason.lower(), reason)
     check("%s: the remedy names no forbidden target" % name,
           re.search(r"\bmain\b|--admin", reason) is None, reason)
+    return reason
 
 
-def case_page_filed_number_passes():
-    """A page item whose number the waiting copy holds passes with its send, and no filing message. Green on
-    today's guard, which the send check alone already passes: this pins a filed item as a pass."""
-    p = page_run(new_cfg(), "page-filed", [(NEUTRAL, (PAGE_ITEM,))],
-                 [owner_rec(NEUTRAL), send_rec(SENT)], cwd=record_repo("filed", copy_files(FILED)))
-    expect_silent("page filing: n 98 filed, with its send, passes with no systemMessage", p)
+def case_page_filed_copy_without_a_read_back_blocks():
+    """A page item whose number the waiting copy holds, with its send and no read-back of the page, blocks. The copy
+    is a backup and is never read, so a filed copy proves nothing. Main passes it. Covers a copy on roadmap, a
+    full-size copy of 40 items, and a copy on the record branch the layout names. Each copy's item 98 is checked
+    with git first, so the block cannot come from a broken fixture."""
+    for label, repo, branch in (
+            ("on roadmap, 2 items", record_repo("filed", copy_files(FILED)), RECORD_BRANCH),
+            ("on roadmap, 40 items", record_repo("filed-forty", copy_files(FORTY)), RECORD_BRANCH),
+            ("on the named record branch", record_repo("named", copy_files(FILED), branch="records",
+                                                       extras=filing_extras("records")), "records")):
+        held = json.loads(git(repo, "show", "refs/remotes/origin/%s:waiting/items/disk-cleanup.json" % branch))
+        check("page filing: the copy %s holds item 98 (fixture scope)" % label, held.get("n") == 98, held)
+        p = page_run(new_cfg(), "page-filed-no-read", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), send_rec(SENT)], cwd=repo)
+        expect_read_back_remedy("page filing: n 98 in the copy (%s), with its send and no read-back, blocks"
+                                % label, p, "fb-0958-7", "98")
 
 
 def case_page_filed_number_still_needs_its_send():
@@ -1549,48 +1590,71 @@ def case_page_filed_number_still_needs_its_send():
     expect_send_missing("page filing: n 98 filed, no send, blocks on the send", p, "fb-0958-7", "98")
 
 
-def case_page_unfiled_number_refuses_with_the_export_remedy():
-    """A page item whose number the copy does not hold is refused, though the send is there. Numbers 980 and
-    198 do not satisfy 98, so the check is equality, not a prefix or a substring. Red today: no filing check
-    runs, so the send alone passes it."""
-    repo = record_repo("unfiled", copy_files(UNFILED))
-    p = page_run(new_cfg(), "page-unfiled", [(NEUTRAL, (PAGE_ITEM,))],
-                 [owner_rec(NEUTRAL), send_rec(SENT)], cwd=repo)
-    expect_unfiled("page filing: n 98 not in the copy, with its send, refuses", p, "fb-0958-7", "98")
+def case_page_unfiled_number_blocks_with_the_read_back_remedy():
+    """A page item whose number the copy does not hold, with its send and no read-back, blocks with the read-back
+    remedy and no export. A full-size copy with no item 98 is the same. The copy is never read, so its numbers do
+    not matter. A closed page item is never checked."""
+    for label, key, items in (("3 items", "unfiled", UNFILED), ("40 items", "unfiled-forty", FORTY_UNFILED)):
+        p = page_run(new_cfg(), "page-unfiled", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), send_rec(SENT)], cwd=record_repo(key, copy_files(items)))
+        expect_read_back_remedy("page filing: n 98 not in the copy (%s), with its send, blocks" % label,
+                                p, "fb-0958-7", "98")
     p = page_run(new_cfg(), "page-unfiled-closed", [(NEUTRAL, ("- fb-0958-7 [page] -> page:98 [closed]",))],
-                 [owner_rec(NEUTRAL), said_rec("Noted.")], cwd=repo)
+                 [owner_rec(NEUTRAL), said_rec("Noted.")], cwd=record_repo("unfiled", copy_files(UNFILED)))
     expect_silent("page filing: a closed page item with an unfiled number is never checked", p)
 
 
-def case_page_unreadable_copy_is_unknown_and_checks_the_send():
-    """A copy that cannot be read is unknown, never clear. The guard says so in a systemMessage, and the send
-    check decides the item alone. Red today: no filing check runs, so no systemMessage."""
+def case_page_unreadable_copy_blocks_like_an_unfiled_one():
+    """A copy that is missing, empty or cannot be read does not stand the filing down for a proved send. The send is
+    read back instead, as for an unfiled number: the item blocks with the read-back remedy, and no filing stand-down
+    prints. Covers no record branch, a record branch with no waiting folder, a waiting folder with no item file, a
+    record branch git cannot read, and an item file that is not JSON, beside a good one or alone. The send check
+    alone decides a missing send."""
     for label, repo in (
             ("no record branch", waiting_repo()),
             ("a record branch with no waiting folder", record_repo("no-folder", {"README.txt": "no copy\n"})),
-            ("a record branch ref git cannot read", record_repo("torn", copy_files(FILED), torn=True))):
+            ("a waiting folder with no item file", record_repo("empty-items", {"waiting/items/.keep": ""})),
+            ("a record branch ref git cannot read", record_repo("torn", copy_files(FILED), torn=True)),
+            ("an item file that is not JSON, beside a good one", record_repo("corrupt-beside", {
+                "waiting/items/sweep-notes.json": json.dumps({"id": "sweep-notes", "n": 99}),
+                "waiting/items/disk-cleanup.json": CORRUPT_ITEM})),
+            ("an item file that is not JSON, alone", record_repo("corrupt-alone",
+                                                                 {"waiting/items/disk-cleanup.json": CORRUPT_ITEM}))):
         p = page_run(new_cfg(), "page-unknown", [(NEUTRAL, (PAGE_ITEM,))],
                      [owner_rec(NEUTRAL), send_rec(SENT)], cwd=repo)
-        expect_filing_unknown("page filing: unknown (%s), with its send" % label, p)
+        expect_read_back_remedy("page filing: unreadable copy (%s), with its send, blocks" % label,
+                                p, "fb-0958-7", "98")
+        no_filing_stand_down("page filing: unreadable copy (%s), with its send" % label, p)
         p = page_run(new_cfg(), "page-unknown-nosend", [(NEUTRAL, (PAGE_ITEM,))],
                      [owner_rec(NEUTRAL), said_rec("Noted.")], cwd=repo)
-        expect_send_missing("page filing: unknown (%s), with no send, blocks on the send" % label,
+        expect_send_missing("page filing: unreadable copy (%s), with no send, blocks on the send" % label,
                             p, "fb-0958-7", "98")
 
 
-def case_page_filing_reads_the_record_branch_the_layout_names():
-    """The copy is read from the record branch the layout names, not from roadmap. A copy on the named branch
-    passes. In a repo that names records, a copy only on roadmap is no copy, so it is unknown. Red today: no
-    filing check runs, so no systemMessage."""
-    named = record_repo("named", copy_files(FILED), branch="records", extras=filing_extras("records"))
-    p = page_run(new_cfg(), "page-named", [(NEUTRAL, (PAGE_ITEM,))],
-                 [owner_rec(NEUTRAL), send_rec(SENT)], cwd=named)
-    expect_silent("page filing: n 98 filed on the named record branch passes", p)
-    roadmap_only = record_repo("named-roadmap-only", copy_files(FILED), branch=RECORD_BRANCH,
-                               extras=filing_extras("records"))
-    p = page_run(new_cfg(), "page-named-other", [(NEUTRAL, (PAGE_ITEM,))],
-                 [owner_rec(NEUTRAL), send_rec(SENT)], cwd=roadmap_only)
-    expect_filing_unknown("page filing: a copy only on roadmap is unknown in a repo that names records", p)
+def case_page_broken_extras_proved_send_passes_with_the_filing_stand_down():
+    """A layout-extras file that cannot be read leaves the waiting page unknown. A proved send then passes with no
+    read-back required, and one stand-down line names the reason: the house fail-open, as for an unreadable layout.
+    A send that is not proved still blocks on the send, so the stand-down does not stand the sends down."""
+    import layout  # lint/layout.py, the one home of the waiting page read
+    repo = shared_repo("broken-filing", lambda: make_repo(
+        "broken-filing-extras", tracked=("decisions/a-ruling.md",), extras="{not json"))
+    raised = []
+    try:
+        layout.waiting_page(repo)
+    except layout.LayoutError as e:
+        raised.append(str(e))
+    check("page filing: the broken extras make layout.waiting_page raise LayoutError (fixture scope)",
+          len(raised) == 1, raised)
+    p = page_run(new_cfg(), "page-broken-extras", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), send_rec(SENT)], cwd=repo)
+    reason = expect_filing_stand_down("page filing: broken extras, n 98 proved and unread, passes with the stand-down",
+                                      p)
+    if reason is not None:  # no line, no reason to read: the check above already names that cause
+        check("page filing: the stand-down reason names the broken layout-extras file",
+              "layout-extras.json" in reason, reason)
+    p = page_run(new_cfg(), "page-broken-extras-nosend", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), said_rec("Noted.")], cwd=repo)
+    expect_send_missing("page filing: broken extras, no send, still blocks on the send", p, "fb-0958-7", "98")
 
 
 def case_page_filing_needs_a_waiting_page_repo():
@@ -1614,29 +1678,43 @@ def case_page_malformed_home_refused_beside_a_filed_number():
               and "fb-0958-9" in reason, reason or p.desc())
 
 
-def case_page_filing_reads_do_not_grow_with_the_copy():
-    """The cost of the filing read, which a test proves (the rule that every reader states its cost): the git
-    starts of a page item do not grow with the copy's size, and a page item adds one to four git starts over a
-    note item in the same repo. Red today: the page item adds none."""
-    extra = {}
+COPY_FOLDER = next(iter(copy_files(FILED))).split("/")[0]  # the waiting copy's folder in the fixtures: "waiting"
+COPY_NAME = re.compile(r"(?:^|[:/])%s(?:/|$)" % re.escape(COPY_FOLDER))  # the folder as one path segment of a token
+
+
+def git_starts_naming_copy(lines):
+    """The logged git starts that name the waiting copy folder in an argument, whatever the subcommand. The token after
+    -C is the repo's own folder, so it is skipped: a run folder never counts as a copy."""
+    named = []
+    for ln in lines:
+        toks = ln.split()
+        skipped = {i + 1 for i, t in enumerate(toks) if t == "-C"}
+        if any(COPY_NAME.search(t) for i, t in enumerate(toks) if i not in skipped):
+            named.append(ln)
+    return named
+
+
+def case_page_filing_never_reads_the_copy():
+    """The cost of the filing check, which a test proves (the rule that every reader states its cost): a page item
+    with a proved send starts no git that names the waiting copy folder, whatever the subcommand (grep, show,
+    cat-file, ls-tree), at 2 items or at 40. The git starts are the same count for both sizes. A git read of the
+    copy would make the stated cost false, so the case holds it at both sizes. Every subcommand counts, so a read
+    by show is caught as a grep is."""
+    counts = {}
     for label, repo in (("a copy of 2 items", record_repo("filed", copy_files(FILED))),
                         ("a copy of 40 items", record_repo("filed-forty", copy_files(FORTY)))):
         cfg = new_cfg()
         env = git_counter(cfg)
-        p = page_run(cfg, "page-cost", [(NEUTRAL, (PAGE_ITEM,))], [owner_rec(NEUTRAL), send_rec(SENT)],
-                     cwd=repo, extra_env=env)
-        expect_silent("page filing cost: %s, n 98 filed, passes" % label, p)
-        page_starts = len(git_lines(env))
-        cfg = new_cfg()
-        env = git_counter(cfg)
-        page_run(cfg, "page-cost-note", [(NEUTRAL, ("- fb-0958-7 [note] -> noted",))],
-                 [owner_rec(NEUTRAL), said_rec("Noted.")], cwd=repo, extra_env=env)
-        extra[label] = page_starts - len(git_lines(env))
-    counts = list(extra.values())
-    check("page filing cost: the same extra git starts for 2 items and for 40 (%s)" % extra,
-          counts[0] == counts[1], extra)
-    check("page filing cost: one to four extra git starts over a note item (%s)" % extra,
-          all(1 <= n <= 4 for n in counts), extra)
+        page_run(cfg, "page-cost", [(NEUTRAL, (PAGE_ITEM,))], [owner_rec(NEUTRAL), send_rec(SENT)],
+                 cwd=repo, extra_env=env)
+        starts = git_lines(env)
+        check("page filing cost: the probe logs the guard's git starts, so the copy check can see them (%s)" % label,
+              len(starts) > 0, starts)
+        copy_reads = git_starts_naming_copy(starts)
+        check("page filing cost: no git start names the copy folder (%s)" % label, not copy_reads, copy_reads)
+        counts[label] = len(starts)
+    check("page filing cost: the git starts are the same count for 2 items and for 40 (%s)" % counts,
+          len(set(counts.values())) == 1, counts)
 
 
 CORRUPT_ITEM = '{"id": "disk-cleanup", "n": 98'  # an item file cut short: not JSON
@@ -1668,27 +1746,9 @@ def stale_origin_repo():
     return shared_repo("stale-origin", build)
 
 
-def case_page_corrupt_item_file_is_unknown_never_a_block():
-    """A copy with an item file that is not JSON is unreadable. The filing is unknown, so the page item is never
-    refused for it, with its send or without. The send check decides alone."""
-    for label, key, files in (
-            ("a corrupt item beside a good one", "corrupt-beside",
-             {"waiting/items/sweep-notes.json": json.dumps({"id": "sweep-notes", "n": 99}),
-              "waiting/items/disk-cleanup.json": CORRUPT_ITEM}),
-            ("a corrupt item alone", "corrupt-alone", {"waiting/items/disk-cleanup.json": CORRUPT_ITEM})):
-        repo = record_repo(key, files)
-        p = page_run(new_cfg(), "page-corrupt", [(NEUTRAL, (PAGE_ITEM,))],
-                     [owner_rec(NEUTRAL), send_rec(SENT)], cwd=repo)
-        expect_filing_unknown("page filing: unreadable copy (%s), with its send" % label, p)
-        p = page_run(new_cfg(), "page-corrupt-nosend", [(NEUTRAL, (PAGE_ITEM,))],
-                     [owner_rec(NEUTRAL), said_rec("Noted.")], cwd=repo)
-        expect_send_missing("page filing: unreadable copy (%s), with no send, blocks on the send" % label,
-                            p, "fb-0958-7", "98")
-
-
-def case_page_stale_origin_ref_names_the_fetch():
-    """A filed number that the clone's origin ref lacks is refused, and the remedy names the fetch. The copy is
-    read as of the last fetch. The hook fetches nothing: the origin ref is the same after the run."""
+def case_page_stale_origin_ref_blocks_and_fetches_nothing():
+    """A copy the clone's origin ref lacks is never read: a proved send with no read-back blocks with the read-back
+    remedy, and the remedy names no fetch. The hook fetches nothing: the origin ref is the same after the run."""
     repo = stale_origin_repo()
     before = git(repo, "rev-parse", "refs/remotes/origin/" + RECORD_BRANCH).strip()
     source = git(os.path.join(ROOT, "repos", "stale-origin-src"), "rev-parse", RECORD_BRANCH).strip()
@@ -1696,12 +1756,8 @@ def case_page_stale_origin_ref_names_the_fetch():
           "remote %s, origin ref %s" % (source, before))
     p = page_run(new_cfg(), "page-stale", [(NEUTRAL, (PAGE_ITEM,))],
                  [owner_rec(NEUTRAL), send_rec(SENT)], cwd=repo)
-    expect_unfiled("page filing: n 98 on the remote, not in the origin ref, refuses", p, "fb-0958-7", "98")
-    reason = block_reason(p) or ""
-    check("page filing: the remedy names `git fetch origin %s`" % RECORD_BRANCH,
-          "git fetch origin %s" % RECORD_BRANCH in reason, reason)
-    check("page filing: the remedy says the copy is read as of the last fetch",
-          "last fetch" in reason.lower(), reason)
+    expect_read_back_remedy("page filing: n 98 on the remote, not in the origin ref, with its send, blocks",
+                            p, "fb-0958-7", "98")
     after = git(repo, "rev-parse", "refs/remotes/origin/" + RECORD_BRANCH).strip()
     check("page filing: the hook fetches nothing, so the origin ref does not move",
           after == before, "before %s, after %s" % (before, after))
@@ -1729,9 +1785,9 @@ ITEM_98 = ("disk-cleanup", {"id": "disk-cleanup", "n": 98})  # the item the wait
 
 def case_page_read_back_proves_the_filing():
     """An ArtifactData get, list or query of the waiting page's items collection, after the owner's message,
-    whose result returns item 98, proves the filing. The sender cannot export the copy, but it can read the page
-    back. The copy here lacks item 98, so only the read-back can pass the item. The case checks that the filing
-    accepts that read-back, since the copy alone refuses item 98."""
+    whose result returns item 98, proves the filing. The read-back is the only proof: the copy is never read. The
+    copy here lacks item 98. The case checks that a read-back returning 98 passes the item, for one document, a list
+    of 3 and a list of 40."""
     repo = record_repo("unfiled", copy_files(UNFILED))
     reads = (
         ("a get of items/disk-cleanup", tool_input("get", collection="items", doc_id="disk-cleanup"),
@@ -1742,6 +1798,8 @@ def case_page_read_back_proves_the_filing():
         ("a query of items where n is 98",
          tool_input("query", collection="items", doc_id=None, query={"where": [["n", "==", 98]]}),
          [ITEM_98], "nested"),
+        ("a list of 40 items, n 98 among them", tool_input("list", collection="items", doc_id=None),
+         docs_of(FORTY), "blocks"),
     )
     for label, inp, docs, form in reads:
         p = page_run(new_cfg(), "page-readback", [(NEUTRAL, (PAGE_ITEM,))],
@@ -1774,33 +1832,24 @@ def case_page_read_back_that_misses_n_does_not_prove_the_filing():
          [used_rec("ArtifactData", tool_input("list", collection="items", doc_id=None,
                                               out_dir=os.path.join(ROOT, "out")), tool_id="rb1"),
           result_rec("rb1", response_of([ITEM_98]))]),
+        ("an empty list of items",
+         [used_rec("ArtifactData", tool_input("list", collection="items", doc_id=None), tool_id="rb1"),
+          result_rec("rb1", response_of([]))]),
     )
     for label, records in misses:
         p = page_run(new_cfg(), "page-readback-no", [(NEUTRAL, (PAGE_ITEM,))],
                      [owner_rec(NEUTRAL), send_rec(SENT)] + records, cwd=repo)
-        expect_unfiled("page filing: %s does not prove n 98" % label, p, "fb-0958-7", "98")
+        expect_read_back_remedy("page filing: %s does not prove n 98" % label, p, "fb-0958-7", "98")
     p = page_run(new_cfg(), "page-readback-early", [(NEUTRAL, (PAGE_ITEM,))],
                  [used_rec("ArtifactData", get98, tool_id="rb1"), result_rec("rb1", response_of([ITEM_98])),
                   owner_rec(NEUTRAL), send_rec(SENT)], cwd=repo)
-    expect_unfiled("page filing: a read-back before the owner's message does not prove n 98", p, "fb-0958-7", "98")
+    expect_read_back_remedy("page filing: a read-back before the owner's message does not prove n 98", p,
+                            "fb-0958-7", "98")
     p = page_run(new_cfg(), "page-readback-nosend", [(NEUTRAL, (PAGE_ITEM,))],
                  [owner_rec(NEUTRAL), used_rec("ArtifactData", get98, tool_id="rb1"),
                   result_rec("rb1", response_of([ITEM_98]))], cwd=repo)
     expect_send_missing("page filing: a read-back of n 98 with no send still blocks on the send", p,
                         "fb-0958-7", "98")
-
-
-def case_page_unfiled_remedy_offers_the_read_back():
-    """The remedy for an unfiled number names both ways out: the page writer exports the copy into folder
-    `waiting`, or the sender reads item 98 back from the page. The case checks that the remedy offers the read-back,
-    since an export of the copy alone cannot file item 98."""
-    repo = record_repo("unfiled", copy_files(UNFILED))
-    p = page_run(new_cfg(), "page-remedy", [(NEUTRAL, (PAGE_ITEM,))], [owner_rec(NEUTRAL), send_rec(SENT)],
-                 cwd=repo)
-    expect_unfiled("page filing remedy: n 98 unfiled, with its send", p, "fb-0958-7", "98")
-    reason = block_reason(p) or ""
-    check("page filing remedy: offers a read of item 98 back from the page as a way out",
-          "read item 98 back from the page" in reason and "ArtifactData" in reason, reason)
 
 
 # --------------------------------------------------------------------------- repo cases
@@ -4357,20 +4406,18 @@ CASES = (
     case_page_owner_record_missing_stands_down,
     case_page_crlf_owner_text_matches_the_inbox,
     case_page_artifactdata_write_without_n_blocks,
-    case_page_filed_number_passes,
+    case_page_filed_copy_without_a_read_back_blocks,
     case_page_filed_number_still_needs_its_send,
-    case_page_unfiled_number_refuses_with_the_export_remedy,
-    case_page_unreadable_copy_is_unknown_and_checks_the_send,
-    case_page_filing_reads_the_record_branch_the_layout_names,
+    case_page_unfiled_number_blocks_with_the_read_back_remedy,
+    case_page_unreadable_copy_blocks_like_an_unfiled_one,
+    case_page_broken_extras_proved_send_passes_with_the_filing_stand_down,
     case_page_filing_needs_a_waiting_page_repo,
     case_page_malformed_home_refused_beside_a_filed_number,
-    case_page_filing_reads_do_not_grow_with_the_copy,
-    case_page_corrupt_item_file_is_unknown_never_a_block,
-    case_page_stale_origin_ref_names_the_fetch,
+    case_page_filing_never_reads_the_copy,
+    case_page_stale_origin_ref_blocks_and_fetches_nothing,
     case_page_stood_down_send_does_not_check_the_filing,
     case_page_read_back_proves_the_filing,
     case_page_read_back_that_misses_n_does_not_prove_the_filing,
-    case_page_unfiled_remedy_offers_the_read_back,
     case_repo_send_naming_the_repo_passes,
     case_repo_send_with_error_result_does_not_count,
     case_repo_slug_match_ignores_case,
