@@ -23,8 +23,8 @@ Interface the hook must match:
   with the call's tool_input JSON where $ARGUMENTS stood.
 - A model answer {"ok": false, "reason": R} refuses through guard_core.refuse(): a PreToolUse deny
   that holds R and the override line, and one guard.log deny line. An override lifts it: no output.
-- Veto (an act no override lifts): an Explore spawn whose model field is neither sonnet nor opus.
-  Every other refusal is liftable.
+- Veto (an act no override lifts): an Explore spawn with no model, a blank model or a haiku model.
+  A model above Sonnet is liftable. Every other refusal is liftable.
 - The Explore remedy: the spawn prompt's fix clause and the Agent fallback reason name the audit marker,
   EXPLORE_AUDIT_MARKER in hooks/guard.py, read at test time and never copied here.
 - Any model error, or malformed input, fails open: no deny, exit 0, one stderr line.
@@ -78,6 +78,7 @@ SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO, "settings
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+from shared_names import CREATE_SESSION_TOOL  # noqa: E402  the one home of the create_session tool name
 ROOT = _test_temp.run_folder()
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)
 STUB_DIR = os.path.join(ROOT, "stub")
@@ -540,10 +541,10 @@ def case_agent_override():
 
 
 def case_explore_row_is_vetoed():
-    # An Explore spawn on a model that is neither sonnet nor opus is the Explore row of agent-model-cap,
-    # a model guard. No override lifts it.
+    # An Explore spawn with no model, a blank model or a haiku model is the Explore row of agent-model-cap,
+    # a model guard. No override lifts it. A model above Sonnet is liftable (case_explore_unranked_model_is_liftable).
     constant = getattr(override, "NO_OVERRIDE", None) if override is not None else None
-    for label, model in (("haiku", "haiku"), ("no model field", None)):
+    for label, model in (("haiku", "haiku"), ("no model field", None), ("a blank model", "   "), ("a tab model", "\t")):
         r = run_hook(spawn_input("Explore", model=model), answer=FLAG, pass_=(SID_A, TIMED))
         d = r.deny() or {}
         check("explore: a flagged spawn on %s stays denied under a timed override" % label,
@@ -557,6 +558,41 @@ def case_explore_row_is_vetoed():
         r = run_hook(inp, answer=FLAG, pass_=(SID_A, TIMED))
         check("explore: %s is not vetoed, a timed override lifts it" % label,
               r.code == 0 and r.out == "" and lifted_log(r, "spawn-judge"), detail(r))
+
+
+# An Explore spawn on a model above Sonnet that the role table does not rank (rule roles-sonnet-is-the-ceiling). Like
+# guard.py's above-row refusal, an owner override lifts it. Haiku and a missing model stay vetoed (case_explore_row_is_vetoed).
+UNRANKED_MODELS = ("fable", "claude-fable-5-2")
+
+
+def case_explore_unranked_model_is_liftable():
+    for model in UNRANKED_MODELS:
+        r = run_hook(spawn_input("Explore", model=model), answer=FLAG, pass_=(SID_A, TIMED))
+        check("explore: a flagged Explore spawn on %s is lifted by a timed override" % model,
+              r.code == 0 and r.out == "" and lifted_log(r, "spawn-judge"), detail(r))
+
+
+def case_explore_unranked_model_offers_the_override():
+    # With no override the refusal still denies, and it ends with the override offer, never the no-override line.
+    offer = override.offer("spawn-judge").strip() if override is not None else ""
+    for model in UNRANKED_MODELS:
+        r = run_hook(spawn_input("Explore", model=model), answer=FLAG)
+        d = r.deny() or {}
+        check("explore: a flagged Explore spawn on %s is denied with no override" % model,
+              r.code == 0 and d.get("permissionDecision") == "deny" and "\toverride\t" not in r.log, detail(r))
+        check("explore: its refusal ends with the override offer, not the no-override line (%s)" % model,
+              bool(offer) and r.reason().rstrip().endswith(offer), r.reason()[-160:])
+
+
+def case_create_session_is_not_judged():
+    # call_judge judges only the tools in JUDGES (Agent, AskUserQuestion, the waiting-page tool), and settings.json's
+    # matcher for it names no create_session. So the Explore veto never reads a create_session call: no output, no
+    # model call, no log line, with an override in place.
+    payload = json.dumps({"session_id": SID_A, "tool_name": CREATE_SESSION_TOOL,
+                          "tool_input": {"model": UNRANKED_MODELS[0], "prompt": "Start a lane. " + MARK}})
+    r = run_hook(payload, answer=FLAG, pass_=(SID_A, TIMED))
+    check("create_session: call_judge passes the call unjudged (no output, no model call, no log line)",
+          r.code == 0 and r.out == "" and r.calls == [] and r.log == "", detail(r))
 
 
 def load_file_module(path, name):
@@ -1718,7 +1754,8 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
 
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
-                 case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
+                 case_explore_unranked_model_is_liftable, case_explore_unranked_model_offers_the_override,
+                 case_create_session_is_not_judged, case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
                  case_question_departs, case_page_fixture_passes_the_form, case_page_reject_and_accept,
                  case_page_no_model_call, case_page_batch_one_call, case_page_override,
                  case_page_model_failure_fails_open, case_page_str_replace_judged,
