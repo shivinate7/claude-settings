@@ -1,0 +1,14 @@
+{
+ "id": "macos-jobs-gated-by-scope",
+ "title": "A PR that touches no macOS path starts zero macOS runners: gate the three macOS jobs at job level on scope, and let all-jobs-passed accept a scope-skip",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Consultant 03:19 CST Nov 14 and coordinator 03:21 (relayed; the coordinator read checks.yml; unchecked by triage): the jobs shell-macos, checks-macos and checks-macos-b have a job `if` of only `github.event_name != 'push'`; the file's own comment says a step-level skip still starts the runner (R61). #3376 waited 52 min in the macOS queue and ran 24 min (n=1, relayed; step ci-wall-time).",
+ "source": "Owner ruling r61 b (15:29 CST Nov 12): \"Run the draft Mac test only when the files touch Mac code.\" This step enacts it at job level. Owner ruling r63 (q2 a): the install.sh tests run on Linux and macOS, so a PR touching install.sh still starts shell-macos. Neighbours: ci-mac-once-per-batch (doing; its lane is archived after #3302; its leftover is #3005's lane, a narrow PR dropping the macOS run of check_unknown_reads_contract.py, a different PR), ci-batch-mac-runner, ci-macos-idle-measure, install-change-runs-install-jobs (done).",
+ "note": "Triage 03:22 CST Nov 14: design (consultant): gate shell-macos, checks-macos and checks-macos-b at JOB level on `needs.scope.outputs`; all-jobs-passed accepts a job skipped because scope said no, and any other skip still fails. Red first: a PR touching no macOS path starts zero macOS runners and all-jobs-passed is green; a PR touching install.sh starts shell-macos. Coordinator's risks, in the brief: (a) it changes a SHARED guard's verdict (all-jobs-passed serves every repo): a guard or check change, round 3 rule, net-value test; (b) the action must tell \"scope said no\" from \"scope itself failed or was skipped\" (dependents then skip too, and must still fail); (c) it changes what a green rollup proves: one test per case. The lane lists the other jobs gated at step level only (Windows legs, checks-mutate, child repos' jobs) as follow-ups in its PR body. Tracker: the coordinator; path ALONE; draft first. Not started.",
+ "updatedAt": "2026-11-14T03:22:00-06:00"
+}
