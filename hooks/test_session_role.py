@@ -246,7 +246,9 @@ class MergeRoleFault(SessionRoleCase):
         import merge as merge_tool  # noqa: E402  merge/merge.py, the merge tool's own reader
         with mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": SID}), \
                 mock.patch.object(session_role, "own_role", side_effect=RuntimeError("injected")):
-            os.environ.pop("CLAUDE_CODE_REMOTE", None)  # a cloud remote would read no local role at all
+            # the local branch runs only with no cloud id; a cloud id reads its own file and never calls the role reader
+            os.environ.pop("CLAUDE_CODE_REMOTE", None)
+            os.environ.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
             try:
                 role = merge_tool.read_merge_role()
             except Exception as e:  # a crash in the fallback is a failed assert here, not an error
