@@ -349,10 +349,9 @@ it's how the limit batches that's the problem". How many lanes start is left to 
 - **R9.** Owner 15:44 CST Nov 10: "yeah i never wanted round 3 if it passed earlier and was so confused
   to see that it was occuring"; "agreed A -- can look into the sonnet noise thing later". Fold the 15+
   rounds rulings into one record. Round 1 runs on item 359 a's model (Sonnet for a guard or check
-  change, the role's model otherwise). Fixes are verified per G5. Correction, owner 16:07 CST Nov 10
-  (relayed; step rounds-rules-one-record): round 3 follows owner pick 471 a
-  (2026-11-09 23:39 CST, step review-state-guard-needs-round-3) as it stands. A guard or check change
-  that passes round 1 is done, and a fix verifier PASS ends review too (owner, 2026-11-13 18:35 CST). The net-value test is
+  change, the role's model otherwise). Fixes are verified per G5. Every change, guard or check included, is done at the first round
+  or fix check that passes. A later fix gets one fix verifier whose pass ends review. Round 3 runs
+  only after a round 2 FAIL (owner, 2026-11-13 18:35 CST). The net-value test is
   only for an unclear case that cannot finish by the end of the rounds (the 2026-10-15 "still
   unfinished" valve in hold-unsafe-after-round-3). Evidence: round 3 found a failure 0 of 14+ times
   after a clean round 2; the net-value hold caught 6 real holes. Deferred: Sonnet round 1 for every
