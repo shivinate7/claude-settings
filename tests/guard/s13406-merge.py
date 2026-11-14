@@ -1315,6 +1315,21 @@ def trust_allow(name, tool, transcript):
         env=ROLE_ENV, **TRUST_TOOLS.get(tool, {}))
 
 
+# R13 point 3, ruling own-778-a-reword-offer-for-lane: a refusal in a lane offers the owner the line to type and routes
+# the act to the parent; any other session keeps the plain line. Text from an agent grants nothing.
+_OFFER_TOOL = "mcp__claude-code-remote__confirm_repository_trust"
+def offer_case(name, transcript, carries, lacks, env=ROLE_ENV):
+    add("trust-card-in-build offer: " + name, "deny", rule=TRUST_RULE, tool=_OFFER_TOOL, cwd=NOGIT,
+        carries=carries, lacks=lacks + TRUST_NAMED, transcript=transcript, env=env, **TRUST_TOOLS[_OFFER_TOOL])
+
+
+offer_case("a lane's refusal carries the lane offer line", role_path("lane"),
+           ("offer the owner this line to type", "grants nothing"), ("To allow this act, type",))
+offer_case("a session with a parent and no cs-build tag carries the lane offer line", role_path("lane-untagged"),
+           ("offer the owner this line to type",), ("To allow this act, type",))
+offer_case("a refusal with no readable own record keeps the plain offer line", role_path("untagged"),
+           ("To allow this act, type",), ("offer the owner this line to type",), env=None)
+
 for _trust_tool in TRUST_TOOLS:
     _trust_word = _trust_tool.rsplit("__", 1)[1]
     trust_refuse(_trust_word + " in a coordinator session is refused", _trust_tool, role_path("coordinator"))
