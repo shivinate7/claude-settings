@@ -18,7 +18,7 @@ source=$(printf '%s' "$input" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\(
 # with a token. Cost: at most two env reads, no network, no new process, no timer, no file written.
 tier_line() {
   if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || [ -n "${CLAUDE_CODE_REMOTE_SESSION_ID:-}" ]; then
-    printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick solo, one lane or coordinator from the request. Before you act as coordinator, read every page of list_sessions for a session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo whose session_status is not archived; if one is found, coordinate with it, else proceed. Merge role: this sentence is for a session whose own tag is cs-build:batch-runner, and for no other. Such a session first runs get_session with no argument, in a turn of its own, then runs `~/.claude/bin/merge --role batch-runner`, at session start and after each resume, because a guard checks its tags in that result and a fresh container loses the role file. A lane, the coordinator or any other tier never runs it, and this line is no instruction to it. A coordinator the owner started tags itself cs-build:coordinator with set_session_tags on its own id at start. The coordinator never merges. A solo or one-lane session the owner started, with no parent_session_id, merges its own PR under the repo merge grant or the owner named act. A lane session (tag cs-build:lane, with a parent_session_id) hands its reviewed branch, head and PR to the batch runner (list_sessions, tag cs-build:batch-runner, same repo) and never merges.'
+    printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick solo, one lane or coordinator from the request. Before you act as coordinator, read every page of list_sessions for a session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo whose session_status is not archived; if one is found, coordinate with it, else proceed. Merge role: this sentence is for a session whose own tag is cs-build:batch-runner, and for no other. Such a session first runs get_session with no argument, in a turn of its own, then runs `~/.claude/bin/merge --role batch-runner`, at session start and after each resume, because a guard checks its tags in that result and a fresh container loses the role file. A lane, the coordinator or any other tier never runs it, and this line is no instruction to it. A session tagged cs-build:batch-runner, and no other, runs `~/.claude/bin/merge --idle-lanes --live FILE` after each merge, with the live file built by the steps in roadmap/livework/README.md on the record branch, then runs get_session on each listed lane alone and archives that lane, but skips any lane that shows a HOLD marker or needs judgment (unpushed work, records on another head, a lane waiting on the owner) and names each skipped lane in its report. A coordinator the owner started tags itself cs-build:coordinator with set_session_tags on its own id at start. The coordinator never merges. A solo or one-lane session the owner started, with no parent_session_id, merges its own PR under the repo merge grant or the owner named act. A lane session (tag cs-build:lane, with a parent_session_id) hands its reviewed branch, head and PR to the batch runner (list_sessions, tag cs-build:batch-runner, same repo) and never merges.'
   fi
 }
 
@@ -56,10 +56,11 @@ bounded_git() {
 # freshness check below. The first call per checkout runs it; a later call for the same checkout (resolved with pwd -P)
 # returns that status again, so a session start refreshes each checkout once, however many checks ask. The caller must
 # not run it in $( ), or the memo and fetch_target are lost with the subshell.
-# The refs come from the remote, not from local refs: one `git ls-remote --symref origin HEAD refs/heads/main` names
-# the remote HEAD's target and says whether main exists. Git fails a whole fetch on a refspec the remote lacks, and a
+# The refs come from the remote, not from local refs: one `git ls-remote --symref origin HEAD refs/heads/main refs/heads/stable`
+# names the remote HEAD's target and says whether main and stable exist. Git fails a whole fetch on a refspec the remote lacks, and a
 # local origin/HEAD goes stale when the remote's default is renamed, so a refspec read locally can fail every start.
-# The one fetch then names main when the remote lists it, and the target when that is another branch. A remote that
+# The one fetch then names main when the remote lists it, the target when that is another branch, and stable when the
+# remote lists it. A remote that
 # lists neither is not fetched, since a fetch with no refspec reads the configured wildcard. Only after a good
 # ls-remote and a good (or skipped) fetch, a remote with no main has its stale origin/main deleted, a remote-tracking
 # ref only. An ls-remote or fetch that fails or is killed counts as not run, deletes nothing and is never retried.
@@ -86,11 +87,13 @@ EOF
   fetch_remote_read=""
   bf_rc=1
   bf_ls=$(mktemp 2>/dev/null)
-  if [ -n "$bf_ls" ] && bounded_git "$bf_dir" "$bf_ls" ls-remote --symref origin HEAD refs/heads/main; then
+  if [ -n "$bf_ls" ] && bounded_git "$bf_dir" "$bf_ls" ls-remote --symref origin HEAD refs/heads/main refs/heads/stable; then
     fetch_remote_read=1
-    # Lines read: "ref: refs/heads/<t> HEAD" for the target, "<sha> refs/heads/main" when main exists. The pattern HEAD
-    # also matches refs that end in /HEAD, so only the exact HEAD field counts.
+    # Lines read: "ref: refs/heads/<t> HEAD" for the target, "<sha> refs/heads/main" when main exists and
+    # "<sha> refs/heads/stable" when stable exists. The pattern HEAD also matches refs that end in /HEAD, so only the
+    # exact HEAD field counts.
     bf_has_main=""
+    bf_has_stable=""
     while read -r bf_f1 bf_f2 bf_f3; do
       if [ "$bf_f1" = "ref:" ] && [ "$bf_f3" = HEAD ]; then
         case "$bf_f2" in
@@ -98,12 +101,19 @@ EOF
         esac
       elif [ "$bf_f1" != "ref:" ] && [ "$bf_f2" = refs/heads/main ] && [ -z "$bf_f3" ]; then
         bf_has_main=1
+      elif [ "$bf_f1" != "ref:" ] && [ "$bf_f2" = refs/heads/stable ] && [ -z "$bf_f3" ]; then
+        bf_has_stable=1
       fi
     done <"$bf_ls"
     set --
     [ -n "$bf_has_main" ] && set -- "+refs/heads/main:refs/remotes/origin/main"
     if [ -n "$fetch_target" ] && [ "$fetch_target" != main ]; then
       set -- "$@" "+refs/heads/$fetch_target:refs/remotes/origin/$fetch_target"
+    fi
+    # stable is the ref the pin follows (decision merge-reinstalls-from-main). Named only when ls-remote listed it, so a
+    # remote with no stable never fails the fetch, and it rides in the same fetch, not a second one.
+    if [ -n "$bf_has_stable" ] && [ "$fetch_target" != stable ]; then
+      set -- "$@" "+refs/heads/stable:refs/remotes/origin/stable"
     fi
     bf_rc=0
     if [ "$#" -gt 0 ]; then
@@ -158,7 +168,7 @@ default_branch="${default_branch#origin/}"
 
 # Step grants-read-from-main: a session cites the standing grants from origin/main, never from its own checkout,
 # because a stale checkout once led a coordinator to cite acts the owner never gave. A checkout with an origin
-# remote is refreshed first with bounded_fetch (one fetch of main and the remote HEAD's target, no prune, on any
+# remote is refreshed first with bounded_fetch (one fetch of main, stable and the remote HEAD's target, no prune, on any
 # branch or a detached HEAD), so the compare reads a current origin/main, not a stale one. The block runs right after
 # the tier line, before every slow step (the worktree listing, the caution call): a hook the platform kills at its
 # timeout loses all later output, and these lines are the ones a session must not lose. A refresh that fails or times out prints one
@@ -179,7 +189,7 @@ default_branch="${default_branch#origin/}"
 # reads, all local. The ls-remote and the fetch are each bounded by a watchdog (bounded_git): a short-lived subshell and
 # a sleep of at most CLAUDE_SETTINGS_FETCH_TIMEOUT seconds; the sleep is killed when git returns first. When the bound
 # hits, the kill reaches only the subshell that runs git, so on bash the git child may finish after the hook
-# exits. It is bounded by git's own run (an ls-remote, or a fetch of one or two refs) and is never a daemon. No other
+# exits. It is bounded by git's own run (an ls-remote, or a fetch of up to three refs) and is never a daemon. No other
 # timer. The hook itself keeps no file; that late git writes only its own refs, objects and FETCH_HEAD.
 gm_unref=""
 gm_remote_read=""
@@ -368,7 +378,8 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
     pin_head=$(cd "$d" 2>/dev/null && git rev-parse HEAD 2>/dev/null)
     main_head=$(cd "$d" 2>/dev/null && git rev-parse --verify -q refs/heads/main 2>/dev/null)
     origin_head=$(cd "$d" 2>/dev/null && git rev-parse --verify -q refs/remotes/origin/main 2>/dev/null)
-    if [ -n "$pin_head" ] && { [ "$pin_head" = "$main_head" ] || [ "$pin_head" = "$origin_head" ]; }; then
+    stable_head=$(cd "$d" 2>/dev/null && git rev-parse --verify -q refs/remotes/origin/stable 2>/dev/null)
+    if [ -n "$pin_head" ] && { [ "$pin_head" = "$main_head" ] || [ "$pin_head" = "$origin_head" ] || [ "$pin_head" = "$stable_head" ]; }; then
       pointer_branch=main
     else
       pointer_branch="a detached HEAD"
@@ -400,10 +411,19 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
   cloud_mirror=$(cd "$d" 2>/dev/null && git config --get claude-settings.cloudMirror 2>/dev/null)
   if [ "$pointer_branch" = "main" ] && [ "$cloud_mirror" != "true" ]; then
     if bounded_fetch "$d"; then
-      behind=$(cd "$d" 2>/dev/null && git rev-list --count main..origin/main 2>/dev/null)
+      # The pin follows origin/stable (decision merge-reinstalls-from-main); a clone with no origin/stable is
+      # counted against origin/main as before. CLAUDE_SETTINGS_REF=main (the recovery) makes main the ref the pin
+      # follows, so the count is against origin/main even when origin/stable exists.
+      if [ "${CLAUDE_SETTINGS_REF:-stable}" != main ] && (cd "$d" 2>/dev/null && git rev-parse --verify -q refs/remotes/origin/stable >/dev/null 2>&1); then
+        behind_ref=origin/stable
+        behind=$(cd "$d" 2>/dev/null && git rev-list --count HEAD..origin/stable 2>/dev/null)
+      else
+        behind_ref=origin/main
+        behind=$(cd "$d" 2>/dev/null && git rev-list --count main..origin/main 2>/dev/null)
+      fi
       if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then
-        printf 'claude-settings: %s is %s commits behind origin/main; global rules and hooks are stale\n' \
-          "$d" "$behind"
+        printf 'claude-settings: %s is %s commits behind %s; global rules and hooks are stale\n' \
+          "$d" "$behind" "$behind_ref"
         ptr_behind_printed=1
       fi
     else
