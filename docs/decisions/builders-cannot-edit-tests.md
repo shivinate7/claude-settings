@@ -59,6 +59,14 @@ The payload must carry an `agent_id`. The main session, reviewers, Explore, and 
 - Write a file in no repository, such as a probe in the session scratchpad, from a call that runs in a repository. A path with no enclosing checkout is no test of the repo. A test path in any repository stays refused, also one in a different repository. A call that runs in no repository still judges the path by its shape.
 - Write a document in a `spec` folder, such as `docs/spec/api.md`. `spec` is a test folder for code and fixtures only. A `.md`, `.mdx`, `.markdown`, `.txt`, `.rst` or `.adoc` file there is a document. `spec/foo_spec.rb` and `src/x.spec.ts` stay refused.
 
+## Where a test-support helper lives
+
+A test-support helper lives in one place: a flat `test_<name>.py` file beside the tests that use it, such as `hooks/test_refusal_note.py` and `hooks/test_mutate_js.py`.
+
+- The guard's `TEST_BASENAME` reads `test_<name>.py` as a test path. Only a test-author writes it. A builder does not.
+- `check_landed_dirs` refuses a subfolder of a landed folder, because `install.sh` lands only top-level files. A helper in a `test_support/` subfolder of a landed folder is refused.
+- The refusal names the flat file as the way out. It accepts no new path form.
+
 ## The shell check
 
 The shell check does not replace the act. The act stays a test path in the builder's change. The shell check flags common mistake forms first. The diff log at commit, push and stop catches every other form. Recovery stays allowed: `git checkout -- <test>` and `git restore` are not read as writes.
