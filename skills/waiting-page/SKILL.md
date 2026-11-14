@@ -443,7 +443,7 @@ report (see the park branch below). A `none` answer on this path gets no new opt
 
 The writer reads each `kept-answer:` line at its wake ("Keep the page on main's code", step 2). The item is closed and its answer is still kept:
 the close kept it on purpose, so leave it. Delete `answers/<id>` (pinned to its version) only when the item is reworded (steps 3 and 4) or overturned (step 5). When the act is not done, reopen the item with `lane` and `lastAnswer`; the reopen keeps `answers/<id>`.
-The `kept-answer:` line is the writer-path check: a close that drops `answers/<id>` is wrong.
+The `kept-answer:` line is the writer-path check: a non-park close that drops `answers/<id>` is wrong.
 A closed item with `waits` is named too ("is closed with waits"), since a chat answer can close an item during a wait. When its wait has ended, drop `waits` and keep the answer.
 A `kept-answer: unknown` line means that the check did not run: fetch again.
 
@@ -473,7 +473,7 @@ for the done report. A Park is the exception (see the park branch). Otherwise it
    roadmap upkeep row "page rulings not on their step" checks.
 2. Close the item: `ArtifactData update items/<id> {"status": "closed", "closed": "<now, ISO UTC with a trailing Z>"}`, pinned to the version
    you read (`if_version`). If the close conflicts, the owner marked the item read in the meantime: read it again and retry the close. Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
-   in the same update. The close keeps `answers/<id>` on purpose. A close never deletes it; only a reword (steps 3 and 4) or an overturn (step 5) does. The page shows a closed
+   in the same update. The close keeps `answers/<id>` on purpose. A non-park close never deletes it; only a reword (steps 3 and 4) or an overturn (step 5) does. The page shows a closed
    item as one line, with its home and its reply, until the owner marks it read. The page shows `lastAnswer` as the answer on the opened line, and on an item left open (steps 3, 4 and a busy lane).
 3. If the answer is `none` with no clear direction, and you can write new `options`, `recommended` and `why` from the
    note in this same turn, act in this order. A `multi` item's new `recommended` is a list. First ask the chat
