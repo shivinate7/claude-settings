@@ -13,9 +13,41 @@ any read error prints nothing: the audit fails open.
 """
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+
+SESSION_ID = re.compile(r"\bsession_[A-Za-z0-9][A-Za-z0-9_-]*")
+
+
+def response_text(response, depth=0):
+    """The text of a tool_response, read from a string, a content list, a dict's `content`, `result` or `text`, or
+    a list of any of these. Anything else, or a nest deeper than four, gives ""."""
+    if depth > 4:
+        return ""
+    if isinstance(response, str):
+        return response
+    if isinstance(response, list):
+        return "\n".join(response_text(item, depth + 1) for item in response)
+    if isinstance(response, dict):
+        return "\n".join(response_text(response.get(key), depth + 1) for key in ("text", "content", "result"))
+    return ""
+
+
+def started(response):
+    """False when the tool_response shows no session started: an error flag or a deny, or a response that is not text,
+    a list or a dict (a number cannot be read, so the audit says nothing)."""
+    if not isinstance(response, (str, list, dict)):
+        return False
+    return not (isinstance(response, dict) and any(response.get(key) for key in ("is_error", "isError", "deny")))
+
+
+def new_session(response):
+    """The new session's id from the response text, or a phrase that says it is unread."""
+    found = SESSION_ID.search(response_text(response))
+    return found.group(0) if found else "id is unread"
 
 
 def reasons(payload):
@@ -46,13 +78,16 @@ def main():
         payload = json.loads(sys.stdin.read() or "{}")
         if not isinstance(payload, dict) or payload.get("tool_name") != "mcp__ccd_session__start_session":
             return 0
+        if not started(payload.get("tool_response")):
+            return 0
         found = reasons(payload)
         if found:
             print(json.dumps({"hookSpecificOutput": {
                 "hookEventName": "PostToolUse",
-                "additionalContext": ("The session you just started is a bad start: %s. Stop it: %s. Then start "
+                "additionalContext": ("The session you just started (%s) is a bad start: %s. Stop it: %s. Then start "
                                       "it again with a good start. (decision start-session-not-pretooluse, "
-                                      "start_session is checked after the call)" % ("; ".join(found), stop_line())),
+                                      "start_session is checked after the call)"
+                                      % (new_session(payload.get("tool_response")), "; ".join(found), stop_line())),
             }}))
     except Exception as err:   # fail open: a hook that cannot read says nothing
         sys.stderr.write("start_session_audit: %s\n" % err)
