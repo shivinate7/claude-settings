@@ -1,7 +1,7 @@
 {
  "id": "hand-made-worktree-vs-red-run",
  "title": "The hand-made-worktree guard blocks the red-run protocol's own checkout; decide a sanctioned route",
- "status": "doing",
+ "status": "folded",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL1w3uxyMbnYYYYmE48",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "A test-author following the red-run protocol is refused and used git archive copies, which do not prove the red on a real checkout.",
  "source": "Coordinator 17:04 CST Nov 13, from lane brief-from-step (session_013NEJL3zemFrPdTzdnwhpVi; PRs #3261, #3262); the lane's measures, unchecked by the coordinator and by triage.",
- "note": "Filed 17:05 CST Nov 13. Decide a sanctioned route, for example EnterWorktree on an old sha (the coordinator's guess, unverified). A lane reads the guard record first; do not route around the refusal. Folds step worktree-guard-refuses-red-run-checkout (filed 17:05 CST from the same lane; same fact). A guard or protocol change: test-author red case first, builder, reviewer. Past rulings not checked. Not started. Coordinator 19:54 CST Nov 13 (19:53, owner asked it to start the lanes): lane started, session_013NEJL1w3uxyMbnYYYYmE48 (Sonnet, medium; searches for duplicates first). It may come back with an owner question.",
- "updatedAt": "2026-11-13T19:54:01-06:00"
+ "note": "Filed 17:05 CST Nov 13. Decide a sanctioned route, for example EnterWorktree on an old sha (the coordinator's guess, unverified). A lane reads the guard record first; do not route around the refusal. Folds step worktree-guard-refuses-red-run-checkout (filed 17:05 CST from the same lane; same fact). A guard or protocol change: test-author red case first, builder, reviewer. Past rulings not checked. Not started. Coordinator 19:54 CST Nov 13 (19:53, owner asked it to start the lanes): lane started, session_013NEJL1w3uxyMbnYYYYmE48 (Sonnet, medium; searches for duplicates first). It may come back with an owner question. Coordinator 20:07 CST Nov 13 (20:06, REST read): its lane started 19:52 duplicated step agent-worktree-add-in-tool-dir (open draft PR #3026, head 369657dc746a). Folded there. Todo step worktree-add-refused-false-alarm is a possible gap; the lane is reading #3026 against its two refusals and builds nothing.",
+ "updatedAt": "2026-11-13T20:07:20-06:00"
 }
