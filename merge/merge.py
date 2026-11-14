@@ -100,7 +100,7 @@
                           heads merge clean with the base. A clash that comes through the base is a report line after the PASS line, and it
                           names the PR that conflicts with the base. A counted clash FAILs, naming each PR and file, with its remedy
                           (--lint-unknown-ok never lifts it); on a batch integration PR (a freeze block in its body, and its branch is that
-                          batch's `batch-NAME`) it is a report line instead, because the lanes rebase after the merge. A base conflict still FAILs. PRs in one stack (one head holds the other) are skipped. Added cost: one `git merge-tree` of the
+                          batch's `batch-NAME`), or on a PR whose body holds the single line `<!-- combined-pr -->` outside a code fence, it is a report line instead, because the lanes rebase after the merge. A base conflict still FAILs. PRs in one stack (one head holds the other) are skipped. Added cost: one `git merge-tree` of the
                           head against main (its base), two merge-trees per other PR compared (that PR against the base, and against the head),
                           and exactly one PR-list read; no merge-tree for a stack-skipped PR, and none beyond the head's when there is no other
                           PR. (A PR-list read is one `gh api` call per 100 PRs, and the PR-list read still runs when there is no other PR. When any PR is
