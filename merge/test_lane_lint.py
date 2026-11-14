@@ -56,7 +56,8 @@ detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=
 files = {p: watched(p) for p in WATCH}
 with open(LOG, "a", encoding="utf-8") as f:
     print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached, "files": files,
-                      "status": git("status", "--porcelain"), "first_parent": git("rev-parse", "--verify", "-q", "HEAD^1")}), file=f)
+                      "status": git("status", "--porcelain"), "first_parent": git("rev-parse", "--verify", "-q", "HEAD^1"),
+                      "head_sha_env": os.environ.get("CI_JOB_HEAD_SHA")}), file=f)
 if "--plan" in sys.argv:
     for state, name in STEPS:
         print("would run " + name)
@@ -2360,14 +2361,13 @@ class BatchLintFlags(tm.Env):
         text = out.getvalue()
         self.assertEqual(rc, 0, text)
         self.assertEqual(len(pass_lines(text)), 1, text)
-        # ci-job gives each step HEAD as its head sha, and the lint's HEAD is the merge commit, so silent undo is passed that commit, not the head.
+        # The lint's HEAD is the merge commit, but head.sha must be the pushed head: silent undo checks the lane's own commits against upstream.
         silent = self.stub_calls(script_of(dict(self.found)["Silent undo check"]))
         self.assertEqual(len(silent), 1, "the silent undo check ran %d times, want once: %s" % (len(silent), text))
         self.assertIn("--head", silent[0]["argv"], "the silent undo check was given no --head: " + text)
-        lint_head = silent[0]["argv"][silent[0]["argv"].index("--head") + 1]
-        self.assertEqual(merge_parents(self.co, lint_head), [self.head(BASE), head],
-                         "the silent undo check was not passed the merge of origin/%s and the head: %s" % (BASE, text))
-        values = {"github.base_ref": BASE, "github.event.pull_request.head.sha": lint_head}
+        given = silent[0]["argv"][silent[0]["argv"].index("--head") + 1]
+        self.assertEqual(given, head, "the silent undo check was given %s, not the pushed head %s: %s" % (given[:9], head[:9], text))
+        values = {"github.base_ref": BASE, "github.event.pull_request.head.sha": head}
         for name, ci_step in self.found:
             if name == STE:
                 continue
@@ -3658,6 +3658,13 @@ class MergedLintTree(LaneFixture):
     commit_on = CrossMeasure.commit_on  # the one home of a pushed commit on a branch: CrossMeasure's
     own_writes = CrossMeasure.own_writes  # the head's pushed commit: CrossMeasure's
     clash = CrossMeasure.clash  # the merge-tree precondition, read in the second clone: CrossMeasure's
+    listing = CrossMeasure.listing  # a scripted pull request row: CrossMeasure's
+    pr_writes = CrossMeasure.pr_writes  # a sibling pull request with its own commit: CrossMeasure's
+    integration_body = CrossMeasure.integration_body  # the batch integration PR's body: CrossMeasure's
+    assert_integration_scope = CrossMeasure.assert_integration_scope  # CrossMeasure's
+    stacked_pr_on_release = LaneLint.stacked_pr_on_release  # a PR based on release: LaneLint's
+    merge_release_into_feat = LaneLint.merge_release_into_feat  # LaneLint's
+    contains = LaneLint.contains  # LaneLint's ancestor read
 
     def shared_file(self, path, text):
         """Main gains `path` with `text`, and the lane head merges main in. Head and main then hold `text` as their merge base, so a later
@@ -3798,6 +3805,70 @@ class MergedLintTree(LaneFixture):
         runs = self.lint_calls()
         self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
         self.assertIsNone(runs[0]["files"][FLOOR_CHECK], "the lint read the head's copy of a file main deleted: " + text)
+
+    def test_the_lint_hands_ci_job_the_pushed_head_as_its_head_sha(self):
+        """ci-job reads head.sha from its tree's HEAD, which is the merge commit. The lint hands ci-job the pushed head in CI_JOB_HEAD_SHA,
+        so the silent undo check reads the lane's own commits."""
+        head = self.main_fix_after_branch()
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        run = self.lint_calls()[0]
+        self.assertEqual(run["head_sha_env"], head,
+                         "ci-job was not given the pushed head as CI_JOB_HEAD_SHA (it got %r), so its head.sha is the lint tree's HEAD: %s" % (run["head_sha_env"], text))
+
+    def test_the_merge_commit_keeps_the_base_tip_the_merge_read_when_main_moves_before_it_is_made(self):
+        """A fetch between the merge read and the commit moves origin/<base>. cross_measure fetches every head when a sibling PR is named, and
+        a sibling's open-PR read runs first here, so main moves in that window. The merge commit keeps the tip the merge read."""
+        self.main_fix_after_branch()
+        old_main = self.head("main")
+        self.host.pulls = {}
+        self.pr_writes(8, {"lane-eight.txt": "lane 8\n"}, lane_body(OTHER))
+        moved = []
+        real_open_pulls = self.host.open_pulls
+
+        def open_pulls_after_main_moves():
+            if not moved:
+                moved.append(True)
+                self.main_edits("race/moved.txt", "main moved after the merge read\n")
+            return real_open_pulls()
+
+        self.host.open_pulls = open_pulls_after_main_moves
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.run_lane("--lane-lint", "7", "--with", "8")
+        self.assertTrue(moved, "scope: main did not move during the lint, so the race probes nothing: " + text)
+        self.assertEqual(rc, 0, text)
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
+        parents = merge_parents(self.co, runs[0]["head"])
+        self.assertEqual(parents[:1], [old_main], "the merge commit's first parent is %s, not the base tip %s that the merge read: %s"
+                         % (parents[0][:9] if parents else None, old_main[:9], text))
+
+    def test_a_stacked_pr_lint_gives_ci_job_its_head_and_a_clean_merge_on_its_base(self):
+        _, release = self.stacked_pr_on_release()
+        head = self.merge_release_into_feat()
+        self.assertTrue(self.contains(head, release), "precondition: the head does not hold its base's head, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.lint_run("--lane-lint", "7", base="release", head=head)
+        self.assertEqual(rc, 0, text)
+        run = self.lint_calls()[0]
+        self.assertEqual(run["head_sha_env"], head,
+                         "the stacked PR's ci-job was not given the pushed head as CI_JOB_HEAD_SHA (it got %r): %s" % (run["head_sha_env"], text))
+        self.assertEqual(run["status"], "", "the stacked PR's lint tree is not clean: " + text)
+        self.assertEqual(run["first_parent"], release, "the stacked PR's merge commit is not on its base tip: " + text)
+
+    def test_an_integration_pr_lint_gives_ci_job_its_head_and_a_clean_merge_on_main(self):
+        head = self.commit_on(merge.integration_branch(INTEGRATION_NAME), {"integration/batch.txt": "integration 7\n"}, "origin/main")
+        self.host.branch, self.host.body = merge.integration_branch(INTEGRATION_NAME), self.integration_body()
+        self.assert_integration_scope()
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.lint_run("--lane-lint", "7", head=head)
+        self.assertEqual(rc, 0, text)
+        run = self.lint_calls()[0]
+        self.assertEqual(run["head_sha_env"], head,
+                         "the integration PR's ci-job was not given the pushed head as CI_JOB_HEAD_SHA (it got %r): %s" % (run["head_sha_env"], text))
+        self.assertEqual(run["status"], "", "the integration PR's lint tree is not clean: " + text)
+        self.assertEqual(run["first_parent"], self.head("main"), "the integration PR's merge commit is not on the base tip: " + text)
 
     def test_a_failed_fetch_of_main_stops_unknown_and_never_passes_with_or_without_a_reason(self):  # control: green on the old code
         self.own_writes({"own-a.txt": "lane 7\n"})
