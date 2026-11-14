@@ -184,8 +184,8 @@ runs_are "$(gh_run ci success 2026-01-02 u1 push 1)" "$(gh_run deploy timed_out 
 jobs_of 1 checks:success
 t red one-red-workflow-among-green
 
-# The empty push run (decision no-merge-onto-red-main): a green run of the push group that ran no suite job is no verdict unless it carries
-# evidence (push-skip success and scope skipped). The alarm judges the group's newest run that is not empty, as merge.py does.
+# The empty push run (decision no-merge-onto-red-main): a green run of the push group that ran no suite job
+# is passed over, with or without push-skip evidence. The alarm judges the group's newest run that ran its suites, as merge.py does.
 runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 push 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 push 1)"
 jobs_of 1 checks:failure
 jobs_of 2 push-skip:success scope:success checks:skipped
@@ -197,7 +197,7 @@ t red empty-green-dispatch-without-evidence-does-not-hide-an-older-red-push "" "
 runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 push 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 push 1)"
 jobs_of 1 checks:failure
 jobs_of 2 push-skip:success scope:skipped checks:skipped
-t green empty-green-push-with-evidence-clears-an-older-red-push "" ""
+t red empty-green-push-with-evidence-does-not-clear-an-older-red-push "" "" https://runs/red-1
 runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 push 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 push 1)"
 jobs_of 1 checks:failure
 jobs_of 2 scope:success

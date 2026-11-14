@@ -12,16 +12,16 @@ Owner, item 729 a (relayed by the coordinator, 2026-11-13 12:29 CST), extended b
 
 How the red-main check still sees a test-red main (`no-merge-onto-red-main`):
 
-- A skipped push run reads green only because a tested-green tree is on main. The run it rests on passed on that exact tree, with the suites its diff touched.
+- A skipped push run is no verdict on main. Its conclusion is `success`, but no job of it concluded `success` except the bookkeeping jobs `scope`, `push-skip` and `nightly-skip`, so the red-main check passes it over (`clear_rule.empty_without_evidence`, the one home; `merge/merge.py` `Host.base_state`; owner ruling own-812-a-judge-suite-runs, 2026-11-13 23:38 CST). The verdict is the newest push-group run (push or dispatch) that ran its suites, so an older red run stays red. A push group whose runs on the page all ran no suite reads unknown. No pull-request run covers a skipped push run. The skip still rests on a passing PR run of the same tree, with the suites its diff touched.
 - A red PR run, a direct push, an admin merge, a tree mismatch and a read error all run the full suites on the push. A red suite then makes the push run red, and the check refuses merges.
-- A skipped push run clears no red nightly. It has `push-skip` success and `scope` skipped, with every suite job skipped, and a skipped job is no pass. Test: `merge/test_merge.py`, class `RedMainBrake`, `test_a_red_nightly_stays_red_under_a_newer_push_run_that_the_proven_skip_skipped`.
+- A skipped push run clears no red run, nightly or push. It has `push-skip` success and `scope` skipped, with every suite job skipped, and a skipped job is no pass. Test: `merge/test_merge.py`, class `RedMainBrake`, `test_a_red_nightly_stays_red_under_a_newer_push_run_that_the_proven_skip_skipped`.
+- Steady state: each proven-tree merge adds two runs to main's 50-run page (the checks push run and stable's workflow_run). About 25 such merges with no full push run make main read UNKNOWN (unmeasured). The way out is `gh workflow run checks.yml --ref main` or `--base-red-ok "<cause>"`.
 
 Why: every merge to main re-ran suites that a passing PR run had passed on the same tree, which cost Windows and macOS minutes and delayed the next merge. A tree equal to a tested-green tree has no new behaviour to test.
 
 - Risk: accepted (owner reading of 16:03 CST). A red from an untouched suite shows only on a later change that touches it, since a narrowed PR run does not run it and main skips.
 - Risk: `stable.yml` moves `stable` on any green push run of main, and a skipped push run is one. After a narrowed PR run, `stable` can advance with no suite run on main. The proven PR run is the accepted evidence.
 - Risk: a skipped push run is a green push run, so `nightly-skip` may count it. It rests on a passing PR run of the same tree, so the nightly skips on a tree that run proved.
-- Risk: accepted (coordinator, 16:37 CST Nov 13, reviewer-recommended). A skipped push run reads as evidence for the red-main check after a narrowed PR run too. So a revert whose PR run scoped out the broken suite can clear a red main. That suite is never re-run. A revert usually touches the broken paths, so the suite usually runs. Filed as note `push-skip-narrowed-clears-red-main`.
 - Risk: a PR run re-run after a push cannot change that push's decision. The push reads the newest run at push time.
 
 Check: `lint/test_push_skip.py` (the decision, the event refusal, the caller workflow read, the wiring), `merge/test_merge.py` class `RedMainBrake`, `actions/ci-alarm/test_clear_rule.py`.

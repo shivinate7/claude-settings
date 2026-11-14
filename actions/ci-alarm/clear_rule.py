@@ -20,19 +20,17 @@ workflow is never read for it. Step two reads the workflow, once step one finds 
 A job name maps to a job when exactly one job has it as `name:` or key. Two matches, or none, map to no job, and the job is kept. A plain
 `if:` that goes on over later lines is read whole; a quoted one over several lines is not read, and the job is kept.
 
-The empty-run rule (decision no-merge-onto-red-main). A push can run no suite: push-skip skips the whole run, or a docs-only push turns every
-scope flag off. That run concludes `success` and must not hide an older red run of its group. A completed `success` run of the push
-group (the events of events.json that share a group with `push`: push and workflow_dispatch) is EMPTY when no job of it concluded
-`success` except the bookkeeping jobs `scope`, `push-skip` and `nightly-skip`. An empty run is a verdict only when it carries evidence: its `push-skip`
-job is `success` and its `scope` job is `skipped`, which is the path where push-skip.py found the push tree equal to the head tree of a
-pull request whose run passed (decision push-skip-on-proven-tree; checks.yml, jobs push-skip and scope). Only a `push` run carries evidence: a dispatch runs no
-push-skip job. `empty_without_evidence` is that test; a caller walks past such a run to the group's newest run that is not, and when the
-group has none keeps the newest run. A schedule run is left as it is.
+The empty-run rule (decision no-merge-onto-red-main). Only a run that ran its suites is judged. A completed
+`success` run of the push group (the events of events.json that share a group with `push`: push and workflow_dispatch) is EMPTY when no job of it
+concluded `success` except the bookkeeping jobs `scope`, `push-skip` and `nightly-skip`. A run with no jobs is empty. Why: a push can run no suite
+(push-skip skips the whole run, so scope and every suite job skip), yet the run concludes `success` and must not hide an older failed run
+of its group; nor may it vouch for a green one. An empty run is passed over, never read as green or red: a caller walks past it to the group's
+newest run that is not empty. `empty_without_evidence` is that test. A schedule run is left as it is.
 
 Command (alarm.sh): clear_rule.py --event EVENT --workflow FILE R_JOBS_JSON N_JOBS_JSON. Each jobs file is a JSON array of job objects
 from the jobs API. Exit 0 when N clears R, 1 when it does not, 2 on an unreadable input. With --red-stays (no --event or --workflow):
 exit 0 when step one finds a certain red, else 1. With --rule-events: print the events the empty-run rule judges, as a JSON array. With
---empty-run --event EVENT JOBS_JSON: exit 0 when the run is empty without evidence, else 1.
+--empty-run --event EVENT JOBS_JSON: exit 0 when the run is empty, else 1.
 """
 import argparse
 import json
@@ -232,12 +230,10 @@ def rule_events():
 
 
 def empty_without_evidence(jobs, event):
-    """True when a completed `success` run of `event` (a push-group event) ran no check and carries no evidence (the module docstring).
-    Empty: no job but `scope`, `push-skip` and `nightly-skip` concluded success. Evidence: a `push` run whose push-skip job is success and scope job is skipped.
-    Callers check the run-level conditions (the event is in rule_events, the run concluded success) before they read the jobs."""
-    if any(j.get("status") == "completed" and j.get("conclusion") == "success" and j["name"] not in BOOKKEEPING for j in jobs):
-        return False
-    return not (event == "push" and concluded("push-skip", jobs, "success") and concluded("scope", jobs, "skipped"))
+    """True when a completed `success` run of a push-group event ran no suite: no job but `scope`, `push-skip` and `nightly-skip` concluded success
+    (the module docstring). `event` is part of the callers' signature; the test reads only the jobs. Callers check the run-level conditions
+    (the event is in rule_events, the run concluded success) before they read the jobs."""
+    return not any(j.get("status") == "completed" and j.get("conclusion") == "success" and j["name"] not in BOOKKEEPING for j in jobs)
 
 
 def red_stays(r_jobs, n_jobs):
@@ -274,7 +270,7 @@ def main(argv):
     p.add_argument("--workflow")
     p.add_argument("--red-stays", action="store_true", help="step one only: exit 0 when a red job of R is missing from N or not passed in N, else 1; reads no workflow")
     p.add_argument("--rule-events", action="store_true", help="print the events the empty-run rule judges, as a JSON array")
-    p.add_argument("--empty-run", action="store_true", help="exit 0 when the one jobs file is an empty run without evidence (needs --event), else 1")
+    p.add_argument("--empty-run", action="store_true", help="exit 0 when the one jobs file is an empty run, i.e. one that ran no suite (needs --event), else 1")
     p.add_argument("r_jobs", nargs="?")
     p.add_argument("n_jobs", nargs="?")
     a = p.parse_args(argv)
