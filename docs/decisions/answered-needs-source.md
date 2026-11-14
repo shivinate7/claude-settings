@@ -12,7 +12,7 @@ The answered-source check, in the Stop hook `lint/report_guard.py` (rule `answer
 
 **Lane choices, process-only.** A source inside an inline code span counts. "Not yet answered" is exempt. "and/or" is no repo path. A double-quoted phrase is not a source: a quoted label such as "Departs from" would cite any line.
 
-Risk kind: likely risk. The incident F188 (claude-settings draft PR #1008, `docs/plans/owner-feedback-audit.md`) is related: its real line never used the word, so the tests hold a synthetic replay. Landed 2026-11-02.
+Risk kind: likely risk. The incident F188 (claude-settings draft PR #1008, the owner-feedback audit) is related: its real line never used the word, so the tests hold a synthetic replay. Landed 2026-11-02.
 
 Cost: a regex over the reply. No process. One bounded read of `hooks/guard.py` (the head of the file, not all 320 KB), once per run at load, to find the stamped copy (coordinator ruling, 2026-11-09 12:46 CST, option A; decision `install-hooks-whole`) (unmeasured). No glossary or record. `AnsweredNeedsSourceTests` in `lint/test_report_guard.py` proves it by watching every file the check opens: exactly the transcript and `hooks/guard.py`.
 

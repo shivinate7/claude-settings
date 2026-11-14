@@ -6,7 +6,7 @@ Owner, 2026-10-11: the agent-end reap also deletes build folders. The low-disk b
 `build-disk-guard`.
 
 `janitor/agent_end_reap.py` (SubagentStop) deletes build folders: `native/build`, `.build`, `DerivedData`, and each name in the
-`buildDirs` list of `.claude/janitor.json`. The three defaults always apply. `buildDirs` adds names and cannot remove a default.
+`buildDirs` list of `janitor.json` in a repo's `.claude` folder. The three defaults always apply. `buildDirs` adds names and cannot remove a default.
 
 Build folders follow the worktree's 30-minute idle clock. The ending agent's own tree keeps its build folders at
 its own end, because a finished agent is often resumed there and would rebuild from nothing. A later agent end reaps them. The reap
@@ -37,7 +37,7 @@ deletes a folder only when each check gives a confirmed yes. Any read that canno
 - A name with `/` matches one path under the worktree root. A bare name matches at any depth under the worktree, and the search
   does not cross a link.
 - A `buildDirs` value that is not a list of strings deletes nothing, defaults included. `sweep.read_optout` is the one reader of
-  `.claude/janitor.json`.
+  `janitor.json` in a repo's `.claude` folder.
 - Windows deletes the same as macOS and Linux (owner, 2026-10-12). `sweep.is_link` is the one link test.
 - The hook stops its build-folder scan after 20 s and keeps what it did not reach. The hook's own limit is 60 s.
 - The sweep deletes leftover trash only in registered, non-primary worktrees directly under `.claude/worktrees`.

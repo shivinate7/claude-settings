@@ -22,7 +22,7 @@ Named limits:
 - A file written this turn whose content matches HEAD is clean. The git filter drops it.
 - Another agent writing into the same checkout is read as this turn.
 
-Measured 2026-09-19 against `hooks/guard.py`: a cap lift to `.claude/settings.local.json` drew an ask
+Measured 2026-09-19 against `hooks/guard.py`: a cap lift to `settings.local.json` in the `.claude` folder drew an ask
 from the Write tool, a `>` redirect, a heredoc, `tee` and `jq ... > file`. It was ALLOWED from `cp`,
 `mv`, `sed -i`, `python3 -c "open(path,'w')"`, `python3 gen.py` and `bash gen.sh`: the value sits in
 another file or a script, so no list of write commands closes the gap. `hooks/config_watch.py` hashes

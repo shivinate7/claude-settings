@@ -11,7 +11,7 @@ Coordinator brief, lane install-drops-retired-files (2026-11-01): each install r
 - With no manifest yet, the install acts only on names in `retired-files.txt` at the repo root. A listed link into the clone is removed. Any other listed entry (a real file or folder, or a link that points elsewhere) moves to `backups/retired/`, so nothing is lost.
 - The post-merge hook that `install.ps1` writes lands only entries git lists and does not ignore (if git fails, it lands every file, as before), and removes no entry main stopped shipping. The next install removes those.
 
-Why: copy mode (cloud, and Windows with no link rights) left every removed file in place, and a link into a folder git no longer tracks was landed again. Incident: the owner's PC kept `skills/tile-windows` and `hooks/config_report.py` (owner's local audit, 2026-11-01).
+Why: copy mode (cloud, and Windows with no link rights) left every removed file in place, and a link into a folder git no longer tracks was landed again. Incident: the owner's PC kept `skills/tile-windows` and `config_report.py` in the `hooks` folder (owner's local audit, 2026-11-01).
 
 Cost: per install, one `git ls-files` start per landed folder and one manifest file written, read once at the next install (unmeasured). No new long-lived process, no timer. A removal that fails keeps its manifest line, so the next install retries it.
 

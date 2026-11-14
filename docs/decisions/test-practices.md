@@ -41,7 +41,7 @@ P6. Treat a flake as a defect report: find its cause and make it deterministic b
 Applies to: every test; CI runs.
 
 P7. Assert the scope before the subject: prove the test reached the thing under test before you assert on it.
-- banchi docs/agent-traps.md — a case guarded by `if (await bar.count())` never ran its assert, because the fixture never drew the control.
+- banchi's `agent-traps.md` in its `docs` folder — a case guarded by `if (await bar.count())` never ran its assert, because the fixture never drew the control.
 - banchi 661d266d — the scope answer is asserted non-empty first, so the second count is known entered.
 - degen 6e016862 — asserts the files are clean before the mutation and that the mutation applied.
 Applies to: UI and browser tests; any test with a probe or a branch on whether the subject is present.

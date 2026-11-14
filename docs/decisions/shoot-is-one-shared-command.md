@@ -8,7 +8,7 @@ Owner, 2026-10-26: cloud sessions ship Chromium and Playwright, so the script ne
 
 The contract of `bin/shoot`:
 
-- `shoot [--config F] [--out DIR]`. F defaults to `.claude/shoot.json` in the current folder.
+- `shoot [--config F] [--out DIR]`. F defaults to `shoot.json` in the `.claude` folder under the current folder.
 - The config holds `baseUrl`, `routes`, `sizes` (widths, default 1440, 820 and 390), `themes` (light and dark, set by `prefers-color-scheme`), an optional `simulator` UDID and an optional `ignoreHTTPSErrors` boolean (default false, for an app with a self-signed certificate). A bad value is a config error: exit 2 and a `shoot: config` line that names the key. Other keys, on the config or on a route, are ignored.
 - A route may carry `steps` (the route steps): a non-empty list that runs after the page loads and its HTTP status passes, before the screenshot. A route step is `{click: css}` or `{wait: css, state: "visible" | "hidden"}` (state defaults to visible), bounded by `timeoutMs`. A route step that errors fails the shot. A `state: "hidden"` wait passes at once when nothing matches, so a disappear-wait alone proves nothing: pair it with a wait for real content.
 - A route may carry `localStorage`: an object of string values, set before the page's scripts run, in the top frame only. A route with route steps or `localStorage` runs in its own browser context, with `ignoreHTTPSErrors` carried into it. The context is closed after the shot, so the route starts clean and leaves nothing behind (localStorage, cookies) for another route. A click can write that state, which is why route steps count too.
