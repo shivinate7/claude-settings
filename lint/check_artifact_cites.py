@@ -141,7 +141,7 @@ def check(root, steps_mode):
     """(fail lines, list lines) for the repo at `root`."""
     fails, listed = [], []
     try:
-        known = {entry["id"] for entry in layout.artifacts(root)}
+        known = {entry["id"] for entry in layout.artifacts(root, exports=False)}
     except layout.LayoutError as err:
         return [FAIL + "the artifacts registry cannot be read: %s" % err], listed
     for kind in ("decisions", "debts"):

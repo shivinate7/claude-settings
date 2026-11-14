@@ -42,6 +42,10 @@ class LayoutError(Exception):
     """The layout file or a repo's extras file cannot be read or has the wrong shape."""
 
 
+class RolledOutMarkError(LayoutError):
+    """The "rolled-out" mark is not JSON true or false. Only the answer to "rolled out?" is unknown."""
+
+
 class BranchNameError(LayoutError):
     """The extras file reads, and its "record-branch" key is not a branch name."""
 
@@ -87,8 +91,17 @@ def has_extras(root):
 
 def rolled_out(root):
     """True when `root` holds its extras file and the file's "rolled-out" key is true, so it keeps
-    every kind at its layout path."""
-    return has_extras(root) and _read(_extras(root)).get(ROLLED_OUT) is True
+    every kind at its layout path. An absent key or false reads as legacy. Any other value (a string,
+    a number, null) raises RolledOutMarkError: reading it as legacy would send a check to decisions/ and
+    pass over docs/decisions. A key that does not depend on the mark (the waiting keys) never calls this."""
+    if not has_extras(root):
+        return False
+    data = _read(_extras(root))
+    if ROLLED_OUT not in data:
+        return False
+    if not isinstance(data[ROLLED_OUT], bool):
+        raise RolledOutMarkError("%s: \"%s\" must be JSON true or false, not %s" % (_extras(root), ROLLED_OUT, json.dumps(data[ROLLED_OUT])))
+    return data[ROLLED_OUT]
 
 
 def kinds(root=None):
@@ -223,10 +236,55 @@ def path(root, name):
     return legacy(name)
 
 
-def candidates(root, name):
+def folders_any_mark(root, name):
+    """The folders kind `name` may sit at in `root`, relative, with `/` separators, as a tuple. A valid mark reads the one
+    folder `path` gives. A bad "rolled-out" mark (RolledOutMarkError) gives `candidates(..., any_mark=True)`, the one home of
+    that fallback."""
+    try:
+        return (path(root, name),)
+    except RolledOutMarkError:
+        return candidates(root, name, any_mark=True)
+
+
+def folder_any_mark(root, name):
+    """The one folder of kind `name` in `root` that reads the same under every mark: the waiting data and design folders,
+    which legacy and layout place alike. A kind whose folder depends on the mark re-raises RolledOutMarkError under a bad
+    mark, so a check that needs one folder fails closed."""
+    found = folders_any_mark(root, name)
+    if len(found) > 1:
+        path(root, name)  # raises RolledOutMarkError: the folder depends on the mark
+    return found[0]
+
+
+def md_under(rel, folder):
+    """True when `rel` (a repo-relative path with `/` separators) is a markdown file under `folder`, at any depth. `folder` takes a
+    trailing slash or none. Only whole path parts match, so docs/decisionsx/a.md is not under docs/decisions. The one home of the
+    records scope that lint/check_ruling_kind.py and merge/merge.py read."""
+    return rel.endswith(".md") and rel.startswith(folder.rstrip("/") + "/")
+
+
+def candidates(root, name, any_mark=False):
     """`path(root, name)`, then the layout path when it differs: for a reader that takes the first
-    one that exists, as STE lint's gloss collapse does."""
-    first, then = path(root, name), layout()["kinds"][name]["path"].strip("/")
+    one that exists, as STE lint's gloss collapse does.
+
+    Under a bad "rolled-out" mark (RolledOutMarkError) the two callers differ on purpose. A record check
+    (stale_cites.py, ste_lint.py) leaves `any_mark` off and the error propagates, so it fails closed: it will not pick a
+    folder it cannot trust. The feedback guard and the waiting copy (`folders_any_mark`) pass `any_mark=True`, because
+    refusing there would block the owner's own filing. Legacy and layout are both possible then, so they get the
+    legacy-repos place when the repo has one (that holds under either mark), else the layout path and the legacy path."""
+    try:
+        first = path(root, name)
+    except RolledOutMarkError:
+        if not any_mark:
+            raise
+        owner = repo_name(root)
+        kept = legacy_repos().get(owner, {}).get(name) if owner else None
+        if kept:
+            return (kept.strip("/"),)
+        first = None
+    then = layout()["kinds"][name]["path"].strip("/")
+    if first is None:
+        return tuple(dict.fromkeys((then, legacy(name))))
     return (first,) if first == then else (first, then)
 
 
@@ -275,19 +333,21 @@ COLLECTION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta")  # what the waiting page's database holds
 
 
-def artifacts(root):
+def artifacts(root, exports=True):
     """[{id, url, role, account, collections, export}] from the "artifacts" key of `root`'s extras file, in order; []
-    for a repo with no extras file or no key. `collections` and `export` are filled in: the waiting-page role exports
+    for a repo with no extras file or no key. With `exports` False, an entry with no export key of its own reads `export`
+    None: a caller that wants ids, urls and roles never reads it.
+    `collections` and `export` are filled in: the waiting-page role exports
     the five waiting collections to the waiting-data folder of the record branch, any other role needs its own
     `collections` and exports to `artifacts/<id>/`. A page-only entry (any other role, `"collections": []`) exports its page
     and files and no database; an empty list is refused on the waiting-page role, and a missing key on any other. An entry with `"export": false` (never the waiting-page role) is held and never exported: it needs
     no collections and reads with `export` False and `collections` []. LayoutError, naming the entry by its id, for an email as account, a
     repeated id, an id over 32 characters, a url that is no artifact link, a second waiting-page role or an unsafe path."""
-    return _registry(root, _repo_keys(root).get(ARTIFACTS), _extras(root))
+    return _registry(root, _repo_keys(root).get(ARTIFACTS), _extras(root), exports)
 
 
-def _registry(root, found, where):
-    """artifacts(root) for the "artifacts" value `found`, read from `where` (a path, or a ref and path in an error)."""
+def _registry(root, found, where, exports=True):
+    """artifacts(root, exports) for the "artifacts" value `found`, read from `where` (a path, or a ref and path in an error)."""
     if found is None:
         return []
     if not isinstance(found, list):
@@ -332,8 +392,10 @@ def _registry(root, found, where):
             if not isinstance(target, str) or not target.strip("/") or target != target.strip():
                 raise LayoutError("%s: %s (id %s) export is not a path" % (where, label, entry_id))
             target = _safe(target, "%s: %s (id %s) export" % (where, label, entry_id)).strip("/")
+        elif not exports:
+            target = None
         else:
-            target = path(root, "waiting-data") if role == WAITING_ROLE else "artifacts/" + entry_id
+            target = folder_any_mark(root, "waiting-data") if role == WAITING_ROLE else "artifacts/" + entry_id
         out.append(dict(item, collections=list(names), export=target))
     if sum(1 for e in out if e["role"] == WAITING_ROLE) > 1:
         raise LayoutError("%s: %s holds more than one entry with the role %s" % (where, ARTIFACTS, WAITING_ROLE))
@@ -366,7 +428,7 @@ def _default_branch_extras(root):
 
 def _page_in(root, keys, where):
     """The waiting page URL held by the extras dict `keys` (read from `where`), else "unknown"."""
-    for entry in _registry(root, keys.get(ARTIFACTS), where):
+    for entry in _registry(root, keys.get(ARTIFACTS), where, exports=False):
         if entry["role"] == WAITING_ROLE:
             return entry["url"]
     found = keys.get(WAITING_PAGE)
@@ -400,11 +462,11 @@ def set_waiting_page(root, url):
         raise LayoutError("%s: %s %r is not a claude.ai artifact link with an id" % (_extras(root), WAITING_PAGE, url))
     if has_extras(root):
         data = _read(_extras(root))
-        held = next((e for e in artifacts(root) if e["role"] == WAITING_ROLE), None)
+        held = next((e for e in artifacts(root, exports=False) if e["role"] == WAITING_ROLE), None)
         if held is not None:
             if artifact_id(held["url"]) == artifact_id(url):
                 return False
-            data[ARTIFACTS][[e["id"] for e in artifacts(root)].index(held["id"])]["url"] = url
+            data[ARTIFACTS][[e["id"] for e in artifacts(root, exports=False)].index(held["id"])]["url"] = url
         elif data.get(WAITING_PAGE) is not None:
             return False
         else:
@@ -612,12 +674,12 @@ def _owner_home(home):
 def mockup_homes(root):
     """The folders a mockup may sit in, as a tuple of paths: the repo's design folder inside the checkout. Reads no
     file and starts no process."""
-    return (os.path.join(root, *path(root, "design").split("/")),)
+    return (os.path.join(root, *folder_any_mark(root, "design").split("/")),)
 
 
 def mockup_home_words(root):
     """The mockup home as a sentence shows it, with no absolute path."""
-    return "%s/<file>, committed to git" % path(root, "design")
+    return "%s/<file>, committed to git" % folder_any_mark(root, "design")
 
 
 def _flavour(*texts):
