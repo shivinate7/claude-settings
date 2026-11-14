@@ -4075,7 +4075,7 @@ REVIEW_FIX_ROW = "fix verifier"  # the round cell of a fix verifier's row in the
 def review_round_model(n, guard=False):
     """-> the model word a reviewer's round `n` (a number, or REVIEW_FIX_ROW) runs: the model record's round row, read through the guard's
     reader (hooks/guard.py role_round_table), else the guard's fallback. A round past REVIEW_LAST_ROUND reads the last round's row.
-    `guard` (a guard or check change) makes round 1 read the `1 guard` row, the only round whose row differs by kind.
+    `guard` (a guard or check change) makes the first round read the `1 guard` row, the only round whose row differs by kind.
     Reads the record once per call; the guard is imported here for the reason guard_hits gives."""
     import guard as hook_guard
     rounds = hook_guard.role_round_table(hook_guard.pointer_checkout())
@@ -5058,10 +5058,10 @@ def main(argv, host=None, lock=None, hosts=None):
                 want = review_round_model(n)
                 if want not in model.lower():
                     p.error(f"--round {n}: a reviewer's round {n} runs {want}, not {model!r}; no round runs another model (decision agent-model-cap, the round rows)")
-            elif role == REVIEW_ROLES[0] and n == 1:  # round 1 is flagged, not refused: the lane may not know its reviewer's model
+            elif role == REVIEW_ROLES[0] and n == 1:  # the first round is flagged, not refused: the lane may not know its reviewer's model
                 import guard as hook_guard
                 want, got = review_round_model(1, a.guard == "yes"), hook_guard.role_model_rank(model)
-                if want and got is not None and got < hook_guard.role_model_rank(want):  # no row for round 1 leaves nothing to flag against
+                if want and got is not None and got < hook_guard.role_model_rank(want):  # no row for the first round leaves nothing to flag against
                     print(f"merge: round 1 ran {model}, below its row's {want} (decision agent-model-cap, the round rows)", file=sys.stderr)
         if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant)) is None:
             p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3; give round 1 with its real model, or unknown if not known" if not a.grant
