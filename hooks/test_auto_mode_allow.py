@@ -83,7 +83,7 @@ OWNER_PR = "Owner PR Housekeeping:"
 RELAYED = "Relayed Grant:"
 RELAYED_MERGE = "Relayed Merge Yes:"
 BATCH_MERGE = "Batch Runner Merge:"
-MERGE_REVIEW_RECORD = "Merge Review Record:"
+MERGE_REVIEW_LOG = "Merge Review Record:"
 MERGE_TOOL_READ = "Merge Tool Read Checks:"
 MERGE_CLOUD_ALLOW = os.path.join(REPO_ROOT, "merge", "cloud_allow.json")
 OWNER_MESSAGE = "Owner Session Message:"
@@ -154,14 +154,14 @@ REASON_FLAGS_REFUSED = (("--base-red-ok", "--base-red-ok"),
                         ("--undo-check-unknown-ok", "--undo-check-unknown-ok"))
 MERGE_GO_REFUSED = (("any other session", "any other session"),
                     ("not a coordinator", "not a coordinator"))
-# The Merge Review Record Covers text quotes each tool name and each command order, and names each record flag.
+# The Covers text of the "Merge Review Record:" entry quotes each tool name and each command order, and names each record flag.
 MERGE_TOOL_NAMES = (("merge", "`merge`"), ("~/.claude/bin/merge", r"`~/\.claude/bin/merge`"))
 MERGE_ORDERS = (("merge <pr> --review-record", r"`merge <pr> --review-record`"),
                 ("merge --review-record <pr>", r"`merge --review-record <pr>`"))
 MERGE_REVIEW_ONLY_READS = (("prints", r"\bprints\b"), ("posts nothing", "posts nothing"))
-# The flags a Merge Review Record Covers text must never name, and its Never covers sentence must (decision `auto-mode-owner-acts`).
+# The flags the Covers text of the "Merge Review Record:" entry must never name, and its Never covers sentence must (decision `auto-mode-owner-acts`).
 MERGE_REVIEW_NEVER_FLAGS = ("--confirm", "--ready", "--base-red-ok", "--lint-unknown-ok", "--undo-check-unknown-ok")
-# Each act the Merge Review Record "Never covers" sentence must name: the refused flags, the other merge forms,
+# Each act the "Merge Review Record:" Never covers sentence must name: the refused flags, the other merge forms,
 # and a session not tagged cs-build:lane (decision `auto-mode-owner-acts`).
 MERGE_REVIEW_REFUSED = tuple((flag, "`%s`" % flag) for flag in MERGE_REVIEW_NEVER_FLAGS) + (
     ("gh pr merge", r"`gh pr merge`"), ("any push", r"\bany push\b"), ("force push", r"force[- ]push"),
@@ -289,7 +289,7 @@ def head_flag():
     return flags[0] if len(flags) == 1 else None
 
 
-def review_record_flags():
+def review_log_flags():
     """The option strings of merge.py's argparse flags whose help starts 'with --review-record', sorted.
     Read from the parser's own add_argument calls, so a renamed or new record flag moves the list with it."""
     with open(MERGE_PY, encoding="utf-8") as handle:
@@ -373,10 +373,10 @@ def last_line(traceback_text):
 
 
 def mutant_settings(clause):
-    """A copy of the settings file in this run's folder, with `clause` removed from the Merge Review Record entry."""
+    """A copy of the settings file in this run's folder, with `clause` removed from the "Merge Review Record:" entry."""
     with open(settings_path(), encoding="utf-8") as handle:
         data = json.load(handle)
-    entry = allow_entry(MERGE_REVIEW_RECORD)
+    entry = allow_entry(MERGE_REVIEW_LOG)
     data["autoMode"]["allow"] = [e.replace(clause, "") if e == entry else e for e in data["autoMode"]["allow"]]
     path = os.path.join(RUN, "settings-without-clause.json")
     with open(path, "w", encoding="utf-8") as handle:
@@ -385,8 +385,8 @@ def mutant_settings(clause):
 
 
 def run_never_covers_cases(settings):
-    """Run each test_never_covers case of MergeReviewRecordIsAllowed against one settings file, through AUTO_MODE_SETTINGS."""
-    names = [n for n in unittest.TestLoader().getTestCaseNames(MergeReviewRecordIsAllowed) if n.startswith("test_never_covers")]
+    """Run each test_never_covers case of MergeReviewLogIsAllowed against one settings file, through AUTO_MODE_SETTINGS."""
+    names = [n for n in unittest.TestLoader().getTestCaseNames(MergeReviewLogIsAllowed) if n.startswith("test_never_covers")]
     saved = os.environ.get("AUTO_MODE_SETTINGS")
     os.environ["AUTO_MODE_SETTINGS"] = settings
     try:
@@ -394,7 +394,7 @@ def run_never_covers_cases(settings):
         # tearDownModule again, and the teardown would delete RUN under the mutant copy.
         result = unittest.TestResult()
         for name in names:
-            MergeReviewRecordIsAllowed(name).run(result)
+            MergeReviewLogIsAllowed(name).run(result)
     finally:
         if saved is None:
             os.environ.pop("AUTO_MODE_SETTINGS", None)
@@ -605,34 +605,34 @@ class BatchRunnerMergeIsAllowed(unittest.TestCase):
                       "Never covers does not name a merge with no `%s`" % flag)
 
 
-class MergeReviewRecordIsAllowed(unittest.TestCase):
-    def test_one_entry_names_the_merge_review_record(self):
-        hits = [e for e in auto_mode().get("allow", []) if e.startswith(MERGE_REVIEW_RECORD)]
+class MergeReviewLogIsAllowed(unittest.TestCase):
+    def test_one_entry_names_the_merge_review_log(self):
+        hits = [e for e in auto_mode().get("allow", []) if e.startswith(MERGE_REVIEW_LOG)]
         self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
-                         % (MERGE_REVIEW_RECORD, len(hits)))
+                         % (MERGE_REVIEW_LOG, len(hits)))
 
     def test_allow_list_keeps_defaults_beside_the_entry(self):
         self.assertIn("$defaults", auto_mode().get("allow", []), "autoMode.allow lost $defaults")
 
     def test_record_flags_come_from_argparse(self):
-        self.assertTrue(review_record_flags(),
+        self.assertTrue(review_log_flags(),
                         "merge/merge.py's argparse names no flag whose help starts 'with --review-record'")
 
     def test_covers_quotes_both_command_orders(self):
-        covers = entry_part(self, MERGE_REVIEW_RECORD)
+        covers = entry_part(self, MERGE_REVIEW_LOG)
         for name, pattern in MERGE_ORDERS:
             with self.subTest(order=name):
                 self.assertRegex(covers, pattern, "Covers text does not quote `%s`" % name)
 
     def test_covers_names_both_tool_names(self):
-        covers = entry_part(self, MERGE_REVIEW_RECORD)
+        covers = entry_part(self, MERGE_REVIEW_LOG)
         for name, pattern in MERGE_TOOL_NAMES:
             with self.subTest(tool=name):
                 self.assertRegex(covers, pattern, "Covers text does not name the tool `%s`" % name)
 
     def test_covers_names_each_record_flag(self):
-        covers = entry_part(self, MERGE_REVIEW_RECORD)
-        flags = review_record_flags()
+        covers = entry_part(self, MERGE_REVIEW_LOG)
+        flags = review_log_flags()
         self.assertTrue(flags, "merge/merge.py's argparse names no record flag")
         listed = flag_list(covers)
         self.assertIsNotNone(listed, "Covers text has no 'only these flags besides it:' list")
@@ -646,31 +646,31 @@ class MergeReviewRecordIsAllowed(unittest.TestCase):
                                     "Covers text names the refused flag %s" % flag)
 
     def test_covers_says_it_prints_and_posts_nothing(self):
-        covers = entry_part(self, MERGE_REVIEW_RECORD)
+        covers = entry_part(self, MERGE_REVIEW_LOG)
         for name, pattern in MERGE_REVIEW_ONLY_READS:
             with self.subTest(term=name):
                 self.assertRegex(covers, pattern, "Covers text does not say %r" % name)
 
-    def test_covers_names_the_lane_session_tag(self):
-        covers = entry_part(self, MERGE_REVIEW_RECORD)
+    def test_covers_names_the_lane_tag(self):
+        covers = entry_part(self, MERGE_REVIEW_LOG)
         self.assertIn("`cs-build:lane`", covers, "Covers text must name the session tagged `cs-build:lane`")
         tags = sorted(set(re.findall(r"cs-build:[\w-]+", covers)))
         self.assertEqual(tags, ["cs-build:lane"], "Covers text names a cs-build tag other than cs-build:lane: %r" % tags)
 
     def test_never_covers_names_each_refused_form(self):
-        clause = entry_part(self, MERGE_REVIEW_RECORD, never=True)
+        clause = entry_part(self, MERGE_REVIEW_LOG, never=True)
         for name, pattern in MERGE_REVIEW_REFUSED:
             with self.subTest(act=name):
                 self.assertRegex(clause, "(?i)" + pattern, "Never covers does not name %r" % name)
 
-    def test_read_checks_entry_still_names_review_record(self):
+    def test_read_checks_entry_still_names_review_log(self):
         hits = [e for e in auto_mode().get("allow", []) if e.startswith(MERGE_TOOL_READ)]
         self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
                          % (MERGE_TOOL_READ, len(hits)))
         self.assertIn("--review-record", hits[0], "the '%s' entry no longer names --review-record" % MERGE_TOOL_READ)
 
     def test_copy_with_the_clause_removed_goes_red(self):
-        clause = entry_part(self, MERGE_REVIEW_RECORD, never=True)
+        clause = entry_part(self, MERGE_REVIEW_LOG, never=True)
         names, real = run_never_covers_cases(settings_path())
         self.assertTrue(names, "no test_never_covers case to run against the settings copy")
         if real.failures or real.errors:
