@@ -131,6 +131,7 @@ skips_case fail "an empty map names no job: the skipped macOS jobs stay red" "{}
 # (f) with the input unset, a skipped job is red as it was before. A malformed input fails closed.
 unset_case fail "SCOPE_SKIPS unset: a skipped macOS job stays red, as before" "$GATE_OFF"
 skips_case fail "a malformed SCOPE_SKIPS fails closed: the skipped macOS job stays red" "{not json" "$GATE_OFF"
+skips_case fail "a named job with an empty flag list stays red: a skip passes only on a flag that says no" '{"shell-macos":[]}' '{"scope":{"result":"success","outputs":{}},"shell-macos":{"result":"skipped"}}'
 # The action's default is '', so every other repo's check sees SCOPE_SKIPS set to the empty string. Each of the five cases above
 # gives the same verdict with it empty, and a skipped macOS job stays red. With the map set and every flag "true", a green run passes.
 skips_case pass "SCOPE_SKIPS empty: all success passes, as unset" "" '{"a":{"result":"success"},"b":{"result":"success"}}'
