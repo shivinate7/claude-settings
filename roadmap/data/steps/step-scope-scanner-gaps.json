@@ -1,0 +1,14 @@
+{
+ "id": "step-scope-scanner-gaps",
+ "title": "The scope scanner of #3408 sees every way a suite builds a path, and a docs-only edit that moves a decision file still runs the comment-narration check",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Notes from the #3408 lane (replaces #3180; head 9e108d49fcf4, record 6883147091, lint 6883211554; at runner 10), relayed by the coordinator 13:49 CST Nov 14 as reports; the coordinator read none of the code; triage read none. 75 of 182 checks-job steps skip on a docs-only edit (the lane's grep of checks.yml). (a) The scanner misses a plain literal constant, pathlib \"/\", a list-form join and a join with a non-literal segment; counting every string flags 72 of 75 steps with help-text noise. (b) The allowance text at lint/test_checks_step_scope.py:437 says \"83 scoped python suites\"; 75 steps are scoped now (wording, in the PR). (c) The lane's audit did not watch child processes of a suite, so the hooks/guard.py allowance is measured, not proven. (d) hooks/check_comment_narration.py (has_decision, lines 83-90) tests whether decisions/<id>.md exists, so a docs-only edit that adds, renames or deletes a decision file can change that check's verdict. Whether ci-scope.sh (slice 1, #3158) still sets lint_comment_narration for that edit is unread (unknown). A check that skips when its verdict can move is a false green: first act of a lane is to read ci-scope.sh and test that edit, red then green. (e) Glossary wording: \"guard\" for a test and bare \"step\" for a CI step in test_checks_step_scope.py and the checks.yml comment. None block #3408 (coordinator). Kin: ci-scope-dynamic-paths, ci-scope-reads-guard-closure, ci-skip-untouched-steps.",
+ "source": "coordinator 13:49 CST Nov 14, from the #3408 lane reports",
+ "note": "Filed 13:47 CST Nov 14 by triage. Tracker: the coordinator. No lane yet. Item (d) is the one that may move a verdict.",
+ "updatedAt": "2026-11-14T13:47:00"
+}
