@@ -1,0 +1,10 @@
+{
+  "id": "own-local-session-ids-exist",
+  "at": "2026-11-13T20:56:00-06:00",
+  "title": "Local sessions have session ids too, and cross-session messaging will rely on them",
+  "ruling": "Owner 20:56 CST Nov 13, on the waiting page (item 797, none of these): session ids exist for local sessions too, and that is how messaging will work. It is the owner's premise for step local-autonomy-equals-cloud. It is not a measurement: the command was not run, so no id has been printed on his Mac or Windows. The lane builds on the premise, and its tests prove the variable before it relies on it.",
+  "quote": "yes session ids are for local too (thats how messaging is going to work too)",
+  "source": "Owner note on item 797, 20:56 CST Nov 13, read by triage on the page; filed by triage.",
+  "status": "open",
+  "step": "local-autonomy-equals-cloud"
+}
