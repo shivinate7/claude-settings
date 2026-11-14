@@ -1271,25 +1271,62 @@ MUTATIONS = [
      '            hit = rx.search(first)',
      '            hit = rx.search(brief)', "guard",
      'role-model: Explore on sonnet with Audit: on line 2 is denied (line 1 only counts)'),
-    ("role-model: a reviewer round 2 or 3 loses its exemption, so it is denied on sonnet",
-     'for kind, n in brief_markers(tool_input.get("prompt"))):',
-     'for kind, n in brief_markers("")):', "guard", 'role-model: reviewer on sonnet with a Round 2 of 3 line is allowed'),
-    ("role-model: a reviewer round 1 is exempt too, so it walks past on sonnet",
-     'kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS',
-     'kind.lower() == "round" and n in ("1", "2", "3")', "guard",
+    ("role-model: a reviewer's Round N of 3 line selects no round row, so a round 2 reviewer on sonnet is denied",
+     'for kind, n in brief_markers(prompt) if kind.lower() == "round"]',
+     'for kind, n in brief_markers("") if kind.lower() == "round"]', "guard",
+     'role-model: reviewer on sonnet with a Round 2 of 3 line is allowed'),
+    ("role-model: the round 1 row is fixed to the fallback's round 1 sonnet, so a reviewer on sonnet with Round 1 of 3 walks past",
+     'ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")',
+     'ROLE_REVIEWER_FREE_ROUNDS = ("1", "2", "3")', "guard",
      'role-model: reviewer on sonnet with a Round 1 of 3 line is denied'),
-    ("role-model: the reviewer fix check lift reads an empty brief, so a fix check reviewer on sonnet is denied",
-     '("fixcheck", None) in marker_hits(tool_input.get("prompt")):',
-     '("fixcheck", None) in marker_hits(""):', "guard",
+    ("role-model: the fix verifier row is read off an empty brief, so a fix check reviewer on sonnet is denied",
+     '    if ("fixcheck", None) in marker_hits(prompt):\n        words.append(',
+     '    if ("fixcheck", None) in marker_hits(""):\n        words.append(', "guard",
      'role-model: fix check: reviewer on sonnet with the marker on line one is allowed'),
-    ("role-model: the fix check lift drops its role test, so a test-author on sonnet with the marker walks past",
-     'if role == "reviewer" and named < top and ("fixcheck", None) in marker_hits(tool_input.get("prompt")):',
-     'if named < top and ("fixcheck", None) in marker_hits(tool_input.get("prompt")):', "guard",
+    ("role-model: the reviewer lift drops its role test, so a test-author on sonnet with a marker walks past",
+     '        if role == "reviewer" and any(role_model_rank(word) >= named',
+     '        if any(role_model_rank(word) >= named', "guard",
      'role-model: fix check: test-author on sonnet with the marker is denied and names no fix check marker'),
-    ("role-model: the fix check lift drops its rank test, so a reviewer on a model the table does not rank walks past with the marker",
-     'if role == "reviewer" and named < top and ("fixcheck", None) in marker_hits(tool_input.get("prompt")):',
-     'if role == "reviewer" and ("fixcheck", None) in marker_hits(tool_input.get("prompt")):', "guard",
+    ("role-model: the reviewer lift drops its rank test, so a reviewer on a model the table does not rank walks past with the marker",
+     'any(role_model_rank(word) >= named\n',
+     'any(True or role_model_rank(word) >= named\n', "guard",
      'role-model: fix check: reviewer on claude-fable-5-1 with the marker on line one is denied, the lift does not reach an unranked model'),
+    ("role-model: the guard marker lifts nothing, so a reviewer on sonnet with it is denied",
+     '    if review_guard_marked(prompt):\n        words.append(',
+     '    if False:\n        words.append(', "guard",
+     'role-model: reviewer on sonnet with the guard marker on line 1 is allowed'),
+    ("role-model: the guard marker is read anywhere in a line, so a mid-line marker walks past on sonnet",
+     r'elif not fenced and line.lstrip(" \t").startswith(REVIEW_GUARD_MARKER):',
+     'elif not fenced and REVIEW_GUARD_MARKER in line:', "guard",
+     'role-model: reviewer on sonnet with the guard marker mid-line, a space at the boundary offset, is denied'),
+    ("role-model: the guard marker's boundary counts a pipe, so the template line Guard or check: yes|no walks past on sonnet",
+     r'[0] in " \t\r.":', r'[0] in " \t\r.|":', "guard",
+     'role-model: reviewer on sonnet with the template line Guard or check: yes|no is denied'),
+    ("role-model: the guard marker's boundary drops a tab, so the marker then a tab and text walks past on sonnet",
+     r'[0] in " \t\r.":', r'[0] in " \r.":', "guard",
+     'role-model: reviewer on sonnet with Guard or check: yes then a tab and text is allowed'),
+    ("role-model: the guard marker's boundary drops a CR, so a CRLF brief's marker line walks past on sonnet",
+     r'[0] in " \t\r.":', r'[0] in " \t.":', "guard",
+     'role-model: reviewer on sonnet with a CRLF brief whose Guard or check: yes line ends CR is allowed'),
+    ("role-model: the guard marker drops its leading-blank allowance, so an indented marker walks past on sonnet",
+     r'elif not fenced and line.lstrip(" \t").startswith(REVIEW_GUARD_MARKER):',
+     'elif not fenced and line.startswith(REVIEW_GUARD_MARKER):', "guard",
+     'reviewer on sonnet on Round 1 with the guard marker after two spaces'),
+    ("role-model: the fence toggle never sets, so a marker line inside a fence counts again and walks past on sonnet",
+     '            fenced = not fenced\n        elif not fenced and line.lstrip(',
+     '            fenced = fenced\n        elif not fenced and line.lstrip(', "guard",
+     'whose only guard marker line sits inside a'),
+    ("role-model: the step-up reads no round rows, so a record whose round 2 row names haiku still refuses a round 2 reviewer on haiku",
+     '        rounds = role_round_table(pointer_checkout())\n    named = ',
+     '        rounds = None\n    named = ', "guard",
+     'role-model: round row: a record whose reviewer round 2 row names haiku lets a round 2 reviewer run haiku'),
+    ("role-model: the lift in role_model_one reads no round rows, so a record whose round 3 row names haiku still lets a round 3 reviewer on sonnet run",
+     '    rounds = role_round_table(pointer)\n', '    rounds = None\n', "guard",
+     'role-model: round row: a record whose reviewer round 3 row names haiku denies a round 3 reviewer on sonnet'),
+    ("role-model: the free rounds ignore the round 1 other row, so round 1 drops out of the lifted rounds and the test-author note",
+     '(word := role_round_model(rounds, role, n))',
+     '(word := role_round_model(None if n == "1" else rounds, role, n))', "guard",
+     'role-model: round 1 free: reviewer on sonnet names round 1 among the free rounds'),
     ("role-model: the fix check row loses its line-start anchor, so a reviewer on sonnet with Round 1 of 3 first on line one walks past",
      r'("fixcheck", r"^[ \t]*" + re.escape(FIX_CHECK_MARKER)',
      r'("fixcheck", r"\b" + re.escape(FIX_CHECK_MARKER)', "guard",
@@ -1328,12 +1365,12 @@ MUTATIONS = [
      '            hit = rx.search(first)\n            found = [hit] if hit else []',
      '            hit = rx.search(first) if kind != "round" else None\n            found = [hit] if hit else []', "guard",
      'first-line marker: builder on opus with a role word before Round 3 of 3 on line one is allowed'),
-    ("step-up: round 3 accepts only sonnet, so an opus reviewer is refused",
-     'n == "3" and "sonnet" not in model and "opus" not in model',
-     'n == "3" and "sonnet" not in model', "guard", 'floor step-up: reviewer Round 3 of 3 on opus is denied (the grant is per spawn, not standing)'),
+    ("step-up: round 3 must name its row's model exactly, so an opus reviewer is refused",
+     'ROLE_ROUND_EXACT = ("2",)',
+     'ROLE_ROUND_EXACT = ("2", "3")', "guard", 'floor step-up: reviewer Round 3 of 3 on opus is denied (the grant is per spawn, not standing)'),
     ("step-up: a builder round 3 on a non-opus model is no longer refused",
-     'if role == "builder" and builder_third_round(prompt) and "opus" not in model:',
-     'if False and role == "builder" and builder_third_round(prompt) and "opus" not in model:',
+     '        want = role_round_model(rounds, role, "3")\n        if want and (',
+     '        want = role_round_model(rounds, role, "3")\n        if False and want and (',
      "guard", 'floor step-up: builder Round 3 of 3 on sonnet is denied'),
     ("step-up: the builder marker drops Round, so a Round 3 of 3 builder on sonnet walks past",
      'BUILDER_MARKERS = ("round", "try")',
@@ -1949,16 +1986,16 @@ MUTATIONS = [
      '    if not session or (SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd):',
      "guard", "scratchpad-owner: 7 a top-level call with no agent_id"),
     ("scratchpad-owner: a read of the file reads as a run",
-     '        if _RUNNER(basename(word)):',
-     '        if True:',
+     '    if not SCRATCHPAD_RUNNER(name):\n        word = re.sub(',
+     '    if False:\n        word = re.sub(',
      "guard", "scratchpad-owner: 8 agent B reads agent A's script with cat"),
     ("scratchpad-owner: the heredoc body is read as run text",
-     '    segments = split_segments(_resolve_vars(strip_heredoc_bodies(command)), ends)\n    for number, segment in enumerate(segments):\n        tokens = segment_tokens(segment)\n        index = resolve_command(tokens) if tokens else None',
-     '    segments = split_segments(_resolve_vars(command), ends)\n    for number, segment in enumerate(segments):\n        tokens = segment_tokens(segment)\n        index = resolve_command(tokens) if tokens else None',
+     '    for full in scratchpad_run_files(_resolve_vars(strip_heredoc_bodies(command)), cwd):',
+     '    for full in scratchpad_run_files(_resolve_vars(command), cwd):',
      "guard", "scratchpad-owner: extra, a run in a heredoc body is text"),
     ("scratchpad-owner: a relative path ignores the cd ahead of it",
-     '        full = shell_abs(script, dir_before_segment(segments, number, cwd, ends))',
-     '        full = shell_abs(script, cwd)',
+     '        named = [shell_abs(file, where) for file in (scripts or ([stdin] if stdin else []))]',
+     '        named = [shell_abs(file, cwd) for file in (scripts or ([stdin] if stdin else []))]',
      "guard", "scratchpad-owner: 2 agent B runs agent A's script after cd"),
     ("scratchpad-owner: a Write family target is not listed as a write",
      '                if SCRATCHPAD_WORD in full and under_session_scratchpad(full, session):\n                    files.append(full)',
@@ -1981,16 +2018,16 @@ MUTATIONS = [
      '                if full and SCRATCHPAD_WORD in full and full not in files and under_session_scratchpad(full, session) and "x" == "y":',
      "guard", "scratchpad-owner: overwrite 2 agent B's shell redirect over agent A's file"),
     ("scratchpad-owner: an interpreter's value flag is read as the script",
-     '            at = workflow_script_index(args)   # past the interpreter\'s flags and their values',
-     '            at = 0 if args else None   # past the interpreter\'s flags and their values',
+     '    at = workflow_script_index(args, name)   # past the interpreter\'s flags and their values',
+     '    at = 0 if args else None   # past the interpreter\'s flags and their values',
      "guard", "scratchpad-owner: flag 1 agent B runs agent A's script past python3 -W ignore"),
     ("scratchpad-owner: a lone - before the script position is read as a script",
-     '            script = args[at] if at is not None and "-" not in args[:at] else ""',
-     '            script = args[at] if at is not None else ""',
+     '    script = args[at] if at is not None and "-" not in args[:at] else ""',
+     '    script = args[at] if at is not None else ""',
      "guard", "scratchpad-owner: stdin 1 agent B's python3 - with a heredoc"),
     ("scratchpad-owner: a shell variable in a run path is not read",
-     '    segments = split_segments(_resolve_vars(strip_heredoc_bodies(command)), ends)',
-     '    segments = split_segments(strip_heredoc_bodies(command), ends)',
+     '    for full in scratchpad_run_files(_resolve_vars(strip_heredoc_bodies(command)), cwd):',
+     '    for full in scratchpad_run_files(strip_heredoc_bodies(command), cwd):',
      "guard", "scratchpad-owner: variable 1 agent B runs agent A's script by a shell variable path"),
     ("scratchpad-owner: a refused overwrite moves the record",
      '    if taken:\n        # A refused write',
@@ -2001,13 +2038,177 @@ MUTATIONS = [
      '            pass\n        return',
      "guard", "scratchpad-owner: top-level 1 a call with no agent_id overwrites agent A's file with Write"),
     ("scratchpad-owner: an rm or mv records its writer",
-     '            if full not in removed:\n                scratchpad_record_writer(full, session, agent)',
-     '            if True:\n                scratchpad_record_writer(full, session, agent)',
+     '            if full not in removed:\n                scratchpad_record_writer(full, session, after[full])',
+     '            if True:\n                scratchpad_record_writer(full, session, after[full])',
      "guard", "scratchpad-owner: approved 2 agent B's rm the owner approves keeps the record with agent A"),
     ("scratchpad-owner: an overwrite the owner lifts leaves the old record",
      ', on_lift=record_writers)',
      ')',
      "guard", "scratchpad-owner: approved 1 agent B's overwrite the owner approves moves the record"),
+    # Rule scratchpad-owner: the run forms a first-command reader does not read, and the copy and move destinations.
+    # Each entry names the case that goes red when its mechanism is removed.
+    ("scratchpad-owner: only the first command of a segment is judged",
+     '        for word, args in scratchpad_command_words(tokens):\n            scripts, stdin, reads',
+     '        for word, args in list(scratchpad_command_words(tokens))[:1]:\n            scripts, stdin, reads',
+     "guard", "scratchpad-owner: runner echo $(python3 F)"),
+    ("scratchpad-owner: a command in a substitution is not read",
+     '            views.append((inside + tokens[at + 1:], tick))',
+     '            views.append(([], False))',
+     "guard", "scratchpad-owner: runner out=$(python3 F)"),
+    ("scratchpad-owner: a word after an assignment substitution reads as a command",
+     '            if number or start not in after_assignment:',
+     '            if True:',
+     "guard", "scratchpad-owner: runner control, agent B's out=$(cat F)"),
+    ("scratchpad-owner: a command after a closed assignment substitution is skipped",
+     '            if opened.start(1) > 0 and _in_group(inside, tick) == inside:',
+     '            if opened.start(1) > 0:',
+     "guard", "scratchpad-owner: runner A=$(date) python3 F"),
+    ("scratchpad-owner: the text of a sh -c is not judged",
+     '        if depth < SCRATCHPAD_NESTING:\n            for inner in inner_commands(tokens):',
+     '        if False:\n            for inner in inner_commands(tokens):',
+     "guard", 'scratchpad-owner: runner bash -c "python3 F"'),
+    ("scratchpad-owner: a stdin redirect names no script",
+     '    args, stdin = scratchpad_stdin(args)\n    start = scratchpad_files_start(name, args)',
+     '    stdin = ""\n    start = scratchpad_files_start(name, args)',
+     "guard", "scratchpad-owner: runner python3 < F"),
+    ("scratchpad-owner: a pipe into an interpreter names no script",
+     '            if reads and not stdin and number and ends[number - 1] == "|":',
+     '            if False:',
+     "guard", "scratchpad-owner: runner cat F | python3"),
+    ("scratchpad-owner: uv, bun, deno and npx words are read as the script",
+     'WORKFLOW_RUNNER_VERBS = {"uv": ("run",), "bun": ("run",), "deno": ("run",), "npx": ("tsx", "ts-node")}',
+     'WORKFLOW_RUNNER_VERBS = {}',
+     "guard", "scratchpad-owner: runner uv run F"),
+    ("scratchpad-owner: python -m pytest reads no script",
+     'WORKFLOW_RUNNER_MODULES = ("pytest",)',
+     'WORKFLOW_RUNNER_MODULES = ()',
+     "guard", "scratchpad-owner: runner python3 -m pytest F"),
+    ("scratchpad-owner: a wrapper's inner command is not judged",
+     '    found = [nested_script(tokens), ssh_remote_script(tokens)]\n    for at in command_indexes(tokens):\n        found.extend(wrapped_commands(tokens, at))',
+     '    found = [nested_script(tokens), ssh_remote_script(tokens)]\n    for at in command_indexes(tokens):\n        found.extend([])',
+     "guard", "scratchpad-owner: runner stdbuf -oL python3 F"),
+    ("scratchpad-owner: a cp makes the write reader raise, so nothing of the call is recorded",
+     '            def in_scratchpad(word, at, verb=None):',
+     '            def in_scratchpad(word, at, verb):',
+     "guard", "scratchpad-owner: cp-mv 1"),
+    ("scratchpad-owner: an mv destination is judged as a removal and not recorded",
+     '                    removed.discard(dest)   # written here, though a later `mv` names it as its source\n',
+     '                    if verb != "mv":\n                        removed.discard(dest)   # written here, though a later `mv` names it as its source\n',
+     "guard", "scratchpad-owner: cp-mv 2"),
+    ("scratchpad-owner: a cp destination carries its source's record",
+     '                    if verb == "mv":\n                        moved[dest] = source\n',
+     '                    if True:\n                        moved[dest] = source\n',
+     "guard", "scratchpad-owner: cp-mv 3"),
+    ("scratchpad-owner: an mv destination records the mover and not its source's writer",
+     '                return scratchpad_writer_of(source, session)\n',
+     '                return agent\n',
+     "guard", "scratchpad-owner: cp-mv 4"),
+    ("scratchpad-owner: a same-call mv source's writer is not carried, so the moved file takes an empty record",
+     '            return agent if source in seen else writer_after(source, seen + (full,))\n',
+     '            return scratchpad_writer_of(source, session)\n',
+     "guard", "scratchpad-owner: one-call 1"),
+    ("scratchpad-owner: a cp source reads as a write",
+     '                if verb is None:   # `_copy_reads` asks with two arguments, about the `cp` target: no, so the sources are only read; `scratchpad_copies` judges the destination\n                    return False\n',
+     '',
+     "guard", "scratchpad-owner: cp-mv 3"),
+    # The shared runner tables keep their meaning for every rule but scratchpad-owner.
+    ("heredoc: uv and npx run a file a heredoc wrote",
+     '_INTERPRETERS + "|" + _WRAPPERS + r")',
+     '_INTERPRETERS + "|" + _WRAPPERS + r"|uv|npx)',
+     "guard", "ask-alone: a heredoc body holding a forced push, written to a file npx formats, chained, allows"),
+    ("workflow-test: pytest value flags are read for every runner",
+     '(pytest and arg in WORKFLOW_PYTEST_VALUE_FLAGS)',
+     '(arg in WORKFLOW_PYTEST_VALUE_FLAGS)',
+     "guard", "builder-test: a bash -k test run deleted from checks.yml is refused"),
+    ("scratchpad-owner: pytest names only the file in a fixed position",
+     '    if name in SCRATCHPAD_FILES_ANYWHERE:\n        return 0',
+     '    if name in SCRATCHPAD_FILES_ANYWHERE:\n        return None',
+     "guard", "scratchpad-owner: runner pytest -n 2 F"),
+    ("scratchpad-owner: a verb runner names only the file in a fixed position",
+     '        if arg in WORKFLOW_RUNNER_VERBS.get(name, ()):\n            return at + 1',
+     '        if arg in WORKFLOW_RUNNER_VERBS.get(name, ()):\n            return None',
+     "guard", "scratchpad-owner: runner uv run --with x F"),
+    # The verb runner's flag table: a value flag skips its value, and every other flag skips only itself.
+    ("scratchpad-owner: a verb runner's value flag skips one word, so its value is judged as the script word",
+     'at += 2 if arg in takes else 1',
+     'at += 1',
+     "guard", "scratchpad-owner: argument 9,"),
+    ("scratchpad-owner: a verb runner's flag that takes no value also skips the word after it",
+     'at += 2 if arg in takes else 1',
+     'at += 2',
+     "guard", "scratchpad-owner: argument control 3,"),
+    ("scratchpad-owner: a verb runner judges every plain argument after its script word, not only the run",
+     'files = [args[at]]',
+     'files = [arg for arg in args[at:] if not arg.startswith("-")]',
+     "guard", "scratchpad-owner: argument 1,"),
+    ("scratchpad-owner: ionice is no wrapper",
+     '    elif word not in ("stdbuf", "ionice", "unbuffer", "caffeinate"):',
+     '    elif word not in ("stdbuf", "unbuffer", "caffeinate"):',
+     "guard", "scratchpad-owner: runner ionice -c3 python3 F"),
+    # Rule scratchpad-owner, the folder check (`scratchpad_owner_write` and `scratchpad_folder_writer`). Each row names
+    # the case that goes red when its mechanism is removed.
+    ("scratchpad-owner: a folder rm or mv is never read for the files under it",
+     "elif full in removed and not taken:",
+     "elif False:",
+     "guard", "folder rm 1,"),
+    ("scratchpad-owner: a folder rm does not read the files of a nested folder",
+     "tops.extend(entry.path for entry in entries)",
+     "pass",
+     "guard", "folder rm 11,"),
+    ("scratchpad-owner: a folder rm does not expand a glob",
+     "roots.extend(sorted(glob.glob(word)))",
+     "roots.append(word)",
+     "guard", "folder rm 8,"),
+    ("scratchpad-owner: a folder rm refuses on an agent's own file too",
+     "writer != agent_id",
+     "writer",
+     "guard", "folder rm control 1,"),
+    ("scratchpad-owner: the folder walk reads past its cap",
+     "left[0] <= 0",
+     "False",
+     "guard", "folder rm walk cap 2,"),
+    ("scratchpad-owner: the folder walk follows a symlink below the folder",
+     "if os.path.islink(top):",
+     "if top == root and os.path.islink(top):",
+     "guard", "folder rm walk link 1,"),
+    ("scratchpad-owner: a folder rm does not expand its brace list",
+     "for word in expand_shell_braces(where):",
+     "for word in [where]:",
+     "guard", "folder rm 13,"),
+    ("scratchpad-owner: a folder rm does not expand a brace list nested in another",
+     "for head in expand_shell_braces(word[:at] + part + word[end + 1:], cap):",
+     "for head in [word[:at] + part + word[end + 1:]]:",
+     "guard", "folder rm 19,"),
+    ("scratchpad-owner: a folder rm drops the text before a brace list, so the list names no folder of its own",
+     "for head in expand_shell_braces(word[:at] + part + word[end + 1:], cap):",
+     "for head in expand_shell_braces(part + word[end + 1:], cap):",
+     "guard", "folder rm 20,"),
+    ("scratchpad-owner: a folder rm drops an empty element of a brace list",
+     "parts.append(text[last:at])",
+     "if last < at: parts.append(text[last:at])",
+     "guard", "folder rm 21,"),
+    ("scratchpad-owner: a folder rm does not expand a letter range",
+     "return at, [chr(n) for n in range(low, high + step, step)]",
+     "return None",
+     "guard", "folder rm 22,"),
+    ("scratchpad-owner: a folder rm does not expand a numeric range",
+     "if abs(high - low) < SCRATCHPAD_BRACE_CAP:",
+     "if False:",
+     "guard", "folder rm 23,"),
+    ("scratchpad-owner: the folder walk skips a link below the folder but reads a root link through",
+     "if os.path.islink(top):",
+     "if top != root and os.path.islink(top):",
+     "guard", "folder rm walk link 3,"),
+    # Rule scratchpad-owner, an mv destination that is a folder of the call: the folder is dropped from the walk only when
+    # no other word of the call names it. The rows are the exception removed, and the brace or glob exclusion removed.
+    ("scratchpad-owner: an mv into a folder is dropped from the walk even when another word of the call names it",
+     'into if into and names.get(os.path.normpath(into)) == intos[os.path.normpath(into)] else ""',
+     'into if into else ""',
+     "guard", "folder move 3,"),
+    ("scratchpad-owner: an mv into a brace list or a glob drops the folder as if its name were one folder",
+     ' and expand_shell_braces(dest) == [dest] and not SCRATCHPAD_GLOB_MAGIC.search(dest)):',
+     '):',
+     "guard", "folder move 7,"),
     ("write-target deny loop judges only the first path field, so a later field's deny is skipped",
      '    for target in targets:\n        # 0b.',
      '    for target in targets[:1]:\n        # 0b.',
@@ -2036,7 +2237,7 @@ MUTATIONS = [
      '        if merging is None or "--auto" in segment:\n            continue\n        verdict, detail = merge_check(',
      "guard", 'merge-checks: --auto is guarded like any merge'),
     ("merge-checks: a head that reports nothing is green in a repo with workflows",
-     'nothing_is_green=not has_workflows(where), batch_ignore=ignore)', 'nothing_is_green=True, batch_ignore=ignore)', "guard",
+     'nothing_is_green=not has_workflows(where))', 'nothing_is_green=True)', "guard",
      'merge-checks: a head that reports nothing yet is not settled'),
     ("merge-checks: a repo with no workflow folder reads as having workflows",
      '    except FileNotFoundError:\n        return False', '    except FileNotFoundError:\n        return True',
@@ -2300,7 +2501,7 @@ MUTATIONS = [
      "            args = tokens if runner else tokens[:1]", "            args = tokens", "guard",
      "builder-test: a ruff --ignore line on tests/ added to checks.yml is allowed"),
     ("builder: an interpreter flag hides the test path a run line runs",
-     '    while index < len(args) and args[index].startswith("-"):', "    while False:", "guard",
+     '        elif arg.startswith("-"):\n            if arg in WORKFLOW_NO_PATH_FLAGS', '        elif False:\n            if arg in WORKFLOW_NO_PATH_FLAGS', "guard",
      "builder-test: python3 -u in place of python3 on a test run is allowed"),
     ("test-author: a mutation test is not its own",
      '            or is_mutation_test_rel(rel))', '            or False)', "guard",
@@ -2797,6 +2998,63 @@ MUTATIONS = [
      'isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in lane_tags(tool_input))',
      'isinstance(t, str) and t.strip() == LANE_TAG for t in lane_tags(tool_input))',
      "guard", "floor lane: an upper-case lane tag on haiku gets the lane remedy"),
+    # ---- lane-title-slug. A lane create_session's title opens with `Lane <branch slug>:`. guard.py lane_title_hit reads the
+    # opening with shared_names.py LANE_TITLE_OPENING, cut from LANE_TITLE_FORM with LANE_SLUG_PATTERN for the placeholder.
+    # Each mutant breaks one clause: the verdict, the refusal, the lane tag condition, the empty or missing title, the colon,
+    # the slug, the Lane word, the anchor, the leading blanks, the slug's case, or the example opening. The printed form's
+    # one mutant changes its colon in the refusal; the opening is cut from the same form, so a changed form changes it too.
+    ("lane-title-slug: the hit always allows, so a lane start with a free title is allowed",
+     '    if LANE_TITLE_OPENING.match(text):\n        return ""\n    return text[:80] or "(none)"',
+     '    return ""',
+     "guard", "lane-title-slug: a lane start with a free title is denied"),
+    ("lane-title-slug: the refusal never fires, so a lane start with a free title is allowed",
+     '    if lane_title:\n        refuse(tool, "deny", "lane-title-slug", LANE_TITLE_REASON, lane_title)',
+     '    if False and lane_title:\n        refuse(tool, "deny", "lane-title-slug", LANE_TITLE_REASON, lane_title)',
+     "guard", "lane-title-slug: a lane start with a free title is denied"),
+    ("lane-title-slug: the lane tag condition is dropped, so a triage start with a free title is refused",
+     '    if not is_lane_create_session(tool, tool_input):\n        return ""\n    title = tool_input.get("title")',
+     '    title = tool_input.get("title")',
+     "guard", "lane-title-slug: a create_session tagged as a triage start with a free title is allowed"),
+    ("lane-title-slug: an empty title reads as no hit, so a lane start with an empty title is allowed",
+     '    return text[:80] or "(none)"',
+     '    return text[:80]',
+     "guard", "lane-title-slug: a lane start with an empty title is denied"),
+    ("lane-title-slug: a title that is not text reads as opening right, so a lane start with no title is allowed",
+     '    text = title.strip() if isinstance(title, str) else ""',
+     '    text = title.strip() if isinstance(title, str) else "Lane x: do the task"',
+     "guard", "lane-title-slug: a lane start with no title is denied"),
+    ("lane-title-slug: the opening needs no colon, so a title with no colon after the slug is allowed",
+     'LANE_TITLE_OPENING = re.compile(re.escape(_FORM_HEAD) + LANE_SLUG_PATTERN + re.escape(_FORM_TAIL))',
+     'LANE_TITLE_OPENING = re.compile(re.escape(_FORM_HEAD) + LANE_SLUG_PATTERN + re.escape(_FORM_TAIL) + "?")',
+     "guard", "lane-title-slug: a title with no colon after the slug is denied"),
+    ("lane-title-slug: the slug may be empty, so a title with Lane, a space and no slug is allowed",
+     'LANE_SLUG_PATTERN = r"[a-z0-9]+(?:-[a-z0-9]+)*"',
+     'LANE_SLUG_PATTERN = r"[a-z0-9]*(?:-[a-z0-9]+)*"',
+     "guard", "lane-title-slug: a title with Lane, a space and no slug is denied"),
+    ("lane-title-slug: the opening needs no Lane word, so a title that opens with the slug alone is allowed",
+     'LANE_TITLE_OPENING = re.compile(re.escape(_FORM_HEAD) + LANE_SLUG_PATTERN + re.escape(_FORM_TAIL))',
+     'LANE_TITLE_OPENING = re.compile("(?:" + re.escape(_FORM_HEAD) + ")?" + LANE_SLUG_PATTERN + re.escape(_FORM_TAIL))',
+     "guard", "lane-title-slug: a title with the slug and no Lane word is denied"),
+    ("lane-title-slug: the opening is searched, not matched, so a title that names the slug after its words is allowed",
+     '    if LANE_TITLE_OPENING.match(text):',
+     '    if LANE_TITLE_OPENING.search(text):',
+     "guard", "lane-title-slug: a title that names the slug after its words is denied"),
+    ("lane-title-slug: the leading blanks are not stripped, so a title that opens after leading blanks is denied",
+     '    text = title.strip() if isinstance(title, str) else ""',
+     '    text = title if isinstance(title, str) else ""',
+     "guard", "lane-title-slug: a lane start whose title opens after leading blanks is allowed"),
+    ("lane-title-slug: the slug may hold capitals, so a session number as the slug is allowed",
+     'LANE_SLUG_PATTERN = r"[a-z0-9]+(?:-[a-z0-9]+)*"',
+     'LANE_SLUG_PATTERN = r"[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*"',
+     "guard", "lane-title-slug: a title with a session number as its slug is denied"),
+    ("lane-title-slug: the refusal prints the form with its colon changed, so it does not carry the printed form verbatim",
+     '    % (LANE_TITLE_FORM, LANE_TITLE_EXAMPLE_OPENING)',
+     '    % (LANE_TITLE_FORM.replace(":", ";"), LANE_TITLE_EXAMPLE_OPENING)',
+     "guard", "lane-title-slug: the refusal carries the printed form verbatim"),
+    ("lane-title-slug: the example opening holds a session number, so the refusal shows Lane N as its example",
+     'LANE_TITLE_EXAMPLE_OPENING = _FORM_HEAD + "my-step" + _FORM_TAIL',
+     'LANE_TITLE_EXAMPLE_OPENING = _FORM_HEAD + "N20" + _FORM_TAIL',
+     "guard", "lane-title-slug: a lane start with a free title is denied"),
     # RULE roadmap-one-writer. A push to the record branch needs the triage tag in the own record, with no
     # set_session_tags call after it.
     ("roadmap-one-writer: the triage tag is not checked, so any own record is a proof",
@@ -3412,6 +3670,15 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_merge.py": ["merge"],
     "hooks/guard_mask_script.py": ["mask-script"],
     "hooks/guard_argv.py": ["argv"],
+    # hooks/guard.py holds the rules that no guard_<x>.py module owns. A mutant of it meets six families that read those rules.
+    "hooks/guard.py": ["write", "paths", "diff", "model-cap", "cite", "hook-bypass"],
+}
+# Suites a row's module never runs (step mutation-tests-for-cost). merge/test_merge.py times out at 180 s on the clean
+# source. The other three assert on guard.py's own text, which the report's ast.unparse copy drops comments from, so each
+# reads not green on the clean copy and never kills a mutant.
+GUARD_MODULE_DROPPED_SUITES = {
+    "hooks/guard.py": ["merge/test_merge.py", "hooks/test_wrappers.py", "lint/test_layout.py",
+                       "lint/test_report_guard_stamped.py"],
 }
 GUARD_MODULE_EXEMPT = {
     "hooks/guard_core.py": "shared by every family, so a mutant of it needs the whole test_guard.py, which takes minutes",
@@ -3868,40 +4135,51 @@ def known_defects_main(argv) -> int:
     return 1 if missing or changed or any(result["verdict"] != "CAUGHT" for result in results) else 0
 
 
-def _loads_module(source: str, stem: str) -> bool:
-    """True when the Python text imports or loads the module `stem`, read from its `ast` tree (never its text, so a comment,
-    a string or a docstring that names the module is not a load). The forms: `import`, `from ... import`,
-    `importlib.import_module` and `__import__` with a literal name, and `spec_from_file_location`, `SourceFileLoader` and
-    `runpy.run_path` with a string literal of the basename `<stem>.py` in the path argument (never the module-name argument),
-    directly or through a name bound to such an expression by an assignment in any scope of the file (module, function or
-    class level; one name bound in two scopes pools both values). A path that arrives as a function parameter is followed
-    to the calls of that function in the same file: a call by a bare name, with the argument by position or by keyword
-    for that parameter, counts as a binding of the parameter, read only inside the def that owns the parameter. Two functions
-    with different names that share a parameter name keep their calls apart.
-    Only the forms above are followed. Any other form reads False, and this list is not complete. Examples: a loader
+_PATH_NAMES = frozenset(("Path", "PurePath", "PurePosixPath", "PureWindowsPath", "join", "abspath", "realpath", "normpath"))
+_PATH_METHODS = frozenset(("Path", "PurePath", "joinpath", "abspath", "realpath", "normpath", "with_name"))
+_FILE_CALLS = frozenset(("open", "copy", "copy2", "copyfile", "copytree", "move", "run", "call", "check_call",
+                         "check_output", "Popen", "read_text", "read_bytes"))
+_LOADERS = frozenset(("spec_from_file_location", "SourceFileLoader", "run_path"))
+
+
+def _load_profile(source: str):
+    """(stems, loads, reads) of one Python text, read from its `ast` tree (never its text, so a comment, a string or a
+    docstring that names a file is not a load). `stems` are the modules it imports or loads by name: `import`, `from ...
+    import`, `importlib.import_module` and `__import__` with a literal name. `loads` are the basenames of the string
+    constants in the path argument of a file loader (`spec_from_file_location`, `SourceFileLoader`, `runpy.run_path`, never
+    the module-name argument). `reads` are the basenames of the string constants of each path expression that copies, opens
+    or runs a file: an argument of `open`, `shutil.copy*`, `subprocess.run` and the like (`_FILE_CALLS`), and a `os.path.join`,
+    `Path` or `/` expression (`_PATH_NAMES`, `_PATH_METHODS`). A text that does not parse has an empty profile.
+
+    A name in a path expression is followed to the expressions it is bound to by an assignment in any scope of the file
+    (module, function or class level; one name bound in two scopes pools both values). The path argument of a loader that
+    arrives as a function parameter is also followed to the calls of that function in the same file: a call by a bare name,
+    with the argument by position or by keyword for that parameter, counts as a binding of the parameter, read only inside
+    the def that owns the parameter. Two functions with different names that share a parameter name keep their calls apart.
+    A name in a `reads` expression is followed only through the parts of its bound value that can be the path (a string,
+    a name, a `/` or `+` of those, and the arguments of a path call), and never through a parameter.
+    Only the forms above are followed. Any other form reads as no load, and this list is not complete. Examples: a loader
     imported from another file, a wrapper that is called through another wrapper's parameter, an attribute call such as
     `obj.load(..., "widget.py")` or `self.load(...)`, a path parameter whose default holds the file when no call passes
     it (`def load(name, path=WIDGET)` called as `load("x")`), a lambda loader, a bare alias of the loader
     (`helper = load`), a loader that takes the path as `*args` or `**kwargs` (a `**kwargs` loader that copies the
     keyword into a local of the same name, `path = kwargs["path"]`, is followed; `p = kwargs["path"]` is not), a call
-    that spreads the path in (a starred
-    argument before it, as `load(*names, "widget.py")`, or `**{"path": ...}`), a name bound only as a `for` or
-    comprehension target (`for path in ["widget.py"]`), and a name bound by tuple unpacking, augmented assignment,
-    `with ... as` or an attribute store (`self.path = "widget.py"`). Also a class constructor that takes the path
-    (`Loader("widget.py")`), `functools.partial(load, "widget.py")`, `map(load, [...])`, a walrus binding, and a split
-    literal (`"widget" + ".py"`).
-    Known false selections, so each reads True: a bare call `load(path=X)` also feeds a method `Loader.load` of the same
-    name in the file, as every def of that name takes the call, and a loader that reassigns its path before the load reads
-    the argument its calls pass, not the new value.
+    that spreads the path in (a starred argument before it, as `load(*names, "widget.py")`, or `**{"path": ...}`), a name
+    bound only as a `for` or comprehension target (`for path in ["widget.py"]`), and a name bound by tuple unpacking,
+    augmented assignment, `with ... as` or an attribute store (`self.path = "widget.py"`). Also a class constructor that
+    takes the path (`Loader("widget.py")`), `functools.partial(load, "widget.py")`, `map(load, [...])`, a walrus binding,
+    and a split literal (`"widget" + ".py"`).
+    Known false selections: a bare call `load(path=X)` also feeds a method `Loader.load` of the same name in the file, as
+    every def of that name takes the call, and a loader that reassigns its path before the load reads the argument its
+    calls pass, not the new value.
 
     It assumes module stems are unique across the repository, so a name match is a load of this file (only
-    `test_action.py` repeats a stem today). A text that does not parse reads False."""
+    `test_action.py` repeats a stem today)."""
     import ast
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError, RecursionError):
-        return False
-    base = stem + ".py"
+        return set(), set(), set()
     bound = {}  # a name -> the expressions it is bound to, in any scope
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
@@ -3911,7 +4189,7 @@ def _loads_module(source: str, stem: str) -> bool:
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
             bound.setdefault(node.target.id, []).append(node.value)
 
-    parent = {}  # a node -> its parent, built with `fed` on the first file loader, so a file with none pays nothing
+    parent = {}  # a node -> its parent, built on the first loader, so a file with none pays nothing
     fed = {}  # (a def, a parameter name) -> the argument expressions its calls pass for it
 
     def read_params() -> None:
@@ -3934,54 +4212,204 @@ def _loads_module(source: str, stem: str) -> bool:
                         if keyword.arg:
                             fed.setdefault((function, keyword.arg), []).append(keyword.value)
 
-    def names_base(expr, seen, scope=()) -> bool:
+    def scope_of(node) -> list:
+        """The defs around `node`, innermost first: the parameters it can read."""
+        if not parent:
+            read_params()
+        scope = []
+        up = parent.get(node)
+        while up is not None:
+            if isinstance(up, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                scope.append(up)
+            up = parent.get(up)
+        return scope
+
+    stems, loads, reads = set(), set(), set()
+
+    def collect(expr, seen: set, scope, into: set) -> None:
+        """Add the basename of each string constant in `expr` to `into`, and of each constant in the values its names are
+        bound to. A name that is a parameter of a def in `scope` adds the argument values its calls pass for it."""
         for part in ast.walk(expr):
             if isinstance(part, ast.Constant) and isinstance(part.value, str):
-                if part.value.replace("\\", "/").rsplit("/", 1)[-1] == base:
-                    return True
+                into.add(part.value.replace("\\", "/").rsplit("/", 1)[-1])
             elif isinstance(part, ast.Name):
                 if part.id in bound and part.id not in seen:
                     seen.add(part.id)
-                    if any(names_base(value, seen, scope) for value in bound[part.id]):
-                        return True
+                    for value in bound[part.id]:
+                        collect(value, seen, scope, into)
                 for function in scope:
                     key = (function, part.id)
                     if key in fed and key not in seen:
                         seen.add(key)
-                        if any(names_base(value, seen) for value in fed[key]):
-                            return True
-        return False
+                        for value in fed[key]:
+                            collect(value, seen, (), into)
 
-    def last_part(dotted: str) -> bool:
-        return dotted.rsplit(".", 1)[-1] == stem
+    def read_collect(expr, seen: set, into: set) -> None:
+        """Add the basename of each string constant in a read's path expression, and follow each name in it (`read_follow`)."""
+        for part in ast.walk(expr):
+            if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                into.add(part.value.replace("\\", "/").rsplit("/", 1)[-1])
+            elif isinstance(part, ast.Name):
+                read_follow(part.id, seen, into)
+
+    def read_follow(name: str, seen: set, into: set) -> None:
+        """Follow a name of a read to the values an assignment binds it to. Only the parts of such a value that can be the
+        path are followed (`read_part`): a call that takes the name as one argument does not pass on its other arguments."""
+        if name in bound and name not in seen:
+            seen.add(name)
+            for value in bound[name]:
+                read_part(value, seen, into)
+
+    def read_part(expr, seen: set, into: set) -> None:
+        if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+            into.add(expr.value.replace("\\", "/").rsplit("/", 1)[-1])
+        elif isinstance(expr, ast.Name):
+            read_follow(expr.id, seen, into)
+        elif isinstance(expr, ast.BinOp) and isinstance(expr.op, (ast.Div, ast.Add)):
+            read_part(expr.left, seen, into)
+            read_part(expr.right, seen, into)
+        elif isinstance(expr, ast.Call) and is_path_call(expr.func):
+            for arg in list(expr.args) + [kw.value for kw in expr.keywords]:
+                read_part(arg, seen, into)
+
+    def last(dotted: str) -> str:
+        return dotted.rsplit(".", 1)[-1]
+
+    def is_path_call(func) -> bool:
+        if isinstance(func, ast.Name):
+            return func.id in _PATH_NAMES
+        if not isinstance(func, ast.Attribute):
+            return False
+        if func.attr == "join":  # os.path.join, never `", ".join(...)`
+            owner = func.value
+            return (isinstance(owner, ast.Attribute) and owner.attr == "path") or \
+                   (isinstance(owner, ast.Name) and owner.id in ("path", "posixpath", "ntpath"))
+        return func.attr in _PATH_METHODS
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            if any(last_part(alias.name) for alias in node.names):
-                return True
+            stems.update(last(alias.name) for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
-            if (node.module and last_part(node.module)) or any(alias.name == stem for alias in node.names):
-                return True
+            if node.module:
+                stems.add(last(node.module))
+            stems.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            read_collect(node, set(), reads)
         elif isinstance(node, ast.Call):
             func = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
             if func in ("import_module", "__import__"):
                 first = node.args[0] if node.args else next((kw.value for kw in node.keywords if kw.arg == "name"), None)
-                if isinstance(first, ast.Constant) and isinstance(first.value, str) and last_part(first.value):
-                    return True
-            elif func in ("spec_from_file_location", "SourceFileLoader", "run_path"):
+                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    stems.add(last(first.value))
+            elif func in _LOADERS:
                 skip = 0 if func == "run_path" else 1  # the first argument of the other two is the module name
                 parts = list(node.args[skip:]) + [kw.value for kw in node.keywords if kw.arg not in ("name", "fullname")]
-                if not parent:
-                    read_params()
-                scope = []  # the defs around this call, innermost first: the parameters it can read
-                up = parent.get(node)
-                while up is not None:
-                    if isinstance(up, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        scope.append(up)
-                    up = parent.get(up)
-                if any(names_base(part, set(), scope) for part in parts):
-                    return True
-    return False
+                scope = scope_of(node)
+                for part in parts:
+                    collect(part, set(), scope, loads)
+            elif func in _FILE_CALLS:
+                for part in list(node.args) + [kw.value for kw in node.keywords]:
+                    read_collect(part, set(), reads)
+            if is_path_call(node.func):
+                read_collect(node, set(), reads)
+    return stems, loads, reads
+
+
+def _profile_loads(profile, stem: str, extension: str = ".py") -> bool:
+    """True when a profile (`_load_profile`) imports or loads the module `stem`: a `.py` stem imported by name, or the
+    basename `stem + extension` in a loader's path argument."""
+    stems, loads = profile[0], profile[1]
+    return (extension == ".py" and stem in stems) or stem + extension in loads
+
+
+def _profile_reads(profile, stem: str, extension: str = ".py") -> bool:
+    """True when a profile (`_load_profile`) loads the module `stem + extension`, or names it in a path expression that
+    copies, opens or runs a file."""
+    return _profile_loads(profile, stem, extension) or stem + extension in profile[2]
+
+
+def _loads_module(source: str, stem: str, extension: str = ".py") -> bool:
+    """True when the Python text imports or loads the module `stem`, or loads `stem + extension` by a file loader
+    (`_load_profile`, `_profile_loads`). A text that does not parse reads False."""
+    return _profile_loads(_load_profile(source), stem, extension)
+
+
+def _tracked_files():
+    """(tracked paths, None), or (None, the reason) when `git ls-files` fails, in the working folder's repository."""
+    done = _nowindow.run(["git", "ls-files", "-z"], capture_output=True, text=True,
+                         encoding="utf-8", stdin=subprocess.DEVNULL)
+    if done.returncode != 0:
+        return None, "git ls-files failed: %s" % done.stderr.strip()
+    return [item for item in done.stdout.split("\0") if item], None
+
+
+def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
+    """The suites that test any of `paths`. Per path: each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it, whether
+    or not it parses, plus each tracked `test_*.py` whose profile (`_load_profile`) reads it: it imports or loads the path's
+    module when the path is a `.py` file, or it names the path's basename in a path expression that copies, opens or runs
+    a file. A listed file (REPORT_TARGETS) adds its listed suites; with `union` False it gets those only and no scan. With
+    `chain` True a suite also tests a `.py` path that a module it loads imports, however deep: from each tracked `.py` the
+    suite names (by stem or by basename), it follows the stems that file imports (`import`, `from`, a literal
+    `import_module`) to tracked `.py` files, each file once, so a cycle ends. A deleted `.py` path is no longer tracked, so
+    its stem is matched against the stems those files import. A stem or basename with no tracked `.py` is outside the
+    repository and ends the chain there. Each file is read and parsed once, whatever the number of paths or suites. A file
+    that cannot be read has an empty profile."""
+    import re
+    listed = dict(REPORT_TARGETS)
+    names = set()
+    scan = [path for path in paths if union or path not in listed]
+    for path in paths:
+        if path in listed:
+            names.update(listed[path])
+    if not scan:
+        return names
+    profiles = {}  # a tracked path -> its profile; each file read once
+
+    def profile_of(item):
+        if item not in profiles:
+            try:
+                with open(item, encoding="utf-8") as handle:
+                    profiles[item] = _load_profile(handle.read())
+            except (OSError, ValueError):
+                profiles[item] = (set(), set(), set())
+        return profiles[item]
+
+    suites = [item for item in tracked if os.path.basename(item).startswith("test_") and item.endswith(".py")]
+    reached = {}  # a suite -> the tracked .py files its loads lead to
+    reached_stems = {}  # a suite -> the stems those files import, so a deleted module (no longer tracked) still matches
+    if chain:
+        by_stem = {}
+        for item in tracked:
+            if item.endswith(".py"):
+                by_stem.setdefault(os.path.splitext(os.path.basename(item))[0], []).append(item)
+        for suite in suites:
+            stems, loads, reads = profile_of(suite)
+            todo = [file for stem in stems for file in by_stem.get(stem, [])]
+            todo += [file for base in loads | reads if base.endswith(".py") for file in by_stem.get(base[:-3], [])
+                     if os.path.basename(file) == base]
+            seen = set()
+            followed = set()
+            while todo:
+                file = todo.pop()
+                if file in seen:
+                    continue
+                seen.add(file)
+                file_stems = profile_of(file)[0]
+                followed.update(file_stems)
+                todo.extend(next_file for stem in file_stems for next_file in by_stem.get(stem, []))
+            reached[suite] = seen
+            reached_stems[suite] = followed
+    for path in scan:
+        folder, name = os.path.split(path)
+        stem, extension = os.path.splitext(name)
+        wanted = re.compile(r"test_%s(_[^/]*)?\.py" % re.escape(stem))
+        for item in suites:
+            if (os.path.dirname(item) == folder and wanted.fullmatch(os.path.basename(item))) \
+                    or _profile_reads(profile_of(item), stem, extension) \
+                    or path in reached.get(item, ()) \
+                    or (extension == ".py" and stem in reached_stems.get(item, ())):
+                names.add(item)
+    return names
 
 
 def _guard_section_sources(tracked) -> list:
@@ -4015,14 +4443,14 @@ def _guard_section_sources(tracked) -> list:
 
 def tests_for_main(argv) -> int:
     """Print the suites that test one file, a line each, sorted, once each. A file listed in REPORT_TARGETS prints exactly its
-    suites. Any other `.py` file prints each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it, plus each tracked
-    `test_*.py` in the repository of the working folder that imports or loads its module (`_loads_module`). A guard section
-    file (`_guard_section_sources`) that loads the module prints `hooks/test_guard.py`, its runner, in place of itself. A file
-    with a row in GUARD_MODULE_FAMILIES prints that union with its `hooks/test_guard.py::<family>` lines, minus the plain whole
-    `hooks/test_guard.py`. A non-`.py` file prints the suites beside it only. A suite that cannot be read or parsed is skipped.
-    It is the `select` command of the `claude_settings` profile. A file with no suite prints nothing."""
+    suites. Any other file prints `suites_for_paths` with no union: each tracked `test_<stem>.py` and `test_<stem>_*.py`
+    beside it, plus each tracked `test_*.py` of the repository of the working folder that imports or loads its module, or
+    names its basename in a path expression it copies, opens or runs (`_load_profile`). A guard section file
+    (`_guard_section_sources`) that loads the module prints `hooks/test_guard.py`, its runner, in place of itself. A file
+    with a row in GUARD_MODULE_FAMILIES prints that union with its `hooks/test_guard.py::<family>` lines, minus the plain
+    whole `hooks/test_guard.py` and each suite of GUARD_MODULE_DROPPED_SUITES for it. A suite that cannot be read or parsed is skipped, unless it sits beside the file. It is the
+    `select` command of the `claude_settings` profile. A file with no suite prints nothing."""
     import argparse
-    import re
     parser = argparse.ArgumentParser(prog="mutate_guard.py --tests-for")
     parser.add_argument("--tests-for", required=True, metavar="PATH", help="a repository-relative path")
     args = parser.parse_args(argv)
@@ -4031,36 +4459,52 @@ def tests_for_main(argv) -> int:
     if path in listed:
         names = set(listed[path])
     else:
-        folder, name = os.path.split(path)
-        stem, extension = os.path.splitext(name)
-        wanted = re.compile(r"test_%s(_[^/]*)?\.py" % re.escape(stem))
-        done = _nowindow.run(["git", "ls-files", "-z"], capture_output=True, text=True,
-                             encoding="utf-8", stdin=subprocess.DEVNULL)
-        if done.returncode != 0:
-            print("ERROR git ls-files failed: %s" % done.stderr.strip())
+        tracked, reason = _tracked_files()
+        if tracked is None:
+            print("ERROR %s" % reason)
             return 2
-        tracked = [item for item in done.stdout.split("\0") if item]
-        names = {item for item in tracked
-                 if os.path.dirname(item) == folder and wanted.fullmatch(os.path.basename(item))}
-        if extension == ".py":
-            for item in tracked:
-                base = os.path.basename(item)
-                if item in names or not (base.startswith("test_") and base.endswith(".py")):
-                    continue
-                try:
-                    with open(item, encoding="utf-8") as handle:
-                        source = handle.read()
-                except (OSError, ValueError):
-                    continue
-                if _loads_module(source, stem):
-                    names.add(item)
-            # The runner reads each guard section file, so it stands for a section file that loads the module.
-            if any(_loads_module(source, stem) for source in _guard_section_sources(tracked)):
-                names.add("hooks/test_guard.py")
+        names = suites_for_paths([path], tracked, union=False)
+        stem, extension = os.path.splitext(os.path.basename(path))
+        # The runner reads each guard section file, so it stands for a section file that loads the module.
+        if extension == ".py" and any(_loads_module(source, stem) for source in _guard_section_sources(tracked)):
+            names.add("hooks/test_guard.py")
         if path in GUARD_MODULE_FAMILIES:
             # The whole `hooks/test_guard.py` loads every guard module and takes minutes per mutant, so only its families run.
             names.discard("hooks/test_guard.py")
             names.update("hooks/test_guard.py::%s" % family for family in GUARD_MODULE_FAMILIES[path])
+            names.difference_update(GUARD_MODULE_DROPPED_SUITES.get(path, ()))
+    for name in sorted(names):
+        print(name)
+    return 0
+
+
+def lint_suites_main(argv) -> int:
+    """`--lint-suites BASE`: print the suites that test any file of `git diff BASE...HEAD`, a line each, sorted. It is the
+    one selector `bin/ci-job --lint` asks for the CI steps with a suite it runs. Unlike `--tests-for`, a listed file also gets
+    the suites its scan finds, and a suite also gets a `.py` file that a module it loads imports (`chain`). Exit 2 with one
+    `ERROR` line when the diff or the file list cannot be read. Cost: one `git diff`, then, when the diff holds a file, one
+    `git ls-files` and one parse of each tracked `test_*.py` and of each module they reach, once for the whole diff."""
+    import argparse
+    parser = argparse.ArgumentParser(prog="mutate_guard.py --lint-suites")
+    parser.add_argument("--lint-suites", required=True, metavar="BASE", help="a ref the diff BASE...HEAD starts from")
+    args = parser.parse_args(argv)
+    done = _nowindow.run(["git", "diff", "--name-only", "--no-renames", "-z", args.lint_suites + "...HEAD"],
+                         capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
+    if done.returncode != 0:
+        print("ERROR git diff %s...HEAD failed: %s" % (args.lint_suites, done.stderr.strip()))
+        return 2
+    changed = sorted({item.replace(os.sep, "/") for item in done.stdout.split("\0") if item})
+    tracked = []
+    if changed:
+        tracked, reason = _tracked_files()
+        if tracked is None:
+            print("ERROR %s" % reason)
+            return 2
+    names = suites_for_paths(changed, tracked, union=True, chain=True)
+    # A changed suite is picked itself: an edit that breaks its own suite is caught by that suite.
+    on_disk = set(tracked)
+    names.update(item for item in changed if item in on_disk
+                 and os.path.basename(item).startswith("test_") and item.endswith(".py"))
     for name in sorted(names):
         print(name)
     return 0
@@ -4081,6 +4525,7 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     env[variable] = copy_path
     env["CLAUDE_CONFIG_DIR"] = config_dir
     env.pop("MUTATE_ONLY", None)
+    env.pop("MUTATE_SHARD", None)  # the shard picks mutants for this run; a suite must not read it
     if only:
         env["MUTATE_ONLY"] = only  # the suites run just the cases whose name holds this
     # stderr goes to a temp file, not a pipe: test_guard.py leaves a `sleep 300` that holds the suite's
@@ -4294,6 +4739,8 @@ def main() -> int:
         return known_defects_main(sys.argv[1:])
     if "--tests-for" in sys.argv[1:]:
         return tests_for_main(sys.argv[1:])
+    if "--lint-suites" in sys.argv[1:]:
+        return lint_suites_main(sys.argv[1:])
     sources = {}
     for name, (path, _suite, _variable, _stem) in TARGETS.items():
         with open(path, encoding="utf-8") as handle:
