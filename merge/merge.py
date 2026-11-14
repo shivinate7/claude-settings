@@ -19,7 +19,7 @@
                           Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
                           (the 3600 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
-                          The batch runner's join (cloud) needs a lane-lint PASS for the head's sha. Only a batch integration PR skips it, when the all-jobs-passed rollup is green on that exact head:
+                          A confirm in the cloud needs a lane-lint PASS for the head's sha. Any pull request skips it, a lane PR included, when the all-jobs-passed rollup is green on that exact head:
                           then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
   merge <pr> --confirm --express   go on to the merge only for a prose-only diff (main's ci-scope.sh turns on nothing) whose body has a `Ruling: <id>`
                           line naming an entry in origin/roadmap's rulings; any other case refuses before a push.
@@ -213,16 +213,16 @@ STAMP_CITE = "(decision one-shared-record-stamp, the claim runs only on the defa
 RECORDS_CITE = "(decision records-index-at-merge, only the merge tool rebuilds the records page, before the branch goes ready)"
 UNDO_CITE = "(decision silent-undo-check-design, a branch that silently undoes earlier work does not merge)"
 DEBT_CITE = "(decision debt-close-runs-retire, a debt closes only when its Retire check passes on the head)"
-RED_CITE = "(decision no-merge-onto-red-main, no batch merges onto a red base)"
+RED_CITE = "(rule git-red-main-reverts, a red main takes only the revert of the blamed commit)"
 CANCELLED_NO_RED = "was cancelled with no red job"  # base_state words an unknown cancelled run with it; red_base reads it back to give the cancelled run its own headline
 RERUN_REMEDY = "gh run rerun"  # base_state names it for a cancelled run on the base's head; red_base reads it back to name the remedy in its way out
 RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-run with it; red_base reads it back to give the re-run its own headline
 BREAKING_MERGE = "breaking merge:"  # base_state words the first red run with a green parent, once its re-run is red again, with it; red_base reads it back to name the revert route
 FIRST_RED_RERUN = re.compile(rf"`{RERUN_REMEDY} (\d+) --failed`")  # base_state names a first red run's re-run with it; red_base reads the run id back to name the re-run before the reason flag
-DROP_CITE = "(decision merge-deletes-batch-lanes, a batch that drops a lane by a revert of its merge does not merge)"
-BATCH_CITE = "(decision no-merge-during-batch-ci, nothing merges while another ready pull request's CI runs, and the required checks are never empty)"
+DROP_CITE = "(decision silent-undo-check-design, a branch that silently undoes earlier work does not merge)"
+BATCH_CITE = "(decision main-branch-protection, the merge tool reads the required checks from the ruleset or the protection and never merges with none)"
 EXPRESS_CITE = "(decision owner-override, ruling R59 part 5 of 15:05 CST Nov 12, a ruled prose change skips the batch queue and runs only the checks that read its files)"
-FREEZE_CITE = BATCH_CITE  # the batch build and drop refusals cite the batch brake's decision, though the freeze decision governs them; a later change points this at the freeze decision
+FREEZE_CITE = "(decision no-merge-during-batch-ci, nothing merges while another ready pull request's CI runs, and the required checks are never empty)"  # the frozen-block refusals keep their own cite: BATCH_CITE now names the required-checks home, which does not govern them
 DRAFT_CITE = "(decision draft-until-reviewed, every pull request opens as a draft and only the one integration PR goes ready)"
 STAMP_RUN_CITE = "(decision one-shared-record-stamp, the claim runs before the merge, on the pull request branch, in the merge tool)"
 STAMP_CFG_CITE = "(decision one-shared-record-stamp, each repo keeps its config in its own tree, and the tool never guesses a config field)"
@@ -1776,8 +1776,10 @@ def head_claim(wt, rev="HEAD"):
     return git(wt, "log", "-1", "--format=%(trailers:key=Record-claim,valueonly)", rev)[1].strip()
 
 def claim_only(root, cfgrel, base, linted, live):
-    """True when `linted` is an ancestor of `live` and each commit after it is a claim: one parent, a Record-claim trailer (head_claim), and only
-    record files touched. A record file is a direct child of a stamp kind's folder that matches its filePattern, or the records page. Any
+    """True when `linted` is an ancestor of `live` and each commit after it is a claim or a records-page commit. A claim has one parent, a Record-claim
+    trailer (head_claim), and only record files touched; a record file is a direct child of a stamp kind's folder that matches its filePattern, or the
+    records page. A records-page commit is page_only's: one parent, the subject PAGE_SUBJECT, the records page alone. The merge tool pushes one after
+    review when the page goes stale, so it moves the head by nothing a record or a lint read. Any other commit is False. Any
     read that fails is False. Commits come from the clone, so the caller fetches the branch first."""
     try:
         _, kinds = base_stamp(root, cfgrel, f"origin/{base}")
@@ -1794,6 +1796,8 @@ def claim_only(root, cfgrel, base, linted, live):
         return path == RECORDS_PAGE or any(folder == k["folder"] and fnmatch.fnmatch(name, k.get("filePattern", "*.md")) for k in kinds)
     for row in rows.splitlines():
         sha, *parents = row.split()
+        if page_only(root, sha):  # page_only reads the one-parent, subject and records-page-alone rules itself
+            continue
         c, files = git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", sha)
         if len(parents) != 1 or c or not head_claim(root, sha) or not all(is_record(f) for f in files.splitlines()):
             return False
@@ -3211,7 +3215,7 @@ def ready_page_state(root, n, host):
         with shared_deadline(READY_PAGE_CLEANUP_SECONDS):
             drop_worktree(root, tmp, wt)
 
-WAITS = 3  # the host.wait_checks calls in confirm, none in a loop: the head, the claim, the merge commit that heals the page
+LOCK_TTL_SECONDS = 1200  # unmeasured. confirm holds no check wait under the lock and extend_for lengthens it for a rate wait, so a crashed run frees the lock in 20 minutes at any merge.deadlineMinutes
 
 def relayed_head_holds(root, branch, relayed, live):
     """True when the live head is the head a relayed yes named, or sits on it with only this tool's own commits between: a Record-claim
@@ -3264,8 +3268,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         return draft_step(root, cfg, n, host, info)
     lock.holder = {"pr": n, "branch": info["branch"], "session": session}
     lifts = {}  # each reason flag that lifts a check in this run, for the merge commit message
-    token = lock.acquire(base, (WAITS * m["deadlineMinutes"] + 10) * 60)  # each wait at most once, ten minutes spare
-    host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant); the TTL spare is for the checks waits
+    token = lock.acquire(base, LOCK_TTL_SECONDS)
+    host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant), so the fixed TTL need not cover it
     tmp = wt = claim_sha = None
     judge = None  # the prose judge's plan, built under the lock and run after it is released
     try:
@@ -3705,8 +3709,8 @@ def edits_outside_conflict(root, parents, tree):
 def clean_merges_after(h, head, live, base=None, claims=None):
     """True when every commit after `head`, up to the live head `live`, is a clean merge of main. A clean merge of main has two
     parents, a second parent main holds (Host.holds_head, main being `base`, else the host's base), and git's clean merge of its parents as its tree
-    (merge_state). `claims`, the stamp config path: a one-parent claim commit (claim_only, read in the host's checkout) also counts, since the
-    merge tool's own claim moves the reviewed head by exactly that. The walk follows first parents from `live` and must reach `head` within
+    (merge_state). `claims`, the stamp config path: a one-parent claim commit or a records-page commit (claim_only, read in the host's checkout) also counts, since the
+    merge tool's own claim and its page rebuild move the reviewed head by exactly that. The walk follows first parents from `live` and must reach `head` within
     REVIEW_MERGE_WALK commits. A commit with one parent (an empty commit too), a merge of three, a merge of a branch main lacks, an edited or conflicted merge, a
     longer walk and a head that is never reached are all False. A failed read, a commit read that names no tree, and a merge git cannot read
     (merge_state "unknown") raise Stop: unknown, never False and never True. Cost: one commit read per commit walked (each sha read once);
@@ -3776,7 +3780,7 @@ def rollup_green(h, n, head):
 
 def lint_carried(root, cfgrel, base, n, passed, live):
     """True when a lane-lint PASS on one of the heads `passed` holds for the live head `live` of pull request `n`: every commit after it is a
-    claim (claim_only, against `base`). The checkout `root` fetches the pull request's head first when it lacks `live`. A read that fails is False.
+    claim or a records-page commit (claim_only, against `base`). The checkout `root` fetches the pull request's head first when it lacks `live`. A read that fails is False.
     The one home of that carry, for the join (lint_check), `--reviewed` and `--release-check`."""
     if not passed:
         return False
@@ -3785,16 +3789,16 @@ def lint_carried(root, cfgrel, base, n, passed, live):
     return any(claim_only(root, cfgrel, base, x, live) for x in passed)
 
 def lint_check(h, n, info, root, cfgrel):
-    """The batch runner's join needs a lane-lint PASS at the live head (decision lanes-run-no-full-ci-job): read from the repo's comment list, the one read the
+    """A join needs a lane-lint PASS at the live head unless CI proved the head (decision lanes-run-no-full-ci-job): read from the repo's comment list, the one read the
     review record uses. No PASS that names the live head, a FAIL, an unreadable result, or a failed read is a Stop that names `merge --lane-lint <n>`; a failed read
     is `lane lint unknown`, never a pass. It runs before the lock, so nothing is claimed, pushed or merged. The caller passes info["head"] to confirm as
     linted_head, so a head pushed after this read is refused there. A PASS for an earlier head also counts when every commit since is a claim (claim_only):
     the join's own claim push, resumed, moves the head by exactly that.
-    The lint is skipped only for a batch integration PR (is_integration_pr) when the all-jobs-passed rollup (ROLLUP_JOB) is green on info["head"], the sha the
+    The lint is skipped for any pull request, a lane PR or a batch integration PR, when the all-jobs-passed rollup (ROLLUP_JOB) is green on info["head"], the sha the
     merge takes: CI proved that head (rule roles-each-layer-proves-once). Green is the verdict of the newest run on that head, and an older run's red row still refuses (rollup_green), because a draft
-    run's skipped row stays on the head beside the ready run's pass. A lane PR keeps the need above even on a green rollup, as does a rollup that is
-    absent, red, pending or skipped in its newest run, green only on another sha, or unreadable."""
-    if is_integration_pr(info) and rollup_green(h, n, info["head"]):
+    run's skipped row stays on the head beside the ready run's pass. A rollup that is absent, red, pending or skipped in its newest run, green only
+    on another sha, or unreadable keeps the need above, for either kind."""
+    if rollup_green(h, n, info["head"]):
         say(f"merge: lane lint skipped for #{n}: {ROLLUP_JOB} is green on {info['head'][:9]}, so CI already proved this head.")
         return
     try:
@@ -4448,8 +4452,9 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--grant: the PR in the grant must be the pull request number")
         if a.fix_check and a.fix_check[0] == a.head:
             p.error("--fix-check: the reviewed head must differ from --head, or the fix diff is empty")
-        # The reviewer row (decision agent-model-cap): every fix check runs Sonnet (owner item 444 a), and a later-round reviewer runs Sonnet;
-        # the last round may run Opus by the owner's override. Checked here, never in parse_review, so a record posted before the rule still parses.
+        # The reviewer row (decision agent-model-cap): every fix check runs Sonnet (owner item 444 a), and every later-round reviewer runs its round
+        # row's model, Sonnet from round 2 on, round 3 and a granted round 4 included (owner ruling own-r3-reviewer-sonnet-high).
+        # Checked here, never in parse_review, so a record posted before the rule still parses.
         if a.fix_check:
             fix_model = review_round_model(REVIEW_FIX_ROW)
             if a.fix_check[2].lower() != fix_model:
@@ -4457,8 +4462,8 @@ def main(argv, host=None, lock=None, hosts=None):
         for n, role, model, _verdict in a.round:  # parse_review below refuses any fourth round with no --grant
             if role == REVIEW_ROLES[0] and n >= 2:
                 want = review_round_model(n)
-                if want not in model.lower() and not (n >= 3 and "opus" in model.lower()):
-                    p.error(f"--round {n}: a reviewer's round {n} runs {want}, not {model!r}; only round 3, or a granted round 4, may run opus (decision agent-model-cap, the round rows)")
+                if want not in model.lower():
+                    p.error(f"--round {n}: a reviewer's round {n} runs {want}, not {model!r}; no round runs another model (decision agent-model-cap, the round rows)")
         if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant)) is None:
             p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3" if not a.grant
                     else "--round: with --grant the rounds must start at 1, rise by one at a time and end at 4")

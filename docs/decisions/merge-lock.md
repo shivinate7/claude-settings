@@ -10,8 +10,8 @@ lock for one base at once. Code: `confirm` in `merge/merge.py`.
   `owner` id, and the holder: `pr`, `branch`, `host`, `platform`, `pid`, `started`, `boot` (only when
   readable) and `session` (80 characters at most). `confirm` sets the holder before the take. Code:
   `lock_message`.
-- **Time limit.** The take sets the expiry to (3 x `merge.deadlineMinutes` + 10) minutes. The default
-  deadline is 45 minutes, so the expiry is 8700 s after the take. A lock past its expiry is free. Another
+- **Time limit.** The take sets the expiry to 20 minutes after the take (`LOCK_TTL_SECONDS`, 1200 s),
+  at every `merge.deadlineMinutes`. The value is unmeasured. A lock past its expiry is free. Another
   run may take it. `LOCK_MAX_HOLD` (6 h from the take) bounds the extensions only.
 - **Extend.** Before each rate-limit wait, and before the lint run and the suite run of the small-move
   check, `Lock.extend_for` moves the expiry to now + wait + 300 s. The wait is the rate wait, or 3600 s
