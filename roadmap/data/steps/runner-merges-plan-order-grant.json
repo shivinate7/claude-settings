@@ -1,0 +1,14 @@
+{
+ "id": "runner-merges-plan-order-grant",
+ "title": "A standing grant in the claude-settings CLAUDE.md lets runner 10 mark ready and merge every plan PR whose `merge --reviewed` reads clear, in the wave plan order, with no per-PR go",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner words, relayed by the consultant at 21:04 CST and by the coordinator at 21:05, remove the per-PR go from the coordinator for PRs inside the wave plan. A grant the owner gives in chat lands in the repo's CLAUDE.md, never only in a handoff.",
+ "source": "Coordinator 21:05 CST Nov 13 (relaying the consultant's 21:04 relay of the owner); verbatim not yet seen by triage.",
+ "note": "Triage 21:05 CST Nov 13: ruling own-runner-merges-plan-order filed on roadmap. The CLAUDE.md line moves main, which moves only by a PR: a record-writer lane writes it as a draft PR under the Standing grants section of .claude/CLAUDE.md, and the quote must be the consultant's verbatim relay, which triage has asked for. Scope as relayed: runner 10 only; PRs in the wave plan only; a PR outside the plan still needs a go; every merge-tool gate holds (lint at head, record at head, a green run with suites run, main green). It covers no other act (rule outcomes-grant-covers-named-act).",
+ "updatedAt": "2026-11-13T21:05:49-06:00"
+}
