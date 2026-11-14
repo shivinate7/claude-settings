@@ -290,24 +290,25 @@ CHECK_TAIL_REASON = (
     "until the check exits and the verdict can be lost "
     "(decision background-check-through-verdict). "
     "Remedy: run the check through verdict, as `verdict <cmd>` with nothing after it. It keeps the "
-    "full log and prints the verdict itself. Start a lane lint in the background with a time limit "
-    "above its bound, LINT_SECONDS plus PUSHED_HEAD_WAIT_MINUTES times 60, times 1000 ms "
-    "(rule check-timeout gives the figure), or the limit ends it before the verdict."
+    "full log and prints the verdict itself. "
+    "Start a lane lint in the background. Give it a time limit above its bound, "
+    "LINT_SECONDS plus PUSHED_HEAD_WAIT_MINUTES times 60, times 1000 ms (rule check-timeout gives the figure). "
+    "A shorter limit ends it before the verdict."
 )
 
 
-# A BACKGROUND LANE LINT'S TIME LIMIT (rule check-timeout). `merge --lane-lint` waits for its pushed head and then
-# runs one ci-job under the merge tool's lint bound, so a Bash or PowerShell call whose `timeout` is shorter ends
-# the run before its verdict. The bound is read from the merge tool, never copied. A foreground call is capped
-# below the bound by the tool, so it is refused at any limit. A call with no `timeout` gets the tool's default,
-# which is under the bound too. An unloadable merge tool is an unknown bound: nothing is refused.
+# A BACKGROUND LANE LINT'S TIME LIMIT (rule check-timeout). `merge --lane-lint` waits for its pushed head. Then it
+# runs one ci-job under the merge tool's lint bound. A call whose `timeout` is shorter ends before the verdict.
+# The bound is read from the merge tool, never copied. The tool caps a foreground limit below the bound,
+# so a foreground lane lint is refused at any limit. A call with no `timeout` gets the tool's default,
+# which is under the bound too. An unloadable merge tool gives an unknown bound: nothing is refused.
 FOREGROUND_DEFAULT_TIMEOUT_MS = 120000
 BACKGROUND_DEFAULT_TIMEOUT_MS = 1800000
 
 
 def check_timeout_bound_ms():
-    """The least time limit in ms a lane lint can finish under, or None when the merge tool does not load."""
-    import guard_merge  # imported here: loading the merge tool is paid only by a call that runs a lane lint
+    """The least limit in ms a lane lint can finish under, or None."""
+    import guard_merge  # Lazy: only a lane lint pays to load the merge tool.
     tool = guard_merge.merge_module()
     if tool is None:
         return None
@@ -318,8 +319,9 @@ def check_timeout_bound_ms():
 
 
 def check_timeout_hit(stripped: str, background: bool, timeout_ms=None) -> str:
-    """The matched text when a call runs `merge --lane-lint` in the foreground, or in the background under a
-    time limit below the bound, else ''. `timeout_ms` is the call's `timeout`; None means the tool's default."""
+    """The matched text when a call runs `merge --lane-lint` with too little time, else ''.
+    The foreground has too little at any limit. The background has too little under the bound.
+    `timeout_ms` is the `timeout` of the call. None means the default."""
     hit = ""
     for segment in split_segments(stripped):
         word = check_stage(segment, False)  # False: ci-job is no lane lint
@@ -340,13 +342,15 @@ def check_timeout_hit(stripped: str, background: bool, timeout_ms=None) -> str:
 
 
 def _check_timeout_reason() -> str:
-    tool_bound = check_timeout_bound_ms()
+    """The text of CHECK_TIMEOUT_REASON, with the bound read from the merge tool."""
+    bound = check_timeout_bound_ms()
+    limit = "at least %d ms" % bound if bound is not None else "above the bound"
     return (
-        "a lane lint that runs under a time limit shorter than its own bound is ended before it prints a "
-        "verdict, and a run in the foreground is capped below that bound. "
-        "Remedy: start it in the background, as `verdict <cmd>`, with a time limit of at least %d ms, which "
-        "is LINT_SECONDS plus PUSHED_HEAD_WAIT_MINUTES times 60, times 1000, and read the verdict when the "
-        "run ends." % tool_bound
+        "a lane lint with a time limit shorter than its own bound ends before it prints a verdict. "
+        "A run in the foreground is capped below that bound. "
+        "Remedy: start it in the background, as `verdict <cmd>`, with a time limit of " + limit + ". "
+        "That is LINT_SECONDS plus PUSHED_HEAD_WAIT_MINUTES times 60, times 1000. "
+        "Read the verdict when the run ends."
     )
 
 
