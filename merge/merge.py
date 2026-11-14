@@ -1276,7 +1276,7 @@ class Host:
         `sha` is the head the caller already read; with none, the head of the pull request `n` is read. The same read judges time against each job's cap (`job_caps`, from the workflow files of this checkout). With `warn`, a job over 70% of its cap prints one line.
         A read that must print nothing passes warn=False: the guard's `head_read` shares stdout with the guard's JSON, and the preview builds its lines first.
         A cancelled check that ran its full cap gets the bucket "timed out ... re-cap or split", so it reads red and apart from a test failure. A pending job has no end time and is skipped.
-        The rows of a superseded workflow run are dropped (`superseded`); statuses and rows with no run link stay."""
+        Per check name the newest run of a workflow is judged: an older run's red row drops when the newest run of that workflow passed or is pending on that name (`superseded`); statuses and rows with no run link stay."""
         sha = sha or self.pr(n)["head"]
         rows = []
         for r in self.pages(f"commits/{sha}/check-runs", "check_runs"):
@@ -1315,10 +1315,12 @@ class Host:
         return "pass", []
 
     def superseded(self, items, sha):
-        """`items` ((row, bucket) pairs) less the rows of a cancelled workflow run when a newer run (larger id) of the same workflow is on `sha`. A concurrency group
-        cancels the older run, yet its always() fan-in job still fails. Its cancel, skip and pending rows drop. Its fail or timeout row drops only when the
-        newest run of that workflow has a pass row of the same check name, or a pending one (it holds the wait, then judges). A row's run is the id in its link; a status has none. The runs are read only when the
-        rows link more than one run. A failed runs read drops nothing: the cancelled run stays red, never green-washed."""
+        """`items` ((row, bucket) pairs) less the rows of an older workflow run, judged per check name against the newest run (largest id) of the same workflow on `sha`.
+        A red row (fail or timeout) of ANY older run drops when the newest run of that workflow has a pass row of the same check name, or a pending one (it holds the wait,
+        then judges). The older run may have failed, timed out or been cancelled: a re-run or a new push that passes clears it, as the Checks tab shows. The newest run's red row
+        stays red; a skipped or absent row there never clears an older red; a different workflow never clears it. A cancelled older run also drops its cancel, skip and pending
+        rows, which a concurrency group leaves beside its failing always() fan-in job. A row's run is the id in its link; a status has none and stays. The runs are read only when the
+        rows link more than one run. A failed runs read drops nothing: no run is known to be older, so red stays red, never green-washed."""
         run_of = [(m.group(1) if (m := re.search(r"/actions/runs/(\d+)/", d.get("link") or "")) and not d.get("status") else None) for d, _ in items]
         if len(set(run_of) - {None}) < 2:
             return items
@@ -1338,7 +1340,9 @@ class Host:
         keep = []
         for (d, bucket), rid in zip(items, run_of):
             red = bucket == "fail" or bucket.startswith("timed out")
-            if rid in gone and (not red and bucket != "pass" or red and (str(newest[flow[rid]]), d["name"]) in cleared):
+            if rid in gone and not red and bucket != "pass":
+                continue
+            if red and rid in flow and newest[flow[rid]] > int(rid) and (str(newest[flow[rid]]), d["name"]) in cleared:
                 continue
             keep.append((d, bucket))
         return keep
@@ -1350,7 +1354,7 @@ class Host:
 
     def buckets(self, rows, warn=True, sha=None):
         """-> {name: [(bucket, link), ...]} of check rows, a cancel that ran its full cap turned into the timeout bucket. See checks.
-        With `sha`, the rows of a superseded run are dropped after that judgment, so a timeout is told from a cancel."""
+        With `sha`, the red rows an older run left behind are dropped after that judgment (see `superseded`), so a timeout is told from a cancel."""
         try:
             flow = workflow_dir(self.cwd)
             caps = job_caps(p.read_text(encoding="utf-8") for p in sorted(flow.glob("*.y*ml"))) if flow else {}
