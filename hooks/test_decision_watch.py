@@ -1331,6 +1331,30 @@ def case_parse_verdict_default_shape():
         check("parse_verdict: %s gives no verdict and an error" % label, v is None and bool(e), (v, e))
 
 
+def case_parse_verdict_reads_a_places_reply():
+    # The where-else judge's shape (PLACES): a list of {path, why}, a section optional. An empty list is the one clean empty reply.
+    pv, shape = dw.parse_verdict, dw.PLACES
+    v, e = pv('{"places": [{"path": "hooks/x.py", "section": 442, "why": "r"}]}', shape)
+    check("parse_verdict places: a list with an integer section reads",
+          v == {"places": [{"path": "hooks/x.py", "section": 442, "why": "r"}]} and e is None, (v, e))
+    v, e = pv('{"places": [{"path": "hooks/x.py", "section": null, "why": "r"}]}', shape)
+    check("parse_verdict places: a null section reads", v is not None and e is None, (v, e))
+    v, e = pv('{"places": []}', shape)
+    check("parse_verdict places: an empty list is a clean reply", v == {"places": []} and e is None, (v, e))
+
+
+def case_parse_verdict_places_gives_an_error_for_every_other_reply():
+    pv, shape = dw.parse_verdict, dw.PLACES
+    for text, label in [("no json here", "prose with no JSON"),
+                        ('{"places": [{"path": "hooks/x.py", "why": "r"', "a truncated reply"),
+                        ("null", "null"),
+                        ("{}", "an object with no places key"),
+                        ('{"places": [{"path": 5, "why": "r"}]}', "an entry with a non-text path"),
+                        ('{"places": [{"path": "hooks/x.py", "why": 7}]}', "an entry with a non-text why")]:
+        v, e = pv(text, shape)
+        check("parse_verdict places: %s gives no verdict and an error" % label, v is None and bool(e), (v, e))
+
+
 def case_parse_verdict_honours_a_custom_shape():
     # reply_judge's shape: one key, ok true or false. A value outside it is an error, never a pass.
     shape = {"ok": (True, False)}
@@ -2048,6 +2072,8 @@ def main():
         case_unread_fallback_dst_forward_line_is_collected_under_utc,
         case_unread_fallback_dst_reverse_line_stays_out_under_utc,
         case_unread_zone_less_line_reads_as_local_under_cst,
+        case_parse_verdict_reads_a_places_reply,
+        case_parse_verdict_places_gives_an_error_for_every_other_reply,
     ):
         run_case(case)
 
