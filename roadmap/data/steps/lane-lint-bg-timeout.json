@@ -6,7 +6,7 @@
   "owner": "claude-settings",
   "why": "A lane ran `merge --lane-lint` under the background command's 30-minute default, so the lint, which waits up to 6000 s, was stopped partway and gave no verdict.",
   "note": "Filed by triage 11:36 CST Nov 10 from lane bg-tail-loses-verdict ([ended:Lane:-bg-tail-loses-verdict]), its own mistake. Guard: refuse a background lane-lint command that sets no limit above 6000 s. Held by the freeze for a new lane; triage may build it with agents (owner 11:26 CST). Widened (12:11 CST Nov 10, lane bg-tail-loses-verdict): lane lint read unknown on #2164 and #2276 because ci-job hit its 1200 s cap at load 10.6 on 4 cores, the load from that lane's own mutation runs; the load brake does not act in a cloud session. Same at triage 12:08 CST on #2268 (stalled in STE lint, with triage's agents running). The fix must cover the cloud: the lint waits for, or refuses under, load the session itself makes. Correction (triage 12:37 CST Nov 10, measured by the #2557 test-author): no 6000 s wait exists in the repo, the installed bin, hooks, lint or git history. The lane-lint path is the pushed-head wait (PUSHED_HEAD_WAIT_MINUTES 5, 300 s) plus one ci-job run at LINT_SECONDS (1200 s on main; 3600 s in #2557). So the bound a background run must exceed is LINT_SECONDS plus 300 s, read from the constant, not a fixed 6000 s. Triage filed the 6000 s figure unmeasured. Lane code-lint-1 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Recurred 20:37 CST Nov 13 (owner paste 20:36): #3270, 590000 ms timeout, ~17 min lint. Detail in the outbox.",
-  "updatedAt": "2026-11-13T20:37:02-06:00",
-  "lane": "session_013NEJL4ULPbZnqEEaLZi9q3",
+  "updatedAt": "2026-11-13T20:40:28-06:00",
+  "lane": "session_013NEJKyhVmjcmShi7KhxEFH",
   "blockedBy": []
 }

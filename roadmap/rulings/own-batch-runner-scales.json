@@ -1,0 +1,10 @@
+{
+  "id": "own-batch-runner-scales",
+  "at": "2026-11-13T20:39:00-06:00",
+  "title": "The batch runner scales: more sub-agents, bigger combined PRs",
+  "ruling": "Owner 20:39 CST Nov 13, relayed by the consultant (triage did not see it): more should be batching; the batch runner should use more sub-agents and combine more together. Consultant's reading: the runner fans agents out in parallel to sort, lint and combine lanes; combined PRs grow as large as conflicts allow; merges stay serial. The coordinator and runner 10 send a plan by 21:00 CST.",
+  "quote": "and in general more should be batching the batch runner needs to be using more sub agents i think and eating more together it feels it needs to scale",
+  "source": "Consultant 20:40 CST Nov 13 (quoting the owner, verbatim); filed by triage.",
+  "status": "open",
+  "step": "batch-runner-scales"
+}

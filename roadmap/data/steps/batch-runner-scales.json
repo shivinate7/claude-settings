@@ -1,0 +1,14 @@
+{
+ "id": "batch-runner-scales",
+ "title": "The batch runner fans out agents in parallel to sort, lint and combine lanes, and combined PRs grow as large as conflicts allow",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The owner feels batching is too small and serial; the batch runner should scale by using more sub-agents and merging more lanes together.",
+ "source": "Owner ruling 20:39 CST Nov 13, relayed by the consultant (triage did not see it).",
+ "note": "Triage 20:40 CST Nov 13: plan owed. The coordinator and runner 10 send a plan by 21:00 CST Nov 13. Shape from the ruling: parallel agents sort, lint and combine lanes; combined PRs grow as large as conflicts allow; merges stay serial. Not yet checked by triage: how many lanes runner 10 combines today (unmeasured), and which existing steps overlap (combined-pr-recipe, drain-batch-measure).",
+ "updatedAt": "2026-11-13T20:40:28-06:00"
+}
