@@ -548,6 +548,122 @@ class Scope(unittest.TestCase):
         self.assertEqual(got["checks_guard"], "false", f"checks_guard: {got}")
 
 
+# The doc groups (lane ci-skip-untouched-steps, slice 3). ci-scope.sh sets one doc_<group> flag per group, and a
+# docs-only step's scope condition reads the flags of the groups it reads (lint/test_checks_step_scope.py).
+DOC_GROUPS = ("decisions", "rules", "skills", "agents", "glossary", "map", "other", "any")
+DOC_FLAGS = ["doc_" + g for g in DOC_GROUPS]
+# Each docs-only path with the groups it sets. Explicit, so the script is checked against this table, not against doc_groups.
+DOC_CASES = [
+    ("docs/decisions/x.md", {"decisions", "any"}),
+    ("skills/foo/SKILL.md", {"skills", "any"}),
+    ("agents/x.md", {"agents", "any"}),
+    ("CLAUDE.md", {"rules", "any"}),
+    (".claude/CLAUDE.md", {"rules", "any"}),
+    ("output-styles/shiv-stylisms.md", {"rules", "any"}),
+    ("GLOSSARY.md", {"glossary", "any"}),
+    ("README.md", {"glossary", "any"}),
+    ("docs/map/x.md", {"map", "any"}),
+    ("docs/debts/x.md", {"other", "any"}),
+    ("docs/notes.md", {"other", "any"}),
+    ("mods/x/README.md", {"other", "any"}),
+    ("unlisted/x.md", {"any"}),
+]
+
+
+def doc_groups(path):
+    """The doc groups a path sets, by the rules of ci-scope.sh: every .md is in `any`, and a path in no other group sets `any` only.
+    Read by lint/test_checks_step_scope.py to check the names a step's entry reads against the flags its `if:` reads."""
+    if not path.endswith(".md"):
+        return set()
+    g = {"any"}
+    if path.startswith("docs/decisions/"):
+        g.add("decisions")
+    elif path in ("CLAUDE.md", ".claude/CLAUDE.md") or path.startswith("output-styles/"):
+        g.add("rules")
+    elif path.startswith("skills/"):
+        g.add("skills")
+    elif path.startswith("agents/") and "/" not in path[len("agents/"):]:
+        g.add("agents")
+    elif path in ("GLOSSARY.md", "README.md"):
+        g.add("glossary")
+    elif path.startswith("docs/map/"):
+        g.add("map")
+    elif path.startswith("docs/") or (path.startswith("mods/") and path.count("/") == 2 and path.endswith("/README.md")):
+        g.add("other")
+    return g
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class DocGroups(unittest.TestCase):
+    """The doc_* flags: each exists, is true for its paths and false for the others, and leaves `code` and every job flag alone.
+    Each case is an edit to a tracked file (existing), so a new file under a landed dir (agents/, skills/) sets code by its own rule."""
+
+    def assertDocFlags(self, got, want, path):
+        for f in DOC_FLAGS:
+            self.assertIn(f, got, f"output {f} missing for {path}: {got}")
+        for g in DOC_GROUPS:
+            self.assertEqual(got["doc_" + g], "true" if g in want else "false", f"doc_{g} for {path}: {got}")
+
+    def assertJobFlagsOff(self, got, path):
+        for n in ALL:
+            self.assertIn(n, got, f"output {n} missing for {path}: {got}")
+            self.assertEqual(got[n], "false", f"{n} set by {path}: {got}")
+
+    def test_each_doc_flag_is_true_for_its_paths_and_false_for_the_rest(self):
+        for path, want in DOC_CASES:
+            with self.subTest(path=path):
+                self.assertDocFlags(run([path], existing=[path]), want, path)
+
+    def test_a_decision_doc_sets_doc_decisions_and_doc_any_only(self):
+        got = run(["docs/decisions/x.md"], existing=["docs/decisions/x.md"])
+        self.assertDocFlags(got, {"decisions", "any"}, "docs/decisions/x.md")
+
+    def test_a_docs_notes_change_sets_doc_other_and_doc_any_only(self):
+        got = run(["docs/notes.md"], existing=["docs/notes.md"])
+        self.assertDocFlags(got, {"other", "any"}, "docs/notes.md")
+
+    def test_a_new_decision_doc_sets_its_flags_and_no_job_flag(self):
+        # docs/decisions is in no landed dir, so a new file there sets nothing but its doc flags.
+        got = run(["docs/decisions/new.md"])
+        self.assertDocFlags(got, {"decisions", "any"}, "docs/decisions/new.md")
+        self.assertJobFlagsOff(got, "docs/decisions/new.md")
+
+    def test_every_doc_flag_is_true_on_push_schedule_and_dispatch(self):
+        for ev in ("push", "schedule", "workflow_dispatch"):
+            with self.subTest(event=ev):
+                got = run(["docs/decisions/x.md"], event=ev)
+                for f in DOC_FLAGS:
+                    self.assertEqual(got.get(f), "true", f"{f} on {ev}: {got}")
+
+    def test_every_doc_flag_is_true_on_an_unreadable_diff(self):
+        for base in ("0" * 40, ""):
+            with self.subTest(base=base):
+                got = run(["docs/decisions/x.md"], base=base)
+                for f in DOC_FLAGS:
+                    self.assertEqual(got.get(f), "true", f"{f} on an unreadable diff: {got}")
+
+    def test_every_doc_flag_is_true_when_the_scope_script_or_the_workflow_changes(self):
+        for p in (".github/scripts/ci-scope.sh", ".github/workflows/checks.yml"):
+            with self.subTest(path=p):
+                got = run([p])
+                for f in DOC_FLAGS:
+                    self.assertEqual(got.get(f), "true", f"{f} for {p}: {got}")
+
+    def test_a_docs_only_change_leaves_code_false_whatever_its_doc_flags(self):
+        for path, _ in DOC_CASES:
+            with self.subTest(path=path):
+                got = run([path], existing=[path])
+                self.assertIn("code", got, got)
+                self.assertEqual(got["code"], "false", f"{path} set code: {got}")
+        # Control: a code change still sets code, so the check above can fail.
+        self.assertEqual(run(["hooks/guard.py"])["code"], "true")
+
+    def test_a_docs_only_change_turns_no_job_or_suite_flag_on(self):
+        for path in ("docs/decisions/x.md", "docs/notes.md"):
+            with self.subTest(path=path):
+                self.assertJobFlagsOff(run([path], existing=[path]), path)
+
+
 # The mod phase must run each mods check script (mods/**/check.mjs), not only *.test.mjs. The script cds to its own
 # root, so each case runs a copy of it inside a scratch tree under the run folder.
 @unittest.skipUnless(BASH, "bash not on PATH")

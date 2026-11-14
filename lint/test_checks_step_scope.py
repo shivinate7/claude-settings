@@ -14,6 +14,9 @@ Pinned here:
   5. the entry file of each scoped step names no tracked .md file, unless ALLOWED lists that name with a reason.
   6. no file a scoped step reaches within TRANSITIVE_DEPTH hops reads test_guard.py or a tracked .md file
      (TRANSITIVE_MD_READERS), unless TRANSITIVE_ALLOWED lists that name for the file with a reason.
+  7. each doc step (DOC_STEPS) carries the scope condition of its doc groups, one constant per group set, and the .md names
+     its entry names are under a doc flag its `if:` reads (ALLOWED names aside).
+  8. a docs-only change runs exactly the doc steps that list its group, or `any`, with no other step's change.
 
 Steps are read by lint/workflow_steps.py. The `if:` evaluator is eval_if in lint/test_windows_split.py.
 Item 5 reads the entry file only, and a name split across arguments is not seen. Item 6 follows imports and read
@@ -32,8 +35,12 @@ sys.path.insert(0, HERE)
 
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import workflow_steps as ws  # noqa: E402  the one home of the step parser
-from test_ci_scope import run as scope_run  # noqa: E402  ci-scope.sh run in a temp repo: the one home of the scope run
-from test_windows_split import NO_MD_SCOPE_CONDITION, eval_if  # noqa: E402  the one home of the `if:` evaluator and of the scope condition
+from test_ci_scope import DOC_CASES, DOC_FLAGS, doc_groups, run as scope_run  # noqa: E402  ci-scope.sh run in a temp repo, and the doc groups
+from test_windows_split import (  # noqa: E402  the one home of the `if:` evaluator, the scope conditions and the doc condition builder
+    LINUX_SUITES, NO_MD_SCOPE_CONDITION, SCOPE_DOC_AGENTS, SCOPE_DOC_ANY, SCOPE_DOC_DECISIONS, SCOPE_DOC_DECISIONS_OTHER,
+    SCOPE_DOC_DECISIONS_RULES, SCOPE_DOC_DECISIONS_RULES_OTHER, SCOPE_DOC_GLOSSARY, SCOPE_DOC_MAP, SCOPE_DOC_RULES,
+    SCOPE_DOC_SKILLS, SCOPE_DOC_SKILLS_AGENTS, SCOPE_DOC_SKILLS_DECISIONS, SCOPE_DOC_SKILLS_OTHER, doc_scope_condition,
+    eval_if, run_lines)
 
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 WORKFLOW = ".github/workflows/checks.yml"
@@ -117,7 +124,6 @@ NO_MD = [
     'Shared resource declaration check',
     'iPhone mockup check fixture suite',
     'CLAUDE.md size fixture suite',
-    'ios-apps skill starter suite',
     'Unknown-read contract fixture suite',
     'Python 3.9 floor check',
     'Playwright setup action suite',
@@ -141,53 +147,16 @@ NAMES_ONLY = [
 ]
 
 # The audit's MUST-STAY-UNSCOPED steps: each reads a .md file at run time, or is not audited yet (fail safe), so each stays unscoped.
+# The doc steps (DOC_STEPS below) left this list in slice 3: each takes the scope condition of the doc groups it reads.
 MUST_STAY_UNSCOPED = [
-    'STE lint',
-    'Rule mechanization audit',
-    'Glossary fixture suite',
-    'Glossary homes and avoided names',
-    'Retired names, one word per meaning',
-    'Map check',
-    'Record slug length',
-    'Cost line pins',
-    'Artifact cite check',
-    'Hook catalog fixture suite',
-    'Hook catalog check',
-    'CLAUDE.md size (warns, never fails)',
-    'Stop-hook guard fixture suite',
-    'Stop-hook cannot-claim suite',
-    'Stop-hook owner-safe reason suite',
-    'Stop-hook review-record fixture suite',
-    'Rule audit fixture suite',
-    'Stale prose check fixture suite',
-    'Agent and skill model floor',
-    'Agent and skill model floor fixture suite',
-    'Agent push form fixture suite',
-    'Skill model rows check',
-    'Retired repo fixture suite',
-    'project-ops skill scaffold suite',
-    'Compliance probes fixture suite',
-    'Waiting page park relay prose suite',
-    'Settings matcher fixture suite',
-    'Route judge measure fixture suite',
-    'Question form fixture suite',
-    'Agent brief fixture suite',
-    'Blind brief fixture suite',
-    'SendMessage state fixture suite',
     'Precompact handoff fixture suite',
     'Handoff wave-2 fixture suite',
-    'Git mailbox wait suite',
     'Daily note fixture suite',
-    'Now-central helper fixture suite',
-    'Landed-directory check fixture suite',
-    'Python 3.9 floor fixture suite',
-    'STE lint action fixture suite',
     'Layout fixture suite',
-    'Mod version fixture suite',
-    'Mod version bump',
+    'Mod version fixture suite',  # reads mods/ paths, which set `mods` and no code or doc flag, so no doc flag can keep it on
+    'Mod version bump',  # the same: a change to a mod's .mjs sets only `mods`
     'Code check',
     'Workflow supply-chain audit (zizmor)',
-    'Silent undo fixture suite',
     'Debt retire fixture suite',
     'Comment narration fixture suite',
     'Ruling kind fixture suite',
@@ -200,6 +169,120 @@ MUST_STAY_UNSCOPED = [
     'Proc env read suite',  # not audited yet, so it stays unscoped (fail safe)
     'Stable workflow move job suite',  # not audited yet, so it stays unscoped (fail safe)
 ]
+
+# The doc steps (lane ci-skip-untouched-steps, slice 3). Each reads the doc groups listed (ci-scope.sh's doc_<group> flags),
+# so its `if:` is the scope condition of those groups. A step whose read is wider than its groups, or not verified, takes
+# ("any",): it runs on every docs-only pull request. Each entry script was read before its groups were pinned.
+DOC_STEPS = {
+    # One group.
+    'SendMessage state fixture suite': ("decisions",),
+    'Stop-hook owner-safe reason suite': ("decisions",),
+    'Settings matcher fixture suite': ("decisions",),
+    'Stop-hook cannot-claim suite': ("rules",),
+    'Stop-hook review-record fixture suite': ("rules",),
+    'CLAUDE.md size (warns, never fails)': ("rules",),
+    'Landed-directory check fixture suite': ("skills",),
+    'Landed-directory manifest agreement': ("skills",),
+    'project-ops skill scaffold suite': ("skills",),
+    'ios-apps skill starter suite': ("skills",),
+    'Agent brief fixture suite': ("agents",),
+    'Stop-hook guard fixture suite': ("agents",),
+    'Glossary homes and avoided names': ("glossary",),
+    'Glossary fixture suite': ("glossary",),
+    'Map check': ("map",),
+    # Several groups.
+    'Blind brief fixture suite': ("skills", "agents"),
+    'Git mailbox wait suite': ("skills", "decisions"),
+    'Rule audit fixture suite': ("decisions", "rules"),
+    'Rule mechanization audit': ("decisions", "rules"),
+    'Route judge measure fixture suite': ("decisions", "rules", "other"),
+    'Artifact cite check': ("decisions", "other"),
+    'Waiting page park relay prose suite': ("skills", "other"),
+    # Any .md: the read is wider than the groups above, or not verified.
+    'STE lint': ("any",),
+    'STE lint action fixture suite': ("any",),
+    'Retired names, one word per meaning': ("any",),
+    'Retired repo fixture suite': ("any",),
+    'Record slug length': ("any",),
+    'Cost line pins': ("any",),
+    'Cost line pin fixture suite': ("any",),
+    'Hook catalog fixture suite': ("any",),
+    'Hook catalog check': ("any",),
+    'Stale prose check fixture suite': ("any",),
+    'Compliance probes fixture suite': ("any",),
+    'Now-central helper fixture suite': ("any",),
+    'Python 3.9 floor fixture suite': ("any",),
+    'Silent undo fixture suite': ("any",),
+    'Question form fixture suite': ("any",),
+    'Agent and skill model floor': ("any",),
+    'Agent and skill model floor fixture suite': ("any",),
+    'Agent push form fixture suite': ("any",),
+    'Skill model rows check': ("any",),
+}
+
+# The steps with no `if:` at all, on purpose, and the two Mod version steps that stay unscoped (their reads are mods/ paths).
+UNSCOPED_ON_PURPOSE = [
+    'Checks step scope suite', 'Reply judge fixture suite', 'Scratchpad owner fixture suite', 'Guard wrappers fixture suite',
+    'Skill model rows fixture suite', 'Proc env read suite', 'Nightly skip fixture suite', 'Stable workflow move job suite',
+    'Code check', 'Workflow supply-chain audit (zizmor)', 'Mod version fixture suite', 'Mod version bump',
+]
+
+# One constant per distinct group set of DOC_STEPS (lint/test_windows_split.py builds each one from its groups).
+SCOPE_OF = {
+    frozenset(["any"]): SCOPE_DOC_ANY,
+    frozenset(["decisions"]): SCOPE_DOC_DECISIONS,
+    frozenset(["rules"]): SCOPE_DOC_RULES,
+    frozenset(["skills"]): SCOPE_DOC_SKILLS,
+    frozenset(["agents"]): SCOPE_DOC_AGENTS,
+    frozenset(["glossary"]): SCOPE_DOC_GLOSSARY,
+    frozenset(["map"]): SCOPE_DOC_MAP,
+    frozenset(["skills", "agents"]): SCOPE_DOC_SKILLS_AGENTS,
+    frozenset(["decisions", "rules"]): SCOPE_DOC_DECISIONS_RULES,
+    frozenset(["decisions", "rules", "other"]): SCOPE_DOC_DECISIONS_RULES_OTHER,
+    frozenset(["decisions", "other"]): SCOPE_DOC_DECISIONS_OTHER,
+    frozenset(["skills", "other"]): SCOPE_DOC_SKILLS_OTHER,
+    frozenset(["skills", "decisions"]): SCOPE_DOC_SKILLS_DECISIONS,
+}
+DOC_FLAG = re.compile(r"needs\.scope\.outputs\.doc_(\w+)")
+
+
+def expected_if(groups):
+    """The `if:` a doc step carries: the scope condition of its groups, as the workflow writes it. The one builder of that string."""
+    return "${{ %s }}" % SCOPE_OF[frozenset(groups)]
+
+
+def doc_flags_of(expr):
+    """The doc groups an `if:` reads: the doc_<group> flags it names."""
+    return set(DOC_FLAG.findall(expr or ""))
+
+
+def tracked_groups(tok, tracked):
+    """The doc groups of the tracked .md file a name stands for: the file itself, or each file the name is the end of."""
+    full = [tok] if tok in tracked else [n for n in tracked if n.endswith("/" + tok)]
+    return set().union(*[doc_groups(n) for n in full]) if full else set()
+
+
+def doc_name_problems(entry, flags, text, tracked):
+    """The .md names in an entry's text that no flag in `flags` covers, as "name (groups)". A name ALLOWED for the entry is
+    written or named there, not read, so it is not counted. The `any` flag covers every name."""
+    allowed = set(ALLOWED.get(entry, ([], ""))[0])
+    problems = []
+    for tok in sorted(md_names_reached(text, tracked) - allowed):
+        groups = tracked_groups(tok, tracked)
+        if "any" in flags or (groups - {"any"}) & flags:
+            continue
+        problems.append("%s (%s)" % (tok, ", ".join(sorted(groups - {"any"})) or "any only"))
+    return problems
+
+
+def runs_on(expr, flags):
+    """Whether a step runs on a pull request whose output is `flags` (each doc flag and `code`; a flag it lacks reads 'false').
+    A step with no `if:` runs."""
+    if expr is None:
+        return True
+    e = re.sub(r"needs\.scope\.outputs\.(\w+) == 'true'", lambda m: "'%s' == 'true'" % flags.get(m.group(1), "false"), expr)
+    return eval_if(e, "pull_request", "false")
+
 
 # The steps that run only on a pull request, each with its own `if:`. The scope condition does not touch them.
 PR_ONLY = [
@@ -406,11 +489,19 @@ ALLOWED = {
     "lint/test_ci_job.py": (["AGENTS.md", "CLAUDE.md"], "written into temp roots"),
     "lint/test_ci_scope.py": ([
         "README.md", "reference/copies-and-accounts.md", "reference/repo-pages.md", "skills/ci-hygiene/SKILL.md",
+        "CLAUDE.md", ".claude/CLAUDE.md", "GLOSSARY.md", "output-styles/shiv-stylisms.md",
         "skills/waiting-page/SKILL.md", "skills/waiting-page/reference/copies-and-accounts.md",
         "skills/waiting-page/reference/designs.md", "skills/waiting-page/reference/repo-pages.md",
         "skills/waiting-page/reference/republish.md", "skills/waiting-page/reference/routing-and-sessions.md",
         "tests/fixture/docs/map/core.md", "tests/fixture/docs/map/traces/home.md",
     ], "paths that run() commits into temp git repos"),
+    "hooks/test_sendmessage_state.py": (["CLAUDE.md", "README.md"], "written into a temp CLAUDE_CONFIG_DIR and a temp repo"),
+    "lint/test_report_guard.py": (["README.md", "decisions/fewest-words-mandate.md", "decisions/plain-prose-lint.md"],
+                                  "README.md is written into a temp repo; the two decisions names are in a docstring and a comment"),
+    "lint/check_glossary.py": (["docs/records.md"], "in SKIP_CODE: the scan passes the generated file by"),
+    "lint/test_check_glossary.py": (["CLAUDE.md", "debts/README.md", "docs/debts/README.md", "docs/records.md"],
+                                    "written into temp repos by the fixtures, not read from the repo"),
+    "skills/project-ops/tests/test_scaffold.py": (["CLAUDE.md"], "written into temp folders; the scaffold's own file list names it"),
     "lint/test_find_copies.py": ([
         ".github/pull_request_template.md", "reference/document.md", "skills/impeccable/SKILL.md",
         "skills/impeccable/reference/document.md", "skills/plain-english-map/SKILL.md",
@@ -682,12 +773,12 @@ class StepNames(ChecksStepBase):
                 self.assertNotIn("needs.scope.outputs", expr, "unlisted step %r reads a scope output: %r" % (name, expr))
 
     def test_each_hard_coded_list_names_a_main_step(self):
-        for name in NO_MD + NAMES_ONLY + MUST_STAY_UNSCOPED + PR_ONLY:
+        for name in NO_MD + NAMES_ONLY + MUST_STAY_UNSCOPED + PR_ONLY + list(DOC_STEPS):
             with self.subTest(step=name):
                 self.assertIn(name, MAIN_STEPS, "a pinned list names a step main does not have")
 
     def test_no_step_is_on_two_lists(self):
-        listed = NO_MD + NAMES_ONLY + MUST_STAY_UNSCOPED + PR_ONLY
+        listed = NO_MD + NAMES_ONLY + MUST_STAY_UNSCOPED + PR_ONLY + list(DOC_STEPS)
         twice = sorted({n for n in listed if listed.count(n) > 1})
         self.assertEqual(twice, [], "a step is on two pinned lists")
 
@@ -706,11 +797,12 @@ class DocsOnlyPullRequest(ChecksStepBase):
                 self.assertFalse(runs_on_pull_request_with(self.named(steps, name), got["code"]),
                                  "step %r still runs on a docs-only pull request" % name)
 
-    def test_ste_lint_stays_unscoped_so_it_runs_on_that_pull_request(self):
+    def test_ste_lint_runs_on_a_docs_only_pull_request_through_doc_any(self):
         got = scope_run([DOC])
-        self.assertEqual(got["code"], "false", "a docs-only change set code: %r" % got)
+        self.assertIn("doc_any", got, "output doc_any missing: %r" % got)
         st = self.named(self.steps(), STE_LINT)
-        self.assertTrue(runs_on_pull_request_with(st, got["code"]), "STE lint carries the scope condition: if %r" % if_of(st))
+        self.assertEqual(if_of(st), expected_if(("any",)), "STE lint: if is %r, want the doc_any scope condition" % if_of(st))
+        self.assertTrue(runs_on(if_of(st), got), "STE lint does not run on a docs-only pull request: %r" % got)
 
 
 class MdNamesInText(unittest.TestCase):
@@ -769,6 +861,7 @@ class ScopedEntriesNameNoUnlistedMd(ChecksStepBase):
         steps = self.steps()
         tracked = tracked_md()
         scoped = {entry for _, st in scoped_steps(steps) for entry in entries(st)}
+        scoped |= {entry for name in DOC_STEPS for entry in entries(self.named(steps, name))}
         for entry, (names, reason) in ALLOWED.items():
             with self.subTest(entry=entry):
                 self.assertIn(entry, scoped, "%s is allowed, but no scoped step runs it" % entry)
@@ -854,6 +947,82 @@ class TransitiveWalkFixtures(unittest.TestCase):
         for i in range(TRANSITIVE_CAP + 1):
             files["a/m%d.py" % i] = "x = 1\n"
         self.assertTrue(self.walk(files)[1], "a walk past TRANSITIVE_CAP files reports no cut")
+
+
+class DocStepScopeConditions(ChecksStepBase):
+    def test_each_doc_step_carries_the_scope_condition_of_its_groups(self):
+        steps = self.steps()
+        for name, groups in DOC_STEPS.items():
+            with self.subTest(step=name):
+                got = if_of(self.named(steps, name))
+                self.assertEqual(got, expected_if(groups), "step %r: if is %r, want the scope condition of %s" % (name, got, groups))
+
+    def test_each_doc_step_group_set_has_one_constant_built_from_its_groups(self):
+        for groups in sorted({tuple(g) for g in DOC_STEPS.values()}):
+            with self.subTest(groups=groups):
+                self.assertIn(frozenset(groups), SCOPE_OF, "no constant for the groups %r" % (groups,))
+        for key, constant in SCOPE_OF.items():
+            with self.subTest(groups=sorted(key)):
+                self.assertEqual(constant, doc_scope_condition(tuple(sorted(key))), "the constant is not built from its groups")
+
+
+class DocStepEntriesReadOnlyTheirFlags(ChecksStepBase):
+    def test_each_doc_step_entry_names_only_files_its_if_reads(self):
+        steps, tracked = self.steps(), tracked_md()
+        for name in DOC_STEPS:
+            st = self.named(steps, name)
+            flags = doc_flags_of(if_of(st))
+            for entry in entries(st):
+                with self.subTest(step=name, entry=entry):
+                    problems = doc_name_problems(entry, flags, read_repo(entry), tracked)
+                    self.assertEqual(problems, [], "%s names .md files its if: does not read: %s" % (name, ", ".join(problems)))
+
+    def test_a_name_under_a_flag_the_if_does_not_read_is_reported(self):
+        # Control: the Blind brief suite names a skill file, so a flag set without `skills` must report it.
+        entry = "hooks/test_blind_brief.py"
+        got = doc_name_problems(entry, {"agents"}, read_repo(entry), tracked_md())
+        self.assertTrue(any(p.startswith("skills/design-explore/SKILL.md") for p in got), got)
+
+
+class DocStepsAgreeWithLinuxSplit(ChecksStepBase):
+    def test_each_doc_step_run_in_the_linux_split_has_its_groups_condition(self):
+        steps = self.steps()
+        for name, groups in DOC_STEPS.items():
+            for cmd in run_lines(self.named(steps, name)):
+                if cmd not in LINUX_SUITES:
+                    continue
+                with self.subTest(step=name, cmd=cmd):
+                    want = doc_scope_condition(tuple(groups))
+                    self.assertEqual(LINUX_SUITES[cmd][0], want, "%r: row condition is %r, want %r" % (cmd, LINUX_SUITES[cmd][0], want))
+
+
+class UnscopedSteps(ChecksStepBase):
+    def test_each_unscoped_on_purpose_step_has_no_if(self):
+        steps = self.steps()
+        for name in UNSCOPED_ON_PURPOSE:
+            with self.subTest(step=name):
+                got = if_of(self.named(steps, name))
+                self.assertIsNone(got, "step %r is meant to stay unscoped, but its if is %r" % (name, got))
+
+
+class DocsOnlyPullRequestSteps(ChecksStepBase):
+    def assert_steps_run_by_groups(self, path):
+        got = scope_run([path], existing=[path])
+        for f in DOC_FLAGS:  # the flags come first: which steps run means nothing without them
+            self.assertIn(f, got, "output %s missing for %s: %r" % (f, path, got))
+        self.assertEqual(got["code"], "false", "%s set code: %r" % (path, got))
+        steps = self.steps()
+        ran = {name for name in DOC_STEPS if runs_on(if_of(self.named(steps, name)), got)}
+        want = {name for name, groups in DOC_STEPS.items() if set(groups) & doc_groups(path)}
+        self.assertEqual(sorted(ran), sorted(want), "%s: the doc steps that run are not the ones that list its groups" % path)
+
+    def test_a_decision_doc_change_runs_exactly_the_steps_that_list_decisions_or_any(self):
+        self.assert_steps_run_by_groups("docs/decisions/x.md")
+
+    def test_each_doc_path_runs_exactly_the_steps_that_list_its_groups(self):
+        for path, _ in DOC_CASES:
+            with self.subTest(path=path):
+                self.assert_steps_run_by_groups(path)
 
 
 if __name__ == "__main__":

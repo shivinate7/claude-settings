@@ -81,6 +81,35 @@ LINUX_SWEEP = "needs.scope.outputs.sweep == 'true'"
 LINUX_MODS = "!cancelled() && needs.scope.outputs.mods == 'true'"
 # The scope condition on a step that reads no .md file, unwrapped as unwrap() reads an `if:`. lint/test_checks_step_scope.py pins which steps take it.
 NO_MD_SCOPE_CONDITION = "needs.scope.outputs.code == 'true' || github.event_name != 'pull_request'"
+# The scope condition of a step that reads the doc groups in `groups` (lane ci-skip-untouched-steps, slice 3): code, the
+# doc_<group> flags of ci-scope.sh, and a non-pull_request event. No group gives NO_MD_SCOPE_CONDITION. The flags come in
+# DOC_GROUPS order, so a group tuple in any order builds one string. lint/test_checks_step_scope.py shares these constants.
+DOC_GROUPS = ("decisions", "rules", "skills", "agents", "glossary", "map", "other", "any")
+
+
+def doc_scope_condition(groups):
+    """The inner expression of the scope condition for the doc groups `groups`. A name outside DOC_GROUPS is an error."""
+    unknown = [g for g in groups if g not in DOC_GROUPS]
+    if unknown:
+        raise ValueError("not a doc group: %s" % unknown)
+    flags = "".join("needs.scope.outputs.doc_%s == 'true' || " % g for g in DOC_GROUPS if g in groups)
+    return "needs.scope.outputs.code == 'true' || %sgithub.event_name != 'pull_request'" % flags
+
+
+# One constant per distinct group set that a doc step reads (the set of lint/test_checks_step_scope.py DOC_STEPS).
+SCOPE_DOC_ANY = doc_scope_condition(("any",))
+SCOPE_DOC_DECISIONS = doc_scope_condition(("decisions",))
+SCOPE_DOC_RULES = doc_scope_condition(("rules",))
+SCOPE_DOC_SKILLS = doc_scope_condition(("skills",))
+SCOPE_DOC_AGENTS = doc_scope_condition(("agents",))
+SCOPE_DOC_GLOSSARY = doc_scope_condition(("glossary",))
+SCOPE_DOC_MAP = doc_scope_condition(("map",))
+SCOPE_DOC_DECISIONS_RULES = doc_scope_condition(("decisions", "rules"))
+SCOPE_DOC_DECISIONS_OTHER = doc_scope_condition(("decisions", "other"))
+SCOPE_DOC_DECISIONS_RULES_OTHER = doc_scope_condition(("decisions", "rules", "other"))
+SCOPE_DOC_SKILLS_OTHER = doc_scope_condition(("skills", "other"))
+SCOPE_DOC_SKILLS_DECISIONS = doc_scope_condition(("skills", "decisions"))
+SCOPE_DOC_SKILLS_AGENTS = doc_scope_condition(("skills", "agents"))
 LINUX_SUITES = {
     "python3 actions/test_action_metadata.py": (LINUX_CODE, None),
     "python3 actions/code-check/test_action.py": (LINUX_CODE, None),
@@ -96,13 +125,13 @@ LINUX_SUITES = {
     "python3 hooks/test_decision_watch.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_reply_judge.py": (None, None),
     "python3 hooks/test_prose_judge.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 hooks/test_sendmessage_state.py": (None, None),
+    "python3 hooks/test_sendmessage_state.py": (SCOPE_DOC_DECISIONS, None),
     "python3 hooks/test_refusal_note.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_call_judge.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 hooks/test_question_form.py": (None, None),
+    "python3 hooks/test_question_form.py": (SCOPE_DOC_ANY, None),
     "python3 hooks/test_rm_prompt_answer.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 hooks/test_agent_brief.py": (None, None),
-    "python3 hooks/test_blind_brief.py": (None, None),
+    "python3 hooks/test_agent_brief.py": (SCOPE_DOC_AGENTS, None),
+    "python3 hooks/test_blind_brief.py": (SCOPE_DOC_SKILLS_AGENTS, None),
     "python3 hooks/test_local_time.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_probe.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_ci_wake.py": (NO_MD_SCOPE_CONDITION, None),
@@ -118,12 +147,12 @@ LINUX_SUITES = {
     "python3 hooks/test_scratchpad_owner.py": (None, None),
     "python3 hooks/test_checks_never_raise.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_session_start.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 lint/test_report_guard.py": (None, None),
+    "python3 lint/test_report_guard.py": (SCOPE_DOC_AGENTS, None),
     "python3 lint/test_ste_autofix.py": (LINUX_CODE, None),
     "python3 hooks/test_ruling_home.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_ruling_census.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 lint/test_rule_audit.py": (None, None),
-    "python3 lint/test_stale_cites.py": (None, None),
+    "python3 lint/test_rule_audit.py": (SCOPE_DOC_DECISIONS_RULES, None),
+    "python3 lint/test_stale_cites.py": (SCOPE_DOC_ANY, None),
     "python3 lint/test_guard_log_report.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_verdict.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_wait_pid.py": (NO_MD_SCOPE_CONDITION, None),
@@ -140,8 +169,8 @@ LINUX_SUITES = {
     "python3 hooks/test_mutate_report.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_mutate_js.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_mutate_replay.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 lint/test_check_landed_dirs.py": (None, None),
-    "python3 lint/test_settings_matcher.py": (None, None),
+    "python3 lint/test_check_landed_dirs.py": (SCOPE_DOC_SKILLS, None),
+    "python3 lint/test_settings_matcher.py": (SCOPE_DOC_DECISIONS, None),
     "python3 lint/test_hook_platform_exit.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_check_hook_stubs.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_check_hook_dup_names.py": (NO_MD_SCOPE_CONDITION, None),
@@ -150,37 +179,37 @@ LINUX_SUITES = {
     "python3 lint/test_find_copies.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_find_time_pinned.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_check_mod_versions.py": (None, None),
-    "python3 lint/test_hook_catalog.py": (None, None),
+    "python3 lint/test_hook_catalog.py": (SCOPE_DOC_ANY, None),
     "python3 lint/test_layout.py": (None, None),
     "python3 lint/test_label_once.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_repo_colour.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 lint/test_retired_repos.py": (None, None),
+    "python3 lint/test_retired_repos.py": (SCOPE_DOC_ANY, None),
     "python3 skills/waiting-page/test_stale_pages.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 skills/waiting-page/test_splice.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_check_artifact_cites.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 skills/roadmap/test_build.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_check_shared_resources.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_check_ios_mockup.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 lint/test_compliance_probes.py": (None, None),
+    "python3 lint/test_compliance_probes.py": (SCOPE_DOC_ANY, None),
     "python3 lint/test_check_claude_md_size.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 lint/test_check_glossary.py": (None, None),
-    "python3 lint/test_retired_names.py": (None, None),
-    "python3 skills/project-ops/tests/test_scaffold.py": (None, None),
-    "python3 skills/ios-apps/tests/test_new_app.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 lint/test_check_glossary.py": (SCOPE_DOC_GLOSSARY, None),
+    "python3 lint/test_retired_names.py": (SCOPE_DOC_ANY, None),
+    "python3 skills/project-ops/tests/test_scaffold.py": (SCOPE_DOC_SKILLS, None),
+    "python3 skills/ios-apps/tests/test_new_app.py": (SCOPE_DOC_SKILLS, None),
     "python3 lint/test_check_ruling_kind.py": (None, None),
-    "python3 lint/test_check_silent_undo.py": (None, None),
+    "python3 lint/test_check_silent_undo.py": (SCOPE_DOC_ANY, None),
     "python3 lint/test_check_comment_narration.py": (None, None),
     "python3 lint/test_check_unknown_reads_contract.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/check_unknown_reads_contract.py": (LINUX_CODE, None),
-    "python3 lint/test_check_agent_models.py": (None, None),
-    "python3 lint/test_agent_push_form.py": (None, None),
+    "python3 lint/test_check_agent_models.py": (SCOPE_DOC_ANY, None),
+    "python3 lint/test_agent_push_form.py": (SCOPE_DOC_ANY, None),
     "python3 lint/test_check_skill_model_rows.py": (None, None),
     "python3 lint/test_no_window_spawn.py": (None, None),
     "pwsh -NoProfile -File install.test.ps1": (LINUX_CODE, None),
     "python3 janitor/test_session_end_sweep.py": (LINUX_CODE, None),
     "python3 janitor/test_install_launchd.py": (LINUX_CODE, None),
     "python3 janitor/test_install_schtasks.py": (LINUX_CODE, None),
-    "python3 actions/ste-lint/test_action.py": (None, None),
+    "python3 actions/ste-lint/test_action.py": (SCOPE_DOC_ANY, None),
     "python3 actions/playwright-setup/test_action.py": (NO_MD_SCOPE_CONDITION, None),
     "node actions/stamp/test_stamp.mjs": (NO_MD_SCOPE_CONDITION, None),
     "node lint/test_scanner_traps.mjs": (NO_MD_SCOPE_CONDITION, None),
