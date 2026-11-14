@@ -40,7 +40,7 @@ For an interpreter, check-tail reads the script operand only: the first word tha
 
 ## Known gaps
 
-Each gap is one line in `docs/debts/notes.md`, under this decision. The lines are `check-tail-pipe-at-line-end`, `check-tail-no-nested-read`, `check-tail-any-filter-false-alarms`, `check-tail-lint-commit-limits`, `check-tail-uv-flag-value` and `narrated-tail-no-uv`. No incident has shown any of them.
+Each gap is one line in `docs/debts/notes.md`, under this decision. The lines are `check-tail-pipe-at-line-end`, `check-tail-no-nested-read`, `check-tail-any-filter-false-alarms`, `check-tail-lint-commit-limits`, `check-tail-uv-flag-value`, `narrated-tail-no-uv` and `check-tail-assign-then-amp`. No incident has shown any of them.
 
 Why: a merge or lane verdict is the one line the orchestrator needs. A pipe into any filter after the run hides it, and the lane must run the check again.
 
