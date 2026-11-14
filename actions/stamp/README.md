@@ -351,7 +351,9 @@ meets each item below. What the tool does when it runs is written in `confirm` i
    draft: `lanes-run-no-full-ci-job`, a lane runs no full CI job. Absent: no ready check runs, and one line says so.
    With the list present, the same run also reads two more checks: the debt-close lint and the open-PR clash. That run is the pre-ready run:
    `merge <pr> --ready`, or `--confirm` on a draft.
-   The clash compares the PR's head with every other open PR on its base. It reads the list through the merge tool's own host,
+   The clash compares the PR's head with every other open PR on its base. It counts a clash only with a PR that is not a draft.
+   A clash with a draft is a report line that names the PR and the files. One switch sets that: `PRE_READY_CLASH_SCOPE` in `merge/merge.py`.
+   It reads the list through the merge tool's own host,
    GitHub REST `GET pulls`, which a lane or a runner can call. A PR whose changed paths meet none of this head's is skipped before any merge-tree.
    The run prints one line per check: `pass NAME`, `fail NAME: why` or `unknown NAME: why`.
    A PR whose base is not the default branch is checked on the merge of its head with that base.
