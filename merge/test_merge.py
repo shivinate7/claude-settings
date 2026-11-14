@@ -3442,6 +3442,8 @@ try:
         finish(one({"total_count": len(runs), "workflow_runs": runs}, jq), 0, include)
 
     elif method == "GET" and m_jobs:
+        if m_jobs.group(1) in (S.get("jobs_fail") or {}):  # {run id: msg}: that run's jobs read fails with msg (OwnRunSuites' own run)
+            raise Refused(S["jobs_fail"][m_jobs.group(1)])
         jobs = (S.get("base_jobs") or {}).get(m_jobs.group(1), [])
         answer_list(jobs, "jobs", {"total_count": len(jobs)})
 
@@ -18727,6 +18729,104 @@ class TouchesRead(Env):
         entry = "\n".join(lines[start:end])
         for kind in ("pull list", "pulls/N/files", "jobs read", "log read"):
             self.assertIn(kind, entry, f"the `merge --touches` entry of merge.py's docstring does not name the {kind} read")
+
+class OwnRunSuites(Env):
+    """`merge --confirm --base-red-ok "<reason>"` on a red base prints how many suites the PR's own run ran (step force-advice-needs-real-run).
+    A job counts when its name is not `scope` and its conclusion is not `skipped`. Zero suites adds a line that the run proves nothing.
+    The lift line red_base prints is the scope the own-run line follows: a case asserts it first.
+    Not a GhHalf subclass: the GhHalf tests must not run twice."""
+    set, gh_host, gh_state = GhHalf.set, GhHalf.gh_host, GhHalf.gh_state
+
+    def setUp(self):
+        super().setUp()
+        gh_case_setup(self)
+
+    HEAD_RUN = 2001  # the PR head's workflow run, newer than main's run 901
+    REASON = "this batch carries the checks fix"
+    LIFT = "--base-red-ok, reason: " + REASON  # the lift line red_base prints on old code and new
+    OWN_LINE = re.compile(r"^merge: own run of #7 ran (\d+) suites on ([0-9a-f]{9})((?:: the run proves nothing, do not advise forcing this PR)?)$", re.M)
+    UNKNOWN_LINE = re.compile(r"^merge: own run (?:of #7 )?unknown: (.*)$", re.M)
+
+    def own_run(self, jobs, *flags, base="red", **state):
+        """Main's latest run is red (or green, with base="green"), and the PR's own run (HEAD_RUN) has `jobs`. -> (rc, out, the PR head before the run)."""
+        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})
+        green = base == "green"
+        self.set(base_runs=[main_run(901, "success" if green else "failure")],
+                 base_jobs={"901": [main_job("scope", "success"), main_job("checks", "success" if green else "failure", 20)],
+                            str(self.HEAD_RUN): jobs},
+                 runs_seq=[[("checks", "completed", "success", self.HEAD_RUN, 9)]], **state)
+        pre = self.head()
+        rc, out = self.run_merge("7", "--confirm", *flags, host=self.gh_host())
+        return rc, out, pre
+
+    def assert_lift_reached(self, out):
+        self.assertIn(self.LIFT, out, "the lift did not run: red_base printed no lift line, so the own-run line has no scope")
+
+    def assert_head_named(self, head9s, pre):
+        for h9 in head9s:
+            self.assertIn(h9, (pre[:9], self.head()[:9]), "the own-run line names a head that is neither the PR head before the claim nor after it")
+
+    def test_suites_ran_counts_the_jobs_outside_scope_that_did_not_skip(self):
+        # the rule the own-run line reads: a job is a suite unless it is the scope gate or skipped. A failed job is a suite.
+        jobs = [{"name": "scope", "conclusion": "success"}, {"name": "a", "conclusion": "success"},
+                {"name": "b", "conclusion": "skipped"}, {"name": "c", "conclusion": "failure"}]
+        self.assertEqual(merge.suites_ran(jobs), 2, "suites_ran does not count the two jobs outside scope that did not skip")
+        self.assertEqual(merge.suites_ran([]), 0, "suites_ran of no jobs is not 0")
+
+    def test_a_lift_prints_the_two_suites_the_own_run_ran(self):
+        # scope is the gate, b skipped, c failed: a and c are the suites
+        jobs = [main_job("scope", "success"), main_job("a", "success"), main_job("b", "skipped"), main_job("c", "failure", 20)]
+        rc, out, pre = self.own_run(jobs, "--base-red-ok", self.REASON)
+        self.assert_lift_reached(out)
+        found = self.OWN_LINE.findall(out)
+        self.assertTrue(found, "no own-run line after the lift: the own run's suites are not read")
+        self.assertEqual({(n, s) for n, _, s in found}, {("2", "")}, "the own-run line does not count 2 suites with no zero-suite note")
+        self.assert_head_named([h for _, h, _ in found], pre)
+
+    def test_a_lift_with_an_all_skipped_own_run_prints_zero_suites_and_the_proves_nothing_line(self):
+        jobs = [main_job("scope", "skipped"), main_job("a", "skipped"), main_job("b", "skipped")]
+        rc, out, pre = self.own_run(jobs, "--base-red-ok", self.REASON)
+        self.assert_lift_reached(out)
+        found = self.OWN_LINE.findall(out)
+        self.assertTrue(found, "no own-run line after the lift for an all-skipped own run")
+        self.assertEqual({(n, s) for n, _, s in found}, {("0", ": the run proves nothing, do not advise forcing this PR")},
+                         "the all-skipped own run does not print 0 suites with the proves-nothing line")
+        self.assert_head_named([h for _, h, _ in found], pre)
+
+    def test_a_lift_with_three_suites_prints_ran_3_suites(self):
+        jobs = [main_job("scope", "success"), main_job("a", "success"), main_job("b", "success"), main_job("c", "success")]
+        rc, out, pre = self.own_run(jobs, "--base-red-ok", self.REASON)
+        self.assert_lift_reached(out)
+        found = self.OWN_LINE.findall(out)
+        self.assertTrue(found, "no own-run line after the lift for a three-suite own run")
+        self.assertEqual({(n, s) for n, _, s in found}, {("3", "")}, "the three-suite own run does not print ran 3 suites with no zero-suite note")
+        self.assert_head_named([h for _, h, _ in found], pre)
+
+    def test_an_unreadable_own_run_read_prints_the_unknown_line_and_the_merge_goes_on(self):
+        rc, out, _ = self.own_run([], "--base-red-ok", self.REASON, jobs_fail={str(self.HEAD_RUN): "gh: HTTP 502 bad gateway"})
+        self.assert_lift_reached(out)
+        unknown = self.UNKNOWN_LINE.findall(out)
+        self.assertTrue(unknown, "no own-run unknown line when the own run's jobs cannot be read")
+        self.assertIn("HTTP 502", unknown[0], "the own-run unknown line does not give the reason")
+        self.assertEqual(rc, 0, out)  # the merge goes on as before
+        fields = self.gh_state("merge_fields") or []
+        self.assertEqual(len(fields), 1, "the merge call was not sent once")
+        self.assertEqual(set(fields[0].get("commit_message", "").splitlines()), {"Reason flag: --base-red-ok: " + self.REASON},
+                         "the lift line in the merge commit message changed when the own run was unreadable")
+
+    def test_no_flag_with_a_red_base_prints_no_own_run_line(self):
+        rc, out, _ = self.own_run([main_job("scope", "success"), main_job("a", "success")])
+        self.assertEqual(rc, 1, out)  # the red base refuses: no flag, no lift
+        self.assertIn("No batch merges onto a red main", out, "the refusal text is missing")
+        self.assertNotRegex(out, r"own run (?:of #7 )?(?:ran|unknown)", "an own-run line prints with no lift")
+
+    def test_a_lift_with_a_green_base_prints_no_own_run_line(self):
+        rc, out, _ = self.own_run([main_job("scope", "success"), main_job("a", "success")], "--base-red-ok", self.REASON, base="green")
+        self.assertEqual(rc, 0, out)  # the green base merges
+        self.assertTrue(self.gh_state("merge_fields"), "the merge was not sent")
+        self.assertNotIn(self.LIFT, out, "the lift line prints for a green base, so the lift was used")
+        self.assertNotRegex(out, r"own run (?:of #7 )?(?:ran|unknown)", "an own-run line prints with a green base, where the lift is unused")
+
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
