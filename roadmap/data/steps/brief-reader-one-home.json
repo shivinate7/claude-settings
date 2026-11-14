@@ -1,0 +1,16 @@
+{
+ "id": "brief-reader-one-home",
+ "title": "One reader of what a lane brief is: lane-one-topic and brief-ids-in-roster both read any line, not line one only",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "PR #3352 merged"
+ ],
+ "why": "Lane brief-ids-from-roster (relayed 00:05 CST Nov 14; hooks/guard_merge.py brief_hit vs brief_roster_hit, PR #3352; unchecked by triage): the new check brief-ids-in-roster reads a Grant:/Lane brief: opener on any line; lane-one-topic reads line one only, so a heading above a brief skips the topic check but not the id check.",
+ "source": "Lane message to triage 00:05 CST Nov 14 (relayed). Rule building-one-home-per-capability.",
+ "note": "Triage 00:01 CST Nov 13: triage's undoable pick (not the owner's word): both read any line, one reader, so a heading cannot skip the topic check. The follow-up lane changes lane-one-topic after #3352 merges; a guard change, so review rounds apply; check first for false alarms from a quoted \"Lane brief:\" line later in a message. Not started.",
+ "updatedAt": "2026-11-14T00:01:00-06:00"
+}
