@@ -14907,7 +14907,7 @@ class ReviewFixBase(ReviewEnv):
         """The record of the source pull request, #6, at SOURCE_HEAD and passing, on the source's own issue."""
         return review_comment(1, REPLACES_SOURCE, record_text(n=REPLACES_SOURCE, head=SOURCE_HEAD, rounds=REVIEW_PASS))
 
-    def test_replacement_7a_a_same_tree_source_log_is_the_earlier_log_for_the_fix_check(self):
+    def test_replacement_7a_a_same_tree_source_log_is_the_earlier_log_for_the_fix_verifier(self):
         # The tree compared is the replacement's live head's (the record's Head). Its tree equals the source head's, so #6's newest log is the
         # earlier log, and a fix check that starts from SOURCE_HEAD is accepted.
         rc, out, err = self.review_with_base(SOURCE_HEAD, self.replacement_host(SOURCE_TREE, source=[self.source_record()]))
@@ -14926,7 +14926,7 @@ class ReviewFixBase(ReviewEnv):
                 rc, out, err = self.review_with_base(SOURCE_HEAD, self.replacement_host(SOURCE_TREE, body=body, source=[self.source_record()]))
                 self.assert_refused(rc, out, err)
 
-    def test_round3_1c_a_fix_check_whose_source_tree_cannot_be_read_is_still_refused(self):
+    def test_round3_1c_a_fix_verifier_whose_source_tree_cannot_be_read_is_still_refused(self):
         # The replacement has no log of its own, and the source's tree read fails (the source head is not in the commit reads). The carry is unknown,
         # so the fix check is refused: a failed read never takes the source's log.
         host = self.record_host(bodies={7: REPLACES_BODY}, commits={REVIEW_HEAD: []}, trees={REVIEW_HEAD: SOURCE_TREE},
@@ -16562,7 +16562,7 @@ class ReplacementCarry(ReviewEnv):
         self.reviewed_line(self.carry_host(per_issue=self.source_issue(self.source_record(net="negative"), self.source_lint())), REVIEW_HEAD, "held",
                            "the carried record does not read its own verdict, held, on the replacement")
 
-    def test_replacement_5c_a_failed_fix_check_on_the_source_reads_open_on_the_replacement(self):
+    def test_replacement_5c_a_failed_fix_verifier_on_the_source_reads_open_on_the_replacement(self):
         failed_fix = fix_verifier_line(verdict="FAIL", head="1e" * 20)
         self.reviewed_line(self.carry_host(per_issue=self.source_issue(self.source_record(fix=(failed_fix,)), self.source_lint())), REVIEW_HEAD, "open",
                            "the carried record does not read its own verdict, open, on the replacement")
