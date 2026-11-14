@@ -1990,7 +1990,7 @@ jobs:
         run: python hooks/test_ci_wake.py
 
       - name: State file parse check fixture suite
-        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() }}
         run: python hooks/test_state_parse_check.py
 
       - name: Feedback inbox fixture suite
