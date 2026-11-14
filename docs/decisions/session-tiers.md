@@ -84,11 +84,13 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session roles and how 
   Before it joins a lane, it runs `merge --lane-lint <pr>` on the lane head and refuses a red lane (`lanes-run-no-full-ci-job`, a lane runs no full CI job).
   The coordinator holds only lane state and talks with the owner. The batch runner runs the merge tool under the coordinator's merge grant (the Merge grant bullet). It holds no grant of its own.
   - Ruling (owner, 2026-11-01 21:34 CST): "cant you have batch mergers running these so you stay focused on being coordinator? why are you doing all the merges again". The coordinator never merges. A batch runner runs every merge, in claude-settings and in other repos, under the coordinator's standing merge grant, which stays the coordinator's (record `standing-merge-grant` holds the words, the repos and the limits). Several batch runners may each own a set of repos.
-- **Rolling combine train** (owner, 2026-11-13 21:48 CST, in batch runner 10's chat, relayed by the consultant; ruling `own-rolling-combine-train`, the train ruling; roadmap steps `batch-runner-rolling-train` and `combine-tournament`). A batch runner combines hand-ins all the time. Merges stay serial. No rule or guard changes.
-  - A batch closes when its real PR is built and linted. A lane handed in after that joins the next batch.
-  - A member that clashes leaves by name to its own lane, and the report names it.
-  - Each merge report carries six numbers for its batch: members in, members left out, clash rate, dry-round minutes, lint minutes, CI minutes.
-  - After 3 batches, review the numbers against lone merges: does the train save time. Unmeasured today; this review measures it.
+- **Rolling combine train** (owner, 2026-11-13 21:48, 21:52 and 21:54 CST, relayed by the consultant; ruling `own-rolling-combine-train`, parts 1 to 3; step `batch-runner-rolling-train`). The batch runner combines all the time, through its own agents. Merges stay serial. Text only: no rule or guard changes, and none of this is built.
+  - Levels: L1 sort the hand-offs. L2 combine lane PRs into an integration PR. L3 fold the batches behind the next in line into one. L4 the next in line and the batch in CI: frozen.
+  - A batch closes when its integration PR is built and its lint passes. A hand-off after that joins the next batch.
+  - Batches behind the next in line keep folding, even after their lint passed, until CI finishes on main. A fold makes a new head, so it is linted again (triage's reading, unchecked).
+  - A lane PR that clashes leaves its batch by name and goes back to its own lane.
+  - Each merge report must carry, per batch: lane PRs in, lane PRs left out, clash rate, dry-round minutes (a trial merge on a tree, no push), lint minutes, CI minutes. No tool prints them yet.
+  - After 3 batches, compare these with lone lanes: does the train save time. Unmeasured. The owner's hope that it cures the drain is unmeasured too.
 - **Arbiter** (owner, 2026-10-29 14:55 CDT, waiting item 72, a question on the waiting page, pick b). The arbiter is a separate role. It holds a repo's ruling and grant voice. Batch checks go to the batch runner, not to it. The coordinator starts it, only on demand (see "On demand" below). The coordinator holds only lane state and talks with the owner.
   - q_max's decision D-748 on browser checks: batch checks go to the batch runner. The ruling voice goes to the arbiter.
   - On demand (owner, 2026-10-29 16:42 CDT, waiting item 81, pick a): the arbiter does not start with triage and the batch runner. It starts later, when the owner tells the coordinator "spawn arbiter". It is for long runs the owner does not want to sit through.
