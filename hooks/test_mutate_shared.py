@@ -90,6 +90,69 @@ class ReportVerdictTests(unittest.TestCase):
             self.assertEqual(mutate_shared.run_mutants(["m"], run_one), 0)
 
 
+class ShardTests(unittest.TestCase):
+    """MUTATE_SHARD=i/n runs entries[i-1::n]; the n shards together run every mutant once."""
+
+    def run_shard(self, value, entries):
+        ran = []
+
+        def run_one(entry):
+            ran.append(entry)
+            return entry, 1, RED_RIGHT, REQUIRED, None
+        env = dict(os.environ)
+        env.pop("MUTATE_SHARD", None)
+        if value is not None:
+            env["MUTATE_SHARD"] = value
+        with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(io.StringIO()):
+            return mutate_shared.run_mutants(entries, run_one), ran
+
+    def test_shards_together_run_each_mutant_once(self):
+        entries = list("abcdefg")
+        seen = []
+        for i in (1, 2, 3):
+            code, ran = self.run_shard("%d/3" % i, entries)
+            self.assertEqual(code, 0)
+            seen += ran
+        self.assertEqual(sorted(seen), entries)
+
+    def test_no_shard_runs_all(self):
+        self.assertEqual(self.run_shard(None, list("abc"))[1], list("abc"))
+
+    def test_bad_value_or_empty_slice_fails_without_running(self):
+        for value in ("0/3", "4/3", "x", "1/0"):
+            self.assertEqual(self.run_shard(value, list("abc")), (1, []))
+        self.assertEqual(self.run_shard("3/3", list("ab")), (1, []))  # empty slice proved nothing
+
+    def test_shard_runs_only_the_controls_its_mutants_read(self):
+        asked = []
+
+        def control(key):
+            def run():
+                asked.append(key)
+                return 0, [], ["case"], []
+            return run
+        entries = [("a", "t1"), ("b", "t2"), ("c", "t1")]
+        controls = {"t1": control("t1"), "t2": control("t2")}
+
+        def run_one(entry):
+            return entry[0], 1, RED_RIGHT, REQUIRED, None
+        env = dict(os.environ, MUTATE_SHARD="2/2")
+        with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(io.StringIO()):
+            code = mutate_shared.run_mutants(entries, run_one, controls=controls, control_of=lambda e: e[1])
+        self.assertEqual((code, asked), (0, ["t2"]))  # entries[1::2] is only ("b", "t2")
+
+    def test_red_control_reads_unknown_in_a_shard(self):
+        def red():
+            return 1, ["FAIL x"], ["case"], []
+
+        def run_one(entry):
+            return entry, 1, RED_RIGHT, REQUIRED, None
+        env = dict(os.environ, MUTATE_SHARD="1/2")
+        with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(io.StringIO()):
+            code = mutate_shared.run_mutants(["a", "b"], run_one, controls={"k": red}, control_of=lambda e: "k")
+        self.assertEqual(code, 1)
+
+
 def write_files(root, files):
     for rel, body in files.items():
         with open(os.path.join(root, rel), "w", encoding="utf-8", newline="\n") as f:
@@ -987,6 +1050,32 @@ class FamilySuiteEngineTests(unittest.TestCase):
         profile = {"tests": r"(^|/)test_[^/]*\.py$", "select": [sys.executable, "select.py", "{path}"]}
         names, note = mutate_shared._select_suites(profile, dest, "widget.py", None, 60)
         self.assertEqual(names, [], "a family line whose file is missing is no suite: %s" % note)
+
+
+class LinuxOnlySweepMutationsTests(unittest.TestCase):
+    """A sweep mutation whose one proving case is skipped off Linux carries `only_on="linux"`, so
+    Windows and macOS count it skipped. Without it the mutation reads survived there and the job
+    goes red."""
+
+    PROVEN_ON_LINUX_ONLY = (
+        "finish gate: a dead host's live lock frees its tree with no finish proof (ungated verdict)",
+        "cut-short restore: a finished dead-host tree is not restored (the finish proof is read as absent)",
+    )
+
+    def test_a_mutation_proven_only_by_the_linux_only_suite_is_marked_linux(self):
+        by_label = {mutate_sweep.mutation_parts(e)[0]: mutate_sweep.mutation_parts(e)[5]
+                    for e in mutate_sweep.MUTATIONS}
+        for label in self.PROVEN_ON_LINUX_ONLY:
+            with self.subTest(label=label):
+                self.assertIn(label, by_label, "the mutation is gone from the list")
+                self.assertEqual(by_label[label], "linux")
+
+    def test_linux_runs_only_on_linux_and_posix_still_runs_on_macos(self):
+        for platform, linux, posix in (("linux", True, True), ("darwin", False, True), ("win32", False, False)):
+            with mock.patch.object(sys, "platform", platform):
+                with self.subTest(platform=platform):
+                    self.assertEqual(mutate_shared.skip_reason("linux") is None, linux)
+                    self.assertEqual(mutate_shared.skip_reason("posix") is None, posix)
 
 
 if __name__ == "__main__":

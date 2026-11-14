@@ -35,11 +35,44 @@ env:
   GIT_CONFIG_VALUE_1: "false"
 
 jobs:
+  # The 03:17 nightly's skip job (R61, owner pick b, Nov 12; decision test-strategy-reset). It says skip when main's head already has a
+  # green push run of checks.yml and the newest completed schedule run is green (.github/scripts/nightly-skip.py). Scope waits on it,
+  # so a skip reaches every job through needs and the run is a visible success: nothing is cancelled, since a cancelled run reads
+  # UNKNOWN and blocks merges. A failed read says skip=false: unknown runs everything. The job itself starts on every event and
+  # its steps run on a schedule only: a job-level `if` would leave it skipped, and a skipped ancestor skips every job behind scope.
+  nightly-skip:
+    runs-on: ubuntu-latest
+    # Cap 5 min, unmeasured: the job makes one runs read.
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      skip: ${{ steps.decide.outputs.skip }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ github.event_name == 'schedule' }}
+        with:
+          persist-credentials: false
+
+      - name: Decide whether the nightly can skip
+        id: decide
+        if: ${{ github.event_name == 'schedule' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.sha }}
+        run: python3 .github/scripts/nightly-skip.py
+
   # Decides which jobs and suites a run needs (.github/scripts/ci-scope.sh). Every other job
   # needs it. An error in the script turns every flag on, never off. A job behind a scope flag always runs; its steps skip when the flag is off.
   # A draft PR skips this job, so every job that needs it skips too (decision draft-until-reviewed).
+  # It also skips on a scheduled run whose skip job said skip. The skip job runs on every event, and its steps run on a schedule only, so
+  # off a schedule its skip output is empty. A failed skip job also has no skip output, which reads as not-skip, and !cancelled() keeps scope running.
   scope:
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.nightly-skip.outputs.skip != 'true' }}
+    needs: nightly-skip
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -183,6 +216,12 @@ jobs:
       - name: Question form option-key gap suite
         run: python3 hooks/test_question_form_option_gap.py
 
+      - name: Question form option-label suite
+        run: python3 hooks/test_question_form_option_labels.py
+
+      - name: Question form letters-frozen suite
+        run: python3 hooks/test_question_form_letters_frozen.py
+
       - name: Remove-prompt answer fixture suite
         run: python3 hooks/test_rm_prompt_answer.py
 
@@ -213,6 +252,9 @@ jobs:
       - name: Git mailbox suite
         run: python3 hooks/test_mail.py
 
+      - name: Git mailbox wait suite
+        run: python3 hooks/test_mail_wait.py
+
       - name: No-window helper fixture suite
         run: python3 hooks/test_nowindow.py
 
@@ -225,6 +267,9 @@ jobs:
 
       - name: Stall watch stop suite
         run: python3 hooks/test_stall_watch_stop.py
+
+      - name: Proc env read suite
+        run: python3 hooks/test_proc_env.py
 
       - name: Simulator boot-record fixture suite
         run: python3 hooks/test_sim_boot_record.py
@@ -253,6 +298,9 @@ jobs:
 
       - name: Stop-hook question route suite
         run: python3 lint/test_report_guard_route.py
+
+      - name: Stop-hook page writer suite
+        run: python3 lint/test_report_guard_page_writer.py
 
       - name: Stop-hook stamped copy suite
         run: python3 lint/test_report_guard_stamped.py
@@ -296,6 +344,9 @@ jobs:
 
       - name: Stale prose check fixture suite
         run: python3 lint/test_stale_cites.py
+
+      - name: Ruled store fixture suite
+        run: python3 lint/test_ruled_store.py
 
       - name: Route judge measure fixture suite
         run: python3 lint/test_prove_route_judge.py
@@ -344,6 +395,9 @@ jobs:
 
       - name: Touched-test selector fixture suite
         run: python3 lint/test_touched_tests.py
+
+      - name: Nightly skip fixture suite
+        run: python3 lint/test_nightly_skip.py
 
       - name: rm shim fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -463,6 +517,12 @@ jobs:
 
       - name: Waiting page grant check suite
         run: python3 skills/waiting-page/test_page_grant.py
+      - name: Waiting page grant answer-label suite
+        run: python3 skills/waiting-page/test_page_grant_label.py
+      - name: Waiting page grant held suite
+        run: python3 skills/waiting-page/test_page_grant_held.py
+      - name: Waiting page question source suite
+        run: python3 skills/waiting-page/test_question_source.py
       - name: Waiting page park relay prose suite
         run: python3 skills/waiting-page/test_skill_park_relay.py
 
@@ -619,6 +679,9 @@ jobs:
         shell: bash
         run: bash actions/stamp/test_action.sh
 
+      - name: Stable workflow move job suite
+        run: python3 lint/test_stable_workflow.py
+
       - name: Opt-in CI template fixture suites
         if: ${{ needs.scope.outputs.code == 'true' }}
         shell: bash
@@ -630,6 +693,7 @@ jobs:
           bash actions/ruling-kind/test_action.sh
           bash actions/zizmor/test_action.sh
           bash actions/silent-undo/test_action.sh
+          bash actions/stable-mover/test_action.sh
           python3 actions/readme-links/test_readme_links.py
           bash githooks/main-ref/test_hook.sh
           bash githooks/test_pre_commit.sh
@@ -914,6 +978,8 @@ jobs:
   shell-macos:
     runs-on: macos-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
+    # No macOS runner starts on a push to main: a step-level skip still starts it (R61). A pull_request, a schedule and a dispatch run it.
     # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Newest 29 completed push runs on main, latest attempt of each (run 42445434802 to run 43184587111):
     # 29 green, median 23.0, slowest 31.3 min (run 43184587111). The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 75
@@ -970,11 +1036,14 @@ jobs:
   checks-macos:
     runs-on: macos-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
+    # No macOS runner starts on a push to main: a step-level skip still starts it (R61). A pull_request, a schedule and a dispatch run it.
     # Cap 75 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 30.5 min
     # is 41% of it (range 14.3-30.5, median 19.4, n 30 green runs, same window as `checks`), after the split into
     # checks-macos and checks-macos-b. A push runs the janitor sweep mutation test and a pull request does not:
     # push median 20.5 min, pull request median 18.7 (n 13 each).
     # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
+    # Unmeasured since R61: the guard shard became the macOS slice, so the figures above describe the old shape.
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -989,13 +1058,14 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Own cap, 45 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The step took 1106 s (18.4 min) in run 43197518392, the slowest of 29 completed push runs.
-      # hooks/test_guard.py holds the shard switch.
-      - name: Guard fixture suite (shard 1 of 2)
+      # The mac-tagged slice of the guard suite, on every event that runs macOS (R61, owner pick b, Nov 12): the full guard suite
+      # runs on Linux and Windows, and on macOS only this slice. Cap 45 stays; the slice runs far shorter than the shard
+      # it replaces (1106 s), unmeasured. hooks/test_guard.py holds the slice switch.
+      - name: Guard fixture suite (macOS slice)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         timeout-minutes: 45
         env:
-          GUARD_SHARD: 1/2
+          GUARD_TESTS: macos-slice
         run: python3 hooks/test_guard.py
 
       - name: Load reader against the OS tools
@@ -1205,16 +1275,19 @@ jobs:
         shell: bash
         run: bash .github/scripts/mod-tests.sh
 
-  # The second half of checks-macos, split off for wall time: that job took 40.6 min in run 41730427997. The guard suite runs
-  # in 2 shards, one per job, and the slow CI steps are shared out between the jobs. Same scope flag, same `if:`
+  # The second half of checks-macos, split off for wall time: that job took 40.6 min in run 41730427997. The guard slice (R61)
+  # runs in checks-macos alone, so this job has no guard step, and the slow CI steps are shared out between the jobs. Same scope flag, same `if:`
   # on every CI step as checks-macos. Both jobs start on every pull request (`needs: scope` only); the scope flag gates
   # their steps, not the jobs. Cost: a pull request with no macOS-scoped change, such as a docs-only one, starts a
   # second, idle macOS runner that it did not start before. That cost is unmeasured: the window below had no such run.
   checks-macos-b:
     runs-on: macos-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
+    # No macOS runner starts on a push to main: a step-level skip still starts it (R61). A pull_request, a schedule and a dispatch run it.
     # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The newest 29 completed push runs on main, latest attempt of each (run 42522167511 to run 43206612905):
     # 29 green, median 25.5, slowest 30.7 min (run 43197518392). The stopgap ends with roadmap step time-pinned-tests-go.
+    # Unmeasured since R61: the guard shard left this job, so those 29 push runs no longer describe it.
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -1227,15 +1300,6 @@ jobs:
         if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
         with:
           python-version: "3.11"
-
-      # Own cap, 45 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The step took 1168 s (19.5 min) in run 43197518392, the slowest job run.
-      # hooks/test_guard.py holds the shard switch.
-      - name: Guard fixture suite (shard 2 of 2)
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
-        timeout-minutes: 45
-        env:
-          GUARD_SHARD: 2/2
-        run: python3 hooks/test_guard.py
 
       - name: CI wake-up fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
@@ -1257,6 +1321,10 @@ jobs:
       - name: Stall watch fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_stall_watch.py
+
+      - name: Proc env read suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_proc_env.py
 
       - name: Janitor triggers fixture suite (SessionEnd hook)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
@@ -1385,7 +1453,10 @@ jobs:
         shell: bash
         run: bash .github/scripts/mod-tests.sh
 
-  # The mutation test for the guard, moved off `checks` by cut F so it runs in parallel.
+  # The mutation test for the guard, moved off `checks` by cut F so it runs in parallel, then split into 3 shards that run in
+  # parallel too: this job and its -b and -c copies. Each sets MUTATE_SHARD=i/3 on its mutate step, so `run_mutants` runs
+  # entries[i-1::3] and each mutant runs in exactly one job (lint/test_windows_split.py, mutate_problems). `main` checks every
+  # anchor before it slices. Debt mutate-guard-split.
   checks-mutate-guard:
     runs-on: ubuntu-latest
     needs: scope
@@ -1395,8 +1466,8 @@ jobs:
     # speed-ups carry over, the set nears 945 s locally, about 16 min. A cap-cut step has no upper bound.
     # Batch 68 run 42608474160 was cancelled at the 25 min cap with 616 of 694 mutants killed and none surviving. The cap
     # is a stopgap (ci-job-caps) until the split (debt mutate-guard-split, shards); the next green run gives the figure.
-    # Now 75, above the 3600 s suite cap in hooks/mutate_guard.py, so the suite cap fires first (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
-    timeout-minutes: 75
+    # One shard holds a third of the list (batch 103's unsplit job ran 35 min). Provisional 60 min cap until 5 green runs (ci-job-caps, How to measure again item 6); each shard's time is unmeasured until the first PR run.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
@@ -1409,8 +1480,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Guard mutation test
+      - name: Guard mutation test, shard 1/3
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        env:
+          MUTATE_SHARD: 1/3
         run: python3 hooks/mutate_guard.py
 
       # The progress beat of hooks/test_guard.py (decision stall-watch). Runs in this job, not in the guard suite, which runs in the
@@ -1422,21 +1495,69 @@ jobs:
         timeout-minutes: 5 # provisional: no CI run yet; 101 s measured locally
         run: python3 hooks/test_guard_beat.py
 
+  checks-mutate-guard-b:
+    runs-on: ubuntu-latest
+    needs: scope
+    # Shard 2/3 of the guard mutation test; see checks-mutate-guard. Provisional 60 min cap until 5 green runs (ci-job-caps); unmeasured until the first PR run.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        with:
+          python-version: "3.11"
+
+      - name: Guard mutation test, shard 2/3
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        env:
+          MUTATE_SHARD: 2/3
+        run: python3 hooks/mutate_guard.py
+
+  checks-mutate-guard-c:
+    runs-on: ubuntu-latest
+    needs: scope
+    # Shard 3/3 of the guard mutation test; see checks-mutate-guard. Provisional 60 min cap until 5 green runs (ci-job-caps); unmeasured until the first PR run.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        with:
+          python-version: "3.11"
+
+      - name: Guard mutation test, shard 3/3
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        env:
+          MUTATE_SHARD: 3/3
+        run: python3 hooks/mutate_guard.py
+
   # The mutation report of a batch (decision mutation-report-scores-suites, owner item mutation-ci-job, 2026-11-05). It runs on
   # a pull request from a `batch-` branch (the scope flag mutation_report, set from the head ref) and on workflow_dispatch.
   # A pull request from any other branch skips its steps, so the job reads passed. A push or a schedule reaches the action,
   # which skips there itself: the scope rules read a scoped job as running on those events.
   # It reports the catch share of the changed lines and never fails on it. It fails only when a known defect (.github/known-defects.json)
-  # is MISS or UNKNOWN, or a base entry is MISSING from the head list or CHANGED on it. Cap (ci-job-caps): the budget is a wall deadline, so the `--changed` step lasts at most the budget (300 s) plus
+  # is MISS or UNKNOWN, or a base entry is MISSING from the head list or CHANGED on it. Cap (ci-job-caps): the budget is a wall deadline, so the `--changed` step lasts at most the budget (1800 s, raised from 300 s under the interim stopgap of decision ci-job-caps: a change to hooks/guard.py ran 10 of 10 mutants in 978 s with a 1800 s budget, 1 of 10 at 600 s; step mutation-tests-for-cost) plus
   # its setup (installs and control runs, before the deadline's mutants), not the 337 s the old start-only budget took on batch 11
   # (59bff081..0497265b, limit 10, suite timeout 180 s). `--known-defects` took 7 s there, with a checkout and setup around
   # 1 min; that run used a profile with no install. `--known-defects` now runs its own install after the `--changed` step removes
-  # its deps: one per lockfile hash, install and link, each up to INSTALL_TIMEOUT (900 s). The 15 min cap is the bound; the first
+  # its deps: one per lockfile hash, install and link, each up to INSTALL_TIMEOUT (900 s). The 45 min cap covers the measured runs (1800 s budget plus
+  # setup and the known-defects step; interim stopgap). A profile with an install adds up to 900 s
+  # (INSTALL_TIMEOUT) per lockfile hash to each of the two steps, which can pass it. claude_settings has no install. The first
   # CI run on a batch with an install replaces the 7 min figure.
   mutation-report:
     runs-on: ubuntu-latest
     needs: scope
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.mutation_report == 'true' || github.event_name != 'pull_request' }}
@@ -1830,6 +1951,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_mail.py
 
+      - name: Git mailbox wait suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python hooks/test_mail_wait.py
+
       - name: Guard wrappers fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_wrappers.py
@@ -1933,6 +2058,7 @@ jobs:
   all-jobs-passed:
     runs-on: ubuntu-latest
     needs:
+      - nightly-skip
       - scope
       - checks
       - checks-merge-install
@@ -1946,6 +2072,8 @@ jobs:
       - checks-macos-b
       - checks-windows
       - checks-mutate-guard
+      - checks-mutate-guard-b
+      - checks-mutate-guard-c
       - mutation-report
       - checks-windows-guard
       - checks-windows-merge
@@ -1969,6 +2097,7 @@ jobs:
   ci-done:
     runs-on: ubuntu-latest
     needs:
+      - nightly-skip
       - scope
       - checks
       - checks-merge-install
@@ -1982,6 +2111,8 @@ jobs:
       - checks-macos-b
       - checks-windows
       - checks-mutate-guard
+      - checks-mutate-guard-b
+      - checks-mutate-guard-c
       - mutation-report
       - checks-windows-guard
       - checks-windows-guard-2
