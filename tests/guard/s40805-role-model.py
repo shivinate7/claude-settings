@@ -941,8 +941,8 @@ for _label, _check in _FENCE_CHECKS:
     FIXTURELESS_CHECKS.add(_check)
 
 # The step-up and the builder rows read the same scan, so the fence reaches each verdict. A reviewer on haiku with a fenced
-# Round 2 of 3 quote is not refused for round 2; unfenced, it keeps the Sonnet refusal. A builder on sonnet is not lifted by a
-# fenced Round 3 of 3 quote. The builder control keeps today's allow: no guard path reads a builder's round marker.
+# quote of the second marker is not refused for it; unfenced, it keeps the Sonnet refusal. A builder on sonnet is not lifted by a
+# fenced quote of the third marker. The builder control keeps today's allow: no guard path reads a builder's marker.
 add("marker fence: reviewer on haiku, round 1, with a fenced Round 2 of 3 quote is allowed and not refused for round 2",
     "allow", tool="Agent", config=ROLE_REAL_CFG, lacks=("Reviewer round 2 runs on Sonnet",),
     **role_input("reviewer", "haiku", "Review the diff for PR 3286.\n" + _fence_quote("Round 2 of 3") + "\nCheck the cases."))
