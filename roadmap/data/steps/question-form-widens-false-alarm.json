@@ -1,14 +1,14 @@
 {
  "id": "question-form-widens-false-alarm",
  "title": "hooks/question_form.py flags a shared form as widening; judge whether it is a false alarm",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1c1Rddp4KKdXvkHh4",
  "owner": "triage",
  "blockedBy": [],
- "why": "Coordinator 12:17 CST Nov 13: page item 729 option a (one CI skip form for every repo) was flagged as widening a shared tool.",
+ "why": "Coordinator 12:17 CST Nov 13: page item 729 option a (one CI skip form for every repo) was flagged as widening a shared tool. LANE STARTED 15:00 CST Nov 14 (coordinator 15:07; started 14:59 CST): lane session_013NEJL1c1Rddp4KKdXvkHh4. The park rested on the owner's 12:20 CST Nov 13 prediction that the flag goes away after the batch merges. The consultant reports the flag fired twice today on item 835 a (11:05 and 14:56 CST), so the prediction did not hold. The step's own rule: a still-firing flag becomes a debt with that run as its incident. The lane's first job: reproduce each sighting and judge false alarm against real widening (rule verification-cry-wolf-guard-is-spent).",
  "source": "coordinator 12:17 CST Nov 13",
  "note": "Todo. The guard reads a shared form that every repo takes as \"a second form\". The coordinator thinks it is a false alarm. Until judged, item 729 a carries the widens label and is not recommended. Read the guard record (verification-cry-wolf-guard-is-spent) before changing it. Owner 12:20 CST Nov 13 (coordinator relay): \"im pretty sure that flag is gonna go away properly as soon as the merges from batch runner occurs\". Parked. After batches 137 and 135 merge, re-run the flag on item 729's wording. Clears: close this note. Still fires: it becomes a debt with that run as its incident. Another sighting 13:31 CST Nov 13: item 750 (a catch-up merge exemption) got the widening label on option a, though a changes the rule for every repo, not a per-repo exception (runner 10 and the coordinator, 13:31). Item 750 is withdrawn, but the pattern matches item 729.",
- "updatedAt": "2026-11-13T13:31:04-06:00"
+ "updatedAt": "2026-11-14T15:00:30"
 }

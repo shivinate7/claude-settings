@@ -1,0 +1,14 @@
+{
+ "id": "debt-close-reads-ci",
+ "title": "A debt close reads the PR's own CI result for the suite its Retire line names, so `merge --ready` does not run hooks/test_guard.py a second time",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Ask (consultant 15:00 CST, relayed by the coordinator 15:07; not built; triage read no code): the debt-close lint runs hooks/test_guard.py, about 39 min (measured once), inside `merge --ready`, and then the PR's CI runs the same suite. Rule roles-each-layer-proves-once: CI is the merge check, each layer proves a change once. Design point (coordinator): `--ready` runs before the PR's own CI run exists, so reading CI needs a different place for the check, or another source, such as the draft touched-tests run. Kin: ready-step-hang-no-timeout (the heartbeat only; the family selector is parked there), ready-checks-time-bound. A change that moves a refusal to a pass on weaker evidence is a widening: it is not built without a `Departs from:` line to the coordinator, and an owner question if it widens. First act of a lane: read lint/check_debt_retire.py judge_close, name which run a close can read and when it exists, then propose; red then green only after the coordinator picks.",
+ "source": "consultant 15:00 CST via coordinator 15:07 CST Nov 14",
+ "note": "Filed 15:00 CST Nov 14 by triage. Tracker: the coordinator. Not started. Not built.",
+ "updatedAt": "2026-11-14T15:00:30"
+}
