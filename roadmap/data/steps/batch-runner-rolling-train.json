@@ -1,14 +1,14 @@
 {
  "id": "batch-runner-rolling-train",
  "title": "A batch runner's standing duty is a rolling combine train, written into decision session-tiers and the project-ops batch-runner template",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL2vjqFYDAqvgfkZRN3",
  "owner": "triage",
  "blockedBy": [],
  "why": "Owner 21:48 CST Nov 13, in runner 10's chat (relayed by the consultant): the combining should be continuous, with lane PRs always joining a batch, so the runner becomes a scaling machine; if sound, make it part of how a batch runner is briefed and operates.",
  "source": "Consultant 21:49 CST Nov 13, relaying runner 10 relaying the owner; retrospective agrees.",
- "note": "Triage 21:49 CST Nov 13: duty as the consultant states it: a batch closes when its real PR is built and linted, later hand-ins join the next batch, clashing members leave by name. Each merge report carries per-batch numbers: members in, members left out, clash rate, dry-round minutes, lint minutes and CI minutes. Review after 3 batches against lone merges: does the train save time. Homes: decision session-tiers (batch runner) and the project-ops batch-runner template, via a lane the coordinator assigns; a fresh reviewer reads it, since it changes a role's duty. Rule: no rule or guard changes here; merges stay serial. Unmeasured by triage: whether a train beats lone merges; the review is how that gets measured.",
- "updatedAt": "2026-11-13T21:49:19-06:00"
+ "note": "Triage 21:49 CST Nov 13: duty as the consultant states it: a batch closes when its real PR is built and linted, later hand-ins join the next batch, clashing members leave by name. Each merge report carries per-batch numbers: members in, members left out, clash rate, dry-round minutes, lint minutes and CI minutes. Review after 3 batches against lone merges: does the train save time. Homes: decision session-tiers (batch runner) and the project-ops batch-runner template, via a lane the coordinator assigns; a fresh reviewer reads it, since it changes a role's duty. Rule: no rule or guard changes here; merges stay serial. Unmeasured by triage: whether a train beats lone merges; the review is how that gets measured. Coordinator 21:50 CST Nov 13 (21:50): lane started, session_013NEJL2vjqFYDAqvgfkZRN3 (Sonnet, medium). Scope: the duty in two homes, decision session-tiers (batch runner section) and the project-ops batch-runner template; the template points to the decision, no copy; no rule or guard change; a fresh reviewer reads it. Overlap by title search (unchecked by triage), open PRs touching those files: #3259, #3247, #3159, #3117, #3057, #2920, #2860, #2747, #2709, #2701. The lane reads each diff, makes its edit a small additive section, and names \"Merge after: ...\". Path: a combined docs PR via runner 10, in the next batch.",
+ "updatedAt": "2026-11-13T21:50:16-06:00"
 }
