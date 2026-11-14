@@ -23,7 +23,8 @@ from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_refspecs, push_target,
+    ARCHIVE_COPY_SUFFIX, ARCHIVE_PREFIX, DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_refspecs,
+    push_target,
 )
 
 
@@ -1447,7 +1448,10 @@ RECORD_REASON = (
     "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this session's own "
     "record does not prove it is triage. Send the step change to the triage session (list_sessions, tag "
     "cs-build:triage, same cs-repo). If this session is triage: run get_session (no argument) alone in its "
-    "own turn, then retry. (decision session-tiers, the triage session is the only writer of the record branch)"
+    "own turn, then retry. Before this session asks the owner to push a commit, run `git fetch origin <record "
+    "branch>`, then `git merge-base --is-ancestor <commit> origin/<record branch>`: exit 0 means the commit is "
+    "already there, so ask the owner only when it is not. "
+    "(decision session-tiers, the triage session is the only writer of the record branch)"  # glossary-ok: session-tiers is the decision's file name
 )
 
 
@@ -1722,7 +1726,7 @@ def _covered(module, host, branch: str, tip, rows, pool) -> bool:
         heads = [str(row["head"]["sha"]) for row in [*rows, *pool] if row["state"] == "open" or _is_merged(row)]
         if any(sha == tip or _compare_status(module, host, sha, tip) in _CONTAINED for sha in dict.fromkeys(heads)):
             return True
-    copy_name = re.compile(re.escape("archive/" + branch) + r"(-[0-9]+)?")
+    copy_name = re.compile(re.escape(ARCHIVE_PREFIX + branch) + ARCHIVE_COPY_SUFFIX)
     for ref in host.pages("git/matching-refs/heads/archive/" + branch):
         name = str(ref["ref"])[len("refs/heads/"):]
         if copy_name.fullmatch(name) and _compare_status(module, host, name, tip, missing_ok=True) in _CONTAINED:
