@@ -25,6 +25,11 @@ RESET = NOW + 600  # the quota's reset, 600 s on: inside the 900 s cap, so a wai
 HEAD = "c" * 40
 PR = {"number": 7, "head": {"sha": HEAD, "ref": "feat"}, "base": {"ref": "main"}, "state": "open", "draft": False,
       "mergeable": True, "mergeable_state": "clean", "body": "", "created_at": "2026-11-13T00:00:00Z", "changed_files": 1}
+MERGE_OID = "e" * 40  # the merge commit the PUT makes
+MERGED = dict(PR, state="closed", merged=True, merge_commit_sha=MERGE_OID)  # the pull request after the PUT lands
+PR_ROUTE = "repos/{owner}/{repo}/pulls/7"  # the route as the fake gh sees it: no -R, so the working directory's repo
+GET_PR = ("gh", "GET", PR_ROUTE)
+PUT_MERGE = ("gh", "PUT", PR_ROUTE + "/merge")
 
 
 def low_until_reset(now):
@@ -57,30 +62,41 @@ def tree(root):
 
 class QuotaGh:
     """A real Host whose gh is faked at merge.sh. `quota(now)` gives the header keys a `gh api -i` reply carries at fake time `now`
-    (None: no quota headers). `checks_at(now)` gives the check rows of HEAD. `first` scripts the first replies as (code, body, headers),
-    headers as for `quota`. Every gh call is recorded as (fake time, args) in `calls`, the args without the leading `gh`."""
+    (None: no quota headers). `quota_on`, a regex on the route, limits `quota` to the replies of the routes it matches; the others
+    carry a full quota. `checks_at(now)` gives the check rows of HEAD. `first` scripts the first replies as (code, body, headers),
+    headers as for `quota`. Every gh call is recorded as (fake time, args) in `calls`, the args without the leading `gh`. `events` holds
+    the calls and the pauses in order: ("gh", method, route) and ("pause", seconds). The PUT of the merge makes the pull request read merged."""
 
-    def __init__(self, test, quota=full, checks_at=green, first=()):
+    def __init__(self, test, quota=full, checks_at=green, first=(), quota_on=None):
         self.clock = tm.Clock(NOW)
-        self.quota, self.checks_at, self.first = quota, checks_at, list(first)
-        self.calls, self.cwd = [], tm.workflow_folder(test, git=True)  # a checkout with no workflows: no job caps to read
+        self.quota, self.checks_at, self.first, self.quota_on = quota, checks_at, list(first), quota_on
+        self.calls, self.events, self.merged = [], [], False
+        self.cwd = tm.workflow_folder(test, git=True)  # a checkout with no workflows: no job caps to read
         patch = unittest.mock.patch.object(tm.merge, "sh", self.sh)
         patch.start()
         test.addCleanup(patch.stop)
 
     def host(self):
-        return tm.merge.Host(required=["checks"], base="main", minute=60, now=self.clock.now, pause=self.clock.pause, cwd=self.cwd)
+        return tm.merge.Host(required=["checks"], base="main", minute=60, now=self.clock.now, pause=self.pause, cwd=self.cwd)
+
+    def pause(self, seconds):
+        """The host's pause: the event goes into `events` in order with the calls, then the fake clock moves on."""
+        self.events.append(("pause", seconds))
+        self.clock.pause(seconds)
 
     def sh(self, args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
         argv = list(args[1:] if args[:1] == ["gh"] else args)
         now = self.clock.now()
         self.calls.append((now, argv))
+        path = argv[1] if argv[:1] == ["api"] else " ".join(argv[:2])
+        self.events.append(("gh", argv[argv.index("-X") + 1] if "-X" in argv else "GET", path))
         if len(self.calls) > 300:  # a loop that never ends fails here, it does not hang the run
             raise AssertionError("runaway reads: more than 300 gh calls")
         if self.first:  # a scripted failure is gh's exit 1 with HTTP 403, the one failure these cases script (a rate limit)
             code, body, headers = self.first.pop(0)
         else:
-            code, body, headers = 0, self.route(argv), self.quota(now)
+            code, body = 0, self.route(argv)
+            headers = self.quota(now) if self.quota_on is None or re.search(self.quota_on, path) else full(now)
         if "-i" not in argv:  # gh api prints no header block without -i
             return code, body
         return code, tm.gh_i(403 if code else 200, body, **(headers or {}))
@@ -89,8 +105,11 @@ class QuotaGh:
         if argv[:2] == ["run", "list"]:
             return "[]"
         route = argv[1] if argv[:1] == ["api"] else ""
+        if re.search(r"/pulls/7/merge$", route) and "PUT" in argv:  # the merge call lands
+            self.merged = True
+            return json.dumps({"merged": True, "sha": HEAD, "message": "Pull Request successfully merged"})
         if re.search(r"/pulls/7$", route):
-            return json.dumps(PR)
+            return json.dumps(MERGED if self.merged else PR)
         m = re.search(r"/commits/([0-9a-f]+)/(check-runs|status)$", route)
         if m and m.group(2) == "check-runs":
             return json.dumps({"check_runs": self.checks_at(self.clock.now())})
@@ -207,6 +226,45 @@ class QuotaCiWait(unittest.TestCase):
         self.assertTrue(ok, why)
         polls = set(g.reads_between(NOW, NOW + 300))
         self.assertGreaterEqual(len(polls), 4, f"{len(polls)} poll times in the first five minutes, want at least four")
+
+    def test_a_low_checks_read_holds_the_next_call_until_the_reset(self):  # control
+        g = QuotaGh(self, quota=low_until_reset, quota_on=r"/check-runs$", checks_at=pending_past_reset)
+        with contextlib.redirect_stdout(io.StringIO()):
+            ok, why = g.host().wait_checks(7, HEAD, 120)
+        self.assertTrue(ok, why)  # scope: the wait ran to its green check
+        reads = [i for i, (_, argv) in enumerate(g.calls) if argv[1:2] and argv[1].endswith("/check-runs")]
+        self.assertTrue(reads, "the wait never read the checks, so the low checks reply was never sent")  # scope
+        i = reads[0]
+        self.assertLess(g.calls[i][0], RESET, "the checks read came after the reset, so its low reply armed no hold")  # scope
+        self.assertLess(i + 1, len(g.calls), "no gh call came after the low checks read")
+        nxt = g.calls[i + 1][0]
+        self.assertGreaterEqual(nxt, RESET, f"the call after the low checks read came at {nxt:.0f} s, before the quota reset at {RESET:.0f} s")
+
+
+class QuotaMerge(unittest.TestCase):
+    """Host.merge reads the pull request, checks it for BLOCKED or BEHIND, then sends the PUT. A low quota on that read must not hold the
+    PUT: a pull request that turns BLOCKED or BEHIND in the hold would be merged through the admin bypass."""
+
+    def test_a_low_quota_on_the_pr_read_holds_nothing_between_that_read_and_the_put(self):
+        g = QuotaGh(self, quota=low_until_reset)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            oid, why = g.host().merge(7, "squash", HEAD)
+        # scope: the merge was sent and landed, and the first call read the pull request while the quota was low
+        self.assertEqual(oid, MERGE_OID, f"the merge did not land: {why}")
+        self.assertEqual([e for e in g.events if e[0] == "gh"][0], GET_PR, "the first gh call was not the pull request read")
+        self.assertLess(g.calls[0][0], RESET, "the pull request read came after the reset, so its low reply armed no hold")
+        put_at = g.events.index(PUT_MERGE)
+        pr_at = max(i for i in range(put_at) if g.events[i] == GET_PR)
+        held = [e for e in g.events[pr_at + 1:put_at] if e[0] == "pause"]
+        self.assertEqual(held, [], f"the quota hold paused between the pull request read and the PUT: {g.events[pr_at:put_at + 1]}")
+
+    def test_a_merge_with_the_quota_full_is_sent_at_once_and_lands(self):  # control
+        g = QuotaGh(self, quota=full)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            oid, why = g.host().merge(7, "squash", HEAD)
+        self.assertEqual(oid, MERGE_OID, f"the merge did not land: {why}")  # scope
+        self.assertEqual([e for e in g.events if e[0] == "pause"], [], "a merge with the quota full paused")
+        self.assertEqual([t for t, argv in g.calls if "PUT" in argv], [NOW], "the PUT was not sent at once")
 
 
 class QuotaInsideDeadline(unittest.TestCase):
