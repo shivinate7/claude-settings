@@ -277,7 +277,7 @@ The seven opt-in templates of that decision:
   `if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}`,
   `permissions: {pull-requests: write}`, and `with: needs: ${{ toJSON(needs) }}`.
 - `ci-alarm`: opens or comments on one issue when the latest completed run per workflow and per
-  event group on a branch (default `main`) is red. Groups: `actions/ci-alarm/events.json`. Runs of
+  event group on a branch (default `main`) is red. Groups: `actions/ci-alarm/events.json`. In the push group (push or dispatch), a run that ran no suites is passed over, and the newest run that ran its suites decides. Runs of
   other events, such as a Pages build, a `workflow_run` or a `repository_dispatch`, and runs of a
   deleted workflow, are not judged. A failed `gh` read prints `unknown` with a warning, never a red
   job. The caller is a scheduled workflow with `permissions: {actions: read, issues: write}`. It
