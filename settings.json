@@ -9,7 +9,6 @@
     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "92"
   },
   "permissions": {
-    "defaultMode": "auto",
     "allow": [
       "Bash(gh pr merge:*)",
       "mcp__Claude_Browser",
