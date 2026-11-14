@@ -1,0 +1,14 @@
+{
+ "id": "lane-lint-names-clashing-open-pr",
+ "title": "merge --lane-lint names which open PR a head clashes with, and the fold build tests that clash before the lint",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 23:05 CST Nov 13 (relayed; unchecked by triage): merge --lane-lint refuses a head that conflicts with any open PR's head (merge-tree), with no override, and does not say which PR. A fold member has to be clash-tested against every open PR.",
+ "source": "Coordinator message 23:05 CST Nov 13 (relayed). Related: steps release-pairwise-clash (todo) and merge-tree-check-tool (queued); no step is known to cover the naming or the fold-build order.",
+ "note": "Triage 23:06 CST Nov 13: two parts. (1) The lint output names the open PR whose head clashes, so a lane can fix it earlier. (2) The batch runner's fold build clash-tests each member against all open PRs before it runs the lint. Check first whether release-pairwise-clash or merge-tree-check-tool already builds either part; if so, fold this into it and say so. A lane starts it; not started.",
+ "updatedAt": "2026-11-13T23:06:00-06:00"
+}

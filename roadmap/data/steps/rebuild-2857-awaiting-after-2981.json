@@ -1,0 +1,16 @@
+{
+ "id": "rebuild-2857-awaiting-after-2981",
+ "title": "Rebuild the --awaiting mode of the stale-pages check on main after #2981 lands",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "PR #2981 merged"
+ ],
+ "why": "Coordinator 23:05 CST Nov 13 (relayed; unchecked by triage): #2857 (--awaiting mode in the stale-pages check) is dirty and stale. Runner 10 may archive and close it so #2981 can merge.",
+ "source": "Coordinator message 23:05 CST Nov 13 (relayed).",
+ "note": "Triage 23:06 CST Nov 13: new lane, starts after #2981 merges: rebuild the --awaiting content on main from #2857's archive branch. Rule for the close: push #2857's branch to archive/<branch> first (rule shared-trees-archive-then-delete), then close. Runner 10 does the archive and close, on the coordinator's word; triage does not close PRs. Not started.",
+ "updatedAt": "2026-11-13T23:06:00-06:00"
+}
