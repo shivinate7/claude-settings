@@ -11,8 +11,9 @@
                           no merge call; run --confirm again when the claim head's own checks are green, and that run merges it. A relayed yes binds
                           across the claim commit. A confirm with nothing to claim merges in one run.
                           On a draft it is the records step and never merges: rebuild the page, push it, ask to mark the PR ready.
-                          A repo that lists merge.readyChecks in its config (step names of the checks job, such as "check invariants")
-                          gets them run first: `bin/ci-job checks --step NAME ... --base origin/<base>` in a temporary worktree on the tree
+                          A repo that lists merge.readyChecks in its config (step names of the checks job, such as "check invariants",
+                          or `<job>:<step>` for a step of another job, such as "checks-rest:project-ops skill scaffold suite")
+                          gets them run first: one `bin/ci-job <job> --step NAME ... --base origin/<base>` per job in a temporary worktree on the tree
                           the step would push, before any push and before the ready mark, on every path (default base, other base,
                           Record-claim head). A FAIL or an unknown stops the step with the step lines and the log: nothing pushed, not
                           marked ready, and no flag lifts it. A repo with no list runs no ready check, and one line says so.
@@ -139,8 +140,7 @@
                           The open-PR clash reads the open PRs through the host's open_pulls (GitHub REST `GET pulls`, the read a lane or runner has),
                           and a failed list read prints `unknown open-PR clash`, never a pass. A clash counts only with a PR that is not a draft; a clash
                           with a draft is a report line `#N shares files: a, b`, read from the changed files alone, with no merge-tree (PRE_READY_CLASH_SCOPE: "ready", or "all" for every open PR).
-                          Every run prints `unknown scaffold: not run (lives in checks-rest, ci-job --step reads one job)`, a coverage note that moves no exit code: the
-                          project-ops scaffold suite is not covered. A repo with no readyChecks prints `unknown pre-ready: no merge.readyChecks declared` and exits 1.
+                          A repo with no readyChecks prints `unknown pre-ready: no merge.readyChecks declared` and exits 1.
                           Cost: see fast_checks, run_ready_checks, pre_ready_rows, cross_measure.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role). A local session reads the role the launcher
@@ -3271,7 +3271,7 @@ def stale_page_remedy(n, claim=""):
 
 READY_CHECKS_CITE = "(decision lanes-run-no-full-ci-job, the ready checks: a draft goes ready only when the repo's merge.readyChecks pass)"
 
-SCAFFOLD_NOTE = "unknown scaffold: not run (lives in checks-rest, ci-job --step reads one job)"  # the project-ops scaffold suite is in checks-rest, which readyChecks cannot name
+READY_JOB_PREFIX = re.compile(r"^([a-z][a-z0-9_-]*):(.+)$")  # a `<job>:<step>` ready check; a step name that does not open this way is a step of job `checks`
 
 STEP_LINE = re.compile(r"^(PASS|FAIL|SKIP|skipped|unknown|not run)\s+(.*)$")
 
@@ -3330,27 +3330,41 @@ def clash_verdict(root, n, base, host, info):
     more = [f"  and {len(reports) - len(shown)} more clash(es) not counted"] if len(reports) > len(shown) else []
     return "pass", name, "\n".join([f"{len(reports)} clash(es) not counted:", *shown, *more])
 
+def ready_job_groups(checks):
+    """-> {job: [(declared name, bare step name)]} of `merge.readyChecks` `checks`, jobs in first-appearance order. An entry `<job>:<step>` names its job;
+    any other entry is a step of job `checks`."""
+    groups = {}
+    for entry in checks:
+        m = READY_JOB_PREFIX.match(entry)
+        groups.setdefault(m.group(1) if m else "checks", []).append((entry, m.group(2) if m else entry))
+    return groups
+
 def pre_ready_rows(wt, n, base, checks, pre):
-    """The pre-ready run: one ci-job run of `merge.readyChecks` `checks` in the tree `wt`, then, when `pre` is (root, host, info), the debt-close lint on `wt` and the
-    open-PR clash of the PR's head, each once. Prints one verdict line per check, `pass NAME`, `fail NAME: why` or `unknown NAME: why`, all before any refusal.
-    -> (rows, (state, lines, log)): rows of (verdict, name, detail), and ci_job_run's own answer.
-    After the lines it prints SCAFFOLD_NOTE once (a coverage note that is no row, so no exit code moves with it).
-    Cost: one ci-job run, one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees."""
-    raw = []
-    args = ["checks", "--pinned", *[a for name in checks for a in ("--step", name)], "--base", f"origin/{base}"]
-    ci = ci_job_run(wt, *args, raw=raw)
-    rows = step_verdicts(raw, checks, ci[0])
+    """The pre-ready run: one ci-job run per job of `merge.readyChecks` `checks` in the tree `wt` (ready_job_groups), then, when `pre` is (root, host, info), the debt-close lint
+    on `wt` and the open-PR clash of the PR's head, each once. Prints one verdict line per check, `pass NAME`, `fail NAME: why` or `unknown NAME: why`, all before any
+    refusal; NAME is the declared entry.
+    -> (rows, (state, lines, log)): rows of (verdict, name, detail), and the jobs' ci_job_run answers combined: state fail over unknown over pass, lines and log joined.
+    Each job's steps are read from that job's own lines, so a step name two jobs hold reads only its own job.
+    Cost: one ci-job run per job, one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees."""
+    rows, states, lines, log = [], [], [], []
+    for job, group in ready_job_groups(checks).items():
+        raw = []
+        args = [job, "--pinned", *[a for _, bare in group for a in ("--step", bare)], "--base", f"origin/{base}"]
+        state, job_lines, job_log, _ = ci_job_run(wt, *args, raw=raw)
+        states.append(state)
+        lines += job_lines
+        log += job_log
+        rows += [(v, declared, d) for (v, _, d), (declared, _) in zip(step_verdicts(raw, [bare for _, bare in group], state), group)]
+    state = "fail" if "fail" in states else "unknown" if "unknown" in states else "pass"
     if pre:
         root, host, info = pre
         rows += [debt_verdict(wt, base, host, info), clash_verdict(root, n, base, host, info)]
     say(*[f"{v} {name}" + (f": {d}" if d else "") for v, name, d in rows])
-    if pre:
-        say(SCAFFOLD_NOTE)  # a coverage note, not a check: it is no row, so no exit code moves with it
-    return rows, ci[:3]
+    return rows, (state, lines, log)
 
 def run_ready_checks(wt, n, base, checks, remedy="Fix it on the branch, push, and run --confirm again.", pre=None):
     """The ready checks of the draft step: run the repo's `merge.readyChecks` through ci-job in the tree `wt`, which holds what the step
-    would push (the merge of the head with the base, for a PR whose base is not the default branch: open_merge_worktree). One ci-job run.
+    would push (the merge of the head with the base, for a PR whose base is not the default branch: open_merge_worktree). One ci-job run per job.
     Returns on a pass; a FAIL or an unknown raises Stop, and no flag lifts it. `checks` is a non-empty list.
     `remedy` is the route the refusal names: the draft step's by default.
     A FAIL is a LintFail, with the step lines and the log; an unknown is a plain Stop.
