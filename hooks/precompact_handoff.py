@@ -1048,6 +1048,187 @@ def _unflagged_missing(session_id, state):
     return missing
 
 
+# --- Owner waits (item 17 of decision precompact-handoff) -------------------------------------
+# A coordinator's handoff keeps every item waiting on the owner in this session. The Stop nudge
+# blocks when the section is missing or empty, or when a refused act with no later success is not
+# named in it. Cost per Stop with a handoff, when no transcript line holds the coordinator tag text
+# in any case: one raw read of the transcript, no JSON parse. A cloud session's SessionStart output
+# holds that text, so its raw read passes and each such Stop adds one parse of the transcript and
+# one read of the handoff. No file is written, no process started.
+OWNER_HEADING = "Waiting on the owner in this session"
+COORDINATOR_TAG = "cs-build:coordinator"
+OWNER_NAMED_MAX = 5  # the newest unanswered refusals the section must name
+OWNER_LABEL_CHARS = 60  # a longer label keeps its head and tail
+_OWNER_HEAD = re.compile(r"^##[ \t]+%s[ \t]*$" % re.escape(OWNER_HEADING), re.I | re.M)
+_CODE_SPAN = re.compile(r"`+([^`]+)`+")
+_LIST_MARK = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+_ANY_HEAD = re.compile(r"^#{1,2}[ \t]")
+_FENCE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})(.*)$")
+
+
+def _squash(text):
+    return " ".join(str(text).split())
+
+
+def _short(text):
+    """A label's text: `text`, or its head and tail when it is longer than OWNER_LABEL_CHARS."""
+    if len(text) <= OWNER_LABEL_CHARS:
+        return text
+    tail = OWNER_LABEL_CHARS // 3
+    return "%s...%s" % (text[:OWNER_LABEL_CHARS - tail - 3], text[-tail:])
+
+
+def _call_name(name, inp):
+    """(answer key, identifier, label) of a tool call. The key tells acts apart: the tool and its whole
+    command, path or url; for a tool with none, the tool and its input without `description`. A refused
+    merge of PR 12 is then not answered by a success for PR 13. The identifier is the text a handoff
+    line must hold to name the act: the whole first line of the command, or the path or url, squashed;
+    else the tool name. The label shows the identifier, cut to its head and tail when long."""
+    inp = inp if isinstance(inp, dict) else {}
+    for field in ("command", "file_path", "path", "url"):
+        value = inp.get(field)
+        if isinstance(value, str) and value.strip():
+            ident = _squash(value.strip().splitlines()[0])
+            return (name, value.strip()), ident, "%s `%s`" % (name, _short(ident))
+    rest = {k: v for k, v in inp.items() if k != "description"}
+    return (name, json.dumps(rest, sort_keys=True, default=str)), name, name
+
+
+def _transcript_has_tag(transcript_path):
+    """Whether any line of the transcript holds the coordinator tag text, in any case. A raw read, no
+    parse. own_session.tag_name compares tags stripped and casefolded."""
+    with open(transcript_path, "r", encoding="utf-8") as f:
+        return any(COORDINATOR_TAG in line.casefold() for line in f)
+
+
+def owner_waits_scan(transcript_path, own_id):
+    """(coordinator, refused): whether the own session carries the coordinator tag, and the unanswered
+    refusals as [(identifier, label)], oldest first. The tags are the newest own get_session record,
+    moved by each own set_session_tags add or remove after it. A refusal is answered by a later
+    success of the same act (see _call_name); a success of another act does not answer it. A
+    transcript that never holds the tag text is no coordinator's, and is not parsed."""
+    import own_session  # the one reader of the own get_session record
+    if not _transcript_has_tag(transcript_path):
+        return False, []
+    calls, uses, sets = {}, set(), {}
+    tags, refused = set(), {}
+    with open(transcript_path, "r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(entry, dict) or entry.get("isSidechain") is True:
+                continue
+            message = entry.get("message")
+            content = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                kind, tu = block.get("type"), block.get("id")
+                inp = block.get("input") if isinstance(block.get("input"), dict) else {}
+                name = str(block.get("name", ""))
+                if kind == "tool_use":
+                    calls[tu] = _call_name(name, inp)
+                    if name.endswith("get_session"):
+                        uses.add(tu)
+                    elif name.endswith("set_session_tags") and own_id in (inp.get("session_ids") or []):
+                        sets[tu] = inp
+                elif kind == "tool_result":
+                    ref = block.get("tool_use_id")
+                    failed = block.get("is_error") is True
+                    if ref in uses and not failed:
+                        record = own_session.record_tags(_result_text(block), own_id)
+                        if record is not None:
+                            tags = record
+                    elif ref in sets and not failed:
+                        own_session.move_tags(tags, sets[ref])
+                    if ref not in calls:
+                        continue
+                    key, ident, label = calls[ref]
+                    if failed and _refusal_line(block):
+                        refused.pop(key, None)  # a repeat refusal is the newest
+                        refused[key] = (ident, label)
+                    elif not failed:
+                        refused.pop(key, None)
+    return COORDINATOR_TAG in tags, list(refused.values())
+
+
+def _owner_lines(text):
+    """The lines under the owner-waits heading, up to the next `#` or `##` heading that is not inside a
+    fenced code block; None when the heading is missing."""
+    head = _OWNER_HEAD.search(text)
+    if not head:
+        return None
+    kept, fence = [], None
+    for line in text[head.end():].splitlines():
+        found = _FENCE.match(line)
+        if fence is None and found:
+            fence = found.group(1)
+        elif fence is not None and found and found.group(1)[0] == fence[0] \
+                and len(found.group(1)) >= len(fence) and not found.group(2).strip():
+            fence = None
+        elif fence is None and _ANY_HEAD.match(line):
+            break
+        kept.append(line)
+    return kept
+
+
+def _owner_entries(lines):
+    """The names the section holds, each whole: every backtick code span, and every line with its list
+    marker and closing punctuation removed. An act is named only when its identifier is one entry, so a
+    longer act that holds it as text (`git push` inside `git push --force origin main`) does not name it."""
+    entries = set()
+    for line in lines:
+        entries.update(_squash(span) for span in _CODE_SPAN.findall(line))
+        entries.add(_squash(_LIST_MARK.sub("", line)).rstrip(".;:,"))
+    entries.discard("")
+    return entries
+
+
+def owner_waits_gap(payload):
+    """The block reason when a coordinator's handoff does not keep what waits on the owner, else "".
+    "" for an agent's call, a session that is not a coordinator, no handoff, and any read that fails."""
+    try:
+        if payload.get("agent_id"):
+            return ""
+        session_id = payload.get("session_id", "")
+        path = handoff_path(session_id)
+        if not session_id or not os.path.isfile(path):
+            return ""
+        import override
+        # A cloud session's get_session record and set_session_tags calls name it session_<x>, not the
+        # Stop payload's UUID (hooks/guard.py reads the same way).
+        own_id = override.remote_session_id() or session_id
+        coordinator, refused = owner_waits_scan(payload.get("transcript_path", ""), own_id)
+        if not coordinator:
+            return ""
+        with open(path, "r", encoding="utf-8") as f:
+            lines = _owner_lines(f.read())
+        section = None if lines is None else _squash(" ".join(lines))
+        entries = _owner_entries(lines or [])
+        problems = []
+        if section is None:
+            problems.append("It has no `## %s` section." % OWNER_HEADING)
+        elif not section:
+            problems.append("Its `## %s` section is empty; write `none` when nothing waits." % OWNER_HEADING)
+        unnamed = [label for ident, label in refused[-OWNER_NAMED_MAX:] if ident not in entries]
+        if unnamed:
+            problems.append("The section does not name these refused acts: %s. Name each, with what it "
+                            "unblocks, or the act that replaced it. Name each by the whole first line of its command, or "
+                            "its path or url, in backticks or alone on its line; a label with `...` is cut short." % "; ".join(unnamed))
+        if not problems:
+            return ""
+        return ("Your handoff at %s must keep every item waiting on the owner in this session. %s Fix it "
+                "under step 4 of %s, one line per item, then continue."
+                % (path, " ".join(problems), prompt_path()))
+    except Exception as e:
+        sys.stderr.write("precompact_handoff: owner waits error: %s\n" % e)
+        return ""
+
+
 def run_nudge(payload):
     try:
         record_dir(payload.get("session_id", ""), payload.get("cwd"))
@@ -1067,6 +1248,7 @@ def run_nudge(payload):
         pass
     before = dict(state)
     facts, missing = None, []
+    reason = ""
     try:
         facts = _checkpoint_facts(payload, state)
     except Exception as e:
@@ -1086,18 +1268,20 @@ def run_nudge(payload):
             ensure_handoff_dir(session_id)
             reason = ("Context is about %dk tokens, messages about %dk. Rewrite your handoff at %s now, the "
                       "whole file; never append. Follow step 4 of %s for its sections and their order. "
-                      "Then continue. (decision precompact-handoff)"
+                      "Then continue."
                       % (size // 1000, messages // 1000, handoff_path(session_id), prompt_path()))
         elif missing:
             reason = ("Your handoff at %s lacks these sections: %s. Rewrite the whole file with each under "
-                      "its own ## heading, per step 4 of %s. (decision precompact-handoff)"
+                      "its own ## heading, per step 4 of %s."
                       % (handoff_path(session_id), ", ".join(missing), prompt_path()))
         else:
             reason = ""
-        if reason:
-            print(json.dumps({"decision": "block", "reason": reason}))
     except Exception as e:
         sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)
+        reason = ""
+    reasons = [r for r in (reason, owner_waits_gap(payload)) if r]
+    if reasons:
+        print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (decision precompact-handoff)"}))
     return 0
 
 
