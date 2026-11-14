@@ -1,14 +1,14 @@
 {
  "id": "lane-lint-names-clashing-open-pr",
- "title": "merge --lane-lint names which open PR a head clashes with, and the fold build tests that clash before the lint",
+ "title": "merge --lane-lint names which same-session PR a head clashes with, and the fold build tests it before the lint",
  "status": "ready",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
  "owner": "triage",
  "blockedBy": [],
- "why": "Coordinator 23:05 CST Nov 13 (relayed; unchecked by triage): merge --lane-lint refuses a head that conflicts with any open PR's head (merge-tree), with no override, and does not say which PR. A fold member has to be clash-tested against every open PR.",
- "source": "Coordinator message 23:05 CST Nov 13 (relayed). Related: steps release-pairwise-clash (todo) and merge-tree-check-tool (queued); no step is known to cover the naming or the fold-build order.",
- "note": "Triage 23:06 CST Nov 13: two parts. (1) The lint output names the open PR whose head clashes, so a lane can fix it earlier. (2) The batch runner's fold build clash-tests each member against all open PRs before it runs the lint. Check first whether release-pairwise-clash or merge-tree-check-tool already builds either part; if so, fold this into it and say so. A lane starts it; not started.",
- "updatedAt": "2026-11-13T23:06:00-06:00"
+ "why": "Coordinator 23:05 CST Nov 13, corrected 23:07 (relayed; unchecked by triage): merge --lane-lint refuses a head that conflicts with another open PR of the same session (merge-tree), with no override, and does not say which. The gate's scope is the same-session PRs, not all open PRs: decision lanes-run-no-full-ci-job, \"The cross rule\"; merge/merge.py cross_measure (~line 2494) picks open PRs whose body has the same session URL as the target, plus --with. An integration PR gets a report line, no refusal.",
+ "source": "Coordinator messages 23:05 and 23:07 CST Nov 13 (relayed); home for the words: lane merge-tool-audit-fixes read, 23:06. Related: steps release-pairwise-clash (todo), merge-tree-check-tool (queued).",
+ "note": "Triage 23:08 CST Nov 13: two parts. (1) The lint output names the same-session PR whose head clashes, so a lane can fix it earlier. (2) The batch runner's fold build clash-tests each member against the same-session open PRs before the lint. The step may already be met: check is_integration_pr in merge/merge.py first (lane merge-tool-audit-fixes reads it now); if met, close this step and say so. Also check release-pairwise-clash and merge-tree-check-tool. Not started.",
+ "updatedAt": "2026-11-13T23:08:00-06:00"
 }
