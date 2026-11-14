@@ -1298,9 +1298,9 @@ TRUST_TOOLS = {
 # The remedy steers to get_session. It never tells the session to call either tool.
 TRUST_NAMED = ("confirm_repository_trust", "request_computer_folder")
 # ask_owner as a string or number opens the card if the server coerces it, so any value but absent, null or false
-# refuses (round 1 finding 3). The cite for the lane offer line: ruling own-778-a-reword-offer-for-lane, owner,
+# refuses. The cite for the lane offer line: ruling own-778-a-reword-offer-for-lane, owner,
 # 2026-11-13 18:24 CST, page item 778 pick a, relayed by the coordinator at 18:31 CST.
-for _coerced in ("true", 1):
+for _coerced in ("true", 1, 0):
     add("trust-card-in-build: update_trigger with ask_owner %r in a lane is refused" % (_coerced,), "deny",
         rule=TRUST_RULE, tool="mcp__claude-code-remote__update_trigger", cwd=NOGIT, lacks=TRUST_NAMED,
         transcript=role_path("lane"), env=ROLE_ENV, trigger_id="trig_X", ask_owner=_coerced)
