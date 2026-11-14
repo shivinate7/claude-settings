@@ -251,7 +251,7 @@ class LocalRoleProof(SessionRoleCase):
         self.assertFalse(self.proves(("triage",), None), "a push with no target repo was proved")
 
     def test_the_hook_session_id_names_the_file_when_the_env_id_differs(self):
-        # RED on 34345f092: the proof needs the env id to equal the hook's session_id, so a differing env id refuses it.
+        # The proof reads the file the hook's session_id names. An env id that differs must not refuse that file's proof.
         self.put_role(SID + ".json", SID, "triage")
         with mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": OTHER}):
             self.assertTrue(guard_merge._local_role_proves(SID, ("triage",), "o/r"),
