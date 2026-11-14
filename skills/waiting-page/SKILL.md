@@ -57,7 +57,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     - `holds` (one plain sentence: what is stopped until the answer) puts the item in Blocking.
     - `by` (an ISO deadline) puts an item with no `holds` in Upcoming.
     - An item with neither is in Whenever.
-    - `stands: true` puts the item in the last section, Pick stands (see "Add an item").
+    - `stands: true` puts the item in the last section, Pick stands (see "Add an item"). A stood pick that closes with no owner answer is held by the export check unless its `reply` starts Reversed or Withdrawn.
   - `arbiter: true` marks a ruling: an item the arbiter decided (decision `session-tiers`, Arbiter, "On the page").
     The arbiter hands each ruling to the writer. The writer writes it closed, with the item's `status` `closed`,
     `home` the ruling's record id, `recommended` (old name `pick`) the ruled option's key, `why`, and `ruled` (an ISO time). It cites the ruling.

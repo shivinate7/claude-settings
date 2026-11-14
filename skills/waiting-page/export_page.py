@@ -25,6 +25,9 @@ Verdict, one line, then exit:
   unknown    a collection folder or its marker is missing, a file is not one JSON doc, a collection emptied, or the
              page has no or two designData blocks; nothing is written; exit 2
   unknown    the run crashed (one line, nothing written); exit 3
+Stood-pick check (no page, no node): each item the page draws in Pick stands when open that is closed with no answers doc,
+no lastAnswer and a reply that does not start Reversed or Withdrawn prints `held item <n>: <sentence>`, exit 4, in --check,
+in an export with or without --page, and under --all.
 Picture check, with --page: after the copy is written, each fetched item that carries a picture and that the page draws as an
 open decision (not closed, not a ruling, not answered) is run through check_designs.mjs, the page's own `pictureProblem` in
 Chromium (page_check.py is the one home). A miss prints `held item <n>: <the page's sentence>` after the verdict line, one
@@ -609,9 +612,34 @@ def fetched_docs(fetched, collections):
     return docs
 
 
+STOOD_CLOSED = ("a stood pick closed with no owner answer, so it left the Pick stands section unseen; reopen it, or "
+                "write a reply that starts Reversed or Withdrawn")
+
+
+def stood_closed(items, answers):
+    """[(n, sentence)] for each fetched item the page draws in Pick stands when open (page.html `standsOk`: stands true, a
+    decision, in no group, with a pick) that is closed, is no ruling, has no answers doc and no lastAnswer, and whose reply
+    does not start Reversed or Withdrawn (markdown marks and spaces before the word are skipped). Pure: no page, no node."""
+    held = []
+    for doc_id, doc in sorted(items.items()):
+        if (not isinstance(doc, dict) or doc.get("stands") is not True or doc.get("status") != "closed"
+                or doc.get("arbiter") is True or doc.get("group") or doc.get("kind") != "decision"
+                or not (doc["recommended"] if doc.get("recommended") is not None else doc.get("pick"))):  # page.html recOf
+            continue
+        reply = doc.get("reply")
+        word = re.sub(r"^[\W_]+", "", reply).lower() if isinstance(reply, str) else ""
+        if doc_id in answers or doc.get("lastAnswer") or word.startswith(("reversed", "withdrawn")):
+            continue
+        held.append((doc.get("n") if isinstance(doc.get("n"), int) else doc_id, STOOD_CLOSED))
+    return held
+
+
 def picture_checks(page, docs):
-    """([held item lines], the `checks unknown: <why>` line or None) for the fetched docs against the page file `page`."""
-    held, why = page_check.check_items(page, docs["items"], docs.get("answers", {}))
+    """([held item lines], the `checks unknown: <why>` line or None) for the fetched docs against the page file `page`.
+    The held lines also carry each stood pick closed with no owner answer (stood_closed)."""
+    answers = docs.get("answers", {})
+    held, why = page_check.check_items(page, docs["items"], answers)
+    held = held + stood_closed(docs["items"], answers)
     return ["held item %s: %s" % (n, sentence) for n, sentence in held], ("checks unknown: " + why) if why else None
 
 
@@ -689,8 +717,10 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
     elif design:
         if page:
             held, unknown = picture_checks(page, docs)
-        elif page_check.pictured_items(docs["items"])[0]:  # a pictured item and no page: the check cannot run
-            unknown = "checks unknown: no page file"
+        else:
+            held = ["held item %s: %s" % (n, sentence) for n, sentence in stood_closed(docs["items"], docs["answers"])]
+            if page_check.pictured_items(docs["items"])[0]:  # a pictured item and no page: the picture check cannot run
+                unknown = "checks unknown: no page file"
     return ("changed %d" % changed if changed else "same"), unknown, held
 
 
