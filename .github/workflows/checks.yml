@@ -855,6 +855,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_merge_grant.py
 
+      - name: Merge tool phase-timing fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_merge_phase_timing.py
+
       - name: Merge tool stall-watch beat suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_merge_beat.py
