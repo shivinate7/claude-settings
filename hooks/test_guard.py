@@ -371,6 +371,10 @@ MACOS_REACH = {
     ("hooks/guard_kill.py", "_pid_cwd"): lambda family, session: family == "kill",
     ("hooks/guard_kill.py", "_ps_ppid"): lambda family, session: family == "kill",
     ("hooks/guard_kill.py", "session_root_pid"): lambda family, session: family == "kill",
+    # Windows-only Office reads (hooks/agent_procs.py): off Windows the darwin arm returns at once. No guard case
+    # calls either function; the kill cases load agent_procs through guard_kill, so the row rides on them.
+    ("hooks/agent_procs.py", "office_lister"): lambda family, session: family == "kill",
+    ("hooks/agent_procs.py", "visible_office_pids"): lambda family, session: family == "kill",
 }
 
 
