@@ -1177,13 +1177,13 @@ class Stale(unittest.TestCase):
         return self.items_run(current, items, {}, answers=answers)
 
     def assert_kept_line(self, r, n, item_id, want=None):
-        """Exactly one kept-answer line names item `n` (id `item_id`), and it starts with `want`, the line the flag prints by default.
-        Returns that line."""
+        """Exactly one kept-answer line names item `n` (id `item_id`), and it is `want` in full, the line the flag prints by default,
+        remedy included. Returns that line."""
         want = kept_line(n, item_id) if want is None else want
         named = [line for line in kept_lines(r.stdout) if line.startswith("kept-answer: item %d (%s)" % (n, item_id))]
         self.assertEqual(len(named), 1, "want one kept-answer line for item %d (%s), got %d:\n%s"
                          % (n, item_id, len(named), r.stdout + r.stderr))
-        self.assertTrue(named[0].startswith(want), "the kept-answer line for item %d differs:\n%s" % (n, named[0]))
+        self.assertEqual(named[0], want, "the kept-answer line for item %d differs from the line in full:\n%s" % (n, named[0]))
         return named[0]
 
     def assert_not_named(self, r, item_id, case):
@@ -1202,8 +1202,8 @@ class Stale(unittest.TestCase):
                 self.assert_page_word(r, "current", 0)
 
     def test_a_closed_item_with_a_last_answer_and_a_kept_answer_is_named(self):
-        # Route and close, step 2, deletes the answer when it closes the item. A kept answer on a closed item is a missed delete,
-        # whether or not the close also wrote lastAnswer.
+        # The close keeps answers/<id> (SKILL.md, "Route and close"), so a kept answer on a closed item is named whether or not the
+        # close also wrote lastAnswer. What the line says is pinned in the 618 cases below.
         current, _ = self.current_and_behind()
         item = decision_item(INCIDENT_N, INCIDENT_ID, lastAnswer={"choice": "a", "note": "x", "at": ANSWER_AT})
         for as_folder in (False, True):
@@ -1309,7 +1309,7 @@ class Stale(unittest.TestCase):
                 self.assertEqual(len(got), 40, "want 40 kept-answer lines, one per closed item with a kept answer, got %d:\n%s"
                                  % (len(got), r.stdout + r.stderr))
                 for line, prefix in zip(got, want):
-                    self.assertTrue(line.startswith(prefix), "a kept-answer line is not the one for its item, in item order:\n" + line)
+                    self.assertEqual(line, prefix, "a kept-answer line is not the one for its item, in item order:\n" + line)
                 self.assert_page_word(r, "current", 0)
 
     def test_an_empty_answers_list_or_folder_prints_no_kept_answer_line(self):
@@ -1395,16 +1395,42 @@ class Stale(unittest.TestCase):
         self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
         self.assert_page_word(r, "current", 0)
 
+    # The 618 sequence: triage closed the item, the close copied the answer into lastAnswer, and answers/<id> stayed. A close keeps
+    # the answer (SKILL.md, "Route and close"), so the kept-answer line never tells the writer to delete it. Only a reword or an
+    # overturn deletes an answer; a reopen keeps it. Ruling: triage, 15:01 CST Nov 12 (pick a: page_grant rule 4 stays, lane checks
+    # run before close, park unchanged, kept-answer line stays without delete remedy), recorded in the roadmap record.
+
+    def test_a_kept_line_on_a_closed_item_with_its_last_answer_never_tells_the_writer_to_delete_the_answer(self):
+        current, _ = self.current_and_behind()
+        item = decision_item(INCIDENT_N, INCIDENT_ID, lastAnswer={"choice": "a", "note": "x", "at": ANSWER_AT})
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                items, answers = self.shaped([item], [(INCIDENT_ID, INCIDENT_ANSWER)], as_folder)
+                r = self.items_run(current, items, {}, answers=answers)
+                line = self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+                self.assertEqual(delete_instructions(line), [], "the kept line tells the writer to delete the answer after close:\n" + line)
+                self.assert_page_word(r, "current", 0)
+
+    def test_a_waits_kept_line_on_a_closed_item_with_its_last_answer_never_tells_the_writer_to_delete_the_answer(self):
+        current, _ = self.current_and_behind()
+        item = decision_item(367, "waits-618", waits={"repo": REPO, "run": RUN}, lastAnswer={"choice": "a", "note": "x", "at": ANSWER_AT})
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                items, answers = self.shaped([item], [("waits-618", answer_for("waits-618", 367))], as_folder)
+                r = self.items_run(current, items, {}, answers=answers)
+                line = self.assert_kept_line(r, 367, "waits-618", want=waits_kept_line(367, "waits-618"))
+                self.assertEqual(delete_instructions(line), [], "the waits line tells the writer to delete the answer after close:\n" + line)
+                self.assert_page_word(r, "current", 0)
+
     # A closed item with `waits` and a kept answer: a page answer is kept during a wait, a chat answer then closes the item, and no
-    # wait line ever ends it (wait lines cover open items only, SKILL.md "Route and close"). It gets one line, which says to delete
-    # answers/<id> only when its wait has ended.
+    # wait line ever ends it (wait lines cover open items only, SKILL.md "Route and close"). It gets one line, and that line never
+    # tells the writer to delete the answer: the close keeps it.
 
     def assert_waits_kept_line(self, r, n, item_id):
-        """Exactly one kept-answer line names closed item `n` (id `item_id`) with waits, and it starts with the waits line. A line
-        that says to delete answers/<id> also says when its wait has ended."""
+        """Exactly one kept-answer line names closed item `n` (id `item_id`) with waits, and it starts with the waits line. The line
+        never tells the writer to delete answers/<id>."""
         line = self.assert_kept_line(r, n, item_id, want=waits_kept_line(n, item_id))
-        if "delete" in line:
-            self.assertIn("when its wait", line, "the line says to delete answers/%s before its wait has ended:\n%s" % (item_id, line))
+        self.assertEqual(delete_instructions(line), [], "the waits line tells the writer to delete answers/%s:\n%s" % (item_id, line))
 
     def test_a_closed_item_with_waits_and_a_kept_answer_gets_one_waits_line_in_both_shapes(self):
         current, _ = self.current_and_behind()
@@ -1439,7 +1465,7 @@ class Stale(unittest.TestCase):
                 self.assertEqual(len(got), 40, "want 40 kept-answer lines, one per closed item with waits and a kept answer, got %d:\n%s"
                                  % (len(got), r.stdout + r.stderr))
                 for line, prefix in zip(got, want):
-                    self.assertTrue(line.startswith(prefix), "a kept-answer line is not the waits line for its item, in item order:\n" + line)
+                    self.assertEqual(line, prefix, "a kept-answer line is not the waits line for its item, in item order:\n" + line)
                 self.assert_page_word(r, "current", 0)
                 self.assertEqual(self.gh_calls(folder), [], "gh was called for a closed item")
 
@@ -1561,18 +1587,36 @@ def answer_for(item_id, n, **extra):
 
 
 def kept_line(n, item_id):
-    """The line the flag prints for a kept answer on closed item `n` (id `item_id`). A remedy may follow it."""
-    return "kept-answer: item %d (%s) is closed and answers/%s is kept" % (n, item_id, item_id)
+    """The line the flag prints in full for a kept answer on closed item `n` (id `item_id`), remedy included: the close keeps the
+    answer, so the remedy never deletes it."""
+    return ('kept-answer: item %d (%s) is closed and answers/%s is kept; the close keeps it on purpose, so never delete it unless the '
+            'item is reworded (SKILL.md, "Route and close")' % (n, item_id, item_id))
 
 
 def waits_kept_line(n, item_id):
-    """The line the flag prints for a kept answer on closed item `n` (id `item_id`) that still has `waits`. A remedy may follow it."""
-    return "kept-answer: item %d (%s) is closed with waits and answers/%s is kept" % (n, item_id, item_id)
+    """The line the flag prints in full for a kept answer on closed item `n` (id `item_id`) that still has `waits`, remedy included."""
+    return ('kept-answer: item %d (%s) is closed with waits and answers/%s is kept; when its wait has ended, drop waits and keep the '
+            'answer (SKILL.md, "Route and close")' % (n, item_id, item_id))
 
 
 def kept_lines(out):
     """The lines of `out` that start as a kept-answer line does."""
     return [line for line in out.splitlines() if line.startswith("kept-answer:")]
+
+
+DELETE_VERB = re.compile(r"\b(?:delet\w*|drop\w*|remov\w*|clear(?:s|ed)?|discard\w*|rm|unlink\w*)\b", re.I)
+# The object right after a delete verb: the answer as answers/<id> (with or without backticks), the answer, or it or them.
+ANSWER_OBJECT = re.compile(r"\s*(?:(?:the|its|their)\s+)?`?answers/|\s*(?:the|its|their)\s+answers?\b|\s*(?:it|them)\b", re.I)
+# The one approved negation of a delete in a kept-answer line: "never delete", the wording kept_answer_lines in stale_pages.py
+# prints. Any other word before a delete leaves it an instruction, however near.
+APPROVED_NEVER = re.compile(r"\bnever delete\b", re.I)
+
+
+def delete_instructions(line):
+    """The delete, drop, remove, clear and discard words of a kept-answer line whose object is the answer, outside the approved
+    "never delete". Each one tells the writer to delete the answer. A drop of waits or of lane is no delete of the answer."""
+    rest = APPROVED_NEVER.sub(" ", line)
+    return [m.group(0) for m in DELETE_VERB.finditer(rest) if ANSWER_OBJECT.match(rest, m.end())]
 
 
 INCIDENT_N, INCIDENT_ID = 356, "round3-fail-holds"  # the incident: a closed decision whose answer was kept
@@ -2119,6 +2163,48 @@ class UnreadStale(FolderCase):
         code, out, _, error = self.run_main("--unread", self.folder)
         self.assert_mode_lines(out, error)
         self.assertEqual((code, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "main() did not send --unread to its mode: " + out)
+
+
+class DeleteInstructionsWording(unittest.TestCase):
+    """The helper that reads a kept-answer line for a delete. Its one negation is the approved "never delete"; any other word
+    before a delete, however near, leaves it an instruction. A delete, drop, remove, clear or discard is an instruction only when
+    the answer, answers/<id> or it is its object. The product's own lines are checked by the cases above."""
+
+    APPROVED = ("kept-answer: item 1 (x) is closed and answers/x is kept; the close keeps it on purpose, so never delete it unless "
+                "the item is reworded (SKILL.md, \"Route and close\")")  # the wording kept_answer_lines prints
+
+    def test_the_approved_never_delete_is_no_instruction(self):
+        self.assertEqual(delete_instructions(self.APPROVED), [], "the approved wording reads as a delete instruction")
+
+    def test_a_delete_after_a_not_with_other_words_between_is_an_instruction(self):
+        line = "kept-answer: item 1 (x) is closed and answers/x is kept; not counted for a grant, so delete it"
+        self.assertEqual(delete_instructions(line), ["delete"], "a delete after a not reads as no instruction")
+
+    def test_a_second_delete_after_the_approved_one_is_an_instruction(self):
+        self.assertEqual(delete_instructions(self.APPROVED + ", so delete it"), ["delete"], "a delete after the approved one reads as none")
+
+    def test_never_deletes_is_not_the_approved_wording(self):
+        line = "kept-answer: item 1 (x) is closed and answers/x is kept; never deletes it"
+        self.assertEqual(delete_instructions(line), ["deletes"], "never deletes reads as the approved never delete")
+
+    def test_each_verb_with_the_answer_as_its_object_is_an_instruction(self):
+        for verb in ("delete", "drop", "remove", "clear", "discard"):
+            for obj in ("`answers/<id>`", "the answer", "it"):
+                line = "kept-answer: item 9 (x) is closed; then %s %s." % (verb, obj)
+                with self.subTest(line):
+                    self.assertEqual(len(delete_instructions(line)), 1, "a %s of the answer is not an instruction: %s" % (verb, line))
+
+    def test_a_drop_of_waits_or_of_lane_is_no_instruction(self):
+        waits = waits_kept_line(154, "x")
+        self.assertIn("drop waits", waits, "scope: the waits line no longer says drop waits, so the check has nothing to read")
+        self.assertEqual(delete_instructions(waits), [], "the waits line's drop of waits reads as an instruction: " + waits)
+        lane = "The session drops `lane` and nothing else."
+        self.assertEqual(delete_instructions(lane), [], "a drop of lane reads as an instruction: " + lane)
+
+    def test_the_approved_non_waits_line_is_no_instruction_in_full(self):
+        approved = kept_line(9, "x")
+        self.assertIn("never delete it", approved, "scope: the kept line no longer has the approved never delete")
+        self.assertEqual(delete_instructions(approved), [], "the approved kept line reads as an instruction: " + approved)
 
 
 if __name__ == "__main__":
