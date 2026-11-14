@@ -15,7 +15,9 @@
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
-# BASE_SHA, HEAD_REF.
+# BASE_SHA, HEAD_REF, GREEN_HEAD (optional: the sha green-head.sh prints, the pull request's newest earlier fully green head).
+# GREEN_HEAD turns the 13 job and suite flags off on a pull request when it is an ancestor of HEAD and the delta from it to HEAD
+# is docs/records.md alone; the lint flags and mutation_report keep their whole-PR values. Any unreadable read: no skip.
 set -u
 JOBS="checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos pointer_windows"
 LINTS="lint_red_run lint_plan_refuter lint_ruling_kind lint_comment_narration"
@@ -23,13 +25,14 @@ ALL="$JOBS checks_guard code mods guard sweep shoot $LINTS"
 range=""
 [ "${EVENT:-}" = pull_request ] && [ -n "${BASE_SHA:-}" ] && range="$BASE_SHA...HEAD"
 on=" "
+whole_read=0
 # --no-renames lists the old path of a rename too, so a move out of a mapped path counts.
 if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name-only --no-renames "$range" 2>/dev/null) && [ -n "$files" ]; then
   W=checks_windows M=checks_windows_merge R=checks_windows_rest Z=checks_windows_sweep X=checks_macos S=shell_macos P=pointer_windows
   while IFS= read -r f; do
     case "$f" in
-      # Fail safe: this script, the workflow, and git settings that change every checkout.
-      .github/scripts/ci-scope.sh|.github/workflows/checks.yml|.gitattributes) on="$on $ALL " ;;
+      # Fail safe: this script, green-head.sh (its line is GREEN_HEAD), the workflow, and git settings that change every checkout.
+      .github/scripts/ci-scope.sh|.github/scripts/green-head.sh|.github/workflows/checks.yml|.gitattributes) on="$on $ALL " ;;
       # Guard and its installers' inputs: test_guard, the janitor suites and config_watch run guard.py.
       # guard_<family>.py modules are guard.py; guard_test_* is not (it falls to hooks/* below).
       hooks/guard_test_*) on="$on $R $Z $X code guard " ;;
@@ -144,14 +147,31 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
   if [ -z "$dirs" ]; then
     on="$on $ALL "
   else
-    added=$(git diff --name-only --diff-filter=A --no-renames "$range" 2>/dev/null) || on="$on $ALL "
-    grep -Eq "^($dirs)/" <<< "$added" && on="$on $W $S code guard "
+    if added=$(git diff --name-only --diff-filter=A --no-renames "$range" 2>/dev/null); then
+      whole_read=1
+      grep -Eq "^($dirs)/" <<< "$added" && on="$on $W $S code guard "
+    else
+      on="$on $ALL "
+    fi
   fi
 else
   on=" $ALL "
 fi
 # checks_guard: the checks-guard job runs the guard suite, which needs both flags (the old step if). The playwright-setup arm above also sets it directly.
 case "$on" in *" code "*) case "$on" in *" guard "*) on="$on checks_guard " ;; esac ;; esac
+# A records-only push after a fully green head: the earlier head's run proved everything but the lints and the mutation report,
+# so only docs/records.md moved since. The whole PR diff was read above (whole_read); every other case keeps its flags.
+# The delta must be exactly one path: an empty or longer delta, an unreadable one or a head that is not an ancestor keeps `on`.
+if [ "$whole_read" = 1 ] && [[ "${GREEN_HEAD:-}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] &&
+   git merge-base --is-ancestor "$GREEN_HEAD" HEAD 2>/dev/null &&
+   delta=$(git diff --name-only --no-renames "$GREEN_HEAD" HEAD 2>/dev/null) && [ "$delta" = docs/records.md ]; then
+  kept=" "
+  for t in $on; do
+    case " $JOBS checks_guard code mods guard sweep shoot " in *" $t "*) ;; *) kept="$kept$t " ;; esac
+  done
+  on="$kept"
+  echo "CI scope: records-only push after green head $GREEN_HEAD"
+fi
 echo "CI scope: event=${EVENT:-} range=${range:-none} on=$on"
 for n in $ALL; do
   case "$on" in *" $n "*) v=true ;; *) v=false ;; esac
