@@ -2994,5 +2994,34 @@ def CI94_cloud_red_comment_voids_the_checkin():
     return expect_block(items) + ["control: " + p for p in expect_silent(items[:2])]
 
 
+@case
+def CI95_ready_undo_closes_the_wait():
+    """CI95. gh pr ready N --undo puts the PR back to draft, so it closes the wait on N: passes. Control: the
+    wait alone blocks. The undo of another PR closes nothing"""
+    wait = [ready()]
+    other = shell("gh pr ready %s --undo" % CI_OTHER_PR)
+    return (["undo of N: " + p for p in silent_with_control(wait + [shell("gh pr ready %s --undo" % CI_PR)], wait)]
+            + ["undo of another PR: " + p for p in expect_block(wait + [other])])
+
+
+@case
+def CI96_mcp_draft_true_closes_the_wait():
+    """CI96. an MCP update_pull_request with draft true for N puts the PR back to draft, so it closes the wait on
+    N: passes. Control: the wait alone blocks. The same call for another PR closes nothing"""
+    wait = [mcp_pr(MCP_READY, draft=False)]
+    return (["draft true for N: " + p
+             for p in silent_with_control(wait + [mcp_pr(MCP_READY, draft=True)], wait)]
+            + ["draft true for another PR: " + p
+               for p in expect_block(wait + [mcp_pr(MCP_READY, number=CI_OTHER_PR, draft=True)])])
+
+
+@case
+def CI97_branch_named_wait_closes_on_a_merge_of_any_pr():
+    """CI97. a wait whose ready call named a branch (gh pr ready my-branch) names no number, so a merge of any PR
+    closes it, as a bare wait does: passes. Control: the wait alone blocks"""
+    wait = [ready(command="gh pr ready my-branch")]
+    return expect_silent(wait + [merge_bin(CI_PR)]) + ["control: " + p for p in expect_block(wait, pr="my-branch")]
+
+
 if __name__ == "__main__":
     sys.exit(run_cases(CASES))
