@@ -103,7 +103,7 @@ CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 # mechanism (lower it) or adds an unmechanized rule (raise it, and say why in the message).
 # JUDGMENT_EXPECTED moves the same way for a rule only judgment can apply.
 RULE_FLOOR = 98
-UNMECHANIZED_EXPECTED = 62
+UNMECHANIZED_EXPECTED = 61
 JUDGMENT_EXPECTED = 27
 REASON_MIN_WORDS = 8
 
@@ -208,6 +208,17 @@ def _section_dir(tree, full):
                 and n.targets[0].id == "SECTION_DIR"):
             return value(n.value)
     return None
+
+
+def section_dir(root: str = ROOT):
+    """The folder of the guard runner's section files (hooks/test_guard.py SECTION_DIR, read by `_section_dir`), relative to `root` with `/`
+    separators, or None when the runner is missing, does not parse, or names no folder. Another tool reads the path here, never copies it."""
+    full = os.path.join(root, "hooks", "test_guard.py")
+    try:
+        folder = _section_dir(ast.parse(read(full)), full)
+    except (OSError, SyntaxError):
+        return None
+    return os.path.relpath(folder, root).replace(os.sep, "/") if folder else None
 
 
 def _with_sections(tree, full):

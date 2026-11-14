@@ -675,6 +675,14 @@ class EachOf(tuple):
 LINE_VERDICTS = {"verdicts": EachOf(("holds", "stale", "unbacked"))}
 
 
+class EachPlace(tuple):
+    """A shape's values for a reply that names places: its key holds a list, and each entry is an object with a string `path` and a
+    string `why`, and may carry a `section`. The merge's where-else judge asks in this shape; an empty list is a readable reply."""
+
+
+PLACES = {"places": EachPlace()}
+
+
 def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE, effort="xhigh"):
     """Run the judgment prompt through `claude -p`, isolated. Return (verdict_dict, error).
 
@@ -750,6 +758,11 @@ def parse_verdict(text, shape=VERDICT_SHAPE, scrub=None):
         if not isinstance(entries, list) or not all(
                 isinstance(e, dict) and type(e.get("line")) is int and e.get("verdict") in values for e in entries):
             return None, "%s's %s was not a list of {line, verdict} with a verdict of %s" % (REPLY_RESULT_ERROR, key, " or ".join(values))
+        return verdict, None
+    if isinstance(values, EachPlace):
+        entries = verdict.get(key)
+        if not isinstance(entries, list) or not all(isinstance(e, dict) and isinstance(e.get("path"), str) and isinstance(e.get("why"), str) for e in entries):
+            return None, "%s's %s was not a list of {path, why}" % (REPLY_RESULT_ERROR, key)
         return verdict, None
     if verdict.get(key) not in values:
         return None, "%s named neither %s" % (REPLY_RESULT_ERROR, " nor ".join(map(str, values)))

@@ -5,7 +5,7 @@ The coordinator's ruling sets the rule: triage's Stop refuses to end a wake whil
 so a triage session cannot end a wake that leaves a stall unread. The rules the cases pin:
 
 - Only a session whose own newest get_session record carries cs-build:triage is held. A set_session_tags call
-  after that record ends the proof, as in hooks/guard_merge.py _own_tier_proved.
+  after that record ends the proof, as in hooks/guard_merge.py _own_role_proved.
 - The newest build output decides. A build output is the result of a Bash call that runs build.py. A clean
   build prints no stalled line, so a newer clean build releases an older entry.
 - An entry line is `stalled step: <id> (...)` or `stalled step: item <n> (...)`. An unknown line is not an entry.

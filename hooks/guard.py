@@ -101,6 +101,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        stage's, and a filter can cut verdict's FAIL line.
   background-end       deny. A background command with no end note. (background-needs-end-note)
   check-tail           deny. A named check piped into tail or head. (background-check-through-verdict)
+  check-timeout        deny. A `merge --lane-lint` run in the foreground, or in the background under a
+                       time limit below its bound. (background-check-through-verdict)
   playwright-browsers-path, playwright-install
                        deny. (playwright-browsers-path, playwright-install-once)
   rm-var-unguarded     deny. A recursive delete under an unguarded variable.
@@ -156,8 +158,16 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        the working directory) has a repo (`git_reads.github_repo`) that no cs-repo tag of the
                        session's own newest get_session record names (`repo_tag_names`), or when a
                        set_session_tags follows that record. No record, an unreadable checkout or unparseable
-                       flags is a refusal. --lane-lint is not judged. Outside the cloud nothing is judged.
-                       (merge-confirm-repo)
+                       flags is a refusal. --lane-lint is not judged. A local session is judged on --confirm
+                       by its own role file (hooks/session_role.py local_judgement): the file must name
+                       batch-runner and the repo, and CS_SESSION_ROLE with no matching file refuses. A local
+                       session with neither is not judged. (merge-confirm-repo)
+  self-role-claim      deny. A Bash or PowerShell call that sets CS_SESSION_ROLE or runs bin/claude-role,
+                       also inside `bash -c`, `sh -c` or `eval`: a session does not claim a role. Also a call
+                       that starts claude while the guard's own CS_SESSION_ROLE is non-empty, since the child
+                       inherits the role. Reads through Test-Path, Get-Item or Remove-Item on Env: pass;
+                       `$role = $env:CS_SESSION_ROLE`, `command -v claude-role` and a bare
+                       `CS_SESSION_ROLE=x` are refused (debt self-role-claim-false-alarms). (self-role-claim)
   roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
                        the checkout's record branch (lint/layout.py record_branch) or `roadmap`, except a
                        dry run, unless the session's own get_session record (read
@@ -585,9 +595,9 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
+            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
-            records_page_hit, repo_proof_hit, role_proof_hit,
+            records_page_hit, repo_proof_hit, role_proof_hit, self_role_child_hit, self_role_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
@@ -613,9 +623,9 @@ while True:
         from guard_argv import PROCESS_ARGS_REASON, process_args_hit
         _loading = "guard_stream"
         from guard_stream import (
-            BACKGROUND_END_REASON, CHECK_TAIL_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
+            BACKGROUND_END_REASON, CHECK_TAIL_REASON, CHECK_TIMEOUT_TEMPLATE, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
             NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, UV_VALUE_FLAGS, VERDICT_PIPE_REASON, WAITER_REASON,
-            background_end_hit, check_tail_hit, live_stream_hit, ln_descends_hit,
+            background_end_hit, check_tail_hit, check_timeout_hit, check_timeout_limit_text, live_stream_hit, ln_descends_hit,
             loop_condition_polls_a_pattern, narrated_tail_hit, verdict_pipe_hit, waiter_verdict,
         )
         _loading = "guard_rm_var"
@@ -4430,7 +4440,8 @@ def refuse_ready_page(tool: str, tool_input: dict, command: str, where: str) -> 
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", agent: bool = False,
-                background: bool = False, description: str = "", payload=None) -> None:
+                background: bool = False, description: str = "", payload=None,
+                timeout_ms=None) -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
     PENDING_ASK.clear()
     stripped = strip_heredoc_bodies(raw)
@@ -4643,6 +4654,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
 
+    # 2a1. A session that holds a role and starts claude: the child inherits the role (rule self-role-claim). It runs before the
+    # detached-launch rule so `Start-Process claude` names its own reason. Cost: one environment read per call.
+    matched = self_role_child_hit(stripped)
+    if matched:
+        refuse(tool, "deny", "self-role-claim", SELF_ROLE_CHILD_REASON, matched)
+
     # 2b. A detached launch: a subshell background job, a nohup/setsid wrapper, disown right
     # after a background job, or a bare trailing background job with no pid captured anywhere
     # in the command. Same decision as rule 2, deny, for the same reason: no pid survives to
@@ -4679,6 +4696,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = check_tail_hit(stripped, background)
     if matched:
         refuse(tool, "deny", "check-tail", CHECK_TAIL_REASON, matched)
+    matched = check_timeout_hit(stripped, background, timeout_ms)
+    if matched:
+        refuse(tool, "deny", "check-timeout", CHECK_TIMEOUT_TEMPLATE % check_timeout_limit_text(), matched)
     matched = background_end_hit(split_segments(stripped), background, description)
     if matched:
         refuse(tool, "deny", "background-end", BACKGROUND_END_REASON, matched)
@@ -4803,14 +4823,20 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "merge-role-proof", ROLE_REASON, matched)
 
     # 6a1. A cloud `merge --confirm` in a checkout whose repo the own get_session record does not name (rule merge-confirm-repo).
-    matched = repo_proof_hit(stripped, cwd, transcript)
+    matched = repo_proof_hit(stripped, cwd, transcript, session_id)
     if matched:
-        refuse(tool, "deny", "merge-confirm-repo", REPO_REASON, matched)
+        refuse(tool, "deny", "merge-confirm-repo", REPO_REASON if is_cloud() else LOCAL_REPO_REASON, matched)
+
+    # 6a1a. A session that sets the role variable or runs the launcher: it would start a child session that claims a role (rule
+    # self-role-claim). Cost: one substring test per call.
+    matched = self_role_hit(stripped)
+    if matched:
+        refuse(tool, "deny", "self-role-claim", SELF_ROLE_REASON, matched)
 
     # 6a2. A push to the record branch from a session its own record does not prove triage (rule
     # roadmap-one-writer). Cost: one `git rev-parse` and one small file read per push, and one
     # transcript read only when the push reaches the record branch.
-    matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb)
+    matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb, session_id)
     if matched:
         refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
 
@@ -7048,7 +7074,7 @@ def judge(payload) -> None:
                         transcript if isinstance(transcript, str) else "",
                         bool(payload.get("agent_id") or payload.get("agent_type")),
                         tool_input.get("run_in_background") is True,
-                        tool_input.get("description") or "", payload)
+                        tool_input.get("description") or "", payload, tool_input.get("timeout"))
             segments = split_segments(strip_heredoc_bodies(command))
             matched = next((hit for seg in segments if (hit := sim_bypass_hit(seg))), "")
             if matched:

@@ -12,7 +12,8 @@ The incident, 2026-11-03 16:15 CST: a batch runner merged mailaudit PR #185 with
 
 The rule:
 
-- It judges a segment that runs the merge tool with `--confirm`, in a cloud session (`CLAUDE_CODE_REMOTE=true`). Outside the cloud nothing is judged: the owner merges from his own computer. `--lane-lint` merges nothing and is not judged.
+- It judges a segment that runs the merge tool with `--confirm`, in a cloud session (`CLAUDE_CODE_REMOTE=true`). `--lane-lint` merges nothing and is not judged.
+- Outside the cloud it judges `--confirm` only, never `--ready`, by the session's own role file (`session_role.local_judgement`, decision `session-tiers`). (a) An own file exists: its role must be batch-runner and its repo must equal the repo of the checkout the merge acts in. (b) No own file, or no id, and `CS_SESSION_ROLE` unset: not judged, so today's prompt stands. (c) `CS_SESSION_ROLE` set with no matching own file: refused. A local refusal gives `LOCAL_REPO_REASON`, which cites this decision.
 - The checkout is the `-C` / `--repo-dir` value, read with the merge tool's own parser (`merge.build_parser`). A glued `-C`, the `=` form, the last of repeated flags and a flag after the PR number read as the tool reads them. With no flag, the checkout is the `cd X &&` directory of the command, else the working directory.
 - A merge inside a subshell paren or a `bash -c`, `sh -c` or `eval` string is judged as a bare one is: the guard unwraps it (`inner_commands`) and carries the `cd` of its segment into the script.
 - The merge tool takes no flag prefix (`allow_abbrev=False`): `--conf` or `--repo` is an error, never the flag it starts, so the guard and the tool read one spelling. Main accepted prefixes; this lane refuses them.
