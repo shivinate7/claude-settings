@@ -1,6 +1,6 @@
 # A kill of merge leaves ci-job running
 
-**What.** A SIGTERM, SIGHUP or SIGKILL to the merge process alone leaves ci-job running in its own session. Its steps die at the 300 s step bound each, so ci-job ends after at most (number of steps) x 300 s plus a 300 s run margin. Before PR 3423, a kill of merge's process group reached ci-job.
+**What.** A SIGTERM, SIGHUP or SIGKILL to the merge process alone leaves ci-job running in its own session. Its steps die at 300 s each, so at most (number of steps) x 300 s of step time; ci-job's start-up and wrap-up have no bound once merge is gone. Before PR 3423, a kill of merge's process group reached ci-job.
 
 **Where.** `merge/merge.py`: the `--ready` and `--fast-checks` dispatch in `main`, which is outside `release_on_signals`. Also `ci_job_run`, which starts ci-job in its own session.
 
