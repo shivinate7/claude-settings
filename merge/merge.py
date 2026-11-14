@@ -4412,7 +4412,7 @@ def priority_closed_branch(h, here, branch):
         if not isinstance(found, list):
             raise TypeError(f"expected a list, got {type(found).__name__}")
     except (ValueError, TypeError) as e:
-        raise Stop(f"reading the closed pull requests of {branch} failed: {e}")
+        raise Stop(f"reading the closed pull requests of {branch} failed: {e} " + UNKNOWN_CITE)
     if not found:
         return "flag", f"no pull request has the head {branch}"
     if found[0].get("merged_at"):
