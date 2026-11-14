@@ -2117,3 +2117,4 @@
 - progress-owner-wait-wording: "waiting on owner approval" (no "the") and "waiting on <a name>" are refused as progress claims.
 - progress-table-subject-carry: the subject carries from any earlier table row, not only the header, so `| deploy | waiting on CI |` after a `| Lane 4 | merged |` row is refused; the record says header only.
 - progress-remedy-omits-rest-api: the refusal text does not name "REST API" or "REST read", which the check accepts; a heading then a list item ("Lane 4 status:" then "- in progress") also passes.
+- repaired-merges-docstring: merge/repaired_merges.py:15 docstring says "read on demand, never on a timer". Rule outcomes-mechanize-rules (CLAUDE.md:11) on main dropped that blanket wording and allows a timer whose record shows it costs less than it saves (plan: docs/plans/restart-plan.md:604). The docstring is stale; fix: say "read on demand" and name the rule, no timer claim.
