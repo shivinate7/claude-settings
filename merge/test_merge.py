@@ -11384,6 +11384,15 @@ class RedMainBrake(Env):
         self.assertEqual([r.count("actions/runs") for r in self.run_reads], [1, 1], "the latest-run list: one read in each run")
         self.assertEqual([r.count("actions/runs/908/jobs") for r in self.run_reads], [1, 1], "the green run's jobs: one read in each run")
 
+    def test_a_skipped_push_run_under_a_green_pull_request_run_refuses_the_merge_onto_a_red_main(self):
+        # decision no-merge-onto-red-main: a pull-request run of the tree never stands in for a push run that ran no suites. The red run beneath it, which ran its suites, refuses the merge.
+        rc, out, before = self.go([main_run(2002, "success", tree=TREE_PUSHED), main_run(2001, "failure", tree=TREE_EARLIER)],
+                                  {2002: skipped_suites_jobs(), 2001: ran_suites_jobs("failure"), 3001: ran_suites_jobs()},
+                                  pr_runs=[pr_run(3001, "success", TREE_PUSHED)])
+        self.assertFalse(getattr(self.host, "merged", False), "the merge went through onto a red main: a pull-request run of the tree must not cover a skipped push run: " + out)
+        self.refused(rc, out, before)
+        self.assertIn("run 2001", out, "the refusal must name the red run that ran its suites")
+
     def test_the_reason_flag_lifts_the_check_and_logs_its_reason(self):
         rc, out, _ = self.go([main_run(901, "failure")], self.OCT14, "--base-red-ok", "this batch carries the checks fix")
         self.merged(rc, out)
@@ -11926,8 +11935,8 @@ class RedMainBrake(Env):
         return sh(self.other, "git", "rev-parse", "origin/main")
 
 
-# A push run whose suite jobs were all skipped (only `scope` ran) reads success: the pull-request run of its tree proved it (decision no-merge-onto-red-main).
-# The gate reads it green only with a green pull-request run of its own tree. Otherwise it reads the newest run on main that ran its suites.
+# A push run whose suite jobs were all skipped (only `scope` ran) reads success and ran no suites. The gate passes it over (decision no-merge-onto-red-main);
+# no pull-request run covers it.
 SKIPPED_SUITES = ("checks", "checks-guard", "checks-shoot", "checks-windows-merge-3")  # suite jobs of checks.yml, sampled: each needs scope
 TREE_PUSHED, TREE_OTHER, TREE_EARLIER = "ab" * 20, "cd" * 20, "12" * 20  # the trees of commits on main; a squash commit keeps its pull request's tree
 PR_HEAD = "ef" * 20  # the head of a pull request whose squash commit is on main
@@ -11953,18 +11962,20 @@ def pr_run(id_, conclusion, tree):
 
 
 class SkippedPushRun(unittest.TestCase):
-    """decision no-merge-onto-red-main: a skipped push run reads green only with a green pull-request run of its own tree. Otherwise the gate
-    reads the newest run on main that ran its suites, and a run that ran them keeps today's verdict. base_state is the read the gate uses."""
+    """decision no-merge-onto-red-main: a push run that ran no suites (only `scope` ran) is never read as green or red. The gate passes it over to
+    the newest push run that ran its suites, and that run keeps its own verdict. No pull-request run covers a skipped push run. base_state is the read the gate uses."""
     def read(self, runs, jobs, pr_runs=()):
         """-> (verdict, detail) of main's runs and their jobs. `pr_runs`: the pull-request runs the read is served; none when empty."""
         host = MainRunsHost("co", "other", runs, jobs, pr_runs=list(pr_runs))
         return host.base_state("main", [CHECKS_PATH])
 
-    def test_a_skipped_push_run_reads_green_with_a_green_pull_request_run_of_its_tree(self):
+    def test_a_green_pull_request_run_of_its_own_tree_does_not_cover_a_skipped_push_run(self):
         runs = [main_run(2002, "success", tree=TREE_PUSHED, path=CHECKS_PATH), main_run(2001, "failure", tree=TREE_EARLIER, path=CHECKS_PATH)]
         jobs = {2002: skipped_suites_jobs(), 2001: ran_suites_jobs("failure"), 3001: ran_suites_jobs()}
+        self.assertTrue(self.suites_of(jobs[3001]), "the scope: the green pull-request run of the tree ran a suite")
         verdict, detail = self.read(runs, jobs, [pr_run(3001, "success", TREE_PUSHED)])
-        self.assertEqual(verdict, "green", f"a skipped push run with a green pull-request run of its own tree must read green, not {verdict}: {detail}")
+        self.assertEqual(verdict, "red", f"a green pull-request run of the same tree does not cover a skipped push run, so the read must walk back to the red run that ran its suites, not read {verdict}: {detail}")
+        self.assertIn("run 2001 ", detail, "the red read must name the older run that ran its suites")
 
     def test_a_green_pull_request_run_of_another_tree_does_not_clear_a_skipped_push_run(self):
         runs = [main_run(2002, "success", tree=TREE_PUSHED, path=CHECKS_PATH), main_run(2001, "failure", tree=TREE_EARLIER, path=CHECKS_PATH)]
@@ -12046,12 +12057,36 @@ class SkippedPushRun(unittest.TestCase):
         self.assertEqual(verdict, "red", f"a green pull-request run whose suites were all skipped does not cover a skipped push run, so the read must walk back to the red run that ran its suites, not read {verdict}: {detail}")
         self.assertIn("run 2001 ", detail, "the red read must name the older run that ran its suites")
 
-    def test_a_green_pull_request_run_that_ran_its_suites_covers_a_skipped_push_run_past_a_scope_only_one(self):
-        runs = [main_run(2002, "success", tree=TREE_PUSHED, path=CHECKS_PATH), main_run(2001, "failure", tree=TREE_EARLIER, path=CHECKS_PATH)]
-        jobs = {2002: skipped_suites_jobs(), 2001: ran_suites_jobs("failure"), 3001: ran_suites_jobs(), 3002: skipped_suites_jobs()}
-        self.assertTrue(self.suites_of(jobs[3001]), "the scope: the green pull-request run of the tree ran a suite")
-        verdict, detail = self.read(runs, jobs, [pr_run(3002, "success", TREE_PUSHED), pr_run(3001, "success", TREE_PUSHED)])
-        self.assertEqual(verdict, "green", f"a green pull-request run of the same tree that ran its suites covers a skipped push run, even past a scope-only run of that tree, not {verdict}: {detail}")
+    def test_a_lone_skipped_push_run_under_a_suites_run_pull_request_run_is_unknown_not_green(self):
+        runs = [main_run(2002, "success", tree=TREE_PUSHED, path=CHECKS_PATH)]  # the page holds this one run
+        jobs = {2002: skipped_suites_jobs(), 3001: ran_suites_jobs()}
+        self.assertTrue(self.suites_of(jobs[3001]), "the scope: the pull-request run of the tree ran a suite")
+        verdict, detail = self.read(runs, jobs, [pr_run(3001, "success", TREE_PUSHED)])
+        self.assertEqual(verdict, "unknown", f"no run on the page ran its suites, so a pull-request run of the tree must not make the skipped push run green: got {verdict}: {detail}")
+
+    def test_a_full_page_of_skipped_push_runs_under_a_suites_run_pull_request_run_is_unknown_not_green(self):
+        runs = [main_run(2100 - i, "success", tree=f"{2100 - i:040x}", path=CHECKS_PATH) for i in range(PAGE_RUNS)]  # a full page, every run skipped
+        jobs = {r["id"]: skipped_suites_jobs() for r in runs}
+        jobs[3001] = ran_suites_jobs()
+        self.assertTrue(self.suites_of(jobs[3001]), "the scope: the pull-request run of the newest run's tree ran a suite")
+        verdict, detail = self.read(runs, jobs, [pr_run(3001, "success", runs[0]["head_commit"]["tree_id"])])
+        self.assertEqual(verdict, "unknown", f"no run on a full page ran its suites, so a pull-request run of the newest tree must not make main green: got {verdict}: {detail}")
+
+    def test_skipped_push_runs_back_to_back_under_a_pull_request_run_read_the_red_run_that_ran_its_suites(self):
+        runs = [main_run(2003, "success", tree=TREE_PUSHED, path=CHECKS_PATH), main_run(2002, "success", tree=TREE_OTHER, path=CHECKS_PATH),
+                main_run(2001, "failure", tree=TREE_EARLIER, path=CHECKS_PATH)]
+        jobs = {2003: skipped_suites_jobs(), 2002: skipped_suites_jobs(), 2001: ran_suites_jobs("failure"), 3001: ran_suites_jobs()}
+        self.assertTrue(self.suites_of(jobs[3001]), "the scope: the pull-request run of the newest tree ran a suite")
+        verdict, detail = self.read(runs, jobs, [pr_run(3001, "success", TREE_PUSHED)])
+        self.assertEqual(verdict, "red", f"a red run that ran its suites reads red whatever skipped push runs and pull-request runs follow it, not {verdict}: {detail}")
+        self.assertIn("run 2001 ", detail, "the red read must name the red run that ran its suites")
+
+    def test_skipped_push_runs_back_to_back_read_the_green_run_that_ran_its_suites(self):
+        runs = [main_run(2003, "success", tree=TREE_PUSHED, path=CHECKS_PATH), main_run(2002, "success", tree=TREE_OTHER, path=CHECKS_PATH),
+                main_run(2001, "success", tree=TREE_EARLIER, path=CHECKS_PATH)]
+        jobs = {2003: skipped_suites_jobs(), 2002: skipped_suites_jobs(), 2001: ran_suites_jobs()}
+        verdict, detail = self.read(runs, jobs)
+        self.assertEqual(verdict, "green", f"back-to-back skipped push runs read the newest run that ran its suites, which is green, not {verdict}: {detail}")
 
 
 class PinnedMismatchStopsMain(Env):
