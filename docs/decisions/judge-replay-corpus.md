@@ -32,7 +32,7 @@ The `judge-replay` job in `checks.yml` is in `all-jobs-passed` and `ci-done`. Li
 
 ## The unknown rule
 
-A replay that cannot get an answer is UNKNOWN, and under `CI` it exits 1 (decision `ci-unknown-is-red`). With no sign-in the line is: `UNKNOWN: model calls cannot authenticate. Add repo secret CLAUDE_CODE_OAUTH_TOKEN (owner, waiting page item 283).` The probe step prints it and exits 1 whatever `CI` holds, so a missing or bad secret is red before any case runs. A MISS always exits 1.
+A replay that cannot get an answer is UNKNOWN, and under `CI` it exits 1 (decision `ci-unknown-is-red`). With no sign-in the line is: `UNKNOWN: model calls cannot authenticate. Add repo secret CLAUDE_CODE_OAUTH_TOKEN (owner, page item 283).` The probe step prints it and exits 1 whatever `CI` holds, so a missing or bad secret is red before any case runs. A MISS always exits 1.
 
 ## Measured
 
