@@ -1,0 +1,14 @@
+{
+ "id": "report-says-archived-count",
+ "title": "A runner's final report after a merge carries \"Archived: N\" or \"Archived: none: <reason>\", checked by lint/report_gate.py",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane archive-sweep-runs-per-merge 00:54 CST Nov 14 (relayed; the coordinator asked it to propose; unchecked by triage): no session was archived after 10:44 CST Nov 13; runner 10 ran `merge --idle-lanes` after none of its four merges (its own report, 22:46 CST), and no report said so. Mistake it stops: idle sessions piling up with no one seeing it. Harm: clutter and spend.",
+ "source": "Lane message 00:54 CST Nov 14 (relayed). Same guard candidate as the \"guard candidate, not built\" line in step archive-sweep-runs-per-merge (triage 22:38 CST Nov 13). Related: lane archive-list-at-merge (#3383 prints the list at merge; this does not replace it). Rules reports-order-of-labels, reports-done-format.",
+ "note": "Triage 00:54 CST Nov 14: filed as the lane proposed. A check on a report that already exists (lint/report_gate.py reads the report text; no new log, file or timer; cost unmeasured, the record states it). The check scope is the runner's final report after a merge only; the form is `Archived: N` or `Archived: none: <reason>`. A check change: own lane, red first (a report with neither form fails), review rounds apply. The lane first reads why no archive ran (step archive-sweep-runs-per-merge) so the check does not just print \"none\" forever. Not started.",
+ "updatedAt": "2026-11-14T00:54:30-06:00"
+}
