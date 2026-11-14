@@ -1925,8 +1925,11 @@ def claim_only(root, cfgrel, base, linted, live):
     """True when `linted` is an ancestor of `live` and each commit after it is a claim or a records-page commit. A claim has one parent, a Record-claim
     trailer (head_claim), and only record files touched; a record file is a direct child of a stamp kind's folder that matches its filePattern, or the
     records page. A records-page commit is page_only's: one parent, the subject PAGE_SUBJECT, the records page alone. The merge tool pushes one after
-    review when the page goes stale, so it moves the head by nothing a record or a lint read. Any other commit is False. Any
-    read that fails is False. Commits come from the clone, so the caller fetches the branch first."""
+    review when the page goes stale, so it moves the head by nothing a record or a lint read. That holds only for a page the generator wrote, so a
+    page-only commit counts when page_is_generated proves it, and is False when the page differs (a hand edit is a change a review must see, never a
+    carry). A generator that cannot run raises Stop (unknown), never True: the callers keep it at stale or unknown, never done. Any other commit is
+    False. Any other read that fails is False. Commits come from the clone, so the caller fetches the branch first.
+    Cost: per page-only commit one temporary worktree, one `git show` and one generator run (page_is_generated; measured median 0.56 s, n=5, on commit 81eaca3)."""
     try:
         _, kinds = base_stamp(root, cfgrel, f"origin/{base}")
     except Stop:
@@ -1943,7 +1946,9 @@ def claim_only(root, cfgrel, base, linted, live):
     for row in rows.splitlines():
         sha, *parents = row.split()
         if page_only(root, sha):  # page_only reads the one-parent, subject and records-page-alone rules itself
-            continue
+            if page_is_generated(root, sha):  # the generator, never the subject line, proves a records page: a hand edit under the subject is no carry
+                continue
+            return False  # a page commit is never a claim either: it has no Record-claim trailer to read
         c, files = git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", sha)
         if len(parents) != 1 or c or not head_claim(root, sha) or not all(is_record(f) for f in files.splitlines()):
             return False
@@ -4491,16 +4496,18 @@ def edits_outside_conflict(root, parents, tree):
 def clean_merges_after(h, head, live, base=None, claims=None):
     """True when every commit after `head`, up to the live head `live`, is a clean merge of main. A clean merge of main has two
     parents, a second parent main holds (Host.holds_head, main being `base`, else the host's base), and git's clean merge of its parents as its tree
-    (merge_state). `claims`, the stamp config path: a one-parent claim commit or a records-page commit (claim_only, read in the host's checkout) also counts, since the
-    merge tool's own claim and its page rebuild move the reviewed head by exactly that. A one-parent records-page commit (page_only) counts too on the walk, but only when the
-    committed page is what the generator writes for its tree (page_is_generated): the tool's own rebuild, never a hand edit. The walk follows first parents from `live` and must reach `head` within
+    (merge_state). `claims`, the stamp config path: a one-parent claim commit also counts (claim_only, read in the host's checkout), since the merge tool's own
+    claim moves the reviewed head by exactly that. A one-parent records-page commit (page_only) counts on the walk, with or without `claims`, but only when the
+    committed page is what the generator writes for its tree (page_is_generated): the tool's own rebuild, never a hand edit. The walk reads the page commit
+    itself, ahead of the claims route, because it must Stop on a read it cannot make and must run with no stamp config; claim_only proves a page the same way
+    for its other callers. The walk follows first parents from `live` and must reach `head` within
     REVIEW_MERGE_WALK commits. A commit with one parent (an empty commit too), a merge of three, a merge of a branch main lacks, an edited or conflicted merge, a
     longer walk and a head that is never reached are all False. A failed read, a commit read that names no tree, and a merge git cannot read
     (merge_state "unknown") raise Stop: so do a page commit whose reads fail and a generator run that fails: unknown, never False and never True.
     Cost: one commit read per commit walked (each sha read once); one holds_head compare and one merge_state per merge commit; per one-parent
-    commit that is no claim, page_only's git reads (one per commit, two only for a commit with the subject PAGE_SUBJECT), and for a page commit
-    one temporary worktree, one `git show` and one generator run (at most one per commit, never repeated for a sha); and at most one
-    fetch_branch_heads a run."""
+    commit, page_only's git reads (one per commit, two only for a commit with the subject PAGE_SUBJECT), and for a page commit
+    one temporary worktree, one `git show` and one generator run (at most one per commit, never repeated for a sha; measured median 0.56 s, n=5, on commit 81eaca3);
+    and at most one fetch_branch_heads a run."""
     sha, read = live, {}
 
     def commit(s):
@@ -4512,10 +4519,12 @@ def clean_merges_after(h, head, live, base=None, claims=None):
         if sha == head:
             return True
         parents, tree = commit(sha)
+        if len(parents) == 1 and page_only(h.cwd or ".", sha, strict=True):
+            if page_is_generated(h.cwd or ".", sha):
+                sha = parents[0]
+                continue
+            return False  # a page the generator did not write: a hand edit, which claim_only would not carry either
         if claims and len(parents) == 1 and claim_only(h.cwd or ".", claims, base or h.base, parents[0], sha):
-            sha = parents[0]
-            continue
-        if len(parents) == 1 and page_only(h.cwd or ".", sha, strict=True) and page_is_generated(h.cwd or ".", sha):
             sha = parents[0]
             continue
         if len(parents) != 2 or not h.holds_head(parents[1], base or h.base):  # a one-parent commit, even an empty one, is no merge of main
@@ -4631,15 +4640,19 @@ def rollup_green(h, n, head):
 
 def lint_carried(root, cfgrel, base, n, passed, live, h=None, source_passed=()):
     """True when a lane-lint PASS on one of the heads `passed` holds for the live head `live` of pull request `n`: every commit after it is a
-    claim or a records-page commit (claim_only, against `base`). The checkout `root` fetches the pull request's head first when it lacks `live`. A read that fails is False.
+    claim or a records-page commit the generator proves (claim_only, against `base`). The checkout `root` fetches the pull request's head first when it lacks `live`. A read that fails is False,
+    a generator that cannot prove a page commit too: the carry reads absent, so the lint reads not carried, never passed.
     A PASS on a head of `source_passed` (the passes of the source a replacement names, replaces_source) holds too when its tree equals the tree of `live`
     (same_tree, through `h`; step review-carries-by-tree).
     The one home of that carry, for the join (lint_check), `--reviewed` and `--release-check`."""
     if passed:
         if git(root, "cat-file", "-e", f"{live}^{{commit}}")[0]:
             git(root, "fetch", "-q", "origin", f"+refs/pull/{n}/head:refs/remotes/origin/pull/{n}")
-        if any(claim_only(root, cfgrel, base, x, live) for x in passed):
-            return True
+        try:
+            if any(claim_only(root, cfgrel, base, x, live) for x in passed):
+                return True
+        except (Stop, subprocess.TimeoutExpired, OSError):  # claim_only raises Stop when the generator cannot prove a page commit: no carry, and the by-tree carry below still reads
+            pass
     for x in source_passed if h is not None else ():
         try:
             if same_tree(h, x, live):
