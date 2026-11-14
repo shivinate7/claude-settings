@@ -287,12 +287,16 @@ def runs_on(expr, flags):
 
 # The steps that run only on a pull request, each with its own `if:`. The scope condition does not touch them.
 PR_ONLY = [
-    'Red-run trailer',
-    'Plan refuter line',
-    'Ruling kind check',
     'Silent undo check',
-    'Comment narration check',
 ]
+
+# The pull-request lint steps: each keeps its pull-request `if:` and adds the scope condition of its own lint flag (ci-scope.sh LINTS).
+PR_LINT = {
+    'Red-run trailer': 'lint_red_run',
+    'Plan refuter line': 'lint_plan_refuter',
+    'Ruling kind check': 'lint_ruling_kind',
+    'Comment narration check': 'lint_comment_narration',
+}
 
 # The checks job's step names. An unnamed step is its `uses:` reference.
 MAIN_STEPS = [
@@ -756,6 +760,14 @@ class UnscopedAndPrOnlySteps(ChecksStepBase):
                 got = if_of(self.named(steps, name))
                 self.assertEqual(got, PR_ONLY_IF, "step %r: if is %r, want its pull-request if" % (name, got))
 
+    def test_each_pr_lint_step_keeps_its_pull_request_if_and_adds_its_lint_flag(self):
+        steps = self.steps()
+        for name, flag in PR_LINT.items():
+            with self.subTest(step=name):
+                got = if_of(self.named(steps, name))
+                want = "${{ github.event_name == 'pull_request' && needs.scope.outputs.%s == 'true' }}" % flag
+                self.assertEqual(got, want, "step %r: if is %r, want its pull-request if and its lint flag %s" % (name, got, flag))
+
 
 class StepNames(ChecksStepBase):
     def test_each_main_step_name_is_in_the_checks_job(self):
@@ -774,12 +786,12 @@ class StepNames(ChecksStepBase):
                 self.assertNotIn("needs.scope.outputs", expr, "unlisted step %r reads a scope output: %r" % (name, expr))
 
     def test_each_hard_coded_list_names_a_main_step(self):
-        for name in NO_MD + NAMES_ONLY + MUST_STAY_UNSCOPED + PR_ONLY + list(DOC_STEPS):
+        for name in NO_MD + NAMES_ONLY + MUST_STAY_UNSCOPED + PR_ONLY + list(PR_LINT) + list(DOC_STEPS):
             with self.subTest(step=name):
                 self.assertIn(name, MAIN_STEPS, "a pinned list names a step main does not have")
 
     def test_no_step_is_on_two_lists(self):
-        listed = NO_MD + NAMES_ONLY + MUST_STAY_UNSCOPED + PR_ONLY + list(DOC_STEPS)
+        listed = NO_MD + NAMES_ONLY + MUST_STAY_UNSCOPED + PR_ONLY + list(PR_LINT) + list(DOC_STEPS)
         twice = sorted({n for n in listed if listed.count(n) > 1})
         self.assertEqual(twice, [], "a step is on two pinned lists")
 
