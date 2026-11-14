@@ -11573,6 +11573,13 @@ class RedMainBrake(Env):
         self.assertIn("UNKNOWN", out)
         self.assertIn(self.no_verdict_cause(1751), out, "main reads UNKNOWN for a cause other than the run that ran no suite")
 
+    def test_a_push_group_with_no_run_that_ran_its_suites_is_labelled_as_no_run_ran_its_suites_not_as_a_failed_read(self):
+        # red_base gives this cause its own label; no read failed here, so the failed-read label is the wrong one
+        rc, out, before = self.go([main_run(1752, "success")], {1752: self.EMPTY_PUSH})
+        self.refused_because(rc, out, before, "a push group with no run that ran its suites reads green")
+        self.assertNotIn("the read failed", out, "main labels a push group with no run that ran its suites as a failed read")
+        self.assertIn("runs are UNKNOWN, no run ran its suites", out, "main does not label a push group with no run that ran its suites as that cause")
+
     def test_two_empty_green_runs_above_a_red_push_run_leave_the_red_run_the_verdict(self):
         # the verdict walks past each run that skipped its suites, to the newest run of the group that ran them
         runs = [main_run(1762, "success"), main_run(1761, "success", event="workflow_dispatch"), main_run(1760, "failure")]
@@ -11589,7 +11596,7 @@ class RedMainBrake(Env):
     @staticmethod
     def no_verdict_cause(newest_id):
         """The line Host.base_state (merge.py) prints when no run of the push group on the page ran its suites. `newest_id` is the run it names."""
-        return f"no run of checks in the push group on the page ran its suites, so main has no verdict (newest, run {newest_id}"
+        return f"no run of checks {merge.NO_SUITE_RUN} (newest, run {newest_id}"
 
     # The suites-run verdict (decision no-merge-onto-red-main; owner ruling own-812-a-judge-suite-runs): the push group's verdict is its newest run
     # that ran its suites. A run that skipped its suites is passed over, whatever its push-skip job says. A page with no such run is UNKNOWN.
