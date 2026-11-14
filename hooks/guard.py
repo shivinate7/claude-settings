@@ -5496,6 +5496,17 @@ def _sim_listing():
     return None if devices is None else (sweep, devices)
 
 
+def _sim_rows(listing):
+    """LISTING as (sweep module, device rows) when it has that shape, else None: the same unreadable list that
+    `_sim_listing` returns, so a caller fails open on it. A row needs the keys the simulator rules read."""
+    if not (isinstance(listing, (tuple, list)) and len(listing) == 2 and isinstance(listing[1], list)):
+        return None
+    if not all(isinstance(d, dict) and all(isinstance(d.get(k), str) for k in ("udid", "name", "state", "runtime"))
+               for d in listing[1]):
+        return None
+    return listing
+
+
 def _sim_name_hits(devices: list, name: str, os_: str = "") -> list:
     """The devices in DEVICES that NAME (a device name or a UDID) names, without case or outer spaces. OS_, a
     destination's `OS=`, picks a runtime when one matches. The one name match of the simulator rules."""
@@ -5514,7 +5525,7 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
     slot is the launched device (sim_lease_holds). LISTING is `_sim_listing()` when the caller has it. Returns the
     UDIDs a launch lease covered, so the device rule does not read the lease again."""
     proven = set()
-    listing = listing or _sim_listing()
+    listing = _sim_rows(listing or _sim_listing())
     if listing is None:
         return proven
     sweep, devices = listing
@@ -5576,6 +5587,10 @@ def sim_device_lease_refusal(tool: str, names: list, session: str, listing, laun
     read per call. A call that names no single leased device (no name, or a name that matches a leased and an unleased
     device) is told to name a leased device by UDID; a remedy never names an unleased device. With no lease held, the
     remedy names the role of each device missing a lease (_sim_hold_remedy)."""
+    listing = _sim_rows(listing)
+    if listing is None:
+        return  # fail open, as for an unreadable list
+    proven = proven if isinstance(proven, (set, frozenset)) else frozenset()
     devices, need, unknown, hit_sets = listing[1], [], [], []
     for name in names:
         hits = _sim_name_hits(devices, name)
