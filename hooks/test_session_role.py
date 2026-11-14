@@ -12,6 +12,7 @@ import os
 import io
 import pathlib
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -190,6 +191,16 @@ class MainFromTheHook(SessionRoleCase):
     def run_main(self, argv, payload, launcher):
         with mock.patch.dict(os.environ, {"CS_SESSION_ROLE": launcher}), mock.patch("sys.stdin", io.StringIO(payload)):
             return session_role.main(argv)
+
+    def test_a_payload_with_a_non_ascii_name_still_records_the_role_under_a_cp1252_locale(self):
+        # The hook decodes the payload's UTF-8 itself. A Windows locale codec (cp1252) cannot read 0x81 and must not decide the read.
+        payload = json.dumps({"session_id": SID, "cwd": "", "note": "Ł"}, ensure_ascii=False).encode("utf-8")  # raw C5 81 bytes
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, CS_SESSION_ROLE="triage", PYTHONIOENCODING="cp1252")
+        answer = subprocess.run([sys.executable, os.path.join(HERE, "session_role.py"), "write"],
+                                input=payload, env=env, capture_output=True)
+        self.assertEqual(answer.returncode, 0, "the hook's write exited %r: %r" % (answer.returncode, answer.stderr))
+        self.assertEqual(session_role.own_role(SID), "triage",
+                         "a payload with a non-ASCII name under cp1252 wrote no role file: %r" % (answer.stderr,))
 
     def test_a_write_from_the_hook_records_the_launcher_role(self):
         rc = self.run_main(["session_role.py", "write"], json.dumps({"session_id": SID, "cwd": ""}), "triage")
