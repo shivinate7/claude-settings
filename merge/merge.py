@@ -132,8 +132,9 @@
                           never merges, takes no lock and needs no merge role. A red head or a head that conflicts with the base is not marked ready.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role). A local session reads the role the launcher
-                          (bin/claude-role) recorded in its role file instead: once any role file exists, `--confirm` runs only for a session whose
-                          file names batch-runner. With no role file, a local `--confirm` is as it was.
+                          (bin/claude-role) recorded in its role file instead: a session with its own role file runs `--confirm` only when
+                          that file names batch-runner, and one the launcher started (CS_SESSION_ROLE set) with no matching own file is refused.
+                          A session with neither is as it was, whatever other sessions' files are on disk.
 
 Git half: the merge lock, the temporary worktree, the claim, the push, the revert, resume, the
 local base branch, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
@@ -4263,13 +4264,14 @@ def read_merge_role():
 LOCAL_ROLE_REFUSAL = "this session may not merge: the launcher recorded no batch-runner role for it. Start the batch runner with `claude-role batch-runner`. Nothing was claimed or pushed. " + ROLE_CITE
 
 def local_role_allows_confirm():
-    """A local session's confirm gate: False when the launcher's role files are in use (hooks/session_role.py roles_in_use) and this session's own
-    file does not name a MERGE_ROLES role (read_merge_role). An absent id, another session's file, a bad file and any other role are each a refusal.
-    With no role file at all nothing is judged and today's local behaviour stands. Fails closed: a reader that cannot load or run is a refusal,
-    since the caller's crash path would otherwise let the confirm through."""
+    """A local session's confirm check, judged by the session's OWN record only (hooks/session_role.py local_judgement, rules a, b, c). The id is
+    CLAUDE_CODE_SESSION_ID. An own file must name a MERGE_ROLES role; with no own file and no CS_SESSION_ROLE nothing is judged and today's
+    local behaviour stands, whatever other sessions' files are on disk; CS_SESSION_ROLE set with no matching own file refuses.
+    Fails closed: a reader that cannot load or run is a refusal, since the caller's crash path would otherwise let the confirm through."""
     try:
         import session_role  # hooks/session_role.py, on sys.path from the top of this file
-        return not session_role.roles_in_use() or read_merge_role() is not None
+        judged, record = session_role.local_judgement(os.environ.get("CLAUDE_CODE_SESSION_ID"))
+        return not judged or (record is not None and record["role"] in MERGE_ROLES)
     except Exception:
         return False
 
