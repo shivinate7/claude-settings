@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Every echo of a command the owner ran, and every long paste, needs a hand-written feedback item, which blocks turns for text that is not an instruction.",
  "source": "owner 21:59 CST Nov 12, Q7 a (store entry inbox-skip-bash-echo)",
- "note": "Ship a: the feedback guard skips bash-input echoes. The owner is open to b, one item covering a run of messages, \"if done right\": only a run with no ruling, grant or question word in it, each message still listed under the item. Decision owner-feedback-inbox is the home. Lane 22:42 CST Nov 12: #3076 ships option a only. Owner prose typed after `!` runs as a shell command, so its echo is skipped and never saved (round 3: low harm). Unmeasured: whether a prompt with only bash-stdout blocks reaches the hook; it would be saved. Closes with a real `!` run.",
- "updatedAt": "2026-11-12T23:14:45-06:00"
+ "note": "Ship a: the feedback guard skips bash-input echoes. The owner is open to b, one item covering a run of messages, \"if done right\": only a run with no ruling, grant or question word in it, each message still listed under the item. Decision owner-feedback-inbox is the home. Lane 22:42 CST Nov 12: #3076 ships option a only. Owner prose typed after `!` runs as a shell command, so its echo is skipped and never saved (round 3: low harm). Unmeasured: whether a prompt with only bash-stdout blocks reaches the hook; it would be saved. Closes with a real `!` run. Degen row 17 23:39 CST Nov 13 (unchecked): option a shipped (#3076, bash-input echoes skipped). Option b, pasted content with no instruction, is still open (hooks/shared_names.py:35 MACHINE_TAGS). Unmeasured: whether a prompt of only bash-stdout blocks reaches the hook.",
+ "updatedAt": "2026-11-13T23:39:00-06:00"
 }

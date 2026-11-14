@@ -1,0 +1,14 @@
+{
+ "id": "fix-check-merge-forced-test",
+ "title": "One more fix check is allowed when a new head is a merge plus the test change that merge forced",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Degen rows 3 and 23: the merge tool refuses a fix check when the new head is a merge plus the test change the merge forced; the lane restarts at round 1 (PRs 645, 674, 567; cite merge/merge.py:4566-4592, unchecked).",
+ "source": "Owner paste 23:39 CST Nov 13: degen repo's claude-settings fix list (audited by degen against main bedbce7b5; the owner says it can be stale). Sorted against the record by a read-only Explore agent; no main file read, so every cite is unchecked.",
+ "note": "Triage 23:39 CST Nov 13: partly covered: done step fix-check-after-main-merge (ruling R1) allows a clean main merge, and one more fix verifier after a conflicted merge; not covered: a merge plus the test change it forced. Neighbours: fix-branch-merge-main-deny, fix-check-after-notes-commit (both doing). A lane checks whether merge.py lags R1 before building; a check change, so it goes through review rounds. Check the claim against main first and say if it is already fixed. Not started.",
+ "updatedAt": "2026-11-13T23:39:00-06:00"
+}

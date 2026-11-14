@@ -1,0 +1,14 @@
+{
+ "id": "refresh-lock-stale-clear",
+ "title": "The SessionStart pin refresh clears a stale lock instead of skipping silently forever",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Degen row 10: the claude-settings pin fell 439 commits behind because the refresh exits silently when its lock is held (settings.json:185, unchecked); debt refresh-lock-untested (no such record found in the roadmap data).",
+ "source": "Owner paste 23:39 CST Nov 13: degen repo's claude-settings fix list (audited by degen against main bedbce7b5; the owner says it can be stale). Sorted against the record by a read-only Explore agent; no main file read, so every cite is unchecked.",
+ "note": "Triage 23:39 CST Nov 13: partly covered: step session-start-pin-skip-log (doing) logs each skip. Not covered: clearing a stale lock (dead owner or old age). A lane adds it, test first, and says whether debt refresh-lock-untested exists in main. Check the claim against main first and say if it is already fixed. Not started.",
+ "updatedAt": "2026-11-13T23:39:00-06:00"
+}

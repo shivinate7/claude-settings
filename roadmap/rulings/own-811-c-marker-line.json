@@ -1,0 +1,10 @@
+{
+ "id": "own-811-c-marker-line",
+ "at": "2026-11-13T23:40:00-06:00",
+ "title": "Combined PRs get a marker line the cross rule reads; the owner chose the widening knowingly",
+ "ruling": "Owner, saved on the waiting page 23:38 CST Nov 13, item 811, pick c: add a combined-PR marker line that the cross rule reads, and rewrite decision lanes-run-no-full-ci-job to match. Option c carried the line \"Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo\" and was not recommended; the owner chose it with that on the page. This grants the marker line only (the combined PR body marker, read only for cross_measure's integration argument) and the rewrite of that decision, not any other change to the cross rule. It must name ruling own-767-a-combined-pr (whose wording said \"not the tool\"; this pick changes that for the cross rule).",
+ "quote": "C: Add a combined-PR marker line the cross rule reads; rewrite lanes-run-no-full-ci-job to match",
+ "source": "Owner page save 23:38 CST Nov 13 (05:38:01Z), read by triage in the answers store; filed by triage.",
+ "status": "open",
+ "step": "lane-lint-names-clashing-open-pr"
+}

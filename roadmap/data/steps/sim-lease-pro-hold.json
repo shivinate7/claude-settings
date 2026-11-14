@@ -1,0 +1,14 @@
+{
+ "id": "sim-lease-pro-hold",
+ "title": "bin/sim-lease refuses on a \"pro\" hold: the tool matches the rule, or the rule says why",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Degen row 20: sim-lease refuses on a \"pro\" hold (bin/sim-lease:185, unchecked). The record has no step or note on a \"pro\" hold.",
+ "source": "Owner paste 23:39 CST Nov 13: degen repo's claude-settings fix list (audited by degen against main bedbce7b5; the owner says it can be stale). Sorted against the record by a read-only Explore agent; no main file read, so every cite is unchecked.",
+ "note": "Triage 23:39 CST Nov 13: related steps sim-lease-gaps, sim-tool-lease-check, lane-sim-hold-path (all doing). A lane reads line 185 and the sim lease rule, says what a \"pro\" hold is, and whether the tool or the rule is wrong, before any change. Check the claim against main first and say if it is already fixed. Not started.",
+ "updatedAt": "2026-11-13T23:39:00-06:00"
+}

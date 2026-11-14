@@ -1,0 +1,10 @@
+{
+ "id": "own-816-skip-other-repo",
+ "at": "2026-11-13T23:40:00-06:00",
+ "title": "The archive sweep skips the other-repo sessions it cannot read",
+ "ruling": "Owner, saved on the waiting page 23:39 CST Nov 13 (05:39:21Z), item 816, \"none of these\", note \"it can skip archiving those\". Read: the archive sweep keeps (does not archive) the about 243 sessions in other repos whose PRs it cannot read (q_max and others; the 403 is the consultant's report, unchecked). No read access is added to any repo for this, and no archive on a title read. Triage's reading of \"skip\"; if he meant skip for now and revisit, say so.",
+ "quote": "it can skip archiving those",
+ "source": "Owner page answer 23:39 CST Nov 13, read by triage in the answers store; filed by triage.",
+ "status": "open",
+ "step": "archive-sweep-runs-per-merge"
+}

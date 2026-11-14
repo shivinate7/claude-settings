@@ -1,0 +1,14 @@
+{
+ "id": "pick-guard-vs-judge-conflict",
+ "title": "Measure whether the pick guard's required send to the page writer is refused by the message judge",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Degen row 31: the pick guard demands a send to the page writer that the message judge then refuses (unmeasured; no step ties the two).",
+ "source": "Owner paste 23:39 CST Nov 13: degen repo's claude-settings fix list (audited by degen against main bedbce7b5; the owner says it can be stale). Sorted against the record by a read-only Explore agent; no main file read, so every cite is unchecked.",
+ "note": "Triage 23:39 CST Nov 13: related steps pick-guard-cloud-writer, page-writer-key-follows-tag, mail-guards-read-send-message (doing) and judge-send-message-refusals (todo). A lane reproduces the conflict from the guard log and the judge log (a Mac read; the cloud has none), and says which step already ends it, or files the fix. Check the claim against main first and say if it is already fixed. Not started.",
+ "updatedAt": "2026-11-13T23:39:00-06:00"
+}

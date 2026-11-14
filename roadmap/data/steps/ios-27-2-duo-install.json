@@ -1,0 +1,16 @@
+{
+ "id": "ios-27-2-duo-install",
+ "title": "Install iOS 27.2, make a new Duo, and update the device ids in skill ios-apps once it proves out",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "a session on the owner's Mac"
+ ],
+ "why": "Degen row 13: only iOS 27.1 is named and its simulator daemons crash (skills/ios-apps/SKILL.md:74, unchecked). Ruling ios-27-2-duo (owner 21:59 CST Nov 12, Q5 A) already says to do it, only after it proves out; needs the owner's Mac.",
+ "source": "Owner paste 23:39 CST Nov 13: degen repo's claude-settings fix list (audited by degen against main bedbce7b5; the owner says it can be stale). Sorted against the record by a read-only Explore agent; no main file read, so every cite is unchecked.",
+ "note": "Triage 23:39 CST Nov 13: the ruling exists; its home step sim-lease-gaps never names the 27.2 pin, so this step names it. Needs a session on the owner's Mac (an act for the owner's computer; a Mac prompt item when a lane is ready). Blocked until a Mac session can run it.",
+ "updatedAt": "2026-11-13T23:39:00-06:00"
+}
