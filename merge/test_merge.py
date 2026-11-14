@@ -14894,11 +14894,11 @@ class ReviewFixBase(ReviewEnv):
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
         self.assert_refused(rc, out, err)
 
-    def replacement_host(self, tree, body=REPLACES_BODY, comments=()):
-        """Pull request 7 at REVIEW_HEAD, whose tree is `tree`, with its body and the comments given. Its source head SOURCE_HEAD holds SOURCE_TREE.
-        Both heads are root commits, so the commit reads name no parent."""
-        return self.record_host(*comments, bodies={7: body}, commits={REVIEW_HEAD: [], SOURCE_HEAD: []},
-                                trees={REVIEW_HEAD: tree, SOURCE_HEAD: SOURCE_TREE})
+    def replacement_host(self, tree, body=REPLACES_BODY, source=()):
+        """Pull request 7 at REVIEW_HEAD, whose tree is `tree`, with its body given. `source` holds the comments of the source, #6, which are served
+        from #6's own list (per_issue), as GitHub serves them. Its source head SOURCE_HEAD holds SOURCE_TREE. Both heads are root commits."""
+        return self.record_host(bodies={7: body}, commits={REVIEW_HEAD: [], SOURCE_HEAD: []}, trees={REVIEW_HEAD: tree, SOURCE_HEAD: SOURCE_TREE},
+                                per_issue={REPLACES_SOURCE: list(source)})
 
     def source_record(self):
         """The record of the source pull request, #6, at SOURCE_HEAD and passing, on the source's own issue."""
@@ -14907,20 +14907,20 @@ class ReviewFixBase(ReviewEnv):
     def test_replacement_7a_a_same_tree_source_log_is_the_earlier_log_for_the_fix_check(self):
         # The tree compared is the replacement's live head's (the record's Head). Its tree equals the source head's, so #6's newest log is the
         # earlier log, and a fix check that starts from SOURCE_HEAD is accepted.
-        rc, out, err = self.review_with_base(SOURCE_HEAD, self.replacement_host(SOURCE_TREE, comments=[self.source_record()]))
+        rc, out, err = self.review_with_base(SOURCE_HEAD, self.replacement_host(SOURCE_TREE, source=[self.source_record()]))
         self.assertEqual(rc, 0, "a replacement whose tree matches its source's was refused the fix check from the source head:\n" + out + err)
         self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (SOURCE_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS"))
 
     def test_replacement_7b_a_different_tree_from_the_source_is_still_refused(self):
         # the same record and fix check as 7a, with the replacement's tree changed: the source's log is not the earlier log, so the fix check is refused
-        rc, out, err = self.review_with_base(SOURCE_HEAD, self.replacement_host(OTHER_TREE, comments=[self.source_record()]))
+        rc, out, err = self.review_with_base(SOURCE_HEAD, self.replacement_host(OTHER_TREE, source=[self.source_record()]))
         self.assert_refused(rc, out, err)
 
     def test_replacement_7c_a_same_tree_without_a_replaces_line_is_still_refused(self):
         # the same tree and record as 7a, with no line that names #6: a shared tree alone carries nothing
         for label, body in (("no body", ""), ("a body that names #6 without Replaces", "Fixes #6\n")):
             with self.subTest(label=label):
-                rc, out, err = self.review_with_base(SOURCE_HEAD, self.replacement_host(SOURCE_TREE, body=body, comments=[self.source_record()]))
+                rc, out, err = self.review_with_base(SOURCE_HEAD, self.replacement_host(SOURCE_TREE, body=body, source=[self.source_record()]))
                 self.assert_refused(rc, out, err)
 
 class ReviewRoundOneCompletes(ReviewEnv):
@@ -16376,8 +16376,9 @@ class ReleaseCheck(ReviewEnv):
         feat = self.head("feat")
         tree = sh(self.co, "git", "rev-parse", f"{feat}^{{tree}}")
         source = review_comment(1, REPLACES_SOURCE, record_text(n=REPLACES_SOURCE, head=SOURCE_HEAD, rounds=REVIEW_PASS), updated=updated)
-        rc, lines, err, _ = self.release([7], lint=["--lint", f"7@{SOURCE_HEAD}:PASS"], comments=[source], bodies={7: REPLACES_BODY},
-                                         commits={feat: [], SOURCE_HEAD: []}, trees={feat: tree, SOURCE_HEAD: tree_of_source(tree)})
+        rc, lines, err, _ = self.release([7], lint=["--lint", f"7@{SOURCE_HEAD}:PASS"], comments=[], bodies={7: REPLACES_BODY},
+                                         commits={feat: [], SOURCE_HEAD: []}, trees={feat: tree, SOURCE_HEAD: tree_of_source(tree)},
+                                         per_issue={REPLACES_SOURCE: [source]})
         return rc, lines, err
 
     def test_replacement_release_a_same_tree_source_record_and_lint_carry_to_the_release_check(self):
@@ -16471,16 +16472,20 @@ class ReplacementCarry(ReviewEnv):
         """The lane-lint PASS of the source at SOURCE_HEAD."""
         return lint_of(REPLACES_SOURCE, SOURCE_HEAD)
 
+    def source_issue(self, *comments):
+        """The source's own comment list, #6's, as `per_issue` takes it: the comments the source's issue holds, oldest first. A carry reads them here."""
+        return {REPLACES_SOURCE: list(comments)}
+
     def assert_not_done(self, out, msg):
         """Pull request 7's line does not read done."""
         self.assertNotRegex(out, r"(?m)^#7 .* done: ", msg + ":\n" + out)
 
     def test_replacement_1_a_same_tree_takes_the_source_record_and_lint_and_reads_done(self):
-        host = self.carry_host(self.source_record(), self.source_lint())
+        host = self.carry_host(per_issue=self.source_issue(self.source_record(), self.source_lint()))
         self.reviewed_line(host, REVIEW_HEAD, "done", "a same-tree replacement did not take its source's record and lint PASS")
 
     def test_replacement_2_a_different_tree_is_not_carried(self):
-        host = self.carry_host(self.source_record(), self.source_lint(), tree=OTHER_TREE)
+        host = self.carry_host(per_issue=self.source_issue(self.source_record(), self.source_lint()), tree=OTHER_TREE)
         rc, out, err = self.run_args("--reviewed", host=host)
         self.assertEqual(rc, 0, out + err)
         self.assert_not_done(out, "a replacement whose tree differs from its source's read done")
@@ -16488,13 +16493,13 @@ class ReplacementCarry(ReviewEnv):
     def test_replacement_3_a_same_tree_without_a_replaces_line_is_not_carried(self):
         for label, body in (("no body", ""), ("a body that names #6 without Replaces", "Fixes #6\n"), ("a body that names itself", "Replaces #7\n")):
             with self.subTest(label=label):
-                rc, out, err = self.run_args("--reviewed", host=self.carry_host(self.source_record(), self.source_lint(), body=body))
+                rc, out, err = self.run_args("--reviewed", host=self.carry_host(per_issue=self.source_issue(self.source_record(), self.source_lint()), body=body))
                 self.assertEqual(rc, 0, out + err)
                 self.assert_not_done(out, f"a same-tree replacement with {label} read done")
 
     def test_replacement_4_a_source_record_whose_pr_line_names_another_number_is_not_carried(self):
         misfiled = review_comment(1, REPLACES_SOURCE, record_text(n=9, head=SOURCE_HEAD, rounds=REVIEW_PASS))  # on #6's issue, but PR: #9
-        rc, out, err = self.run_args("--reviewed", host=self.carry_host(misfiled, self.source_lint()))
+        rc, out, err = self.run_args("--reviewed", host=self.carry_host(per_issue=self.source_issue(misfiled, self.source_lint())))
         self.assertEqual(rc, 0, out + err)
         self.assert_not_done(out, "a source record whose PR line names #9 was carried to #7")
 
@@ -16502,28 +16507,28 @@ class ReplacementCarry(ReviewEnv):
         failed_fix = fix_verifier_line(verdict="FAIL", head="1e" * 20)
         for label, record in (("held", self.source_record(net="negative")), ("a failed fix check", self.source_record(fix=(failed_fix,)))):
             with self.subTest(label=label):
-                rc, out, err = self.run_args("--reviewed", host=self.carry_host(record, self.source_lint()))
+                rc, out, err = self.run_args("--reviewed", host=self.carry_host(per_issue=self.source_issue(record, self.source_lint())))
                 self.assertEqual(rc, 0, out + err)
                 self.assert_not_done(out, f"a replacement read done from a source whose record is {label}")
 
     def test_replacement_5b_a_held_source_record_reads_held_on_the_replacement(self):
-        self.reviewed_line(self.carry_host(self.source_record(net="negative"), self.source_lint()), REVIEW_HEAD, "held",
+        self.reviewed_line(self.carry_host(per_issue=self.source_issue(self.source_record(net="negative"), self.source_lint())), REVIEW_HEAD, "held",
                            "the carried record does not read its own verdict, held, on the replacement")
 
     def test_replacement_5c_a_failed_fix_check_on_the_source_reads_open_on_the_replacement(self):
         failed_fix = fix_verifier_line(verdict="FAIL", head="1e" * 20)
-        self.reviewed_line(self.carry_host(self.source_record(fix=(failed_fix,)), self.source_lint()), REVIEW_HEAD, "open",
+        self.reviewed_line(self.carry_host(per_issue=self.source_issue(self.source_record(fix=(failed_fix,)), self.source_lint())), REVIEW_HEAD, "open",
                            "the carried record does not read its own verdict, open, on the replacement")
 
     def test_replacement_6a_a_same_tree_source_lint_pass_counts_for_the_replacement(self):
         # the replacement has its own done record at its live head, so only the lint differs between 6a and 6b
         own = review_comment(2, 7, record_text(head=REVIEW_HEAD, rounds=REVIEW_PASS))
-        self.reviewed_line(self.carry_host(own, self.source_lint()), REVIEW_HEAD, "done",
+        self.reviewed_line(self.carry_host(own, per_issue=self.source_issue(self.source_lint())), REVIEW_HEAD, "done",
                            "a same-tree source's lane-lint PASS did not count for the replacement's head")
 
     def test_replacement_6b_a_different_tree_source_lint_pass_does_not_count(self):
         own = review_comment(2, 7, record_text(head=REVIEW_HEAD, rounds=REVIEW_PASS))
-        self.reviewed_line(self.carry_host(own, self.source_lint(), tree=OTHER_TREE), REVIEW_HEAD, "no lint",
+        self.reviewed_line(self.carry_host(own, per_issue=self.source_issue(self.source_lint()), tree=OTHER_TREE), REVIEW_HEAD, "no lint",
                            "a lint PASS on a source whose tree differs counted for the replacement")
 
     def test_round2_case1_a_window_holding_only_a_fail_on_the_source_still_reads_the_source_in_full(self):
@@ -16536,7 +16541,7 @@ class ReplacementCarry(ReviewEnv):
     def test_round2_case2_a_crlf_body_names_its_source(self):
         # A body written by a CRLF client ends each line in \r\n. Its Replaces line still names #6.
         body = "Replaces #6\r\n\r\nThe same change, re-cut.\r\n"
-        self.reviewed_line(self.carry_host(self.source_record(), self.source_lint(), body=body), REVIEW_HEAD, "done",
+        self.reviewed_line(self.carry_host(per_issue=self.source_issue(self.source_record(), self.source_lint()), body=body), REVIEW_HEAD, "done",
                            "a Replaces line ending in CRLF did not name its source, so nothing carried")
 
     def test_round2_the_newest_source_record_is_the_last_row_the_source_read_gives(self):
@@ -16557,7 +16562,10 @@ class ReplacementCarry(ReviewEnv):
         # The replacement has no lint of its own, and the repo-wide window holds none of #6's comments, so the per-issue read of #6 runs.
         per_issue = {REPLACES_SOURCE: [self.source_lint()]}
         host = self.carry_host(per_issue=per_issue)
-        self.join(host)  # no Stop: the source's PASS carries by tree
+        try:
+            self.join(host)  # no Stop: the source's PASS carries by tree
+        except merge.Stop as e:  # a refusal of a join that should carry is a failure that names it, not an error
+            self.fail("the join refused a head whose tree matches its source's lane-lint PASS: " + str(e))
         self.assertIn(f"issues/{REPLACES_SOURCE}/comments", [rel for rel, _ in host.list_calls], "the join did not read the source's own comment list")
         host = self.carry_host(per_issue=per_issue, tree=OTHER_TREE)
         with self.assertRaises(merge.Stop) as refused:
