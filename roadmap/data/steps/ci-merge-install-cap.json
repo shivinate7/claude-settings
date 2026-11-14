@@ -1,7 +1,7 @@
 {
  "id": "ci-merge-install-cap",
  "title": "CI jobs near their time caps (checks-merge-install, checks-windows-rest, shell-macos) finish inside them, so no main run is cancelled",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "lane": "session_013NEJL1JKZGZ1f8ybkciY6K",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "checks-merge-install hit its 30-minute cap and main's push run 43164094808 on f024eae4e was cancelled, so the merge tool reads main as UNKNOWN and every merge waits.",
  "source": "coordinator 01:01 CST Nov 12",
- "note": "Stability fix. Lane started 01:01 CST Nov 12. Batch runner 10 re-runs the main run once meanwhile. Related: step ci-job-caps-line-count. Part landed: PR #2634 raised the checks-merge-install cap from 30 to 75 minutes, in batch 94 (7e7cd97a4, by 02:39 CST Nov 12). Widened (coordinator 02:39 CST): the same lane now takes checks-windows-rest, which runs 32 minutes of its 37-minute cap. The step stays open until that lands. Widened again (coordinator 04:08 CST Nov 12): the lane also takes the shell-macos cap, 30 minutes of its 40. #2653 (stopgap caps for macos-b, the windows-merge shards and shoot; round 3 PASS, net value zero) is with batch runner 10 for the next code batch (coordinator 06:53 CST Nov 12). Coordinator 00:10 CST Nov 14 (relayed): close with its proof or record the missing measure today. #2634 and #2653 merged; caps on main are shell-macos 75, windows-rest 60 per an agent read, unverified by the coordinator and by triage.",
- "updatedAt": "2026-11-14T00:10:30-06:00"
+ "note": "Stability fix. Lane started 01:01 CST Nov 12. Batch runner 10 re-runs the main run once meanwhile. Related: step ci-job-caps-line-count. Part landed: PR #2634 raised the checks-merge-install cap from 30 to 75 minutes, in batch 94 (7e7cd97a4, by 02:39 CST Nov 12). Widened (coordinator 02:39 CST): the same lane now takes checks-windows-rest, which runs 32 minutes of its 37-minute cap. The step stays open until that lands. Widened again (coordinator 04:08 CST Nov 12): the lane also takes the shell-macos cap, 30 minutes of its 40. #2653 (stopgap caps for macos-b, the windows-merge shards and shoot; round 3 PASS, net value zero) is with batch runner 10 for the next code batch (coordinator 06:53 CST Nov 12). Coordinator 00:10 CST Nov 14 (relayed): close with its proof or record the missing measure today. #2634 and #2653 merged; caps on main are shell-macos 75, windows-rest 60 per an agent read, unverified by the coordinator and by triage. CLOSED 00:13 CST Nov 14 on proof (lane ci-steps-proof-read (session_013NEJL1K7SBy1DvaQGoTSZg), read from main 8e9f2b153 at 00:11 CST, relayed by the coordinator; triage did not re-read main): caps on main are checks-merge-install 75 (checks.yml l.764), shell-macos 75 (l.1029), checks-windows-rest 60 (l.1875); #2634 (fadbca2d8) and #2653 (332fc4165) are on main; no cap cancel since Nov 12 07:27 CST. The caps are marked provisional and unmeasured in the file.",
+ "updatedAt": "2026-11-14T00:13:40-06:00"
 }

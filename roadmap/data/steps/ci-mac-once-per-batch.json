@@ -1,7 +1,7 @@
 {
  "id": "ci-mac-once-per-batch",
  "title": "macOS CI runs once per batch, on the batch PR, and only on OS-tagged tests",
- "status": "done",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "lane": "session_013NEJKzYPcwdLyfXoaZiZ7t",
@@ -10,6 +10,6 @@
  "why": "R61 (owner pick b 15:29 CST Nov 12, macOS CI audit): macOS jobs end last in 12 of 19 runs, the 5-slot pool queued up to 26 min four times, and each batch runs its macOS suites twice (about 85 macOS min per batch).",
  "source": "retrospective 15:30 CST Nov 12 (owner pick b); store roadmap/rulings/r61.json; home decision test-strategy-reset",
  "note": "1. No macOS jobs on the push to main; the batch PR run is the macOS proof. 2. checks-macos and checks-macos-b drop full guard shards for a mac-tagged slice, as Windows has. 3. The 03:17 nightly skips when main's head already has a green push run; first check that the no-merge-onto-red-main gate still reads a run. 4. The lane-touched-tests macOS leg runs only for macOS-subject files. Express under R55 (CI speed). Stacks after #2916 and #2970 where hunks clash. Retrospective 15:53 CST Nov 12: also drop the macOS run of lint/check_unknown_reads_contract.py (checks.yml:1183), a pure lint. Coordinator 15:57 CST Nov 12: step ci-linux-windows-once (R62, R63) folded into this lane, same file and shape. Safety hole, owner-relayed 21:44 CST Nov 12 from Degen's round-1 review of its PR 708 (retrospective and coordinator 21:44-21:46 CST): under once-per-batch CI (R61-R63) a push to main runs no suite, so its run is always green. The shared no-merge-onto-red-main check reads main's newest run per event group, so an empty green push run can hide an older red run. #3042 and #3021 must change the check to read the integration PR's run on the same tree, or keep their push suites, with a test: red integration run, then green empty push run, must refuse. #3004 (skill text only) is held until then. R61 part 3 stays unverified. Coordinator 22:09 CST Nov 12: lane session_013NEJL3q82Z6A8yHbNvQ5Nf has both once-per-batch holes (empty green push run hides red; docs-only run skips suites), red test first. #3004 stays held until both close. Lane 15:58 CST Nov 13 (coordinator 15:57): session_013NEJL1RHFvXyfXKmdj9BQe replaces session_013NEJL3q82Z6A8yHbNvQ5Nf (past 380k tokens). It builds #3042, #3217 and #3088 as one PR after #3278 merges, plus two docs fix-afters (nightly-backstop text; CLAUDE.md rule roles-each-layer-proves-once). It builds nothing for the open owner pick on step push-skip-partial-run-record. Top priority, tracked until on main. Coordinator 18:51 CST Nov 13 (18:51): #3302 (ci-speed-stack-4, head 723e54e9) exists; runner 10 closes #3282, #3291 and #3296. Close this step when the stack is on main.",
- "updatedAt": "2026-11-13T21:55:10-06:00",
+ "updatedAt": "2026-11-14T00:13:40-06:00",
  "order": -300
 }

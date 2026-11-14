@@ -1,11 +1,11 @@
 {
   "title": "Every test file runs in CI",
   "phase": "now",
-  "status": "ready",
+  "status": "done",
   "order": 60,
   "owner": "coordinator",
   "lane": "",
   "why": "#1502 added lint/test_report_guard_push_checks.py and no workflow ran it until #1585.",
-  "note": "Fix: a lint lists every test_*.py and requires each in a workflow or the CI scope list. Done check: a test where an unwired test file fails the lint. Filed from lane notes-fix-large-3 ([ended:lane:-notes-fix-large-3]), 18:04 CST Nov 7, at the coordinator's ask. Built as #1685, with runner 8 (coordinator 18:50 CST). #1686 (docs only: the notes' Fix lines) is stacked on #1685. Lane cleared 08:59 CST Nov 12: its session (was \"lane: test-file-in-ci\") is archived (coordinator ask 08:57 CST Nov 12, sweep of ended session ids).",
-  "updatedAt": "2026-11-12T08:59:00-06:00"
+  "note": "Fix: a lint lists every test_*.py and requires each in a workflow or the CI scope list. Done check: a test where an unwired test file fails the lint. Filed from lane notes-fix-large-3 ([ended:lane:-notes-fix-large-3]), 18:04 CST Nov 7, at the coordinator's ask. Built as #1685, with runner 8 (coordinator 18:50 CST). #1686 (docs only: the notes' Fix lines) is stacked on #1685. Lane cleared 08:59 CST Nov 12: its session (was \"lane: test-file-in-ci\") is archived (coordinator ask 08:57 CST Nov 12, sweep of ended session ids). CLOSED 00:13 CST Nov 14 on proof (lane ci-steps-proof-read (session_013NEJL1K7SBy1DvaQGoTSZg), read from main 8e9f2b153 at 00:11 CST, relayed by the coordinator; triage did not re-read main): lint/test_windows_split.py class CiCoverage (l.2476) is run by checks.yml l.425; on main via #2038, batch 73 (7ce947156). The link from #1685 and #1686 to that lint is unread.",
+  "updatedAt": "2026-11-14T00:13:40-06:00"
 }
