@@ -349,6 +349,14 @@ meets each item below. What the tool does when it runs is written in `confirm` i
 8. `merge.readyChecks` is an optional list of step names of the repo's `checks` job. On a draft, `merge <pr> --confirm` runs
    them through `bin/ci-job checks --step NAME ...` before any push and before the ready mark. A FAIL or unknown stops the
    draft: `lanes-run-no-full-ci-job`, a lane runs no full CI job. Absent: no ready check runs, and one line says so.
+   With the list present, the same run (the pre-ready run, `merge <pr> --ready` or `--confirm` on a draft) also reads the debt-close
+   lint and the open-PR clash (the PR's head against every other open PR on its base, from the merge tool's own host: GitHub REST
+   `GET pulls`, which a lane or runner can call; a PR whose changed paths meet none of this head's is skipped before any merge-tree).
+   It prints one line per check, `pass NAME`, `fail NAME: why` or `unknown NAME: why`, and a PR whose base is not the default branch is
+   checked on the merge of its head with that base. `merge <pr> --fast-checks` is the same run, read-only: on a dry merge of the PR onto
+   its base (a temporary worktree and one commit object, no ref), no lock, no push, no ready mark, no comment, no records page; exit 0 only when
+   every line is a pass. Cost: one ci-job run, one debt-close lint, one list read (a page per 100 open PRs), one fetch of every branch head,
+   one `git diff` per other open PR on the base, a merge-tree per overlap, one worktree; the only file written is ci-job's log.
 
 ## Adoption checklist, the merge tool
 
