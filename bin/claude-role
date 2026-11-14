@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+# claude-role <role> [claude args]: start `claude` as a local session of one tier, so the session-start hook records the role
+# (hooks/session_role.py). Roles: coordinator, triage, batch-runner. A lane is never started here; it takes no role file.
+# The role goes in CS_SESSION_ROLE. Exit 2: no role, or a role outside the list. Else the exit code of `claude`.
+import os, shutil, subprocess, sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
+from session_role import SESSION_ROLES  # noqa: E402  the one home of the roles a launcher may start
+def main(argv):
+    if not argv or argv[0] not in SESSION_ROLES:
+        print("usage: claude-role <%s> [claude args]" % "|".join(SESSION_ROLES), file=sys.stderr)
+        return 2
+    exe = shutil.which("claude")
+    if not exe:
+        print("claude-role: `claude` is not on PATH", file=sys.stderr)
+        return 127
+    env = dict(os.environ, CS_SESSION_ROLE=argv[0])
+    if os.name == "nt":  # no exec that keeps the console and the exit code on Windows
+        return subprocess.run([exe, *argv[1:]], env=env).returncode
+    os.execve(exe, [exe, *argv[1:]], env)
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -9,6 +9,23 @@ cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\
 session_id=$(printf '%s' "$input" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
 source=$(printf '%s' "$input" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
 
+# The launcher's role file (bin/claude-role sets CS_SESSION_ROLE): hooks/session_role.py records the role for this session id,
+# or removes the session's file when the variable is unset, so the guard and the merge tool can read a local session's tier
+# (decision session-tiers). Local sessions only; a cloud session reads its tags. Any failure is silent. Cost: one python
+# start and one small file write or delete per start, no process kept, no timer.
+if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
+  sr_script="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session_role.py"
+  [ -f "$sr_script" ] || sr_script="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/session_role.py"
+  if [ -f "$sr_script" ]; then
+    for sr_py in python3 python; do
+      sr_bin=$(command -v "$sr_py" 2>/dev/null) || continue
+      case "$sr_bin" in */WindowsApps/*) continue ;; esac
+      printf '%s' "$input" | "$sr_bin" "$sr_script" write >/dev/null 2>&1
+      break
+    done
+  fi
+fi
+
 # tier_line: a cloud session (the CLAUDE_CODE_REMOTE read install.sh makes) or a session with a
 # CLAUDE_CODE_REMOTE_SESSION_ID tells the session how to find its tier (decision session-tiers). A local
 # session with a remote session id also reads its own record, so lane_session_hit (decision
