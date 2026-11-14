@@ -1,0 +1,14 @@
+{
+ "id": "stable-switch-map-check",
+ "title": "Before a child repo switches to the map skill at @stable, its map-check passes on stable's skill",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane merge-flow-after-anthropic found that a child pinning the map skill at @stable meets format drift as stable moves. Banchi's `make map-check` is red on the switch: the old pin read format 5, stable's skill reads 6, and bumping to 6 gives MAP1 and MAP10.",
+ "source": "Coordinator 21:12 CST Nov 13, from the lane's measurement (lane clock 21:14); triage has measured nothing.",
+ "note": "Triage 21:14 CST Nov 13: home, mailaudit and q_max pass (lane report). Child draft PRs: home #728 (c63fad1b5940), mailaudit #324 (b359fda8c490), banchi #1098 (9e33a74b493f), q_max #1171 (21309ddf98b7, five owed items building); all draft, tests being re-pointed. Fix: a check, before each child switches, that its map-check passes on stable's skill; red case first. Coordinator pick, undoable (undo: close the draft): the lane builds a banchi map-format-6 draft PR under #1098, docs lines only. Triage agrees; it keeps behaviour and widens no shared tool.",
+ "updatedAt": "2026-11-13T21:14:32-06:00"
+}
