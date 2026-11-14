@@ -12346,15 +12346,11 @@ class RedMainBrake(Env):
 
     def land_revert(self, pr, reverted, extra=None, catch_up=False, titled=None):
         """The revert of commit `reverted` lands on main as pull request #pr, as a merge commit. `extra` names a file the merge adds of its own, so the
-        merge's tree is not the revert's tree. The feat branch takes the new main, as a lane does. `catch_up` makes the pull request's head a merge of a
-        catch-up commit of main over the revert, so the revert sits one parent below that head. `titled` makes the head a commit with that title that
-        reverts nothing. -> (the pull request's head, which is the revert unless a flag says otherwise, and main's new head)."""
+        merge's tree is not the revert's tree. The feat branch takes the new main, as a lane does. `catch_up` pushes a commit to main after `reverted`,
+        then makes the pull request's head a merge of that main over the revert, so the revert sits one parent below that head. `titled` makes the head
+        a commit with that title that reverts nothing. -> (the pull request's head, which is the revert unless a flag says otherwise, and main's new head)."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
-        if catch_up:
-            sh(o, "git", "checkout", "-q", "-B", f"catch-up-{pr}", "origin/main")
-            put(os.path.join(o, f"catch-up-{pr}.txt"), "catch-up\n")
-            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", f"Catch up for #{pr}"); sh(o, "git", "push", "-q", "origin", f"catch-up-{pr}")
         sh(o, "git", "checkout", "-q", "-B", f"revert-{pr}", "origin/main")
         if titled:
             put(os.path.join(o, f"titled-{pr}.txt"), "not a revert\n")
@@ -12362,8 +12358,13 @@ class RedMainBrake(Env):
         else:
             mainline = ["-m", "1"] if len(sh(o, "git", "rev-list", "--parents", "-n", "1", reverted).split()) > 2 else []
             sh(o, "git", "revert", "--no-edit", *mainline, reverted)
-        if catch_up:
-            sh(o, "git", "merge", "-q", "--no-ff", "-m", f"Merge branch 'catch-up-{pr}' into revert-{pr}", f"catch-up-{pr}")
+        if catch_up:  # main moves on, and the head merges that main over the revert
+            sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+            put(os.path.join(o, f"catch-up-{pr}.txt"), "catch-up\n")
+            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", f"Catch up main for #{pr}"); sh(o, "git", "push", "-q", "origin", "main")
+            sh(o, "git", "checkout", "-q", f"revert-{pr}")
+            sh(o, "git", "fetch", "-q", "origin")
+            sh(o, "git", "merge", "-q", "--no-ff", "-m", f"Merge branch 'main' into revert-{pr}", "origin/main")
         revert = sh(o, "git", "rev-parse", "HEAD")
         sh(o, "git", "push", "-q", "origin", f"revert-{pr}")
         sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
@@ -12601,6 +12602,7 @@ class RedMainBrake(Env):
         self.assert_revert_one_parent_deeper(B, H, M)
         runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
         rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, H)})
+        self.assertNotEqual(rc, 0, "the lift read a revert line one parent below main's second parent: the merge went through")
         self.refused_by_red_main(rc, out, before)
         self.assertIn("run 903", out)
 
@@ -12615,6 +12617,7 @@ class RedMainBrake(Env):
         self.assertNotIn("This reverts commit", sh(self.co, "git", "log", "-1", "--format=%B", X), "the fixture's titled head names a revert")
         runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
         rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, X)})
+        self.assertNotEqual(rc, 0, "a head titled as a revert lifted the red main: the merge went through")
         self.refused_by_red_main(rc, out, before)
         self.assertIn("run 903", out)
 
