@@ -28,6 +28,10 @@ ADVERBS = ("even", "yet", "currently", "actually", "really", "still", "also", "j
 # and its verb, after not, and before the act.
 ADVERB_PATTERN = "(?:%s|[a-z]{3,}ly)" % "|".join(ADVERBS)
 CONDITIONALS = ("if", "unless", "whether", "would")
+# The progress-claim check's words (report_guard.PROGRESS_PHRASE_RE): what "nearly", "almost" or "close to" can be followed
+# by, and who a wait is on when it is a wait on the owner, not on CI or a PR. They live here, the one home of word lists.
+PROGRESS_END_WORDS = ("done", "finished", "complete", "there")
+OWNER_WAIT_WORDS = ("you", "your", "the owner", "owner's")
 REASON_LINKS = ("because",)
 DETERMINERS = ("a", "an", "the", "this", "that", "these", "those", "its", "their", "his", "her", "our", "my", "your")
 JOINERS = ("and", "but", "or", "so", "yet", "then")
