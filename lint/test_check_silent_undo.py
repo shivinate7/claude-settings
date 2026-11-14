@@ -2388,6 +2388,21 @@ class DropsLinesHint(unittest.TestCase):
         hints = C.misplaced(self.r.dir, "origin/main..HEAD")
         self.assertTrue(any(sha[:9] in h and self.HINT in h for h in hints), "misplaced() does not name the commit: %r" % hints)
 
+    def test_the_merge_refusal_prints_the_complete_remedy(self):
+        """merge.undo_check refuses with the same remedy: the commit message between the markers, which git reads back as a
+        trailer, and the proof command."""
+        import merge
+        self.land_pr()
+        self.revert_with("Bring Card back")
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(merge.Stop) as cm:
+            merge.undo_check(self.r.dir, "origin/main")
+        text = str(cm.exception)
+        self.assertIn("app.txt", text, "premise: the refusal names the file")
+        block = printed_message(text)
+        self.assertIsNotNone(block, "the merge refusal prints no commit message between the marker lines: %r" % text)
+        self.assertIn("app.txt -- the owner wants Card back", read_back(block), "git reads no Drops-lines trailer from the merge refusal's message")
+        self.assertIn(PROOF, text, "the merge refusal does not print the proof command: %r" % text)
+
     # ------------------------------------------------ reads of the message
 
     def test_a_folded_parsed_trailer_does_not_hide_a_misplaced_line(self):
@@ -3189,6 +3204,21 @@ class RevivedNote(unittest.TestCase):
         self.assertIsNotNone(e, "premise: check() reads the octopus merge as UNKNOWN")
         self.assertIsInstance(getattr(e, "notes", None), list,
                               "the UNKNOWN for the octopus merge carries no .notes list: %r" % (getattr(e, "notes", None),))
+
+    def test_the_merge_refusal_for_an_octopus_finding_carries_the_complete_remedy(self):
+        """The other refusal of merge.undo_check: an Unknown that carries findings. It prints the same remedy and proof command."""
+        import merge
+        self.start(union=True)
+        self.merge_main()
+        self.octopus()
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(merge.Stop) as cm:
+            merge.undo_check(self.r.dir, "origin/main")
+        text = str(cm.exception)
+        self.assertIn("could not read the whole history", text, "premise: the refusal is the octopus Unknown that carries findings")
+        block = printed_message(text)
+        self.assertIsNotNone(block, "the octopus refusal prints no commit message between the marker lines: %r" % text)
+        self.assertIn("app.txt -- the owner wants Card back", read_back(block), "git reads no Drops-lines trailer from the octopus refusal's message")
+        self.assertIn(PROOF, text, "the octopus refusal does not print the proof command: %r" % text)
 
     def test_main_prints_the_finding_then_unknown_and_exits_1_without_strict(self):
         self.start(union=True)
