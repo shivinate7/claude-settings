@@ -22,7 +22,7 @@
 
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses
-nothing. Among commits the first reason for a path wins, and a later commit does not replace it. A PR-body line wins over the commits. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
+nothing. Among commits the oldest reason for a path wins, and a later commit does not replace it. In the merge tool (the CLI and CI pass no body) a PR-body line wins over the commits. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
 reason. No switch turns the check off.
 
 A refusal prints the whole remedy, so the author can copy it: a commit message between the lines
@@ -82,8 +82,10 @@ changed lines are a new edit, so the reversal dial stays at one line until a mea
 - A rewrite by the resolver, when a line of the same hunk reads very much like the lost line. Adding
   tokens to a line (a new argument, a trailing clause) is a rewrite. A negation voids that only when it sits
   inside the original words (`deploy now` became `deploy not now`). A negation after the last original word
-  is new text beside the old, so the line is not lost. Trailing punctuation of the old line is no word.
-  Two cases keep the plain rule, where a negation anywhere counts: an old line with no word (`}`), and a
+  is new text beside the old, so the line is not lost, but only in a prose file (.md, .txt, .rst, by lower-cased
+  extension). In any other file a negation anywhere in the new line counts (`retry = 3` became
+  `retry = 3 if not CI else 0`). Trailing punctuation of the old line is no word.
+  Two more cases keep the plain rule in prose, where a negation anywhere counts: an old line with no word (`}`), and a
   new line with a comment opener (`#`, `//`, `--`, `/*`) that the old line lacks, since the old words may
   sit inside a comment.
 - A stale value put back is a reversal, never a rewrite. A similar line excuses a drop only when it
