@@ -56,13 +56,17 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    session then moves the pin in a lane of its own. No bot and no schedule moves it. That tool reads
    only the `ste-lint` and `zizmor` pins. Other claude-settings pins can drift unseen.
    Other pins keep full-SHA pinning. Which bot, if any, bumps them is set per repo.
-8. **Batch lanes.** Batch lanes into one integration branch and one integration PR. A batch runs one
+8. **Batch lanes.** The batch rules below stay live until the cutover (decision `all-repos-switch-together`).
+
+   After the cutover (target, not live): each lane PR merges alone through the merge tool, on its own green run and the review its risk needs (rule `git-integration-branch-merge`). Each lane PR goes ready once, after its last review and lane lint (decision `draft-until-reviewed`). After a merge, main's run runs the full suites and the Windows shards (rule `roles-each-layer-proves-once`). A breaking merge is one after which main's newest finished run is red. Its revert PR is an ordinary lane PR, merged with `--base-red-ok` (decision `no-merge-onto-red-main`). After a red main, merges resume when the revert merges, with the revert's own run still going (owner pick 745 b, 2026-11-13 13:20 CST). While main is red, a lane that touches none of the blamed paths may merge (owner pick 746 b; the blame step is not built). Both are target, not live: the built brake still waits for the revert's run on main to be green.
+
+   Until the cutover, batch lanes into one integration branch and one integration PR. A batch runs one
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
    ready. Each lane PR stays a draft until the integration PR merges. A lane runs
    `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
    each lane head before the build starts, once per lane. A red lane does not join. Before it marks
-   the integration PR ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration PR number>`
-   on the batch head, after the draft step's page push. The batch ready route (`merge --batch-build NAME --ready`) runs the lint, then the repo's ready checks (`merge.readyChecks`), and no touched tests.
+   the PR ready, the batch runner runs `~/.claude/bin/merge --lane-lint <PR number>`
+   on the head, after the draft step's page push. The ready route (`merge <pr> --ready`) runs the records step and the repo's ready checks (`merge.readyChecks`).
    A lane's `merge --lane-lint <pr> --touched-tests` runs each test file the diff touches, once, in the lint worktree, after the lint passes. That catches a test that fails only on that head before the CI run. A ref target posts no comment, so it cannot
    satisfy the join. A FAIL keeps it a draft. The lint counts a clash between two heads only when both
    merge clean with their base (decision `lanes-run-no-full-ci-job`). A hand list of checks never stands in for that run: `bin/ci-job`
@@ -79,15 +83,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    the running batch may merge (decision `no-merge-during-batch-ci`, the contains rule). A drop
    changes the running batch's head, so the brake refuses that merge until the next batch is built
    on the new head.
-   The merge tool enforces the freeze (decision `batch-freeze-lane-set`, a batch's lane set freezes at its build). `merge --batch-build NAME PR...`
-   builds the integration branch `batch-NAME` and its draft integration PR, and writes the frozen lane set into the PR body. A changed set is
-   refused, so a late PR goes to the next batch. `merge --batch-build NAME --ready` runs the one lane lint on the batch head, then the ready
-   checks, then records the head that passed. When the head moved since the last lint, it lints again. It does not mark the PR ready:
-   the tool sends no GraphQL, so it names the route, and the batch runner marks the PR ready. A FAIL of the lint or of a ready check
-   stores the lanes it names (`Blamed:`). For a red CI run, `merge --batch-build NAME --blame PR --run <run URL>` stores the blame. It
-   refuses a run that is still running, a run that did not fail, a run on an older head, and a lane outside the batch.
-   `merge --batch-drop NAME PR` takes off only a stored-blamed lane and its dependents, rebuilds from the frozen set, runs no lane lint, and asks
-   to return a ready PR to draft. Any other lane waits for the next batch. `--on BRANCH` stacks a batch on a running batch.
+   Each lane merges alone: `merge <pr> --confirm` takes one PR, with no batch to build, freeze, blame or stack.
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
    the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,
@@ -101,8 +97,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    lanes is two names, so read each lane's diff before you drop either. Example: the failing job
    reads `lint/foo.py`. Lane A's own search lists `lint/foo.py` and lane B's lists nothing. Blame A.
    (At 17:10 CST on Nov 8 two searches printed together, so the runner blamed lane B for lane A's
-   red.) Store the blame with `merge --batch-build NAME --blame PR --run <run URL>`. Then drop that lane and any lane that depends on it. Rebuild the branch from main without them. Never
-   revert. A lane dropped by a revert re-applies its diff after it merges main, and checks that each
+   red.) Then revert the blamed lane's merge as an ordinary PR, merged with `--base-red-ok "<reason>"` (rule `git-red-main-reverts`). A lane whose merge was reverted re-applies its diff after it merges main, and checks that each
    file is there. A job that ends at its cap with no red CI step is re-capped or split. That is not a
    reason to drop the lane.
    A lane that is red on form (record format, version bump, lint) is dropped like any red lane. Its
@@ -117,7 +112,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    `batch-freeze-lane-set`). Fix the dropped lane in its own lane. It joins the next batch after its fix. A held lane
    (rule `roles-review-cap-three`, three review rounds) is the exception. Drop it and park it. It
    gets no fix lane until the owner decides.
-   No merge to main while a batch's run is in progress. The owner is included. Decision
+   Until the cutover, no merge to main while a batch's run is in progress. The owner is included. Decision
    `no-merge-during-batch-ci` (no merge while a batch runs) holds the rule. A merge needs a green
    run on the current base (decision `merge-needs-current-base`). A head that lacks the base tip is
    refused, except a small move.
@@ -157,7 +152,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    PASS fix verifier, a merge whose second parent is not on main. The first fix verifier on a log with
    no Fix check line meets no merge-shape test, so the verifier's read is the check there. The lane never works around the refusal. A FAIL starts a
    new lane at round 1.
-   Batch across sessions too (`git-integration-branch-merge`).
+   Until the cutover, batch across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
    notice. In cloud, mark ready by MCP `update_pull_request` `draft: false` (route
    pr-ready-mcp-cloud); the same CI-wake notice is meant to follow (decision `ci-wait-reads-run-status`; unmeasured in cloud), so
@@ -204,7 +199,10 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     PR 293 (the Windows merge-test slice), is the case for it. A CI step's `if:` names only its own
     scope flag, or a non-PR event (step 19).
 17. **Slice tests on a slow platform.** On PRs, run a platform-specific test slice. Run the full suite
-    on main and nightly.
+    on main and nightly, except on macOS (R61): every macOS run takes the slice, and a push to main
+    starts no macOS job (a job-level `github.event_name != 'push'`, since a step-level skip still starts
+    the runner). The nightly skips when main's head has a green push run and the newest completed
+    nightly is green (the `nightly-skip` job), and `scope` waits on that job, so nothing is cancelled.
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If the saving is
     under 20%, stop.
 19. **Run one scope job first.** Make it a cheap Linux job named `scope`. Every other job needs it.

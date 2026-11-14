@@ -142,7 +142,7 @@ Each id takes the plain name of its group. Words per id follow the id.
 - **No destructive git; archive; no machine-wide kill** (65): `shared-trees-no-destructive-git` 15, `shared-trees-archive-then-delete` 28, `shared-trees-no-machine-wide-kill` 22.
 - **Own ports; confirm; reverify; absolute delete path** (50): `shared-trees-own-ports-data` 15, `shared-trees-confirm-before-write` 14, `shared-trees-reverify-after-incident` 6, `shared-trees-delete-names-absolute-path` 15.
 - **Main only by PR; no failing merge; cloud gh refused** (53): `git-main-only-by-pr` 25, `git-never-merge-failing-ci` 4, `gh-write-cloud` 24.
-- **No merge during batch CI** (21): `git-no-merge-during-batch-ci` 21.
+- **No merge during batch CI, retired** (21): cites of `git-no-merge-during-batch-ci` 21. Its replacement is `git-red-main-reverts`.
 - **CI wait and wake rules** (54): `git-ci-wait-checks-in` 36, `git-ci-done-comment-wakes` 18.
 - **Output and remedy** (20): `git-never-discard-output` 11, `git-remedy-never-names-target` 9.
 - **Record ids and files** (74): `git-slug-then-claim-number` 33, `git-cite-by-id` 10, `git-record-own-file-per-kind` 10, `git-one-record-per-question` 21.
