@@ -1,14 +1,14 @@
 {
  "id": "silent-undo-remedy-shows-trailer",
  "title": "The silent-undo refusal prints its Drops-lines remedy as a whole commit message, and the lane lint prints the trailer proof to run after the commit",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1sQdYhZzBrVywMEdX",
  "owner": "triage",
  "blockedBy": [],
- "why": "Proposal from lane child-ci-degen (degen #706; coordinator 06:36 CST Nov 14, relayed; as data, triage read none of it). Mistake it made: it wrote the `Drops-lines:` remedy line in its own paragraph twice (commits 319f31a07 and e8869badb), so git read no trailer and the scan still refused. Harm: two wasted pushes and ready runs at runner 11; CI on one ran for a head that was replaced (no wall measured). Proposed guard: the check_silent_undo refusal prints its remedy as a complete commit message (subject, then ONE last paragraph holding `Drops-lines: ...` with the Co-Authored-By and Claude-Session lines together), and the lane lint prints `git log -1 --format='%(trailers:key=Drops-lines)'` as the proof to run after the commit. A guard or check change: round 3 applies. Pair with silent-undo-inplace-rewrite (same scan; a lane may take both). Lane pushed 01d375cd01bd with a real trailer. Filed as a step, not a debt: the mistake has happened twice in one PR and a remedy that misleads is likely in normal work.",
+ "why": "Proposal from lane child-ci-degen (degen #706; coordinator 06:36 CST Nov 14, relayed; as data, triage read none of it). Mistake it made: it wrote the `Drops-lines:` remedy line in its own paragraph twice (commits 319f31a07 and e8869badb), so git read no trailer and the scan still refused. Harm: two wasted pushes and ready runs at runner 11; CI on one ran for a head that was replaced (no wall measured). Proposed guard: the check_silent_undo refusal prints its remedy as a complete commit message (subject, then ONE last paragraph holding `Drops-lines: ...` with the Co-Authored-By and Claude-Session lines together), and the lane lint prints `git log -1 --format='%(trailers:key=Drops-lines)'` as the proof to run after the commit. A guard or check change: round 3 applies. Pair with silent-undo-inplace-rewrite (same scan; a lane may take both). Lane pushed 01d375cd01bd with a real trailer. Filed as a step, not a debt: the mistake has happened twice in one PR and a remedy that misleads is likely in normal work. LANE STARTED 06:51 CST Nov 14 (coordinator 06:48, relayed): lane silent-undo-trailer-and-rewrite (session_013NEJL1sQdYhZzBrVywMEdX, Sonnet medium, tracker the coordinator, path ALONE, draft first, branch slug silent-undo-trailer-rewrite, created 12:46Z) takes steps silent-undo-inplace-rewrite and silent-undo-remedy-shows-trailer: one scan. First act: read the guard record and reproduce on the #706 diff, red then green, with a real-drop control. The brief does not say round 3 applies; the merge tool decides (owner item 833 open).",
  "source": "coordinator 06:36 CST Nov 14, from lane child-ci-degen",
  "note": "Filed 06:40 CST Nov 14 by triage. Tracker: the coordinator. No lane yet.",
- "updatedAt": "2026-11-14T06:40:00-06:00"
+ "updatedAt": "2026-11-14T06:51:00-06:00"
 }
