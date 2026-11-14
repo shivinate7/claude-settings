@@ -1,0 +1,10 @@
+{
+ "id": "own-overlaps-standing-grant",
+ "at": "2026-11-13T14:17:00-06:00",
+ "title": "Standing grant to act on overlaps between lane branches (owner typed it in runner 10's chat; the reading is unconfirmed)",
+ "ruling": "Owner 2026-11-13 14:17 CST, typed in runner 10's chat, as quoted in the merged text of PR #3233: the batch runner may act on overlaps between lane branches. Runner 10 reads that as a plain merge of one lane's head into another lane's branch, under the limits of the main-merge bullet (no rebase, no force push, a behaviour-changing conflict goes to the coordinator, a fix verifier and a fresh review log on each new head). The owner has not confirmed that reading (the merged text says so). Process-only grant text; it covers the act it names and no variant.",
+ "quote": "you have a standing grant to act on overlaps by me, owner",
+ "source": "Quoted in .claude/CLAUDE.md Standing grants and docs/decisions/standing-merge-grant.md by PR #3233 (merged 04:03 CST Nov 14). Triage did not see the chat; the quote is second-hand through that PR. Filed by triage at the coordinator's sort of #3233 (04:06 CST Nov 14).",
+ "status": "open",
+ "step": "runner-merge-main-grant"
+}

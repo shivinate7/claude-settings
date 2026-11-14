@@ -1,7 +1,7 @@
 {
  "id": "runner-merge-main-grant",
  "title": "Standing grant: the batch runner may push a plain merge of main into a handed-in PR branch",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Owner 13:12 CST Nov 13 answered \"a\" to the coordinator's standing-grant question (relayed by the coordinator).",
  "source": "owner 13:12 CST Nov 13, relayed by the coordinator",
- "note": "Doing. The batch runner may push a plain merge of main into a handed-in PR branch when no lane has pushed there in 2 h. No rebase and no force push. A conflict that changes behaviour goes back to the coordinator. Each new head gets a fix check and a fresh record. Home: .claude/CLAUDE.md Standing grants; lane runner-merge-main-grant writes it (coordinator 13:12 CST). Not page item 749, which stays open. Home moved 13:13 CST Nov 13 (coordinator 13:14): docs/decisions/standing-merge-grant.md (new bullet), with a pointer bullet in .claude/CLAUDE.md Standing grants; same lane.",
- "updatedAt": "2026-11-13T13:13:53-06:00"
+ "note": "Doing. The batch runner may push a plain merge of main into a handed-in PR branch with no clock rule (owner 23:40 CST Nov 13, waiting-page item 806 d, replaces the 2-hour clause; the 2 hours was never his number). No rebase and no force push. A conflict that changes behaviour goes back to the coordinator. Each new head gets a fix check and a fresh record. Home: .claude/CLAUDE.md Standing grants; lane runner-merge-main-grant writes it (coordinator 13:12 CST). Not page item 749, which stays open. Home moved 13:13 CST Nov 13 (coordinator 13:14): docs/decisions/standing-merge-grant.md (new bullet), with a pointer bullet in .claude/CLAUDE.md Standing grants; same lane. Landed 04:08 CST Nov 14: PR #3233 (branch main-merge-grant-bullet) merged 04:03 CST onto main 48728d122be0 (coordinator and runner 10, relayed). Triage read the merged diff (REST get_diff on #3233): .claude/CLAUDE.md Standing grants gets the bullet \"Main merge into handed-in branches\" with no clock rule, and docs/decisions/standing-merge-grant.md gets the matching bullet; the same PR also adds an \"Overlaps between lane branches\" bullet (see ruling own-overlaps-standing-grant). Matched to this step by the ruling text (coordinator asked 04:06). Marked done with main 48728d12; not re-read on main itself.",
+ "updatedAt": "2026-11-14T04:08:08-06:00"
 }
