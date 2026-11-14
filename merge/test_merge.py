@@ -6199,7 +6199,7 @@ class ReadyChecksRun(unittest.TestCase):
         def stub(args, *a, **k):
             if args[1:2] == [merge.CI_JOB]:
                 calls.append(list(args))
-                return 0, ""
+                return 0, "\n".join("PASS " + c for c in checks)  # a step with no line reads unknown (step_verdicts)
             return real(args, *a, **k)
         with unittest.mock.patch.object(merge, "sh", stub):
             merge.run_ready_checks(wt, 7, "main", checks)
