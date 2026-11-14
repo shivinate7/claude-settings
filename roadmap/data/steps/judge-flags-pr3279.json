@@ -1,0 +1,14 @@
+{
+ "id": "judge-flags-pr3279",
+ "title": "Back or cut the two lines the #3279 prose judge flagged in docs/debts/windows-shards-outgrow-caps.md (lines 3 and 6)",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 02:12 CST Nov 14 (relayed; the merge tool printed the notes on #3279, which merged 02:09 CST anyway): docs/debts/windows-shards-outgrow-caps.md :3 and :6 are flagged as unbacked; the cites at ci-job-caps.md:47, :60 and :90 do not back the claims. The coordinator sends them to the lane that wrote the file.",
+ "source": "Same family as judge-flags-batch95, judge-flags-batch101, judge-flags-batch102 (each: back or cut the flagged lines); the prose judge's notes do not block a merge, so each batch gets one small step. Neighbours: judge-sees-named-code (ready), prose-judge-reads-all-cites (ready): either may be why the cites read as unbacked.",
+ "note": "Triage 02:16 CST Nov 14: done check: the merge tool's prose judge run on the file reads both lines as backed or the lines are cut; the lane first reads ci-job-caps.md:47, :60 and :90 to say whether the claims are true (a stale cite) or the judge misreads them (a false alarm; then the line goes to prose-judge-reads-all-cites). A docs edit, no guard change. Not started.",
+ "updatedAt": "2026-11-14T02:16:00-06:00"
+}
