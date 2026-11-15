@@ -1996,13 +1996,15 @@ def claim_only(root, cfgrel, base, linted, live):
     review when the page goes stale, so it moves the head by nothing a record or a lint read. That holds only for a page the generator wrote, so a
     page-only commit counts when page_is_generated proves it, and is False when the page differs (a hand edit is a change a review must see, never a
     carry). A generator that cannot run raises Stop (unknown), never True: the callers keep it at stale or unknown, never done. Any other commit is
-    False. Any other read that fails is False. Commits come from the clone, so the caller fetches the branch first.
-    Cost: per page-only commit one temporary worktree, one `git show` and one generator run (page_is_generated; measured median 0.56 s, n=5, on a real tool page commit)."""
+    False. Any other read that fails is False. Commits come from the clone, so the caller fetches the branch first. A base with no stamp kinds
+    still carries a generated page, because the generator proves the page alone; it carries no claim, since no folder there holds records.
+    Cost: per page-only commit one temporary worktree, one `git show` and one generator run (page_is_generated; measured median 0.56 s, n=5, on a real tool page commit).
+    A base with no kinds costs the merge-base and rev-list reads once, then page_only's reads per commit (one, two for the PAGE_SUBJECT subject) until the first commit that is no page commit."""
     try:
         _, kinds = base_stamp(root, cfgrel, f"origin/{base}")
     except Stop:
         return False
-    if not kinds or git(root, "merge-base", "--is-ancestor", linted, live)[0]:
+    if git(root, "merge-base", "--is-ancestor", linted, live)[0]:
         return False
     c, rows = git(root, "rev-list", "--parents", f"{linted}..{live}")
     if c or not rows.strip():
@@ -2017,6 +2019,8 @@ def claim_only(root, cfgrel, base, linted, live):
             if page_is_generated(root, sha):  # the generator, never the subject line, proves a records page: a hand edit under the subject is no carry
                 continue
             return False  # a page commit is never a claim either: it has no Record-claim trailer to read
+        if not kinds:  # no stamp kinds: no folder is a record's, so no claim, and no read to make
+            return False
         c, files = git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", sha)
         if len(parents) != 1 or c or not head_claim(root, sha) or not all(is_record(f) for f in files.splitlines()):
             return False
@@ -4775,13 +4779,14 @@ def pr_had_head(h, head, live, base):
 
 REVIEW_MERGE_WALK = 50  # the most commits (clean merges of main) clean_merges_after walks between a record's head and the live head
 
-def merge_state(h, parents, tree):
+def merge_state(h, parents, tree, root=None):
     """-> (state, why): how the merge commit whose parents are `parents` and whose tree is `tree` relates to git's own merge of them (merge_tree,
     run in the host's checkout). States: "clean" (git's merge is clean and has exactly `tree`), "edited" (clean, and `tree` differs), "conflicted"
     (git's merge conflicts, so a hand edit is expected) or "unknown" (a parent the checkout lacks after one fetch, a git that cannot run the merge,
     or no tree named), never read as clean or conflicted. `why` is one line for "unknown", else "". When a parent is missing, the first call of a
-    run makes one fetch_branch_heads (a branch head that a main-only checkout lacks); a fork's head is on no branch of origin, so it stays unknown."""
-    root = h.cwd or "."
+    run makes one fetch_branch_heads (a branch head that a main-only checkout lacks); a fork's head is on no branch of origin, so it stays unknown.
+    `root` is the checkout to read in, else the host's."""
+    root = root or h.cwd or "."
     if missing_commits(root, *parents) and getattr(h, "heads_fetch", None) is None:
         h.heads_fetch = fetch_branch_heads(root)
     state, merged, files = merge_tree(root, *parents)
@@ -4807,22 +4812,24 @@ def edits_outside_conflict(root, parents, tree):
         raise Stop(f"git diff-tree exited {c}: {' '.join(out.split())[:200]} " + REVIEW_CITE)
     return sorted(set(f for f in out.split("\0") if f) - set(files))
 
-def clean_merges_after(h, head, live, base=None, claims=None):
+def clean_merges_after(h, head, live, base=None, claims=None, root=None, trailing_only=False):
     """True when every commit after `head`, up to the live head `live`, is a clean merge of main. A clean merge of main has two
     parents, a second parent main holds (Host.holds_head, main being `base`, else the host's base), and git's clean merge of its parents as its tree
     (merge_state). `claims`, the stamp config path: a one-parent claim commit also counts (claim_only, read in the host's checkout). A one-parent records-page
     commit (page_only) counts on the walk, with or without `claims`, but only when the committed page is what the generator writes for its tree
-    (page_is_generated): the tool's own rebuild, never a hand edit. The walk reads the page commit itself, ahead of the claims route, because it must Stop on a
+    (page_is_generated): the tool's own rebuild, never a hand edit. `root` is the checkout every git read runs in, else the host's (h.cwd).
+    `trailing_only` (the lane lint's carry, lint_carried) keeps both one-parent routes only for the commits after the newest clean merge: a claim or page
+    commit below a merge on the walk, made before that merge, ends the walk False. The walk reads the page commit itself, ahead of the claims route, because it must Stop on a
     read it cannot make and must run with no stamp config; claim_only proves a page the same way for its other callers. Both count since the
     merge tool's own claim and its page rebuild move the reviewed head by exactly that. The walk follows first parents from `live` and must reach `head` within
     REVIEW_MERGE_WALK commits. A commit with one parent (an empty commit too), a merge of three, a merge of a branch main lacks, an edited or conflicted merge, a
     longer walk and a head that is never reached are all False. A failed read, a commit read that names no tree, and a merge git cannot read
     (merge_state "unknown") raise Stop: so do a page commit whose reads fail and a generator run that fails: unknown, never False and never True.
-    Cost: one commit read per commit walked (each sha read once); one holds_head compare and one merge_state per merge commit; per one-parent
-    commit, page_only's git reads (one per commit, two only for a commit with the subject PAGE_SUBJECT), and for a page commit
-    one temporary worktree, one `git show` and one generator run (at most one per commit, never repeated for a sha; measured median 0.56 s, n=5, on a real tool page commit);
-    and at most one fetch_branch_heads a run."""
-    sha, read = live, {}
+    Cost: one commit read per commit walked (each sha read once); one holds_head compare and one merge_state per merge commit (four rev-parse starts and one
+    merge-tree start); and at most one fetch_branch_heads a run (merge_state's, for a commit the checkout lacks). Also per one-parent commit the walk reads (all of
+    them, but with `trailing_only` only those above the newest merge), page_only's git reads (one per commit, two only for a commit with the subject PAGE_SUBJECT), and for a page commit
+    one temporary worktree, one `git show` and one generator run (at most one per commit, never repeated for a sha; measured median 0.56 s, n=5, on a real tool page commit)."""
+    sha, read, root, merged = live, {}, root or h.cwd or ".", False
 
     def commit(s):
         if s not in read:
@@ -4833,22 +4840,24 @@ def clean_merges_after(h, head, live, base=None, claims=None):
         if sha == head:
             return True
         parents, tree = commit(sha)
-        if len(parents) == 1 and page_only(h.cwd or ".", sha, strict=True):
-            if page_is_generated(h.cwd or ".", sha):
+        if trailing_only and merged:
+            pass  # a claim or page made before a merge is a change the lane lint did not see
+        elif len(parents) == 1 and page_only(root, sha, strict=True):
+            if page_is_generated(root, sha):
                 sha = parents[0]
                 continue
             return False  # a page the generator did not write: a hand edit, which claim_only would not carry either
-        if claims and len(parents) == 1 and claim_only(h.cwd or ".", claims, base or h.base, parents[0], sha):
+        elif claims and len(parents) == 1 and claim_only(root, claims, base or h.base, parents[0], sha):
             sha = parents[0]
             continue
         if len(parents) != 2 or not h.holds_head(parents[1], base or h.base):  # a one-parent commit, even an empty one, is no merge of main
             return False
-        state, why = merge_state(h, parents, tree)
+        state, why = merge_state(h, parents, tree, root)
         if state == "unknown":
             raise Stop(why + " " + REVIEW_CITE)
         if state != "clean":
             return False
-        sha = parents[0]
+        sha, merged = parents[0], True
     return sha == head  # the head after the last commit the walk may read: REVIEW_MERGE_WALK commits reach it, one more does not
 
 REPLACES_LINE = re.compile(r"(?im)^[ \t]*(?:Replaces|Carries)[ \t]+#(\d+)[ \t\r]*$")  # a body line that names the source of a replacement pull request
@@ -5024,20 +5033,41 @@ def rollup_green(h, n, head):
     return bool(rows) and all(bucket == "pass" for (bucket, _), i in zip(rows, ids) if decides(bucket, i))
 
 def lint_carried(root, cfgrel, base, n, passed, live, h=None, source_passed=()):
-    """True when a lane-lint PASS on one of the heads `passed` holds for the live head `live` of pull request `n`: every commit after it is a
-    claim or a records-page commit the generator proves (claim_only, against `base`). The checkout `root` fetches the pull request's head first when it lacks `live`. A read that fails is False,
-    a generator that cannot prove a page commit too: the carry reads absent, so the lint reads not carried, never passed.
-    A PASS on a head of `source_passed` (the passes of the source a replacement names, replaces_source) holds too when its tree equals the tree of `live`
-    (same_tree, through `h`; step review-carries-by-tree).
-    The one home of that carry, for the join (lint_check), `--reviewed` and `--release-check`."""
+    """True when a lane-lint PASS on one of the heads `passed` holds for the live head `live` of pull request `n`. Three forms carry it. Claim chain: every commit after the
+    PASS is a claim or a records-page commit the generator proves (claim_only, against `base`). Clean merge of main (a lane-lint PASS carries across one, since a clean merge adds no lane change to lint):
+    every commit after the PASS, up to `live`, is a clean merge of main, read by clean_merges_after with `trailing_only`, through `h`: two parents, the second on main, and git's
+    own merge of the parents as the tree. A claim or a generated page commit made after the newest clean merge also counts (the same reads as claim_only, per commit; the stamp
+    config `cfgrel` and, for a claim, the base's stamp kinds). A claim or page made before a merge, a merge with any other change, a conflict-resolved merge, a tree that differs from git's own
+    merge and a merge git cannot read are not carried. Main is the repo's default branch (default_branch), never `base`, the pull request's own base: a merge of a stacked pull
+    request's base is no merge of main. This form needs no stamp kinds, and without `h` it does not read. Equal tree: a PASS on a head of `source_passed` (the passes of the source a
+    replacement names, replaces_source) holds when its tree equals the tree of `live` (same_tree, through `h`; step review-carries-by-tree). The lane lint carries no other form.
+    The checkout `root` fetches the pull request's head first when it lacks `live`. A read that fails is False, a generator that cannot prove a page commit too: the carry reads
+    absent, so the lint reads not carried, never passed. The one home of that carry, for the join (lint_check), `--reviewed` and `--release-check`.
+    Cost: the claim chain's git reads (claim_only) for each head of `passed`. The clean-merge form adds, for each head of `passed`, the walk's reads (see clean_merges_after's Cost).
+    At most one default_branch read a call, and none when the first head carries by the claim chain, without `h`, or with `passed` empty: a failed read is kept
+    and read as no carry for each later head."""
     if passed:
         if git(root, "cat-file", "-e", f"{live}^{{commit}}")[0]:
             git(root, "fetch", "-q", "origin", f"+refs/pull/{n}/head:refs/remotes/origin/pull/{n}")
-        try:
-            if any(claim_only(root, cfgrel, base, x, live) for x in passed):
-                return True
-        except (Stop, subprocess.TimeoutExpired, OSError):  # claim_only raises Stop when the generator cannot prove a page commit: no carry, and the by-tree carry below still reads
-            pass
+        main, main_failed = None, False
+        for x in passed:
+            try:
+                if claim_only(root, cfgrel, base, x, live):
+                    return True
+            except (Stop, subprocess.TimeoutExpired, OSError):  # claim_only raises Stop when the generator cannot prove a page commit: no carry by this form, and the others below still read
+                pass
+            if h is None or main_failed:
+                continue
+            try:
+                main = main or default_branch(root)
+            except (Stop, subprocess.TimeoutExpired, OSError):  # main unread: no merge of main can be proved
+                main_failed = True
+                continue
+            try:
+                if clean_merges_after(h, x, live, main, cfgrel, root=root, trailing_only=True):
+                    return True
+            except (Stop, subprocess.TimeoutExpired, OSError):  # a read that cannot run proves no carry
+                pass
     for x in source_passed if h is not None else ():
         try:
             if same_tree(h, x, live):
@@ -5062,8 +5092,9 @@ def lint_check(h, n, info, root, cfgrel):
     """A join needs a lane-lint PASS at the live head unless CI proved the head (decision lanes-run-no-full-ci-job): read from the repo's comment list, the one read the
     review record uses. No PASS that names the live head, a FAIL, an unreadable result, or a failed read is a Stop that names `merge --lane-lint <n>`; a failed read
     is `lane lint unknown`, never a pass. It runs before the lock, so nothing is claimed, pushed or merged. The caller passes info["head"] to confirm as
-    linted_head, so a head pushed after this read is refused there. A PASS for an earlier head also counts when every commit since is a claim (claim_only):
-    the join's own claim push, resumed, moves the head by exactly that.
+    linted_head, so a head pushed after this read is refused there. A PASS for an earlier head also counts when it carries to the
+    live head by a claim chain, or clean merges of main with at most a claim or generated page commit after the newest, and a PASS on the source a replacement names when its tree equals the live head's (lint_carried,
+    the one home); one that does not carry, an unreadable merge-tree too, refuses as `no lane-lint PASS names this head`.
     The lint is skipped for any pull request, a lane PR or a batch integration PR, when the all-jobs-passed rollup (ROLLUP_JOB) is green on info["head"], the sha the
     merge takes: CI proved that head (rule roles-each-layer-proves-once). Green is the verdict of the newest run on that head, and an older run's red row that no newer pass or pending row of the same name clears
     still refuses (rollup_green), because a draft run's skipped row stays on the head beside the ready run's pass. A rollup that is absent, red, pending or skipped in its newest run, green only
@@ -5079,7 +5110,7 @@ def lint_check(h, n, info, root, cfgrel):
     if lint == "none":
         older = lint_passed(lints.get(n, []))
         if older and not git(root, "fetch", "-q", "origin", f"+refs/heads/{info['branch']}:refs/remotes/origin/{info['branch']}")[0]:
-            if lint_carried(root, cfgrel, info["base"], n, older, info["head"]):
+            if lint_carried(root, cfgrel, info["base"], n, older, info["head"], h):
                 return
         if lint_carried(root, cfgrel, info["base"], n, [], info["head"], h, source_lint_passed(h, n, info.get("body"))[1]):
             return
@@ -5097,8 +5128,9 @@ def reviewed_read(h, cfgrel=None):
     The same list holds the lane-lint comments: a done record counts as done only with a lane-lint PASS at the live head (lint_state), else its line
     names `merge --lane-lint <n>`; no extra call. A ready pull request with no such PASS adds one rollup_green read (the check runs and the commit
     statuses, two more `gh` calls): a green all-jobs-passed on the live head reads `lint skipped`, as the join (lint_check) does, and the state stays done. Each record's clean-merge walk judges against the host's base at entry, the repo's default branch, never the pull
-    request's own base. A claim commit on the reviewed head carries both the record and the lint (claim_only, with the stamp config `cfgrel`), as
-    the join reads it; that reads git in the host's checkout, and fetches a pull request head it lacks."""
+    request's own base. A claim commit on the reviewed head carries the record (claim_only, with the stamp config `cfgrel`). The lint carries to the
+    live head by a claim chain, clean merges of main with at most a claim or generated page commit after the newest, or an equal tree with the source a replacement names (lint_carried, the one home), as the join reads it; a lint that does not
+    carry, an unreadable merge-tree too, reads `no lint` unless the rollup is green. That reads git in the host's checkout, and fetches a pull request head it lacks."""
     main, cfgrel, root = h.base, cfgrel or DEFAULT_CONFIG, h.cwd or "."
     pulls = h.pages("pulls", fields={"state": "open"})
     if not pulls:
@@ -5330,8 +5362,10 @@ def release_check(root, h, numbers, lints, root_why=None, cfgrel=None):
     (live_review_state, as `--reviewed` reads it); that record is unedited (created_at equals updated_at); the lint ran on the live head and its verdict is PASS or UNKNOWN-AT-CAP;
     the merge with the base tip is clean; and a base that is not the default branch is the head of a pull request in the call that passes.
     `root_why` says why the checkout root could not be read; then no check runs, and each number's one reason is that unknown.
-    A claim commit on the reviewed or linted head carries the record and the lint to the live head (claim_only, with the stamp config `cfgrel`,
-    DEFAULT_CONFIG when None, as main calls it), as `--reviewed` reads them.
+    A claim commit on the reviewed head carries the record to the live head (claim_only, with the stamp config `cfgrel`, DEFAULT_CONFIG when None, as
+    main calls it). The lint carries by a claim chain, clean merges of main with at most a claim or generated page commit after the newest, or, when the body names a source (replaces_source), an equal tree
+    (lint_carried, the one home), as `--reviewed` reads it; a lint that does not carry, an unreadable merge-tree too, reads
+    `the lint ran on <sha>, not the live head <sha>`.
     Cost: one `pulls/N` read per number and one list read of the repo's comments since the oldest of them (every page), one fetch per distinct
     base, one merge-tree per open number (it writes tree objects, never a ref), and a fetch of a pull request head the clone lacks. A number
     that reads a record from its source (carries_by_tree) and whose tree differs from the source Head's adds one fetch of main a run, and
