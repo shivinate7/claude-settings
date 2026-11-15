@@ -1,0 +1,16 @@
+{
+ "id": "answered-lines-prose-fix",
+ "title": "Three prose lines still say an answered line stays until Mark read",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [
+  "answered-lines-age-out"
+ ],
+ "why": "Lane answered-lines-age-out's notes on #3327 (lane's reads, relayed by the coordinator 00:43 CST Nov 15; not read by triage): skills/waiting-page SKILL.md line 476 says \"until the owner marks it read\"; docs/design/ask-phase-out-notes.md line 66 says \"newest mark first\" while the page now sorts by the later of mark and close; the same notes file, section 5, still says a line stays until Mark read. Not fixed in #3327 so its reviewed head stays. SKILL.md line 476 already has the step waiting-page-skill-route-close-line (ready): one home, so this step takes the two notes-file lines and cites that step for the third.",
+ "source": "coordinator 00:43 CST Nov 15, from lane answered-lines-age-out's #3327 notes",
+ "note": "Todo, blocked by answered-lines-age-out (#3327 merges first). A docs follow-up lane fixes the prose lines (rule fresh-prose: bind each claim to a check). Unread by triage: the three lines on main. Tracker: the coordinator.",
+ "updatedAt": "2026-11-15T00:44:00-06:00"
+}

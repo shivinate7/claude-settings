@@ -1,0 +1,14 @@
+{
+ "id": "page-home-tag-cut-off",
+ "title": "The waiting page's home tag is cut off at 360 and 390 px wide",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Lane answered-lines-age-out saw the home tag cut off at 360 and 390 px wide, on main too (lane's read, relayed by the coordinator 00:43 CST Nov 15; not seen by triage). The owner builds for phones first and parents use phones: a screen defect, so the screen is checked at every size and theme it ships in, with a designer before the builder and a design reviewer after, per CLAUDE.md (a text-only change on an existing screen skips the designer).",
+ "source": "coordinator 00:43 CST Nov 15, from lane answered-lines-age-out's #3327 notes",
+ "note": "Todo, no lane. Defect: the home tag is cut off at 360 and 390 px wide (lane's read; widths other than these two are unread). Fix is a page template change: a verdict per screen at each size, designer first, design reviewer after. Not read: which element the home tag is, the template code.",
+ "updatedAt": "2026-11-15T00:44:00-06:00"
+}
