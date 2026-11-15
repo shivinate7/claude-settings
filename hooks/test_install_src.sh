@@ -2515,6 +2515,30 @@ skills_bak9() {
   rm -rf "$h"
 }
 
+# A failed backup fails the run: backups/skills is a file, so the hand-edited skill cannot be backed up. The run exits
+# non-zero, the live generation stays as it was, its new generation folder is removed, and the edit stays in the live skill.
+skills_bak10() {
+  name="skills_bak10: a refresh whose backup of a hand-edited skill fails exits non-zero, keeps the live generation, removes its new generation, and keeps the edit"
+  skills_bak_setup skills_bak10
+  skills_bak_run
+  if [ $rc -ne 0 ]; then bad "$name" "the first install exited $rc: $out"; rm -rf "$h"; return; fi
+  live="$cfg/.cs-current/skills/fresh-prose"
+  if [ ! -f "$live/SKILL.md" ]; then bad "$name" "scope: no live generation skill at $live"; rm -rf "$h"; return; fi
+  printf 'hand edit\n' > "$cfg/skills/fresh-prose/SKILL.md"
+  mkdir -p "$cfg/backups" && printf 'not a folder\n' > "$cfg/backups/skills"
+  before_gen=$(readlink "$cfg/.cs-current")
+  before_installs=$(ls -A "$cfg/installs")
+  skills_bak_run
+  if [ $rc -eq 0 ]; then bad "$name" "install.sh exited 0 although its backup failed: $out"
+  elif ! printf '%s\n' "$out" | grep -q 'could not back up'; then bad "$name" "the run did not fail at the backup: $(install_problems)"
+  elif [ "$(readlink "$cfg/.cs-current")" != "$before_gen" ]; then bad "$name" "the live generation moved although the backup failed"
+  elif [ "$(ls -A "$cfg/installs")" != "$before_installs" ]; then bad "$name" "a generation folder was left after the failed refresh: $(ls -A "$cfg/installs")"
+  elif [ "$(cat "$live/SKILL.md" 2>/dev/null)" != "hand edit" ] || [ "$(cat "$cfg/skills/fresh-prose/SKILL.md" 2>/dev/null)" != "hand edit" ]; then
+    bad "$name" "the hand edit is not in the live skill after the failed refresh"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
 # ---- copy-mode case: a fake `ln` that copies instead of linking must not pile up .bak entries
 # across repeated runs. Git Bash's `ln -sfn` on a Windows account without symlink rights makes a
 # real copy, so the next run sees a real file/dir where land_dir()/land_skills_dir() expect a
@@ -6683,6 +6707,7 @@ run skills_bak6
 run skills_bak7
 run skills_bak8
 run skills_bak9
+run skills_bak10
 run copymode_case1
 run backup_case1
 run backup_case2
