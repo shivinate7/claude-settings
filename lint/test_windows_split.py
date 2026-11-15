@@ -2255,6 +2255,15 @@ def eval_with(expr, event, values, default="false", draft=False):
     return eval_if(rewritten, event, default, draft=draft)
 
 
+def runs_with_values(job, st, event, values, draft=False):
+    """runs_on with one value per scope output (eval_with), the job's own if counted too. It reads the step's raw `if:`, so a
+    records-only value in `values` counts."""
+    if job["if"] is not None and not eval_with(job["if"], event, values, draft=draft):
+        return False
+    expr = st.get("if")
+    return expr is None or eval_with(expr, event, values, draft=draft)
+
+
 class SweepOnReadyPull(unittest.TestCase):
     """R62, "each suite once per batch, on the batch PR", on checks.yml. The two janitor sweep mutation steps (macOS and Windows)
     run on a ready pull_request, as they do on push, schedule and dispatch. Each case reads the real file."""
@@ -2374,10 +2383,10 @@ class ReadyPullShards(unittest.TestCase):
 
 
 class ReadyPullFullSuite(unittest.TestCase):
-    """R62, "each suite once per batch, on the batch PR", with its lean: the Windows guard and merge shards and the rest jobs run
-    on a ready pull_request whatever the scope flags say, so a docs-only ready PR runs them too. A draft pull_request with no
-    flag set runs none of their steps, and a shard's draft guard stays on its job. Push, schedule and dispatch keep their
-    flag rules. Each case reads the real file, so it is red until the change lands."""
+    """R62, "each suite once per batch, on the batch PR", with its lean: the Windows merge and rest jobs run on a ready pull_request
+    whatever the scope flags say. The guard shards run there too, but only with windows_guard set (the guard-inputs gate). A draft
+    pull_request with no flag set runs none of their steps, and a shard's draft guard stays on its job. Push, schedule and dispatch
+    keep their flag rules. Each case reads the real file."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
@@ -2391,19 +2400,37 @@ class ReadyPullFullSuite(unittest.TestCase):
             self.assertIn(base, names, f"no {base} job in the full Windows suite")
         return names
 
+    # R62 re-pointed for windows_guard; waits for the owner's grant (coordinator pick 2026-11-15 13:30 CST, not owner-typed).
     def test_a_docs_only_ready_pull_request_runs_every_step_of_the_full_suite_jobs(self):
         # Named failure: a step of a full-suite job is conditioned on a scope flag or on code, which a docs-only PR leaves false.
+        # The guard shards read windows_guard, so this case sets it true; the sibling case below sets it false.
         # The records-only condition is the one a ready pull_request does not meet: with it shut, no run step runs.
         for name in self.suite_jobs():
             job = self.jobs[name]
+            values = {"windows_guard": "true"} if (shard_base(name) or name) == GUARD_JOB else {}
             for st in job["steps"]:
                 with self.subTest(job=name, step=step_label(st)):
-                    self.assertTrue(runs_on(job, st, "pull_request", "false", draft=False),
-                                    f"{name} step {step_label(st)!r} does not run on a ready pull_request with every scope flag false")
+                    self.assertTrue(runs_with_values(job, st, "pull_request", values),
+                                    f"{name} step {step_label(st)!r} does not run on a ready pull_request with {values or 'no flag set'}")
                 if "run" in st:
                     with self.subTest(job=name, step=step_label(st), condition="shut"):
-                        self.assertFalse(runs_with_condition(job, st, "pull_request", "false", draft=False, skip_value="true"),
+                        self.assertFalse(runs_with_values(job, st, "pull_request", dict(values, records_only_skip="true")),
                                          f"{name} step {step_label(st)!r} runs on a ready pull_request with the records-only condition shut")
+
+    def test_a_docs_only_ready_pull_request_keeps_the_guard_shard_steps_off_without_windows_guard(self):
+        # The off side of the gate on the same kind of PR: with windows_guard false, each guard shard's run step is off, and the
+        # steps that only check out and set up still run.
+        for name in self.suite_jobs():
+            if (shard_base(name) or name) != GUARD_JOB:
+                continue
+            job = self.jobs[name]
+            for st in job["steps"]:
+                with self.subTest(job=name, step=step_label(st)):
+                    runs = runs_with_values(job, st, "pull_request", {"windows_guard": "false"})
+                    if "run" in st:
+                        self.assertFalse(runs, f"{name} step {step_label(st)!r} runs on a ready pull_request with windows_guard false")
+                    else:
+                        self.assertTrue(runs, f"{name} step {step_label(st)!r} is a checkout or setup step and does not run on a ready PR")
 
     def test_a_shard_job_skips_a_draft_pull_request_at_job_level_and_runs_a_ready_one(self):
         # Control, green on the old code: the draft skip is the shard job's own if, and it stays.
