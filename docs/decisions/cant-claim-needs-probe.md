@@ -45,7 +45,7 @@ The hand-off guard does not read `CANNOT_FORMS`. Its `CAPABILITY_RE` reads `CANT
   - A choice: a between ("can't decide between A and B"), or a need the act waits on ("we can't ship this without the migration"). A need that is access ("without the token", "without the VPN"; `ACCESS_NOUNS`) keeps the claim.
   - A size: a measure of the work in the clause ("can't fix this in one line"). A time ("in time") is no size, so "can't reach it in time" keeps the claim.
   - A find of nothing ("can't see any issues").
-  - The rule reads the object, not a longer verb list, so a new verb of judgement needs no edit when its object is a why-clause, a between, a need or a size.
+  - The rule reads the object, not a longer verb list. So a new verb of judgement needs no edit when its object is a why-clause, a between, a need or a size.
 - A sentence that names its check: an exit code, a status form, or a backtick span or tool name beside a result word.
   - A span or a tool name alone names the object of the act, not its result ("can't import `inbox.mbox`", "can't run `make build`"). It counts only beside a result word (returned, failed, exited ...) in its own clause, with at most three words between. A result word whose subject is the writer names no call ("I ran `make build`").
   - A status form has a status word before or after the number: "HTTP 500", "status 407", "returned 403", "500 error" (`STATUS_FORM_PATTERN`, `lint/_clause.py`). A bare count after a comma ("500 rows") is no status.
@@ -72,7 +72,7 @@ If the transcript reader does not load, the check prints UNKNOWN to stderr and d
 
 ## Cost
 
-A regex over the reply, and one pass over the turn's records already in hand. It starts no process, writes no file, and starts no timer or log. It reads the turn only for a reply sentence that holds a cannot-phrase.
+Every Stop that holds a human message reads the reply and runs `_turn_acks`, whether or not the reply holds a cannot-phrase. `_turn_acks` scans the whole transcript for peer messages and sends to a parent. It scans the transcript again for the session's own record only when it finds both. The caller then scans back through the transcript for the last incoming message. The turn's tool calls are read only for a reply sentence that holds a cannot-phrase. The check starts no process, writes no file, and starts no timer or log.
 
 Rule `outcomes-mechanize-rules` (each check states its cost and a test proves it) applies. No test proves zero process starts and zero file writes, so the cost is stated, not proven.
 
