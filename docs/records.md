@@ -48,7 +48,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `git-main-only-by-pr` | Move main only by pull request, merged only when I name the act, or under a repo grant. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-merge-failing-ci` | Never merge a PR whose own run is red, or onto a red main, except its revert. | [`CLAUDE.md`](../CLAUDE.md) |
 | `gh-write-cloud` | In a cloud session, a `gh` pr, issue or `gh api` write is refused: write through the GitHub MCP tools or the merge tool. | [`CLAUDE.md`](../CLAUDE.md) |
-| `git-red-main-reverts` | While main's newest finished run is red, only the revert of the blamed commit merges, with `--base-red-ok "<reason>"`, until the revert's run on main is green. | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-red-main-reverts` | While main's newest finished run is red, only the revert of the blamed commit merges, with `--base-red-ok "<reason>"`. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-ci-wait-checks-in` | A session that waits on CI sets a one-time check-in when it starts to wait, and again after each red job, each wider apart, never past 55 minutes. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-ci-done-comment-wakes` | A run that ends red posts one PR comment, which wakes the session that watches the PR (decision `ci-wait-reads-run-status`). | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-discard-output` | Keep git write output. | [`CLAUDE.md`](../CLAUDE.md) |
