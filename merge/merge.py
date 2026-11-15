@@ -42,9 +42,10 @@
                           Any commit with one parent ends the walk as stale. `merge --reviewed` proves it
                           (live_review_state). A read or a merge-tree that cannot run, such as a commit the checkout lacks after one fetch, keeps
                           the record stale and the line says unknown; the fix verifier then refuses. Any other difference keeps today's rules.
-                          --accepted adds the optional `Owner accepted: <ruling id>, <time>` line directly before Net value. For a negative record
-                          `merge --reviewed` reads that ruling once (origin/roadmap:roadmap/rulings/<id>.json in this checkout, no fetch, whose own id must
-                          match) and then reads the record as at Net value zero; a ruling it cannot read keeps the hold. A new head needs a new record.
+                          --accepted adds the optional `Owner accepted: <ruling id>, <time>` line directly before Net value. The id must be own-<PR>-<letters>
+                          for this PR. For a negative record, at its own Head only, `merge --reviewed` reads that ruling through the ruled store reader (two git
+                          starts, no fetch: this checkout's origin/roadmap; the entry must be open, checked, and name its own id) and then reads the record as at
+                          Net value zero; a ruling it cannot prove keeps the hold. A clean merge of main or a new head needs a new record.
                           A replacement PR with no log of its own starts the fix check from its source's newest log when the trees match, or the live tree is
                           a clean merge of main into the Head (see --reviewed).
                           The refusal of a restarting record offers, in order, carry by tree (this head holds the tree the earlier record reviewed: a new PR
@@ -216,6 +217,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # required_check, pin_note and git_reads, loaded below
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
+import ruled_store  # noqa: E402  the one reader of the ruling store (lint/ruled_store.py)
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 
@@ -4935,22 +4937,24 @@ def restart_remedies(h, n, last, head):
         steps.append(f"First, a fix verifier on the delta: post the earlier rounds again, with --fix-check {last['head']}:reviewer:{review_round_model(REVIEW_FIX_ROW)}:PASS, after a reviewer has read only the diff since that head.")
     return unknown + " ".join(steps + ["A new branch with a new PR is the last resort."])
 
-def ruling_unread(h, rid):
-    """-> "" when this checkout's origin/roadmap holds the ruling `rid` (RULED_STORE_PATH, whose own id is `rid`), else one line on why it does not,
-    so the caller keeps the hold. Never reads a missing, unreadable or foreign-id file as the ruling. Cost: one git start, one blob read, no
-    fetch: it reads the copy this checkout last fetched."""
-    path = RULED_STORE_PATH.format(id=rid)
-    try:
-        code, out = git(h.cwd or ".", "show", f"refs/remotes/origin/roadmap:{path}")
-    except (subprocess.TimeoutExpired, OSError) as e:
-        return f"ruling {rid} could not be read ({type(e).__name__})"
-    if code:
-        return f"ruling {rid} is not readable at origin/roadmap:{path} in this checkout (fetch origin roadmap, then run again)"
-    try:
-        named = json.loads(out).get("id")
-    except (ValueError, AttributeError):
-        named = None
-    return "" if named == rid else f"the file at origin/roadmap:{path} does not name ruling {rid}"
+def ruling_unproven(h, rec):
+    """-> "" when the record's Owner accepted line cites a ruling that holds, else one line on why it does not, so the caller keeps the hold. The
+    id must be `own-<N>-<letters>` with N the record's own pull request, so a ruling of another pull request or a bare slug lifts nothing. The
+    ruling is an entry of the one store reader (ruled_store) at this checkout's origin/roadmap: its own id is the cited id, its status is open,
+    check_entry flags nothing and it is not unchecked. Cost: the reader's two git starts (ls-tree, cat-file --batch), no fetch: it reads the copy
+    this checkout last fetched."""
+    rid = rec["accepted"][0]
+    if not re.fullmatch(rf"own-{rec['n']}-[a-z]+", rid):
+        return f"ruling {rid} is not named own-{rec['n']}-<letters>, for this pull request"
+    entries, state = ruled_store.read_store(h.cwd or ".")
+    if state != "ok":
+        return f"the ruling store at origin/roadmap is {state} in this checkout (fetch origin roadmap, then run again)"
+    entry = next((e for e in entries if e.get("id") == rid), None)
+    if entry is None:
+        return f"origin/roadmap holds no ruling whose own id is {rid}"
+    if entry.get("status") != "open" or ruled_store.check_entry(entry) or ruled_store.is_unchecked(entry):
+        return f"ruling {rid} is not an open, checked entry of the store"
+    return ""
 
 REVIEW_SURVIVAL_UNKNOWN = "whether only clean merges of main follow the reviewed head is unknown"  # the why of a stale record whose clean-merge read could not run
 
@@ -4981,7 +4985,7 @@ def live_review_state(h, rec, live, main, claims=None, earlier=(), source=None):
         state, why = review_state(rec, head, earlier)
         if state != "held" or not rec.get("accepted"):
             return state, why
-        said = ruling_unread(h, rec["accepted"][0])
+        said = ruling_unproven(h, rec)
         if said:
             return state, f"{why}; the owner's acceptance is unproven: {said}"
         # a recorded ruling lifts the hold only: every other rule reads the record as at Net value zero
@@ -4996,8 +5000,8 @@ def live_review_state(h, rec, live, main, claims=None, earlier=(), source=None):
             return state, why
     except (Stop, subprocess.TimeoutExpired, OSError) as e:
         return state, f"{why}; {REVIEW_SURVIVAL_UNKNOWN} ({' '.join(str(e).split())[:300]})"
-    state, why = read(rec["head"])
-    return state, why + "; the head is the reviewed head plus clean merges of main"
+    state, why = review_state(rec, rec["head"], earlier)  # an acceptance covers its Head only, so a clean merge of main carries the rest of the record and not the lift
+    return state, why + "; the head is the reviewed head plus clean merges of main" + ("; the owner's acceptance covers the reviewed head only" if rec.get("accepted") and state == "held" else "")
 
 def rollup_green(h, n, head):
     """True only when the ROLLUP_JOB rows of the newest run on `head` are all a pass and no older run's red row survives `superseded`. The newest run is the largest id in
@@ -5732,7 +5736,7 @@ def build_parser():
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
     p.add_argument("--fix-check", type=fix_verifier_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the `Fix check:` line, after the rounds; HEAD is the reviewed head the fix diff starts from; the newest review log has no Fix check line or a PASS one; after a PASS one, a head that is a merge of main must be a merge of the base into that Head with no edit beyond git's own merge")
     p.add_argument("--grant", type=grant_arg, metavar="TEXT", help="with --review-record: the owner's grant of round 4, `#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT`, with PR the pull request's own number; the rounds must then reach round 4")
-    p.add_argument("--accepted", type=accepted_arg, metavar="ID,TIME", help="with --review-record: the owner's acceptance of a negative net value, `RULING_ID,YYYY-MM-DD HH:MM CST|CDT`; prints the `Owner accepted:` line directly before Net value. `merge --reviewed` then reads the record as at Net value zero only when this checkout's origin/roadmap holds that ruling (one git read, only for a negative record with the line)")
+    p.add_argument("--accepted", type=accepted_arg, metavar="ID,TIME", help="with --review-record: the owner's acceptance of a negative net value, `RULING_ID,YYYY-MM-DD HH:MM CST|CDT`; prints the `Owner accepted:` line directly before Net value. `merge --reviewed` then reads the record as at Net value zero only at the record's own Head, and only when this checkout's origin/roadmap holds an open, checked ruling named own-<PR>-<letters> for this PR (the ruled store reader's two git starts, only for a negative record with the line)")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant) when that round failed; a passing round, or a passing fix check after any round, owes none")
     p.add_argument("--touches", action="store_true", help="list the open pull requests that touch a failing case or a named file; takes no lock, merges and posts nothing")
     p.add_argument("--run", default=None, metavar="RUN", help="a workflow run, by its id or its Actions run URL. With --touches: the run whose failing log lines name the cases")
