@@ -193,10 +193,29 @@ def condition(text, pr):
     return bool(eval(expr.replace("T", "True").replace("F", "False"), {"__builtins__": {}}))  # only T, F, and, or, not, ()
 
 
+LITERAL = re.compile(r"('[^']*')")
+OTHER_JOB_REF = re.compile(r"\b(?:needs|steps)\.[\w-]+(?:\.[\w-]+)*")
+
+
+def other_job_value(expr):
+    """The value of an expression that reads only other jobs' results and outputs, and earlier steps' outputs, with each read as ''
+    (this runner runs one job alone, so none of them exists, as GitHub reads a missing context): a proof that depends on them
+    reads as no proof. The terms it understands are string literals, those reads, ==, !=, &&, ||, ! and parentheses. None for anything else."""
+    parts = LITERAL.split(expr)
+    code = "".join(p if i % 2 else OTHER_JOB_REF.sub("''", p).replace("&&", " and ").replace("||", " or ")
+                   for i, p in enumerate(parts))
+    code = re.sub(r"!(?!=)", " not ", code)
+    if re.sub(r"'[^']*'|==|!=|\band\b|\bor\b|\bnot\b|[\s()]", "", code) or not OTHER_JOB_REF.search(expr):
+        return None
+    got = eval(code, {"__builtins__": {}})  # only literals, ==, !=, and, or, not and parentheses pass the check above
+    return str(got).lower() if isinstance(got, bool) else got
+
+
 def expand(value, values):
-    """value with each known ${{ }} replaced, or None when one is unknown."""
-    missing = [m.group(1) for m in EXPR.finditer(value) if m.group(1) not in values]
-    return None if missing else EXPR.sub(lambda m: values[m.group(1)], value)
+    """value with each known ${{ }} replaced, or None when one is unknown. A ${{ }} that reads only other jobs' results
+    and outputs reads as other_job_value says."""
+    read = {m.group(1): values[m.group(1)] if m.group(1) in values else other_job_value(m.group(1)) for m in EXPR.finditer(value)}
+    return None if any(v is None for v in read.values()) else EXPR.sub(lambda m: read[m.group(1)], value)
 
 
 def commands(script):
