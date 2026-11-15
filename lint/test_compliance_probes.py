@@ -3786,6 +3786,37 @@ class AlignedVendor(AlignedSteps, unittest.TestCase):
                     os.remove(path)
 
 
+# Round 4. A sentence's text is judged against the file's base side, rebuilt from head and the hunks. Two shapes that the
+# removed-line text alone gets wrong: a sentence that wraps, with only a sibling on its last line edited; a whole line
+# deleted beside a citing sentence.
+ALIGNED_GONE_LINE = "Sentence X keeps its own wording and is deleted. <!-- rule:gone-x -->"
+ALIGNED_WRAP_LINES = [
+    "**Review.** The citing sentence begins on this line and keeps going",
+    "across the second line, and it cites decision `%s`" % ALIGNED_ROUND,
+    "as the round rules say. <!-- rule:%s --> Sibling sentence on the last line keeps its wording. <!-- rule:wrap-sib -->"
+    % ALIGNED_HOME,
+]
+
+
+class AlignedWrapped(AlignedSteps, unittest.TestCase):
+    """Round 4, items (i) and (ii): an edit that touches a wrapped citing sentence's last line, or a deleted line beside a
+    citing sentence, is no change for that sentence. A record that did not change is not demanded."""
+
+    def test_a_sibling_edit_on_the_last_line_of_a_wrapped_citing_sentence_is_no_change_for_it(self):
+        base, _ = para_base(ALIGNED_WRAP_LINES)
+        edited = list(ALIGNED_WRAP_LINES)
+        edited[2] = edited[2].replace("keeps its wording.", "keeps its wording, edited.", 1)
+        text, _ = para_file(edited)
+        repo = self.pr(base, {"CLAUDE.md": text})
+        self.assert_clear(repo)
+
+    def test_a_whole_line_deleted_beside_a_citing_sentence_is_no_change_for_it(self):
+        base, _ = para_base([ALIGNED_GONE_LINE, ALIGNED_CITE_LINE, ALIGNED_TAIL])
+        text, _ = para_file([ALIGNED_CITE_LINE, ALIGNED_TAIL])
+        repo = self.pr(base, {"CLAUDE.md": text})
+        self.assert_clear(repo)
+
+
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
