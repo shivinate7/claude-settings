@@ -38,6 +38,7 @@ PAGE_URL = "https://claude.ai/artifact/" + PAGE_ID
 PAGE_CODE_URL = "https://claude.ai/code/artifact/" + PAGE_ID
 NOTES_ID = "Nq3hT8sVc2YbK5wD"
 NOTES_URL = "https://claude.ai/artifact/" + NOTES_ID
+OUTLOOK_URL = "https://claude.ai/artifact/Ol5rU9pWq2Xb7Nc4"  # the waiting page's link in another account
 OTHER_URL = "https://claude.ai/artifact/Zz9Qq1Ww2Ee3Rr4T"  # an artifact link that the registry does not hold
 ITEM_ID = "review-fix-check-go"
 ITEM_N = 231
@@ -106,15 +107,15 @@ def verdict(choice, note=None):
 def registry():
     """The repo's registry: a notes page that is not exported, and the waiting page last."""
     return [
-        {"id": "notes", "url": NOTES_URL, "role": "notes", "account": "main", "export": False},
-        {"id": "waiting", "url": PAGE_URL, "role": "waiting-page", "account": "main"},
+        {"id": "notes", "role": "notes", "export": False, "links": [{"account": "main", "url": NOTES_URL}]},
+        {"id": "waiting", "role": "waiting-page", "export": "waiting", "links": [{"account": "main", "url": PAGE_URL}]},
     ]
 
 
 def full_registry():
     """Full size: 24 entries before the waiting page, which stays last."""
-    many = [{"id": "entry-%02d" % n, "url": "https://claude.ai/artifact/Entry%02dAbCdEfGh0" % n,
-             "role": "notes-%02d" % n, "account": "main", "export": False} for n in range(1, 25)]
+    many = [{"id": "entry-%02d" % n, "role": "notes-%02d" % n, "export": False,
+             "links": [{"account": "main", "url": "https://claude.ai/artifact/Entry%02dAbCdEfGh0" % n}]} for n in range(1, 25)]
     return many + registry()[1:]
 
 
@@ -405,6 +406,14 @@ class NotCounted(Base):
     def test_page_url_is_another_registry_entry(self):
         r = self.check(self.repo(), self.pair(), page=NOTES_URL)
         self.assertNotCounted(r, "page URL is a registry entry that is not the waiting page")
+
+    def test_page_url_that_is_another_account_link_of_the_waiting_page_counted(self):
+        """The waiting entry holds one link per account (owner ruling, 2026-11-15 13:16 CST): the link of another account is
+        the waiting page too, so a grant made from that account counts."""
+        entries = registry()
+        entries[1] = dict(entries[1], links=[{"account": "main", "url": PAGE_URL}, {"account": "outlook", "url": OUTLOOK_URL}])
+        r = self.check(self.repo(artifacts=entries), self.pair(), page=OUTLOOK_URL, pick="a")
+        self.assertCounted(r, verdict("a"))
 
     def test_choice_not_an_option_key(self):
         r = self.check(self.repo(), self.pair(answer_fields={"choice": "z"}))

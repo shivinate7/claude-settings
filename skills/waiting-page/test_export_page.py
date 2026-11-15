@@ -838,6 +838,11 @@ def verdict_lines(r):
     return [line.strip() for line in (r.stdout + r.stderr).splitlines() if line.strip()]
 
 
+def skipped_for_account(lines, entry_id):
+    """The line that skips `entry_id` for want of a link for the --account label, when it names the rebuild remedy, else None."""
+    return next((line for line in lines if line.startswith(entry_id + ": skipped") and "rebuild" in line), None)
+
+
 def says(r, word):
     """True when a line the run printed starts with the verdict word, as `unknown` or `unknown - asks missing` does."""
     return any(re.match(re.escape(word) + r"\b", line) for line in verdict_lines(r))
@@ -2027,15 +2032,18 @@ class All(Base):
     WAIT, QUEUE = "page01", "queue02"
     VERDICT = r"\b(changed\s+\d+|same|refused|unknown)\b"
 
-    def queue_entry(self, **changes):
-        return dict({"id": self.QUEUE, "url": "https://claude.ai/artifact/" + self.QUEUE, "role": "queue-page", "account": "work",
+    def queue_entry(self, account="work", **changes):
+        """The queue entry with its one link, in `account`. Its export is artifacts/<id>, the path the registry requires."""
+        return dict({"id": self.QUEUE, "role": "queue-page", "export": "artifacts/" + self.QUEUE,
+                     "links": [{"account": account, "url": "https://claude.ai/artifact/" + self.QUEUE}],
                      "collections": ["items"]}, **changes)
 
     def repo(self, queue=None):
         """The registry: the waiting page, then the queue entry. `queue` replaces the queue entry for a case of another shape."""
         root = os.path.join(self.tmp.name, "repo")
         registry = {"kinds": {}, "artifacts": [
-            {"id": self.WAIT, "url": "https://claude.ai/artifact/" + self.WAIT, "role": "waiting-page", "account": "work"},
+            {"id": self.WAIT, "role": "waiting-page", "export": "waiting",
+             "links": [{"account": "work", "url": "https://claude.ai/artifact/" + self.WAIT}]},
             queue or self.queue_entry()]}
         write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps(registry))
         return root
@@ -2185,8 +2193,8 @@ class All(Base):
         base = os.path.join(self.export_folder(worktree, self.QUEUE), "page")
         self.assertEqual(read_bytes(os.path.join(base, "page.html")), QUEUE_PAGE, "page/page.html is not byte-identical")
         self.assertEqual(read_bytes(os.path.join(base, "files", "x.js")), script, "page/files/x.js is not byte-identical")
-        self.assertIn("%s: skipped - account work" % self.WAIT, verdict_lines(first),
-                      "the waiting page of another account was not skipped")
+        self.assertIsNotNone(skipped_for_account(verdict_lines(first), self.WAIT),
+                             "the waiting page with no link for the flag's account was not skipped with the rebuild remedy")
         second = self.run_cmd(*args)
         self.assertEqual(second.returncode, 0, "the second run of a page-only entry failed. Output:\n" + shown(second))
         self.assertVerdictOf(second, self.QUEUE, r"\bsame\b")
@@ -2370,13 +2378,15 @@ class NoExport(Base):
     EXTERNAL = ["ext%03d" % n for n in range(1, 9)]  # the eight pages of the other account, with synthetic ids
 
     def waiting(self):
-        return {"id": self.WAIT, "url": "https://claude.ai/artifact/" + self.WAIT, "role": "waiting-page", "account": "work"}
+        return {"id": self.WAIT, "role": "waiting-page", "export": "waiting",
+                "links": [{"account": "work", "url": "https://claude.ai/artifact/" + self.WAIT}]}
 
     def external(self, entry_id, held=True, **changes):
-        """An artifact of the other account. `held` (the default) adds `export` false: the repo holds the page, never exports it."""
-        entry = {"id": entry_id, "url": "https://claude.ai/artifact/" + entry_id, "role": "page", "account": "other-account"}
-        if held:
-            entry["export"] = False
+        """An artifact of the other account, with its one link in that account. `held` (the default) gives `export` false: the
+        repo holds the page and never exports it. Otherwise the entry exports to artifacts/<id>, the path the registry requires."""
+        entry = {"id": entry_id, "role": "page",
+                 "links": [{"account": "other-account", "url": "https://claude.ai/artifact/" + entry_id}],
+                 "export": False if held else "artifacts/" + entry_id}
         return dict(entry, **changes)
 
     def repo(self, entries):
@@ -2433,6 +2443,8 @@ class NoExport(Base):
         r = self.run_all(root, self.fetched_waiting(), self.out("worktree"))
         self.assertEqual(r.returncode, 2, "an export of true must make the run unknown with exit 2. Output:\n" + shown(r))
         self.assertTrue(says(r, "unknown"), "no unknown verdict printed. Output:\n" + shown(r))
+        self.assertTrue(any(line.startswith("unknown") and re.search(r"\bexport\b", line) for line in verdict_lines(r)),
+                        "the unknown verdict does not name the export that is not a path. Output:\n" + shown(r))
 
     def test_a_waiting_page_entry_with_export_false_is_unknown_not_skipped(self):
         """The waiting page is never held: export false on its role makes the registry unknown, exit 2, as a refused entry does."""
@@ -2440,6 +2452,8 @@ class NoExport(Base):
         r = self.run_all(root, self.fetched_waiting(), self.out("worktree"))
         self.assertEqual(r.returncode, 2, "a waiting-page entry with export false must make the run unknown with exit 2. Output:\n" + shown(r))
         self.assertTrue(says(r, "unknown"), "no unknown verdict printed for a waiting-page entry with export false. Output:\n" + shown(r))
+        self.assertTrue(any(line.startswith("unknown") and re.search(r"\bexport\b", line) for line in verdict_lines(r)),
+                        "the unknown verdict does not name the export false on the waiting page. Output:\n" + shown(r))
         self.assertNotIn("%s: skipped - no export" % self.WAIT, verdict_lines(r),
                          "the waiting page was skipped instead of refused. Output:\n" + shown(r))
 
@@ -2451,19 +2465,19 @@ class NoExport(Base):
         self.assertEqual(r.returncode, 0, "a run with --account must exit 0 when its other-account entries are skipped. Output:\n"
                          + shown(r))
         for entry_id in self.EXTERNAL:
-            self.assertIn("%s: skipped - account other-account" % entry_id, verdict_lines(r),
-                          "%s has no `skipped - account` line. Output:\n%s" % (entry_id, shown(r)))
+            self.assertIsNotNone(skipped_for_account(verdict_lines(r), entry_id),
+                                 "%s has no skipped line that names the rebuild remedy. Output:\n%s" % (entry_id, shown(r)))
 
     def test_an_entry_of_the_flag_account_exports_as_today_beside_the_skipped_one(self):
         """--account LABEL: an entry whose account matches exports as it does without the flag, and the waiting page does too."""
         own, other = "own001", self.EXTERNAL[0]
-        matching = {"id": own, "url": "https://claude.ai/artifact/" + own, "role": "page", "account": "work",
-                    "collections": ["items"]}
+        matching = {"id": own, "role": "page", "export": "artifacts/" + own, "collections": ["items"],
+                    "links": [{"account": "work", "url": "https://claude.ai/artifact/" + own}]}
         entries = [self.waiting(), matching, self.external(other, held=False, collections=["items"])]
         r = self.run_all(self.repo(entries), self.fetched_waiting(also=(own,)), self.out("worktree"), account="work")
         self.assertEqual(r.returncode, 0, "a run with --account must exit 0. Output:\n" + shown(r))
-        self.assertIn("%s: skipped - account other-account" % other, verdict_lines(r),
-                      "the other-account entry was not skipped. Output:\n" + shown(r))
+        self.assertIsNotNone(skipped_for_account(verdict_lines(r), other),
+                             "the other-account entry was not skipped with the rebuild remedy. Output:\n" + shown(r))
         self.assertIn("%s: changed 5" % self.WAIT, verdict_lines(r),
                       "the waiting page of the flag's account did not export. Output:\n" + shown(r))
         self.assertIn("%s: changed 1" % own, verdict_lines(r),
@@ -2474,8 +2488,8 @@ class NoExport(Base):
         r = self.run_all(self.repo([self.waiting(), self.external(other, held=False, collections=["items"])]),
                          self.fetched_waiting(also=(other,)), worktree, account="work")
         self.assertEqual(r.returncode, 0, "a run with --account must exit 0. Output:\n" + shown(r))
-        self.assertIn("%s: skipped - account other-account" % other, verdict_lines(r),
-                      "the other-account entry was not skipped. Output:\n" + shown(r))
+        self.assertIsNotNone(skipped_for_account(verdict_lines(r), other),
+                             "the other-account entry was not skipped with the rebuild remedy. Output:\n" + shown(r))
         self.assertFalse(os.path.exists(os.path.join(worktree, "artifacts")),
                          "a skipped entry wrote an artifacts folder although its account was not the flag's")
 
@@ -2487,8 +2501,38 @@ class NoExport(Base):
         self.assertEqual(r.returncode, 0, "a run without --account must exit 0. Output:\n" + shown(r))
         self.assertIn("%s: changed 1" % other, verdict_lines(r),
                       "an other-account entry did not export without the flag. Output:\n" + shown(r))
-        self.assertEqual([line for line in verdict_lines(r) if "skipped - account" in line], [],
+        self.assertEqual([line for line in verdict_lines(r) if "skipped" in line], [],
                          "a run without --account skipped an entry")
+
+    def test_an_entry_with_a_link_for_the_flag_account_exports_though_another_link_comes_first(self):
+        """--account LABEL reads every link of an entry, not only its first: an entry whose second link is the flag's account
+        exports as it does without the flag."""
+        own = "own001"
+        entry = {"id": own, "role": "page", "export": "artifacts/" + own, "collections": ["items"],
+                 "links": [{"account": "other-account", "url": "https://claude.ai/artifact/" + own},
+                           {"account": "work", "url": "https://claude.ai/artifact/" + own}]}
+        r = self.run_all(self.repo([self.waiting(), entry]), self.fetched_waiting(also=(own,)), self.out("worktree"), account="work")
+        self.assertEqual(r.returncode, 0, "a run with --account must exit 0. Output:\n" + shown(r))
+        self.assertTrue(any(line.startswith(own + ": changed ") for line in verdict_lines(r)),
+                        "the entry whose second link is the flag's account did not export. Output:\n" + shown(r))
+        self.assertEqual([line for line in verdict_lines(r) if line.startswith(own + ": skipped")], [],
+                         "the entry was skipped though one of its links is the flag's account. Output:\n" + shown(r))
+
+    def test_a_label_held_only_in_a_second_link_is_not_unknown(self):
+        """--account LABEL is unknown only when no entry holds the label in any of its links."""
+        second = "two001"
+        entry = {"id": second, "role": "page", "export": "artifacts/" + second, "collections": ["items"],
+                 "links": [{"account": "other-account", "url": "https://claude.ai/artifact/" + second},
+                           {"account": "gmail", "url": "https://claude.ai/artifact/" + second}]}
+        r = self.run_all(self.repo([self.waiting(), entry]), self.fetched_waiting(also=(second,)), self.out("worktree"), account="gmail")
+        lines = verdict_lines(r)
+        self.assertEqual([line for line in lines if line.startswith("unknown")], [],
+                         "a label held in a second link was reported unknown. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 0, "a label held in a second link must exit 0. Output:\n" + shown(r))
+        self.assertTrue(any(line.startswith(second + ": changed ") for line in lines),
+                        "the entry holding the label in its second link did not export. Output:\n" + shown(r))
+        self.assertIsNotNone(skipped_for_account(lines, self.WAIT),
+                             "the waiting page with no gmail link was not skipped with the rebuild remedy")
 
     def label_run(self, label):
         """--all --account LABEL over the waiting page and one other-account entry, both fetched: the run and its worktree."""
@@ -2794,8 +2838,8 @@ class PictureHoldAll(PictureChecks):
 
     def test_the_waiting_page_entry_of_all_holds_item_292(self):
         root = os.path.join(self.tmp.name, "repo")
-        registry = {"kinds": {}, "artifacts": [{"id": "page01", "url": "https://claude.ai/artifact/page01",
-                                                "role": "waiting-page", "account": "work"}]}
+        registry = {"kinds": {}, "artifacts": [{"id": "page01", "role": "waiting-page", "export": "waiting",
+                                                "links": [{"account": "work", "url": "https://claude.ai/artifact/page01"}]}]}
         write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps(registry))
         folder = self.fetch(items={ITEM_292["id"]: ITEM_292}, meta={"page": META})
         write_bytes(os.path.join(folder, "page.html"), page_with_mockups(MOCKS_292).encode("utf-8"))
@@ -2913,8 +2957,8 @@ class NoPageFile(Copied):
 
     def test_an_all_entry_without_its_page_names_the_missing_page(self):
         root = os.path.join(self.tmp.name, "repo")
-        registry = {"kinds": {}, "artifacts": [{"id": "page01", "url": "https://claude.ai/artifact/page01",
-                                                "role": "waiting-page", "account": "work"}]}
+        registry = {"kinds": {}, "artifacts": [{"id": "page01", "role": "waiting-page", "export": "waiting",
+                                                "links": [{"account": "work", "url": "https://claude.ai/artifact/page01"}]}]}
         write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps(registry))
         folder = self.fetch(items={ITEM_292["id"]: ITEM_292}, meta={"page": META})  # no page.html in this folder
         fetched = os.path.join(self.tmp.name, "fetched-no-page")
@@ -2947,9 +2991,10 @@ class ExitRank(PictureChecks):
     def repo(self):
         root = os.path.join(self.tmp.name, "repo")
         registry = {"kinds": {}, "artifacts": [
-            {"id": "page01", "url": "https://claude.ai/artifact/page01", "role": "waiting-page", "account": "work"},
-            {"id": "queue02", "url": "https://claude.ai/artifact/queue02", "role": "queue-page", "account": "work",
-             "collections": ["items"]}]}
+            {"id": "page01", "role": "waiting-page", "export": "waiting",
+             "links": [{"account": "work", "url": "https://claude.ai/artifact/page01"}]},
+            {"id": "queue02", "role": "queue-page", "export": "artifacts/queue02",
+             "links": [{"account": "work", "url": "https://claude.ai/artifact/queue02"}], "collections": ["items"]}]}
         write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps(registry))
         return root
 
@@ -3221,7 +3266,8 @@ class WaitingCollectionsRun(Copied):
 
     def run_all(self, collections, items, answers=None, role="waiting-page", entry_id="page01"):
         root = os.path.join(self.tmp.name, "repo")
-        entry = {"id": entry_id, "url": "https://claude.ai/artifact/" + entry_id, "role": role, "account": "work"}
+        entry = {"id": entry_id, "role": role, "export": "waiting" if role == "waiting-page" else "artifacts/" + entry_id,
+                 "links": [{"account": "work", "url": "https://claude.ai/artifact/" + entry_id}]}
         if collections is not None:
             entry["collections"] = list(collections)
         write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "artifacts": [entry]}))

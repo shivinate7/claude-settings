@@ -34,7 +34,8 @@ UNREGISTERED = "ghost99"
 URL = "https://claude.ai/artifact/" + REGISTERED
 CODE_URL = "https://claude.ai/code/artifact/" + REGISTERED
 REGISTRY = {"kinds": {}, "rolled-out": True,
-            "artifacts": [{"id": REGISTERED, "url": URL, "role": "waiting-page", "account": "work"}]}
+            "artifacts": [{"id": REGISTERED, "role": "waiting-page", "export": "waiting",
+                           "links": [{"account": "work", "url": URL}]}]}
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
 
