@@ -16020,8 +16020,9 @@ class OwnerAcceptedHold(ScopedRepo, ReviewEnv):
                 self.assertEqual(state, "done", why)
                 self.assertEqual(state, self.live(without)[0], "the line changes a record whose Net value is %s" % net)
 
-    def test_a_negative_record_with_the_line_starts_one_process_and_the_rest_start_none(self):
-        # The cost of live_review_state: one git start, reading the cited ruling, only for a negative record with the line.
+    def test_a_negative_record_with_the_line_starts_two_git_processes_and_the_rest_start_none(self):
+        # The cost of live_review_state: the one reader of the ruling store (lint/ruled_store.py) starts two git processes, ls-tree of the
+        # store folder and then cat-file --batch, only for a negative record with the line. Every other record starts 0 processes.
         self.publish(ruling_files())
         quiet = (("no line, net negative", pr3381_text()),
                  ("the line, net zero", pr3381_text(accepted=(ACCEPT_LINE,), net="zero")),
@@ -16030,12 +16031,14 @@ class OwnerAcceptedHold(ScopedRepo, ReviewEnv):
             with self.subTest(record=name):
                 rec = accepted_record(self, text)
                 _out, starts = process_starts(lambda: self.live(rec))
-                self.assertEqual(starts, [], f"{name} started {len(starts)} process(es), want none: {starts!r}")
+                self.assertEqual(len(starts), 0, f"{name} started {len(starts)} process(es), want 0: {starts!r}")
         rec = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,)))
         (state, why), starts = process_starts(lambda: self.live(rec))
         self.assertEqual(state, "done", why)
-        self.assertEqual(len(starts), 1, f"a negative record with the line starts {len(starts)} process(es), want the one ruling read: {starts!r}")
-        self.assertIn(merge.RULED_STORE_PATH.format(id=ACCEPT_ID), str(starts[0]), "the one process does not read the cited ruling: %r" % (starts[0],))
+        self.assertEqual(len(starts), 2, f"a negative record with the line starts {len(starts)} git process(es), want 2 (the reader's ls-tree and cat-file --batch): {starts!r}")
+        self.assertIn("ls-tree", starts[0], "the first of the 2 processes is not the reader's ls-tree: %r" % (starts[0],))
+        self.assertIn(ruled_store.STORE_DIR, starts[0], "the ls-tree does not list the ruling store folder: %r" % (starts[0],))
+        self.assertIn("cat-file", starts[1], "the second of the 2 processes is not the reader's cat-file: %r" % (starts[1],))
 
     def test_a_ruling_of_another_pull_request_does_not_lift_the_hold(self):
         # scope: a record on pull request N lifts on a ruling named own-N-letters that the store holds, letters plural included
