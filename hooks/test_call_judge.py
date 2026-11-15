@@ -65,8 +65,9 @@ Interface the hook must match:
 - A coordinator's pick (the section "a coordinator's pick"): a call of send_message, create_session or SendMessage whose
   sender's own record carries cs-build:coordinator (the add and remove lists of the set_session_tags calls after that
   record are applied in order), and whose text states a pick or hold (pick, picks,
-  picked, hold, holds, held; not `on hold`, `hold on`, `pick up` or a hyphen id), must cite a ruling or say `no ruling
-  found:`. The text is the `message` of send_message and SendMessage (SendMessage's `to` names its agent, and a call
+  picked, picking, hold, holds, held, holding; a bare `hold up` counts; not `on hold`, `hold on`, `held on`, `pick up`,
+  `holds up`, `held up`, `holding up`, a hyphen id, or a statement word before `the call` or `the meeting`), must cite a ruling or say
+  `no ruling found:`. The text is the `message` of send_message and SendMessage (SendMessage's `to` names its agent, and a call
   that carries only a `summary` is not judged) and the `prompt` of create_session. A cite gets one judge call whose
   prompt carries the pick text and the candidate rulings. Any other message passes with no model call.
   On create_session and SendMessage, a bare hold, holds or held states no pick. A statement there is a line or clause that
@@ -1743,7 +1744,8 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
 # A send_message from a coordinator (its own record carries cs-build:coordinator, read as hooks/own_session.py reads it, with the
 # set_session_tags add and remove lists after that record applied in order) whose text states a pick or a hold must cite a
 # ruling, or say `no ruling found:` with what it searched. The statement words are
-# pick, picks, picked, hold, holds and held, and a word is no statement inside `on hold`, `hold on`, `pick up` or a hyphen id.
+# pick, picks, picked, picking, hold, holds, held and holding; a bare `hold up` counts. A word is no statement inside `on hold`,
+# `hold on`, `held on`, `pick up`, `holds up`, `held up`, `holding up` or a hyphen id, or before `the call` or `the meeting`.
 # A cite gets one judge call, whose prompt carries the pick text and the candidate rulings. Any other sender or text passes
 # with no model call. The cases run the hook as a child, as the cases above do: the stub answers `claude -p`, and each call
 # is read from its record.
@@ -1912,7 +1914,8 @@ def case_pick_check_passes_untouched():
     cases = (
         ("a session that is no coordinator", PICK_PASS_MESSAGE, {"coordinator": False}),
         ("a coordinator whose record carries another tag", PICK_PASS_MESSAGE, {"tags": ("cs-build:lane",)}),
-        ("a text with no whole word pick or hold", "coordinator picker reads the holding note, per decision %s." % MBX_SLUG, {}),
+        ("a text with no whole word pick or hold",
+         "coordinator picker reads the pickup note and the household, per decision %s." % MBX_SLUG, {}),
     )
     for label, message, kw in cases:
         r = pick_run(message, **kw)
@@ -2133,6 +2136,16 @@ def case_pick_chatter_passes_untouched():
         r = pick_run(message)
         check("pick chatter, %s: passes untouched, with no model call and no refusal" % label,
               r.code == 0 and r.out == "" and r.calls == [], detail(r))
+
+
+def case_pick_known_limit_meeting_hold_passes_untouched():
+    # Known limit: PICK_WORD reads `hold the meeting` as chatter, so a pick in substance that says it passes with no model call.
+    control = pick_run("coordinator hold: keep the lane parked until the run ends.")
+    check("pick known limit control: a coordinator's uncited hold is denied",
+          (control.deny() or {}).get("permissionDecision") == "deny", detail(control))
+    r = pick_run("Hold the meeting until R49 settles.")
+    check("pick known limit, Hold the meeting until R49 settles: passes untouched, with no model call",
+          r.code == 0 and r.out == "" and r.calls == [], detail(r))
 
 
 def case_pick_markdown_no_ruling_is_not_refused():
@@ -2971,6 +2984,7 @@ def main():
                  case_pick_message_is_fenced_as_data, case_pick_message_cannot_close_its_fence,
                  case_pick_statement_words_are_checked,
                  case_pick_held_cited_reaches_the_judge, case_pick_chatter_passes_untouched,
+                 case_pick_known_limit_meeting_hold_passes_untouched,
                  case_pick_markdown_no_ruling_is_not_refused, case_pick_bare_item_is_no_cite,
                  case_pick_long_plan_section_reaches_the_prompt,
                  case_create_session_pick_is_judged, case_send_message_pick_is_judged,
