@@ -7,7 +7,7 @@
  "lane": "",
  "owner": "triage",
  "blockedBy": [],
- "why": "Retrospective audit of stands item 569 (coordinator 12:59 CST Nov 12): the pick to keep degen's pins was wrong under rule verification-newest-that-passes.",
+ "why": "Retrospective audit of stands item 569 (coordinator 12:59 CST Nov 12): the pick to keep degen's pins was wrong under rule verification-newest-that-passes. OWNER 18:37 CST Nov 14 (page item 834, pick-pin-audit-cooldown, option b, no note; ruling own-834-b-pins-newest-passing): a lane that audits pins keeps taking the newest version that passes its checks, with no 7-day wait; the cooldown in degen's .github/dependabot.yml binds dependabot's PRs only. Degen #704 (runner 11's pin audit, row audit-569-degen-pins) needs no change for it. Triage has not read #704; whether it merged is unread.",
  "source": "coordinator 12:59 CST Nov 12",
  "note": "Which pins is unknown; the pick names none. Read degen's pins, read each changelog, move each to the newest that passes its checks, and pin back with a reason any that break. Degen repo work: its own triage or runner. Degen repo work (coordinator 13:04 CST Nov 12): routed to degen's own triage, not a claude-settings lane. The roster names no degen triage or runner session yet, so it waits until one is named.",
  "updatedAt": "2026-11-12T13:07:51-06:00"

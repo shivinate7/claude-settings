@@ -1,0 +1,10 @@
+{
+ "id": "own-834-b-pins-newest-passing",
+ "at": "2026-11-14T18:37:37-06:00",
+ "title": "A lane that audits pins keeps taking the newest version that passes its checks; the 7-day wait is dependabot's own setting, not a rule for lanes.",
+ "ruling": "Owner, page item 834 (pick-pin-audit-cooldown), option b, saved on the page at 18:37 CST Nov 14 with no note: a lane keeps taking the newest version that passes its checks, as degen #704 did, with no new waiting period (root rule verification-newest-that-passes). Option a (a lane skips any version under 7 days old) is not chosen. The `cooldown: default-days: 7` in degen's .github/dependabot.yml binds dependabot's own PRs only (runner 11's read, unchecked by triage). The ruling covers pin audits by a lane; it adds no waiting period and edits no rule. It does not say whether the dependabot setting itself should stay; that is degen's own file. Nothing waited on this item: #704 needs no change for it.",
+ "quote": "",
+ "source": "waiting/answers/pick-pin-audit-cooldown.json (00:37:37Z Nov 15 = 18:37:37 CST Nov 14, choice b, optionId newest-passing, no note). Owner.",
+ "status": "open",
+ "step": "degen-pins-newest"
+}
