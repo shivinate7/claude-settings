@@ -65,7 +65,8 @@ the desktop app has none.
   item 14.
   It also blocks once per newest event of three kinds that this session landed after the handoff's mtime (a merge,
   a ruling relay, a role change; see "Handoff lag" below), kept as "lag_event" in the same nudge.json. Cost: one
-  stat of the handoff and one read of the transcript at each Stop; no new file, timer or process start.
+  stat of the handoff and one read of the transcript from its end back to the handoff's mtime, decoding a line
+  only when a substring says it can matter; no new file, timer or process start.
 
   The required sections are the names on the marker line `<!-- handoff-sections: A | B | ... -->` in
   step 4 of the installed prompt file, read at run time by missing_sections(); no code holds the list.
@@ -1251,41 +1252,141 @@ def owner_waits_gap(payload):
 # --- Handoff lag --------------------------------------------------------------------------
 # The Stop blocks once per newest event this session landed after the handoff's last write (its mtime):
 # a merge, a ruling relay or a role change. Each is a moment the handoff should have recorded.
-#   merge: a successful mcp__github__merge_pull_request call, or a successful Bash call of the merge tool
-#     with --confirm (guard_merge.merge_tool_args reads which segment runs the tool; a preview is no merge).
-#   ruling relay: a successful send tool call (_transcript.SEND_TOOLS) whose message holds the word ruling.
-#   role change: an assistant text line `Role: <role>`.
-# Cost per Stop with a handoff: one stat of it and one read of the transcript; the newest flagged event is
-# kept as "lag_event" in the same nudge.json. No timer, process or other file. Any read error gives None.
-LAG_ROLES = ("coordinator", "lane", "consultant", "batch runner", "triage")
-_LAG_ROLE_LINE = re.compile(r"^[ \t]*Role:[ \t]*(?:%s)\b" % "|".join(LAG_ROLES), re.M)
+#   merge: a successful call of a merge tool (guard_merge.MERGE_TOOLS), or of a shell tool (guard_core.SHELL_TOOLS)
+#     that runs the merge tool with --confirm (guard_merge.merge_tool_args reads which segment runs it) and whose
+#     result holds the tool's success line "merge: #N merged as <sha>". The draft step, the claim push and a
+#     preview each run it with --confirm and merge nothing, so only that line counts.
+#   ruling relay: a successful send tool call (_transcript.SEND_TOOLS) whose message holds the word ruling and no
+#     question mark, and does not ask for one (`Need a ruling ...`): a request for a ruling is no relay of one.
+#   role change: an assistant text line `Role: <name>`, outside a code fence, whose name differs from the session's
+#     last such line. A session that restates its role has changed nothing; a quoted line is not its role.
+# Cost per Stop with a handoff: one stat of it and one read of the transcript from its end back to the handoff's
+# mtime, with no JSON decode of a line until a substring says it can matter. The scan goes further back only to
+# find the last role line before a role line it must compare. The newest flagged event is kept as "lag_event"
+# in the same nudge.json. No timer, process or other file. Any read error gives None.
+# SESSION_ROLES lists the roles a session launcher starts. CLAUDE.md also names a lane and a consultant as roles.
+LAG_ROLES_NOT_STARTED = ("lane", "consultant")
+_LAG_FENCE = re.compile(r"^[ \t]*(?:```|~~~)")
 _LAG_RULING = re.compile(r"\brulings?\b", re.I)
+# A message that asks for a ruling, without a question mark: the request words come before the word ruling in a sentence.
+_LAG_ASKS = re.compile(
+    r"\b(?:needs?|needed|awaiting|waiting (?:for|on)|asking for|requesting|requests?)\b[^.\n]*\brulings?\b", re.I)
+_LAG_MERGED = re.compile(r"^merge: #\d+ merged as [0-9a-f]+", re.M)
+_LAG_STAMP = re.compile(rb'"timestamp"\s*:\s*"([^"]*)"')
+_LAG_WORDS = re.compile(rb"merge|ruling|Role:", re.I)
 
 
-def _lag_merge(use):
-    """Whether this tool_use is a merge: the MCP merge call, or a Bash call that runs the merge tool with --confirm."""
+def _lag_role_line():
+    """The pattern for a role line, from session_role.SESSION_ROLES and LAG_ROLES_NOT_STARTED. A hyphen in a name
+    also matches a space (`batch runner`)."""
+    import session_role
+    names = tuple(session_role.SESSION_ROLES) + LAG_ROLES_NOT_STARTED
+    names = "|".join(re.escape(n).replace(r"\-", "[- ]") for n in names)
+    return re.compile(r"^[ \t]*Role:[ \t]*(%s)(?![\w-])" % names)
+
+
+def _lag_roles_in(text, pattern):
+    """The role names on the role lines of `text` that sit outside a code fence, in order."""
+    roles, fenced = [], False
+    for line in text.split("\n"):
+        if _LAG_FENCE.match(line):
+            fenced = not fenced
+        elif not fenced:
+            found = pattern.match(line)
+            if found:
+                roles.append(found.group(1).replace(" ", "-"))
+    return roles
+
+
+def _lag_record_roles(rec, pattern):
+    content = (rec.get("message") or {}).get("content")
+    roles = []
+    for b in content if isinstance(content, list) else ():
+        if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str):
+            roles += _lag_roles_in(b["text"], pattern)
+    return roles
+
+
+def _lag_merge_kind(use):
+    """"tool" for a call of a merge tool, "shell" for a shell call that runs the merge tool with --confirm, else
+    None. The imports wait for a call that can be either."""
     name, given = use.get("name"), use.get("input")
     if not isinstance(given, dict):
-        return False
-    if name == "mcp__github__merge_pull_request":
-        return True
+        return None
+    if "merge" in str(name):
+        import guard_merge
+        if name in guard_merge.MERGE_TOOLS:
+            return "tool"
     command = given.get("command")
-    # The cheap filter: guard_merge is imported only for a command that can be the merge tool's confirm.
-    if name != "Bash" or not isinstance(command, str) or "--confirm" not in command:
-        return False
-    import guard_core
-    import guard_merge
-    for segment in guard_core.split_segments(command):
-        args = guard_merge.merge_tool_args(segment)
-        if args is not None and "--confirm" in args:
-            return True
-    return False
+    if isinstance(command, str) and "--confirm" in command:
+        import guard_core
+        import guard_merge
+        if name in guard_core.SHELL_TOOLS:
+            for segment in guard_core.split_segments(command):
+                args = guard_merge.merge_tool_args(segment)
+                if args is not None and "--confirm" in args:
+                    return "shell"
+    return None
 
 
 def _lag_relay(use, send_tools):
     given = use.get("input")
     message = given.get("message") if isinstance(given, dict) else None
-    return use.get("name") in send_tools and isinstance(message, str) and bool(_LAG_RULING.search(message))
+    return (use.get("name") in send_tools and isinstance(message, str)
+            and bool(_LAG_RULING.search(message)) and "?" not in message and not _LAG_ASKS.search(message))
+
+
+def _lag_line_time(line):
+    """The epoch time in the last "timestamp" field of a raw transcript line (bytes), read without a JSON decode, or
+    None. The last one, since the record's own sits after its content."""
+    i = line.rfind(b'"timestamp"')
+    found = _LAG_STAMP.match(line, i) if i >= 0 else None
+    return _entry_time({"timestamp": found.group(1).decode("ascii", "replace")}) if found else None
+
+
+def _lag_main_assistant(line):
+    try:
+        rec = json.loads(line)
+    except ValueError:
+        return None
+    ok = isinstance(rec, dict) and rec.get("type") == "assistant" and not rec.get("isSidechain") \
+        and not rec.get("agent_id")
+    return rec if ok else None
+
+
+def _lag_scan_after(after, pattern, _transcript):
+    """(the newest time of a merge or relay that landed, the role lines as (time, name) in order), over the raw
+    lines after the handoff's mtime (newest first, as (time, bytes)). A line is decoded only when it names a
+    merge, a ruling or a role, and a result line only when it holds the id of a call that waits on one."""
+    asks, hits = [], []  # asks: (time, id, whether the result text must show the merge)
+    for when, line in reversed(after):
+        rec = _lag_main_assistant(line) if when is not None and _LAG_WORDS.search(line) else None
+        if rec is None:
+            continue
+        for use in _transcript.tool_uses(rec):
+            kind = _lag_merge_kind(use)
+            if kind or _lag_relay(use, _transcript.SEND_TOOLS):
+                asks.append((when, use.get("id"), kind == "shell"))
+        hits += [(when, role) for role in _lag_record_roles(rec, pattern)]
+    results = {}  # id -> (failed, text)
+    ids = [i.encode("utf-8") for _, i, _ in asks if isinstance(i, str)]
+    if ids:
+        wanted = re.compile(b"|".join(re.escape(i) for i in ids))
+        for _, line in after:
+            if b'"tool_result"' not in line or not wanted.search(line):
+                continue
+            rec = json.loads(line)
+            if rec.get("type") != "user":
+                continue
+            failed = _transcript.failed_tool_use_ids([rec])
+            for block in _transcript.tool_results(rec):
+                results[block.get("tool_use_id")] = (block.get("tool_use_id") in failed, _result_text(block))
+    landed = None
+    for when, i, needs_line in asks:
+        failed, text = results.get(i, (True, ""))
+        if not failed and (not needs_line or _LAG_MERGED.search(text)) and (landed is None or when > landed):
+            landed = when
+    return landed, hits
 
 
 def handoff_lag_event(payload):
@@ -1299,26 +1400,34 @@ def handoff_lag_event(payload):
             return None
         mtime = os.stat(handoff_path(session_id)).st_mtime
         _transcript = _transcript_module()
-        records = _transcript.read_transcript(payload.get("transcript_path", ""))
-        failed = _transcript.failed_tool_use_ids(records)
-        answered = {b.get("tool_use_id") for rec in records for b in _transcript.tool_results(rec)}
-        newest = None
-        for rec in records:
-            if rec.get("isSidechain") or rec.get("agent_id") or rec.get("type") != "assistant":
-                continue
-            when = _entry_time(rec)
-            if when is None or when <= mtime or (newest is not None and when <= newest):
-                continue
-            landed = any(
-                use.get("id") in answered and use.get("id") not in failed
-                and (_lag_merge(use) or _lag_relay(use, _transcript.SEND_TOOLS))
-                for use in _transcript.tool_uses(rec))
-            content = (rec.get("message") or {}).get("content")
-            role = isinstance(content, list) and any(
-                isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)
-                and _LAG_ROLE_LINE.search(b["text"]) for b in content)
-            if landed or role:
+        pattern = _lag_role_line()
+        after, landed, hits, baseline = [], None, None, None
+        # Newest line first. A transcript is in time order, so the first line at or before the mtime ends the
+        # events; a role line must still be compared with the last one before it.
+        for line in _transcript._lines_backwards(payload.get("transcript_path", "")):
+            when = _lag_line_time(line)
+            if when is None:
+                line.decode("utf-8")  # a line that cannot be read fails the whole check open
+            if hits is None:
+                if when is None or when > mtime:
+                    after.append((when, line))
+                    continue
+                landed, hits = _lag_scan_after(after, pattern, _transcript)
+                if not hits:
+                    break
+            if when is not None and b"Role:" in line:
+                rec = _lag_main_assistant(line)
+                roles = _lag_record_roles(rec, pattern) if rec is not None else []
+                if roles:
+                    baseline = roles[-1]
+                    break
+        if hits is None:
+            landed, hits = _lag_scan_after(after, pattern, _transcript)
+        newest, previous = landed, baseline
+        for when, role in hits:
+            if role != previous and (newest is None or when > newest):
                 newest = when
+            previous = role
         return newest
     except Exception:
         return None
