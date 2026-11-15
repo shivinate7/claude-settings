@@ -156,6 +156,17 @@ parent, or miss a message while busy.
 - Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.
   A turn that ends waiting on a named event sets a one-time check-in for that event. It sets the next one only when a new named event arrives, such as a red job, never on a wake from anything else.
+- Lane check: at each wake, the coordinator lists its lanes once and acts on each stuck one. Cost: one
+  `list_sessions` read (`children` true, every page), one `get_session` per lane the list shows blocked or
+  review_ready, and one branch-head read per lane. No process, no timer, no file.
+  - Waiting on you: `status_bucket` blocked, or `post_turn_summary.needs_action` set, or a last turn that ends in a
+    question to you with no later message from you. Answer it in that wake, or say in one line why not.
+  - Stopped: no push and no turn for over 1 h means a nudge; over 2 h means replace the lane. The two limits are the
+    consultant's picks, unmeasured. A lane that waits on the owner (an open page item) or on CI (a check-in it set)
+    is not stopped.
+  - Unplaced: each PR a lane handed in that the batch runner's list does not name is placed or held in that wake.
+  Incidents: Nov 14 15:09 CST (a handed-in PR unlisted for 10 h), Nov 14 16:24 CST (a lane's question missed
+  55 min), Nov 15 00:27 CST (five lanes blocked for hours after a compaction). Step `lane-idle-shows`.
 - A check-in's message names the home of each list it reads (a page collection, a roadmap ref, a git
   ref or a GitHub query), never a copy.
 
