@@ -2605,16 +2605,16 @@ class ClaimSurvivesUnknown(Env):
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
         self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
 
-    def test_a_debt_check_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        import check_debt_retire  # the lint the merge tool's debt check runs; its read fails below, only after the claim push
+    def test_an_undo_history_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        """Confirm runs no Retire check: CI's verdict is the gate. The history read that runs again after the claim push is the silent-undo check's."""
         claimed = []
         self.host.on_claim = lambda: claimed.append(self.head())
-        real_check = check_debt_retire.check
-        def check_unknown(*a, **k):
-            if claimed:  # prove() runs the debt check after the claim push
-                raise check_debt_retire.Unknown("the debt history could not be read")
-            return real_check(*a, **k)
-        with unittest.mock.patch.object(check_debt_retire, "check", check_unknown):
+        real_undo = merge.undo_check
+        def history_unreadable(*a, **k):
+            if claimed:  # prove() reads the history again after the claim push
+                raise merge.Unread("the history could not be read")
+            return real_undo(*a, **k)
+        with unittest.mock.patch.object(merge, "undo_check", history_unreadable):
             rc, out = self.run_merge("7", "--confirm")
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
         self.assertIn("could not read the history", out, "the stop does not name the failed history read")
@@ -4451,13 +4451,12 @@ class GhHalf(Env):
         self.merge_reply_is_retried_then_stops(RATE_API_SECONDARY_403, rate=True)
 
     def spare_is_the_take(self):
-        """The lock's spare is its take expiry, LOCK_TTL_SECONDS, as the rate-wait cases are sized. confirm's two check extensions (UNDO_CHECK_LOCK_SECONDS
-        and debt_check_lock_seconds()) would lift the expiry to about 3900 s from the take, past the end of the 900 s rung, so no rung would need an
-        extension. They are 0 here; their real values are pinned by the event-order cases (confirm_extends_the_lock_for_*_before_each_*_check)."""
-        for name, value in (("UNDO_CHECK_LOCK_SECONDS", 0), ("debt_check_lock_seconds", lambda: 0)):
-            patch = unittest.mock.patch.object(merge, name, value)
-            patch.start()
-            self.addCleanup(patch.stop)
+        """The lock's spare is its take expiry, LOCK_TTL_SECONDS, as the rate-wait cases are sized. confirm's undo-check extension (UNDO_CHECK_LOCK_SECONDS)
+        would lift the expiry to about 3900 s from the take, past the end of the 900 s rung, so no rung would need an extension. It is 0 here; its real
+        value is pinned by test_confirm_extends_the_lock_for_3600_s_before_each_undo_check. confirm runs no debt-check extension (ruling R2)."""
+        patch = unittest.mock.patch.object(merge, "UNDO_CHECK_LOCK_SECONDS", 0)
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def test_a_rate_wait_past_the_lock_spare_extends_the_lock_and_the_merge_goes_on(self):
         # the take holds the lock LOCK_TTL_SECONDS (1200 s) at any deadline: the 60 s and 300 s waits fit its spare, and the 900 s wait, which starts
@@ -6428,7 +6427,6 @@ class SilentUndo(Env):
 
 DEBT_FIXTURE = "# Retire target\n\n- **What.** A fixture debt for the merge tests.\n- **Where.** None.\n- **Decision.** none\n- **Retire.** %s\n"
 RETIRE_TEST = "Delete the fixture. Check: `tests/test_retire_target.py`."
-PROSE_RETIRE = "Confirm it on a phone."  # names no runnable check: the close needs a cited run
 
 
 def names_kind(test, out, slug, kind):
@@ -6487,16 +6485,22 @@ class DebtRetire(Env):
 
     def test_preview_refuses_a_closed_debt_whose_retire_check_is_red(self):
         self.pr_on_debt(1)
+        self.host.state = "red: checks: fail"  # the head's CI is not green, so preview runs the Retire check itself
         rc, out = self.run_merge("7")
         self.assertEqual(rc, 1, out)
         names_kind(self, out, "retire-target", "red")
 
-    def test_confirm_refuses_a_closed_debt_whose_retire_check_is_red_before_any_claim_or_push(self):
+    def test_confirm_with_red_ci_refuses_at_the_head_wait_before_any_claim_or_push(self):
+        """CI's verdict on the head is the gate at confirm. A red head read refuses before the claim, and confirm runs no Retire check."""
         self.pr_on_debt(1)
+        calls = self.stub_retire_check()
+        self.host.state = "red: checks: fail"  # the head reads red: refused before any claim
         before = self.refs()
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
-        names_kind(self, out, "retire-target", "red")
+        self.assertIn("nothing was claimed or pushed", out)
+        self.assertIn("checks: fail", out, "the stop does not print the red check")
+        self.assertEqual(calls, [], "confirm called the Retire check")
         self.assertEqual(self.refs(), before, "a refused confirm pushed")
         self.assertEqual(self.claims(), 0, "a refused confirm claimed a record number")
         self.assertFalse(getattr(self.host, "merged", False), "a refused confirm merged")
@@ -6522,67 +6526,69 @@ class DebtRetire(Env):
         self.assertIn("PREVIEW", out)
         self.assertNotIn("BLOCKED", out)
 
-    def test_confirm_with_a_claim_keeps_a_cited_run_on_the_pr_head(self):
-        """The claim commit goes on top of the PR head. The cited run is on that head, so the re-check after the claim must accept it."""
-        self.pr_on_debt(0, retire=PROSE_RETIRE)
-        run_head = self.head()  # the run was on this head; the claim pushes the branch past it
-        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
-        self.host.cited_run = lambda url: ("success", run_head)
+    def stub_retire_check(self):
+        """Stand in for check_debt_retire.check: each call is recorded, and it finds nothing. -> the list of recorded calls."""
+        import check_debt_retire
+        calls = []
+
+        def check(*args, **kwargs):
+            calls.append((args, kwargs))
+            return []
+
+        patch = unittest.mock.patch.object(check_debt_retire, "check", check)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return calls
+
+    def ci_closes_a_debt(self, state):
+        """Scope: feat deletes the debt file, and the host reports `state` on the head."""
+        self.assertIn("D\tdocs/debts/retire-target.md", sh(self.co, "git", "diff", "--name-status", "origin/main", "origin/feat"),
+                      "scope: feat does not close the debt, so there is no close to judge")
+        self.host.state = state
+        self.assertEqual(self.host.head_state(7), state, "scope: the host does not report %s CI" % state)
+
+    def green_ci_closes_a_debt(self):
+        """Scope: feat deletes the debt file, and the host reports green CI on the head."""
+        self.ci_closes_a_debt("green")
+
+    def test_confirm_with_green_ci_never_calls_the_retire_check(self):
+        """The Retire run moved into CI, so a host that reports green CI is not asked for the check at confirm, before the claim or after its wait."""
+        self.pr_on_debt(1)  # the close's own Retire test is red: merge would refuse it if it still ran the check
+        self.green_ci_closes_a_debt()
+        calls = self.stub_retire_check()
         rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertEqual(self.claims(), 1, out)
-        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(rc, 0, "scope: confirm did not reach its merge: " + out)
+        self.assertTrue(getattr(self.host, "merged", False), "scope: confirm did not merge")
+        self.assertEqual(calls, [], "confirm called the Retire check with green CI")
 
-    def test_confirm_claim_does_not_carry_a_file_the_retire_test_wrote(self):
-        """The Retire test runs in the merge worktree, before the claim's `git add -A`. A file the test leaves there is no part of the claim."""
-        self.pr_on_debt(0, test_text="import sys\nopen('junk-from-test.txt', 'w').write('x')\nsys.exit(0)\n")
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        self.assertEqual(self.claims(), 1, out)
-        names = sh(self.co, "git", "log", "origin/main", "--format=", "--name-only")  # the claim is a parent of the merge: its files are in the log
-        self.assertNotIn("junk-from-test.txt", names, "the claim commit holds a file the Retire test wrote into the merge folder")
+    def test_preview_with_green_ci_never_calls_the_retire_check(self):
+        self.pr_on_debt(1)
+        self.green_ci_closes_a_debt()
+        calls = self.stub_retire_check()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, "scope: preview did not reach its verdict: " + out)
+        self.assertEqual(calls, [], "preview called the Retire check with green CI")
 
+    def test_preview_runs_the_retire_check_when_head_ci_is_pending(self):
+        """Pending CI is not green, so preview runs the Retire check on the head. The close's own Retire test is red, so a real run would refuse it."""
+        self.pr_on_debt(1)
+        self.ci_closes_a_debt("pending: checks")
+        calls = self.stub_retire_check()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, "scope: preview did not reach its verdict: " + out)
+        self.assertEqual(len(calls), 1, "preview did not call the Retire check once with pending CI")
 
-    def cited_run_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self, error):
-        """The PR closes a debt by a prose check and cites a run on its head. The run reads green before the claim push; after it, the read raises."""
-        self.pr_on_debt(0, retire=PROSE_RETIRE)
-        run_head = self.head()
-        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
-        claimed = []
-        def read(url):
-            if claimed:
-                raise error
-            return "success", run_head
-        self.host.cited_run = read
-        self.host.on_claim = lambda: claimed.append(self.head())
-        rc, out = self.run_merge("7", "--confirm")
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
-        self.assertIn("could not be read", out, "the stop does not name the cited run that could not be read")
-        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+    def test_preview_runs_the_retire_check_when_head_ci_is_unknown(self):
+        """An unknown read of the head's CI is not green, so preview runs the Retire check on the head. The close's own Retire test is red."""
+        self.pr_on_debt(1)
+        self.ci_closes_a_debt("unknown (a read of the head's checks failed)")
+        calls = self.stub_retire_check()
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, "scope: preview did not reach its verdict: " + out)
+        self.assertEqual(len(calls), 1, "preview did not call the Retire check once with unknown CI")
 
-    def test_a_cited_run_read_that_fails_with_a_network_error_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        self.cited_run_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(merge.NetStop("the run's reply was cut short"))
-
-    def test_a_cited_run_read_that_fails_with_an_error_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        self.cited_run_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(RuntimeError("boom"))
-
-    def test_a_cited_run_that_is_red_after_the_claim_push_still_reverts(self):
-        """A real finding: the cited run reads green before the claim push and red after it. A red finding refuses, so the claim reverts."""
-        self.pr_on_debt(0, retire=PROSE_RETIRE)
-        run_head = self.head()
-        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
-        claimed = []
-        self.host.on_claim = lambda: claimed.append(self.head())
-        self.host.cited_run = lambda url: ("failure", run_head) if claimed else ("success", run_head)
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("reverted on feat", out)
-        self.assertIn("closes a debt without proof", out)
-        self.assertEqual(self.show("feat", "docs/decisions/second.md"), record("pending", "second").strip())
-        self.assertFalse(self.lock_ref(), "the merge lock was left on origin")
-
-    # The lock outlasts the long checks (debt_check runs each Retire test up to 1800 s; undo_check has no bound). Each check call is preceded by
-    # its own extend_for, so the lock is never left to the take's fixed expiry under a check.
+    # The lock outlasts the long check that confirm runs, undo_check, which has no bound. Each check call is preceded by its own extend_for, so the
+    # lock is never left to the take's fixed expiry under a check. confirm runs no debt check (ruling R2, owner 14:07 CST Nov 10).
 
     LOCK_REFUSAL = "the fake lock refuses the extension"
 
@@ -6630,27 +6636,33 @@ class DebtRetire(Env):
         self.spy_checks(events)
         return self.run_merge("7", "--confirm", lock=self.recording_lock(events))
 
-    def assert_claimed_and_checked_twice(self, events, out):
-        """Scope before subject (P7): the claim was pushed and merged, and each check ran twice, before the claim and inside prove."""
+    def assert_claimed_and_undo_checked_twice(self, events, out):
+        """Scope before subject (P7): the claim was pushed and merged, and the undo check ran twice, before the claim and inside prove. confirm of a
+        ready PR runs no debt check (ruling R2, owner 14:07 CST Nov 10), so the debt check count is 0."""
         self.assertEqual(self.claims(), 1, out)
         self.assertTrue(getattr(self.host, "merged", False), out)
-        self.assertGreaterEqual(events.count(("check", "debt")), 2, "the debt check ran fewer than twice, so the case misses the call inside prove")
+        self.assertEqual(events.count(("check", "debt")), 0, f"confirm ran a debt check, which ruling R2 removed from confirm (run order: {events})")
         self.assertGreaterEqual(events.count(("check", "undo")), 2, "the undo check ran fewer than twice, so the case misses the call inside prove")
 
-    def test_confirm_extends_the_lock_for_1800_s_before_each_debt_check(self):
+    def test_confirm_of_a_ready_pr_runs_no_debt_check_and_extends_no_lock_for_one(self):
+        """Ruling R2 (owner, 14:07 CST Nov 10): the Retire run moved into CI, so confirm runs no debt check and extends the lock for none. The
+        debt-check length is patched to a value no undo extension uses, so an extension that carries it is a debt check's."""
+        sentinel = 7777
+        patch = unittest.mock.patch.object(merge, "debt_check_lock_seconds", lambda: sentinel, create=True)  # create: the name may go once no caller remains
+        patch.start()
+        self.addCleanup(patch.stop)
         events = []
         rc, out = self.confirm_closed_debt_under_spies(events)
         self.assertEqual(rc, 0, out)
-        self.assert_claimed_and_checked_twice(events, out)
-        lacking = unextended_checks(events, "debt", 1800)
-        self.assertEqual(lacking, [], f"a debt check at event {lacking} ran with no lock extension of 1800 s or more before it, since the check before it "
-                                      f"(run order: {events}). debt_check runs a Retire test for up to 1800 s, and the lock can expire under it")
+        self.assert_claimed_and_undo_checked_twice(events, out)
+        self.assertNotIn(sentinel, [wait for what, wait in events if what == "extend"],
+                         f"confirm extended the lock by {sentinel} s, the debt-check length, before a check (run order: {events})")
 
     def test_confirm_extends_the_lock_for_3600_s_before_each_undo_check(self):
         events = []
         rc, out = self.confirm_closed_debt_under_spies(events)
         self.assertEqual(rc, 0, out)
-        self.assert_claimed_and_checked_twice(events, out)
+        self.assert_claimed_and_undo_checked_twice(events, out)
         lacking = unextended_checks(events, "undo", 3600)
         self.assertEqual(lacking, [], f"an undo check at event {lacking} ran with no lock extension of 3600 s or more before it, since the check before it "
                                       f"(run order: {events}). undo_check has no time bound, and the lock can expire under it")
@@ -6663,7 +6675,7 @@ class DebtRetire(Env):
         self.assertNotIn("AttributeError", out, "a lock with no extend_for crashed confirm")
         self.assertTrue(getattr(self.host, "merged", False), out)
 
-    def test_confirm_stops_before_the_undo_and_debt_checks_when_the_lock_cannot_be_extended(self):
+    def test_confirm_stops_before_the_undo_check_when_the_lock_cannot_be_extended(self):
         """confirm extends the lock before the undo check, its first call under the lock. The extension is refused: no check runs, no claim is pushed, nothing merges."""
         self.pr_on_debt(0)
         events = []
@@ -21013,6 +21025,38 @@ class DraftReady(CloudSession):
         self.assertEqual(self.host.readies, [101], "passing ready checks did not let the draft confirm mark #101 ready once: %s" % out)
         self.assertFalse(self.host.batch_pulls[101]["draft"], "#101 is still a draft after its checks passed: %s" % out)
         self.assertEqual(rc, 0, "a draft confirm with its checks passing exited %s: %s" % (rc, out))
+
+    def debt_close_on_green_head(self, test_exit):
+        """DebtRetire's close fixture, run on PR 7 of this class: feat deletes a debt whose Retire test exits with `test_exit`, and the host reads green CI."""
+        DebtRetire.pr_on_debt(self, test_exit)
+        DebtRetire.ci_closes_a_debt(self, "green")
+
+    def test_fast_checks_refuses_a_red_debt_close_even_with_green_head_ci(self):
+        """The pre-ready route (--fast-checks: pre_ready_rows, debt_verdict, debt_check) runs the debt-close lint with no CI gate: a host that reads
+        green CI on the head does not lift a close whose Retire check is red. Ruling R2 (owner, 14:07 CST Nov 10) keeps the CI gate for the preview only."""
+        self.ready_checks_on_main()
+        self.debt_close_on_green_head(1)  # the close's own Retire test is red
+        with self.ready_check_answers("pass") as ran:
+            rc, out, err = self.run_args("7", "--fast-checks")
+        text = out + err
+        self.assertTrue(ran, "scope: the pre-ready run made no ready-check call: " + text)
+        self.assertIn("pass check invariants", text, "scope: the ready check is not a pass: " + text)
+        self.assertIn("pass open-PR clash", text, "scope: the open-PR clash is not a pass: " + text)
+        self.assertIn("fail debt retire", text, "the pre-ready run did not fail the debt-close lint for a red Retire check with green head CI: " + text)
+        self.assertEqual(rc, 1, "the pre-ready run exited %s, not 1, with a red debt close: %s" % (rc, text))
+        names_kind(self, text, "retire-target", "red")
+
+    def test_fast_checks_passes_a_debt_close_whose_retire_check_holds_with_green_head_ci(self):
+        """The control of the case above: the same pre-ready route, green head CI, and a close whose Retire check holds. The debt line passes."""
+        self.ready_checks_on_main()
+        self.debt_close_on_green_head(0)
+        with self.ready_check_answers("pass") as ran:
+            rc, out, err = self.run_args("7", "--fast-checks")
+        text = out + err
+        self.assertTrue(ran, "scope: the pre-ready run made no ready-check call: " + text)
+        self.assertIn("pass open-PR clash", text, "scope: the open-PR clash is not a pass: " + text)
+        self.assertIn("pass debt retire", text, "the debt-close lint did not pass a close whose Retire check holds: " + text)
+        self.assertEqual(rc, 0, "the pre-ready run exited %s, not 0, with a passing debt close: %s" % (rc, text))
 
     def test_ready_alone_marks_a_lane_draft_ready_once_and_merges_nothing(self):  # per-lane, from the Q2 pick: --ready is not batch-only
         self.lane(101)

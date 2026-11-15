@@ -2242,7 +2242,7 @@ test("a group with one new member is new as a whole, so a seen item in its tier 
   assert.deepEqual(await idsInSection(page, "calm"), ["g-new", "g-old", "g-solo"], "the seen solo sits above the group in Whenever");
 });
 
-// ---------------------------------------------------------------- repo sub-groups inside each tier (section-sort-notes, sections 1 to 5)
+// ---------------------------------------------------------------- repo sub-groups inside each tier (session-role-sort-notes, sections 1 to 5)
 // Inside each tier, one sub-group per repo: a section role="group" labelled by its head (a letter tile, the repo name, the count).
 // This repo is meta/page `repo` (owner/name) when set, else the item repo whose name part matches identity.name, ignoring case.
 // Only the repo sub-groups are tested here. The `stops` key and its sort wait on an owner answer, so no case sorts by stops.
@@ -2449,8 +2449,8 @@ test("repo sub-groups control: the Answered section and its rail row draw no rep
   assert.equal((await railRuns(page, "answered")).length, 0, "the Answered rail row draws repo chip runs");
 });
 
-// Case 8: inside a repo's sub-group the order stays: an arrival first, then new before seen, then rank, then age (newest first).
-test("repo sub-groups: inside a repo's sub-group the order stays: an arrival first, then new before seen, rank, and age", async (t) => {
+// Case 8: inside a repo's sub-group the order stays: an arrival first, then new before seen, then rank, then age.
+test("repo sub-groups: inside a repo's sub-group the order stays: an arrival first, then new before seen, rank, and newest first", async (t) => {
   const items = [
     inRepo("own-1", 9, "acme/sample-repo", { added: at(1), rank: 0 }),
     inRepo("a-seen", 1, "acme/alpha", { added: at(5), rank: 0 }), inRepo("a-r2", 2, "acme/alpha", { added: at(20), rank: 2 }),
@@ -2466,7 +2466,7 @@ test("repo sub-groups: inside a repo's sub-group the order stays: an arrival fir
   assert.equal(groups.length, 2, `tier-calm draws ${groups.length} repo sub-groups, not 2`);
   const alpha = groups.find((g) => g.cards.includes("a-r1"));
   assert.ok(alpha, "no sub-group holds alpha's cards");
-  assert.deepEqual(alpha.cards, ["a-arrival", "a-r1", "a-r2", "a-young", "a-old", "a-seen"], "alpha's sub-group does not keep arrival, new before seen, rank, then age (newest first, owner ruling page-newest-first, 2026-11-12 21:37 CST)");
+  assert.deepEqual(alpha.cards, ["a-arrival", "a-r1", "a-r2", "a-young", "a-old", "a-seen"], "alpha's sub-group does not keep arrival, new before seen, rank, then newest first");
 });
 
 // ---------------------------------------------------------------- a reply or a step since the last visit

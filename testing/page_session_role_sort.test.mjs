@@ -1,8 +1,8 @@
-// Browser cases for the waiting page's sort and tier labels (docs/design/section-sort-notes.md: ruling Q1, points 1, 3 and 4).
+// Browser cases for the waiting page's sort and tier labels (docs/design/session-role-sort-notes.md: ruling Q1, points 1, 3 and 4).
 // Blocking sorts by arrival, new before seen, the most `stops` (a group takes its best member's), rank, then age. Each order
 // is worked out at load and kept. A Blocking card's top row shows "stops N", a group head shows its count once, and each tier
 // head has one line that names its key.
-//   NODE_PATH=<dir with playwright> node --test tests/page_section_sort.test.mjs
+//   NODE_PATH=<dir with playwright> node --test testing/page_session_role_sort.test.mjs
 // The stub database and open() below are a copy of page.test.mjs's, trimmed to what these cases use. That file runs its
 // cases when it is imported, so its helpers cannot be imported, and moving them into a shared module would edit the file
 // the repo sub-group cases also change.
@@ -12,7 +12,7 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { needEnv } from "../testing/skip-locally-fail-in-ci.mjs";
+import { needEnv } from "./skip-locally-fail-in-ci.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const html = fs.readFileSync(path.join(HERE, "..", "skills", "waiting-page", "page.html"), "utf8");
@@ -188,7 +188,7 @@ test("Upcoming and Whenever keep their own keys, and ignore stops", async (t) =>
   const calmNew = mk("calm-new-stops", 4, { added: at(5), stops: ["lane a", "lane b", "lane c"] });
   const page = await open(t, { items: [soon, soonerStops, calmOld, calmNew] }); if (!page) return;
   assert.deepEqual(await sectionIds(page, "due"), [soon.id, soonerStops.id], "Upcoming is not nearest deadline first");
-  assert.deepEqual(await sectionIds(page, "calm"), [calmNew.id, calmOld.id], "Whenever is not newest first (owner ruling page-newest-first, 2026-11-12 21:37 CST)");
+  assert.deepEqual(await sectionIds(page, "calm"), [calmNew.id, calmOld.id], "Whenever is not newest first");
 });
 
 // ---------------------------------------------------------------- the order is worked out at load and kept
@@ -372,10 +372,10 @@ test("at 1280 the first run in the rail's chips has no top gap: its label's marg
 // db.d.ts: a store that goes quiet is time-limited at about 10 s, and the page's own wait is the one these cases run out on the fake clock.
 const META_WAIT_MS = 10_000;
 
-// The list a settled meta gives repo-less items: one tier in age order, no repo head, and the rail drawn with a chip per item.
+// The list a settled meta gives repo-less items: one tier, newest first, no repo head, and the rail drawn with a chip per item.
 async function assertDrawnRepoless(page, ids, when) {
   assert.doesNotMatch(await page.locator("#list").innerText(), /Loading the items waiting on you/, `${when}: the loading line still shows`);
-  assert.deepEqual(await sectionIds(page, "holds"), ids, `${when}: the cards are not in age order`);
+  assert.deepEqual(await sectionIds(page, "holds"), ids, `${when}: the cards are not newest first`);
   assert.equal(await page.locator(".subgrp, .subhead").count(), 0, `${when}: a repo head is drawn for repo-less items alone`);
   assert.equal(await page.locator("#rail").evaluate((el) => el.hidden), false, `${when}: the rail is hidden`);
   assert.equal(await page.locator("#rail .nchip").count(), ids.length, `${when}: the rail does not draw one chip per item`);
@@ -460,4 +460,32 @@ test("control: once the repo meta answers, the rail is shown and draws a chip pe
   const page = await open(t, { items: twelveItems(), meta: META }); if (!page) return;
   assert.equal(await page.locator("#rail").evaluate((el) => el.hidden), false, "the rail stays hidden after the repo meta answers");
   assert.equal(await page.locator("#rail .nchip").count(), 12, "the rail does not draw one chip per item");
+});
+
+// ---------------------------------------------------------------- Send while the list is held, and a long repo name
+
+test("while the repo meta is held the list is not drawn, so Send stays off, and it turns on once the cards draw", async (t) => {
+  const s1 = mk("held-stand-one", 1, { stands: true }), s2 = mk("held-stand-two", 2, { stands: true, repo: "owner/other-repo" });
+  const page = await open(t, { items: [s1, s2], meta: META, holdMeta: true }); if (!page) return;
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is live while the owner sees only the loading line");
+  await page.evaluate(() => window.__releaseMeta());
+  await page.waitForFunction("feed.meta === true");
+  await page.waitForSelector(`#item-${s1.id}`);
+  assert.equal(await page.locator("#send").isDisabled(), false, "Send stays off after the cards draw with stood picks");
+});
+
+test("a long repo name in a sub-group head never makes the page scroll sideways", async (t) => {
+  const unbroken = "a".repeat(37), hyphenated = "very-long-hyphenated-repository-name-x".slice(0, 38);
+  const items = [blk("long-own", 1, { added: at(1) }), blk("long-a", 2, { added: at(2), repo: "owner/" + unbroken }), blk("long-b", 3, { added: at(3), repo: "owner/" + hyphenated })];
+  const page = await open(t, { items, meta: META, metaFirst: true }); if (!page) return;
+  for (const [width, theme] of [320, 390, 800, 961, 1280, 1440].flatMap((w) => [[w, "light"], [w, "dark"]])) {
+    await page.emulateMedia({ colorScheme: theme });
+    await page.setViewportSize({ width, height: 800 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `the page scrolls sideways at ${width} px, ${theme}`);
+    assert.equal(await page.evaluate(() => [...document.querySelectorAll(".subhead .nm")].every((n) => n.getBoundingClientRect().right <= innerWidth)), true, `a repo name runs past the screen at ${width} px, ${theme}`);
+    assert.equal(await page.evaluate(() => { const el = document.querySelector("#rail"), rail = el.getBoundingClientRect(), inner = rail.right - parseFloat(getComputedStyle(el).paddingRight); return [...document.querySelectorAll("#rail .rrepo")].every((r) => r.getBoundingClientRect().right <= inner + 1); }), true, `a repo name in the rail runs past the rail's inner edge at ${width} px, ${theme}`);
+    assert.equal(await page.evaluate(() => [...document.querySelectorAll("#rail .rrepo")].every((r) => r.title && getComputedStyle(r.querySelector(".rn")).textOverflow === "ellipsis")), true, `a rail repo name has no title or no ellipsis at ${width} px, ${theme}`);
+    // WP_SHOTS=<dir> keeps a picture of each state for a design review; a normal run writes nothing.
+    if (process.env.WP_SHOTS) await page.screenshot({ path: path.join(process.env.WP_SHOTS, `long-repo-${width}-${theme}.png`), fullPage: true });
+  }
 });
