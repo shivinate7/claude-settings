@@ -395,7 +395,7 @@ role_model_refuse("role-model: builder with no model is denied when the default 
           "builder", None, "Fix the failing case.", config=ROLE_UNPINNED_CFG, carries=(ROLE_DEFAULT_REMEDY,),
           env=EMPTY_DEFAULT)
 role_model_allow("role-model: builder with no model is allowed when the default is sonnet",
-           "builder", None, "Fix the failing case.", env=SONNET_DEFAULT)
+           "builder", None, "Fix the failing case.", config=ROLE_UNPINNED_CFG, env=SONNET_DEFAULT)
 role_model_allow("role-model: reviewer with no model is allowed when the default is unset (its file pins haiku)",
            "reviewer", None, "Check the diff for typos.", env=UNSET_DEFAULT)
 role_model_allow("role-model: test-author with no model is allowed when the default is unset (its file pins haiku)",
