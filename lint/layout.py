@@ -272,13 +272,13 @@ WAITING_ROLE = "waiting-page"  # the role of the registry entry that is the repo
 ARTIFACT_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")  # a slug of 32 characters or fewer, as a record slug is (git-slug-then-claim-number)
 ROLE = re.compile(r"[a-z0-9][a-z0-9-]*")
 COLLECTION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
-WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta")  # what the waiting page's database holds
+WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta", "receipts")  # what the waiting page's database holds
 
 
 def artifacts(root):
     """[{id, url, role, account, collections, export}] from the "artifacts" key of `root`'s extras file, in order; []
     for a repo with no extras file or no key. `collections` and `export` are filled in: the waiting-page role exports
-    the five waiting collections to the waiting-data folder of the record branch, any other role needs its own
+    the six waiting collections to the waiting-data folder of the record branch, any other role needs its own
     `collections` and exports to `artifacts/<id>/`. A page-only entry (any other role, `"collections": []`) exports its page
     and files and no database; an empty list is refused on the waiting-page role, and a missing key on any other. An entry with `"export": false` (never the waiting-page role) is held and never exported: it needs
     no collections and reads with `export` False and `collections` []. LayoutError, naming the entry by its id, for an email as account, a
