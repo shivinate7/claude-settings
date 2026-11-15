@@ -1,0 +1,10 @@
+{
+ "id": "lint-checks-before-fix-check",
+ "title": "A lane runs the CI lint checks before it posts a fix check on a hand-resolved merge",
+ "status": "queued",
+ "repo": "shivinate7/claude-settings",
+ "why": "Lane lesson via the coordinator, 05:37 CST Nov 15 (relayed; the lane's account, not checked by triage). Three failed fix checks on #2787 each came from a defect of the lane's hand-resolved merge: cost pins, silent-undo, STE. Harm: each failed fix check counts as a review round (step review-fix-check-round), so a defect the CI lint checks would have read burns the three-round cap and forces a replacing PR (#3482). Idea (the lane's): run the CI lint checks (check_cost_pins, check_silent_undo, the STE check) on the merged head before a fix check is posted. Nearest steps, not the same: lane-lint-checks-from-batch (lane lint judges added lines with the batch's check scripts) and mixed-merge-resolver (who resolves a mixed conflict); neither runs the lint checks before a fix check (grep of roadmap steps for hand-resolved, pre-fix-check, fix check, 05:39 CST). Unmeasured: how often a hand-resolved merge fails a lint check; one incident (#2787, three times). Past rulings checked: none found.",
+ "source": "lane sim-lease-gaps via coordinator 05:37 CST Nov 15, relayed by triage",
+ "note": "Low. Open. One incident, three fix checks on #2787; the check set and its cost are unmeasured.",
+ "updatedAt": "2026-11-15T05:40:00-06:00"
+}

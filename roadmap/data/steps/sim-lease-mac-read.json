@@ -5,10 +5,10 @@
   "order": 0.6,
   "owner": "coordinator",
   "why": "From the sim-lease-gaps lane via the coordinator, 00:56 CST Nov 15: #2787's paths that need a real Mac are not run: the text real `hinge get` prints, a reuse followed by `bin/sim-lease status`, and the SpringBoard and PosterBoard crash-report count. The command is the lane's; neither the coordinator nor triage ran it.",
-  "note": "Ask: owner-run (or Mac session) read of real hinge output, a reuse then status, and crash reports. Item command {powershell: n/a, mac}: cd ~/claude-settings && for u in $(xcrun simctl list devices booted | grep -Eo '[0-9A-F]{8}-[0-9A-F-]{27}'); do echo \"$u\"; hinge -d \"$u\" get; done; bin/sim-lease status; ls ~/Library/Logs/DiagnosticReports | grep -cE 'SpringBoard|PosterBoard' . Not posted as an owner item (the coordinator asked only for the step).",
+  "note": "Ask: owner-run (or Mac session) read of real hinge output, a reuse then status, and crash reports. Item command {powershell: n/a, mac}: cd ~/claude-settings && for u in $(xcrun simctl list devices booted | grep -Eo '[0-9A-F]{8}-[0-9A-F-]{27}'); do echo \"$u\"; hinge -d \"$u\" get; done; bin/sim-lease status; ls ~/Library/Logs/DiagnosticReports | grep -cE 'SpringBoard|PosterBoard' . Posted as owner item 876 (act-mac-sim-lease-read) at 05:39 CST Nov 15, on the coordinator's 05:37 ask for PR 3482; nothing waits on it.",
   "command": {
     "powershell": "n/a",
     "mac": "cd ~/claude-settings && for u in $(xcrun simctl list devices booted | grep -Eo '[0-9A-F]{8}-[0-9A-F-]{27}'); do echo \"$u\"; hinge -d \"$u\" get; done; bin/sim-lease status; ls ~/Library/Logs/DiagnosticReports | grep -cE 'SpringBoard|PosterBoard'"
   },
-  "updatedAt": "2026-11-15T06:56:38+00:00"
+  "updatedAt": "2026-11-15T05:40:00-06:00"
 }
