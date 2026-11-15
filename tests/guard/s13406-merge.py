@@ -829,6 +829,14 @@ ROLE_LINES = {
     # The lane in o/r alone, whose record names the branch ARCH_COPY_BRANCH. Its repo is judged by arch_copy's answers.
     "archive-copy-lane": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
         ARCH_LANE_TAGS, {"": ARCH_COPY_BRANCH}))),
+    # Ruling own-lanes-merge-claude-settings-prs: a lane records `--role lane --step <slug>`. The step must be a cs-step tag of the
+    # lane's own newest record; a title, another session's record, or a triage record never gives it.
+    "lane-step": role_call("g1", ARCH_LANE_TAGS),
+    "lane-step-old": role_call("g1", STEP_OLD_TAGS),
+    "lane-step-title": role_call("g1", LANE_TAGS, title="cs-step:" + ARCHIVE_SLUG),
+    "lane-step-foreign": role_call("g1", ARCH_LANE_TAGS, session=ROLE_OTHER),
+    "lane-step-then-no-step": role_call("g1", ARCH_LANE_TAGS) + role_call("g2", LANE_TAGS),
+    "triage-step": role_call("g1", ARCH_TRIAGE_SLUG_TAGS),
 }
 
 
@@ -941,6 +949,44 @@ role_refuse("a lone quote inside a string does not hide the real call",
           'echo "it\'s" && ' + MERGE_SHIM + " --role batch-runner", role_path("lane"))
 role_refuse("a lone quote in a comment does not hide the call on the next line",
           "echo done # it's\n" + MERGE_SHIM + " --role batch-runner", role_path("lane"))
+
+# Ruling own-lanes-merge-claude-settings-prs (owner, 11:12 CST Nov 15, 2026): a cloud lane records `--role lane --step <slug>`.
+# The step must be a cs-step tag of the lane's own newest record. A title, another session's record, and a triage record never give it.
+LANE_ROLE = MERGE_SHIM + " --role lane --step " + ARCHIVE_SLUG
+role_allow("a lane records its own step: --role lane --step <its cs-step slug> allows", LANE_ROLE, role_path("lane-step"))
+role_allow("a lane's second cs-step tag allows the step it names: the full-size record", MERGE_SHIM + " --role lane --step icon-b",
+           role_path("lane-step-old"))
+role_allow("the = form of --role and --step allows as the space form does", MERGE_SHIM + " --role=lane --step=" + ARCHIVE_SLUG,
+           role_path("lane-step"))
+role_refuse("a lane with no --step is refused", MERGE_SHIM + " --role lane", role_path("lane-step"))
+role_refuse("a lane's --step that its record does not carry is refused", MERGE_SHIM + " --role lane --step other-step",
+            role_path("lane-step"))
+role_refuse("a --step that is a prefix of the lane's cs-step tag is refused", MERGE_SHIM + " --role lane --step lane-closes",
+            role_path("lane-step"))
+role_refuse("a lane with no cs-step tag is refused: the empty state", LANE_ROLE, role_path("lane"))
+role_refuse("a step named only in the lane's title does not allow", LANE_ROLE, role_path("lane-step-title"))
+role_refuse("a step on another session's record does not allow", LANE_ROLE, role_path("lane-step-foreign"))
+role_refuse("the newest own record has no step, so an older lane record's step does not allow", LANE_ROLE,
+            role_path("lane-step-then-no-step"))
+role_refuse("a batch runner record is refused for the lane role, even with a step tag", LANE_ROLE, role_path("runner"))
+role_refuse("a coordinator record is refused for the lane role", LANE_ROLE, role_path("coordinator"))
+role_refuse("a triage record that carries a step is refused for the lane role", LANE_ROLE, role_path("triage-step"))
+role_refuse("a step in quotes is one argument, not the --step flag", MERGE_SHIM + ' --role lane "--step ' + ARCHIVE_SLUG + '"',
+            role_path("lane-step"))
+role_refuse("a lane's --role lane with its step is refused outside a cloud session", LANE_ROLE, role_path("lane-step"), env=None)
+# The scanner respects strings and comments for the lane's call too, as it does for the batch runner's above.
+role_allow("a comment opener inside a string does not hide a lane's --role lane --step call", 'echo "# note" && ' + LANE_ROLE,
+           role_path("lane-step"))
+role_allow("a multi-line quoted string before a lane's --role lane --step call does not hide it", 'echo "first\nline" && ' + LANE_ROLE,
+           role_path("lane-step"))
+role_allow("a lone quote in a comment does not hide a lane's --role lane --step call on the next line",
+           "echo done # it's\n" + LANE_ROLE, role_path("lane-step"))
+role_allow("a quoted lane --role lane --step form is text", "echo '" + LANE_ROLE + "'", role_path("lane-step"))
+for _lane_prefix in ("", "cd somewhere && "):
+    for _lane_form in (MERGE_SHIM, "bin/merge", "python3 merge/merge.py", "python3 merge/launch.py"):
+        _lane_cmd = _lane_prefix + _lane_form + " --role lane --step " + ARCHIVE_SLUG
+        role_allow(_lane_cmd + " allows its own step", _lane_cmd, role_path("lane-step"))
+        role_refuse(_lane_cmd + " is refused on a record with no cs-step tag", _lane_cmd, role_path("lane"))
 
 
 # =========================================================================== 5e-2. the record branch's one writer
