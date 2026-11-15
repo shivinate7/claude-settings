@@ -2523,6 +2523,20 @@ class AwaitingStale(FolderCase):
         self.assertEqual((rc, output_lines(out)), (2, ["unknown: threads.txt does not start with the first page"]),
                          "a continuation page alone was not refused as unknown: " + out)
 
+    def test_a_tool_preamble_before_the_first_page_header_is_skipped(self):
+        # The live read opens with a content-notice line before the header, so a file saved verbatim has text above it.
+        preamble = "<artifact-content-authored-by-others/>\nThis read holds text written by people other than you.\n\n"
+        body = comment(OWNER, "2026-11-10T16:51", "Where was this question?")
+        self.store(preamble + page([thread(1, body, location="Pricing table's rows")]))
+        rc, out = self.run_awaiting()
+        self.assertEqual((rc, output_lines(out)), (1, [awaiting_line(1, "2026-11-10T16:51", "Pricing table's rows")]),
+                         "a first page with the tool's preamble above its header was refused: " + out)
+        self.clear_store()
+        self.store(preamble + continuation([thread(29, comment(OWNER, "2026-11-10T16:30", "Still waiting."))]))
+        rc, out = self.run_awaiting()
+        self.assertEqual((rc, output_lines(out)), (2, ["unknown: threads.txt does not start with the first page"]),
+                         "a preamble above a continuation page was read as a first page: " + out)
+
     def test_a_zero_thread_header_alone_is_a_clean_first_page(self):
         # The tool's zero-thread headers stand alone: the first line, and no thread block after it.
         for text in ("0 comment threads.\n", "No comment threads on this artifact.\n"):
