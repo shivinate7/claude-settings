@@ -601,27 +601,6 @@ class Env(unittest.TestCase):
         sh(self.other, "git", "rm", "-q", "docs/decisions/second.md")
         sh(self.other, "git", "commit", "-qm", "no pending record left"); sh(self.other, "git", "push", "-q", "origin", "feat")
 
-    def ready_checks_on_main(self):
-        """origin's main names one ready check, so a draft confirm must run it before the ready mark (merge.readyChecks). The pre-ready run needs it too."""
-        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], readyChecks=["check invariants"]))))
-
-    @contextlib.contextmanager
-    def ready_check_answers(self, checks_state):
-        """merge.ci_job_run answers a ready check (its --pinned run) with LINT_STATES[checks_state]. The temp tree lives in this run's folder.
-        Yields the --pinned calls the run made, so a case reads whether a ready check ran."""
-        ran = []
-
-        def answer(wt, *args, **kw):
-            if "--pinned" in args:
-                ran.append(args)
-                if checks_state == "pass" and kw.get("raw") is not None:  # ci-job prints one PASS line per step it ran: a declared step with no line reads unknown
-                    kw["raw"].extend("PASS %s: ok" % args[i + 1] for i, arg in enumerate(args) if arg == "--step")
-                return LINT_STATES[checks_state]
-            return LINT_STATES["pass"]
-        with unittest.mock.patch.object(merge, "ci_job_run", side_effect=answer), \
-                unittest.mock.patch.object(tempfile, "tempdir", run_folder()):
-            yield ran
-
     def run_args(self, *argv, host=None, hosts=None):
         """-> (rc, stdout, stderr) of merge with argv. A usage error's SystemExit is read as its code."""
         out, err = io.StringIO(), io.StringIO()
@@ -6569,35 +6548,6 @@ class DebtRetire(Env):
         rc, out = self.run_merge("7")
         self.assertEqual(rc, 0, "scope: preview did not reach its verdict: " + out)
         self.assertEqual(calls, [], "preview called the Retire check with green CI")
-
-    def test_fast_checks_refuses_a_red_debt_close_even_with_green_head_ci(self):
-        """The pre-ready route (--fast-checks: pre_ready_rows, debt_verdict, debt_check) runs the debt-close lint with no CI gate: a host that reads
-        green CI on the head does not lift a close whose Retire check is red. Ruling R2 (owner, 14:07 CST Nov 10) keeps the CI gate for the preview only."""
-        self.ready_checks_on_main()
-        self.pr_on_debt(1)  # the close's own Retire test is red
-        self.green_ci_closes_a_debt()
-        with self.ready_check_answers("pass") as ran:
-            rc, out, err = self.run_args("7", "--fast-checks")
-        text = out + err
-        self.assertTrue(ran, "scope: the pre-ready run made no ready-check call: " + text)
-        self.assertIn("pass check invariants", text, "scope: the ready check is not a pass: " + text)
-        self.assertIn("pass open-PR clash", text, "scope: the open-PR clash is not a pass: " + text)
-        self.assertIn("fail debt retire", text, "the pre-ready run did not fail the debt-close lint for a red Retire check with green head CI: " + text)
-        self.assertEqual(rc, 1, "the pre-ready run exited %s, not 1, with a red debt close: %s" % (rc, text))
-        names_kind(self, text, "retire-target", "red")
-
-    def test_fast_checks_passes_a_debt_close_whose_retire_check_holds_with_green_head_ci(self):
-        """The control of the case above: the same pre-ready route, green head CI, and a close whose Retire check holds. The debt line passes."""
-        self.ready_checks_on_main()
-        self.pr_on_debt(0)
-        self.green_ci_closes_a_debt()
-        with self.ready_check_answers("pass") as ran:
-            rc, out, err = self.run_args("7", "--fast-checks")
-        text = out + err
-        self.assertTrue(ran, "scope: the pre-ready run made no ready-check call: " + text)
-        self.assertIn("pass open-PR clash", text, "scope: the open-PR clash is not a pass: " + text)
-        self.assertIn("pass debt retire", text, "the debt-close lint did not pass a close whose Retire check holds: " + text)
-        self.assertEqual(rc, 0, "the pre-ready run exited %s, not 0, with a passing debt close: %s" % (rc, text))
 
     def test_preview_runs_the_retire_check_when_head_ci_is_pending(self):
         """Pending CI is not green, so preview runs the Retire check on the head. The close's own Retire test is red, so a real run would refuse it."""
@@ -19693,6 +19643,27 @@ class DraftReady(CloudSession):
         self.heads[n] = self.head(f"lane-{n}")
         return self.heads[n]
 
+    def ready_checks_on_main(self):
+        """origin's main names one ready check, so a draft confirm must run it before the ready mark (merge.readyChecks)."""
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], readyChecks=["check invariants"]))))
+
+    @contextlib.contextmanager
+    def ready_check_answers(self, checks_state):
+        """merge.ci_job_run answers a ready check (its --pinned run) with LINT_STATES[checks_state]. The temp tree lives in this run's folder.
+        Yields the --pinned calls the run made, so a case reads whether a ready check ran."""
+        ran = []
+
+        def answer(wt, *args, **kw):
+            if "--pinned" in args:
+                ran.append(args)
+                if checks_state == "pass" and kw.get("raw") is not None:  # ci-job prints one PASS line per step it ran: a declared step with no line reads unknown
+                    kw["raw"].extend("PASS %s: ok" % args[i + 1] for i, arg in enumerate(args) if arg == "--step")
+                return LINT_STATES[checks_state]
+            return LINT_STATES["pass"]
+        with unittest.mock.patch.object(merge, "ci_job_run", side_effect=answer), \
+                unittest.mock.patch.object(tempfile, "tempdir", self.run_dir):
+            yield ran
+
     def test_a_lane_draft_the_host_will_not_mark_ready_stays_a_draft_with_its_reason(self):  # re-pointed from the batch's --ready (act 4)
         self.lane(101)
         self.host.batch_pulls[101]["draft"] = True
@@ -19724,6 +19695,38 @@ class DraftReady(CloudSession):
         self.assertEqual(self.host.readies, [101], "passing ready checks did not let the draft confirm mark #101 ready once: %s" % out)
         self.assertFalse(self.host.batch_pulls[101]["draft"], "#101 is still a draft after its checks passed: %s" % out)
         self.assertEqual(rc, 0, "a draft confirm with its checks passing exited %s: %s" % (rc, out))
+
+    def debt_close_on_green_head(self, test_exit):
+        """DebtRetire's close fixture, run on PR 7 of this class: feat deletes a debt whose Retire test exits with `test_exit`, and the host reads green CI."""
+        DebtRetire.pr_on_debt(self, test_exit)
+        DebtRetire.ci_closes_a_debt(self, "green")
+
+    def test_fast_checks_refuses_a_red_debt_close_even_with_green_head_ci(self):
+        """The pre-ready route (--fast-checks: pre_ready_rows, debt_verdict, debt_check) runs the debt-close lint with no CI gate: a host that reads
+        green CI on the head does not lift a close whose Retire check is red. Ruling R2 (owner, 14:07 CST Nov 10) keeps the CI gate for the preview only."""
+        self.ready_checks_on_main()
+        self.debt_close_on_green_head(1)  # the close's own Retire test is red
+        with self.ready_check_answers("pass") as ran:
+            rc, out, err = self.run_args("7", "--fast-checks")
+        text = out + err
+        self.assertTrue(ran, "scope: the pre-ready run made no ready-check call: " + text)
+        self.assertIn("pass check invariants", text, "scope: the ready check is not a pass: " + text)
+        self.assertIn("pass open-PR clash", text, "scope: the open-PR clash is not a pass: " + text)
+        self.assertIn("fail debt retire", text, "the pre-ready run did not fail the debt-close lint for a red Retire check with green head CI: " + text)
+        self.assertEqual(rc, 1, "the pre-ready run exited %s, not 1, with a red debt close: %s" % (rc, text))
+        names_kind(self, text, "retire-target", "red")
+
+    def test_fast_checks_passes_a_debt_close_whose_retire_check_holds_with_green_head_ci(self):
+        """The control of the case above: the same pre-ready route, green head CI, and a close whose Retire check holds. The debt line passes."""
+        self.ready_checks_on_main()
+        self.debt_close_on_green_head(0)
+        with self.ready_check_answers("pass") as ran:
+            rc, out, err = self.run_args("7", "--fast-checks")
+        text = out + err
+        self.assertTrue(ran, "scope: the pre-ready run made no ready-check call: " + text)
+        self.assertIn("pass open-PR clash", text, "scope: the open-PR clash is not a pass: " + text)
+        self.assertIn("pass debt retire", text, "the debt-close lint did not pass a close whose Retire check holds: " + text)
+        self.assertEqual(rc, 0, "the pre-ready run exited %s, not 0, with a passing debt close: %s" % (rc, text))
 
     def test_ready_alone_marks_a_lane_draft_ready_once_and_merges_nothing(self):  # per-lane, from the Q2 pick: --ready is not batch-only
         self.lane(101)
