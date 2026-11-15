@@ -2,6 +2,8 @@
 
 ## The ruling
 
+State: live until the cutover (decision `all-repos-switch-together`). The per-lane target retires it, with the batches it governs. Until then the red-main check (decision `no-merge-onto-red-main`) does not replace it.
+
 No one merges to main while a batch's CI runs, unless the running batch's head already contains the merging PR's head. That includes the owner (ruled Oct 28 at 13:36 CDT).
 
 The owner's reading, Nov 1 20:54 CST: the rule keeps main from moving under a running batch. It does not forbid testing batch N+1 on top of batch N. A merge of N moves main to a tree that N+1's head already holds, so N+1's run still tests what lands.
