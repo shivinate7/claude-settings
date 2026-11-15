@@ -8,7 +8,9 @@
 # TREE_CITES=true in the env runs tree mode, as an opted-in repo's CI does; the workflow's tree-cites setting is not read.
 # Pin check: when the repo's CI pins this repo's ste-lint or zizmor action at a commit whose files for that
 # action differ from this copy's, it says so on stderr and exits 3 even if the lint passed, so a session moves
-# the pin before CI spends a run (decision action-pins-follow-sessions). Each action is judged on its own files
+# the pin before CI spends a run (decision action-pins-follow-sessions). Against a stable head (STE_CHANGED_COMPARE_TO, from
+# bin/ci-job) a pin ahead of it prints a line and exits 0, and a stale pin behind it exits 3. A failed stable fetch, with an
+# origin that may hold stable, is unknown (exit 2, ci-job's). Each action is judged on its own files
 # (PINNED below). A pin this clone does not hold is reported as unknown and changes no exit code. A pin the
 # clone holds but whose history a shallow clone cut is unknown too, in its own line with the remedy
 # `git fetch --unshallow`; unlike the line above, it still exits 3, because the files differ, and that is a fact.
