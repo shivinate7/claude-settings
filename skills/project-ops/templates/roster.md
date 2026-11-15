@@ -13,5 +13,7 @@ sends triage the new id in the same turn (ruling R22 point 2, which names a lane
 - Arbiter (decider only; makes rulings and grants, each marked as its own, for its own repo
   only; the coordinator starts one only on the owner's grant): "<session title>", <session id>,
   since <date and time>. It compacts in place. Keep this line only while an arbiter exists.
+- Consultant (owner-started, on demand, read-only audits; no coordinator starts it): "<session title>", <session id>,
+  since <date and time>. It has no successor. Keep this line only while a consultant exists.
 
 Lanes are not on the roster. The coordinator holds lane state.
