@@ -722,7 +722,7 @@ ROLE_LINES = {
     # out. A set_session_tags call on its own id after the solo read makes that read stale, as the trust card's read is.
     "solo": role_call("g1", ["cs-repo:o/r"], parent=None),
     "solo-null-parent": [role_use("g1", GET_SESSION), role_result("g1", json.dumps({"ccr": {
-        "id": ROLE_OWN, "title": "a solo session", "tags": ["cs-repo:o/r"], "parent_session_id": None}}))],
+        "id": ROLE_OWN, "title": "a lane on its own", "tags": ["cs-repo:o/r"], "parent_session_id": None}}))],
     "solo-no-tags": role_call("g1", [], parent=None),
     "solo-then-other-tags": role_call("g1", ["cs-repo:o/r"], parent=None) + role_tag_call("t1", session=ROLE_OTHER),
     "solo-then-tags": role_call("g1", ["cs-repo:o/r"], parent=None) + role_tag_call("t1"),

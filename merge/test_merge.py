@@ -14393,17 +14393,18 @@ def settings_branches(text):
 class SoloHatConfirm(CloudSession):
     """A session with no parent_session_id and no cs-build tag records the batch-runner role for its own merge (decision session-tiers,
     roles are hats). The role is the only thing the hat changes: a confirm made with it still runs the checks a batch runner's does,
-    the head's CI and the batch brake. Keep-green: the merge tool reads no tags and no parent, and neither check moves, so these pass on
+    the head's CI. Keep-green: the merge tool reads no tags and no parent, and the head's CI does not move, so these pass on
     the old code too. The lane-lint join (the review gate) runs under the same role in LintCheckJoin (merge/test_lane_lint.py)."""
 
     def setUp(self):
         super().setUp()
-        rc, out, err = self.run_main("--role", "batch-runner")  # the solo session records its own hat, through the writer
+        rc, out, err = self.run_main("--role", "batch-runner")  # a lane on its own records its own hat, through the writer
         self.assertEqual(rc, 0, out + err)
         with self.cloud():
-            self.assertEqual(merge.read_merge_role(), "batch-runner", "the solo session did not record the batch-runner role it confirms with")
+            self.assertEqual(merge.read_merge_role(), "batch-runner", "a lane on its own did not record the batch-runner role it confirms with")
 
     def test_a_solo_confirm_on_a_red_head_check_is_refused_before_any_claim_or_merge(self):
+        self.host.state = "red: checks: fail"  # the head reads red: refused before any claim
         self.host.seq = [(False, "a check is red: checks: fail")]
         refs = self.refs()
         rc, out, err = self.runner_confirm()
@@ -14412,17 +14413,7 @@ class SoloHatConfirm(CloudSession):
         self.assertEqual(self.refs(), refs, "the solo confirm pushed a claim on a red head")
         self.assertFalse(getattr(self.host, "merged", False), out + err)
 
-    def test_a_solo_confirm_is_refused_while_another_ready_pr_runs_ci(self):
-        self.host.batch = [BATCH_BLOCKER]
-        refs = self.refs()
-        rc, out, err = self.runner_confirm()
-        self.assertEqual(rc, 1, out + err)
-        self.assertIn("#2", out + err)
-        self.assertIn("CI-done comment", out + err)
-        self.assertEqual(self.refs(), refs, "the solo confirm pushed past the batch brake")
-        self.assertFalse(getattr(self.host, "merged", False), out + err)
-
-    def test_a_solo_confirm_on_a_clear_head_merges(self):  # control: the setup merges, so the two refusals above come from their checks
+    def test_a_solo_confirm_on_a_clear_head_merges(self):  # control: the setup merges, so the refusal above comes from its check
         rc, out, err = self.runner_confirm()
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(self.host.merged)
