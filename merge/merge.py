@@ -48,13 +48,15 @@
                           live CI; then the PRs with no record.
                           A replacement PR names its source in its body on a line `Replaces #M` (or `Carries #M`; two different numbers, or its own,
                           name none). With no record of its own, it takes the newest record on #M when that record's `PR:` line is #M and the tree
-                          of its Head equals the tree of the live head, or the live tree is git's clean merge of that Head and the tip of main exactly
-                          (carries_by_tree); #M's lane-lint PASS counts for it on the equal-tree test only (replaces_source,
-                          carry_source, lint_carried). Trees are compared, never head shas. The carried record reads as it reads at its own Head: held stays
-                          held and a failed fix check stays open; its why says `carried from #M by tree`. #M may be closed. Every reader takes the same
-                          carry: `--reviewed`, `--release-check`, the join's lint check, and the fix check of `--review-record`.
+                          of its Head equals the tree of the live head, or the live tree is git's clean merge of that Head and main's current tip
+                          exactly (carry_source, carries_by_tree). #M's lane-lint PASS counts for it on the equal-tree test only (lint_carried, which the
+                          join's lint check, `--reviewed` and `--release-check` call). Trees are compared, never head shas. The carried record reads as
+                          it reads at its own Head: held stays held and a failed fix check stays open; its why says `carried from #M by tree`. #M may be
+                          closed. The record's carry (carry_source) is read the same way by `--reviewed`, `--release-check` and the fix check of `--review-record`.
                           Cost: for a PR that names a source and has no record or lint of its own, one paged read of issue M's comments (once a run)
-                          and two commit reads, plus one merge-tree start when the trees differ. A read that cannot run reads unknown, never done.
+                          and two commit reads; when the trees differ, also one `git fetch origin <main>` a run (at most one), then two git rev-parse
+                          starts and one git merge-tree start per read, plus at most one fetch of all branch heads a run when a commit is missing.
+                          A read that cannot run reads unknown, never done.
   merge --reviewed --root DIR [--root DIR ...]
                           the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, then that repo's lines.
                           Each lane merges on its own, so a block names no batch to open or build. The base is the root's
@@ -1067,6 +1069,7 @@ class Host:
         self.ignore = ignore or {}  # check name -> reason, from ignore_checks()
         self.warned = set()  # (check name, link) already warned about, so a poll loop prints each line once
         self.heads_fetch = None  # (code, output) of this run's one fetch_branch_heads, made by merge_state only when a commit is missing; None before it
+        self.main_fetch = None  # (code, output) of this run's one fetch of main (fetch_main_once), made by the first carry that needs main's tip; None before it
 
     commit_message = None  # set by confirm just before the merge: one line per reason flag that lifted a check. None leaves GitHub's default message
     branch = "<branch>"  # the head branch of the last pr() read: the remedy of a "no check ran" red names it
@@ -4466,12 +4469,6 @@ def review_state(rec, head):
 
 REVIEW_MERGE_WALK = 50  # the most commits (clean merges of main) clean_merges_after walks between a record's head and the live head
 
-def fetch_heads_if_missing(h, root, *shas):
-    """Make the run's one fetch_branch_heads, stored on h.heads_fetch, when the checkout `root` lacks one of `shas` and the run has made none yet
-    (a branch head that a main-only checkout lacks). The one home of that step (merge_state, carries_by_tree). Cost: at most one fetch a run."""
-    if missing_commits(root, *shas) and getattr(h, "heads_fetch", None) is None:
-        h.heads_fetch = fetch_branch_heads(root)
-
 def merge_state(h, parents, tree):
     """-> (state, why): how the merge commit whose parents are `parents` and whose tree is `tree` relates to git's own merge of them (merge_tree,
     run in the host's checkout). States: "clean" (git's merge is clean and has exactly `tree`), "edited" (clean, and `tree` differs), "conflicted"
@@ -4479,7 +4476,8 @@ def merge_state(h, parents, tree):
     or no tree named), never read as clean or conflicted. `why` is one line for "unknown", else "". When a parent is missing, the first call of a
     run makes one fetch_branch_heads (a branch head that a main-only checkout lacks); a fork's head is on no branch of origin, so it stays unknown."""
     root = h.cwd or "."
-    fetch_heads_if_missing(h, root, *parents)
+    if missing_commits(root, *parents) and getattr(h, "heads_fetch", None) is None:
+        h.heads_fetch = fetch_branch_heads(root)
     state, merged, files = merge_tree(root, *parents)
     if state == "unknown":
         fetched = getattr(h, "heads_fetch", None)
@@ -4570,32 +4568,44 @@ def same_tree(h, a, b):
 
 CARRY_BY_TREE, CARRY_BY_MERGE = "tree", "merge"  # how a record carried (carries_by_tree)
 
+def fetch_main_once(h, root, main):
+    """Bring refs/remotes/origin/<main> to the remote's current tip with one `git fetch origin <main>` a run, its (code, output) kept on h.main_fetch. A failed
+    fetch raises Stop, on this call and on every later one of the run, so a stale local ref is never read as main's tip. Cost: one fetch a run."""
+    if getattr(h, "main_fetch", None) is None:
+        h.main_fetch = git(root, "fetch", "-q", "origin", f"+refs/heads/{main}:refs/remotes/origin/{main}")
+    code, out = h.main_fetch
+    if code:
+        raise Stop(f"git fetch origin {main} failed, so main's tip is unknown: {' '.join(out.split())[:200]} {READ_CITE}")
+
 def carries_by_tree(h, rec_head, live, main):
     """-> how a record at `rec_head` carries to the live head `live`, or None when it does not: CARRY_BY_TREE when the two hold one tree (same_tree),
-    else CARRY_BY_MERGE when the tree of `live` is the tree of git's clean merge of `rec_head` and the tip of `main` (merge_tree against
-    refs/remotes/origin/<main> in the host's checkout, the tip the clean-merge walk reads; never the first parent of `live`). The tree must equal git's
-    merge exactly, with no edit beyond it. A conflicted merge carries nothing. A merge-tree that cannot run (a commit the checkout lacks, a git
-    without merge-tree --write-tree), an empty `main` and a commit read that names no tree raise Stop, so the caller reads unknown, never None. A commit the
-    checkout lacks is fetched once first (fetch_heads_if_missing) and stays unknown if the fetch does not bring it.
-    The one home of the carry; the lane lint stays equal-tree (lint_carried). Cost: two commit reads, and one merge_tree start (two rev-parse starts
-    and one merge-tree start) per read when the trees differ, plus at most one fetch_branch_heads a run."""
+    else CARRY_BY_MERGE when the tree of `live` is exactly git's clean merge of `rec_head` and main's current tip (merge_state "clean", run against
+    refs/remotes/origin/<main> in the host's checkout after fetch_main_once; never the first parent of `live`). `main` is the branch name, or a function
+    that returns it: it is read only when the trees differ, so an equal tree carries with no default branch read. An edited or conflicted merge
+    carries nothing. A merge git cannot read (a commit the checkout lacks after merge_state's one fetch, a git without merge-tree --write-tree), a failed
+    fetch of main, no `main` and a commit read that names no tree raise Stop, so the caller reads unknown, never None.
+    The one home of the carry; the lane lint stays equal-tree (lint_carried). Cost: two commit reads; when the trees differ also fetch_main_once's one
+    fetch a run, then merge_state's reads: two git rev-parse starts and one git merge-tree start per read, plus its one fetch_branch_heads a run when a
+    commit is missing."""
     live_tree = tree_of(h, live)
     if tree_of(h, rec_head) == live_tree:
         return CARRY_BY_TREE
+    main = main() if callable(main) else main
     if not main:
         raise Stop(f"no default branch is read, so the tip of main is unknown {READ_CITE}")
-    root, tip = h.cwd or ".", f"refs/remotes/origin/{main}"
-    fetch_heads_if_missing(h, root, rec_head, tip)
-    state, merged, files = merge_tree(root, rec_head, tip)
+    root = h.cwd or "."
+    fetch_main_once(h, root, main)
+    state, why = merge_state(h, (rec_head, f"refs/remotes/origin/{main}"), live_tree)
     if state == "unknown":
-        raise Stop(f"git's merge of {rec_head[:9]} and main cannot be read: {' '.join(files)} {READ_CITE}")
-    return CARRY_BY_MERGE if state == "clean" and merged == live_tree else None
+        raise Stop(f"git's merge of {rec_head[:9]} and main cannot be read: {why} {READ_CITE}")
+    return CARRY_BY_MERGE if state == "clean" else None
 
 def carry_source(h, m, live, main):
     """-> (rec, row, how) of the newest review record on pull request `m` when it carries to the live head `live` of the pull request that names `m` as its
     source, else None: rec is the parsed record, row its (body, created_at, updated_at) and how what carries_by_tree answers (the tree of its Head equals
-    the tree of `live`, or `live` is git's clean merge of that Head and the tip of `main`). A tree that is neither, an unparsable newest record and a record for
-    another number carry nothing. A failed read raises Stop. Cost: Host.source_comments, which reads issue `m` once a run, then carries_by_tree's."""
+    the tree of `live`, or `live` is git's clean merge of that Head and main's current tip). `main` is a branch name or a function that returns one
+    (carries_by_tree). A tree that is neither, an unparsable newest record and a record for another number carry nothing. The lane lint is not carried
+    here: lint_carried takes equal trees only. A failed read raises Stop. Cost: Host.source_comments, which reads issue `m` once a run, then carries_by_tree's."""
     rows = h.source_comments(m)[0].get(m)
     rec = parse_review(rows[-1][0]) if rows else None
     how = carries_by_tree(h, rec["head"], live, main) if rec and rec["n"] == m else None
@@ -4604,7 +4614,7 @@ def carry_source(h, m, live, main):
 def restart_remedies(h, n, last, head):
     """-> the remedies the refusal of a restarting review record prints, in order. `last` is the newest earlier record on pull request `n`, parsed
     (None when it does not parse, as the fix check reads it) and `head` the head the new record reviews. Carry by tree comes first when the tree of that record's Head equals the tree
-    of `head`: a new pull request whose body says `Replaces #n` takes the record and the lane lint by tree (carry_source). When the trees differ and
+    of `head`: a new pull request whose body says `Replaces #n` takes the record by tree (carry_source) and the lane lint by equal tree (lint_carried). When the trees differ and
     that record has no failed fix check, a fix verifier on the delta comes next. A new branch with a new PR is always the last resort. A tree read that
     cannot run offers neither, and says so. Cost: two commit reads (same_tree) when a record exists."""
     steps, unknown = [], ""
@@ -5546,9 +5556,9 @@ def main(argv, host=None, lock=None, hosts=None):
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
                 last = earlier[-1] if earlier else None
                 source = replaces_source(a.pr, info["body"]) if not earlier else None
-                if source:  # a replacement with no log of its own starts from its source's newest log when the trees match (carry_source)
+                if source:  # a replacement with no log of its own starts from its source's newest log when the trees match or the live tree is git's clean merge of main (carry_source)
                     try:
-                        got = carry_source(h, source, a.head, default_branch(root))
+                        got = carry_source(h, source, a.head, lambda: default_branch(root))
                     except (Stop, subprocess.TimeoutExpired, OSError) as e:
                         print(f"merge: --fix-check: whether the log of #{source} carries by tree is unknown ({' '.join(str(e).split())[:300]}), so the fix verifier is refused. " + REVIEW_CITE, file=sys.stderr)
                         return 2
