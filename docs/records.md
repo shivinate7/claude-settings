@@ -530,13 +530,10 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `grant-reaches-lanes` | Plan: an owner grant typed in one session reaches the session it names | [`docs/plans/grant-reaches-lanes.md`](../docs/plans/grant-reaches-lanes.md) |
 | `local-session-reach` | Plan: reach between local and cloud sessions | [`docs/plans/local-session-reach.md`](../docs/plans/local-session-reach.md) |
 | `o10-session-questions-page` | Plan: a page per session for questions waiting on the owner | [`docs/plans/o10-session-questions-page.md`](../docs/plans/o10-session-questions-page.md) |
-| `plugin-assess-three` | Plan: three catalog plugins, add or skip | [`docs/plans/plugin-assess-three.md`](../docs/plans/plugin-assess-three.md) |
 | `pointer-system` | Plan: the pointer system | [`docs/plans/pointer-system.md`](../docs/plans/pointer-system.md) |
 | `r42-part2-design` | R42 part 2: per-lane merges, test after merge, stable branch | [`docs/plans/r42-part2-design.md`](../docs/plans/r42-part2-design.md) |
 | `refusal-vs-rule` | Plan: each refusal matches its rule | [`docs/plans/refusal-vs-rule.md`](../docs/plans/refusal-vs-rule.md) |
 | `restart-plan` | Restart plan: how claude-settings lands work after the freeze | [`docs/plans/restart-plan.md`](../docs/plans/restart-plan.md) |
 | `shared-merge-tool` | Plan: the shared merge tool | [`docs/plans/shared-merge-tool.md`](../docs/plans/shared-merge-tool.md) |
-| `stalled-steps` | Plan: stalled steps (lane doing-needs-live-lane) | [`docs/plans/stalled-steps.md`](../docs/plans/stalled-steps.md) |
 | `test-ci-standard` | Plan: how good tests and CI are made, how far the repos are, and how to close the gap | [`docs/plans/test-ci-standard.md`](../docs/plans/test-ci-standard.md) |
 | `time-pinned-tests` | Time-pinned tests: per-repo list | [`docs/plans/time-pinned-tests.md`](../docs/plans/time-pinned-tests.md) |
-| `trial-results` | Trial results: Ambition Lenses, blind grade | [`docs/plans/trial-results.md`](../docs/plans/trial-results.md) |
