@@ -21927,12 +21927,12 @@ class DraftReady(CloudSession):
 
     @contextlib.contextmanager
     def ready_check_answers(self, checks_state):
-        """merge.ci_job_run answers a ready check (its --pinned run) with LINT_STATES[checks_state]. The temp tree lives in this run's folder.
-        Yields the --pinned calls the run made, so a case reads whether a ready check ran."""
+        """merge.ci_job_run answers a ready check (its --step run) with LINT_STATES[checks_state]. The temp tree lives in this run's folder.
+        Yields the ready-check calls the run made, so a case reads whether a ready check ran."""
         ran = []
 
         def answer(wt, *args, **kw):
-            if "--pinned" in args:
+            if "--step" in args:  # a ready check names its steps; the lane lint's run names none
                 ran.append(args)
                 self.check_reads.append((sh(wt, "git", "rev-parse", "HEAD^{tree}"), self.lane_pushes()))  # the tree the check reads, and the lane's pushes before it
                 if checks_state == "pass" and kw.get("raw") is not None:  # ci-job prints one PASS line per step it ran: a declared step with no line reads unknown
