@@ -4,7 +4,7 @@
 
 Every session that starts from source `startup` gets two checks at its own start. The checks are in `hooks/start_check.py`, a SessionStart hook. `settings.json` runs it with matcher `startup`, so it runs on no other source.
 
-The checks flag. They do not stop. The hook prints one line: SessionStart `additionalContext`. It has no `continue` and no `stopReason`. The two checks are the model floor (decision `agent-model-cap`, the agent model cap) and the full-machine load brake (decision `machine-load-brake`, the machine-load brake).
+The checks flag. They do not stop. `start_check.py` `main` prints one line: SessionStart `additionalContext`. It has no `continue` and no `stopReason`. The two checks are the model floor (decision `agent-model-cap`, the agent model cap) and the full-machine load brake (decision `machine-load-brake`, the machine-load brake).
 
 The flag text tells the session what to do. A session with a `parent_session_id` (a lane) does no work and tells its parent it started in this state. A session with no parent (the owner's own) goes on.
 
@@ -35,7 +35,7 @@ Chosen: a flag, not a stop (coordinator, 2026-11-15).
 
 ## Why both the hook and the audit flag a Haiku start
 
-The PostToolUse audit (`start_session_audit.py`) flags a Haiku start too. The audit runs in the caller, after the `start_session` call. This hook runs in the started session, so it also covers a start that did not come through `start_session`. Each reads `guard.py` `floor_hit`. Both flag. Neither stops.
+The PostToolUse audit (`start_session_audit.py`) flags a Haiku start too. The audit runs in the caller, after the `start_session` call. This hook (`start_check.py` `flag_text`) runs in the started session, so it also covers a start that did not come through `start_session`. Each reads `guard.py` `floor_hit`. Both flag. Neither stops.
 
 ## What stays with the audit
 
@@ -50,7 +50,7 @@ A model can ignore the flag. The text says what to do, but nothing enforces it. 
 Both are unmeasured. No command settles either here.
 
 1. Whether the desktop app delivers SessionStart `additionalContext` to a `start_session` session. If not, the flag never reaches the model.
-2. Whether a `start_session` session runs its startup SessionStart hook at all. If not, neither check runs there.
+2. Whether a `start_session` session runs its startup SessionStart hook at all. If not, neither check (`start_check.py` `flag_text`) runs there.
 
 ## Cost
 
