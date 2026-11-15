@@ -28,9 +28,11 @@ output style load in each session on each repo.
   under every merge check (`settings.json` `autoMode.allow`, entry "Relayed Merge Yes"; decision
   `auto-mode-owner-acts`). A relayed yes covers no other act and no other session. The owner's
   consultant (tag `cs-build:consultant`) may also relay a yes to a batch runner, directly or
-  through triage (owner, 2026-11-15 11:18 CST; entry "Consultant Relayed Merge Yes"). The yes binds to
-  the head the pull request had when the owner said yes, or a later head of the same docs-only pull
-  request that a review record names.
+  through triage that forwards what the consultant relayed (owner, 2026-11-15 11:18 CST; entry "Consultant
+  Relayed Merge Yes"). A yes that started at triage with no consultant is not covered. The yes binds to
+  the head the pull request had when the consultant relayed it. The merge tool accepts a live head that
+  is that head, or sits on it with only a Record-claim commit, its revert or a page-only commit
+  (`relayed_head_holds` in `merge/merge.py`); it reads no review record.
 - **Lane draft PR** (owner, 2026-11-12 17:19 CST; until withdrawn). Any lane that a coordinator or another
   lane started may open its own draft PR, and never marks it ready. Only the batch runner marks a
   PR ready. Source: decision `draft-until-reviewed` (every PR opens as a draft).
