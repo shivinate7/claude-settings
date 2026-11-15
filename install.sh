@@ -859,9 +859,11 @@ SKILL_COPY_DIR="$CLAUDE_DIR/backups/skill-copies"
 
 # Print a hash of a directory tree: every file path and every file content.
 # It covers file names and contents only, so a mode, empty-folder or symlink-only change is replaced with no backup.
+# __pycache__ folders and *.pyc files are runtime files a script writes when it runs through the live link, not
+# part of the skill, so they stay out of the hash.
 tree_hash() {
   [ -d "$1" ] || return 1
-  ( cd "$1" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do
+  ( cd "$1" && find . -name __pycache__ -type d -prune -o -type f ! -name '*.pyc' -print | LC_ALL=C sort | while IFS= read -r f; do
       printf '%s ' "$f"; sha256_of < "$f"
     done ) | sha256_of
 }
@@ -1092,11 +1094,12 @@ EOF
 # gen_record_skills: after a good switch, record the tree hash of each skill this run shipped, the hash a later
 # refresh compares the live skill with.
 gen_record_skills() {
-  mkdir -p "$SKILL_COPY_DIR" || return 0
+  mkdir -p "$SKILL_COPY_DIR" || { log "WARN: could not make $SKILL_COPY_DIR; no skill tree hash recorded"; return 0; }
   while IFS= read -r gr_rel; do
     case "$gr_rel" in skills/*) ;; *) continue ;; esac
     gr_rec="$SKILL_COPY_DIR/${gr_rel#skills/}"
-    tree_hash "$GEN_DIR/$gr_rel" > "$gr_rec.cs-new" && mv -f "$gr_rec.cs-new" "$gr_rec"
+    tree_hash "$GEN_DIR/$gr_rel" > "$gr_rec.cs-new" && mv -f "$gr_rec.cs-new" "$gr_rec" ||
+      log "WARN: could not record the tree hash of $gr_rel; a later refresh may back it up as a hand edit"
   done <<EOF
 $GEN_LINKS
 EOF
@@ -1109,7 +1112,8 @@ EOF
 gen_switch() {
   gs_to="installs/$INSTALL_ID_VALUE"; gs_tmp="$GEN_CUR.cs-new"
   gs_old=$(readlink "$GEN_CUR" 2>/dev/null)
-  [ -z "$gs_old" ] || [ "$gs_old" = "$gs_to" ] || touch "$CLAUDE_DIR/$gs_old" 2>/dev/null
+  [ -z "$gs_old" ] || [ "$gs_old" = "$gs_to" ] || touch "$CLAUDE_DIR/$gs_old" 2>/dev/null ||
+    log "WARN: could not touch the outgoing generation $gs_old; gen_prune may remove it early"
   rm -f "$gs_tmp"
   ln -s "$gs_to" "$gs_tmp" || return 1
   if [ -L "$GEN_CUR" ]; then
