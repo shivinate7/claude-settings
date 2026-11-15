@@ -1,0 +1,11 @@
+{
+ "id": "own-3381-replacing-pr-same-act",
+ "at": "2026-11-15T07:07:00-06:00",
+ "title": "A same-tree replacing PR (`Replaces #3381`) is the same act as the owner's \"a\" on PR 3381",
+ "ruling": "Consultant's pick, not owner-typed, undoable, under the owner's 20:18 CST Nov 14 words (consultant answer 07:07 CST Nov 15, relayed by the coordinator). The owner's \"a\" (01:43 CST Nov 15, item 865, ruling own-3381-a) granted landing PR 3381's change as is. A new PR number with the identical tree and nothing wider lands exactly that change, so it is the same act. Why it came up: `merge --review-record` refuses to post the fresh Sonnet round 1 PASS on #3381 (it restarts the review: fewer rounds than record 6890835699, no fix verifier); the tool's remedy is a replacing PR with the line `Replaces #3381`. Order: the lane opens the draft PR with `Replaces #3381` and posts the round 1 PASS there; runner 10 lints, merges it and closes #3381 as replaced. COVERED: only a PR whose tree is identical to #3381 at head cdb68f8d8d6a, with `Replaces #3381` and no product, test or file change (PR 3501, head cdb68f8d8d6a, read by triage 07:06 CST, is that PR). NOT COVERED: a different tree, a wider change, any other PR. A grant covers the named act, never a variant. Reopen if the owner says otherwise. Do not edit own-3381-a.",
+ "quote": "A same-tree replacing PR is the same act as the owner's 'a' (01:43 CST Nov 15, item 865). The owner's 'a' granted landing #3381's change as is; a new PR number with the identical tree and nothing wider lands exactly that change.",
+ "source": "Consultant answer 07:07 CST Nov 15, relayed by the coordinator (07:07 CST) to triage. Consultant's pick, not owner-typed.",
+ "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: it answers a new question (is a same-tree replacing PR the same act as own-3381-a) and leaves own-3381-a unchanged",
+ "step": "start-session-not-pretooluse"
+}
