@@ -566,6 +566,18 @@ class Env(unittest.TestCase):
         sh(self.co, "git", "fetch", "-q", "origin")
         return sh(self.co, "git", "show", f"origin/{ref}:{path}")
 
+    def rev(self, expr):
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return sh(self.co, "git", "rev-parse", expr)
+
+    def log1(self, fmt, ref):
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return sh(self.co, "git", "log", "-1", f"--format={fmt}", ref)
+
+    def tree_names(self, ref):
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return sh(self.co, "git", "ls-tree", "-r", "--name-only", ref).splitlines()
+
     def claims(self, ref="main"):
         sh(self.co, "git", "fetch", "-q", "origin")
         return sh(self.co, "git", "log", f"origin/{ref}", "--format=%s").splitlines().count("Claim record numbers")
@@ -588,11 +600,12 @@ class Env(unittest.TestCase):
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "rival"); sh(o, "git", "push", "-q", "origin", "feat")
         return sh(o, "git", "rev-parse", "HEAD")
 
-    def main_moves(self):
-        """A person pushes a commit to main that touches no path a batch touches, from the second clone."""
+    def main_moves(self, files=None):
+        """A person pushes a commit to main from the second clone. Default: a path no batch touches (elsewhere.txt); `files` ({path: text}) names others."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
-        put(os.path.join(o, "elsewhere.txt"), "main moved\n")
+        for path, text in (files or {"elsewhere.txt": "main moved\n"}).items():
+            put(os.path.join(o, path), text)
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
 
     def leave_no_pending_record(self):
@@ -8555,18 +8568,6 @@ class RecordsEnv(Env):
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{branch}")
         sh(o, "git", "rm", "-q", rel); sh(o, "git", "commit", "-qm", msg); sh(o, "git", "push", "-q", "origin", branch)
-
-    def rev(self, expr):
-        sh(self.co, "git", "fetch", "-q", "origin")
-        return sh(self.co, "git", "rev-parse", expr)
-
-    def log1(self, fmt, ref):
-        sh(self.co, "git", "fetch", "-q", "origin")
-        return sh(self.co, "git", "log", "-1", f"--format={fmt}", ref)
-
-    def tree_names(self, ref):
-        sh(self.co, "git", "fetch", "-q", "origin")
-        return sh(self.co, "git", "ls-tree", "-r", "--name-only", ref).splitlines()
 
     def draft_confirm(self, lock=None):
         """--confirm on the pull request while it is a draft: the records step, then the mark-ready call. Never a merge."""
@@ -19617,16 +19618,31 @@ class DraftReady(CloudSession):
     def setUp(self):
         super().setUp()
         self.heads = {}  # lane PR number -> its head sha on origin, as lane() leaves it
+        self.check_reads = []  # one (tree, lane pushes so far) per ready check the run made: ready_check_answers appends it
 
-    def lane(self, n):
-        """Lane PR #n: a branch on origin with one commit of its own, off origin/main, and an open pull request in the host. -> its head sha."""
+    def lane(self, n, page=False, claim=False, debt=False):
+        """Lane PR #n: a branch on origin with one commit of its own, off origin/main, and an open pull request in the host. -> its head sha.
+        debt: the commit adds a debt record, which gives the records page a row. The generator reads the layout's folders, so only a debt
+        makes a page here: without one the generator writes nothing, and the page is current whatever the head holds.
+        page: the commit also carries the records page the merge tool would write for its tree, so the page is current.
+        claim: the commit is a Record-claim for D-002, as a lane that claims a number is."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", f"lane-{n}", "origin/main")
         put(os.path.join(o, "lanes", f"{n}.txt"), f"lane {n}\n")
+        msg = f"lane {n}"
+        if debt:
+            put(os.path.join(o, "debts", "gap-one.md"), DEBT_TEXT)
+        if claim:
+            put(os.path.join(o, "docs/decisions/second.md"), record("D-002", "second"))
+            msg = "Claim record numbers\n\nRecord-claim: D-002"
         sh(o, "git", "add", "-A")
-        sh(o, "git", "commit", "-q", "-m", f"lane {n}")
+        if page:
+            sh(o, sys.executable, merge.RECORDS, "--root", o, "--records-only")
+            sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", msg)
         sh(o, "git", "push", "-q", "origin", f"lane-{n}")
+        self.record_pushes()  # after the lane's own push, so a case counts only the pushes the run makes
         self.host.add_pr(n, f"lane-{n}")
         self.heads[n] = self.head(f"lane-{n}")
         return self.heads[n]
@@ -19644,6 +19660,7 @@ class DraftReady(CloudSession):
         def answer(wt, *args, **kw):
             if "--pinned" in args:
                 ran.append(args)
+                self.check_reads.append((sh(wt, "git", "rev-parse", "HEAD^{tree}"), self.lane_pushes()))  # the tree the check reads, and the lane's pushes before it
                 if checks_state == "pass" and kw.get("raw") is not None:  # ci-job prints one PASS line per step it ran: a declared step with no line reads unknown
                     kw["raw"].extend("PASS %s: ok" % args[i + 1] for i, arg in enumerate(args) if arg == "--step")
                 return LINT_STATES[checks_state]
@@ -19651,6 +19668,37 @@ class DraftReady(CloudSession):
         with unittest.mock.patch.object(merge, "ci_job_run", side_effect=answer), \
                 unittest.mock.patch.object(tempfile, "tempdir", self.run_dir):
             yield ran
+
+    def record_pushes(self):
+        """origin's pre-receive hook appends each ref update to pushes.log in the bare repo, where the push lands, so a case counts the
+        pushes the run made. The hook accepts every push: a refusal is a case's own (refuse_pushes)."""
+        hook = os.path.join(self.bare, "hooks", "pre-receive")
+        put_lf(hook, "#!/bin/sh\nwhile read old new ref; do\n  echo \"$ref $new\" >> pushes.log\ndone\nexit 0\n")
+        os.chmod(hook, 0o755)
+
+    def lane_pushes(self, n=101):
+        """The shas pushed to lane n's branch on origin, in the order they landed (record_pushes). [] before any is recorded."""
+        try:
+            with open(os.path.join(self.bare, "pushes.log"), encoding="utf-8") as f:
+                rows = [line.split() for line in f if line.strip()]
+        except FileNotFoundError:
+            return []
+        return [new for ref, new in rows if ref == f"refs/heads/lane-{n}"]
+
+    def parents(self, sha):
+        """The parents of commit sha, in order."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return sh(self.co, "git", "rev-list", "--parents", "-n", "1", sha).split()[1:]
+
+    def merged_tree(self, ours, theirs):
+        """The tree git's own clean merge of two commits gives: the tree a merge commit of them must carry."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return sh(self.co, "git", "merge-tree", "--write-tree", ours, theirs).split()[0]
+
+    def ready_run(self):
+        """`merge 101 --ready`, the lane's one act on its draft. -> (rc, stdout and stderr together)."""
+        rc, out, err = self.run_args("101", "--ready")
+        return rc, out + err
 
     def test_a_lane_draft_the_host_will_not_mark_ready_stays_a_draft_with_its_reason(self):  # re-pointed from the batch's --ready (act 4)
         self.lane(101)
@@ -19694,6 +19742,137 @@ class DraftReady(CloudSession):
         self.assertFalse(getattr(self.host, "merged", False), "--ready merged #101: %s" % (out + err))
         self.run_args("101", "--ready")  # the second run finds #101 ready already
         self.assertEqual(self.host.readies, [101], "a second --ready on a ready lane asked the host to mark it ready again")
+
+    # --ready on a draft whose head lacks main's tip. A clean merge with the tip is pushed as a merge commit (parents: the head, then the
+    # tip), then the records page commit when the page is stale. The merge is git's own, so the tip adds nothing to the pushed tree.
+
+    def test_a_draft_that_lacks_the_tip_with_a_stale_page_pushes_a_merge_then_the_page(self):
+        old = self.lane(101, debt=True)
+        self.main_moves()  # main moves on: the lane no longer holds the tip, and its merge with the tip is clean
+        self.host.batch_pulls[101]["draft"] = True
+        tip = self.rev("origin/main")
+        rc, text = self.ready_run()
+        pushed = self.head("lane-101")
+        merged = self.rev(f"{pushed}^")
+        self.assertEqual(self.parents(merged), [old, tip], "the push does not join the old head and main's tip in a merge commit:\n" + text)
+        self.assertEqual(self.log1("%s", pushed), merge.PAGE_SUBJECT, "the pushed head is not the records page commit:\n" + text)
+        self.assertEqual(self.parents(pushed), [merged], "the page commit does not sit on the merge commit alone:\n" + text)
+        self.assertEqual(self.rev(f"{merged}^{{tree}}"), self.merged_tree(old, tip),
+                         "the merge commit's tree is not git's clean merge of the head and main's tip:\n" + text)
+        self.assertEqual(self.merged_tree(tip, pushed), self.rev(f"{pushed}^{{tree}}"),
+                         "main's tip changes the pushed tree, so the pushed head does not hold main's current tree:\n" + text)
+        self.assertEqual(self.lane_pushes(), [pushed], "the run pushed the lane other than once:\n" + text)
+
+    def test_a_draft_that_lacks_the_tip_with_a_current_page_pushes_only_the_merge(self):
+        old = self.lane(101, page=True, debt=True)
+        self.main_moves()
+        self.host.batch_pulls[101]["draft"] = True
+        tip = self.rev("origin/main")
+        rc, text = self.ready_run()
+        pushed = self.head("lane-101")
+        self.assertNotEqual(pushed, old, "nothing was pushed, though the lane lacks main's tip and its merge with the tip is clean:\n" + text)
+        self.assertEqual(self.parents(pushed), [old, tip], "the push is not a merge commit of the head and main's tip:\n" + text)
+        self.assertEqual(self.rev(f"{pushed}^{{tree}}"), self.merged_tree(old, tip),
+                         "the pushed tree is not git's clean merge of the head and main's tip:\n" + text)
+        self.assertEqual(self.lane_pushes(), [pushed], "the run pushed the lane other than once:\n" + text)
+
+    def test_the_ready_checks_of_a_draft_that_lacks_the_tip_read_the_merged_tree_before_any_push(self):
+        self.ready_checks_on_main()
+        self.lane(101, debt=True)
+        self.main_moves()
+        self.host.batch_pulls[101]["draft"] = True
+        with self.ready_check_answers("pass") as ran:
+            rc, text = self.ready_run()
+        pushed = self.head("lane-101")
+        self.assertTrue(self.check_reads, "setup: no ready check ran, though merge.readyChecks names one:\n" + text)
+        checked, pushes_before = self.check_reads[0]
+        self.assertIn("elsewhere.txt", self.tree_names(checked),
+                      "the ready checks read a tree without main's elsewhere.txt, so not the merged tree:\n" + text)
+        self.assertEqual(checked, self.rev(f"{pushed}^{{tree}}"), "the ready checks read a tree other than the one pushed:\n" + text)
+        self.assertEqual(pushes_before, [], "a push to the lane landed before the ready checks ran:\n" + text)
+        self.assertEqual(len(ran), 1, "the ready checks did not run once:\n" + text)
+        self.assertEqual(rc, 0, text)
+
+    def test_a_draft_that_holds_the_tip_with_a_current_page_pushes_nothing(self):  # control: green on the old code
+        old = self.lane(101, page=True, debt=True)
+        self.host.batch_pulls[101]["draft"] = True
+        rc, text = self.ready_run()
+        self.assertEqual(rc, 0, text)
+        self.assertIn("is current. Nothing was pushed.", text)
+        self.assertEqual(self.head("lane-101"), old, "a head that holds the tip was pushed to:\n" + text)
+        self.assertEqual(self.lane_pushes(), [])
+        self.assertEqual(self.host.readies, [101])
+
+    def test_a_draft_that_holds_the_tip_with_a_stale_page_pushes_only_the_page_commit(self):  # control: green on the old code
+        old = self.lane(101, debt=True)
+        self.host.batch_pulls[101]["draft"] = True
+        rc, text = self.ready_run()
+        self.assertEqual(rc, 0, text)
+        self.assertIn("the records page pushed to lane-101", text)
+        pushed = self.head("lane-101")
+        self.assertEqual(self.parents(pushed), [old], "the page commit does not sit on the old head alone:\n" + text)
+        self.assertEqual(self.log1("%s", pushed), merge.PAGE_SUBJECT, "the pushed head is not the records page commit:\n" + text)
+        self.assertEqual(self.lane_pushes(), [pushed], "the run pushed the lane other than once:\n" + text)
+        self.assertEqual(self.host.readies, [101])
+
+    def test_a_draft_whose_merge_with_the_tip_conflicts_stops_and_pushes_nothing(self):  # control: green on the old code
+        old = self.lane(101)
+        self.main_moves({"lanes/101.txt": "main side\n"})  # main adds the lane's own file with other text: an add-add conflict
+        self.host.batch_pulls[101]["draft"] = True
+        rc, text = self.ready_run()
+        self.assertEqual(rc, 1, text)
+        self.assertIn("BEHIND:", text)
+        self.assertEqual(self.head("lane-101"), old, "a conflicted draft was pushed to:\n" + text)
+        self.assertEqual(self.lane_pushes(), [])
+        self.assertEqual(self.host.readies, [], "a conflicted draft was marked ready:\n" + text)
+        self.assertTrue(self.host.batch_pulls[101]["draft"], "a conflicted draft went ready:\n" + text)
+
+    def test_a_draft_on_a_base_other_than_main_pushes_nothing(self):  # control: green on the old code
+        old = self.lane(101)
+        self.main_moves()
+        sh(self.other, "git", "push", "-q", "origin", "main:refs/heads/release")  # release at main's new tip, which the lane lacks
+        self.host.batch_pulls[101].update(base="release", draft=True)
+        rc, text = self.ready_run()
+        self.assertEqual(rc, 0, text)
+        self.assertIn("is not the default branch", text)
+        self.assertEqual(self.head("lane-101"), old, "a draft on another base was pushed to:\n" + text)
+        self.assertEqual(self.lane_pushes(), [])
+
+    def test_a_draft_whose_head_holds_a_record_claim_is_stopped_and_pushes_nothing(self):  # control: green on the old code
+        old = self.lane(101, claim=True)
+        self.main_moves()  # the lane lacks main's tip, and its merge with the tip is clean: only the claim stops the run
+        self.host.batch_pulls[101]["draft"] = True
+        rc, text = self.ready_run()
+        self.assertEqual(rc, 1, text)
+        self.assertIn("holds a Record-claim", text)
+        self.assertEqual(self.head("lane-101"), old, "a draft that holds a claim was pushed to:\n" + text)
+        self.assertEqual(self.lane_pushes(), [])
+        self.assertEqual(self.host.readies, [])
+
+    def test_a_refused_push_of_the_merge_leaves_the_draft_unmarked(self):  # control: green on the old code
+        old = self.lane(101, debt=True)
+        self.main_moves()
+        self.refuse_pushes()  # every push to origin is refused from here on
+        self.host.batch_pulls[101]["draft"] = True
+        rc, text = self.ready_run()
+        self.assertEqual(rc, 1, text)
+        self.assertIn(self.PUSH_REFUSAL, text, "the run did not stop at the refused push:\n" + text)
+        self.assertEqual(self.head("lane-101"), old, "a refused push moved the lane:\n" + text)
+        self.assertEqual(self.host.readies, [], "a draft whose push was refused was marked ready:\n" + text)
+        self.assertTrue(self.host.batch_pulls[101]["draft"], "a draft whose push was refused went ready:\n" + text)
+
+    def test_a_merge_that_cannot_be_read_stops_and_pushes_nothing(self):  # control: green on the old code
+        old = self.lane(101)
+        self.main_moves()
+        self.merge_tree_faults((128, "fatal: simulated merge-tree failure"))  # every merge-tree call of the run exits 128
+        self.host.batch_pulls[101]["draft"] = True
+        rc, text = self.ready_run()
+        self.assertEqual(rc, 1, text)
+        self.assertIn("UNKNOWN:", text)
+        self.assertEqual(self.head("lane-101"), old, "a merge that could not be read moved the lane:\n" + text)
+        self.assertEqual(self.lane_pushes(), [])
+        self.assertEqual(self.host.readies, [], "a draft whose merge could not be read was marked ready:\n" + text)
+        self.assertTrue(self.host.batch_pulls[101]["draft"], "a draft whose merge could not be read went ready:\n" + text)
 
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
