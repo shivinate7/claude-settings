@@ -3399,7 +3399,7 @@ class AlignedRecord(AlignedSteps, unittest.TestCase):
         repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
         self.assert_refused(repo, where, ALIGNED_ROUND, "Rules checked:", body="")
 
-    def test_a_refusal_names_the_re_read_remedy_and_the_rules_checked_line(self):  # red on ae13fcab: no remedy named re-read
+    def test_a_refusal_names_the_re_read_remedy_and_the_rules_checked_line(self):  # red before the remedy named re-read
         base, where = self.cited()
         repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
         self.assert_refused(repo, where, "re-read", "clean what rotted", "Rules checked:", body="")

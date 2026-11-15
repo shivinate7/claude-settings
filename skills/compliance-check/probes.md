@@ -219,7 +219,7 @@ Child CI runs the same probe through the action `actions/claude-md-cites`, after
 does, or a citing unit changes and its record does not. A unit cites a record by its slug alone in a
 code span, or by the `<!-- rule:X -->` anchor the record's `Home:` line names. A PR body line
 `Rules checked: <record> — no change` clears one record, only after the author re-read the citing units against the change and cleaned what rotted (decision child-cites-not-copies). It reads one
-`git diff` and writes nothing. The fix goes in the PR: re-read each citing unit against the change and clean the unit or the record, then add the line to the PR body only if both still hold, and push a commit.
+`git diff` and writes nothing. The fix goes in the PR. Re-read each citing unit against the change and clean the unit or the record. Add the line to the PR body only if both still hold, then push a commit.
 
 | Exit | Group line |
 | --- | --- |
