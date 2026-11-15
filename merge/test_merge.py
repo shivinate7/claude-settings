@@ -23167,7 +23167,7 @@ def sha_of(k):
 
 class GhApiBudget(Env):
     """Each case primes the budget with one ordinary read, then makes the call under test. The priming read is never bulk, so it is never refused."""
-    set, calls, gh_host = GhHalf.set, GhHalf.calls, GhHalf.gh_host
+    set, calls, gh_host, gh_state = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.gh_state
 
     def setUp(self):
         super().setUp()
@@ -23318,6 +23318,61 @@ class GhApiBudget(Env):
         self.assertEqual(self.call_count(), 1, "the ordinary read made no call")  # scope: the priming read, before the bulk read
         h.pages("pulls", fields={"state": "open"}, **bulk_kw())
         self.assertEqual(self.call_count(), 2, "the bulk read after an identical ordinary read was served from the memo, so it made no call")
+
+    # ---- the merge's own reads under its lock, the pushed-head poll, and a header block with no budget in it
+
+    def test_a_head_whose_checks_turn_red_after_a_green_read_before_the_lock_is_not_merged(self):  # pins the head: confirm reads the checks fresh under the lock
+        self.leave_no_pending_record()  # no claim, so the merge runs in one step and the head's checks are read under the lock
+        head = self.head()
+        self.set(checks_seq=[[(REQUIRED_CHECK, "pass", "")], [(REQUIRED_CHECK, "fail", "https://x/checks")]])
+        h = self.gh_host(required=[REQUIRED_CHECK])
+        self.assertTrue(merge.rollup_green(h, 7, head), "scope: the read before the lock did not see the head's checks green")  # the read lint_check makes before the lock
+        rc, out = self.run_merge("7", "--confirm", host=h)
+        self.assertNotEqual(rc, 0, "the merge went out on a head whose checks read red under the lock, after a green read before it: " + out)
+        self.assertIn("not green", out, "the refusal does not say the head's checks are not green: " + out)
+        self.assertEqual(self.gh_state("merge_fields") or [], [], "a merge call was sent for the head whose checks read red under the lock")
+
+    def test_a_head_whose_checks_stay_green_after_a_green_read_before_the_lock_is_merged(self):  # control: green on the old code and the new
+        self.leave_no_pending_record()
+        head = self.head()
+        self.set(checks_seq=[[(REQUIRED_CHECK, "pass", "")], [(REQUIRED_CHECK, "pass", "")]])
+        h = self.gh_host(required=[REQUIRED_CHECK])
+        self.assertTrue(merge.rollup_green(h, 7, head), "scope: the read before the lock did not see the head's checks green")
+        rc, out = self.run_merge("7", "--confirm", host=h)
+        self.assertEqual(rc, 0, "the merge of a head whose checks stay green was refused: " + out)
+        self.assertEqual(len(self.gh_state("merge_fields") or []), 1, "the merge call was not sent once")
+
+    def test_the_pushed_head_poll_sees_the_pushed_head_on_its_second_read(self):  # pins the head: the poll reads the pull request fresh, never the memo
+        h = self.gh_host()
+        prior = h.pr(7)  # the read before the push, the poll's starting point; the run's memo now holds the prior head
+        pushed = self.competitor_push()
+        self.assertNotEqual(prior["head"], pushed, "scope: the push did not move the head")
+        self.set(lag={"n": 1, "prior": prior["head"]})  # GitHub shows the prior head on the poll's first read, then the pushed one
+        got = merge.wait_pushed_head(h, 7, prior, h.now() + merge.PUSHED_HEAD_WAIT_MINUTES * 60, want=pushed)
+        self.assertIsNotNone(got, "the poll ended at its bound on the prior head: its reads were served from the memo, so it never saw the push")
+        self.assertEqual(got["head"], pushed, "the poll returned a head other than the pushed one")
+
+    def test_the_pushed_head_poll_with_no_read_before_it_returns_the_pushed_head_at_once(self):  # control: green on the old code and the new
+        prior = self.head()
+        pushed = self.competitor_push()
+        h = self.gh_host()
+        got = merge.wait_pushed_head(h, 7, {"head": prior}, h.now() + merge.PUSHED_HEAD_WAIT_MINUTES * 60, want=pushed)
+        self.assertIsNotNone(got, "the poll ended at its bound with no read before it, although GitHub shows the pushed head")
+        self.assertEqual(got["head"], pushed, "the poll returned a head other than the pushed one")
+
+    def test_a_reply_with_a_header_block_and_no_budget_header_makes_the_next_bulk_read_go_out(self):  # pins the head: an unknown budget never refuses
+        self.budget(100, 15000)
+        h = self.primed_host()  # the budget is now 100 of 15000
+        self.assertIsNotNone(refusal_of(lambda: h.pages("pulls", fields={"state": "open"}, **bulk_kw())),
+                             "control: a bulk read at 100 of 15000 was not refused, so the budget of the priming reply was not recorded")
+        self.set(ratelimit={"remaining": None, "limit": None, "reset": None})  # the next reply has a header block and no X-Ratelimit line
+        before = self.call_count()
+        h.api("pulls/7")  # an ordinary read, sent: its header block resets the budget to unknown
+        self.assertEqual(self.call_count(), before + 1, "scope: the ordinary read after the header-less reply made no call")
+        before = self.call_count()
+        refusal = refusal_of(lambda: h.pages("pulls", fields={"state": "open"}, **bulk_kw()))
+        self.assertIsNone(refusal, "a bulk read was refused after a reply with no budget header, so the old budget was kept: " + str(refusal))
+        self.assertEqual(self.call_count(), before + 1, "the bulk read after a reply with no budget header was not sent")
 
 
 class AuditPrs(Env):
