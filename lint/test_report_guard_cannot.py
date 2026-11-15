@@ -2770,6 +2770,117 @@ class CannotClaimTests(unittest.TestCase):
                     self.assertIn("Hand-off guard", reason, "the block is not the hand-off guard's: %s" % reason)
                     self.assertNotIn(PROBE_RULE, reason, "the probe rule joins a hand-off line: %s" % reason)
 
+    # ---- round 1 review of cant-claim-needs-probe. Each red below has zero tool calls in its turn and is red on the head it
+    # was written on (21605b0a95). Each comment names the cause the red reads on that head.
+
+    def test_cc_red_probe_failed_word_with_no_call_blocks(self):
+        # Catches: "it failed" read as naming its check. The bare check word, with a subject that is not the writer, passes
+        # the claim with no call in its turn. The probe's own list of checks is a backtick span, a tool name, an exit code
+        # and an HTTP status, and a bare word is none of them.
+        line = "I cannot import it myself; I tried and it failed."
+        self.assert_probe_blocked(self.stop([trg.human("import it"), trg.assistant_text(line)]), line)
+
+    def test_cc_red_probe_couldnt_handed_to_the_owner_blocks(self):
+        # Catches: the past flag exempting a claim that hands the act to the owner. "couldn't" passes as a report of a failed
+        # try, but "so you'll need to run it" is a hand-off, not a report, so the claim needs a probe. The green pin is the
+        # past report with no hand-off, test_cc_red_r1_f1_false_alarms_pass.
+        line = "I couldn't import it myself, so you'll need to run it."
+        self.assert_probe_blocked(self.stop([trg.human("import it"), trg.assistant_text(line)]), line)
+
+    def test_cc_red_probe_dont_have_access_from_here_blocks(self):
+        # Catches: "don't have access" missing from CANNOT_FORMS, which lists only "don't have access to". The line is no claim.
+        line = "I don't have access from here."
+        self.assert_probe_blocked(self.stop([trg.human("check the mail service"), trg.assistant_text(line)]), line)
+
+    def test_cc_red_probe_lack_access_to_the_service_blocks(self):
+        # Catches: "lack access" missing from CANNOT_FORMS, which lists only "lack permission to". The line is no claim.
+        line = "I lack access to the service."
+        self.assert_probe_blocked(self.stop([trg.human("check the mail service"), trg.assistant_text(line)]), line)
+
+    def test_cc_red_no_permission_to_push_takes_the_no_try_verdict(self):
+        # Catches: "have no permission to" missing from CANNOT_FORMS, so a push claim with no try is no claim and passes. Push
+        # is a table act, so the line takes the no-try verdict and no probe reason.
+        line = "I have no permission to push."
+        self.assert_one_refusal(self.stop([trg.human("push the branch"), trg.assistant_text(line)]), NO_TRY, line)
+
+    def test_cc_red_probe_myself_after_the_subject_blocks(self):
+        # Catches: "myself" between the writer's subject and the phrase. own_subject reads "I" then an adverb, and "myself" is
+        # in neither ADVERBS nor the subject words, so the claim has no writer's subject and is read as no claim.
+        line = "I myself cannot import it."
+        self.assert_probe_blocked(self.stop([trg.human("import it"), trg.assistant_text(line)]), line)
+
+    def test_cc_red_table_act_and_probe_act_in_one_line_give_one_refusal(self):
+        # Catches: one sentence listed under the no-try reason and again under the probe reason, so one line reads as two
+        # refusals. A table act keeps its verdict alone, so the probe reason adds nothing to the line.
+        line = "I can't open the PR and I can't import it myself."
+        out = self.stop([trg.human("open the PR and import it"), trg.assistant_text(line)])
+        reason = self.assert_one_refusal(out, NO_TRY, line)
+        self.assertEqual(reason.count(line), 1, "the line is listed more than once: %s" % reason)
+
+    def test_cc_red_peer_message_after_a_send_to_parent_starts_a_turn(self):
+        # Catches: any peer's message read as the parent's ack. The ack map gives every sender the parent targets, so a send to
+        # @parent stays in the turn and its call backs the claim. This peer is not the parent, so its message starts a turn,
+        # and the turn has no call.
+        line = "I cannot import it myself."
+        out = self.stop([trg.human("import it"),
+                         use("SendMessage", {"to": "@parent", "message": "status?"}, "tu_s"),
+                         done("tu_s", "sent"), trg.peer_msg("got it", from_session="session_peer"),
+                         trg.assistant_text(line)])
+        self.assert_probe_blocked(out, line)
+
+    def test_cc_pass_plain_claims_about_no_act_pass(self):
+        # Catches: a verb with no act read as a probe act. "agree more", "see any issues", "find any bugs" and "comment on
+        # pricing" name a finding or a remark, not an act on a thing, so no probe is due.
+        for line in ("I can't agree more.", "I can't see any issues.", "I can't find any bugs.", "I can't comment on pricing."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("review the change"), trg.assistant_text(line)])
+                self.assert_passes(out, "a plain claim about no act: %r" % line)
+
+    def test_cc_pass_other_writers_labelled_row_in_the_owners_report_is_not_read(self):
+        # Catches: the whole blockquote read as the owner's report once one of its rows carries an owner label, so a row
+        # labelled as another writer's ("Agent report:", the label of the fixture above) is judged as this session's claim.
+        # The owner's own row is backed by `unchecked`, so the report passes only if the other writer's row is not read.
+        report = "\n".join(["> **Done** BUILT abc123", "> Agent report: I cannot import the file myself.",
+                            "> **Input Needed** I cannot import it myself, unchecked.", "> **Next** wait"])
+        out = self.stop([trg.human("import it"), trg.assistant_text(report)])
+        self.assert_passes(out, "a row labelled as another writer's, beside the owner's backed claim")
+
+    def test_cc_red_owners_unbacked_claim_lists_only_its_own_line_beside_another_writers_row(self):
+        # Catches: the other writer's row listed in the owner's block. The owner's own unbacked claim is listed once, and the
+        # labelled row's claim is not in the reason at all.
+        owner = "I cannot import it myself."
+        report = "\n".join(["> **Done** BUILT abc123", "> Agent report: I cannot import the file myself.",
+                            "> **Input Needed** " + owner, "> **Next** wait"])
+        out = self.stop([trg.human("import it"), trg.assistant_text(report)])
+        reason = self.assert_probe_blocked(out, owner)
+        self.assertNotIn("I cannot import the file myself.", reason, "the other writer's row is listed: %s" % reason)
+
+    def test_cc_pass_probe_lines_with_one_call_in_the_turn_pass(self):
+        # Control: each claim of an act outside the table passes with one call in its turn. The call is unrelated, so the
+        # turn's call alone backs the claim. The push line is a table act, so it takes a failed push and its named exit code.
+        lines = ("I cannot import it myself; I tried and it failed.", "I couldn't import it myself, so you'll need to run it.",
+                 "I don't have access from here.", "I lack access to the service.", "I myself cannot import it.")
+        for line in lines:
+            with self.subTest(line=line):
+                out = self.stop([trg.human("import it"), *ok_bash("git status", "tu_c"), trg.assistant_text(line)])
+                self.assert_passes(out, "a probe claim with one call in its turn: %r" % line)
+        push = "I have no permission to push: `git push origin HEAD` exited 1."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"), landed_reply(push)])
+        self.assert_passes(out, "a push claim backed by its failed push, with the exit named")
+
+    def test_cc_control_near_twins_of_the_plain_claims_still_block(self):
+        # Control: the same verbs on an act with a thing keep their verdict. "comment on PR 12" is a table act (no try), and
+        # "see the logs" and "find the config file" name an act outside the table (a probe).
+        cases = (("I can't comment on PR 12.", NO_TRY), ("I can't see the logs.", "probe"),
+                 ("I can't find the config file.", "probe"))
+        for line, variant in cases:
+            with self.subTest(line=line):
+                out = self.stop([trg.human("check the logs"), trg.assistant_text(line)])
+                if variant == NO_TRY:
+                    self.assert_blocked_for(out, NO_TRY, line)
+                else:
+                    self.assert_probe_blocked(out, line)
+
 
 if __name__ == "__main__":
     unittest.main()
