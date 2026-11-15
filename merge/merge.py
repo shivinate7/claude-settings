@@ -5951,7 +5951,16 @@ def main(argv, host=None, lock=None, hosts=None):
                         print(f"merge: --fix-check: whether the log of #{source} carries by tree is unknown ({' '.join(str(e).split())[:300]}), so the fix verifier is refused. " + REVIEW_CITE, file=sys.stderr)
                         return 2
                     last = got[0] if got else None
-                if not last or last["head"] != a.fix_check[0]:
+                chained = False  # the fix check starts at a descendant of the newest record's Head, not at the Head itself (decision pr-review-record)
+                if last and last["head"] != a.fix_check[0] and last["fix"] and last["fix"][3] == "PASS":
+                    root_dir = h.cwd or "."
+                    down = ancestor(root_dir, last["head"], a.fix_check[0])  # the start holds the reviewed Head
+                    up = ancestor(root_dir, a.fix_check[0], a.head) if down else False  # the head holds the start: the verifier's delta is start..head
+                    if down is None or up is None:  # git could not tell: unknown never reads as true
+                        print(f"merge: --fix-check: whether {a.fix_check[0][:9]} descends from the reviewed head {last['head'][:9]} and {a.head[:9]} from it is unknown (a commit the checkout lacks, or a shallow clone), so the fix verifier is refused. Fetch the branch, then run again. " + REVIEW_CITE, file=sys.stderr)
+                        return 2
+                    chained = bool(down and up)
+                if not last or (last["head"] != a.fix_check[0] and not chained):
                     ok = False
                 elif not last["fix"]:
                     ok = True
@@ -5980,7 +5989,7 @@ def main(argv, host=None, lock=None, hosts=None):
                             print(f"merge: --fix-check: whether {a.head[:9]} is git's own merge of the base is unknown ({unread}), so the fix verifier is refused. Fetch both parents of that head into this checkout, then run again. " + REVIEW_CITE, file=sys.stderr)
                             return 2
                 if not ok:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line or a PASS one. After a PASS one, a head that is a merge must be a merge of the base into that Head, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
+                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line or a PASS one. After a PASS one, the fix check may also start at a descendant of that Head that the head descends from, and a head that is a merge must be a merge of the base into that Head, and the log must read done, with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant, accepted=a.accepted).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
