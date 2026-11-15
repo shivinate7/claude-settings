@@ -2492,6 +2492,7 @@ sys.exit(0 if rule == "lenient" else 1)
 UNFETCHABLE = "3c5a9e0b7d1f4824a6e9c0d5b7f1a2e4c8d6b9f0"  # 40 hex, in no clone of the fixture
 ZIZMOR_LENIENT = "echo 'fixture zizmor: lenient'\nexit 0\n"  # stands in for actions/zizmor/run.sh, which runs pipx
 ZIZMOR_STRICT = "echo 'fixture zizmor: strict'\nexit 1\n"
+STE_RUN_STUB = "#!/usr/bin/env bash\necho 'fixture ste-lint: pinned'\nexit 0\n"  # stands in for actions/ste-lint/run.sh at a pin
 
 
 def git_in(repo, *args):
@@ -2583,9 +2584,10 @@ class PinnedHarness(Job):
     def zizmor_step(ref):
         return step(ZIZMOR, uses="shivinate7/claude-settings/actions/zizmor@%s" % ref, **{"with": {"paths": ".github/ actions/"}})
 
-    def add_ste_lint(self):
-        """Two commits on the source's main, each holding this checkout's ste-lint files. The first is the pin. The second
-        changes lint/ste_lint.py, one of the files CI runs for ste-lint (bin/ste-changed's LINT_FILES). -> the pin's sha.
+    def add_ste_lint(self, run_sh=None, change=True):
+        """Commits on the source's main, each holding this checkout's ste-lint files. The first is the pin: its run.sh is
+        run_sh when given (a marker a case can read). The next commit holds the real run.sh again and, with change, a line
+        added to lint/ste_lint.py, one of the files CI runs for ste-lint (bin/ste-changed's LINT_FILES). -> the pin's sha.
         The files are copied from this checkout at run time, as CodeCheckFromCopiedInstall copies them: bin/ste-changed
         imports and runs them, and no copy is kept in the repo."""
         for rel in ("bin/ste-changed", "actions/ste-lint", "lint", "hooks"):
@@ -2595,13 +2597,33 @@ class PinnedHarness(Job):
             else:
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copy2(src, dst)  # copy2 keeps the mode: the pinned tree runs bin/ste-changed as a program
+        run = os.path.join(self.source, "actions", "ste-lint", "run.sh")
+        with open(run, encoding="utf-8") as f:
+            real_run = f.read()
+        if run_sh is not None:
+            write_lf(run, run_sh)
         git_in(self.source, "add", "-A")
         git_in(self.source, "commit", "-qm", "ste-lint files")
         pin = git_in(self.source, "rev-parse", "HEAD")
-        with open(os.path.join(self.source, "lint", "ste_lint.py"), "a", encoding="utf-8", newline="\n") as f:
-            f.write("\n# a line the pinned copy does not have\n")
-        git_in(self.source, "commit", "-qam", "change ste_lint.py")
+        if change or run_sh is not None:
+            write_lf(run, real_run)
+            if change:
+                with open(os.path.join(self.source, "lint", "ste_lint.py"), "a", encoding="utf-8", newline="\n") as f:
+                    f.write("\n# a line the pinned copy does not have\n")
+            git_in(self.source, "commit", "-qam", "change ste_lint.py")
         return pin
+
+    def stable_moves_past_the_pin(self, pin):
+        """origin's stable branch moves to a commit past `pin`: that commit changes a file of ste-lint's LINT_FILES. The
+        source's HEAD stays at the pin, so this copy matches the pin. -> the stable head's sha."""
+        git_in(self.source, "checkout", "-qb", "newer")
+        with open(os.path.join(self.source, "lint", "ste_lint.py"), "a", encoding="utf-8", newline="\n") as f:
+            f.write("\n# a line the pin does not have\n")
+        git_in(self.source, "commit", "-qam", "change ste_lint.py")
+        head = self.publish_stable(git_in(self.source, "rev-parse", "HEAD"))
+        git_in(self.source, "checkout", "-q", "main")
+        self.assertEqual(git_in(self.source, "rev-parse", "HEAD"), pin, "precondition: this copy's HEAD is not the pin")
+        return head
 
     def symlink_pin(self):
         """A commit on the lenient harness that holds AGENTS.md as a symlink to CLAUDE.md, as the real repo does. git makes
@@ -2841,6 +2863,40 @@ class PinnedHarness(Job):
             step("Code check again", uses="shivinate7/claude-settings/actions/code-check@%s" % self.pin_a)
         rc, lines, text = self.run_step(steps, "--step", "Code check", "--step", "Code check again", "--base", "origin/main")
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL", "PASS"]), "the two steps did not each run their own pin's tree\n" + text)
+
+    def test_lint_runs_the_ste_lint_of_the_pin_not_the_local_copy(self):
+        pin = self.add_ste_lint(run_sh=STE_RUN_STUB)  # the pin's run.sh prints a marker; this copy's does not
+        self.pin_child("ste-lint", pin)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        rc, lines, text = self.run_step(ste, "--lint", "--base", "origin/main")
+        self.assertIn("fixture ste-lint: pinned", text, "--lint ran the local ste-lint, not the one at the pin\n" + text)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "--lint did not PASS the ste-lint at the pin\n" + text)
+
+    def test_a_pin_behind_the_stable_head_fails_under_step_though_this_copy_matches_it(self):
+        pin = self.add_ste_lint(change=False)  # this copy's HEAD is the pin
+        self.stable_moves_past_the_pin(pin)
+        self.pin_child("ste-lint", pin)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main")
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a pin behind the stable head did not FAIL under --step\n" + text)
+
+    def test_a_pin_at_the_stable_head_passes_under_step_though_this_copy_differs(self):
+        pin = self.add_ste_lint()  # this copy's HEAD is one commit past the pin
+        self.assertNotEqual(pin, git_in(self.source, "rev-parse", "HEAD"), "precondition: this copy's HEAD is the pin")
+        self.publish_stable(pin)
+        self.pin_child("ste-lint", pin)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main")
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "a pin at the stable head did not PASS under --step\n" + text)
+
+    def test_a_pin_behind_the_stable_head_passes_with_a_note_under_lint(self):
+        pin = self.add_ste_lint(change=False)
+        self.stable_moves_past_the_pin(pin)
+        self.pin_child("ste-lint", pin)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        rc, lines, text = self.run_step(ste, "--lint", "--base", "origin/main")
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "--lint did not PASS a stale pin\n" + text)
+        self.assertTrue(any(PIN_NOTE_MARKER in ln for ln in text.splitlines()), "--lint printed no pin note for a stale pin behind the stable head\n" + text)
 
     @unittest.skipUnless(os.name == "posix", "the git stub is a shell script")
     def test_the_export_is_deleted_after_a_pass_and_after_an_unknown(self):
