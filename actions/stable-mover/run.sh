@@ -4,7 +4,7 @@
 # when the push skip proved a push run. It moves origin's stable branch to HEAD_SHA only when the run succeeded,
 # the run covers the slow legs (a schedule run, or a push run the push skip proved: a green Linux-only push run
 # does not, owner page item 880, 11:53 CST Nov 15), HEAD_SHA is on origin's main, and HEAD_SHA
-# descends from stable (a fast-forward). A schedule run that nightly-skip skipped runs no job and still counts:
+# descends from stable (a fast-forward). A schedule run that nightly-skip skipped runs no check job (nightly-skip, push-skip and scope still start) and still counts:
 # the skip requires every push since the green daily to be proven. GH_TOKEN, when set, authenticates the push;
 # a local origin needs none.
 set -u

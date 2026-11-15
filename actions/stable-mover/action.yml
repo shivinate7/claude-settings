@@ -2,7 +2,7 @@ name: Stable mover
 description: >
   Moves the stable branch to the head of a green main run that covers the slow legs. Fast-forward only: it refuses a run
   that did not succeed, a push run that ran only the Linux fast jobs (no push-skip proof), and a head that does not
-  descend from stable, and it never forces. A green schedule run (the daily, which runs every job) and a green push run
+  descend from stable, and it never forces. A green schedule run (the daily, which runs every job unless nightly-skip skipped it: then it runs no check job) and a green push run
   that the push skip proved move stable (owner page item 880, 11:53 CST Nov 15). The caller needs actions/checkout with
   fetch-depth 0 so the history reaches stable, and a token that can push to the repository and read its Actions runs
   (the job's contents: write and actions: read).

@@ -6,7 +6,7 @@ name: stable
 # moves stable. A push run runs the Linux fast jobs only (owner page item 880, 11:53 CST Nov 15), so
 # the mover moves stable on a push run only when its push-skip job proved it (scope skipped, which
 # needs `actions: read` to see the run's jobs); the green daily schedule run moves it too. A schedule
-# run that nightly-skip skipped runs no job, and stable still moves on it, because the skip requires
+# run that nightly-skip skipped runs no check job (nightly-skip, push-skip and scope still start), and stable still moves on it, because the skip requires
 # every push since the green daily to be proven. A green Linux-only push run moves nothing.
 # zizmor flags workflow_run as dangerous because it can run with a pull request's code or secrets.
 # It is safe here: the job's `if:` passes only a push or schedule run on main of this repository, no
