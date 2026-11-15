@@ -19563,8 +19563,8 @@ class ReviewLogUsageLine(unittest.TestCase):
     def test_the_sonnet_rule_names_the_fix_verifier_and_not_every_log(self):
         usage = merge.__doc__
         self.assertNotIn("MODEL must be sonnet on every record", usage, "the usage line still reads as if every round must run sonnet")
-        self.assertIn("--fix-check MODEL must be sonnet", usage)
-        self.assertIn("the first takes any MODEL", usage)
+        self.assertIn("The fix check's MODEL must be sonnet", usage)
+        self.assertIn("The first round takes its row's model", usage)
 
 
 class ReviewFixSonnet(ReviewEnv):
