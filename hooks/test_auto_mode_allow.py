@@ -53,6 +53,10 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   Its Covers text names the session tagged cs-build:lane and says it prints and posts nothing. Its Never
   covers names each form in MERGE_REVIEW_REFUSED (decision `auto-mode-owner-acts`). A copy with its Never
   covers clause removed goes red on the same cases.
+- One "Merge Tool Read Checks:" entry names each limit the read-only flags keep: `--reviewed`,
+  `--review-record` and `--lane-lint` (read from merge/merge.py's argparse), "takes no lock", the PASS and
+  ref-or-commit comment rules, and both tool names. Its Never covers names each act in READ_CHECKS_REFUSED.
+  No word in READ_CHECKS_DROPPED appears outside that sentence.
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
 same cases run against a copy with a clause removed and show red there.
 """
@@ -167,6 +171,17 @@ MERGE_REVIEW_REFUSED = tuple((flag, "`%s`" % flag) for flag in MERGE_REVIEW_NEVE
     ("gh pr merge", r"`gh pr merge`"), ("any push", r"\bany push\b"), ("force push", r"force[- ]push"),
     ("any other merge form", "any other merge form"),
     ("a session not tagged cs-build:lane", r"not tagged `cs-build:lane`"))
+# The "Merge Tool Read Checks:" entry. READ_CHECKS_DROPPED holds the words its owner ruling dropped: none may appear
+# outside the entry's Never covers sentence. The other constants are what the entry still names.
+READ_CHECKS_DROPPED = (("the Incident sentence", r"(?i)\bincident:"), ("the refusal name", r"(?i)merge without review"),
+                       ("the word refused", r"(?i)\brefused\b"), ("the word refusal", r"(?i)\brefusals?\b"))
+READ_CHECKS_FLAGS = ("--reviewed", "--review-record", "--lane-lint")
+READ_CHECKS_LIMITS = (("takes no lock", r"\btakes no lock\b"),
+                      ("a PASS posts one comment", r"\bPASS\b[^.]*\bposts one\b[^.]*\bcomment\b"),
+                      ("a ref or commit posts nothing", r"(?i)\bref or commit\b[^.]*\bposts nothing\b"))
+READ_CHECKS_REFUSED_FLAGS = ("--confirm", "--base-red-ok", "--undo-check-unknown-ok")
+READ_CHECKS_REFUSED = tuple((flag, "`%s`" % flag) for flag in READ_CHECKS_REFUSED_FLAGS) + (
+    ("gh pr merge", r"`gh pr merge`"), ("any other flag that lifts a check", "any other flag that lifts a check"))
 # The Covers text names the session that started this one, and the no-act report it lets through.
 MESSAGE_TARGET = (("the session that started this one", "the session that started this one"),)
 MESSAGE_REPORT = (("asks for no act", "asks for no act"), ("pull request number", "pull request number"),
@@ -310,6 +325,16 @@ def flag_list(covers):
     """The flags a Covers text lists after 'only these flags besides it:', sorted, or None when it has no such list."""
     found = re.search(r"only these flags besides it:(.*?)\.(?:\s|$)", covers)
     return sorted(re.findall(r"`(--[\w-]+)", found.group(1))) if found else None
+
+
+def merge_flag_names():
+    """Every option string merge/merge.py's argparse adds, as a set. Read from the parser's own add_argument calls."""
+    with open(MERGE_PY, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    return {node.args[0].value for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "add_argument" and node.args
+            and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
+            and node.args[0].value.startswith("--")}
 
 
 def allow_entry(prefix):
@@ -683,6 +708,45 @@ class MergeReviewLogIsAllowed(unittest.TestCase):
         other = [tb for tb in causes if "need a 'Never covers' sentence" not in tb]
         if other:
             self.fail("a case went red on another cause than the removed clause: %s" % last_line(other[0]))
+
+
+class MergeToolReadChecksIsAllowed(unittest.TestCase):
+    def test_drops_the_refusal_words(self):
+        entry = allow_entry(MERGE_TOOL_READ)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % MERGE_TOOL_READ)
+        found = never_covers_match(entry)
+        outside = entry[:found.start()] + entry[found.end():] if found else entry
+        for name, pattern in READ_CHECKS_DROPPED:
+            with self.subTest(term=name):
+                self.assertNotRegex(outside, pattern, "the '%s' entry still has %s outside its Never covers sentence"
+                                    % (MERGE_TOOL_READ, name))
+
+    def test_still_names_each_remaining_limit(self):
+        covers = entry_part(self, MERGE_TOOL_READ)
+        clause = entry_part(self, MERGE_TOOL_READ, never=True)
+        names = merge_flag_names()
+        for flag in READ_CHECKS_FLAGS:
+            with self.subTest(flag=flag):
+                self.assertIn(flag, names, "merge/merge.py's argparse has no flag %s" % flag)
+                self.assertRegex(covers, r"(?<![\w-])%s(?![\w-])" % re.escape(flag),
+                                 "Covers text does not name the flag %s" % flag)
+        for name, pattern in MERGE_TOOL_NAMES:
+            with self.subTest(tool=name):
+                self.assertRegex(covers, pattern, "Covers text does not name the tool `%s`" % name)
+        for name, pattern in READ_CHECKS_LIMITS:
+            with self.subTest(limit=name):
+                self.assertRegex(covers, pattern, "Covers text does not say %r" % name)
+        for flag in READ_CHECKS_REFUSED_FLAGS:
+            with self.subTest(flag=flag):
+                self.assertIn(flag, names, "merge/merge.py's argparse has no flag %s" % flag)
+        for name, pattern in READ_CHECKS_REFUSED:
+            with self.subTest(act=name):
+                self.assertRegex(clause, pattern, "Never covers does not name %r" % name)
+
+    def test_one_entry_starts_with_the_name(self):
+        hits = [e for e in auto_mode().get("allow", []) if e.startswith(MERGE_TOOL_READ)]
+        self.assertEqual(len(hits), 1, "need exactly one '%s' entry in autoMode.allow, found %d"
+                         % (MERGE_TOOL_READ, len(hits)))
 
 
 class OwnerPrHousekeepingIsAllowed(unittest.TestCase):
