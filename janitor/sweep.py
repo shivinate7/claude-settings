@@ -431,6 +431,22 @@ def _is_primary_checkout(entry_path: str):
 AGENT_LOCK_RE = re.compile(r"^claude agent agent-[\w-]+ \(pid (\d+)(?: start (.+))?\)$")
 
 
+def _proc_start_ticks(pid: int):
+    """Field 22 of /proc/PID/stat (clock ticks since boot, 10 ms) as an int. None when the pid is
+    gone, `git_reads.PROCESS_START_UNREADABLE` when /proc cannot answer."""
+    try:
+        with open("/proc/%d/stat" % pid, encoding="utf-8") as handle:
+            text = handle.read()
+    except (FileNotFoundError, ProcessLookupError):
+        return None
+    except OSError:
+        return git_reads.PROCESS_START_UNREADABLE
+    try:
+        return int(text.rsplit(")", 1)[1].split()[22 - 3])  # fields after ')' start at field 3
+    except (ValueError, IndexError):
+        return git_reads.PROCESS_START_UNREADABLE
+
+
 def _ticks_lock_stale(pid: int, ticks: int):
     """The `stale_agent_lock_verdict` answer for a lock `(pid N start S)` whose S is clock ticks since
     boot, the harness's own form (measured: host pid 159 holds start 181, field 22 of /proc/159/stat).
@@ -439,17 +455,10 @@ def _ticks_lock_stale(pid: int, ticks: int):
     the host is then unproven, and the caller keeps the tree and stops nothing."""
     if not sys.platform.startswith("linux"):
         return None
-    try:
-        with open("/proc/%d/stat" % pid, encoding="utf-8") as handle:
-            text = handle.read()
-    except (FileNotFoundError, ProcessLookupError):
-        return True
-    except OSError:
+    actual = _proc_start_ticks(pid)
+    if actual is git_reads.PROCESS_START_UNREADABLE:
         return None
-    try:
-        return int(text.rsplit(")", 1)[1].split()[22 - 3]) != ticks  # fields after ')' start at field 3
-    except (ValueError, IndexError):
-        return None
+    return actual is None or actual != ticks
 
 
 def stale_agent_lock_verdict(reason: str):
@@ -525,40 +534,40 @@ def own_agent_lock_verdict(reason: str):
     if alive is not False:
         return None if alive is None else False
     holder = int(found.group(1))
-    current, child = os.getpid(), None
+    current, child, starts = os.getpid(), None, {}
     for _ in range(MAX_CLIMB):
-        if current == holder:
-            return True if child is None else _started_no_later(holder, child)
         if current <= 1:
             return False
+        if child is not None:
+            ordered = _started_no_later(current, child, starts)
+            if ordered is not True:
+                return ordered
+        if current == holder:
+            return True
         child, current = current, _parent_pid(current)
         if current is None:
             return None
     return None
 
 
-def _start_ticks(pid: int):
-    """Field 22 of /proc/PID/stat (clock ticks since boot, 10 ms), or None where it cannot be read."""
-    try:
-        with open("/proc/%d/stat" % pid, encoding="utf-8") as handle:
-            return int(handle.read().rsplit(")", 1)[1].split()[22 - 3])
-    except (OSError, ValueError, IndexError):
-        return None
+def _start_key(pid: int, cache: dict):
+    """PID's start as (epoch ms, ticks), read once per walk through CACHE. None when either read
+    could not tell. Ticks are 0 off Linux: `ps` times have a one-second grain, and ticks tell
+    apart a parent and child started in one second."""
+    if pid not in cache:
+        ms = git_reads._process_start_ms(pid)
+        ticks = _proc_start_ticks(pid) if sys.platform.startswith("linux") else 0
+        unread = (None, git_reads.PROCESS_START_UNREADABLE)
+        cache[pid] = None if ms in unread or ticks in unread else (ms, ticks)
+    return cache[pid]
 
 
-def _started_no_later(parent: int, child: int):
+def _started_no_later(parent: int, child: int, cache: dict):
     """True when PARENT did not start after CHILD, so it can be CHILD's real parent. False when it
     started later: Windows recycles a dead parent's pid to an unrelated, newer process (the same
-    order test as `_is_orphan_windows`). None when either start could not be read. `ps` times have
-    a one-second grain, so a parent and child started in one second tie on them; ticks break the
-    tie where /proc has them, and an unbroken tie reads as the real parent."""
-    starts = [git_reads._process_start_ms(pid) for pid in (parent, child)]
-    if any(start is None or start is git_reads.PROCESS_START_UNREADABLE for start in starts):
-        return None
-    if starts[0] != starts[1]:
-        return starts[0] < starts[1]
-    ticks = [_start_ticks(pid) for pid in (parent, child)]
-    return None in ticks or ticks[0] <= ticks[1]
+    order test as `_is_orphan_windows`). None when either start could not be read."""
+    keys = _start_key(parent, cache), _start_key(child, cache)
+    return None if None in keys else keys[0] <= keys[1]
 
 
 def _own_lock_ready(where: str, path: str, batch, idle):
