@@ -1,0 +1,15 @@
+{
+ "id": "stale-row-reads-rest",
+ "title": "build.py's stale-draft row reads GitHub and sessions itself, with no hand-dumped live file",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "session_013NEJL3tMVa6d437aatxvYY",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "11:55 CST Nov 15 (coordinator, relayed; consultant's 12:00 CST word via triage; not owner-typed): the coordinator started this lane. Guard or check: yes. build.py's stale-draft row reads GitHub (REST) and sessions itself, so the close pass needs no live file dumped by hand. Needed because the REST-list close pass was refused at spawn by the auto-mode check (see step stale-draft-joint-pass). Lane runs Sonnet round 1. No PR yet.",
+ "source": "coordinator 11:55 CST Nov 15 (relayed), consultant 12:00 CST word via triage",
+ "note": "Lane session_013NEJL3tMVa6d437aatxvYY. Guard or check: yes (round rules apply). Kin: step stale-draft-joint-pass (the close pass this feeds). No PR yet; triage read none.",
+ "updatedAt": "2026-11-15T11:58:00-06:00",
+ "blocked": null
+}
