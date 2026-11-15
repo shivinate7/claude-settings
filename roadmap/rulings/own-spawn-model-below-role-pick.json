@@ -1,0 +1,10 @@
+{
+ "id": "own-spawn-model-below-role-pick",
+ "at": "2026-11-15T01:21:43-06:00",
+ "title": "The spawn guard refuses a guard-marked round 1 reviewer on haiku; unmarked briefs stay allowed.",
+ "ruling": "Coordinator's pick, not the owner's, undoable, relayed 01:21 CST Nov 15 (lane spawn-model-below-role). The guard refuses a round 1 reviewer spawn on haiku when its brief is guard-marked; unmarked briefs stay allowed. It agrees with the owner's 00:42 CST Nov 15 word that haiku round 1 on a change with no guard or check is intended. Triage read none of the code. Reopens if the owner says otherwise.",
+ "quote": "refuse a guard-marked round 1 reviewer spawn on haiku; unmarked briefs stay allowed",
+ "source": "Coordinator message 01:20 CST Nov 15 to triage.",
+ "status": "open",
+ "step": "spawn-model-below-role"
+}
