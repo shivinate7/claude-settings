@@ -17,12 +17,13 @@
 # lane lint (one git diff, one git ls-files, one parse of each tracked test_*.py and of each module they reach, once for
 # the whole diff), plus one process per picked CI step. A mutation script (a name with "mutate")
 # and every other command (bash, unpinned pipx, other uses:) is left out with one `not run` line naming the step and why, except a `uses:` of
-# this repo's own action (`$/actions/<name>`, `./actions/<name>`), which runs under the gate below or prints one unknown line. After the
+# this repo's own action (`$/actions/<name>`, `./actions/<name>`), which runs only when the read of its action.yml below accepts it, else prints one unknown line. After the
 # last step, one line counts the steps run out of the job's total (--plan: "would run"). Neither it nor a `not run`
 # line starts with FAIL or unknown or moves the exit code: merge.py's lane lint reads those two words.
 # An install CI step is a run: whose every line is one install command (INSTALL_CMD: a lockfile install, or type
 # generation such as `npx astro sync`), since a lint step that reads generated files fails on a bare checkout. --lint
-# runs it, in order, only when a later lint step will run; its if: and env read as any step's. An install that fails
+# runs it, in order, only when a later lint step will run, or a later local action passes local_ready (its uses: step and
+# the read of its action.yml before any step runs, below); its if: and env read as any step's. An install that fails
 # or is unknown prints unknown, never FAIL (the tree, not the change, is at fault), and each later lint step prints
 # unknown naming it and does not run. Three `uses:` it runs in place, each by its one home: actions/ste-lint as
 # `bin/ste-changed <base>` (shared with the action through actions/ste-lint/run.sh), actions/code-check as its
@@ -37,7 +38,8 @@
 # step is unknown; any other failure makes it FAIL, its reason naming the tools that could not start.
 # A local `uses:` that is none of those three runs only under --lint, from the tree under test's own actions/<name>/action.yml. The
 # `uses:` step's own if: and continue-on-error: read as a run: step's do (a false if: is skipped, an unreadable one or a continue-on-error is
-# unknown), and after a failed install the action reads unknown naming it. A gate read before any step runs refuses the action unless:
+# unknown), and after a failed install the action reads unknown naming it. A uses: step with its own env: is unknown naming the env, since
+# CI hands that env to the action's steps and this runner does not. A read of action.yml before any step runs refuses the action unless:
 # runs.using is composite; every step is a `shell: bash` run: (no uses:, no working-directory); the only expression in a run: is
 # `${{ github.action_path }}`, read as the relative folder actions/<name> (the quotes around that one token drop); and every run: line is
 # a lint command, as above. A refusal runs no step, and its one unknown line names the file, the line or the expression. Each step then
@@ -46,7 +48,7 @@
 # unknown when a step is unknown, else PASS. A step whose env needs the PR body (github.event.pull_request.body) is unknown, since this
 # runner has no PR body: an action with such a step reads unknown after its other steps ran, and a FAIL of those still wins. The real
 # actions/claude-md-cites of PR #3492 (rules and records move together) reads unknown for another reason: its second step's run: holds
-# `HEAD_SHA="$(git ...)"` and `export HEAD_SHA`, which are not lint commands, so the gate refuses the whole action, names that first line,
+# `HEAD_SHA="$(git ...)"` and `export HEAD_SHA`, which are not lint commands, so the read refuses the whole action, names that first line,
 # and runs none of its steps. Cost: one bin/verdict and one shell per step, in order on the main thread, never in the worker pool; one
 # `git rev-parse` of the base per run with a base.
 # --lint with no --base takes origin/main as CI does and says so
@@ -508,7 +510,7 @@ ACTION_PATH = re.compile(r'"\$\{\{\s*github\.action_path\s*\}\}([^"\s$`]*)"|\$\{
 
 def action_steps(top, step):
     """([(name, step text)], None): the steps of a local uses: action, each laid out and expanded as a workflow step.
-    (None, why) when the gate refuses the action. The gate reads every step before any runs, so a refused action runs nothing."""
+    (None, why) when it refuses the action. It reads every step before any runs, so a refused action runs nothing."""
     ref = uses(step)
     m = ACTION_FOLDER.fullmatch(ref)
     if not m:
@@ -520,7 +522,8 @@ def action_steps(top, step):
             lines = f.read().splitlines()
     except (OSError, UnicodeError) as e:
         return None, "cannot read %s in the tree under test: %s" % (rel, getattr(e, "strerror", None) or e)
-    # A comment above step depth (under three spaces) would end the steps list below: drop it. A deeper one is a step's own text.
+    # A comment above step depth (under three spaces) would end the steps list below: drop it. A deeper one is a step's own
+    # text, or sits above the first `    - `: the layout check below skips it, and step_blocks drops what comes before a step.
     lines = [ln for ln in lines if not (ln.strip().startswith("#") and len(ln) - len(ln.lstrip()) < 3)]
     runs = next((i for i, ln in enumerate(lines) if re.fullmatch(r"runs:\s*", ln)), None)
     body = []
@@ -537,7 +540,7 @@ def action_steps(top, step):
         if ln.strip() and not ln.startswith("   "):
             break
         raw.append(ln)
-    first = next((ln for ln in raw if ln.strip()), "")
+    first = next((ln for ln in raw if ln.strip() and not ln.lstrip().startswith("#")), "")
     if not first:
         return None, "%s has no steps, so a pass would prove nothing" % rel
     if not first.startswith("    - "):
@@ -568,21 +571,32 @@ def action_steps(top, step):
     return out, None
 
 
-def local_action(name, step, ctx, log, dry):
-    """(state, the action's one line, True when a step ran or would run). state: FAIL, unknown, PASS, skipped, or
-    would run (--plan). FAIL beats unknown, and the first FAIL ends the action, as in CI."""
-    top, base, values, _ = ctx
+def local_ready(step, top, base):
+    """(steps, None) when a local uses: action will start; (None, (state, why)) when its uses: step or the read of its
+    action.yml before any step runs stops it. The one home of that read: an install before the action runs only when it passes."""
     # The uses: step's own continue-on-error: and if: read as plan() reads a run: step's.
     if step_key(step, "continue-on-error") not in (None, "false"):
-        return "unknown", "continue-on-error: this runner reads no step as allowed to fail", False
+        return None, ("unknown", "continue-on-error: this runner reads no step as allowed to fail")
     held = if_held(step, bool(base))
     if held and held[0] == "skipped" and not base and condition(step_key(step, "if"), True) is not False:
         held = "unknown", "a pull-request step, skipped for want of a base (pass --base)"
     if held:
-        return held[0], held[1], False
+        return None, held
+    env = step_env(step)
+    if env:
+        return None, ("unknown", "env %s: CI hands a uses: step's env to the action's steps, and this runner does not"
+                      % ", ".join(sorted(env)))
     steps, why = action_steps(top, step)
-    if steps is None:
-        return "unknown", why, False
+    return (steps, None) if steps is not None else (None, ("unknown", why))
+
+
+def local_action(name, step, ctx, log, dry, ready):
+    """(state, the action's one line, True when a step ran or would run). ready: local_ready()'s result for the step.
+    state: FAIL, unknown, PASS, skipped, or would run (--plan). FAIL beats unknown, and the first FAIL ends the action, as in CI."""
+    top, base, values, _ = ctx
+    steps, held = ready
+    if held:
+        return held[0], held[1], False
     parts, states, started = [], [], False
     for sname, st in steps:
         state, detail, shell, env, cwd = plan(st, bool(base), values, top, True)
@@ -838,7 +852,10 @@ def main(argv):
         if picked is not None and picked.intersection(found):
             kind[i] = "suite"
     planned = [plan(st, bool(base), values, top, lint) if k not in ("", "local") else None for st, k in zip(steps, kind)]
-    runs = [k == "lint" and p[0] == "run" for k, p in zip(kind, planned)]  # an install runs only if a lint step after it does
+    runs = [k == "lint" and p[0] == "run" for k, p in zip(kind, planned)]  # the lint steps the pool may queue
+    ready = [local_ready(st, top, base) if k == "local" else (None, None) for st, k in zip(steps, kind)]
+    # An install runs only if a lint step after it runs, or a local action after it that local_ready lets start.
+    starts = [r or s is not None for r, (s, _) in zip(runs, ready)]
     ran, ran_lint, blocker = 0, 0, None  # blocker: the install step that did not finish
     ctx = (top, base, values, pinned)
     workers = lint_workers() if lint and not dry else 1
@@ -860,7 +877,7 @@ def main(argv):
                     tally["unknown"] += 1
                     print("%-15s %s: --lint did not run it: install step %s did not finish" % ("unknown", name, blocker))
                     continue
-                state, line, started = local_action(name, step, ctx, log, dry)
+                state, line, started = local_action(name, step, ctx, log, dry, ready[n - 1])
                 ran += started
                 ran_lint += started
                 print("%-15s %s" % (state, name) if state == "would run" else "%-15s %s: %s" % (state, name, line))
@@ -873,7 +890,7 @@ def main(argv):
                     "this is a suite the diff does not pick%s" % ("" if base else " (no base to read a diff)") if suites[n - 1]
                     else "its run: is neither a lint nor an install command"))
                 continue
-            if kind[n - 1] == "install" and (blocker or not (any(runs[n:]) or "local" in kind[n:])):
+            if kind[n - 1] == "install" and (blocker or not any(starts[n:])):
                 print("%-15s %s: %s" % ("not run", name, "install step %s did not finish" % blocker if blocker
                                         else "no lint step after it will run"))
                 continue
