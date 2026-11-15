@@ -171,6 +171,9 @@ jobs:
     # 2026-11-05 17:26 to 2026-11-06 17:38 UTC), after the merge and install suites moved to checks-merge-install.
     # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
     timeout-minutes: 75
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -374,6 +377,9 @@ jobs:
       - name: Settings matcher fixture suite
         run: python3 lint/test_settings_matcher.py
 
+      - name: Start check wiring suite
+        run: python3 lint/test_start_check_wiring.py
+
       - name: Hook platform exit fixture suite
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_hook_platform_exit.py
@@ -516,6 +522,13 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: python3 lint/check_ruling_kind.py --base "origin/$BASE_REF"
 
+      # Rule and record move together (decision child-cites-not-copies). The action's aligned step diffs origin/<base>...HEAD and reads the PR
+      # body from the event file, and only when a gap needs it. No scope flag on purpose: decisions are .md files, so a docs-only pull request must run it. The `checks` job is read
+      # by all-jobs-passed. The action reads the full-depth checkout above.
+      - name: Rules and records move together
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: $/actions/claude-md-cites
+
       - name: Silent undo fixture suite
         run: python3 lint/test_check_silent_undo.py
 
@@ -528,6 +541,21 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python3 lint/check_silent_undo.py --upstream "origin/$BASE_REF" --head "$HEAD_SHA" --strict
+
+      - name: Debt retire check
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+        # Main's copy of the classifier and the modules it imports (lint/, hooks/) runs, so a PR cannot rewrite the check that judges its own close.
+        # The run is more than one lint command, so `ci-job checks --lint` (lane lint, the small base move) never runs it: it reads the PR body, which only CI has (decision debt-close-runs-retire).
+        run: |
+          [ -z "$GITHUB_REPOSITORY" ] || export GH_REPO="$GITHUB_REPOSITORY"  # gh finds the repository from the checkout, and the CLI runs from a scratch folder
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          git archive "origin/$BASE_REF" $(git ls-tree --name-only "origin/$BASE_REF" lint hooks) | tar -x -C "$scratch"
+          (cd "$scratch" && python3 lint/check_debt_retire.py --repo "$OLDPWD" --upstream "origin/$BASE_REF" --head "$HEAD_SHA")
 
       - name: Comment narration fixture suite
         run: python3 lint/test_check_comment_narration.py
@@ -786,6 +814,10 @@ jobs:
       - name: Session start notice suite
         if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_session_start.py
+
+      - name: Start check suite
+        if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 hooks/test_start_check.py
 
       - name: Session role file suite
         run: python3 hooks/test_session_role.py
@@ -1458,6 +1490,10 @@ jobs:
       - name: Session start notice suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_session_start.py
+
+      - name: Start check suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_start_check.py
 
       - name: Refusal settle fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
@@ -2262,6 +2298,10 @@ jobs:
       - name: Session start notice suite
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_session_start.py
+
+      - name: Start check suite
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python hooks/test_start_check.py
 
       - name: Refusal settle fixture suite
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
