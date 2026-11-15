@@ -1,6 +1,6 @@
 # The aligned check does not read output-styles Markdown
 
-**What.** Probe group `aligned` reads rule files and the `agents/` and `skills/` Markdown, but not `output-styles/` Markdown, so a sentence there that cites a record can go stale when the record changes and nothing flags it. The owner picked `agents/` and `skills/` only (waiting-page item 872, option b, 2026-11-15 11:33 CST); `output-styles/` is unruled.
+**What.** Probe group `aligned` reads rule files and the `agents/` and `skills/` Markdown. It does not read `output-styles/` Markdown. A sentence there that cites a record can go stale when the record changes, and nothing flags it. The owner picked `agents/` and `skills/` only (waiting-page item 872, option b, 2026-11-15 11:33 CST). `output-styles/` is unruled.
 
 **Where.** `lint/compliance_probes.py`, `rule_scope` with `agents_skills`.
 
