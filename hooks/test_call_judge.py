@@ -66,7 +66,8 @@ Interface the hook must match:
   sender's own record carries cs-build:coordinator (the add and remove lists of the set_session_tags calls after that
   record are applied in order), and whose text states a pick or hold (pick, picks,
   picked, picking, hold, holds, held, holding; a bare `hold up` counts; not `on hold`, `hold on`, `held on`, `pick up`,
-  `holds up`, `held up`, `holding up`, a hyphen id, or a statement word before `the call` or `the meeting`), must cite a ruling or say
+  `holds up`, `held up`, a hyphen id, `The CI is holding up the merge.`, or a hold of `the call` or `the meeting` that is only a
+  clock time), must cite a ruling or say
   `no ruling found:`. The text is the `message` of send_message and SendMessage (SendMessage's `to` names its agent, and a call
   that carries only a `summary` is not judged) and the `prompt` of create_session. A cite gets one judge call whose
   prompt carries the pick text and the candidate rulings. Any other message passes with no model call.
@@ -1745,7 +1746,8 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
 # set_session_tags add and remove lists after that record applied in order) whose text states a pick or a hold must cite a
 # ruling, or say `no ruling found:` with what it searched. The statement words are
 # pick, picks, picked, picking, hold, holds, held and holding; a bare `hold up` counts. A word is no statement inside `on hold`,
-# `hold on`, `held on`, `pick up`, `holds up`, `held up`, `holding up` or a hyphen id, or before `the call` or `the meeting`.
+# `hold on`, `held on`, `pick up`, `holds up`, `held up` or a hyphen id. `The CI is holding up the merge.` is chatter, and a hold
+# of `the call` or `the meeting` is chatter only as a bare clock-time statement (`We will hold the call at 3pm.`).
 # A cite gets one judge call, whose prompt carries the pick text and the candidate rulings. Any other sender or text passes
 # with no model call. The cases run the hook as a child, as the cases above do: the stub answers `claude -p`, and each call
 # is read from its record.
@@ -2085,14 +2087,15 @@ def case_pick_message_cannot_close_its_fence():
 
 
 def case_pick_statement_words_are_checked():
-    # held, picked, picks and holds state a pick too, and so do holding, picking and hold up: an uncited one is denied in
-    # code, with no model call. The holding and hold up texts carry no plan cite, so only the word decides them.
+    # held, picked, picks and holds state a pick too, and so do holding, holding up, picking and hold up: an uncited one is
+    # denied in code, with no model call. The holding and hold up texts carry no plan cite, so only the word decides them.
     for label, message in (
         ("held", "The mailbox default was held."),
         ("picked", "The owner picked the second option."),
         ("picks", "The coordinator picks route B."),
         ("holds", "The lane holds the mailbox default."),
         ("holding", "Holding PR 12 until the mailbox rule settles."),
+        ("holding up", "Holding up PR 12 until the mailbox rule settles."),
         ("picking", "Picking route B for the lane."),
         ("hold up", "Hold up the mailbox merge until the mailbox rule is settled."),
     ):
@@ -2110,9 +2113,10 @@ def case_pick_held_cited_reaches_the_judge():
     check("pick, was held + plan R49: the prompt carries the cited plan text", R49_MARK in pick_prompt(r), detail(r))
     check("pick, was held + plan R49: the judge's refusal denies the pick with its reason",
           (r.deny() or {}).get("permissionDecision") == "deny" and reason in r.reason(), detail(r))
-    # Holding and hold up state a pick too. A plan R-number is a cite, so each text gets one judge call with R49's text.
+    # Holding, holding up and hold up state a pick too. A plan R-number is a cite, so each text gets one judge call with R49's text.
     for label, message in (
         ("Holding", "Holding PR 12 until R49 settles."),
+        ("Holding up", "Holding up PR 12 until R49 settles."),
         ("hold up", "Hold up the mailbox merge until R49 is settled."),
     ):
         r = pick_run(message)
@@ -2132,20 +2136,38 @@ def case_pick_chatter_passes_untouched():
         ("hyphen ids", "Still open: hold-unsafe-after-round-3 and pick-cites-ruling-before-send."),
         ("hold the call", "We will hold the call at 3pm."),  # a meeting hold, not a pick: must pass
         ("held on", "The test held on the old code."),  # guard: a fix that lets `hold up` through must still pass `held on`
+        ("CI holding up", "The CI is holding up the merge."),  # guard: a `holding up` pick must not refuse a plain report
+        ("holding company", "The holding company signed the change order."),  # `holding` is no pick word before a noun
     ):
         r = pick_run(message)
         check("pick chatter, %s: passes untouched, with no model call and no refusal" % label,
               r.code == 0 and r.out == "" and r.calls == [], detail(r))
 
 
-def case_pick_known_limit_meeting_hold_passes_untouched():
-    # Known limit: PICK_WORD reads `hold the meeting` as chatter, so a pick in substance that says it passes with no model call.
+def case_pick_call_and_meeting_holds_are_picks():
+    # A hold of the call or the meeting is a pick unless the text is only a clock time (owner pick, round-1 review). Each text
+    # below names plan R49, a cite, so it reaches the judge once with R49's text. Its uncited twin, with the mailbox rule in
+    # place of R49, is denied in code with no model call.
     control = pick_run("coordinator hold: keep the lane parked until the run ends.")
-    check("pick known limit control: a coordinator's uncited hold is denied",
+    check("pick call or meeting hold control: a coordinator's uncited hold is denied",
           (control.deny() or {}).get("permissionDecision") == "deny", detail(control))
-    r = pick_run("Hold the meeting until R49 settles.")
-    check("pick known limit, Hold the meeting until R49 settles: passes untouched, with no model call",
-          r.code == 0 and r.out == "" and r.calls == [], detail(r))
+    for label, message in (
+        ("Hold the call on route B", "Hold the call on route B until R49 settles."),
+        ("Hold the meeting", "Hold the meeting until R49 settles."),
+        ("Hold the call at 3pm", "Hold the call at 3pm until R49 settles."),
+    ):
+        r = pick_run(message)
+        check("pick, %s until R49: one judge call" % label, len(r.calls) == 1, detail(r))
+        check("pick, %s until R49: the prompt carries the cited plan text" % label, R49_MARK in pick_prompt(r), detail(r))
+    for label, message in (
+        ("Hold the call on route B", "Hold the call on route B until the mailbox rule settles."),
+        ("Hold the meeting", "Hold the meeting until the mailbox rule settles."),
+        ("Hold the call at 3pm", "Hold the call at 3pm until the mailbox rule settles."),
+    ):
+        r = pick_run(message)
+        check("pick, uncited %s: denied in code" % label,
+              (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+        check("pick, uncited %s: no model call" % label, r.calls == [], detail(r))
 
 
 def case_pick_markdown_no_ruling_is_not_refused():
@@ -2984,7 +3006,7 @@ def main():
                  case_pick_message_is_fenced_as_data, case_pick_message_cannot_close_its_fence,
                  case_pick_statement_words_are_checked,
                  case_pick_held_cited_reaches_the_judge, case_pick_chatter_passes_untouched,
-                 case_pick_known_limit_meeting_hold_passes_untouched,
+                 case_pick_call_and_meeting_holds_are_picks,
                  case_pick_markdown_no_ruling_is_not_refused, case_pick_bare_item_is_no_cite,
                  case_pick_long_plan_section_reaches_the_prompt,
                  case_create_session_pick_is_judged, case_send_message_pick_is_judged,
