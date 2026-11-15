@@ -17,7 +17,7 @@ Owner, 2026-10-15 12:00 CDT. The owner's words:
   - The merge tool already reads this way (`review_state` in `merge/merge.py`). Decision `pr-review-record` holds the form, the done rules and the owner's round 4 grant, and its changed-head route is unchanged.
   - Not decided: whether round 1 runs Sonnet for every logic change. Deferred, as the owner said.
 - The judgment is semantic.
-- The owner's grant can allow work on a held change. A merge still needs zero or positive net value, unless the owner accepted the loss in a ruling that the tool's `Owner accepted` line on the record cites, for that PR and that head only.
+- The owner's grant can allow work on a held change. A merge still needs zero or positive net value. The one exception is a loss the owner accepted in a ruling that the tool's `Owner accepted` line on the record cites, for that PR and that head only.
 - A main ask that the change turns into a refusal is a safety hole closed.
 - Owner acceptance of a held change goes by a recorded ruling named `own-<PR>-<letters>` for the PR it accepts (`own-3381-a` is PR 3381's: relayed by the coordinator, not typed by the owner). The review record cites it in an `Owner accepted` line, and the record then reads as at Net value zero, for its Head only: a clean merge of main does not carry the lift. The entry must be open and checked, and name its own id, at `origin/roadmap`, or the hold stands.
 - Owner, 2026-10-15 13:40 CDT: a held change that is red in CI gets no red-CI split. A change that is not held keeps the split (red CI is split, not a safety hole).
