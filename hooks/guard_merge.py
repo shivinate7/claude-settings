@@ -19,7 +19,7 @@ from guard_core import (
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, STEP_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -1372,7 +1372,9 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
 
 
 # ---- merge --role: the tier is read from this session's own get_session record
-ROLE_TIERS = ("batch-runner",)
+ROLE_TIERS = ("batch-runner", "lane")  # merge.py MERGE_ROLES names the same tiers
+LOCAL_ROLE_TIERS = ("batch-runner",)  # the tiers a local role file may name (merge.py LOCAL_MERGE_ROLES); the lane tier is a cloud tier only
+ROLE_STEP_TIER = "lane"  # the tier whose call also names a step (--step), proved by a cs-step tag of the own record
 ROLE_TAG_PREFIX = BUILD_TAG
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
@@ -1421,6 +1423,18 @@ def role_call_of(segment: str):
     return None
 
 
+def role_step_of(segment: str) -> str:
+    """The value after the step flag when the segment runs the merge tool with it (`--step X` or `--step=X`), else ''. The last flag wins, as argparse reads it."""
+    rest = merge_tool_args(segment) or []
+    step = ""
+    for at, arg in enumerate(rest):
+        if arg == "--step":
+            step = rest[at + 1] if at + 1 < len(rest) else ""
+        elif arg.startswith("--step="):
+            step = arg[len("--step="):]
+    return step
+
+
 def _own_session_read(transcript: str, own_id: str, created: bool = False):
     """(tags, tagged_after): the own-record read of hooks/own_session.py, without the parent id."""
     # `created` counts a create_session call as a record too: rule lane-one-topic reads a lane by its start.
@@ -1447,7 +1461,9 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
             if own_id and transcript:
                 tags = _own_get_session_tags(transcript, own_id)
                 if tier in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + tier in tags:
-                    continue
+                    step = role_step_of(segment)
+                    if tier != ROLE_STEP_TIER or (step and STEP_TAG + step in tags):  # a lane's step must be a cs-step tag of its own record, exactly
+                        continue
         except Exception:
             pass
         return "merge role " + tier
@@ -1740,7 +1756,7 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int, local_se
                     continue
                 import session_role
                 judged, record = session_role.local_judgement(local_session)
-                if not judged or (record and record["role"] in ROLE_TIERS and repo and record.get("repo") == repo):  # glossary-ok: ROLE_TIERS is the existing name
+                if not judged or (record and record["role"] in LOCAL_ROLE_TIERS and repo and record.get("repo") == repo):  # glossary-ok: LOCAL_ROLE_TIERS is the existing name
                     continue
                 return True
             from override import remote_session_id
