@@ -2779,6 +2779,55 @@ class PinnedHarness(Job):
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "a step pinned to the stable branch did not PASS on the tree it names\n" + text)
         self.assertIn("fixture harness: lenient", text, "the local strict copy ran, not the tree the stable branch names\n" + text)
 
+    def pin_tree_of(self, ref):
+        """pin_tree(ref) of ci-job, loaded as a module whose clone is the fixture's source. Its exports go into this run's
+        folder and are deleted at the end of the case. -> (tree or None, why or None)."""
+        ci = load_ci_job()
+        ci.pin_source = lambda: self.source
+        self.addCleanup(ci.drop_pin_trees)
+        with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER):
+            return ci.pin_tree(ref)
+
+    @staticmethod
+    def rule_in(tree):
+        with open(os.path.join(tree, "lint", "rule.txt"), encoding="utf-8") as f:
+            return f.read().strip()
+
+    def test_pin_tree_resolves_a_moving_ref_to_its_commit_then_archives_that_commit(self):
+        """stable names the lenient commit on origin. The clone holds no branch of that name, so the export must come from the
+        commit origin gives for it, and the harness in it is the one the pin names."""
+        self.publish_stable(self.pin_a)
+        held = subprocess.run(["git", "-C", self.source, "rev-parse", "-q", "--verify", "stable^{commit}"], env=ENV, capture_output=True)
+        self.assertNotEqual(held.returncode, 0, "precondition: the clone already holds a branch named stable\n")
+        tree, why = self.pin_tree_of("stable")
+        self.assertIsNone(why, "pin_tree did not resolve the stable branch and export its commit: %s" % why)
+        self.assertEqual(self.rule_in(tree), "lenient", "the export is not the commit that stable names")
+
+    def test_pin_tree_still_archives_a_sha(self):  # the control
+        tree, why = self.pin_tree_of(self.pin_a)
+        self.assertIsNone(why, "pin_tree did not archive a sha the clone holds: %s" % why)
+        self.assertEqual(self.rule_in(tree), "lenient", "the export of a sha is not that commit")
+
+    def test_pin_tree_of_a_ref_nothing_holds_is_none_with_a_reason(self):  # the control
+        self.publish_stable(self.pin_a)
+        tree, why = self.pin_tree_of("no-such-branch")
+        self.assertIsNone(tree, "pin_tree exported a tree for a ref nothing holds")
+        self.assertTrue(why, "pin_tree gave no reason for a ref nothing holds")
+
+    def test_a_branch_pin_under_step_runs_the_tree_it_names(self):
+        self.publish_stable(self.pin_a)
+        rc, lines, text = self.run_pinned("stable")
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "a step pinned to the stable branch did not PASS under --step\n" + text)
+        self.assertIn("fixture harness: lenient", text, "under --step the local strict copy ran, not the tree stable names\n" + text)
+
+    def test_a_pin_on_a_branch_that_does_not_exist_reads_unknown_and_never_passes(self):
+        """The harm this stops: the local copy reads lenient here, so a run that fell back to it would pass."""
+        self.publish_stable(self.pin_a)
+        write_lf(os.path.join(self.cfg, "lint", "rule.txt"), "lenient\n")
+        rc, lines, text = self.run_pinned("no-such-branch")
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), "a ref nothing holds did not read unknown, never PASS\n" + text)
+        self.assertNotIn("fixture harness", text, "the local copy ran for a ref it could not resolve\n" + text)
+
     @unittest.skipUnless(os.name == "posix", "the git stub is a shell script")
     def test_the_export_is_deleted_after_a_pass_and_after_an_unknown(self):
         tmp = tempfile.mkdtemp(prefix="tmp-", dir=RUN_FOLDER)  # TMPDIR for the run: each export is made here
