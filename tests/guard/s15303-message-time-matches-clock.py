@@ -3,9 +3,10 @@ FAMILY = "message-time-matches-clock"
 #
 # Rule message-time-matches-clock. A send_message whose first non-blank line, after its markdown lead chars, opens
 # with a header stamp is refused when the stamp is wrong for the clock. A header stamp is `<label>` (1 to 4 words),
-# then `,`, `:`, or a dash spaced on both sides (` - `, ` — `), then an optional date `YYYY-MM-DD `, then `H:MM` or
-# `HH:MM`, an optional `:SS`, then the zone `CST` or `CDT` in any letter case. Anything may follow it. The zone must
-# be the clock's own: a CDT stamp in CST season and a CST stamp in CDT season are refused, whatever the minutes.
+# then `,`, `:`, a dash spaced on both sides (` - `, ` — `), or a plain space, then an optional date `YYYY-MM-DD `,
+# then `H:MM` or `HH:MM`, an optional `:SS`, then the zone `CST` or `CDT` in any letter case. The stamp may sit in
+# parens, `(13:40 CST)`, and the header may sit in square brackets, `[coordinator 13:40 CST]`. Anything may follow it.
+# The zone must be the clock's own: a CDT stamp in CST season and a CST stamp in CDT season are refused, whatever the minutes.
 # A dated stamp is an instant with its zone's offset, refused when it is more than 1 minute ahead, with no upper
 # limit. An undated stamp is a signed minute-of-day offset mod 1440, refused only when it is 2 to 60 minutes ahead:
 # more than 60 ahead reads as a quote from an earlier day, and passes. A stamp behind the clock passes. The wrap reads
@@ -135,9 +136,9 @@ mtc_allow("a lane brief whose first line holds no stamp is allowed, though a sta
 # Refused: a label of four words is a header, so this stamp 18 minutes ahead is refused.
 mtc_refuse("a label of four words, Owner of the lane, 13:40 CST, is a header and is refused",
            "Owner of the lane, 13:40 CST: pick 1 taken")
-# Passes: a label with no comma, colon or dash is not a header, so the line passes.
-mtc_allow("a label with no comma, colon or dash is not a header, so the line passes",
-          "Coordinator 13:40 CST: pick 1 taken")
+# Refused: a label with no comma, colon or dash is a header too, so this stamp 18 minutes ahead is refused.
+mtc_refuse("a label with no comma, colon or dash, Coordinator 13:40 CST, is a header and is refused",
+           "Coordinator 13:40 CST: pick 1 taken", carries=("13:22 CST",))
 # Passes: the empty states. No first line means nothing to judge.
 mtc_allow("an empty message passes: there is no first line to judge",
           "")
@@ -213,6 +214,36 @@ mtc_allow("a header 61 minutes ahead at 07:08 is allowed: past 60 minutes it rea
 # Refused: a dated stamp has no window. 16:36 on the same day is 9 hours 28 minutes ahead at 07:08, and is refused.
 mtc_refuse("a dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated stamp has no window",
            "Coordinator, 2026-11-08 16:36 CST: x", clock=MTC_MORNING)
+
+# A label with no separator, a lowercase label, a stamp in parens and a header in brackets are headers too. Each is
+# refused 18 minutes ahead, and the reason prints the clock. Each form passes behind the clock and at its own minute.
+# Refused: a lowercase label with no separator, 18 minutes ahead.
+mtc_refuse("a lowercase label with no separator, coordinator 13:40 CST, is refused: the reason prints 13:22 CST",
+           "coordinator 13:40 CST", carries=("13:22 CST",))
+# Refused: a bracketed header, 18 minutes ahead.
+mtc_refuse("a bracketed header, [coordinator 13:40 CST] x, is refused: the reason prints 13:22 CST",
+           "[coordinator 13:40 CST] x", carries=("13:22 CST",))
+# Refused: a stamp in parens, 18 minutes ahead.
+mtc_refuse("a stamp in parens, Coordinator (13:40 CST): x, is refused: the reason prints 13:22 CST",
+           "Coordinator (13:40 CST): x", carries=("13:22 CST",))
+# Passes: the four forms 10 minutes behind the clock, at 13:12 against 13:22. A stamp behind the clock passes.
+mtc_allow("a label with no separator 10 minutes behind, Coordinator 13:12 CST, is allowed: a stamp behind the clock passes",
+          "Coordinator 13:12 CST: x")
+mtc_allow("a lowercase label with no separator 10 minutes behind, coordinator 13:12 CST, is allowed",
+          "coordinator 13:12 CST")
+mtc_allow("a bracketed header 10 minutes behind, [coordinator 13:12 CST] x, is allowed",
+          "[coordinator 13:12 CST] x")
+mtc_allow("a stamp in parens 10 minutes behind, Coordinator (13:12 CST): x, is allowed",
+          "Coordinator (13:12 CST): x")
+# Passes: the four forms at the clock's own minute, 13:22.
+mtc_allow("a label with no separator at the clock's own minute, Coordinator 13:22 CST, is allowed",
+          "Coordinator 13:22 CST: x")
+mtc_allow("a lowercase label with no separator at the clock's own minute, coordinator 13:22 CST, is allowed",
+          "coordinator 13:22 CST")
+mtc_allow("a bracketed header at the clock's own minute, [coordinator 13:22 CST] x, is allowed",
+          "[coordinator 13:22 CST] x")
+mtc_allow("a stamp in parens at the clock's own minute, Coordinator (13:22 CST): x, is allowed",
+          "Coordinator (13:22 CST): x")
 
 
 # ---- the written values: ArtifactData `added`, a roadmap step's `updatedAt`, a literal `updatedAt` in Bash
