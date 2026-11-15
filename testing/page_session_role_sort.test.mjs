@@ -465,13 +465,13 @@ test("control: once the repo meta answers, the rail is shown and draws a chip pe
 // ---------------------------------------------------------------- Send while the list is held, and a long repo name
 
 test("while the repo meta is held the list is not drawn, so Send stays off, and it turns on once the cards draw", async (t) => {
-  const s1 = mk("held-stand-one", 1, { stands: true }), s2 = mk("held-stand-two", 2, { stands: true, repo: "owner/other-repo" });
+  const s1 = mk("held-stand-one", 1), s2 = mk("held-stand-two", 2, { repo: "owner/other-repo" });
   const page = await open(t, { items: [s1, s2], meta: META, holdMeta: true }); if (!page) return;
   assert.equal(await page.locator("#send").isDisabled(), true, "Send is live while the owner sees only the loading line");
   await page.evaluate(() => window.__releaseMeta());
   await page.waitForFunction("feed.meta === true");
   await page.waitForSelector(`#item-${s1.id}`);
-  assert.equal(await page.locator("#send").isDisabled(), false, "Send stays off after the cards draw with stood picks");
+  assert.equal(await page.locator("#send").isDisabled(), false, "Send stays off after the cards draw");
 });
 
 test("a long repo name in a sub-group head never makes the page scroll sideways", async (t) => {
