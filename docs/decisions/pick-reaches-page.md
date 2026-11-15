@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner, 2026-11-12 12:09 CST: "this needs to be mechanized". A coordinator that takes a pick the owner could overrule makes it show on the waiting page (skill `waiting-page`, "Add an item"). It sends the pick to the page writer.
+Owner, 2026-11-12 12:09 CST: "this needs to be mechanized". A coordinator that takes a pick the owner could overrule makes it show on the page (skill `waiting-page`, "Add an item"). It sends the pick to the page writer.
 
 The guard rule `pick-reaches-page` refuses a send_message from a coordinator. A line of the message opens `Coordinator pick` or `Coordinator picks`, after markdown lead characters and an optional list lead (`-`, `+`, `1.`, `1)`), in any case. The marker ends with `:`, `.`, `,`, `;`, a dash and a space, or the line's end. So `Coordinator pick summary:` is no marker. The line is outside a closed fenced block. The send goes to a session that is not the page writer.
 
@@ -10,7 +10,7 @@ The send passes when the pick is named since the last human message. A send to t
 
 ## The mistake
 
-On 2026-11-12 a coordinator took 19 undoable picks (rule `parallelism-keep-going`, take a pick that can be undone). It sent each only to lanes. None reached the waiting page.
+On 2026-11-12 a coordinator took 19 undoable picks (rule `parallelism-keep-going`, take a pick that can be undone). It sent each only to lanes. None reached the page.
 
 ## The harm
 

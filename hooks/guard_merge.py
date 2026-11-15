@@ -2276,15 +2276,15 @@ _FENCE_LINE = re.compile(r"\s*(```|~~~)")
 PICK_REASON = (
     "this message states a pick (`Coordinator pick: {key}`) to a session that is not the page writer, and the "
     "page writer has had no send naming that pick since the owner's last message. The owner overrules a pick on "
-    "the waiting page, so the pick reaches the page first. Send the same `Coordinator pick: {key}` line to the "
-    "page writer in this turn (skill waiting-page, \"Add an item\"), then retry "
+    "the page, so the pick reaches the page first. Send the same `Coordinator pick: {key}` line to the "
+    "page writer in this turn (the page skill, \"Add an item\"), then retry "
     "this send. (decision pick-reaches-page, a coordinator's pick reaches the owner's page)"
 )
 PICK_SELF_REASON = (
     "this message states a pick (`Coordinator pick: {key}`) to a session that is not the page writer, and this "
     "session is the page writer, so it cannot send to itself. It has written no item naming that pick since the "
     "owner's last message. Write the item with a `Coordinator pick: {key}` line to the items collection in this "
-    "turn (skill waiting-page, \"Add an item\"), then retry this send. "
+    "turn (the page skill, \"Add an item\"), then retry this send. "
     "(decision pick-reaches-page, a coordinator's pick reaches the owner's page)"
 )
 
