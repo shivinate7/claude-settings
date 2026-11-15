@@ -1,0 +1,23 @@
+# The files the guard suite (hooks/test_guard.py and tests/guard/*.py, run in the checks-windows-guard shards) reads. ci-scope.sh
+# turns windows_guard on when a diff touches a path that matches a line here, so the Windows guard shards run for that diff only.
+# One glob per line; `*` also matches `/`. A `#` starts a comment. An empty or unreadable list turns the shards on for every diff.
+# lint/test_guard_inputs.py checks the list against the files the suite opens, names and imports.
+hooks/*
+tests/guard/*
+agents/*
+lint/*
+janitor/*
+merge/*
+testing/*
+skills/waiting-page/*
+settings.json
+install.sh
+package.json
+landed-dirs.txt
+docs/decisions/agent-model-cap.md
+skills/impeccable/SKILL.md
+bin/sim-lease
+bin/sim-test
+actions/ci-alarm/events.json
+.github/stamp.json
+.claude/layout-extras.json

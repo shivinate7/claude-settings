@@ -12,11 +12,12 @@
 #     lint_comment_narration (Comment narration check: any non-.md path; the checker reads no .md file).
 #   lint/layout.py, lint/layout.json and .claude/layout-extras.json set all four: each lint finds its record folders through them.
 #   checks_windows_rest_2 repeats checks_windows_rest's value (R62). No job reads it: checks-windows-rest-2 runs every step on a ready pull_request, so the output is kept only for the tests that derive it.
+#   windows_guard (the checks-windows-guard shards): a path that matches a glob of .github/guard-inputs.txt, an added file under a landed dir, or a change to this script, the workflow or that list; read in its own pass over the diff, so a .md input counts, and a path the table names nowhere does not set it.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event; false on a records-only skip.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
 # BASE_SHA, HEAD_REF, GREEN_HEAD (optional: the sha green-head.sh prints, the pull request's newest earlier fully green head), PR_HEAD
-# (optional: the pull request's head sha; HEAD when unset). GREEN_HEAD turns the 13 job and suite flags off on a pull request when it is an
+# (optional: the pull request's head sha; HEAD when unset). GREEN_HEAD turns the 14 job and suite flags off on a pull request when it is an
 # ancestor of PR_HEAD and the delta from it to PR_HEAD is docs/records.md alone; the lint flags keep their whole-PR values and mutation_report is false. Any unreadable read: no skip.
 # The last output line, records_only_skip=true|false, is true exactly in that case.
 set -u
@@ -142,21 +143,35 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       *) on="$on lint_red_run lint_comment_narration " ;;
     esac
   done <<< "$files"
+  # windows_guard has its own pass: the case table above skips a .md path, and an input such as agents/builder.md is one. The list is
+  # .github/guard-inputs.txt (the one list); an unreadable or empty list turns the flag on.
+  globs=$(sed 's/#.*//; s/[[:space:]]//g' .github/guard-inputs.txt 2>/dev/null | grep -v '^$')
+  if [ -z "$globs" ]; then
+    on="$on windows_guard "
+  else
+    while IFS= read -r f; do
+      case "$f" in .github/guard-inputs.txt|.github/scripts/ci-scope.sh|.github/workflows/checks.yml) on="$on windows_guard "; continue ;; esac
+      while IFS= read -r g; do
+        # shellcheck disable=SC2254  # the list's globs are the case patterns
+        case "$f" in $g) on="$on windows_guard "; break ;; esac
+      done <<< "$globs"
+    done <<< "$files"
+  fi
   # A new file under a landed dir (landed-dirs.txt, the one list) changes what test_install_src and
   # the guard suite see. An unreadable or empty list turns everything on.
   dirs=$(sed 's/#.*//; s/[[:space:]]//g; s#/$##' landed-dirs.txt 2>/dev/null | grep -v '^$' | paste -sd'|' -)
   if [ -z "$dirs" ]; then
-    on="$on $ALL "
+    on="$on $ALL windows_guard "
   else
     if added=$(git diff --name-only --diff-filter=A --no-renames "$range" 2>/dev/null); then
       whole_read=1
-      grep -Eq "^($dirs)/" <<< "$added" && on="$on $W $S code guard "
+      grep -Eq "^($dirs)/" <<< "$added" && on="$on $W $S code guard windows_guard "
     else
-      on="$on $ALL "
+      on="$on $ALL windows_guard "
     fi
   fi
 else
-  on=" $ALL "
+  on=" $ALL windows_guard "
 fi
 # checks_guard: the checks-guard job runs the guard suite, which needs both flags (the old step if). The playwright-setup arm above also sets it directly.
 case "$on" in *" code "*) case "$on" in *" guard "*) on="$on checks_guard " ;; esac ;; esac
@@ -176,14 +191,14 @@ if [ "$whole_read" = 1 ] && [[ "${GREEN_HEAD:-}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})
    delta=$(git diff --name-only --no-renames "$GREEN_HEAD" "$end" 2>/dev/null) && [ "$delta" = docs/records.md ]; then
   kept=" "
   for t in $on; do
-    case " $JOBS checks_guard code mods guard sweep shoot " in *" $t "*) ;; *) kept="$kept$t " ;; esac
+    case " $JOBS checks_guard code mods guard sweep shoot windows_guard " in *" $t "*) ;; *) kept="$kept$t " ;; esac
   done
   on="$kept"
   skip=true
   echo "CI scope: records-only push after green head $GREEN_HEAD"
 fi
 echo "CI scope: event=${EVENT:-} range=${range:-none} on=$on"
-for n in $ALL; do
+for n in $ALL windows_guard; do
   case "$on" in *" $n "*) v=true ;; *) v=false ;; esac
   echo "$n=$v" >> "$GITHUB_OUTPUT"
   # checks-windows-rest-2 is the second half of the rest suites (R62). Its output repeats the rest flag; no job reads it (the job runs every step on a ready pull_request).
@@ -197,5 +212,5 @@ case "${EVENT:-}" in
 esac
 [ "$skip" = true ] && v=false
 echo "mutation_report=$v" >> "$GITHUB_OUTPUT"
-# records_only_skip: true exactly when the records-only shortcut above forced the 13 flags off; checks.yml reads it to skip the run steps of the test jobs.
+# records_only_skip: true exactly when the records-only shortcut above forced the 14 flags off; checks.yml reads it to skip the run steps of the test jobs.
 echo "records_only_skip=$skip" >> "$GITHUB_OUTPUT"

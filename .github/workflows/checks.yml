@@ -135,6 +135,7 @@ jobs:
       sweep: ${{ steps.scope.outputs.sweep }}
       shoot: ${{ steps.scope.outputs.shoot }}
       mutation_report: ${{ steps.scope.outputs.mutation_report }}
+      windows_guard: ${{ steps.scope.outputs.windows_guard }}
       records_only_skip: ${{ steps.scope.outputs.records_only_skip }}
       lint_red_run: ${{ steps.scope.outputs.lint_red_run }}
       lint_plan_refuter: ${{ steps.scope.outputs.lint_plan_refuter }}
@@ -1916,7 +1917,8 @@ jobs:
   # job, because the records page is a .md file. Checkout and setup steps still start. R62 ("each suite runs once per batch, on the
   # batch PR"; "Part 3 keeps the full shards once per batch") puts the full suites on every ready pull_request; own-830-c ("every
   # job", owner 15:02 CST Nov 14) narrows that: the green head's run already proved what a records-only push changes. Push, schedule
-  # and dispatch run them whole.
+  # and dispatch run them whole. The three guard shards also read windows_guard (ci-scope.sh, .github/guard-inputs.txt): a pull request whose
+  # diff touches no file the guard suite reads runs no guard shard, since the suite cannot change its verdict on such a diff.
   checks-windows-guard:
     runs-on: windows-latest
     needs: scope
@@ -1939,7 +1941,7 @@ jobs:
           python-version: "3.11"
 
       - name: Guard fixture suite (shard 1 of 3)
-        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         env:
           GUARD_SHARD: 1/3
         run: python hooks/test_guard.py
@@ -1963,7 +1965,7 @@ jobs:
           python-version: "3.11"
 
       - name: Guard fixture suite (shard 2 of 3)
-        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         env:
           GUARD_SHARD: 2/3
         run: python hooks/test_guard.py
@@ -1987,7 +1989,7 @@ jobs:
           python-version: "3.11"
 
       - name: Guard fixture suite (shard 3 of 3)
-        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         env:
           GUARD_SHARD: 3/3
         run: python hooks/test_guard.py
