@@ -66,8 +66,8 @@ def find_root():
     from repo B reads B, not the link's target. B's top is the root even with no glossary, so the FAIL names B's
     GLOSSARY.md, never ~/.claude. Outside any repo, a link install reads its target repo."""
     own = os.path.dirname(HERE)
-    if os.path.isfile(os.path.join(own, GLOSSARY)):
-        return own
+    if os.path.isfile(os.path.join(own, GLOSSARY)) or os.path.exists(os.path.join(own, ".git")):
+        return own  # a repo copy run in place with its glossary gone fails on its own path, not the cwd repo's
     try:
         r = _nowindow.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, encoding="utf-8")
         top = os.path.normpath(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else ""
