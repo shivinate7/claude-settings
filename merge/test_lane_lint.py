@@ -1706,6 +1706,45 @@ class LaneLint(LaneFixture):
             t.join(timeout=2 * HEARTBEAT_FAST)
         self.assertEqual(live_heartbeat_threads(), [], "a heartbeat thread outlived the call that ran its shard: " + out)
 
+    def test_mutation_test_progress_error_out_of_a_shard_run_leaves_no_heartbeat_thread_alive(self):  # an error that is not a start error still leaves the call, and the shard's heartbeat thread ends with it
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(shard_jobs(), sleeps={"2/3": 0.6})
+        self.assertEqual(live_heartbeat_threads(), [], "precondition: a heartbeat thread is alive before the run, so the case probes nothing")
+        real_sh = merge.sh
+
+        def sh_raising_after_shard_2(args, *rest, **kwargs):
+            if mutation_test_run(args) and (kwargs.get("env") or {}).get("MUTATE_SHARD") == "2/3":
+                real_sh(args, *rest, **kwargs)  # the run takes its sleep, while the heartbeats print; then the error leaves the shard
+                raise RuntimeError("shard 2/3 raised after its run")
+            return real_sh(args, *rest, **kwargs)
+
+        with heartbeat_every(HEARTBEAT_FAST), unittest.mock.patch.object(merge, "sh", sh_raising_after_shard_2):
+            with self.assertRaises(RuntimeError):
+                self.lane_streams("--lane-lint", "7")
+        for t in live_heartbeat_threads():
+            t.join(timeout=2 * HEARTBEAT_FAST)
+        self.assertEqual(live_heartbeat_threads(), [], "a heartbeat thread outlived the call that raised out of shard 2/3's run")
+
+    def test_mutation_test_progress_shard_whose_command_cannot_start_prints_did_not_start_and_no_end_line(self):  # a start error: its shard prints did not start and no end line, and the lint FAILs
+        self.use_ci_job(PASSING, 0)
+        self.push_sharded_lane(shard_jobs())
+        real_sh = merge.sh
+
+        def sh_missing_on_shard_2(args, *rest, **kwargs):
+            if mutation_test_run(args) and (kwargs.get("env") or {}).get("MUTATE_SHARD") == "2/3":
+                raise FileNotFoundError(2, "No such file or directory", args[0])  # the command cannot start: its program is not there
+            return real_sh(args, *rest, **kwargs)
+
+        with heartbeat_every(HEARTBEAT_NEVER), unittest.mock.patch.object(merge, "sh", sh_missing_on_shard_2):
+            rc, out, err = self.lane_streams("--lane-lint", "7")
+        self.assertEqual(len(shard_lines(out, 2, 3, "start")), 1, "shard 2/3 printed no start line, so its run was not reached: " + out + err)
+        self.assertIn("mutation test shard 2/3: did not start", out, "shard 2/3, whose command could not start, printed no did-not-start line: " + out + err)
+        self.assertEqual(shard_lines(out, 2, 3, "end"), [], "shard 2/3, whose command could not start, printed an end line: " + out + err)
+        self.assertEqual(rc, 1, "the lint passed a head whose shard 2/3 command could not start: " + out + err)
+        self.assertNotIn("Traceback", out + err, "the lint printed a traceback when shard 2/3's command could not start: " + out + err)
+        self.assertEqual(pass_lines(out + err), [], "the lint printed a PASS line for shard 2/3, whose command could not start: " + out + err)
+        self.assertRegex(out + err, r"FAIL", "the lint printed no FAIL line for shard 2/3, whose command could not start: " + out + err)
+
     def test_mutation_test_progress_one_job_head_prints_start_and_end_for_its_one_shard(self):  # a head with no shard step: its one run prints a start and an end too
         body, script = real_mutate_job()
         self.use_ci_job(PASSING, 0)
