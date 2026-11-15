@@ -234,7 +234,7 @@ WINDOWS_PUSH_OFF_JOBS = ("pointer-windows", "checks-windows", "checks-windows-gu
                          "checks-windows-merge-5", "checks-windows-sweep", "checks-windows-rest", "checks-windows-rest-2")
 MUTATE_PUSH_OFF_JOBS = ("checks-mutate-guard", "checks-mutate-guard-b", "checks-mutate-guard-c", "mutation-report")
 PUSH_OFF_JOBS = MACOS_JOBS + WINDOWS_PUSH_OFF_JOBS + MUTATE_PUSH_OFF_JOBS
-# The shards whose job-level if keeps the draft guard with the push guard (SHARD_JOB_IF). rest-2 has no job-level if.
+# The shards whose job-level if keeps the draft guard with the push guard (SHARD_JOB_IF). rest-2 has the push guard alone, no draft guard.
 PUSH_OFF_SHARDS = ("checks-windows-guard-2", "checks-windows-guard-3", "checks-windows-merge-2", "checks-windows-merge-3",
                    "checks-windows-merge-4", "checks-windows-merge-5")
 # R61 part 3: the 03:17 nightly's skip job, and the one scope output it reads (the skip job's output).
