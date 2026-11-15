@@ -356,6 +356,16 @@ class JudgmentKindTests(unittest.TestCase):
                             for p in problems), problems)
 
 
+class CountsFromRestMechanismTests(unittest.TestCase):
+    """verification-counts-from-rest is a judgment: a model reads the reply, and no test proves its verdict.
+    Its map row must read `judgment`, not `check`."""
+
+    def test_counts_from_rest_row_is_a_judgment(self):
+        with open(rule_audit.MAP_FILE, encoding="utf-8") as f:
+            rules = json.load(f)["rules"]
+        self.assertEqual(rules["verification-counts-from-rest"]["mechanism"]["kind"], "judgment")
+
+
 SIBLING_MAP = {
     "rules": {
         "shared-trees-no-destructive-git": {"mechanism": {"kind": "guard", "ref": "sibling-rule"}}
@@ -3401,6 +3411,20 @@ class RefusalCiteRatchetTests(unittest.TestCase):
         src = body_src('    raise Stop("not in a git checkout")\n')
         exempt = {"merge:go: not in a git checkout": "refusal-matches-rule"}
         self.assertTrue(any("needs a reason" in p for p in module_problems(src, exempt)))
+
+
+class SectionDirTests(unittest.TestCase):
+    """section_dir(): the folder the guard runner's SECTION_DIR names. This repo names tests/guard; a root with no runner names none."""
+
+    def test_this_repo_names_the_guard_section_folder(self):
+        self.assertTrue(os.path.isdir(os.path.join(rule_audit.ROOT, "tests", "guard")), "scope: tests/guard is not a folder of this repo")
+        self.assertEqual(rule_audit.section_dir(), "tests/guard")
+
+    def test_a_root_with_no_runner_names_no_folder(self):
+        root = tempfile.mkdtemp(dir=_test_temp.run_folder())
+        self.addCleanup(shutil.rmtree, root, True)
+        self.assertFalse(os.path.exists(os.path.join(root, "hooks", "test_guard.py")), "scope: the root has a runner")
+        self.assertIsNone(rule_audit.section_dir(root), "section_dir named a folder for a root with no runner")
 
 
 if __name__ == "__main__":
