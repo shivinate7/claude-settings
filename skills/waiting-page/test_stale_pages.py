@@ -2284,6 +2284,23 @@ class SessionLine(unittest.TestCase):
         self.assertEqual(len(lines), 1, "want one behind line from the local stamp when the record is missing:\n" + r.stdout)
         self.assertIn(self.BEHIND, lines[0], "the fallback line does not say behind: " + lines[0])
 
+    def test_3_no_branch_and_no_local_stamp_prints_the_no_stamp_line(self):  # no roadmap branch at all: a missing ref is missing, not unreadable
+        root = self.root()
+        r = self.session_run(root)
+        self.assert_clean(r)
+        lines = r.stdout.splitlines()
+        self.assertEqual(len(lines), 1, "want one no-stamp line for a repo with no roadmap branch and no stamp:\n" + r.stdout)
+        self.assertTrue(lines[0].startswith(self.NO_STAMP), "the line does not start with the no-stamp text: " + lines[0])
+
+    def test_4_no_branch_and_a_stale_local_stamp_prints_the_behind_line(self):  # the fallback with no roadmap branch at all
+        root = self.root()
+        self.local_stamp(root, self.other_blob)
+        r = self.session_run(root)
+        self.assert_clean(r)
+        lines = r.stdout.splitlines()
+        self.assertEqual(len(lines), 1, "want one behind line from the local stamp when there is no roadmap branch:\n" + r.stdout)
+        self.assertIn(self.BEHIND, lines[0], "the fallback line does not say behind: " + lines[0])
+
     def test_5_an_unreadable_record_prints_the_no_stamp_line_and_never_crashes(self):
         for name, text in (("unparseable", "{not json"), ("no-blob-key", json.dumps({"at": "2026-11-15T00:00:00Z"}))):
             with self.subTest(record=name):
