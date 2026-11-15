@@ -1,0 +1,11 @@
+{
+ "id": "own-layout-extras-links-per-acct",
+ "at": "2026-11-15T13:16:00-06:00",
+ "title": ".claude/layout-extras.json names an artifact once, with its git path required and one link per account",
+ "ruling": "Owner chat answer \"i think A\", 13:16 CST Nov 15, relayed by the consultant (session_013NEJKz5AWFJhGvmCUoi6wQ; rule own-consultant-speaks-for-owner); question asked 13:08 CST; triage did not read the chat. RELAYED, not owner-typed here. Question: how `.claude/layout-extras.json` names artifacts across accounts. A: each artifact has one entry; its git path is required; its links are listed one per account. A session opens its own account's link, or rebuilds the page from git with the `--all` export and adds its link. Home: decision waiting-data-in-repo, rewritten in place by lane artifact-links-per-account (the consultant starts it). Step: artifact-links-per-account.",
+ "quote": "i think A",
+ "source": "Owner, chat answer 13:16 CST Nov 15 (verbatim \"i think A\"), relayed by the consultant (session_013NEJKz5AWFJhGvmCUoi6wQ), relayed by the coordinator; question asked 13:08 CST",
+ "status": "open",
+ "step": "artifact-links-per-account",
+ "supersedes_none": "No earlier ruling on how layout-extras.json names artifacts across accounts was read by triage; the closed item layout-extras-rollout-mark (n 3) covers what marks a repo rolled out, a different question."
+}

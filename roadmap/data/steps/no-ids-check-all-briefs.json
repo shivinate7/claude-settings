@@ -1,0 +1,14 @@
+{
+ "id": "no-ids-check-all-briefs",
+ "title": "The no-ids check reads triage and batch runner briefs too, not only lane briefs",
+ "priority": "now",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T13:24:00-06:00",
+ "why": "[13:19 CST Nov 15, triage] The no-ids check (ruling own-819-b-slug-or-role: slug or role only, never an id) reads only lane briefs, not triage or batch runner briefs. Queued by triage 13:19 CST from the consultant's open point; undoable. The owner asked at 13:16 CST (relayed) whether the lane-start brief was wrong and should carry both; the consultant's answer: no, ruling own-819-b-slug-or-role says slug or role only. Guard or check: yes (unverified). (source: consultant 13:18 CST via the coordinator, relayed by triage; queued by triage 13:19 CST, undoable; not owner-typed)",
+ "source": "consultant 13:18 CST via the coordinator, relayed by triage; queued by triage 13:19 CST, undoable; not owner-typed",
+ "note": "Todo. Extend the no-ids check (ruling own-819-b-slug-or-role) to triage and batch runner briefs. Guard or check: yes (unverified)."
+}
