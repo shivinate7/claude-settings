@@ -1058,7 +1058,7 @@ def octopus_push_hit(stripped: str, cwd: str, read_verb) -> str:
 # Cost: per pushed ref one paged read of the open pull requests; only when one holds the branch, one paged read of its comments, and for a
 # stale review log the clean-merge reads (commit reads, a compare per merge). A named remote reads one `git config --get-regexp`, a remote
 # named by URL or path one `git config --get`. All gh reads share MERGE_READ_TIMEOUT. An open pull requests read that cannot run names no
-# pull request, so the push passes with one stderr line. A later read that cannot run refuses as unknown (decision guard-hooks-fail-closed),
+# pull request, so the push passes with one stderr line. A later read that cannot run refuses as unknown (decision handed-in-push-needs-record),
 # and so does a folder or a branch this reader cannot name.
 HANDED_IN_PUSH_STALE_REASON = (
     "Rule (Git, handed-in-push-needs-record; decision handed-in-push-needs-record): this push goes to the branch of #{n}, whose newest "
@@ -1067,7 +1067,7 @@ HANDED_IN_PUSH_STALE_REASON = (
     "--kind K --guard yes|no --round N:ROLE:MODEL:VERDICT` prints it), then retry the push."
 )
 HANDED_IN_PUSH_UNKNOWN_REASON = (
-    "Rule (Git, guard-hooks-fail-closed; decision handed-in-push-needs-record): whether the review log of the pull request this push "
+    "Rule (Git, handed-in-push-needs-record; decision handed-in-push-needs-record): whether the review log of the pull request this push "
     "goes to is stale is unknown: {detail}. A read that cannot run refuses the push. Remedy: retry when the read works, or push a branch "
     "name this check can read from a folder it can read."
 )
