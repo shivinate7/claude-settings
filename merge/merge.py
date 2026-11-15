@@ -5177,7 +5177,7 @@ def freeze_lines(name, lanes, dropped=(), on=None, base=None, blamed=(), linted=
             *(f"Lane: #{n} {lanes[n]}" for n in sorted(lanes)),
             *(f"Dropped: #{n}" for n in dropped), *(f"Blamed: #{n}" for n in sorted(blamed)), *([f"Linted: {linted}"] if linted else []), BATCH_END]
 
-REPLACES_LINE = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?\**(?:Replaces|Carries)\**:?\**[ \t]+(?:PR[ \t]+)?(#\d+(?:(?:[ \t]*,[ \t]*(?:and[ \t]+|&[ \t]*)?|[ \t]+and[ \t]+|[ \t]*&[ \t]*)(?:PR[ \t]+)?#\d+)*)(?=\**[ \t]*(?:$|[.!?;](?:[ \t]|$)))", re.I)
+NAMED_REPLACED_LINE = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?\**(?:Replaces|Carries)\**:?\**[ \t]+(?:PR[ \t]+)?(#\d+(?:(?:[ \t]*,[ \t]*(?:and[ \t]+|&[ \t]*)?|[ \t]+and[ \t]+|[ \t]*&[ \t]*)(?:PR[ \t]+)?#\d+)*)(?=\**[ \t]*(?:$|[.!?;](?:[ \t]|$)))", re.I)
 
 def replaced_names(info, n):
     """-> the numbers of the pull requests that the body of pull request `n` (`info`: its "branch" and "body") names as replaced, in order, once each.
@@ -5192,7 +5192,7 @@ def replaced_names(info, n):
     for number, row in enumerate(rows, 1):
         if number in fenced or stale_cites.HEADING_OR_QUOTE.match(row):
             continue
-        m = REPLACES_LINE.match(stale_cites.CODE_SPAN.sub("", row))
+        m = NAMED_REPLACED_LINE.match(stale_cites.CODE_SPAN.sub("", row))
         names += [int(x) for x in re.findall(r"#(\d+)", m.group(1))] if m else []
     dropped = ()
     if is_integration_pr(info):
