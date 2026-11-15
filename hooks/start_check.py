@@ -3,11 +3,12 @@
 
 A SessionStart hook for source `startup` only (decisions agent-model-cap and machine-load-brake). It never stops a
 session: its one line is SessionStart additionalContext, with no `continue` and no `stopReason`. A session start
-cannot be refused here (the app card, anthropics/claude-code#103832), and the started session cannot tell a lane from
-an owner session, so the hook flags it and addresses a session that has a parent_session_id. The text names the model
-or the readings and the decision, and tells the session what to do. A session with a parent_session_id (a lane, read
-with get_session and no session_id) does no work and tells its parent it started in that state. A session with no
-parent (the owner's own) goes on.
+cannot be refused here (the app card, anthropics/claude-code#103832), and the hook cannot tell a lane from an owner
+session, so it flags the start and addresses a session whose own get_session record (no session_id) carries the tag
+cs-build:lane. A parent_session_id alone makes no lane: triage and the batch runner carry one (decision
+machine-load-brake). The text names the model or the readings and the decision, and tells the session what to do. A
+session with the tag does no work and tells its parent (send_message @parent) what it started in. A session without the
+tag (the owner's own, the coordinator, triage, the batch runner) goes on.
 
 The model is checked first (guard.floor_hit, the one home of the floor), so a run prints one flag at most. Then, in a
 local session, it reads the load once (guard.read_load) and asks guard.load_full for the readings over the full line.
@@ -26,9 +27,11 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+LANE_TAG = "cs-build:lane"
 LANE_AND_OWNER = (
-    "A session with a parent_session_id (a lane; read it with get_session, passing no session_id) does no work: "
-    "it tells its parent it started in this state and waits. A session with no parent (the owner's own) goes on."
+    "Read this session's own record with get_session, passing no session_id. If its tags include %s, it is a lane "
+    "and does no work: it tells its parent (send_message to @parent) what it started in, and waits. A session "
+    "without the tag (the owner's own, the coordinator, triage, the batch runner) goes on." % LANE_TAG
 )
 
 
