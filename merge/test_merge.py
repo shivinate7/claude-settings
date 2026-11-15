@@ -15820,6 +15820,238 @@ class ReviewEnv(Env):
         parents = [arg for p in (parent, *more_parents) for arg in ("-p", p)]
         return sh(self.co, "git", "commit-tree", tree, *parents, "-m", message)
 
+# ------------------------------------------------------------------ the owner's acceptance of a held change
+# A change with Net value negative is held (decision hold-unsafe-after-round-3). The owner can accept that loss in the record: one line
+# `Owner accepted: <ruling id>, <YYYY-MM-DD HH:MM CST|CDT>`, directly before Net value. parse_review reads it into rec["accepted"]. Only
+# live_review_state reads the ruling: one git read of origin/roadmap at merge.RULED_STORE_PATH, whose own id must be the cited one.
+# review_state stays pure, so it holds a negative record whatever the line says. The cases use PR 3381's shape: Guard or check yes,
+# three FAIL rounds, Net value negative.
+
+ACCEPT_PR = 3381
+ACCEPT_ID = "own-3381-a"
+ACCEPT_AT = "2026-11-15 01:50 CST"
+ACCEPT_LINE = f"Owner accepted: {ACCEPT_ID}, {ACCEPT_AT}"
+UNLINKED_HEAD = "e5" * 20  # a head no record names: a push that is not a clean merge of main
+
+def pr3381_text(accepted=(), net="negative", rounds=REVIEW_FAILED_THREE, fix=()):
+    """PR 3381's record at REVIEW_HEAD: Guard or check yes, `rounds`, then `fix` and `accepted` lines. record_text puts both after the rounds
+    and before Net value, which is where the owner's line goes."""
+    return record_text(rounds=rounds, kind="normal", guard="yes", net=net, n=ACCEPT_PR, fix=(*fix, *accepted))
+
+def accepted_record(test, text):
+    """-> the parsed record of `text`, which must parse. The old parser refuses a record with the owner's line, and this names that."""
+    rec = review_fn(test, "parse_review")(text)
+    test.assertIsNotNone(rec, "parse_review refused the record, so its Owner accepted line is not read:\n" + text)
+    return rec
+
+def ruling_files(rid=ACCEPT_ID, inside=None):
+    """origin/roadmap's file for ruling `rid`. Its own id is `inside` when given, so a file can name another id than its own name."""
+    return {merge.RULED_STORE_PATH.format(id=rid): json.dumps({"id": inside or rid}) + "\n"}
+
+def process_starts(action):
+    """-> (what action returns, the argv of each process it starts). Every process a call starts goes through subprocess.Popen, so this counts
+    each git and gh start."""
+    real, starts = subprocess.Popen, []
+    def counting(*args, **kwargs):
+        starts.append(args[0] if args else kwargs.get("args"))
+        return real(*args, **kwargs)
+    with unittest.mock.patch.object(subprocess, "Popen", counting):
+        out = action()
+    return out, starts
+
+class OwnerAcceptedForm(unittest.TestCase):
+    """The Owner accepted line, as parse_review reads it: one optional line directly before Net value, with one ruling id and one CST or CDT
+    time. Each refusal sits beside the well-formed line, which must parse as an acceptance first (scope before subject). So a parser that never
+    learned the line fails on that line, by name, and not on the refusal."""
+
+    def assert_refused(self, scope, text, why):
+        self.assertTrue(accepted_record(self, scope).get("accepted"), "fixture: the well-formed line does not parse as an acceptance")
+        rec = review_fn(self, "parse_review")(text)
+        read = rec.get("accepted") if rec else None
+        self.assertFalse(read, f"{why}: the record reads the line as an acceptance: {read!r}")
+        self.assertNotEqual(review_fn(self, "review_state")(rec, REVIEW_HEAD)[0], "done", f"{why}: the record reads done")
+
+    def test_the_line_parses_into_the_ruling_id_and_its_time(self):
+        rec = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,)))
+        read = str(rec.get("accepted"))
+        self.assertIn(ACCEPT_ID, read, "the parsed record does not carry the ruling id: %r" % (rec.get("accepted"),))
+        self.assertIn("01:50 CST", read, "the parsed record does not carry the time: %r" % (rec.get("accepted"),))
+        self.assertEqual((rec["net"], rec["guard"]), ("negative", "yes"), "the line changed another field")
+
+    def test_a_record_without_the_line_reads_no_acceptance(self):
+        # the control: the form without the line parses with no acceptance, on the old code too
+        self.assertFalse(review_fn(self, "parse_review")(pr3381_text()).get("accepted"))
+
+    def test_the_line_must_sit_directly_before_net_value(self):
+        scope = pr3381_text(accepted=(ACCEPT_LINE,))
+        after_net = pr3381_text().replace("Net value: negative\n", "Net value: negative\n" + ACCEPT_LINE + "\n")
+        before_rounds = pr3381_text().replace("Guard or check: yes\n", "Guard or check: yes\n" + ACCEPT_LINE + "\n")
+        for why, text in (("after Net value", after_net), ("before the rounds", before_rounds)):
+            with self.subTest(place=why):
+                self.assert_refused(scope, text, f"the line {why}")
+
+    def test_a_ruling_id_in_backticks_or_quotes_is_no_acceptance(self):
+        scope = pr3381_text(accepted=(ACCEPT_LINE,))
+        for line in (f"Owner accepted: `{ACCEPT_ID}`, {ACCEPT_AT}", f'Owner accepted: "{ACCEPT_ID}", {ACCEPT_AT}'):
+            with self.subTest(line=line):
+                self.assert_refused(scope, pr3381_text(accepted=(line,)), "a quoted ruling id")
+
+    def test_a_lone_quote_is_no_acceptance(self):
+        scope = pr3381_text(accepted=(ACCEPT_LINE,))
+        for line in (f'Owner accepted: "{ACCEPT_ID}, {ACCEPT_AT}', f"Owner accepted: {ACCEPT_ID}', {ACCEPT_AT}"):
+            with self.subTest(line=line):
+                self.assert_refused(scope, pr3381_text(accepted=(line,)), "a lone quote")
+
+    def test_a_line_after_the_rule_is_no_acceptance(self):
+        # The record ends at the first `---` line, and the attribution footer follows it, so a line there is no part of the record.
+        scope = pr3381_text(accepted=(ACCEPT_LINE,))
+        footer = pr3381_text() + "\n---\n" + ACCEPT_LINE + "\n"
+        self.assert_refused(scope, footer, "a line in the footer after the rule")
+
+    def test_a_second_line_is_no_acceptance(self):
+        scope = pr3381_text(accepted=(ACCEPT_LINE,))
+        for lines, why in (((ACCEPT_LINE, ACCEPT_LINE), "the same line twice"),
+                           ((ACCEPT_LINE, f"Owner accepted: own-3381-b, {ACCEPT_AT}"), "two ruling ids")):
+            with self.subTest(case=why):
+                self.assert_refused(scope, pr3381_text(accepted=lines), why)
+
+    def test_a_bad_time_is_no_acceptance(self):
+        scope = pr3381_text(accepted=(ACCEPT_LINE,))
+        for at in ("2026-13-45 99:99 CST", "2026-11-15 1:50 CST", "2026-11-15 01:50 PST", "2026-11-15 01:50"):
+            with self.subTest(time=at):
+                self.assert_refused(scope, pr3381_text(accepted=(f"Owner accepted: {ACCEPT_ID}, {at}",)), f"the time {at!r}")
+
+class OwnerAcceptedHold(ScopedRepo, ReviewEnv):
+    """What the line lifts: a held record reads as it reads at Net value zero, once live_review_state has read the ruling it names. A case that needs
+    the store unread does not fetch it, or drops its copy."""
+
+    def publish(self, files):
+        """origin/roadmap holds `files`, and this checkout fetches it, so the ruling store is readable here."""
+        self.on("roadmap", files, start="main")
+        sh(self.co, "git", "fetch", "-q", "origin")
+
+    def live(self, rec, live=REVIEW_HEAD):
+        """-> (state, why) of `rec` at the live head `live`: live_review_state on a Host of this checkout, with main as the base."""
+        return review_fn(self, "live_review_state")(merge.Host(cwd=self.co), rec, live, "main")
+
+    def test_review_state_alone_holds_the_record_and_starts_no_process(self):
+        # review_state stays pure: the ruling is read by live_review_state, so the line alone lifts nothing in review_state
+        rec = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,)))
+        (state, why), starts = process_starts(lambda: review_fn(self, "review_state")(rec, REVIEW_HEAD))
+        self.assertEqual(starts, [], f"review_state started {len(starts)} process(es), so it is not pure: {starts!r}")
+        self.assertEqual(state, "held", why)
+
+    def test_a_valid_acceptance_of_a_negative_record_reads_done(self):
+        self.publish(ruling_files())
+        rec = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,)))
+        state, why = self.live(rec)
+        self.assertEqual(state, "done", f"a negative record whose line names a ruling on origin/roadmap reads {state}: {why!r}")
+
+    def test_the_same_record_without_the_line_stays_held(self):
+        # the control: the same ruling on the store, and no line, so nothing lifts the hold
+        self.publish(ruling_files())
+        state, why = self.live(accepted_record(self, pr3381_text()))
+        self.assertEqual(state, "held", why)
+
+    def test_an_unknown_ruling_id_does_not_lift_the_hold(self):
+        # scope: the store holds three rulings, and the cited one lifts the hold; then a typo of its id, which the store does not hold
+        self.publish({**ruling_files(), **ruling_files("own-3381-b"), **ruling_files("own-3380-a")})
+        self.assertEqual(self.live(accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,))))[0], "done",
+                         "fixture: the cited ruling does not lift the hold")
+        typo = pr3381_text(accepted=(f"Owner accepted: own-3381-typo, {ACCEPT_AT}",))
+        state, why = self.live(accepted_record(self, typo))
+        self.assertEqual(state, "held", f"an id the store does not hold reads {state}: {why!r}")
+
+    def test_a_ruling_file_that_names_another_id_does_not_lift_the_hold(self):
+        # the file at own-3381-b's path names own-3381-x inside, so citing own-3381-b must not read it
+        self.publish({**ruling_files(), **ruling_files("own-3381-b", inside="own-3381-x")})
+        self.assertEqual(self.live(accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,))))[0], "done",
+                         "fixture: the cited ruling does not lift the hold")
+        state, why = self.live(accepted_record(self, pr3381_text(accepted=(f"Owner accepted: own-3381-b, {ACCEPT_AT}",))))
+        self.assertEqual(state, "held", f"a file that names another id lifts the hold: {state}: {why!r}")
+
+    def test_a_ruling_store_this_checkout_cannot_read_holds_the_record(self):
+        self.publish(ruling_files())
+        rec = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,)))
+        self.assertEqual(self.live(rec)[0], "done", "fixture: the store is readable here, so the line should lift the hold")
+        sh(self.co, "git", "update-ref", "-d", "refs/remotes/origin/roadmap")  # this checkout loses its copy of the store: the one read cannot run
+        state, why = self.live(rec)
+        self.assertNotEqual(state, "done", f"the store cannot be read, yet the record reads done: {why!r}")
+        self.assertIn(state, ("held", "unknown"), why)
+
+    def test_an_acceptance_covers_the_named_head_only(self):
+        self.publish(ruling_files())
+        rec = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,)))
+        self.assertEqual(self.live(rec)[0], "done", "fixture: the accepted record does not read done at its own head")
+        state, why = self.live(rec, live=UNLINKED_HEAD)
+        self.assertEqual(state, "stale", f"an acceptance covers the head it names, and a new head reads {state}: {why!r}")
+
+    def test_the_line_lifts_only_the_hold(self):
+        # Each shape reads with the line as it reads at Net value zero. A failed fix check, a failed round before the last, and one failed round
+        # stay open, and a passed round or fix check stays done.
+        self.publish(ruling_files())
+        shapes = (
+            ("the three rounds FAIL", REVIEW_FAILED_THREE, (), "done"),
+            ("round 1 PASS", REVIEW_PASS, (), "done"),
+            ("round 1 and round 2 FAIL, round 3 not run", REVIEW_FAILED_THREE[:2], (), "open"),
+            ("round 1 FAIL alone", REVIEW_FAILED_THREE[:1], (), "open"),
+            ("the three rounds FAIL and a fix check FAIL", REVIEW_FAILED_THREE, (fix_verifier_line("FAIL"),), "open"),
+            ("the three rounds FAIL and a fix check PASS", REVIEW_FAILED_THREE, (fix_verifier_line("PASS"),), "done"),
+        )
+        for name, rounds, fix, want in shapes:
+            with self.subTest(shape=name):
+                zero = accepted_record(self, pr3381_text(rounds=rounds, fix=fix, net="zero"))
+                self.assertEqual(self.live(zero)[0], want, "fixture: the record at Net value zero does not read %s" % want)
+                held = accepted_record(self, pr3381_text(rounds=rounds, fix=fix, accepted=(ACCEPT_LINE,)))
+                state, why = self.live(held)
+                self.assertEqual(state, want, f"the line reads {name!r} as {state}, not as at Net value zero: {why!r}")
+
+    def test_a_zero_or_positive_net_with_the_line_parses_and_reads_as_without_it(self):
+        self.publish(ruling_files())
+        for net in ("zero", "positive"):
+            with self.subTest(net=net):
+                with_line = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,), net=net))
+                without = accepted_record(self, pr3381_text(net=net))
+                state, why = self.live(with_line)
+                self.assertEqual(state, "done", why)
+                self.assertEqual(state, self.live(without)[0], "the line changes a record whose Net value is %s" % net)
+
+    def test_a_negative_record_with_the_line_starts_one_process_and_the_rest_start_none(self):
+        # The cost of live_review_state: one git start, reading the cited ruling, only for a negative record with the line.
+        self.publish(ruling_files())
+        quiet = (("no line, net negative", pr3381_text()),
+                 ("the line, net zero", pr3381_text(accepted=(ACCEPT_LINE,), net="zero")),
+                 ("the line, net positive", pr3381_text(accepted=(ACCEPT_LINE,), net="positive")))
+        for name, text in quiet:
+            with self.subTest(record=name):
+                rec = accepted_record(self, text)
+                _out, starts = process_starts(lambda: self.live(rec))
+                self.assertEqual(starts, [], f"{name} started {len(starts)} process(es), want none: {starts!r}")
+        rec = accepted_record(self, pr3381_text(accepted=(ACCEPT_LINE,)))
+        (state, why), starts = process_starts(lambda: self.live(rec))
+        self.assertEqual(state, "done", why)
+        self.assertEqual(len(starts), 1, f"a negative record with the line starts {len(starts)} process(es), want the one ruling read: {starts!r}")
+        self.assertIn(merge.RULED_STORE_PATH.format(id=ACCEPT_ID), str(starts[0]), "the one process does not read the cited ruling: %r" % (starts[0],))
+
+class OwnerAcceptedWrite(ScopedRepo, ReviewEnv):
+    """`merge <pr> --review-record --accepted <ruling id>,<time>` prints the Owner accepted line directly before Net value, and changes nothing
+    else. The ruling is on origin/roadmap here, so a writer that reads the store finds it."""
+
+    def test_the_writer_prints_the_line_directly_before_net_value(self):
+        self.on("roadmap", ruling_files(), start="main")
+        argv = ("7", "--review-record", "--kind", "normal", "--guard", "yes", "--head", self.head(),
+                "--round", "1:reviewer:sonnet:FAIL", "--round", "2:reviewer:sonnet:FAIL", "--round", "3:reviewer:sonnet:FAIL",
+                "--net-value", "negative")
+        rc, out, err = self.run_args(*argv)  # the scope: the same record with no line prints
+        self.assertEqual(rc, 0, out + err)
+        rc, out, err = self.run_args(*argv, "--accepted", f"{ACCEPT_ID},{ACCEPT_AT}")
+        self.assertEqual(rc, 0, out + err)
+        body = posted_body(self, out)
+        lines = body.splitlines()
+        self.assertEqual(lines[lines.index("Net value: negative") - 1], ACCEPT_LINE,
+                         "the accepted line is not directly before Net value:\n" + body)
+        self.assertEqual(parse_text(self, body)["net"], "negative")
+
 class ReviewArgs(ReviewEnv):
     """The flags, as argparse reads them. --reviewed and --role each stand alone. --review-record needs a PR number and a --head, and takes no
     --confirm or --unlock. Each refusal has a control: the same flag with good values exits 0, so a parser that never learned the flag fails here too."""

@@ -937,6 +937,49 @@ class ReviewRecordTests(unittest.TestCase):
             self.assertIn("PR #%d" % n, refusal or "", "the stale record of PR #%d did not block its PASS claim: %r" % (n, refusal))
         self.assertLessEqual(elapsed, self.hook_budget(), "the fast check ran past the Stop hook budget: %.2f s" % elapsed)
 
+    def publish_roadmap(self, files):
+        """origin/roadmap in this repo holds `files` ({path: text}), as a fetch of the ruling store leaves it: the one read of the owner's line."""
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t",
+                   GIT_INDEX_FILE=os.path.join(self.run_dir, "roadmap.index"))
+
+        def git_in(*args, text=None):
+            r = subprocess.run(["git", "-C", self.repo, *args], input=text, capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return r.stdout.strip()
+
+        for path, body in files.items():
+            blob = git_in("hash-object", "-w", "--stdin", text=body)
+            git_in("update-index", "--add", "--cacheinfo", f"100644,{blob},{path}")
+        commit = git_in("commit-tree", git_in("write-tree"), "-m", "roadmap")
+        git_in("update-ref", "refs/remotes/origin/roadmap", commit)
+
+    def accepted_body(self, accepted=True, net="negative"):
+        """PR 12's record at LIVE in PR 3381's shape: Guard or check yes, three FAIL rounds, Net value `net`. With `accepted`, the owner's line
+        sits directly before Net value, where the form puts it."""
+        body = record(head=LIVE, n=PR, rounds=[(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL"), (3, "reviewer", "sonnet", "FAIL")],
+                      guard="yes", net=net)
+        line = "Owner accepted: own-3381-a, 2026-11-15 01:50 CST\n"
+        return body.replace("Net value: %s\n" % net, line + "Net value: %s\n" % net) if accepted else body
+
+    def test_the_guard_and_merge_read_an_owner_accepted_hold_the_same_way(self):
+        # Catches: the Stop hook's review check and merge's live_review_state disagreeing on a held record the owner accepted. Both take the
+        # one read of the ruling, so a PASS claim passes exactly when merge reads the record done at the live head.
+        self.publish_roadmap({merge_mod.RULED_STORE_PATH.format(id="own-3381-a"): json.dumps({"id": "own-3381-a"}) + "\n"})
+        for accepted, want in ((True, "done"), (False, "held")):
+            with self.subTest(accepted=accepted):
+                body = self.accepted_body(accepted=accepted)
+                rec = merge_mod.parse_review(body)
+                self.assertIsNotNone(rec, "parse_review refused the record, so its Owner accepted line is not read:\n" + body)
+                merge_state, why = merge_mod.live_review_state(merge_mod.Host(cwd=self.repo), rec, LIVE, "main")
+                self.assertEqual(merge_state, want, "fixture: merge reads the record as %s: %r" % (merge_state, why))
+                self.serve(comments=[body])
+                out = self.stop(self.lane_turn(report(CLAIM)))
+                if want == "done":
+                    self.assertIsNone(out, "the guard refuses a PASS claim that merge reads done: %r" % (out,))
+                else:
+                    self.assert_blocked(out)
+                    self.assertIn("PR #12", out["reason"], out)
+
 
 if __name__ == "__main__":
     unittest.main()
