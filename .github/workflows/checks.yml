@@ -1317,7 +1317,7 @@ jobs:
       - name: install.sh checkout-detection suite
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
         # Own cap, 45 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Recorded basis is the old shape, the whole suite in one step: it ran 1293 s (run 43184587111) and 1221 s (run 43164094808) on macOS.
-        # A 22.4 min figure (owner CI audit at origin/main ae13fcab3, n=5) was an input to this change and is not in the repo. Each leg now runs half the cases; the split shape is unmeasured.
+        # Each leg now runs half the cases; the split shape is unmeasured.
         timeout-minutes: 45
         env:
           INSTALL_SRC_SHARD: ${{ matrix.shard }}
