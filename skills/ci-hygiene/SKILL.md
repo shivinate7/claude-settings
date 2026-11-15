@@ -160,7 +160,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    new lane at round 1.
    Until the cutover, every repo except degen and home batches across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
-   notice. Run `merge <pr> --ready` first. If it says the PR stays a draft, in cloud mark ready by MCP `update_pull_request` `draft: false` (route
+   notice. Run `merge <pr> --ready` first. When it exits 0 with the line "stays a draft (", in cloud mark ready by MCP `update_pull_request` `draft: false` (route
    pr-ready-mcp-cloud). Never mark before `--ready` has run; the same CI-wake notice is meant to follow (decision `ci-wait-reads-run-status`; unmeasured in cloud), so
    also wait on the PR subscription and a check-in. Never run `gh run watch`. One watch made 131 API calls in one minute (decision
    `ci-wait-reads-run-status`, CI waits read the run status). Never poll with a sleep loop. Repeated
@@ -182,7 +182,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     A workflow that also has `on: push` for all branches still runs on a draft branch.
     `gh pr create --draft` then `gh pr ready` fires two runs. Keep the draft state in the concurrency
     group (step 4). Otherwise the skipped draft run cancels an in-progress ready run.
-    Run `merge <pr> --ready` first. If it says the PR stays a draft, mark ready by hand (`gh pr ready`, or in cloud MCP `update_pull_request`) and only after the draft run shows in `gh run list`. A ready sent seconds after the
+    Run `merge <pr> --ready` first. When it exits 0 with the line "stays a draft (", mark ready by hand (`gh pr ready`, or in cloud MCP `update_pull_request`) and only after the draft run shows in `gh run list`. A ready sent seconds after the
     PR opens can give both runs `draft=false`. One then cancels the other. Its cancelled check runs
     can stop the merge, even for an admin (PR 381, Sonnet prompt judges).
     After `gh pr ready`, a run of only skipped jobs proves nothing. Wait for a run on the head that
