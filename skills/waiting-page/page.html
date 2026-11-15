@@ -176,6 +176,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .opt .tr { margin: 0; display: grid; gap: 4px; font-size: 14.5px; align-content: start; }
 .opt .tr div { display: grid; grid-template-columns: 18px minmax(0, 1fr); }
 .opt .tr .s { font: 600 15px/1.4 var(--mono); }
+.opt .tr div > span:not(.s) { min-width: 0; overflow-wrap: anywhere; }
 .opt .tr .gain .s { color: var(--good); }
 .opt .tr .lose .s { color: var(--holds); }
 /* What sets an option apart: a bar on the row, a not-equal sign and hidden words. Shape, sign and words carry it; the accent colour only adds. */
@@ -281,7 +282,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .cmd-text code { font: inherit; }
 .cmd-text .ln { display: block; padding-inline-start: 2ch; text-indent: -2ch; }
 .cmd-text .ln:empty::after { content: " "; }
-.dest { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.dest { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
 .status.broken { padding: 9px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1.5px var(--due); background: var(--due-soft); }
 .status { font-size: 14px; color: var(--due); font-weight: 600; margin: 0; }
 
@@ -309,7 +310,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .receipt.last .lhead { margin: 0; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
 .receipt.last .line { grid-template-columns: minmax(0, 1fr); min-height: 0; }
 .receipt.last .line b { grid-column: 1; color: var(--ink); font-weight: 600; }
-.thread .reply { font-size: 15px; }
+.thread .reply { font-size: 15px; min-width: 0; overflow-wrap: anywhere; }
 .card.answered { border-left: 6px solid var(--good); }
 .ans { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; line-height: 20px; }
 .ans::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
@@ -851,7 +852,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .prail .nmr { display: inline-flex; align-items: center; gap: 6px; }
 .askc .thread .lhead { margin: 0; font-size: 14px; color: var(--muted); }
 .askc .thread .reply { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
-.askc .thread .filed { margin: 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.askc .thread .filed { margin: 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
 /* A folded answer is one button: the whole row unfolds it. */
 .askc.folded { padding: 0; }
 .frow { width: 100%; min-height: 48px; padding: 4px 16px; background: none; border: 0; border-radius: 12px; text-align: left; cursor: pointer; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 4px 12px; color: var(--ink); }
