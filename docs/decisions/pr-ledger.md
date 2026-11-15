@@ -64,14 +64,14 @@ Each open PR gets exactly one next act. The tool reads it from GitHub alone. The
 - Review log stale, newest record has a PASS Fix check, and the live head is a conflicted merge of main into the fixed head: one more fix verifier (decision pr-review-record). Its prior record must be a PASS that `review_state` accepts. Not built.
 - Review log stale, in any other case: the fresh full review at the live head, as decision pr-review-record (The review a changed head owes) sets it.
 - Label `held`, `parked` or `replaced`, with a `Waits on: debt:<slug>` or `Waits on: page:<item id>` comment line: `waits on` that debt or item.
-- Label `batch` on an integration PR: `batch run`. It counts against the batch limit, aged from the label's last `labeled` event.
+- Label `batch` on an integration PR: `batch run`. It counts against the batch limit, aged from the label's last `labeled` event. Until the cutover only; after it, no integration PR exists and this rule goes.
 - Based on, or stacked on, #N: blocked on #N.
 - Draft with no record: `lane round 1`.
 - None of these: no next act, shown red.
 
 The first match wins, in this order. A held or unparseable record matches no record rule, so it falls to the label, blocked and draft rules. A stacked PR with a done record reads `batch`; the merge refuses one that cannot merge cleanly.
 
-The ledger reads no pull request's CI state. A batch line is a done record for the live head. `merge --lane-lint` checks the join, and the integration PR's CI run checks the merge. Its CI-side reads are main's runs, judged per workflow, for the main-red hold.
+The ledger reads no pull request's CI state. A batch line is a done record for the live head. `merge --lane-lint` checks the join, and the integration PR's CI run checks the merge. Until the cutover; after it, the lane PR's own run checks the merge. Its CI-side reads are main's runs, judged per workflow, for the main-red hold.
 
 Each next act has an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/merge.py. Every limit is unmeasured (coordinator pick A, 12:33 CST Nov 7); the coordinator measures the real ages after the label rollout. Batch is 24 h, a first guess at one batch cycle. Blocked on #N has no limit of its own and is red while #N is red. A next act over its limit is red.
 

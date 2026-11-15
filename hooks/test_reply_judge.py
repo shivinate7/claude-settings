@@ -30,11 +30,15 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "lint"))
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 
 MODULE_PATH = os.environ.get("REPLY_JUDGE_UNDER_TEST") or os.path.join(HERE, "reply_judge.py")
 SETTINGS_PATH = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO_ROOT, "settings.json")
@@ -68,6 +72,10 @@ def _is_claude(argv):
 def _fake_run(argv, **kwargs):
     if not _is_claude(argv):
         return _real_run(argv, **kwargs)
+    if os.environ.get("RJ_SPAWNS"):
+        # The claude answer is a process start too. The spy below sees every other start in Popen.
+        with open(os.environ["RJ_SPAWNS"], "a", encoding="utf-8") as f:
+            f.write(json.dumps({"argv": list(argv)}) + "\\n")
     env = kwargs.get("env") or {}
     cfg = env.get("CLAUDE_CONFIG_DIR")
     cwd = kwargs.get("cwd")
@@ -123,6 +131,27 @@ if os.environ.get("RJ_OPENS"):
 
 with open(os.environ["RJ_LOADED"], "w", encoding="utf-8") as f:
     f.write("loaded")
+if os.environ.get("RJ_SPAWNS"):
+    # A spy on each process start in the hook process: every subprocess.Popen (subprocess.run calls it) and
+    # every os.system. Each start writes one line to RJ_SPAWNS, so a case reads how many starts a Stop made.
+    _real_popen = subprocess.Popen
+    _real_system = os.system
+
+    def _log_start(argv):
+        with open(os.environ["RJ_SPAWNS"], "a", encoding="utf-8") as f:
+            f.write(json.dumps({"argv": argv}) + "\\n")
+
+    class _SpyPopen(_real_popen):
+        def __init__(self, args, *rest, **kwargs):
+            _log_start(list(args) if isinstance(args, (list, tuple)) else [str(args)])
+            super().__init__(args, *rest, **kwargs)
+
+    def _spy_system(command):
+        _log_start(["os.system", str(command)])
+        return _real_system(command)
+
+    subprocess.Popen = _SpyPopen
+    os.system = _spy_system
 subprocess.run = _fake_run
 if os.environ.get("RJ_FAIL_REPLACE"):
     # Fake write failure, in the hook process only: every os.replace raises, so no counter write lands.
@@ -940,18 +969,25 @@ IMPORT_PROBE = (
 )
 
 
-def probe_ignored_stop(payload, config=None):
+def probe_ignored_stop(payload, config=None, starts=None, answer=FINDING_ANSWER):
     """Return (the hook's stdout, the GUARD_FAMILY modules its process imported, the model calls).
     The model is the stub, so a Stop that is wrongly judged reaches no real claude. A shared
-    `config` carries the sampling counter from an earlier Stop."""
+    `config` carries the sampling counter from an earlier Stop. A list passed as `starts` is filled
+    with one entry per process start in the hook process (the stub's spy); None leaves the spy off.
+    `answer` is the stub's answer, so a judged Stop with an ok answer writes no guard.log line."""
     RUNS[0] += 1
     base = os.path.join(ROOT, "probe-%03d" % RUNS[0])
     config = config or os.path.join(base, "config")
     os.makedirs(base, exist_ok=True)
     os.makedirs(config, exist_ok=True)
     record = os.path.join(base, "calls.jsonl")
+    spawns = os.path.join(base, "spawns.jsonl")
     env = dict(os.environ, CLAUDE_CONFIG_DIR=config, PYTHONPATH=STUB_DIR, RJ_SCENARIO="",
-               RJ_ANSWER=FINDING_ANSWER, RJ_RECORD=record, RJ_LOADED=os.path.join(base, "loaded"))
+               RJ_ANSWER=answer, RJ_RECORD=record, RJ_LOADED=os.path.join(base, "loaded"))
+    if starts is None:
+        env.pop("RJ_SPAWNS", None)
+    else:
+        env["RJ_SPAWNS"] = spawns
     proc = subprocess.run(
         [sys.executable, "-c", IMPORT_PROBE, MODULE_PATH],
         input=json.dumps(payload), capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -960,6 +996,9 @@ def probe_ignored_stop(payload, config=None):
     out, mark, tail = proc.stdout.rpartition("PROBE ")
     if not mark:
         raise RuntimeError("the probe did not finish: %s" % proc.stderr[-300:])
+    if starts is not None and os.path.exists(spawns):
+        with open(spawns, encoding="utf-8") as f:
+            starts.extend(json.loads(line) for line in f if line.strip())
     return out, json.loads(tail), os.path.exists(record)
 
 
@@ -1356,8 +1395,8 @@ def case_prompt_flags_a_pick_one_question_whose_options_could_combine():
           sentences)
     check("prompt: a sentence never flags options that exclude each other",
           has_pin(sentences, ("never flag",), ("exclude",)), sentences)
-    check("prompt: the prompt still judges against eight rules",
-          has_pin(sentences, ("against eight rules",)), sentences[:2])
+    check("prompt: the prompt judges against nine rules",
+          has_pin(sentences, ("against nine rules",)), sentences[:2])
 
 
 def case_widens_finding_logs_its_rule():
@@ -1675,6 +1714,421 @@ def case_cap_keeps_a_works_row_behind_thirty_one_refused_rows():
           "%d route rows in the prompt" % carried)
 
 
+# --------------------------------------------------------------------------- counts-from-rest
+# verification-counts-from-rest: a reply that quotes a GitHub search total (total_count, a search result
+# count) as a count or a state is flagged. A count read from REST is not, and neither is a search used only
+# to find candidates. Code finds a search total and sends that Stop to the model off-sample (SEARCH_TOTAL in
+# reply_judge.py): a reply that holds `total_count`, a `search/<endpoint>` path, or the word "search" within
+# 120 characters of a count word (a digit, none, zero, no), in either order. The model decides. Each leg has
+# its own fixture, so a regex that drops one leg fails that leg's case alone.
+
+SEARCH_RULE = "verification-counts-from-rest"
+SEARCH_COUNT_REPLY = "Done: checked the PR list. search total_count 0: no PRs closed since 09:30."
+REST_COUNT_REPLY = "Done: checked the PR list. REST pulls list: 100 closed 10:00-11:00."
+CANDIDATES_REPLY = "Done: gh api search/issues found 3 candidates; each confirmed with REST: 2 closed."
+SEARCH_FINDING = {"ok": False, "reason": SEARCH_RULE + ": a search total is a candidate count, not a count; "
+                  "confirm each with REST."}
+TOTAL_LEG = "Done: the PR list reply carried total_count and nothing else was read."  # no digit, no word search
+ENDPOINT_LEG = "Done: read the rows with gh api search/%s?q=rule and kept them."  # no digit, no word search
+ENDPOINTS = ("issues", "code", "commits", "repositories", "users")
+WORD_LEG = "Done: a search came back with 7 rows for the rule."  # the word search, a digit after it
+DIGIT_BEFORE_LEG = "Done: 7 rows came back from the search for the rule."  # a digit before it
+FAR_FROM_DIGIT = ("Done: the search of the docs took a long time, because it read every page of the handbook for "
+                  "the rule text and then the rule text again, and the final count of pages was 40.")  # 155 characters
+RESEARCH_REPLY = "Done: the research on the rule took 3 passes."  # holds the letters search, not the word
+LONG_FILLER = "Next: open the follow-up lane. " * 250  # about 8,250 characters, so the reply passes REPLY_MAX
+
+
+def stop_payload(text, session=SESSION_ALPHA):
+    return {"session_id": session, "stop_hook_active": False, "last_assistant_message": text}
+
+
+def every_file(config):
+    """Paths, relative to the config dir, of every file under it, not only under state/."""
+    found = []
+    for dirpath, _dirs, names in os.walk(config):
+        for name in names:
+            found.append(os.path.relpath(os.path.join(dirpath, name), config))
+    return sorted(found)
+
+
+def gap_chars(text, first, second):
+    """Characters from the end of the first word to the start of the second, both found in the text."""
+    return text.index(second) - (text.index(first) + len(first))
+
+
+def case_search_total_reply_is_judged_off_sample():
+    run, _ = second_stop(SEARCH_COUNT_REPLY, label="counts-a", session="counts-a")
+    check("search total: Stop 2 exit 0", run.code == 0, run.code)
+    check("search total: Stop 2 calls the model once", len(run.calls) == 1, run.calls)
+
+
+def case_search_total_finding_is_a_note_logged_as_its_rule():
+    run, config = second_stop(SEARCH_COUNT_REPLY, answer=json.dumps(SEARCH_FINDING), label="counts-a2",
+                              session="counts-a2")
+    got = parse_stdout(run)
+    specific = got.get("hookSpecificOutput") if got else None
+    note = specific.get("additionalContext") if isinstance(specific, dict) else None
+    check("search total finding: Stop 2 prints the reason as its note", note == SEARCH_FINDING["reason"], run.out)
+    check("search total finding: exit 0", run.code == 0, run.code)
+    check("search total finding: never a decision block", "decision" not in (got or {}), run.out)
+    lines = guard_lines(config)
+    parts = lines[0].split("\t") if len(lines) == 1 else []
+    check("search total finding: guard.log holds one line, with rule %s" % SEARCH_RULE,
+          len(parts) == 6 and parts[3] == SEARCH_RULE, lines)
+
+
+def case_rest_count_reply_is_not_judged_off_sample():
+    run, _ = second_stop(REST_COUNT_REPLY, label="counts-b", session="counts-b")
+    check("REST count: Stop 2 exit 0 and silent", run.code == 0 and run.out == "", (run.code, run.out))
+    check("REST count: Stop 2 never calls the model", not run.calls, run.calls)
+
+
+def case_search_used_for_candidates_is_judged_off_sample():
+    run, _ = second_stop(CANDIDATES_REPLY, label="counts-c", session="counts-c")
+    check("candidates: Stop 2 exit 0", run.code == 0, run.code)
+    check("candidates: Stop 2 calls the model once, since the search/issues leg matches", len(run.calls) == 1,
+          run.calls)
+
+
+def case_each_search_trigger_leg_is_judged_off_sample():
+    legs = [("total_count", TOTAL_LEG)]
+    legs += [("search/%s" % endpoint, ENDPOINT_LEG % endpoint) for endpoint in ENDPOINTS]
+    legs += [("the word search with a digit after it", WORD_LEG),
+             ("the word search with a digit before it", DIGIT_BEFORE_LEG)]
+    for n, (name, text) in enumerate(legs):
+        run, _ = second_stop(text, label="counts-leg-%02d" % n, session="counts-leg-%02d" % n)
+        check("search trigger, %s: Stop 2 calls the model once" % name, len(run.calls) == 1, run.calls)
+
+
+def case_search_word_far_from_a_digit_is_not_judged_off_sample():
+    # Controls: the word search with no count word within 120 characters, and a word that only holds its letters.
+    gap = gap_chars(FAR_FROM_DIGIT, "search", "40")
+    check("far digit: the digit sits more than 120 characters past the search word", gap > 120, gap)
+    for n, (name, text) in enumerate((("a digit %d characters past the search word" % gap, FAR_FROM_DIGIT),
+                                      ("research, which holds the letters search", RESEARCH_REPLY))):
+        run, _ = second_stop(text, label="counts-far-%02d" % n, session="counts-far-%02d" % n)
+        check("no search trigger, %s: Stop 2 never calls the model" % name, not run.calls, run.calls)
+
+
+def case_long_reply_search_total_past_the_clip_is_judged():
+    reply = "Done: shipped the check.\n" + LONG_FILLER + SEARCH_COUNT_REPLY + "\n" + LONG_FILLER
+    module = reference_module()
+    # Scope first: the reply is clipped for the prompt, and the clip cuts the search total out of it.
+    check("long reply: the reply is longer than the prompt clip", len(reply) > module.REPLY_MAX, len(reply))
+    check("long reply: the prompt clip cuts the search total out of the prompt",
+          SEARCH_COUNT_REPLY not in module.build_prompt(reply), "the clip kept the search total")
+    run, _ = second_stop(reply, label="counts-long", session="counts-long")
+    check("long reply: Stop 2 calls the model once, so the trigger read the whole reply", len(run.calls) == 1,
+          run.calls)
+
+
+def case_prompt_flags_a_search_total_read_as_a_count():
+    run = run_hook(SEARCH_COUNT_REPLY, answer=OK_ANSWER)
+    sentences = rule_sentences(run, SEARCH_COUNT_REPLY)
+    check("prompt: names %s with a colon before the reply" % SEARCH_RULE,
+          any(SEARCH_RULE + ":" in s for s in sentences), run.prompt()[:300])
+    # Each pin holds the rule id, so it reads the flag sentence and no other. SEARCH_TOTAL_PHRASES takes the old
+    # wording (total_count, result count) and the new one (search total, result total) alike.
+    check("prompt: a sentence flags a search total read as a count",
+          has_pin(sentences, (SEARCH_RULE,), ("flag",), ("search",), SEARCH_TOTAL_PHRASES, ("count",)), sentences)
+    check("prompt: a sentence flags a search total read as a state (open, closed, merged, CI status)",
+          has_pin(sentences, (SEARCH_RULE,), ("flag",), ("search",), SEARCH_TOTAL_PHRASES, ("state", "status"),
+                  ("open", "closed", "merged")), sentences)
+
+
+def case_prompt_never_flags_a_count_read_from_rest():
+    run = run_hook(REST_COUNT_REPLY, answer=OK_ANSWER)
+    sentences = rule_sentences(run, REST_COUNT_REPLY)
+    check("prompt: a sentence says never flag a count read from REST",
+          has_pin(sentences, ("never flag",), ("rest",), ("count",)), sentences)
+
+
+def case_prompt_names_the_fix_confirm_with_rest():
+    run = run_hook(SEARCH_COUNT_REPLY, answer=OK_ANSWER)
+    sentences = rule_sentences(run, SEARCH_COUNT_REPLY)
+    check("prompt: a sentence names the fix, confirm each with REST",
+          has_pin(sentences, ("confirm",), ("rest",)), sentences)
+
+
+def case_prompt_never_flags_a_search_used_only_for_candidates():
+    run = run_hook(CANDIDATES_REPLY, answer=OK_ANSWER)
+    sentences = rule_sentences(run, CANDIDATES_REPLY)
+    check("prompt: a sentence says never flag a search used only to find candidates",
+          has_pin(sentences, ("never flag",), ("search",), ("candidate",)), sentences)
+
+
+def case_prompt_says_nine_rules_with_the_counts_rule():
+    run = run_hook(SEARCH_COUNT_REPLY, answer=OK_ANSWER)
+    sentences = rule_sentences(run, SEARCH_COUNT_REPLY)
+    check("nine rules: the prompt says against nine rules", has_pin(sentences, ("against nine rules",)),
+          sentences[:2])
+    rules = judged_rules()
+    check("nine rules: JUDGED_RULES holds nine rules", len(rules) == 9, rules)
+    check("nine rules: JUDGED_RULES holds %s" % SEARCH_RULE, SEARCH_RULE in rules, rules)
+    with open(MODULE_PATH, encoding="utf-8") as f:
+        first = f.read().split("\n", 2)[1]
+    check("nine rules: the docstring says against nine rules", "against nine rules" in first, first[:120])
+
+
+# Cost. A Stop that the trigger does not match starts no process and writes no file beyond the count file. Stop 1
+# is judged first, so the spy is seen to record a real start before a zero count means anything.
+
+def case_rest_count_stop_starts_no_process_and_writes_no_file():
+    config = sample_config("counts-cost-rest")
+    judged = []
+    probe_ignored_stop(stop_payload(MARK), config=config, starts=judged, answer=OK_ANSWER)  # Stop 1, judged
+    check("cost, spy: the judged Stop 1 starts one process, the claude call",
+          [os.path.basename(s["argv"][0]) for s in judged] == ["claude"], judged)
+    before = every_file(config)
+    check("cost, count file: Stop 1 leaves the count file and nothing else", before == counter_files(config)
+          and len(before) == 1, before)
+    starts = []
+    out, imported, called = probe_ignored_stop(stop_payload(REST_COUNT_REPLY), config=config, starts=starts)  # Stop 2
+    check("cost, REST Stop 2: prints nothing and calls no model", out.strip() == "" and not called, (out, called))
+    check("cost, REST Stop 2: starts no process", starts == [], starts)
+    check("cost, REST Stop 2: imports no guard-family module", imported == [], imported)
+    check("cost, REST Stop 2: writes no file beyond the count file", every_file(config) == before,
+          every_file(config))
+
+
+def case_search_total_stop_starts_only_the_judge_call():
+    config = sample_config("counts-cost-search")
+    probe_ignored_stop(stop_payload(MARK), config=config, starts=[], answer=OK_ANSWER)  # Stop 1, judged
+    starts = []
+    out, _imported, called = probe_ignored_stop(stop_payload(SEARCH_COUNT_REPLY), config=config, starts=starts,
+                                                answer=OK_ANSWER)
+    check("cost, search Stop 2: the model is called", called, (out, called))
+    check("cost, search Stop 2: the trigger starts no process of its own, the only start is the claude call",
+          [os.path.basename(s["argv"][0]) for s in starts] == ["claude"], starts)
+
+
+# --------------------------------------------------------------------------- counts-from-rest: trigger words
+# The off-sample trigger also takes a search word in any form (search, searched, --search), a search/<word>
+# endpoint, and a count word (a digit, zero, none) within 120 characters of a search word. Each form is its own
+# check, so a regex that drops one form fails that check alone. A count word with no search word is no trigger.
+
+SEARCHED_LEG = "Done: I searched the repo and found 4 open issues."
+ZERO_LEG = "Done: the search returned zero open PRs."
+NONE_FLAG_LEG = "Done: gh pr list --search 'is:open' returned none."
+LABELS_ENDPOINT_LEG = "Done: gh api search/labels listed the rows."  # no digit, no count word: the endpoint alone
+LABELS_ENDPOINT_NONE_LEG = "Done: gh api search/labels returned none."
+GH_SEARCH_DIGIT_LEG = "Done: gh search prs shows 6 open"  # a control: the digit 6 already triggers it
+REST_COUNT_WORDS_REPLY = "Done: checked the PR list with REST: none open and zero closed."  # count words, no search
+FAR_FROM_COUNT_WORD = ("Done: the search of the docs took a long time, because it read every page of the handbook "
+                       "for the rule text and then the rule text again, and the final count of pages was zero.")
+REFUTE_REPLY = ("Done: checked the PR list. REST says 4 open PRs; the search total_count of 6 includes closed ones, "
+                "so it was not used.")
+SEARCH_TOTAL_PHRASES = ("total_count", "total count", "search total", "result total", "result count")  # old and new
+
+
+def case_searched_word_with_a_digit_is_judged_off_sample():
+    run, _ = second_stop(SEARCHED_LEG, label="counts-d-searched", session="counts-d-searched")
+    check("search word 'searched', with the digit 4 after it: Stop 2 calls the model once", len(run.calls) == 1,
+          run.calls)
+
+
+def case_search_with_a_count_word_is_judged_off_sample():
+    legs = (("the count word zero", ZERO_LEG), ("the count word none, after --search", NONE_FLAG_LEG))
+    for n, (name, text) in enumerate(legs):
+        run, _ = second_stop(text, label="counts-d-word-%02d" % n, session="counts-d-word-%02d" % n)
+        check("search with %s: Stop 2 calls the model once" % name, len(run.calls) == 1, run.calls)
+
+
+def case_any_search_endpoint_is_judged_off_sample():
+    legs = (("search/labels with no count word", LABELS_ENDPOINT_LEG),
+            ("search/labels returned none", LABELS_ENDPOINT_NONE_LEG))
+    for n, (name, text) in enumerate(legs):
+        run, _ = second_stop(text, label="counts-d-endpoint-%02d" % n, session="counts-d-endpoint-%02d" % n)
+        check("search endpoint, %s: Stop 2 calls the model once" % name, len(run.calls) == 1, run.calls)
+
+
+def case_gh_search_with_a_digit_is_judged_off_sample():
+    # A control: the old code already judges this one, by the digit 6 after the word search.
+    run, _ = second_stop(GH_SEARCH_DIGIT_LEG, label="counts-d-gh", session="counts-d-gh")
+    check("gh search with the digit 6: Stop 2 calls the model once", len(run.calls) == 1, run.calls)
+
+
+def case_count_words_without_a_search_word_are_not_judged_off_sample():
+    # A control: a REST count in count words, and no search word anywhere in the reply.
+    run, _ = second_stop(REST_COUNT_WORDS_REPLY, label="counts-d-rest", session="counts-d-rest")
+    check("REST count words, no search word: Stop 2 exit 0 and silent", run.code == 0 and run.out == "",
+          (run.code, run.out))
+    check("REST count words, no search word: Stop 2 never calls the model", not run.calls, run.calls)
+
+
+def case_search_word_far_from_a_count_word_is_not_judged_off_sample():
+    # Scope first: the search word and the count word are more than 120 characters apart in the reply.
+    gap = FAR_FROM_COUNT_WORD.index("zero") - (FAR_FROM_COUNT_WORD.index("search") + len("search"))
+    check("far count word: the count word sits more than 120 characters past the search word", gap > 120, gap)
+    run, _ = second_stop(FAR_FROM_COUNT_WORD, label="counts-d-far", session="counts-d-far")
+    check("far count word, %d characters away: Stop 2 never calls the model" % gap, not run.calls, run.calls)
+
+
+# The window is 120 characters, in either order. The near fixtures sit past 60 and within 120, so only the
+# 120-character window judges them. The 120 and 121 pair pins the exact edge. The far fixtures sit past 120.
+REALISTIC_REPLY = ("Searched the org with gh search prs --state open across all repos we track, and the total came to "
+                   "5 open PRs.")
+NEAR_AFTER_REPLY = ("Done: searched the open PRs across every tracked repo, and read each row with its labels "
+                    "and owners, so the total is 4 open.")
+NEAR_BEFORE_REPLY = ("Done: 4 open PRs were read across every tracked repo, with each row and its labels "
+                     "and owners in full, then searched again.")
+FAR_AFTER_REPLY = ("Done: searched the open PRs across every tracked repo, and read each row with its labels, owners, "
+                   "reviewers, comments and checks in full, so the total is 4 open.")
+FAR_BEFORE_REPLY = ("Done: 4 open PRs were read across every tracked repo, with each row and its labels, owners, "
+                    "reviewers, comments and checks in full, and then searched again.")
+
+
+def search_count_reply(gap, count_first):
+    """A reply whose count word and search word sit `gap` characters apart, in the order named."""
+    spacer = " " + "x" * (gap - 2) + " "  # gap characters, filler that is no count word and no search word
+    if count_first:
+        return "Done: 4" + spacer + "searched the tracked repos."
+    return "Done: searched" + spacer + "4 open PRs."
+
+
+def case_realistic_search_total_sentence_is_judged_off_sample():
+    gap = gap_chars(REALISTIC_REPLY, "search", "5")  # the nearest search word, the one in "gh search prs"
+    check("realistic sentence: the count word sits past 60 and within 120 characters of the search word",
+          60 < gap <= 120, gap)
+    run, _ = second_stop(REALISTIC_REPLY, label="counts-g-realistic", session="counts-g-realistic")
+    check("realistic sentence: Stop 2 calls the model once", len(run.calls) == 1, run.calls)
+
+
+def case_count_word_about_100_characters_from_a_search_word_is_judged_off_sample():
+    legs = (("after the search word", NEAR_AFTER_REPLY, "searched", "4"),
+            ("before the search word", NEAR_BEFORE_REPLY, "4", "searched"))
+    for n, (name, text, first, second) in enumerate(legs):
+        gap = gap_chars(text, first, second)
+        check("near window, count word %s: the gap is past 60 and within 120 characters" % name,
+              60 < gap <= 120, gap)
+        run, _ = second_stop(text, label="counts-g-near-%02d" % n, session="counts-g-near-%02d" % n)
+        check("near window, count word %s: Stop 2 calls the model once" % name, len(run.calls) == 1, run.calls)
+
+
+def case_search_word_120_characters_from_a_count_word_is_judged_off_sample():
+    for n, count_first in enumerate((True, False)):
+        text = search_count_reply(120, count_first)
+        first, second = ("4", "searched") if count_first else ("searched", "4")
+        order = "count word first" if count_first else "search word first"
+        gap = gap_chars(text, first, second)
+        check("window edge 120, %s: the words sit exactly 120 characters apart" % order, gap == 120, gap)
+        run, _ = second_stop(text, label="counts-h-edge-%02d" % n, session="counts-h-edge-%02d" % n)
+        check("window edge 120, %s: Stop 2 calls the model once" % order, len(run.calls) == 1, run.calls)
+
+
+def case_search_word_121_characters_from_a_count_word_is_not_judged_off_sample():
+    for n, count_first in enumerate((True, False)):
+        text = search_count_reply(121, count_first)
+        first, second = ("4", "searched") if count_first else ("searched", "4")
+        order = "count word first" if count_first else "search word first"
+        gap = gap_chars(text, first, second)
+        check("window edge 121, %s: the words sit exactly 121 characters apart" % order, gap == 121, gap)
+        run, _ = second_stop(text, label="counts-h-past-%02d" % n, session="counts-h-past-%02d" % n)
+        check("window edge 121, %s: Stop 2 never calls the model" % order, not run.calls, run.calls)
+
+
+def case_count_word_past_120_characters_is_not_judged_off_sample():
+    legs = (("after the search word", FAR_AFTER_REPLY, "searched", "4"),
+            ("before the search word", FAR_BEFORE_REPLY, "4", "searched"))
+    for n, (name, text, first, second) in enumerate(legs):
+        gap = gap_chars(text, first, second)
+        check("far count word, %s: the gap is more than 120 characters" % name, gap > 120, gap)
+        run, _ = second_stop(text, label="counts-i-far-%02d" % n, session="counts-i-far-%02d" % n)
+        check("far count word, %s: Stop 2 never calls the model" % name, not run.calls, run.calls)
+
+
+def case_prompt_never_flags_a_reply_that_refutes_a_search_total():
+    run = run_hook(REFUTE_REPLY, answer=OK_ANSWER)
+    sentences = rule_sentences(run, REFUTE_REPLY)
+    check("prompt: a sentence says never flag a reply that refutes a search total",
+          has_pin(sentences, ("never flag",), ("refut", "not used"), ("search",), ("total",)), sentences)
+
+
+UNCONFIRMED_SEARCH_REPLY = "Done: gh search prs found 6 open PRs."  # a search, and no REST read that confirms it
+
+
+def case_prompt_flag_sentence_exempts_only_a_search_rest_confirms():
+    run = run_hook(UNCONFIRMED_SEARCH_REPLY, answer=OK_ANSWER)
+    flag = [s for s in rule_sentences(run, UNCONFIRMED_SEARCH_REPLY) if SEARCH_RULE + ":" in s]
+    check("prompt: one sentence starts the counts rule and flags it", len(flag) == 1 and "flag" in flag[0], flag)
+    # The exemption is one clause of the flag sentence, split at each semicolon. It must name REST and confirm in
+    # its own clause, so a search with no REST read is not taken for candidates. The fix clause also holds REST and
+    # confirm, but it has no "never", so it cannot satisfy the exemption.
+    clauses = [c for s in flag for c in s.split(";")]
+    check("prompt: the candidates exemption names REST and confirm in its own clause",
+          has_pin(clauses, ("never", "not"), ("candidate",), ("rest",), ("confirm",)), clauses)
+
+
+# SEARCH_WORD needs a word boundary, and "_" is a word character, so a search word joined to other words by "_"
+# (mcp__github__search_issues, search_pull_requests) must still be seen. The control is a whole-word search with a
+# digit before it, which already triggers.
+UNDERSCORE_ISSUES_REPLY = "Done: mcp__github__search_issues found 4 open issues."
+UNDERSCORE_PRS_REPLY = "Done: search_pull_requests returned 5 open PRs."
+TOTAL_CONTROL_REPLY = "Done: GraphQL totalCount 6 open PRs from the search."
+
+
+def case_search_joined_by_underscore_is_judged_off_sample():
+    legs = (("mcp__github__search_issues, the digit 4 after it", UNDERSCORE_ISSUES_REPLY),
+            ("search_pull_requests, the digit 5 after it", UNDERSCORE_PRS_REPLY),
+            ("totalCount, a whole-word search after the digit 6 (control)", TOTAL_CONTROL_REPLY))
+    for n, (name, text) in enumerate(legs):
+        run, _ = second_stop(text, label="counts-e-%02d" % n, session="counts-e-%02d" % n)
+        check("search trigger, %s: Stop 2 calls the model once" % name, len(run.calls) == 1, run.calls)
+
+
+# Mutation-proof pins. Each one names the alternative it proves. A scratch mutant that drops that alternative turns
+# its own case red and no other case in this block.
+NO_COUNT_WORD_REPLY = "Done: the search found no open PRs."  # the count word no, and no digit anywhere
+SEARCHES_REPLY = "Done: the rule searches returned 4 open PRs."  # the search word with es, the digit 4 after it
+SEARCHING_REPLY = "Done: searching the rule returned 4 open PRs."  # the search word with ing, the digit 4 after it
+
+
+def case_search_with_count_word_no_is_judged_off_sample():
+    run, _ = second_stop(NO_COUNT_WORD_REPLY, label="counts-f-no", session="counts-f-no")
+    check("search with the count word no: Stop 2 calls the model once", len(run.calls) == 1, run.calls)
+
+
+def case_searches_with_a_digit_is_judged_off_sample():
+    run, _ = second_stop(SEARCHES_REPLY, label="counts-f-es", session="counts-f-es")
+    check("search word 'searches', with the digit 4 after it: Stop 2 calls the model once", len(run.calls) == 1,
+          run.calls)
+
+
+def case_searching_with_a_digit_is_judged_off_sample():
+    run, _ = second_stop(SEARCHING_REPLY, label="counts-f-ing", session="counts-f-ing")
+    check("search word 'searching', with the digit 4 after it: Stop 2 calls the model once", len(run.calls) == 1,
+          run.calls)
+
+
+# The counts rule as CLAUDE.md states it. The rule's words sit between the anchor before it and its own anchor.
+# They must name the GitHub REST API as the count source, and say a search is not one. Naming REST alone is not
+# enough: the case also needs the "not a search" clause. No other test reads rule-line text, so this one lives here.
+COUNTS_ANCHOR = "<!-- rule:verification-counts-from-rest -->"
+CLAUDE_MD = os.path.join(REPO_ROOT, "CLAUDE.md")
+
+
+def counts_rule_text(text):
+    """The counts rule's words in CLAUDE.md, or "" when its anchor is absent."""
+    at = text.find(COUNTS_ANCHOR)
+    if at < 0:
+        return ""
+    before = text[:at]
+    prev = before.rfind("-->")  # the anchor of the rule before this one, if any
+    return before[prev + 3:] if prev >= 0 else before
+
+
+def case_claude_md_counts_rule_names_the_github_rest_api_and_not_a_search():
+    with open(CLAUDE_MD, encoding="utf-8") as f:
+        text = f.read()
+    anchors = text.count(COUNTS_ANCHOR)
+    check("claude.md: the counts rule has one anchor", anchors == 1, anchors)
+    rule = counts_rule_text(text)
+    check("claude.md: the counts rule names the GitHub REST API as its count source",
+          "GitHub REST API" in rule, rule[-300:])
+    check("claude.md: the counts rule says a search is not a count source", "not a search" in rule, rule[-300:])
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_ignored_stop_imports_no_guard_family_module,
@@ -1743,6 +2197,38 @@ CASES = (
     case_route_block_flags_only_on_a_works_row_on_this_surface,
     case_shared_route_id_carries_only_its_surface_rows,
     case_cap_keeps_a_works_row_behind_thirty_one_refused_rows,
+    case_search_total_reply_is_judged_off_sample,
+    case_search_total_finding_is_a_note_logged_as_its_rule,
+    case_rest_count_reply_is_not_judged_off_sample,
+    case_search_used_for_candidates_is_judged_off_sample,
+    case_each_search_trigger_leg_is_judged_off_sample,
+    case_search_word_far_from_a_digit_is_not_judged_off_sample,
+    case_long_reply_search_total_past_the_clip_is_judged,
+    case_prompt_flags_a_search_total_read_as_a_count,
+    case_prompt_never_flags_a_count_read_from_rest,
+    case_prompt_names_the_fix_confirm_with_rest,
+    case_prompt_never_flags_a_search_used_only_for_candidates,
+    case_prompt_says_nine_rules_with_the_counts_rule,
+    case_rest_count_stop_starts_no_process_and_writes_no_file,
+    case_search_total_stop_starts_only_the_judge_call,
+    case_searched_word_with_a_digit_is_judged_off_sample,
+    case_search_with_a_count_word_is_judged_off_sample,
+    case_any_search_endpoint_is_judged_off_sample,
+    case_gh_search_with_a_digit_is_judged_off_sample,
+    case_count_words_without_a_search_word_are_not_judged_off_sample,
+    case_search_word_far_from_a_count_word_is_not_judged_off_sample,
+    case_realistic_search_total_sentence_is_judged_off_sample,
+    case_count_word_about_100_characters_from_a_search_word_is_judged_off_sample,
+    case_search_word_120_characters_from_a_count_word_is_judged_off_sample,
+    case_search_word_121_characters_from_a_count_word_is_not_judged_off_sample,
+    case_count_word_past_120_characters_is_not_judged_off_sample,
+    case_prompt_never_flags_a_reply_that_refutes_a_search_total,
+    case_search_joined_by_underscore_is_judged_off_sample,
+    case_search_with_count_word_no_is_judged_off_sample,
+    case_searches_with_a_digit_is_judged_off_sample,
+    case_searching_with_a_digit_is_judged_off_sample,
+    case_prompt_flag_sentence_exempts_only_a_search_rest_confirms,
+    case_claude_md_counts_rule_names_the_github_rest_api_and_not_a_search,
 )
 
 
@@ -1756,11 +2242,78 @@ def run_case(case):
         RED_CASES.append(case.__name__)
 
 
+# The cost of one Stop (decision reply-judge). The first Stop of a session is judged: one model call, no child of
+# its own. A Stop sampled out makes no call and writes only its counter. A finding is a note, and adds one guard line.
+REPLY = "Done. The change is in place."
+JUDGED_REASON = "output-start-with-point: start with the point."
+
+
+def stop_hook(reply=REPLY, session="cost-reply", active=False):
+    return json.dumps({"session_id": session, "stop_hook_active": active, "last_assistant_message": reply})
+
+
+class CostTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.base = os.path.join(ROOT, "cost")  # a subfolder of this run's ROOT: the run removes ROOT, not this
+        os.makedirs(cls.base, exist_ok=True)
+        spec = importlib.util.spec_from_file_location("reply_judge_cost", MODULE_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        cls.model_timeout = module.MODEL_TIMEOUT
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.base, ignore_errors=True)
+
+    def folder(self):
+        return tempfile.mkdtemp(dir=self.base)
+
+    def stop(self, folder, stdin, answers=None):
+        return cost_probe.run_hook(MODULE_PATH, stdin, folder, answers)
+
+    def test_a_stop_hook_active_stop_starts_nothing(self):
+        run = self.stop(self.folder(), stop_hook(active=True), [[{"ok": True}, None]])
+        self.assertEqual((run["code"], run["models"], run["children"], run["files"]), (0, [], [], []))
+
+    def test_an_empty_reply_starts_nothing(self):
+        run = self.stop(self.folder(), stop_hook(reply="   "), [[{"ok": True}, None]])
+        self.assertEqual((run["code"], run["models"], run["children"], run["files"]), (0, [], [], []))
+
+    def test_a_judged_stop_costs_one_model_call_and_no_child(self):
+        run = self.stop(self.folder(), stop_hook(), [[{"ok": True}, None]])
+        self.assertEqual(len(run["models"]), 1, "Stop 1 is judged: one model call, got %r" % run["models"])
+        self.assertEqual(run["models"][0]["timeout"], self.model_timeout)
+        self.assertEqual(run["children"], [], "the judge starts no child of its own")
+        self.assertEqual(run["out"].strip(), "", "an allow prints nothing")
+        self.assertEqual(len(run["files"]), 1, "a judged allow writes the counter only; got %r" % run["files"])
+        self.assertTrue(run["files"][0].startswith("state/reply-judge/"), run["files"])
+
+    def test_a_sampled_out_stop_costs_no_model_call_and_writes_only_the_counter(self):
+        folder = self.folder()
+        first = self.stop(folder, stop_hook(), [[{"ok": True}, None]])
+        second = self.stop(folder, stop_hook(), [[{"ok": False, "reason": JUDGED_REASON}, None]])
+        self.assertEqual(len(first["models"]), 1, "Stop 1 is judged")
+        self.assertEqual(second["models"], [], "Stop 2 is sampled out: no model call")
+        self.assertEqual(second["children"], [])
+        self.assertEqual(len(second["files"]), 1, "a sampled-out Stop writes the counter only; got %r" % second["files"])
+        self.assertTrue(second["files"][0].startswith("state/reply-judge/"), second["files"])
+
+    def test_a_judged_stop_with_a_finding_adds_the_guard_log_line(self):
+        run = self.stop(self.folder(), stop_hook(), [[{"ok": False, "reason": JUDGED_REASON}, None]])
+        self.assertEqual(len(run["models"]), 1)
+        self.assertIn("additionalContext", run["out"], "a finding is a note, not a block")
+        self.assertIn("guard.log", run["files"], "a finding writes its guard log line; got %r" % run["files"])
+        self.assertEqual(run["children"], [])
+
+
 def main():
     _write_stub()
     try:
         for case in CASES:
             run_case(case)
+        if not cost_probe.run_class(CostTests):
+            RED_CASES.append("CostTests")
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if RED_CASES:
