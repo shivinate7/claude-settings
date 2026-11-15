@@ -1,0 +1,14 @@
+{
+ "id": "lint-carry-doc-after-main-merge",
+ "title": "skills/ci-hygiene/SKILL.md stops saying a clean merge of main needs the lane lint again, once the lint carry lands",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Coordinator 01:03 CST Nov 15 (relayed; triage read no file): after PR 2 of the carry work (branch rct-lint-main-merge; it builds the lane lint carry over a clean merge of main under owner ruling own-850-a-lane-lint-carries-clean-main-merge), skills/ci-hygiene/SKILL.md lines ~150-152 still say a clean merge needs the lane lint again \"because the lint verdict names an exact head\". That sentence goes stale when PR 2 merges. Blocked by PR 2. Triage found no step and no GitHub PR for the head rct-lint-main-merge (REST list by head, 01:04 CST: empty), so blockedBy is left empty: set it when PR 2 has a step or number. PR 1 is #3448 (step carry-forgives-main-merge), open draft, head 7b85dbe8b33c. Docs-only edit: ruling own-tiny-fixes-b lets a standing session send one agent for it.",
+ "source": "Coordinator message 01:03 CST Nov 15.",
+ "note": "Filed 01:04 CST Nov 15 by triage. Todo until PR 2 exists and merges. Not built.",
+ "updatedAt": "2026-11-15T01:04:00-06:00"
+}
