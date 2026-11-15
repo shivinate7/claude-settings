@@ -16332,8 +16332,8 @@ class ReviewFixFlag(ReviewEnv):
 
 class ReviewFixBase(ReviewEnv):
     """`--fix-check BASE:...` with --review-record refuses unless BASE is the head of the newest review record already on the pull request, and
-    that record has no fix check line, or its fix check passed (owner, page item 741: a fix check after a passing one is accepted); or the pull request has no record at all and its new head holds BASE (coordinator brief R55, owner 13:21 CST
-    Nov 12, 13:59 CST pick: a pull request opened after the review has no record to name the head). The
+    that record has no fix check line, or its fix check passed (owner, page item 741: a fix check after a passing one is accepted). The
+    one exception is a pull request with no record at all, whose new head holds BASE: a pull request opened after the review has no record to name the head. The
     earlier records come from review_comments, which PullsHost serves from its comment list, oldest first. A refusal exits 2 and prints no record."""
 
     EARLIER_HEAD = "1e" * 20  # a head that an earlier record reviewed, and that is not the newest record's
@@ -17693,7 +17693,7 @@ class ReviewedList(ReviewEnv):
 
     def test_the_newest_log_at_the_fix_head_decides_what_the_fix_inherits(self):
         # a log at the fix head that already has a fix check (one fix verifier per record), or one with no round
-        # (a bare hold), gives nothing, and no older log at that head is read past it. With nothing inherited, a passing fix verifier still ends review (owner, waiting-page item 858 a, 2026-11-15 11:39 CST)
+        # (a bare hold), gives nothing, and no older log at that head is read past it. With nothing inherited, a passing fix verifier still ends review
         round_fail = ("Round 1: reviewer, sonnet, FAIL",)
         fixed = record_text(head=REVIEW_OLD_HEAD, rounds=round_fail, fix=(fix_verifier_line(head="2e" * 20),))
         bare_hold = record_text(head=REVIEW_OLD_HEAD, rounds=(), net="negative")
@@ -17707,7 +17707,7 @@ class ReviewedList(ReviewEnv):
                 self.assertRegex(list_line(self, out, 7), r"done: the fix verifier passed")
 
     def test_a_fix_verifier_reads_no_round_from_a_log_at_another_head_or_pr(self):
-        # the round is read only from the log whose Head is the fix check's reviewed head, and only on the same pull request. Nothing inherited still reads done (owner, waiting-page item 858 a, 2026-11-15 11:39 CST)
+        # the round is read only from the log whose Head is the fix check's reviewed head, and only on the same pull request. Nothing inherited still reads done
         other = review_comment(1, 7, record_text(head="2e" * 20, rounds=("Round 1: reviewer, sonnet, FAIL",)))
         wrong_pr = review_comment(2, 8, record_text(n=8, head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",)))
         later = review_comment(3, 7, record_text(rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD),)))
