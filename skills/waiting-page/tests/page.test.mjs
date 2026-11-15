@@ -1581,6 +1581,46 @@ test("the Copy line keeps a saved done when a draft under Change would not send"
   assert.equal(await page.evaluate(() => window.__copied), "27 a, 28 done");
 });
 
+// The note 'accepted pick' is the placeholder of saved answers from before the page preselected nothing (LEGACY_NOTE in
+// page.html). It is no note of the owner's, so neither the Copy line nor the note box shows it. The controls hold the
+// owner's own note, which both still show.
+const LEGACY_PICK = { [DECISION.id]: { ...SAVED_A[DECISION.id], note: "accepted pick" } };
+const OWN_NOTE = { [DECISION.id]: { ...SAVED_A[DECISION.id], note: "Green, please" } };
+const SECOND = mk("second", 28, { added: ASKED_AFTER_SEND });
+// The Copy line after a write the store refused. The draft on `it` is the one that opens the line.
+async function copyAfterDenied(page, it, key) {
+  await choose(page, it, key);
+  await send(page);
+  await page.locator("#barStatus", { hasText: "Not saved (denied)" }).waitFor();
+  await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async (s) => { window.__copied = s; } } }); });
+  await page.click("#copy");
+  return page.evaluate(() => window.__copied);
+}
+
+test("the Copy line does not print the old note 'accepted pick' of a saved answer", async (t) => {
+  const page = await open(t, { items: [DECISION, SECOND], answers: LEGACY_PICK, failSet: true }); if (!page) return;
+  assert.equal(await copyAfterDenied(page, SECOND, "a"), "27 a, 28 a");
+});
+
+test("the Copy line keeps the owner's own saved note of an answer", async (t) => {
+  const page = await open(t, { items: [DECISION, SECOND], answers: OWN_NOTE, failSet: true }); if (!page) return;
+  assert.equal(await copyAfterDenied(page, SECOND, "a"), "27 a (Green, please), 28 a");
+});
+
+test("Change on an answer whose note is the old 'accepted pick' leaves the note box empty", async (t) => {
+  const page = await open(t, { answers: LEGACY_PICK }); if (!page) return;
+  await card(page, DECISION).getByRole("button", { name: "Change" }).click();
+  await need(page.locator(`#n-${DECISION.id}`), `No. ${DECISION.n} has no note box under Change`);
+  assert.equal(await page.inputValue(`#n-${DECISION.id}`), "", "Change put the old note accepted pick in the note box");
+});
+
+test("Change keeps the owner's own saved note in the note box", async (t) => {
+  const page = await open(t, { answers: OWN_NOTE }); if (!page) return;
+  await card(page, DECISION).getByRole("button", { name: "Change" }).click();
+  await need(page.locator(`#n-${DECISION.id}`), `No. ${DECISION.n} has no note box under Change`);
+  assert.equal(await page.inputValue(`#n-${DECISION.id}`), "Green, please");
+});
+
 test("a send gives one notice that names the item and the choice", async (t) => {
   const page = await open(t); if (!page) return;
   await choose(page, DECISION, "a");

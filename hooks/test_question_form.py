@@ -444,6 +444,35 @@ def case_str_replace_bare_problem_lines():
                     PROBLEM, "Problem: which job runs it.", (STAKE_RULES, "Problem"))
 
 
+def case_str_replace_bare_to_malformed_stake():
+    # A bare Problem line swapped for a line that names a parenthesised stake the set lacks, or names one with no text,
+    # is refused as no stake: PROBLEM_LABEL matches the new line and PROBLEM_LINE does not. A bare line swapped for
+    # another bare line is allowed, as a bare line may be edited (form_str_replace_hit keeps that rule).
+    context_replace("that swaps a bare Problem line for a stake outside the set is refused as no stake",
+                    "Problem: which job runs it.", "Problem (internals): which job runs it.", (STAKE_RULES, "Problem"))
+    context_replace("that swaps a bare Problem line for a stake with no text is refused as no stake",
+                    "Problem: which job runs it.", "Problem (money):", (STAKE_RULES, "Problem"))
+    context_replace("that swaps a bare Problem line for another bare line is allowed",
+                    "Problem: which job runs it.", "Problem: which job runs it, and why it needs your word.", None)
+
+
+def case_page_form_reason_names_the_pick_on_stake_only():
+    # The take-your-own-pick sentence belongs on the stake refusal alone. A missing Goal line is a form refusal, so the
+    # reason the writer reads for it names no pick. Both reasons are read off the guard, as the writer sees them.
+    missing_goal = {"url": PAGE_URL, "action": "set", "collection": "items", "doc_id": DOC, "data": page_item(goal=None)}
+    stake = {"url": PAGE_URL, "action": "set", "collection": "items", "doc_id": DOC,
+             "data": page_item(problem="Problem (internals): which job runs it")}
+    scope = guard.data_tool_hit(missing_goal, PAGE_REPO)[0]
+    check("page form reason: a missing Goal line is refused by the form rule", scope == FORM_RULE, repr(scope))
+    goal_reason = printed_reason(missing_goal)
+    check("page form reason: a missing Goal line is refused with a reason", goal_reason != "", repr(goal_reason)[:200])
+    check("page form reason: a missing Goal refusal does not say take your own pick",
+          "take your own pick" not in goal_reason, goal_reason[:200])
+    stake_reason = printed_reason(stake)
+    check("page form reason: a stake refusal says take your own pick",
+          "take your own pick" in stake_reason, stake_reason[:200])
+
+
 def page_batch(writes):
     """guard.data_tool_hit on one ArtifactData batch of waiting-page writes."""
     return guard.data_tool_hit({"url": PAGE_URL, "action": "batch", "writes": writes}, PAGE_REPO)
@@ -2697,7 +2726,9 @@ def main():
                  case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_str_replace_bare_problem_lines,
+                 case_str_replace_bare_to_malformed_stake,
                  case_stands_gets_no_relaxed_stake_rule, case_page_reasons_name_no_stands_field,
+                 case_page_form_reason_names_the_pick_on_stake_only,
                  case_batch, case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose, case_session_press_needs_no_link,
                  case_claude_own_merge_needs_no_link,
