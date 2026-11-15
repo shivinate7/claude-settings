@@ -24,7 +24,8 @@ this work does not change it.
 ## 2. Both lines under the title (hide: "under the title"), state `bothtop`, focus `#stBothTop`
 
 - Waiting on, then Recommended, both before the context. Gain: both answers are on the first phone screen.
-- Loss: the options start as far down as in item 1, and the why sits away from the cards it explains.
+- Loss: the options start as far down as in item 1, and the why sits away from the cards it explains. Pick: no (item 1).
+- Departs from: page.html `buildCard` — draws a recommendation before the context. Owner grant: no. Not blocking.
 
 ## 3. One home for `why`: the option card keeps the star only
 
@@ -32,14 +33,17 @@ this work does not change it.
   beside the star. A multi item loses "Also recommended." The word "Recommended" shows once as text (ux-label-once);
   the star keeps `aria-label="Recommended"`.
 - The `.pick` and `.nopick` rows stay, so the subgrid rows still line up. Gain: the why prints once. Loss: a reader of
-  one card alone sees a star and no reason; the reason is one panel up.
+  one card alone sees a star and no reason; the reason is one panel up. Pick: yes.
+- Departs from: page.html `optCard` `.pick` — drops `it.why` (decided by the lane) and "Also recommended." on a multi
+  item (this design's call: the word now shows once in the line). Owner grant: no. Not blocking.
 
 ## 4. The Waiting on line, state `both`, `oneline`, focus `#stOneLine`
 
-- The page takes the first context line that starts `Waiting on:` out of `context` and draws it as its own line under
-  the title, after the holds and due lines. Neutral (`--chip`), bold "Waiting on:" lead, no icon.
+- The page takes the first context line that starts `Waiting on:` out of `context` and draws it as its own line. Place,
+  in `buildCard` order: holds, due, Waiting on, then the thread, then the context. Neutral (`--chip`), bold
+  "Waiting on:" lead, no icon.
 - Gain: the 220-character clamp can no longer hide it, and it prints once. Loss: a second parse of `context`
-  (the Departs from line is checked by the guard only).
+  (the Departs from line is checked by the guard only). Pick: yes.
 - It is independent of the Recommended line: 844 has a Waiting on line and no valid recommendation (state `oneline`).
 
 ## 5. A holds line and a Waiting on line together, state `holds` (878)
@@ -51,7 +55,7 @@ this work does not change it.
 ## 6. Label length in the line (pick: whole label), states `widens` and `widenscut`
 
 - Pick (`widens`): the whole label, with the lead word and chip, clamped at three lines; `title` holds the full text.
-  837 option C's label is 250 characters. Gain: the line reads as a sentence. Loss: a CSS clamp, not `optName`.
+  837 option C's label is 213 characters. Gain: the line reads as a sentence. Loss: a CSS clamp, not `optName`.
 - Other (`widenscut`, hide: "label cut at 28"): the page's own `optName`, as the ready line. Gain: one home for a short
   name. Loss: "Keep all four tools, but re…" says little.
 - Multi and ranked (`multi`, `ranked`): one row per recommended option, chip and label on one line each, cut with an
@@ -60,7 +64,7 @@ this work does not change it.
 ## 7. A widening option that is not recommended, state `widens` (837)
 
 - C is recommended; A widens and keeps today's warning line. Nothing new is drawn for A. A recommendation never names a
-  widening option (guard rule `uniform-pick`), so the line never carries the warning.
+  widening option (guard rule `uniform-pick`), so the line never carries the warning. Pick: yes, no new mark.
 
 ## 8. Old item with neither line (pick: draw nothing), states `old` and `oldsay`
 
@@ -68,6 +72,9 @@ this work does not change it.
   for you…") is no reason for an option and stays unshown, as today.
 - Other (`oldsay`, hide: "says none"): two muted dashed lines, "This item names no recommended option." and
   "This item states no Waiting on line." Gain: the owner knows to ask. Loss: two lines on every old item until they close.
+  Departs from: page.html `buildCard` — draws a line for a field the item lacks. Owner grant: no. Not blocking.
+- 857 is the item where the owner asked what we wait on. The page shows its Waiting on line only once the writer adds
+  one to its `context`.
 - 844 stores `recommended: true` on option B, a field the page does not read on an option. No star, today or here.
 
 ## 9. Measured verdicts
