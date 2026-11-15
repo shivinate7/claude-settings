@@ -20,6 +20,11 @@ A prompt that reads origin writes no file in the config dir, the source clone or
 itself, and it is wired once, under UserPromptSubmit. The cost record's Ruling section accepts that one read per cloud
 prompt, with its measured figures.
 
+THE STAMP. A cloud run that names a tip (CS_STALE_TIP) writes <config dir>/.claude-settings-install-attempt.json
+when it starts, and removes it when its record lands at that tip. The hook skips the installer for that same tip
+within the backoff, prints one skip line, and never writes the stamp. The stub installer models the stamp. No case
+runs install.sh's own write_attempt_stamp, and none covers the install lock wait.
+
 THE SEAM. Each fixture is a bare origin, a seed that pushes to it, and a source clone at the recorded sha,
 all under the run folder. HOME and CLAUDE_CONFIG_DIR point into the run folder, so the real ~/.claude is
 never read. A PATH shim on `git` logs each call's argv and then runs the real git. A stub installer logs
@@ -60,12 +65,19 @@ UNKNOWN = "claude-settings: install freshness unknown ("
 RESTART = "claude-settings: restart needed for:"
 RESTART_UNKNOWN = "claude-settings: restart check unknown (could not diff %s..%s)"
 NOT_REACHED = "claude-settings: reinstall did not reach %s (record at %s)"
+STAMP_NAME = ".claude-settings-install-attempt.json"
+DEFAULT_BACKOFF = 900
+# Seconds an aged stamp is moved back by. Far past the default backoff, so the reinstall is not a near miss.
+AGED_BY = 3600
+SKIPPED = re.compile(r"claude-settings: reinstall skipped \(install started at ([0-9a-f]{7}) not finished, "
+                     r"retry in (\d+) s\)")
 # A timeout case waits out the installer bound the hook has on the code under test (100 s), so its guard sits above.
 TIMEOUT_GUARD = 130
 GIT_LOCATORS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
                 "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX")
 HOOK_ENV_DROP = GIT_LOCATORS + ("CLAUDE_CODE_REMOTE", "CLAUDE_CONFIG_DIR", "CLAUDE_SETTINGS_FETCH_TIMEOUT",
-                                "CLAUDE_SETTINGS_REF", "CLAUDE_SETTINGS_REINSTALL_TIMEOUT", "CS_HOOK_INPUT",
+                                "CLAUDE_SETTINGS_REF", "CLAUDE_SETTINGS_REINSTALL_TIMEOUT",
+                                "CLAUDE_SETTINGS_REINSTALL_BACKOFF", "CS_HOOK_INPUT", "CS_STALE_TIP",
                                 "GIT_SHIM_LS_REMOTE", "GIT_SHIM_DIFF", "STUB_EXIT", "STUB_RECORD_SHA")
 HOOK_ONLY = {"hooks/config_watch.py": "pass  # tweak\n"}
 COST_TERMS = (
@@ -93,16 +105,27 @@ esac
 exec "$GIT_SHIM_REAL" "$@"
 '''
 
-# Stands in for install.sh: counts each run, logs the CLAUDE_SETTINGS_REF and CS_HOOK_INPUT it saw, fetches origin
-# as the real installer does, and writes the install record when STUB_WRITE_RECORD is set. When STUB_EXIT is set it
-# exits with that code first, before the fetch and the record. When STUB_RECORD_SHA is set it writes that sha and
-# exits 0 with no fetch: an installer whose fetch failed while the hook's ls-remote worked.
-STUB = r'''#!/bin/sh
-here=$(cd "$(dirname "$0")" && pwd -P)
-printf '%s\n' "$*" >> "$STUB_COUNTER"
+# The installer's start, modelled on install.sh: counts the run, logs the environment it saw, and, when the hook named a
+# tip (CS_STALE_TIP), writes the attempt stamp before anything else. START is the one home of that code. STUB and
+# HANG_STUB both begin with it.
+START = r'''printf '%s\n' "$*" >> "$STUB_COUNTER"
 printf 'CLAUDE_SETTINGS_REF=%s\n' "${CLAUDE_SETTINGS_REF-unset}" >> "$STUB_ENV_LOG"
 printf 'CS_HOOK_INPUT=%s\n' "${CS_HOOK_INPUT-unset}" >> "$STUB_ENV_LOG"
-[ -n "$STUB_EXIT" ] && exit "$STUB_EXIT"
+printf 'CS_STALE_TIP=%s\n' "${CS_STALE_TIP-unset}" >> "$STUB_ENV_LOG"
+stamp="$CLAUDE_CONFIG_DIR/.claude-settings-install-attempt.json"
+if [ -n "$CS_STALE_TIP" ]; then
+  printf '{"tip": "%s", "epoch": %s}\n' "$CS_STALE_TIP" "$(date +%s)" > "$stamp.cs-new"
+  mv -f "$stamp.cs-new" "$stamp"
+fi
+'''
+
+# Stands in for install.sh: runs START, fetches origin as the real installer does, and writes the install record when
+# STUB_WRITE_RECORD is set. When STUB_EXIT is set it exits with that code first, before the fetch and the record, so
+# the stamp START wrote stays. When STUB_RECORD_SHA is set it writes that sha and exits 0 with no fetch: an installer
+# whose fetch failed while the hook's ls-remote worked. When the record lands at CS_STALE_TIP it removes the stamp.
+STUB = r'''#!/bin/sh
+here=$(cd "$(dirname "$0")" && pwd -P)
+''' + START + r'''[ -n "$STUB_EXIT" ] && exit "$STUB_EXIT"
 if [ -n "$STUB_RECORD_SHA" ]; then
   sha=$STUB_RECORD_SHA
 else
@@ -114,14 +137,15 @@ fi
 if [ -n "$STUB_WRITE_RECORD" ] && [ -n "$sha" ]; then
   printf '{"ref": "%s", "sha": "%s", "source": "%s", "installer": "%s/install.sh"}\n' \
     "$STUB_REF" "$sha" "$here" "$here" > "$CLAUDE_CONFIG_DIR/.claude-settings-install.json"
+  if [ -n "$CS_STALE_TIP" ] && [ "$sha" = "$CS_STALE_TIP" ]; then rm -f "$stamp"; fi
 fi
 '''
 
 # Stands in for an install that holds the install lock when the hook stops it. Its TERM trap waits for the child it
 # started, then writes a "term" mark and releases the lock. The wait ends only once that child has exited, so a
-# "term" mark means the child was signalled too.
+# "term" mark means the child was signalled too. It begins with START, so it counts its run and writes the stamp.
 HANG_STUB = r'''#!/bin/sh
-lock="$CLAUDE_CONFIG_DIR/.claude-settings-install.lock"
+''' + START + r'''lock="$CLAUDE_CONFIG_DIR/.claude-settings-install.lock"
 ( set -C; printf '%s\n' "$$" > "$lock" ) 2>/dev/null || exit 1
 sleep 300 >/dev/null 2>&1 &
 grand=$!
@@ -249,6 +273,7 @@ class Fixture:
         self.grand_path = os.path.join(self.root, "installer-child.pid")
         self.lock_path = os.path.join(self.config, ".claude-settings-install.lock")
         self.record_path = os.path.join(self.config, RECORD)
+        self.stamp_path = os.path.join(self.config, STAMP_NAME)
         self.source = None
         self.ref = "main"
         for folder in (self.home, self.config, self.shim_dir, self.seed):
@@ -283,7 +308,7 @@ class Fixture:
         return env
 
     def hook_env(self, cloud=True, ls_remote=None, timeout=None, diff=None, stub_exit=None, settings_ref=None,
-                 record_sha=None, reinstall_timeout=None):
+                 record_sha=None, reinstall_timeout=None, stale_tip=None, backoff=None):
         env = dict(os.environ)
         for key in HOOK_ENV_DROP:
             env.pop(key, None)
@@ -309,6 +334,10 @@ class Fixture:
             env["STUB_RECORD_SHA"] = record_sha
         if reinstall_timeout:
             env["CLAUDE_SETTINGS_REINSTALL_TIMEOUT"] = reinstall_timeout
+        if stale_tip:
+            env["CS_STALE_TIP"] = stale_tip
+        if backoff:
+            env["CLAUDE_SETTINGS_REINSTALL_BACKOFF"] = backoff
         return env
 
     def sha(self, repo, rev):
@@ -356,6 +385,34 @@ class Fixture:
                 return json.load(handle).get("sha")
         except (OSError, ValueError, AttributeError):
             return None
+
+    def read_stamp(self):
+        """The attempt stamp as a dict, or None when it is absent or unreadable."""
+        try:
+            with open(self.stamp_path, encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            return None
+        return data if isinstance(data, dict) else None
+
+    def write_stamp(self, text):
+        write_file(self.stamp_path, text)
+
+    def age_stamp(self, seconds):
+        """Moves the stamp's epoch back by `seconds`, so the hook reads it as that much older. No clock is read."""
+        stamp = self.read_stamp()
+        if stamp is None or not isinstance(stamp.get("epoch"), int):
+            raise RuntimeError("fixture: no stamp with an integer epoch to age")
+        stamp["epoch"] -= seconds
+        write_file(self.stamp_path, json.dumps(stamp) + "\n")
+
+    def changes_since(self, before):
+        """One row per change since the snapshot `before`, under the config dir, the source clone or the home dir."""
+        after = self.watched()
+        rows = []
+        for label in ("config", "source", "home"):
+            rows += ["%s: %s" % (label, row) for row in state_changes(before[label], after[label])]
+        return rows
 
     def run_hook(self, guard=HOOK_GUARD, **options):
         """One hook run. The hook gets its own session and writes its output to files, so a stop at `guard`
@@ -497,10 +554,8 @@ class StaleInstall(unittest.TestCase):
         self.assertEqual(len(run.lines), 2, "output beyond the reinstall and restart lines: %r" % run.lines)
 
     def assert_wrote_no_file(self, fx, before):
-        after = fx.watched()
-        for label in ("config", "source", "home"):
-            rows = state_changes(before[label], after[label])
-            self.assertEqual(rows, [], "the prompt changed files under the %s tree: %s" % (label, "; ".join(rows)))
+        rows = fx.changes_since(before)
+        self.assertEqual(rows, [], "the prompt changed files: %s" % "; ".join(rows))
 
     # Behind origin: one reinstall, one read, the recorded installer.
 
@@ -804,6 +859,200 @@ class StaleInstall(unittest.TestCase):
         self.assertFalse(pid_alive(grand), "the installer's child survived the timeout: the group was not signalled")
 
 
+class StaleInstallBackoff(unittest.TestCase):
+    """The attempt stamp. A cloud run that fails, times out or misses the tip leaves the stamp the installer wrote, and
+    the hook skips the installer for that same tip within the backoff. The hook never writes the stamp.
+
+    The cases seed the stamp with the stub installer (seed_stamp), so the stamp is the one the installer writes. A case
+    that must not block first shows the skip, which a tree without the stamp fails, and then makes its own change to
+    the stamp: an age, a garble, a newer tip or a success.
+    """
+
+    def assert_skipped(self, run, tip):
+        self.assertEqual(len(run.lines), 1, "want one skip line, got %r; stderr: %s" % (run.lines, run.tail()))
+        found = SKIPPED.fullmatch(run.lines[0])
+        self.assertIsNotNone(found, "not the skip line: %r" % run.lines[0])
+        self.assertEqual(found.group(1), tip[:SHORT], "the skip line names the wrong tip: %r" % run.lines[0])
+        self.assertTrue(1 <= int(found.group(2)) <= DEFAULT_BACKOFF,
+                        "the retry count is outside 1 to %d: %r" % (DEFAULT_BACKOFF, run.lines[0]))
+
+    def seed_stamp(self, fx, tip):
+        """The stamp a failed install leaves: one stub run with a tip, failing before its record. Returns the installer
+        runs so far, so a case counts only the runs after it."""
+        done = fx.run_stub(stale_tip=tip, stub_exit="3")
+        self.assertEqual(done.returncode, 3, "scope: the stub did not exit 3: %s" % done.stderr.strip())
+        stamp = fx.read_stamp()
+        self.assertIsNotNone(stamp, "scope: the stub left no attempt stamp")
+        self.assertEqual(stamp.get("tip"), tip, "scope: the attempt stamp does not name the tip")
+        return len(fx.installer_runs())
+
+    # A hook-driven failed install: the installer's own stamp holds the next turn to a skip.
+
+    def test_failed_install_skips_the_retry_within_backoff(self):
+        fx, old, new = behind(self._testMethodName)
+        run = fx.run_hook(stub_exit="3")
+        self.assertEqual(fx.installer_runs(), ["--cloud"],
+                         "scope: turn 1 did not run the installer once: %r" % run.lines)
+        self.assertIsNotNone(fx.read_stamp(), "scope: the failed install left no attempt stamp")
+        self.assertEqual(fx.read_stamp().get("tip"), new, "scope: the attempt stamp does not name the tip")
+        self.assertEqual(fx.record_sha(), old, "scope: the failed install moved the record")
+        run = fx.run_hook()
+        self.assertEqual(len(fx.installer_runs()), 1,
+                         "turn 2 ran the installer again: %d runs in all" % len(fx.installer_runs()))
+        self.assertEqual(fx.subcommands(), ["ls-remote"], "turn 2 made git calls %r, want one ls-remote"
+                         % fx.subcommands())
+        self.assert_skipped(run, new)
+
+    # The stamp is cleared by a success, and a later tip is not held by it.
+
+    def test_success_clears_the_stamp_and_a_later_stale_tip_reinstalls(self):
+        fx, old, new = behind(self._testMethodName)
+        self.seed_stamp(fx, new)
+        fx.age_stamp(AGED_BY)
+        run = fx.run_hook()
+        self.assertEqual(run.lines, [REINSTALL % (new[:SHORT], old[:SHORT])],
+                         "want the reinstall line; stderr: %s" % run.tail())
+        self.assertFalse(os.path.exists(fx.stamp_path), "the successful reinstall at the tip left the attempt stamp")
+        newer = fx.advance(HOOK_ONLY)
+        run = fx.run_hook()
+        self.assertEqual(run.lines, [REINSTALL % (newer[:SHORT], new[:SHORT])],
+                         "want the reinstall line for the later tip; stderr: %s" % run.tail())
+
+    def test_stamp_for_an_older_tip_does_not_block_a_newer_tip(self):
+        fx, old, new = behind(self._testMethodName)
+        base = self.seed_stamp(fx, new)
+        self.assert_skipped(fx.run_hook(), new)
+        newer = fx.advance(HOOK_ONLY)
+        self.assertNotEqual(newer, new, "scope: origin did not move on")
+        run = fx.run_hook()
+        self.assertEqual(run.lines, [REINSTALL % (newer[:SHORT], old[:SHORT])],
+                         "want the reinstall of the newer tip; stderr: %s" % run.tail())
+        self.assertEqual(len(fx.installer_runs()) - base, 1, "the newer tip ran the installer %d times, want 1"
+                         % (len(fx.installer_runs()) - base))
+
+    def test_stamp_older_than_backoff_reinstalls(self):
+        fx, old, new = behind(self._testMethodName)
+        base = self.seed_stamp(fx, new)
+        self.assert_skipped(fx.run_hook(), new)
+        fx.age_stamp(AGED_BY)
+        run = fx.run_hook()
+        self.assertEqual(run.lines, [REINSTALL % (new[:SHORT], old[:SHORT])],
+                         "want the reinstall line for an aged stamp; stderr: %s" % run.tail())
+        self.assertEqual(len(fx.installer_runs()) - base, 1, "the aged stamp ran the installer %d times, want 1"
+                         % (len(fx.installer_runs()) - base))
+
+    def test_garbled_stamp_reinstalls_without_a_crash(self):
+        garbles = ("{not json", "", "[]", '{"tip": "not-a-sha", "epoch": 1}', '{"tip": "TIP", "epoch": "soon"}')
+        for index, text in enumerate(garbles):
+            with self.subTest(garbled=text):
+                fx, old, new = behind("%s-%d" % (self._testMethodName, index))
+                base = self.seed_stamp(fx, new)
+                self.assert_skipped(fx.run_hook(), new)
+                fx.write_stamp(text.replace("TIP", new))
+                run = fx.run_hook()
+                self.assertEqual(run.lines, [REINSTALL % (new[:SHORT], old[:SHORT])],
+                                 "garbled stamp %r: want the reinstall line; stderr: %s" % (text, run.tail()))
+                self.assertEqual(len(fx.installer_runs()) - base, 1,
+                                 "garbled stamp %r: the installer ran %d times, want 1"
+                                 % (text, len(fx.installer_runs()) - base))
+
+    # The backoff: the env value replaces 900 when it is a positive number, and only then.
+
+    def test_backoff_override_of_5_reinstalls_a_stamp_10_s_old(self):
+        fx, old, new = behind(self._testMethodName)
+        base = self.seed_stamp(fx, new)
+        self.assert_skipped(fx.run_hook(), new)
+        fx.age_stamp(10)
+        run = fx.run_hook(backoff="5")
+        self.assertEqual(run.lines, [REINSTALL % (new[:SHORT], old[:SHORT])],
+                         "backoff 5 did not reinstall a stamp 10 s old; stderr: %s" % run.tail())
+        self.assertEqual(len(fx.installer_runs()) - base, 1, "backoff 5 ran the installer %d times, want 1"
+                         % (len(fx.installer_runs()) - base))
+
+    def test_invalid_backoff_falls_back_to_900(self):
+        for index, value in enumerate(("junk", "0", "-5")):
+            with self.subTest(backoff=value):
+                fx, old, new = behind("%s-%d" % (self._testMethodName, index))
+                base = self.seed_stamp(fx, new)
+                self.assert_skipped(fx.run_hook(), new)
+                fx.age_stamp(10)
+                run = fx.run_hook(backoff=value)
+                self.assert_skipped(run, new)
+                self.assertEqual(len(fx.installer_runs()) - base, 0,
+                                 "backoff %r ran the installer; want the 900 default to skip" % value)
+
+    # The tip the installer gets is the tip the hook read from origin, whatever the hook's environment names.
+
+    def test_hook_passes_the_tip_to_the_installer_as_CS_STALE_TIP(self):
+        fx, old, new = behind(self._testMethodName)
+        self.assertNotEqual(fx.record_sha(), new, "scope: the record is at the tip, so the tip is not the record sha")
+        run = fx.run_hook()
+        seen = fx.installer_env().get("CS_STALE_TIP")
+        self.assertEqual(seen, new, "the installer got CS_STALE_TIP=%r, want the origin tip; stderr: %s"
+                         % (seen, run.tail()))
+
+    def test_hook_env_naming_another_tip_does_not_reach_the_installer(self):
+        fx, old, new = behind(self._testMethodName)
+        self.assertEqual(fx.hook_env(stale_tip="bogus")["CS_STALE_TIP"], "bogus",
+                         "scope: the hook env does not name another tip")
+        run = fx.run_hook(stale_tip="bogus")
+        seen = fx.installer_env().get("CS_STALE_TIP")
+        self.assertEqual(seen, new, "the installer got CS_STALE_TIP=%r, want the origin tip; stderr: %s"
+                         % (seen, run.tail()))
+
+    # A timeout kill is a failure too: the stamp stays, and the next turn skips.
+
+    def test_timeout_kill_leaves_the_stamp_and_the_next_turn_skips(self):
+        fx, old, new = behind(self._testMethodName)
+        write_file(os.path.join(fx.source, "install.sh"), HANG_STUB, mode=0o755)
+        run = fx.run_hook(guard=TIMEOUT_GUARD, reinstall_timeout="1")
+        grand = read_pid(fx.grand_path)
+        self.addCleanup(kill_if_alive, grand)
+        self.assertIsNotNone(run.rc, "the hook ran past %d s: the installer was not stopped at its timeout"
+                             % TIMEOUT_GUARD)
+        self.assertIsNotNone(grand, "scope: the installer did not start its child; stderr: %s" % run.tail())
+        self.assertEqual(run.lines, ["claude-settings: reinstall failed (timed out after 1 s)"],
+                         "scope: the install did not time out: %r" % run.lines)
+        stamp = fx.read_stamp()
+        self.assertIsNotNone(stamp, "the timed-out install left no attempt stamp")
+        self.assertEqual(stamp.get("tip"), new, "the attempt stamp does not name the tip")
+        run = fx.run_hook()
+        self.assertEqual(fx.installer_runs(), ["--cloud"],
+                         "turn 2 ran the installer again: %r" % fx.installer_runs())
+        self.assertEqual(fx.subcommands(), ["ls-remote"], "turn 2 made git calls %r, want one ls-remote"
+                         % fx.subcommands())
+        self.assert_skipped(run, new)
+
+    # The skip is a read, not a write: the hook writes no file on a skip turn.
+
+    def test_skip_turn_writes_no_file(self):
+        fx, old, new = behind(self._testMethodName)
+        self.seed_stamp(fx, new)
+        before = fx.watched()
+        run = fx.run_hook()
+        self.assert_skipped(run, new)
+        self.assertEqual(fx.subcommands(), ["ls-remote"], "skip turn made git calls %r, want one ls-remote"
+                         % fx.subcommands())
+        rows = fx.changes_since(before)
+        self.assertEqual(rows, [], "the skip turn changed files: %s" % "; ".join(rows))
+
+    # An installer that exits 0 but leaves the record short of the tip is a failure: the stamp stays.
+
+    def test_exit_zero_with_the_record_short_of_the_tip_keeps_the_stamp(self):
+        fx, old, new = behind(self._testMethodName)
+        run = fx.run_hook(record_sha=old)
+        self.assertEqual(run.lines, [NOT_REACHED % (new[:SHORT], old[:SHORT])],
+                         "scope: the record-short install did not print the not-reached line; stderr: %s" % run.tail())
+        self.assertEqual(fx.installer_runs(), ["--cloud"], "scope: turn 1 did not run the installer once")
+        stamp = fx.read_stamp()
+        self.assertIsNotNone(stamp, "the install that missed the tip left no attempt stamp")
+        self.assertEqual(stamp.get("tip"), new, "the attempt stamp does not name the tip")
+        run = fx.run_hook()
+        self.assertEqual(len(fx.installer_runs()), 1,
+                         "turn 2 ran the installer again: %d runs in all" % len(fx.installer_runs()))
+        self.assert_skipped(run, new)
+
+
 class HookFile(unittest.TestCase):
     """Static reads of the hook source and of settings.json. The behaviour cases above prove the rest."""
 
@@ -901,6 +1150,38 @@ class Harness(unittest.TestCase):
         self.assertEqual(done.returncode, 0, "stub installer exited %d: %s" % (done.returncode, done.stderr.strip()))
         self.assertEqual(fx.record_sha(), old, "stub did not write the sha it was given")
         self.assertNotEqual(fx.origin_tip("main"), old, "scope: origin did not move on, so the sha is not stale")
+
+    def test_control_stub_writes_the_stamp_and_a_failed_run_keeps_it(self):
+        fx, old, new = behind(self._testMethodName)
+        done = fx.run_stub(stale_tip=new, stub_exit="3")
+        self.assertEqual(done.returncode, 3,
+                         "stub installer exited %d, want 3: %s" % (done.returncode, done.stderr.strip()))
+        stamp = fx.read_stamp()
+        self.assertIsNotNone(stamp, "stub wrote no attempt stamp for a tip")
+        self.assertEqual(stamp.get("tip"), new, "stub stamp names %r, want the tip" % stamp.get("tip"))
+        self.assertEqual(fx.record_sha(), old, "the failed stub run moved the record")
+
+    def test_control_stub_clears_the_stamp_when_its_record_lands_at_the_tip(self):
+        fx, old, new = behind(self._testMethodName)
+        fx.run_stub(stale_tip=new, stub_exit="3")
+        self.assertIsNotNone(fx.read_stamp(), "scope: no stamp to clear")
+        done = fx.run_stub(stale_tip=new)
+        self.assertEqual(done.returncode, 0, "stub installer exited %d: %s" % (done.returncode, done.stderr.strip()))
+        self.assertEqual(fx.record_sha(), new, "stub did not write the tip into the record")
+        self.assertFalse(os.path.exists(fx.stamp_path), "stub left the stamp after its record landed at the tip")
+
+    def test_control_stub_keeps_the_stamp_when_its_record_misses_the_tip(self):
+        fx, old, new = behind(self._testMethodName)
+        done = fx.run_stub(stale_tip=new, record_sha=old)
+        self.assertEqual(done.returncode, 0, "stub installer exited %d: %s" % (done.returncode, done.stderr.strip()))
+        self.assertEqual(fx.record_sha(), old, "scope: stub did not write the sha it was given")
+        self.assertIsNotNone(fx.read_stamp(), "stub removed the stamp although its record missed the tip")
+
+    def test_control_stub_writes_no_stamp_without_a_tip(self):
+        fx, old, new = behind(self._testMethodName)
+        done = fx.run_stub()
+        self.assertEqual(done.returncode, 0, "stub installer exited %d: %s" % (done.returncode, done.stderr.strip()))
+        self.assertFalse(os.path.exists(fx.stamp_path), "stub wrote a stamp with no tip given")
 
 
 if __name__ == "__main__":
