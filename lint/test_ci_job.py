@@ -2955,6 +2955,30 @@ class PinnedHarness(Job):
         rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main")
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a stale pin with no stable branch on origin did not exit 3 under --step\n" + text)
 
+    def pin_ahead_of_stable(self):
+        """A pin newer than origin's stable head: origin's stable is the commit before the pin, which lacks the lint files, so the
+        pin's files differ from it, and the stable head is an ancestor of the pin. -> the pin's sha."""
+        pin = self.add_ste_lint(change=False)  # the pin, and this copy's HEAD
+        self.publish_stable(git_in(self.source, "rev-parse", pin + "^"))
+        self.pin_child("ste-lint", pin)
+        return pin
+
+    def test_a_pin_ahead_of_the_stable_head_is_not_stale_under_step(self):
+        """A pin ahead of stable is not behind it: nothing is stale, so no exit 3 and no line that says to pull claude-settings."""
+        pin = self.pin_ahead_of_stable()
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main")
+        self.assertNotIn("pull claude-settings", text, "a pin ahead of the stable head was read as stale\n" + text)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "a pin ahead of the stable head did not PASS under --step\n" + text)
+
+    def test_a_pin_ahead_of_the_stable_head_passes_with_a_note_under_lint(self):
+        pin = self.pin_ahead_of_stable()
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        rc, lines, text = self.run_step(ste, "--lint", "--base", "origin/main")
+        self.assertNotIn("pull claude-settings", text, "a pin ahead of the stable head was read as stale under --lint\n" + text)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "a pin ahead of the stable head did not PASS under --lint\n" + text)
+        self.assertTrue(any(PIN_NOTE_MARKER in ln for ln in text.splitlines()), "--lint printed no pin note for a pin ahead of the stable head\n" + text)
+
     @unittest.skipUnless(os.name == "posix", "the git stub is a shell script")
     def test_the_export_is_deleted_after_a_pass_and_after_an_unknown(self):
         tmp = tempfile.mkdtemp(prefix="tmp-", dir=RUN_FOLDER)  # TMPDIR for the run: each export is made here
