@@ -37,6 +37,8 @@ import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (on
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import test_refusal_note as hook_base  # noqa: E402  the route-rows seam name and fixture (one home, hooks/test_refusal_note.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 # The correction step's words (decision guard-remedy-not-to-owner, shared tails). A refusal holds none of them; the
@@ -5704,6 +5706,66 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
     def test_mg_red_forgot_the_check_before_when_clause_blocks(self):
         self.assert_blocked(mg_report("I forgot the check when the lane was open."))
+
+
+# The cost of one Stop (the past-ruling check, which reads the ruled store and the roadmap through git and makes one model
+# call). A reply that relays questions makes one past-ruling model call for all of them, and two git processes: the
+# ruled-store ls-tree and the roadmap cat-file. A reply with no question starts nothing. A refusal adds no file under
+# the config dir.
+
+TWO_QUESTIONS = RELAY + "\n\n" + "Should the caps stay at 2x?"  # two different questions, not one repeated
+
+
+class CostTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.decided = tcj.make_repo("cost-decided", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+        cls.ci = tcj.CI_REPO  # a roadmap ref, so the two git processes are the ruled-store ls-tree and the roadmap cat-file
+
+    def stop(self, repo, reply, answers, earlier=()):
+        """One Stop after the owner's message: the `earlier` replies, then `reply`, the one the hook reads."""
+        folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        texts = list(earlier) + [reply]
+        path = write_transcript([human("decide")] + [assistant_text(text) for text in texts], folder)
+        hook = json.dumps({"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
+                           "cwd": repo})
+        return cost_probe.run_hook(REPORT_GUARD, hook, folder, answers)
+
+    def test_a_reply_with_no_question_starts_nothing(self):
+        run = self.stop(self.ci, DONE_ONLY, [[{"ok": True}, None]])
+        self.assertEqual((run["models"], run["children"], run["files"]), ([], [], []))
+
+    def test_a_reply_with_one_question_costs_one_model_call_and_two_git_reads(self):
+        run = self.stop(self.ci, RELAY, [[{"ok": True}, None]])
+        self.assertEqual(len(run["models"]), 1, "one question, one past-ruling call; got %r" % run["models"])
+        self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
+                         "two children, the ruled-store ls-tree and the roadmap cat-file; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "an allow writes no file")
+
+    def test_two_relayed_questions_cost_one_model_call_and_two_git_reads(self):
+        run = self.stop(self.ci, TWO_QUESTIONS, [[{"ok": True}, None]])
+        self.assertEqual(len(run["models"]), 1, "both questions share one past-ruling call; got %r" % run["models"])
+        self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
+                         "two children, the ruled-store ls-tree and the roadmap cat-file; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "an allow writes no file")
+
+    def test_a_refused_relayed_question_blocks_once_and_writes_no_file(self):
+        run = self.stop(self.decided, RELAY, [[json.loads(REFUSE_APPS), None]])
+        self.assertEqual(len(run["models"]), 1)
+        self.assertEqual(json.loads(run["out"]).get("decision"), "block", "the ruling blocks the Stop once")
+        self.assertEqual(run["files"], [], "a past-ruling block writes no file under the config dir")
+
+    def test_a_question_in_an_earlier_reply_costs_one_model_call_and_two_git_reads(self):
+        run = self.stop(self.ci, DONE_ONLY, [[{"ok": True}, None]], earlier=[RELAY])
+        self.assertEqual(len(run["models"]), 1,
+                         "the question in an earlier reply is judged once; got %r" % run["models"])
+        self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
+                         "two children, the ruled-store ls-tree and the roadmap cat-file; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "an allow writes no file")
+
+    def test_replies_with_no_question_since_the_owner_message_start_nothing(self):
+        run = self.stop(self.ci, DONE_ONLY, [[{"ok": True}, None]], earlier=[DONE_ONLY])
+        self.assertEqual((run["models"], run["children"], run["files"]), ([], [], []))
 
 
 if __name__ == "__main__":
