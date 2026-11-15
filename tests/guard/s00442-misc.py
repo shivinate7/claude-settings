@@ -958,8 +958,11 @@ else:
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
                  count_file=None, compares=None, repos=None, refs=(), tips=None, head_sha=None, head_ref=None,
-                 draft=False, comments=None, commits=None):
+                 draft=False, comments=None, commits=None, head_repo=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
+
+    `head_repo`, when given, is the `owner/name` the head branch of the pull request lives in, as GitHub names it in
+    head.repo.full_name: a fork's pull request names the fork. None leaves the head with no repo, as before.
 
     `comments`, when given, is the list of issue comments the comment reads answer (the repo's `issues/comments` and one
     issue's `issues/<n>/comments`), each a dict with `issue_url`, `body`, `created_at`, `updated_at`, `user` and
@@ -1050,6 +1053,8 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     if head_sha:  # the pull request's own head, when a case names a real commit (records-page-ready); its draft flag too
         state["pr"]["head"] = {"ref": head_ref or "feat", "sha": head_sha}
         state["pr"]["draft"] = draft
+        if head_repo:  # a fork's head: GitHub names the repo the head branch lives in
+            state["pr"]["head"]["repo"] = {"full_name": head_repo}
     write(os.path.join(folder, "state.json"), json.dumps(state))
     write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
     fake_py = os.path.join(folder, "ghfake.py")
