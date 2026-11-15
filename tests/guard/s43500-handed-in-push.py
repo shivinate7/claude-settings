@@ -5,8 +5,9 @@ FAMILY = "handed-in-push"  # a push to a pull request's branch (roadmap step han
 # against the live head: the record is for an older head, and no clean merge of main and no records-page commit of the merge
 # tool carries it to the live head. The live head is the pull request's head on GitHub before the push, the head the lane
 # pushes from. A record for the live head (a FAIL round too) passes, so the fix push after a posted FAIL round is allowed.
-# A pull request with no record at all passes: its first round is the known gap of option a. A read that cannot run is
-# refused unknown (decision guard-hooks-fail-closed), never allowed as clear and never named as a missing record.
+# A pull request with no record at all passes: its first round is the known gap of option a. A PR-list read that cannot run
+# lets the push pass, and a read after a pull request is found that cannot run is refused unknown (decision
+# guard-hooks-fail-closed), never allowed as clear and never named as a missing record.
 #
 # THE FIXTURE. A bare origin with feat (Z, A, B), feat-merge (a clean merge M of main into B), feat-page (a page-only commit
 # P on A), feat-three (C, one commit on B) and main, which moves on after feat is cut. A bare backup beside it is a second
