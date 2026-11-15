@@ -33,6 +33,9 @@ from guard_env import _quoted_words, _substitutions, script_spots
 CONFIG_FROZEN_FILES = (
     os.path.normcase("settings.json"),
     os.path.normcase("CLAUDE.md"),
+    # The link itself (decision install-hooks-whole): the DIRS entry below covers what is under it, and
+    # only this exact name covers a write to the name when the link is absent.
+    os.path.normcase(".cs-current"),
 )
 # This tuple is a literal on purpose, not a read of landed-dirs.txt at the repo root (the
 # manifest install.sh and install.ps1 both read). A frozen-path list read from a file shrinks
