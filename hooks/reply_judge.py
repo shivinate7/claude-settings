@@ -12,7 +12,8 @@ hook again. This file passes its own accepted answer, `{"ok": true|false}`.
 Sampling: the judge runs on Stop n of a session (counting only Stops that carry a reply) when (n - 1) % 5 == 0. A skipped Stop returns
 at once with no model call and no output. The count is a file per session under the state folder.
 
-Input Needed: a reply with an Input Needed item is judged on every Stop, besides the sample, so
+Input Needed: a reply with an Input Needed item (a none-led note that offers no pick and has no "?"
+outside quotes and backticks is no item) is judged on every Stop, besides the sample, so
 each handed-off step is checked for its reason and the check. It is also checked for a pick that can
 be undone, which the session takes and does not ask (rule questions-go-to-owner). The label is read in code, not by the
 model, from lint/report_guard.py LABEL_ORDER (the one home; lint/ lands beside hooks/). If that
@@ -78,7 +79,7 @@ COUNT_SUB = "reply-judge"  # <config dir>/state/reply-judge/<sha256 of session_i
 LEAD = re.compile(r"^[\s>]*(?:\*\*)?\s*")
 TAIL = re.compile(r"^\s*(?:\*\*)?\s*:?\s*(?:\*\*)?\s*")
 EMPTY_ITEM = re.compile(r"^[\W_]*(none|n/a|nothing)?[\W_]*$", re.I)
-NONE_LED = re.compile(r"^[\W_]*(none|n/a|nothing)\b", re.I)  # "None, with a note": empty unless the note asks
+NONE_LED = re.compile(r"^[\W_]*(none|n/a|nothing)\b", re.I)  # "None, with a note": empty unless the note offers a pick or asks
 TABLE_SEPARATOR = re.compile(r"^[\s>]*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$", re.M)
 BLOCKED_ON = re.compile(r"\bblocked\s+on\b", re.I)
 # \b counts "_" as a word character, so it would miss search_issues; these bounds take "_" as a break
@@ -276,7 +277,7 @@ def count_this_stop(session_id):
 
 def has_input_needed(reply):
     """True when the reply has an Input Needed label line with an item that is not empty or none. A none-led
-    note counts only when it asks. A reply with no such words returns False before report_guard loads. If LABEL_ORDER cannot be
+    note counts only when it offers a pick or asks. A reply with no such words returns False before report_guard loads. If LABEL_ORDER cannot be
     read, return True (judge this Stop) and print one stderr line."""
     if "input needed" not in reply.casefold():
         return False
@@ -284,7 +285,7 @@ def has_input_needed(reply):
         lint = os.path.join(HERE, "..", "lint")
         if lint not in sys.path:
             sys.path.append(lint)
-        from report_guard import LABEL_ORDER, QUESTION_MARK_RE, QUOTED_RE
+        from report_guard import LABEL_ORDER, QUESTION_MARK_RE, QUOTED_RE, offers_a_pick
         want = next(l for l in LABEL_ORDER if "input" in l.casefold()).casefold()
         labels = {l.casefold() for l in LABEL_ORDER}
     except Exception as exc:
@@ -305,8 +306,8 @@ def has_input_needed(reply):
     text = " ".join(item)
     if EMPTY_ITEM.match(text):
         return False
-    if NONE_LED.match(text):  # the note holds an item only when it asks, by a "?" outside quotes and backticks
-        return bool(QUESTION_MARK_RE.search(QUOTED_RE.sub("", text)))
+    if NONE_LED.match(text):  # the note holds an item only when it offers a pick or has a "?" outside quotes and backticks
+        return offers_a_pick(reply) or bool(QUESTION_MARK_RE.search(QUOTED_RE.sub("", text)))
     return True
 
 
