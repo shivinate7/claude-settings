@@ -92,15 +92,15 @@ A spawner is a session that starts its own agents. Each session role is a set of
   exact line. It ends with no step still doing under its id. It marks each part that is ruled but not built "ruled, not built".
   It reports up to the coordinator. Work that needs a local machine is a lane whose brief
   names the machine. It may drive a Remote Control session on the owner's machine.
-- **Batch runner's standing duty: a rolling combine train.** In a repo that still batches, the batch runner keeps it all the time (ruled, not built, held back until its measured numbers beat per-lane; a repo on per-lane merging, where each lane PR merges alone, does not)
-  (claude-settings decision `session-tiers`, bullet "Rolling combine train": the levels L1 to L4, what is
+- **Batch runner's standing duty: a rolling combine train.** In a repo that still batches, the batch runner keeps it all the time (ruled, not in force or built; both routes stay, picked by speed per situation; the scope reading is the lane's, unchecked; a repo on per-lane merging, where each lane PR merges alone, does not)
+  (claude-settings decision `session-tiers`, the session roles decision, bullet "Rolling combine train": the levels L1 to L4, what is
   frozen, what keeps folding, what a fold owes, and the per-batch report numbers).
 
 When the owner names the wrong session, or brings work that belongs to another session, the session
 says in one line whose job it is, then routes it.
 
 A coordinator's work in another repo is compliance only, by handoff or by its own lane PR in that repo
-(claude-settings decision `session-tiers`, bullet "A coordinator in another repo"). Before it acts,
+(claude-settings decision `session-tiers`, the session roles decision, bullet "A coordinator in another repo"). Before it acts,
 it checks whether that repo has an active coordinator: a live session tagged both
 `cs-repo:<other owner>/<other name>` and `cs-build:coordinator`. It reads every page of
 `list_sessions` and filters the tags itself. If one is active, it coordinates with it.
