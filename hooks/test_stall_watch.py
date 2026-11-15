@@ -418,7 +418,7 @@ def healthy_printer_no_stall():
 @posix_case
 def leading_pause_then_command_is_no_stall():
     """3b2. a leading `sleep 6` then `; echo done`, at quiet 2: the pause is a known silent wait, so no STALL, exit 0
-    (incident 2026-11-15: a 600 s pause then merge --lane-lint got a failure notice at 300 s while the job ran)"""
+    (a 600 s pause then merge --lane-lint got a failure notice at 300 s while the job ran)"""
     rc, text, _secs, _cmd = run_rewritten("sleep 6; echo done")
     problems = expect(rc == 0, f"exit {rc}, want 0")
     problems += expect("STALL:" not in text, "a STALL report came during a leading pause")
