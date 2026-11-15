@@ -42,6 +42,12 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   the batch runner that merges (cs-build:batch-runner), and the pull request the relay names. Its
   Never covers names each act in RELAYED_MERGE_REFUSED, the reason flags, and a session not tagged
   cs-build:batch-runner (decision `auto-mode-owner-acts`).
+- One "Consultant Relayed Merge Yes:" entry quotes the same derived merge command with the head flag.
+  Its Covers text names the consultant that relays (cs-build:consultant), the triage session the relay
+  may pass through (cs-build:triage), the batch runner that merges (cs-build:batch-runner), and the pull
+  request the relay names. Its Never covers names each act in CONSULTANT_MERGE_REFUSED, the reason flags,
+  a head the relay did not name, a merge with no `--head`, and a session not tagged cs-build:batch-runner
+  (decision `auto-mode-owner-acts`).
 - One "Batch Runner Merge:" entry quotes the same derived merge command with the head flag
   (`--head <sha>`) in its Covers text. Its Covers text names the coordinator that sends the merge go
   (cs-build:coordinator), the batch runner (cs-build:batch-runner), `merge go`, and the pull request
@@ -82,6 +88,7 @@ ARCHIVE = "Archived Branch Delete:"
 OWNER_PR = "Owner PR Housekeeping:"
 RELAYED = "Relayed Grant:"
 RELAYED_MERGE = "Relayed Merge Yes:"
+CONSULTANT_MERGE = "Consultant Relayed Merge Yes:"
 BATCH_MERGE = "Batch Runner Merge:"
 MERGE_REVIEW_LOG = "Merge Review Record:"
 MERGE_TOOL_READ = "Merge Tool Read Checks:"
@@ -142,8 +149,13 @@ RELAYED_MERGE_REFUSED = (("another pull request", "another pull request"),
                          ("review", "review"), ("admin", "admin"), ("force push", "force[- ]push"),
                          ("permissions", "permission"), ("settings", "setting"),
                          ("overrides", "override"), ("any other act", "any other act"))
+# The Consultant Relayed Merge Yes entry refuses the same acts as Relayed Merge Yes, except the coordinator-relay
+# clause, which names the consultant and the triage session instead.
+CONSULTANT_MERGE_REFUSED = tuple(item for item in RELAYED_MERGE_REFUSED if item[0] != "not tagged cs-build:coordinator") + (
+    ("a relay from a session not tagged consultant or triage",
+     r"a relay from a session not tagged `cs-build:consultant` or `cs-build:triage`"),)
 # Each act the Batch Runner Merge entry's "Never covers" sentence must name (decision `auto-mode-owner-acts`).
-BATCH_MERGE_REFUSED = (("not tagged cs-build:batch-runner", "not tagged `cs-build:batch-runner`"),
+BATCH_MERGE_REFUSED =(("not tagged cs-build:batch-runner", "not tagged `cs-build:batch-runner`"),
                        ("nobody named", "nobody named"),
                        ("failing", "failing"), ("running", "running"), ("approval", "approv"),
                        ("review", "review"), ("admin", "admin"), ("force push", "force[- ]push"),
@@ -536,6 +548,78 @@ class RelayedMergeYesIsAllowed(unittest.TestCase):
         clause = never_covers(self.relayed_merge_entry())
         flag = head_flag()
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Merge Yes entry")
+        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the relayed head")
+        self.assertIn("a merge with no `%s`" % flag, clause,
+                      "Never covers does not name a merge with no `%s`" % flag)
+
+
+class ConsultantRelayedMergeYesIsAllowed(unittest.TestCase):
+    def consultant_merge_entry(self):
+        """The one Consultant Relayed Merge Yes entry, asserting first that there is exactly one."""
+        entry = allow_entry(CONSULTANT_MERGE)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % CONSULTANT_MERGE)
+        return entry
+
+    def test_one_entry_names_the_consultant_relayed_merge_yes(self):
+        self.assertIn("$defaults", auto_mode().get("allow", []), "autoMode.allow lost $defaults")
+        self.consultant_merge_entry()
+
+    def test_entry_quotes_the_merge_command(self):
+        entry = self.consultant_merge_entry()
+        command, flag = merge_command(), head_flag()
+        self.assertIsNotNone(command, "merge/cloud_allow.json must hold exactly one --confirm merge rule")
+        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the relayed head")
+        self.assertIn("`%s %s <sha>`" % (command, flag), bounds_text(entry),
+                      "Covers text must quote the merge command with the head flag and <sha> for the relayed head")
+
+    def test_covers_names_the_consultant_tag(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("cs-build:consultant", bounds_text(entry),
+                      "Covers text must require a relay from a session tagged cs-build:consultant")
+
+    def test_covers_names_the_triage_tag(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("cs-build:triage", bounds_text(entry),
+                      "Covers text must allow the relay to pass through a session tagged cs-build:triage")
+
+    def test_covers_names_the_batch_runner_that_merges(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("cs-build:batch-runner", bounds_text(entry),
+                      "Covers text must name cs-build:batch-runner as the session that merges")
+
+    def test_covers_names_the_pull_request_the_relay_names(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("the pull request the relay names", bounds_text(entry),
+                      "Covers text must say the pull request the relay names")
+
+    def test_never_covers_names_a_batch_runner_not_tagged(self):
+        clause = never_covers(self.consultant_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Consultant Relayed Merge Yes entry")
+        self.assertIn("not tagged `cs-build:batch-runner`", clause,
+                      "Never covers does not name a session not tagged cs-build:batch-runner")
+
+    def test_never_covers_names_each_refused_act(self):
+        clause = never_covers(self.consultant_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Consultant Relayed Merge Yes entry")
+        missing = unnamed_terms(clause, CONSULTANT_MERGE_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+    def test_never_covers_names_the_reason_flags(self):
+        clause = never_covers(self.consultant_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Consultant Relayed Merge Yes entry")
+        missing = unnamed_terms(clause, REASON_FLAGS_REFUSED)
+        self.assertFalse(missing, "Never covers does not name the reason flags %r" % missing)
+
+    def test_never_covers_names_a_head_the_relay_did_not_name(self):
+        clause = never_covers(self.consultant_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Consultant Relayed Merge Yes entry")
+        self.assertIn("a head the relay did not name", clause,
+                      "Never covers does not name a head the relay did not name")
+
+    def test_never_covers_names_a_merge_with_no_head_flag(self):
+        clause = never_covers(self.consultant_merge_entry())
+        flag = head_flag()
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Consultant Relayed Merge Yes entry")
         self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the relayed head")
         self.assertIn("a merge with no `%s`" % flag, clause,
                       "Never covers does not name a merge with no `%s`" % flag)
