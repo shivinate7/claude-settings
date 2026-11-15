@@ -144,7 +144,7 @@ test("Blocking: age breaks a tie in stops and rank", async (t) => {
   const older = blk("age-old", 1, { added: at(1), stops: ["lane a"] });
   const newer = blk("age-new", 2, { added: at(5), stops: ["lane b"] });
   const page = await open(t, { items: [older, newer] }); if (!page) return;
-  assert.deepEqual(await tierIds(page, "holds"), [older.id, newer.id]);
+  assert.deepEqual(await tierIds(page, "holds"), [newer.id, older.id]);
 });
 
 test("Blocking: an item with holds and no stops counts zero, so it sits after the counted ones", async (t) => {
@@ -188,7 +188,7 @@ test("Upcoming and Whenever keep their own keys, and ignore stops", async (t) =>
   const calmNew = mk("calm-new-stops", 4, { added: at(5), stops: ["lane a", "lane b", "lane c"] });
   const page = await open(t, { items: [soon, soonerStops, calmOld, calmNew] }); if (!page) return;
   assert.deepEqual(await tierIds(page, "due"), [soon.id, soonerStops.id], "Upcoming is not nearest deadline first");
-  assert.deepEqual(await tierIds(page, "calm"), [calmOld.id, calmNew.id], "Whenever is not oldest first");
+  assert.deepEqual(await tierIds(page, "calm"), [calmNew.id, calmOld.id], "Whenever is not newest first (owner ruling page-newest-first, 2026-11-12 21:37 CST)");
 });
 
 // ---------------------------------------------------------------- the order is worked out at load and kept
@@ -254,9 +254,9 @@ test("each tier head has one line that names its key, and the line shows once on
   const calm = mk("key-calm", 3, { added: at(3) });
   const page = await open(t, { items: [held, due, calm] }); if (!page) return;
   const keys = [
-    ["holds", /Most stopped work first, then triage['’]s order, then oldest\./i],
-    ["due", /Triage['’]s order first, then nearest deadline, then oldest\./i],
-    ["calm", /Triage['’]s order first, then decisions, then oldest\./i],
+    ["holds", /Most stopped work first, then triage['’]s order, then newest\./i],
+    ["due", /Triage['’]s order first, then nearest deadline, then newest\./i],
+    ["calm", /Triage['’]s order first, then decisions, then newest\./i],
   ];
   for (const [k] of keys) assert.equal(await page.locator(`#tier-${k}`).count(), 1, `no tier-${k} section on the page`);
   const body = await page.evaluate(() => document.body.innerText);
@@ -349,7 +349,7 @@ test("when the repo meta read fails the page settles, and repo-less items alone 
   const page = await open(t, { items: [first, second], failMeta: true }); if (!page) return;
   await page.waitForFunction("window.__metaFailed === true");
   assert.doesNotMatch(await page.locator("#list").innerText(), /Loading the items waiting on you/, "the loading line still shows after the repo meta read failed");
-  assert.deepEqual(await tierIds(page, "holds"), [first.id, second.id], "the repo-less items are not drawn in tier order after the failed meta read");
+  assert.deepEqual(await tierIds(page, "holds"), [second.id, first.id], "the repo-less items are not drawn in tier order after the failed meta read");
   assert.equal(await page.locator(".subgrp, .subhead").count(), 0, "a repo head is drawn for repo-less items alone after the failed meta read");
   assert.doesNotMatch(await page.locator("#tier-holds .tsub").innerText(), /This repo first\./, "the key line says 'This repo first.' with repo-less items alone");
 });
@@ -386,7 +386,7 @@ test("a meta that never answers: after the page's 10 s wait it treats the meta a
   const second = blk("silent-b", 2, { added: at(2) });
   const page = await open(t, { items: [first, second], meta: META, holdMeta: true, clock: true }); if (!page) return;
   await page.clock.runFor(META_WAIT_MS);
-  await assertDrawnRepoless(page, [first.id, second.id], "after 10 s of fake time (db.d.ts: about 10 s)");
+  await assertDrawnRepoless(page, [second.id, first.id], "after 10 s of fake time (db.d.ts: about 10 s)");
 });
 
 test("control: with the fake clock on and the meta answered, the same items draw the same list", async (t) => {
@@ -394,7 +394,7 @@ test("control: with the fake clock on and the meta answered, the same items draw
   const second = blk("answered-b", 2, { added: at(2) });
   const page = await open(t, { items: [first, second], meta: META, clock: true }); if (!page) return;
   await page.clock.runFor(META_WAIT_MS);
-  await assertDrawnRepoless(page, [first.id, second.id], "with the meta answered, after 10 s of fake time");
+  await assertDrawnRepoless(page, [second.id, first.id], "with the meta answered, after 10 s of fake time");
 });
 
 test("a late meta after the 10 s wait moves no drawn card and adds or removes no repo head", async (t) => {
