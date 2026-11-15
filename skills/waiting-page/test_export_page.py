@@ -35,7 +35,7 @@ Contract the page cases assume (the builder builds to it):
     host with no credentials passes.
   --rebuild DIR --batches OUT --collections NAME [NAME ...]. The named collections are the only folders allowed besides
     page/, and a batch entry's `collection` is its folder name. A named collection with no folder is empty. A folder not
-    named is unknown, exit 2, even one of the five waiting collections. Without --collections the five are allowed.
+    named is unknown, exit 2, even one of the six waiting collections. Without --collections the six are allowed.
     --collections without --rebuild, or a name that is not a collection slug, is a usage error: exit 2, an argparse
     `error:` line, nothing written. The error for --collections without --rebuild names --rebuild.
   --merge COPY --live LIVE --batches OUT [--collections NAME ...] [--live-page PATH]. COPY holds the --rebuild layout.
@@ -1282,6 +1282,29 @@ class Receipts(Base):
                          "control: the item the fetch no longer lists was kept, so the mirror delete did not run")
         self.assertChanged(r, 2)  # one receipt written and one item deleted; the archived receipt counts for nothing
 
+    def export_in_process(self, fetched, out):
+        """export() with receipts among its collections and no design block, run in this process. A Stop is a failure."""
+        try:
+            return export_page.export(fetched, out, None, (), collections=("items", "receipts"), design=False)
+        except export_page.Stop as stop:
+            self.fail("export(design=False) stopped: %s" % stop)
+
+    def test_a_receipt_the_fetch_lacks_stays_when_the_export_runs_without_its_design_block(self):
+        """Append-only follows the collection name, not the design flag: export(design=False) with receipts among its
+        collections keeps an archived receipt. Items still mirror-delete, the control."""
+        out = self.out()
+        self.export_in_process(self.fetch(folders={"items": {"item-001": item(1), "item-gone": item(9)},
+                                                   "receipts": {"item-001": receipt(1), "item-002": receipt(2)}}), out)
+        self.assertTrue(os.path.isfile(os.path.join(out, "receipts", "item-002.json")),
+                        "scope: the copy holds no receipts/item-002.json to archive")
+        self.assertTrue(os.path.isfile(os.path.join(out, "items", "item-gone.json")),
+                        "scope: the copy holds no items/item-gone.json for the control")
+        self.export_in_process(self.fetch(folders={"items": {"item-001": item(1)}, "receipts": {"item-001": receipt(1)}}), out)
+        self.assertTrue(os.path.isfile(os.path.join(out, "receipts", "item-002.json")),
+                        "export(design=False) deleted an archived receipt the fetch no longer lists")
+        self.assertFalse(os.path.exists(os.path.join(out, "items", "item-gone.json")),
+                         "control: the item the fetch no longer lists was kept, so the mirror delete did not run")
+
     def test_an_emptied_receipts_fetch_is_unknown_unless_named_and_the_archive_stays(self):
         out = self.out()
         full = self.fetch(items={"item-001": item(1)}, receipts={"item-001": receipt(1)})
@@ -1921,7 +1944,7 @@ class Rebuild(Base):
     def test_merge_of_a_full_size_copy_into_an_empty_live_page_writes_every_doc(self):
         data = full_size()
         copy = self.exported(data, page=False)  # no page, so no designData: the merge needs no --live-page here
-        live = self.fetch()  # five empty collections, each with its marker
+        live = self.fetch()  # six empty collections, each with its marker
         batches = os.path.join(self.tmp.name, "batches")
         r = self.merge_run(copy, live, batches)
         self.assertMergeSummary(r, 3, 133, 0, 0)
@@ -3424,16 +3447,16 @@ class RepublishChecksFirst(Base):
 
 class WaitingCollectionsRun(Copied):
     """--all with one registry entry `entry_id` of `role`, whose own `collections` is `collections` (None: no list, so the
-    waiting page gets the default five). The fetched page holds `items`, `answers` and the page with item 292's mockups.
-    Returns (the run, the worktree)."""
+    waiting page gets the default six). The fetched page holds `items`, `answers`, `receipts` and the page with item 292's
+    mockups. Returns (the run, the worktree)."""
 
-    def run_all(self, collections, items, answers=None, role="waiting-page", entry_id="page01"):
+    def run_all(self, collections, items, answers=None, role="waiting-page", entry_id="page01", receipts=None):
         root = os.path.join(self.tmp.name, "repo")
         entry = {"id": entry_id, "url": "https://claude.ai/artifact/" + entry_id, "role": role, "account": "work"}
         if collections is not None:
             entry["collections"] = list(collections)
         write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "artifacts": [entry]}))
-        folder = self.fetch(items=items, answers=answers, meta={"page": META})
+        folder = self.fetch(items=items, answers=answers, meta={"page": META}, receipts=receipts)
         write_bytes(os.path.join(folder, "page.html"), page_with_mockups(MOCKS_292).encode("utf-8"))
         fetched = os.path.join(self.tmp.name, "fetched-collections")
         os.makedirs(fetched)
@@ -3476,6 +3499,18 @@ class WaitingCollections(WaitingCollectionsRun):
         checks = [line for line in verdict_lines(r) if "checks" in line]
         self.assertEqual(checks, [], "a queue page with no waiting role was given a check line. Output:\n" + shown(r))
         self.assertEqual(r.returncode, 0, "a queue page with a plain item must exit 0. Output:\n" + shown(r))
+
+
+    def test_a_waiting_entry_listing_the_old_five_still_exports_its_receipts(self):
+        """The waiting page always exports receipts. An explicit list of the old five, with no receipts, does not drop them:
+        the registry adds receipts to the waiting role's list."""
+        r, worktree = self.run_all(("items", "answers", "groups", "asks", "meta"), {"plain": item(1)},
+                                   receipts={"plain": receipt(1)})
+        waiting = os.path.join(worktree, "waiting")
+        self.assertTrue(os.path.isfile(os.path.join(waiting, "items", "plain.json")),
+                        "scope: the waiting page's item did not export. Output:\n" + shown(r))
+        self.assertTrue(os.path.isfile(os.path.join(waiting, "receipts", "plain.json")),
+                        "the waiting page's explicit list of the old five dropped its receipts. Output:\n" + shown(r))
 
 
 class WaitingCollectionsHold(WaitingCollectionsRun, PictureChecks):

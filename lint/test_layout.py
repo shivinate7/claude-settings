@@ -960,7 +960,7 @@ class Registry(Tree):
         self.assertEqual(found[0]["export"], "artifacts/queue02", "a page-only entry does not export to artifacts/<id>")
 
     def test_a_waiting_page_entry_with_empty_collections_is_still_refused_and_named(self):
-        """Control: the waiting page exports its five collections, so an empty list on its role is refused, not read."""
+        """Control: the waiting page exports its six collections, so an empty list on its role is refused, not read."""
         self.registry([self.page_entry(collections=[])])
         self.assertReported("page01", "a waiting-page entry with collections []")
 
