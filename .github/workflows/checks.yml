@@ -352,6 +352,9 @@ jobs:
       - name: Checks step scope suite
         run: python3 lint/test_checks_step_scope.py
 
+      - name: Guard inputs list fixture suite
+        run: python3 lint/test_guard_inputs.py
+
       - name: Touched-test selector fixture suite
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_touched_tests.py
