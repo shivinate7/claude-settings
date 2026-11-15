@@ -16,6 +16,7 @@ note=<json string> when the answer has a note (exit 0).
   unknown: <reason>                                                      exit 2 (no readable registry, a fetched file not one JSON object)
 The rules are SKILL.md "Read the answers" ("A decision answer is clear only when") and "Route and close".
 """
+import importlib.util
 import json
 import os
 import shutil
@@ -40,6 +41,7 @@ NOTES_URL = "https://claude.ai/artifact/" + NOTES_ID
 OTHER_URL = "https://claude.ai/artifact/Zz9Qq1Ww2Ee3Rr4T"  # an artifact link that the registry does not hold
 ITEM_ID = "review-fix-check-go"
 ITEM_N = 231
+LANE = "owner-word-relay"  # the lane a routed close names: the item's `lane`, and the --as-lane a routing session passes
 ADDED = "2026-11-04T12:00:00Z"  # the item's `added`, before the answer
 AT = "2026-11-04T13:56:29.078Z"  # the answer's `at`, as the live answer of item 231 holds it
 ABSENT = object()  # set a field to ABSENT to leave it out of a fixture
@@ -79,7 +81,7 @@ def answer(**fields):
 def routed(**fields):
     """Item 231 as a routed close holds it: closed, with `home` and `lane` set and `lastAnswer` at this answer's `at`. A case
     gives one field to change it, or ABSENT to leave it out, so each refusal is for that one condition alone."""
-    doc = {"status": "closed", "home": "answered-leaves-page", "lane": "owner-word-relay",
+    doc = {"status": "closed", "home": "answered-leaves-page", "lane": LANE,
            "lastAnswer": {"choice": "a", "note": "", "at": AT}}
     doc.update(fields)
     return doc
@@ -133,6 +135,20 @@ def snapshot(folder):
     return out
 
 
+def load_checker():
+    """The checker as a module, for the constants settings.json's Relayed Grant entry is pinned to (COMMAND). Bytecode is
+    not written, so the load leaves no __pycache__ beside the script."""
+    spec = importlib.util.spec_from_file_location("page_grant_under_test", CMD)
+    module = importlib.util.module_from_spec(spec)
+    was = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = was
+    return module
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: never the system temp dir
@@ -174,10 +190,12 @@ class Base(unittest.TestCase):
         return self.fetch(items={ITEM_ID: item(**(item_fields or {}))},
                           answers={ITEM_ID: answer(**(answer_fields or {}))})
 
-    def check(self, root, fetched, page=PAGE_URL, item_id=ITEM_ID, pick=PICK):
+    def check(self, root, fetched, page=PAGE_URL, item_id=ITEM_ID, pick=PICK, as_lane=None):
         args = [sys.executable, CMD, "--root", root, "--page-url", page, "--item", item_id, "--fetched", fetched]
         if pick is not None:
             args += ["--pick", pick]
+        if as_lane is not None:  # "" and "   " are given as they are: a blank --as-lane is a value the check refuses
+            args += ["--as-lane", as_lane]
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
         return subprocess.run(args, capture_output=True, text=True, timeout=60, env=env)
 
@@ -252,15 +270,16 @@ class Counted(Base):
         self.assertCounted(r, verdict("a"))
 
     def test_routed_item_closed_with_home_and_matching_last_answer_counted(self):
-        """The busy-lane path closes the item at routing with `home` set, and keeps `lane`, `lastAnswer` and answers/<id>
-        until the receiver's done report. The relayed pick counts while `lastAnswer.at` is the answer's `at`. Red on the old
-        checker, which refuses every closed item but an arbiter overturn."""
-        r = self.check(self.repo(), self.pair(item_fields=routed()), pick="a")
+        """The busy-lane path closes the item at routing with `home` and `lane` set, and keeps `lastAnswer` and answers/<id>
+        until the receiver's done report. The routing session passes --as-lane equal to the item's lane, and the relayed
+        pick counts while `lastAnswer.at` is the answer's `at`."""
+        r = self.check(self.repo(), self.pair(item_fields=routed()), pick="a", as_lane=LANE)
         self.assertCounted(r, verdict("a"))
 
     def test_routed_item_with_no_arbiter_field_counted(self):
-        """`arbiter` not true is the rule: an absent `arbiter` is not true, so a routed item without the field counts. Red on the old checker."""
-        r = self.check(self.repo(), self.pair(item_fields=routed(arbiter=ABSENT)), pick="a")
+        """`arbiter` not true is the rule: an absent `arbiter` is not true, so a routed item without the field counts,
+        with --as-lane equal to its lane."""
+        r = self.check(self.repo(), self.pair(item_fields=routed(arbiter=ABSENT)), pick="a", as_lane=LANE)
         self.assertCounted(r, verdict("a"))
 
     def test_item_with_no_status_field_counted(self):
@@ -519,6 +538,59 @@ class NotCounted(Base):
         r = self.check(self.repo(), self.pair(item_fields={"kind": "task", "options": []},
                                               answer_fields={"choice": ABSENT, "done": True}), pick="done")
         self.assertNotCounted(r, "task answer with done true", reason="task")
+
+
+class AsLane(Base):
+    """Ruling own-844-a-page-grant-as-lane-flag (owner, 19:56 CST Nov 14): rule 4 counts a routed close only when --as-lane
+    equals the item's lane. An open item and a closed arbiter overturn need no --as-lane and count as they do today."""
+
+    def test_routed_close_with_as_lane_equal_to_its_lane_counted(self):
+        r = self.check(self.repo(), self.pair(item_fields=routed()), pick="a", as_lane=LANE)
+        self.assertCounted(r, verdict("a"))
+
+    def test_routed_close_with_as_lane_equal_to_its_lane_on_full_size_registry_counted(self):
+        r = self.check(self.repo(artifacts=full_registry()), self.pair(item_fields=routed()), pick="a", as_lane=LANE)
+        self.assertCounted(r, verdict("a"))
+
+    def test_routed_close_with_as_lane_of_another_lane_not_counted(self):
+        """Scope first: the same routed close counts with its own lane, so the refusal below is for the lane alone. The
+        refusal names the lane mismatch: the word `lane`, and the lane the flag gave or the item's lane."""
+        self.assertCounted(self.check(self.repo(), self.pair(item_fields=routed()), pick="a", as_lane=LANE), verdict("a"))
+        r = self.check(self.repo(), self.pair(item_fields=routed()), pick="a", as_lane="other-lane")
+        self.assertNotCounted(r, "routed close with --as-lane of another lane", reason="lane")
+        line = r.stdout.strip()
+        self.assertTrue("other-lane" in line or LANE in line, "the refusal names neither lane: %r" % line)
+
+    def test_routed_close_with_no_as_lane_not_counted(self):
+        """A routed close counts only with --as-lane, so one with the flag left out is refused, and the refusal names the flag."""
+        r = self.check(self.repo(), self.pair(item_fields=routed()), pick="a")
+        self.assertNotCounted(r, "routed close with no --as-lane", reason="as-lane")
+
+    def test_routed_close_with_blank_as_lane_not_counted(self):
+        r = self.check(self.repo(), self.pair(item_fields=routed()), pick="a", as_lane="")
+        self.assertNotCounted(r, "routed close with --as-lane empty", reason="lane")
+
+    def test_routed_close_with_whitespace_as_lane_not_counted(self):
+        r = self.check(self.repo(), self.pair(item_fields=routed()), pick="a", as_lane="   ")
+        self.assertNotCounted(r, "routed close with --as-lane of spaces", reason="lane")
+
+    def test_closed_arbiter_overturn_on_a_routed_item_counted_without_as_lane(self):
+        """An arbiter overturn needs no --as-lane, even when the item holds a lane and a home."""
+        last = {"choice": "overturn", "note": "", "at": AT}
+        r = self.check(self.repo(), self.pair(item_fields=routed(arbiter=True, lastAnswer=last),
+                                              answer_fields={"choice": "overturn"}), pick="overturn")
+        self.assertCounted(r, verdict("overturn"))
+
+    def test_as_lane_is_in_command(self):
+        """COMMAND is the line settings.json's Relayed Grant entry quotes, so the flag belongs in it."""
+        command = load_checker().COMMAND
+        self.assertIn("--as-lane", command.split(), "page_grant.COMMAND does not quote --as-lane: %r" % command)
+
+    def test_as_lane_is_in_help(self):
+        r = subprocess.run([sys.executable, CMD, "--help"], capture_output=True, text=True, timeout=60,
+                           env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+        self.assertEqual(r.returncode, 0, "--help failed: stderr %r" % r.stderr)
+        self.assertIn("--as-lane", r.stdout, "--help does not list --as-lane")
 
 
 class Provenance(Base):
