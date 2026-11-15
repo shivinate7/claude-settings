@@ -459,17 +459,19 @@ class StoreStateTests(unittest.TestCase):
 class CostTests(unittest.TestCase):
     def test_a_message_with_no_claim_starts_no_process(self):
         module = load_helper(self)
-        assert_refused(self, send(self, CLAIM, refusing()), "874", CLAIM)  # scope: the store would refuse a claim
+        repo = refusing()  # built before the block: its git starts are not the check's
+        assert_refused(self, send(self, CLAIM, repo), "874", CLAIM)  # scope: the store would refuse a claim
         with cost_probe.children() as log:
-            result = module.answered_claim_hit(TOOL, {"session_id": SESSION, "message": NO_CLAIM}, refusing())
+            result = module.answered_claim_hit(TOOL, {"session_id": SESSION, "message": NO_CLAIM}, repo)
         assert_allowed(self, result, NO_CLAIM)
         self.assertEqual(log.argvs, [], "a message with no claim started %d child process(es): %r"
                          % (len(log.argvs), log.argvs))
 
     def test_a_claim_starts_at_most_two_git_reads(self):
         module = load_helper(self)
+        repo = refusing()  # the fixture's own git starts are built before the block, so only the check's count
         with cost_probe.children() as log:
-            result = module.answered_claim_hit(TOOL, {"session_id": SESSION, "message": CLAIM}, refusing())
+            result = module.answered_claim_hit(TOOL, {"session_id": SESSION, "message": CLAIM}, repo)
         assert_refused(self, result, "874", CLAIM)  # scope first: the claim was judged and refused
         self.assertGreaterEqual(len(log.argvs), 1, "a claim that was refused read no git: the store was not reached")
         self.assertLessEqual(len(log.argvs), 2, "a claim started %d child processes, not at most 2: %r"
@@ -479,9 +481,9 @@ class CostTests(unittest.TestCase):
 
     def test_a_tool_that_is_not_judged_starts_no_process(self):
         module = load_helper(self)
+        repo = refusing()  # built before the block: its git starts are not the check's
         with cost_probe.children() as log:
-            result = module.answered_claim_hit("Bash", {"command": "echo 'item 874 is already answered'"},
-                                               refusing())
+            result = module.answered_claim_hit("Bash", {"command": "echo 'item 874 is already answered'"}, repo)
         assert_allowed(self, result, "echo 'item 874 is already answered'")
         self.assertEqual(log.argvs, [], "a tool that is not judged started %d child process(es)" % len(log.argvs))
 
