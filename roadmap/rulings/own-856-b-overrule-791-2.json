@@ -1,0 +1,16 @@
+{
+ "id": "own-856-b-overrule-791-2",
+ "at": "2026-11-15T11:39:47-06:00",
+ "title": "Item 791 reopens on the owner's typed B: --base-red-ok keeps its no-prompt rule as written in PR 3097, with no revert check first (widening).",
+ "ruling": "Owner, page item 856 (taken-791-2-revert-first), option b, \"Overrule: the ruling reopens\", saved on the page at 11:39 CST Nov 15 (2026-11-15T17:39:47Z), typed on the page, no note. The widening option, chosen knowingly: the item marked it widening (any merge typed with --base-red-ok and a reason runs with no prompt, a widening of a shared check). It overrules the consultant's pick own-791-2-narrow-revert-first and returns to the owner's own typed answer on item 791 (B, option 1, keep as written; saved 01:42 CST Nov 14, note \"ask consultsnt for a or b and why\"). ACT COVERED: PR 3097's settings.json no-prompt rule for --base-red-ok goes ahead as written (ruling own-786-c-base-red-ok-settings), and the build of the merge-tool check that a --base-red-ok PR reverts the breaking merge (lane base-red-ok-checks-revert) is no longer required first. Covers that act only: no other merge flag, no other shared check. A merge onto a red main still needs the revert of the blamed commit by main's rules (git-red-main-reverts); this ruling does not relax that rule, only the tool's own check of it. Any lane work already started on the revert check is not named here; the coordinator decides whether it stands. Reopens if the owner says otherwise.",
+ "quote": "b",
+ "source": "waiting/answers/taken-791-2-revert-first.json (2026-11-15T17:39:47.156Z, choice b, optionId overrule-taken-791-2-revert-first, note empty), read by triage; owner typed on the page.",
+ "status": "open",
+ "supersedes": [
+  {
+   "kind": "ruling",
+   "ref": "own-791-2-narrow-revert-first (the consultant's pick 2, narrow first: a revert check built before the no-prompt rule)"
+  }
+ ],
+ "step": "allow-merge-base-red-ok"
+}

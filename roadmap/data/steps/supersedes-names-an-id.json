@@ -7,8 +7,8 @@
  "lane": "",
  "owner": "coordinator",
  "blockedBy": [],
- "why": "11:39 CST Nov 15 (coordinator, relayed, not read by triage): the coordinator started lane supersedes-names-an-id from item 877 a (owner answer read by the coordinator; ruling own-ruling-names-overtaken-a, roadmap commit 5080cc080). Design reply first; the lane may ask. The coordinator's reading of the owner's note (not owner-typed) is that the check tells rulings apart by exact id. Guard or check: yes. Sonnet, round 1. Lane id not relayed.",
+ "why": "11:39 CST Nov 15 (coordinator, relayed, not read by triage): the coordinator started lane supersedes-names-an-id from item 877 a (owner answer read by the coordinator; ruling own-ruling-names-overtaken-a, roadmap commit 5080cc080). Design reply first; the lane may ask. The coordinator's reading of the owner's note (not owner-typed) is that the check tells rulings apart by exact id. Guard or check: yes. Sonnet, round 1. Lane id not relayed.\n\n11:45 CST Nov 15 (coordinator 11:40 CST, lane words, relayed; triage read no code): the record-vs-later-ruling lane's design: look-alike ids never pair (only an exact id pairs a ruling with the record it overtakes); the verb regex drops only after every ruling carries an exact id.",
  "source": "Coordinator 11:39 CST Nov 15 (relayed, not read by triage)",
  "note": "Doing. Guard or check: yes. Lane id not relayed. Filed 11:40 CST Nov 15.",
- "updatedAt": "2026-11-15T11:40:00-06:00"
+ "updatedAt": "2026-11-15T11:45:00-06:00"
 }

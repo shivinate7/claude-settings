@@ -1,0 +1,11 @@
+{
+ "id": "own-858-a-fix-verifier-ends-review",
+ "at": "2026-11-15T11:39:47-06:00",
+ "title": "A passing fix verifier ends review even when no round is recorded at its head.",
+ "ruling": "Owner, page item 858 (pick-fix-verifier-no-round-recorded), option a, \"A passing fix verifier ends review even when no round is recorded at its head\", saved on the page at 11:39 CST Nov 15 (2026-11-15T17:39:47Z), typed on the page, no note. ACT COVERED: PR 2940 (step review-record-fix-check-reads) merges with main's review rule unchanged: a passing fix check with no round recorded at its head (the log sits at another head or PR, an earlier log carries its own fix check, or a bare hold) reads done, as main's decision pr-review-record, done rules, reads today. The 2940 tests that expect \"open: the fix check passed, but no round is recorded\" expect exactly what this rules out; they re-point, red then green, with this ruling's time cited. Triage's earlier point stands: a round 1 FAIL followed by a passing fix verifier already reads done, so the PR test that expects it open is a plain re-point. Covers this reading only; own-741-a-lint-fix-no-r3 stands for the lint fix after a pass. Reopens if the owner says otherwise.",
+ "quote": "a",
+ "source": "waiting/answers/pick-fix-verifier-no-round-recorded.json (2026-11-15T17:39:47.156Z, choice a, optionId fix-verifier-ends-review-always, note empty), read by triage; owner typed on the page.",
+ "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: own-741-a-lint-fix-no-r3 covers only a lint fix after a passed round and names no no-round case (the item says so); this keeps main's pr-review-record reading as it is, so it widens nothing in code",
+ "step": "review-record-fix-check-reads"
+}

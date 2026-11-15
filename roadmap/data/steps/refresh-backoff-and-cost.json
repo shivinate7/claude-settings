@@ -7,8 +7,8 @@
  "lane": "",
  "owner": "coordinator",
  "blockedBy": [],
- "why": "11:39 CST Nov 15 (coordinator, relayed, not read by triage): the coordinator started a lane for items 870 a and 871 b (owner answers read by the coordinator). Design reply first; stacks on #3487. Guard or check: yes. Sonnet, round 1. Item-owner lane cloud-hooks-stale-copy was told to check its answers for 870, 871 and 866 and write receipts. Lane id not relayed.",
+ "why": "11:39 CST Nov 15 (coordinator, relayed, not read by triage): the coordinator started a lane for items 870 a and 871 b (owner answers read by the coordinator). Design reply first; stacks on #3487. Guard or check: yes. Sonnet, round 1. Item-owner lane cloud-hooks-stale-copy was told to check its answers for 870, 871 and 866 and write receipts. Lane id not relayed.\n\n11:45 CST Nov 15 (coordinator 11:40 CST, lane words, relayed; triage read no code): design reply part 2: the stamp file is written by install.sh, not by the hook; the backoff is a fixed 900 s; the 900 s figure is unmeasured. Guard or check: yes. Stacks on PR 3487.",
  "source": "Coordinator 11:39 CST Nov 15 (relayed, not read by triage)",
  "note": "Doing. Guard or check: yes. Stacks on PR 3487. Lane id not relayed. Filed 11:40 CST Nov 15.",
- "updatedAt": "2026-11-15T11:40:00-06:00"
+ "updatedAt": "2026-11-15T11:45:00-06:00"
 }

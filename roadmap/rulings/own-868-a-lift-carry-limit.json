@@ -1,0 +1,16 @@
+{
+ "id": "own-868-a-lift-carry-limit",
+ "at": "2026-11-15T11:39:47-06:00",
+ "title": "The lane lint carry may also cover a claim or page commit made after a clean merge of main (the owner lifts the limit in own-850-a).",
+ "ruling": "Owner, page item 868 (pick-carry-lint-after-claim), option a, \"Lift the limit: carry the lane lint across a claim or page commit made after a clean merge\", saved on the page at 11:39 CST Nov 15 (2026-11-15T17:39:47Z), typed on the page, no note. The widening option, chosen knowingly: the item marked it widening and the coordinator recommended b (keep the limit). ACT COVERED: lifting the one limit in own-850-a-lane-lint-carries-clean-main-merge that leaves out a claim commit or a page commit made after a clean merge of main (decision lanes-run-no-full-ci-job, PR 3481, cites it). A lint pass then carries over that tree. Every other form own-850-a leaves out stays out: a merge with any other change, a conflict-resolved merge, a merge whose tree differs from git's own merge, an unreadable merge-tree (reads unknown, not carried). The item notes a page commit made BEFORE the merge needs its own ruling; this covers none. The two tests test_b_a_claim_after_a_clean_merge_is_not_carried and test_b_a_records_page_after_a_clean_merge_is_not_carried expect exactly what this lifts; they re-point, red then green, with this ruling's time cited. Guard or check change: review rounds and the net-value test apply. No lane started at filing; the build is the coordinator's act, a new step, not filed here. Reopens if the owner says otherwise.",
+ "quote": "a",
+ "source": "waiting/answers/pick-carry-lint-after-claim.json (2026-11-15T17:39:47.156Z, choice a, optionId lift-carry-limit, note empty), read by triage; owner typed on the page.",
+ "status": "open",
+ "supersedes": [
+  {
+   "kind": "ruling",
+   "ref": "own-850-a-lane-lint-carries-clean-main-merge: its exclusion of a claim or page commit made after a clean merge of main (the 'any other lint-carried form' clause), for that one form only"
+  }
+ ],
+ "step": "lint-carries-page-commit-no-stamp"
+}

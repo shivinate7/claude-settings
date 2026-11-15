@@ -1,0 +1,11 @@
+{
+ "id": "own-855-a-keep-debt-close-route-a",
+ "at": "2026-11-15T11:39:47-06:00",
+ "title": "Route A for debt closes stands: a debt close reads the ready PR's CI result (the owner keeps the coordinator's pick).",
+ "ruling": "Owner, page item 855 (taken-debt-close-route-a), option a, \"Keep: the pick stands\", saved on the page at 11:39 CST Nov 15 (2026-11-15T17:39:47Z), typed on the page, no note. The item closed at 11:41:53 CST (17:41:53Z). ACT COVERED: coord-debt-close-route-a stands as the owner's pick: `--ready` defers a debt close for a draft (\"deferred to confirm: no run exists yet\"); the ready PR's CI step judges every close; `confirm` refuses a missing, running, red, wrong-head or unreadable result. The change to PR 3251's own test for drafts re-points red then green, not deleted, with this ruling's time cited. Covers route A only. The coordinator's reading that this is not a pass on weaker evidence stays unverified by triage.",
+ "quote": "a",
+ "source": "waiting item taken-debt-close-route-a, field lastAnswer (2026-11-15T17:39:47.156Z, choice a, note empty), read by triage. The answers doc for this slug was already cleared when the item closed (collection answers has no taken-debt-close-route-a document); owner typed on the page.",
+ "status": "open",
+ "supersedes_none": "keeps coord-debt-close-route-a as picked; the owner's keep confirms that pick as his own and supersedes no other ruling",
+ "step": "debt-close-reads-ci"
+}
