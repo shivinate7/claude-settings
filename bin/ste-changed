@@ -107,6 +107,10 @@ def pin_report(note=False):
                   "that commit. Fetch claude-settings and run again." % (pin, where), file=sys.stderr)
         elif _nowindow.run(["git", "-C", CLONE, "diff", "--quiet", sha, TARGET, "--", *files]).returncode == 0:
             print("%s (%s), the same %s as %s." % (pin, where, what, COPY), file=sys.stderr)
+        elif os.environ.get("STE_CHANGED_COMPARE_TO") and git_reads.branch_is_ancestor(CLONE, sha, TARGET):
+            # The stable head is reachable from the pin: the pin is ahead of stable, not behind it, so nothing is stale and no pull helps.
+            print("%s (%s, %s), ahead of %s's %s. Nothing to move." % (
+                drifted, here("log", "-1", "--format=%cs", sha), where, COPY, what), file=sys.stderr)
         else:
             drift = True
             day = here("log", "-1", "--format=%cs", sha)

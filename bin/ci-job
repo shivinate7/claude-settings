@@ -92,7 +92,7 @@
 # the stable branch when a ste-lint step is pinned. The pin's pattern: hooks/action_pin.py.
 # Symlink members are not extracted: the harness reads none, and a host that refuses os.symlink would fail the export.
 # Limits: the uses: owner is not checked, since the fetch reads the clone's origin. A quoted uses: is no pin, so it runs the local
-# copy; an uppercase 40-hex pin reads as a moving ref that origin does not hold, so it is unknown. A SIGKILL from merge's timeout skips
+# copy; an uppercase 40-hex pin reads as a moving ref that origin does not hold, so it is unknown. A SIGTERM or SIGKILL from merge's timeout skips
 # the cleanup and leaves the export in TMPDIR: one export per run, about 24 MB at worst.
 # A pinned ste-lint step is two commands: the pinned tree's bin/ste-changed lints (STE_CHANGED_ONLY=lint; that tree has no .git, so it
 # judges no pin), then this file's own bin/ste-changed judges every ste-lint and zizmor sha pin of the child's workflows
@@ -274,6 +274,7 @@ HEAD_SHA_ENV = "CI_JOB_HEAD_SHA"
 KNOWN_ACTION = re.compile(r"(?:\S*/)?actions/(ste-lint|code-check|zizmor)(?:@\S*)?")
 SETTINGS_PIN = pin_regex(("ste-lint", "code-check", "zizmor"), moving=True)  # a uses: pinned to a sha or a moving ref of this repo's action
 STABLE_BRANCH = "stable"  # the branch CI's child repos pin and sessions install from; a pin is judged against its head when origin has it
+NO_REF = ("has no origin to fetch", "couldn't find remote ref")  # what resolve_ref's reason holds when origin has no such branch (git's English, LC_ALL=C)
 STE_CHANGED_VARS = ("STE_CHANGED_ONLY", "STE_CHANGED_CLONE", "STE_CHANGED_COMPARE_TO")  # bin/ste-changed's inputs from ci-job alone, never the caller's
 LOCAL_ACTION = re.compile(r"[$.]/actions/\S+")  # this repo's own action: a check --lint should run
 CODE_CHECK = os.path.join("actions", "code-check", "code_check.py")  # under a checkout of this repo
@@ -328,7 +329,7 @@ def resolve_ref(clone, ref):
     if os.path.exists(os.path.join(clone, url)):
         url = os.path.abspath(os.path.join(clone, url))  # a path remote is read from the scratch dir, not from the clone
     scratch = tempfile.mkdtemp(prefix="ci-job-fetch-")
-    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_OBJECT_DIRECTORY=objects)  # a credential prompt must fail, not hang the run
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_OBJECT_DIRECTORY=objects, LC_ALL="C")  # a credential prompt must fail, not hang the run; LC_ALL: NO_REF below reads git's English
     try:
         made = _nowindow.run(["git", "init", "-q", "--bare", scratch], capture_output=True, text=True)
         if made.returncode != 0:
@@ -345,11 +346,13 @@ def resolve_ref(clone, ref):
 
 
 def stable_head(clone):
-    """The commit the stable branch of `clone`'s origin names now, fetched once per run; None when it cannot be read (no origin,
-    no stable branch there). A pin is judged against it; unread, the clone's own HEAD judges."""
+    """(sha, None): the commit the stable branch of `clone`'s origin names now, fetched once per run. (None, None) when origin has
+    no stable branch, or the clone has no origin: the clone's own HEAD judges a pin then. (None, why) when origin may hold one and the
+    fetch failed: the pin cannot be judged, so the step reads unknown."""
     if clone not in STABLE_HEADS:
-        STABLE_HEADS[clone] = resolve_ref(clone, STABLE_BRANCH)
-    return STABLE_HEADS[clone][0]
+        sha, why = resolve_ref(clone, STABLE_BRANCH)
+        STABLE_HEADS[clone] = (None, None) if why and any(m in why for m in NO_REF) else (sha, why)
+    return STABLE_HEADS[clone]
 
 
 def pin_tree(ref):
@@ -542,7 +545,11 @@ def plan(step, pr, values, top, lint=False, pinned=False, dry=False):
             # against the stable head when origin has one, else the clone's HEAD (decision action-pins-follow-sessions). A failing
             # lint keeps its exit code; a stale pin exits 3 here and is a pin note under --lint.
             clone = pin_source()
-            head = stable_head(clone) if clone and not dry else None
+            head, why = stable_head(clone) if clone and not dry else (None, None)
+            if why:
+                ref = SETTINGS_PIN.fullmatch(uses(step)).group(2)
+                return "unknown", "pin %s of ste-lint: cannot judge it against the stable branch: %s" % (
+                    ref[:7] if is_sha(ref) else ref, why), None, None, None
             env = {"STE_CHANGED_CLONE": clone or "", "STE_CHANGED_COMPARE_TO": head or "", **({PIN_NOTE_ENV: "1"} if lint else {})}
             return "run", ('rc=0; STE_CHANGED_ONLY=lint "%s" "%s" || rc=$?\n'
                            'drift=0; STE_CHANGED_ONLY=pins "%s" "%s" || drift=$?\n'
