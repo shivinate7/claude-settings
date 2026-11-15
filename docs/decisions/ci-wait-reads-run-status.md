@@ -8,7 +8,7 @@ Owner, 2026-10-16 01:47 CDT ("Status read only") and 03:00 CDT ("Change them too
 - `hooks/ci_wake.py`, `watch_run`: no watch. It reads `gh run view <id> --json status` on one schedule (`pauses`): 30 s apart through 240 s, then gaps that grow by 30 s up to 120 s, never shorter than the gap before. `wait_for` lists the head's runs on the same schedule, and lists once more at once after the first judged run (one extra `gh run list` per wait), to catch a run that shows late. The watch returns when the status is `completed` or the deadline passes. The deadline stays 3300 s, and `watch_run` makes no status read at or after it. A failed read gets one retry after a 30 s pause, never past the deadline. A second failure ends the wait as unknown, never green.
 - A session waits on CI through the CI-wake notice that follows `gh pr ready`. The guard's remedy never names `bin/merge`, because it merges when the wait ends.
 
-Why: one `gh run watch` made 131 API calls in 60 s, about 7,900 an hour. The core limit is 5,000 an hour, shared by every session on the account. Merges failed on it.
+Why: one `gh run watch` made 131 API calls in 60 s, about 7,900 an hour. The core limit is 15,000 an hour (measured 2026-11-15, `gh-api-budget`), shared by every session on the account. Merges failed on it.
 
 ### The CI wake-up
 

@@ -1123,7 +1123,7 @@ class Host:
         self.warned = set()  # (check name, link) already warned about, so a poll loop prints each line once
         self.heads_fetch = None  # (code, output) of this run's one fetch_branch_heads, made by merge_state only when a commit is missing; None before it
         self.main_fetch = None  # (code, output) of this run's one fetch of main (fetch_main_once), made by the first carry that needs main's tip; None before it
-        self.budget = {}  # remaining, limit, reset (epoch seconds) from the newest reply that carried X-Ratelimit headers; a missing or unreadable one is None
+        self.budget = {}  # remaining, limit, reset (epoch seconds) from the newest reply that had a header block; None for each one the reply lacks or garbles, so an unknown budget never refuses
         self.memo = {}  # (route, query, flags) -> the reply of this run's GET, kept until any write (api)
         self.route_counts = {}  # (method, route template) -> gh calls made, retries included (route_template)
 
@@ -5183,7 +5183,7 @@ def own_records(n, bodies):
 
 def reviewed_read(h, cfgrel=None):
     """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
-    repo's comments since the oldest one) and, for each ready pull request that has a record, two `gh` calls: the check runs and the commit statuses of its head,
+    repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and the workflow run list (`head_state`'s `gh run list`) of its head,
     read once (the lint step's rollup read and the CI state share them), and the ruleset and the branch protection once a run (decision pr-review-record, the cost;
     decision gh-api-budget). The two list reads are bulk reads: each stops when the budget is under a tenth. The comment list pages every comment of the repo since the oldest open pull request.
     The same list holds the lane-lint comments: a done record counts as done only with a lane-lint PASS at the live head (lint_state), else its line
