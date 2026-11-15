@@ -153,8 +153,16 @@ repo_case("a merge in a subshell inside the tagged checkout is allowed", "allow"
           f"({MERGE_SHIM} 5 --confirm)", LANE_REPO, TX_RUNNER)
 # Not judged: a merge named in quoted text, --lane-lint (no lock, no merge), and any session outside the cloud.
 repo_case("a merge named in a quoted echo is not judged", "allow", f"echo '{MERGE_SHIM} --repo-dir {REPO_B} 5 --confirm'", REPO_A, TX_A)
-repo_case("--lane-lint is not judged, whatever the record", "allow", f"{MERGE_SHIM} --lane-lint --repo-dir '{REPO_B}' 5", REPO_A, TX_NONE)
-repo_case("--lane-lint naming no git checkout is not judged", "allow", f"{MERGE_SHIM} --lane-lint --repo-dir '{NOGIT}' 5", REPO_A, TX_NONE)
+# The two lane-lint rows run in the background under the lane lint's time limit, so check-timeout passes them.
+# They pin this rule, not the limit.
+add("merge-confirm-repo: --lane-lint is not judged, whatever the record", "allow", cwd=REPO_A,
+    transcript=TX_NONE, env=CLOUD_ENV,
+    run_in_background=True, timeout=CHECK_TIMEOUT_MS, description=TAIL_BG_UNTIL,
+    command=f"{MERGE_SHIM} --lane-lint --repo-dir '{REPO_B}' 5")
+add("merge-confirm-repo: --lane-lint naming no git checkout is not judged", "allow", cwd=REPO_A,
+    transcript=TX_NONE, env=CLOUD_ENV,
+    run_in_background=True, timeout=CHECK_TIMEOUT_MS, description=TAIL_BG_UNTIL,
+    command=f"{MERGE_SHIM} --lane-lint --repo-dir '{NOGIT}' 5")
 repo_case("outside the cloud a merge is not judged", "allow", f"{MERGE_SHIM} --repo-dir '{REPO_B}' 5 --confirm", REPO_A, TX_A,
           env=ROLE_ENV)
 
