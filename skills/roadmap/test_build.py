@@ -693,6 +693,10 @@ class UpkeepFixture(Fixture):
         """A live pulls row that carries only the marks (held, reviewLog) for the pull `number`."""
         return dict({"number": number, "title": "lane %d" % number}, **flags)
 
+    def live_pull(self, number, branch, title=None):
+        """The live pulls row the publisher writes for an open pull, with no marks: held and reviewLog read as unset."""
+        return {"number": number, "title": title or "lane " + branch, "branch": branch}
+
     def serve_pulls(self, *pages, token="test-token"):
         """Serve the rest_get seam: page N is pages[N-1], and a page past the list is empty. A page is a list of
         pulls rows, a (body, headers) pair, or an exception to raise. The seam, as the build reads it, returns
@@ -3093,7 +3097,7 @@ class ReadyAndDraftRows(UpkeepFixture):
         # The Nov 1 replay, read from REST: the draft was last updated 12 h 21 m before the build run.
         self.commit_replay_step()
         self.serve_pulls([self.rest_draft(999, self.REPLAY, 741, self.REPLAY_TITLE)])
-        self.publish(sessions=[])
+        self.publish(sessions=[], pulls=[self.live_pull(999, self.REPLAY, self.REPLAY_TITLE)])
         _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
         self.assertEqual(self.row(out, self.READY), (1, self.REPLAY))
         self.assertEqual(self.row(out, self.DRAFT), (1, "#999 (%s)" % self.REPLAY))
@@ -3127,7 +3131,7 @@ class ReadyAndDraftRows(UpkeepFixture):
         # updated_at is aged from the build run. 11 h 30 m is under 12 h, so late-eleven is not listed.
         # lone-draft is the control: 13 h before now.
         self.serve_pulls([self.rest_draft(1000, "late-eleven", 690), self.rest_draft(1001, "lone-draft", 780)])
-        self.publish(sessions=[])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "lone-draft")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1001 (lone-draft)"]))
 
@@ -3135,7 +3139,8 @@ class ReadyAndDraftRows(UpkeepFixture):
         # c1 is doing, so the pair line stays quiet. Its live session carries this repo's tag and the step's tag.
         self.commit_step("c1", status="doing")
         self.serve_pulls([self.rest_draft(1001, "c1", 780), self.rest_draft(1002, "lone-draft", 780)])
-        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:c1")])
+        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:c1")],
+                     pulls=[self.live_pull(1001, "c1"), self.live_pull(1002, "lone-draft")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]))
 
@@ -3159,7 +3164,8 @@ class ReadyAndDraftRows(UpkeepFixture):
         # The head ref lane/c1 is the lane of step c1, as c1 is. lone-draft is the control: no live step.
         self.commit_step("c1", status="doing")
         self.serve_pulls([self.rest_draft(1001, "lane/c1", 780), self.rest_draft(1002, "lone-draft", 780)])
-        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:c1")])
+        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:c1")],
+                     pulls=[self.live_pull(1001, "lane/c1"), self.live_pull(1002, "lone-draft")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]))
 
@@ -3168,14 +3174,16 @@ class ReadyAndDraftRows(UpkeepFixture):
         # c91 is the control: its branch is the step, so it is laned.
         self.serve_pulls([self.rest_draft(1001, "c91-cleanup", 780, title="Follow-up for c91"),
                           self.rest_draft(1002, "c91", 780)])
-        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:c91")])
+        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:c91")],
+                     pulls=[self.live_pull(1001, "c91-cleanup", "Follow-up for c91"), self.live_pull(1002, "c91")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1001 (c91-cleanup)"]))
 
     def test_empty_step_tag_names_no_draft(self):
         # An empty step id names nothing, so the title "a: b" does not lane this draft.
         self.serve_pulls([self.rest_draft(1001, "lone-draft", 780, title="a: b")])
-        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:")])
+        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:")],
+                     pulls=[self.live_pull(1001, "lone-draft", "a: b")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1001 (lone-draft)"]))
 
@@ -3202,7 +3210,7 @@ class ReadyAndDraftRows(UpkeepFixture):
         # reviewLog true on the live row for number 1001 is the only mark. lone-draft is the control.
         self.commit_step("merge-reads-ruleset", status="doing")
         self.serve_pulls([self.rest_draft(1001, "lane-ruleset-read", 780), self.rest_draft(1002, "lone-draft", 780)])
-        self.publish(sessions=[], pulls=[self.mark(1001, reviewLog=True)])
+        self.publish(sessions=[], pulls=[self.mark(1001, reviewLog=True), self.live_pull(1002, "lone-draft")])
         count, detail = self.row(self.out_with_live(expect=(0, 1)), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]),
                          "a draft whose review log is posted is not listed")
@@ -3211,7 +3219,7 @@ class ReadyAndDraftRows(UpkeepFixture):
         # The same shape as the #2818 case, with held true on the live row for number 1001 and no review log.
         self.commit_step("merge-reads-ruleset", status="doing")
         self.serve_pulls([self.rest_draft(1001, "lane-ruleset-read", 780), self.rest_draft(1002, "lone-draft", 780)])
-        self.publish(sessions=[], pulls=[self.mark(1001, held=True)])
+        self.publish(sessions=[], pulls=[self.mark(1001, held=True), self.live_pull(1002, "lone-draft")])
         count, detail = self.row(self.out_with_live(expect=(0, 1)), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]),
                          "a draft the runner's list names (held true) is not listed")
@@ -3294,14 +3302,14 @@ class StaleDraftRestRead(UpkeepFixture):
 
     def test_pages_of_one_hundred_then_fewer_are_both_read(self):
         self.serve_pulls(self.stale_first_page(), [self.rest_draft(2001, "old-2001", 780)] + self.fresh_rows(2002, 1))
-        self.publish(sessions=[])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "old-1001"), self.live_pull(2001, "old-2001")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual(self.requested_pages(), [1, 2], "a full page 1 did not lead to a read of page 2")
         self.assertEqual((count, self.entries(detail)), (2, ["#1001 (old-1001)", "#2001 (old-2001)"]))
 
     def test_exactly_one_hundred_rows_reads_an_empty_second_page(self):
         self.serve_pulls(self.stale_first_page(), [])
-        self.publish(sessions=[])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "old-1001")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual(self.requested_pages(), [1, 2], "a full page 1 did not lead to a read of page 2")
         self.assertEqual((count, self.entries(detail)), (1, ["#1001 (old-1001)"]))
@@ -3310,7 +3318,7 @@ class StaleDraftRestRead(UpkeepFixture):
         # More than the live file's 200 rows: the stale drafts on page 1 and on page 3 are both listed.
         self.serve_pulls(self.stale_first_page(), self.fresh_rows(1101, 100),
                          [self.rest_draft(3001, "old-3001", 780)] + self.fresh_rows(3002, 49))
-        self.publish(sessions=[])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "old-1001"), self.live_pull(3001, "old-3001")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual(self.requested_pages(), [1, 2, 3])
         self.assertEqual((count, self.entries(detail)), (2, ["#1001 (old-1001)", "#3001 (old-3001)"]))
@@ -3320,7 +3328,7 @@ class StaleDraftRestRead(UpkeepFixture):
         pages = [self.fresh_rows(100 * i + 1, 100) for i in range(19)]
         pages.append([self.rest_draft(2000, "old-2000", 780)] + self.fresh_rows(2001, 4))
         self.serve_pulls(*pages)
-        self.publish(sessions=[])
+        self.publish(sessions=[], pulls=[self.live_pull(2000, "old-2000")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual(self.requested_pages(), list(range(1, 21)))
         self.assertEqual((count, self.entries(detail)), (1, ["#2000 (old-2000)"]))
@@ -3371,7 +3379,7 @@ class StaleDraftRestRead(UpkeepFixture):
         # The count is 0 on page 2, which is short, so page 2 is the last page and the read is whole.
         self.serve_pulls((self.stale_first_page(), headers_of({"X-RateLimit-Remaining": "5"})),
                          ([self.rest_draft(2001, "old-2001", 780)], headers_of({"X-RateLimit-Remaining": "0"})))
-        self.publish(sessions=[])
+        self.publish(sessions=[], pulls=[self.live_pull(1001, "old-1001"), self.live_pull(2001, "old-2001")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual(self.requested_pages(), [1, 2])
         self.assertEqual((count, self.entries(detail)), (2, ["#1001 (old-1001)", "#2001 (old-2001)"]))
@@ -3379,7 +3387,7 @@ class StaleDraftRestRead(UpkeepFixture):
     def test_a_draft_is_aged_by_updated_at_not_created_at(self):
         self.serve_pulls([self.rest_draft(1001, "created-long-ago", 60, created_min=20 * 60),
                           self.rest_draft(1002, "updated-long-ago", 780, created_min=60)])
-        self.publish(sessions=[])
+        self.publish(sessions=[], pulls=[self.live_pull(1002, "updated-long-ago")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (updated-long-ago)"]))
 
@@ -3387,14 +3395,14 @@ class StaleDraftRestRead(UpkeepFixture):
         # The live file was read 45 min ago. 12 h 15 m before now is 11 h 30 m before that read, so an age taken from
         # the read would not list it. young-draft, 11 h 30 m before now, is not listed.
         self.serve_pulls([self.rest_draft(1001, "aged-from-now", 735), self.rest_draft(1002, "young-draft", 690)])
-        self.publish(read_at=iso_ago(45), sessions=[])
+        self.publish(read_at=iso_ago(45), sessions=[], pulls=[self.live_pull(1001, "aged-from-now")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1001 (aged-from-now)"]))
 
     def test_a_pull_that_is_not_a_draft_is_not_listed(self):
         self.serve_pulls([self.rest_draft(1001, "open-not-draft", 780, draft=False),
                           self.rest_draft(1002, "draft-stale", 780)])
-        self.publish(sessions=[])
+        self.publish(sessions=[], pulls=[self.live_pull(1002, "draft-stale")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (draft-stale)"]))
 
@@ -3520,7 +3528,8 @@ class StaleDraftRestRead(UpkeepFixture):
     def test_a_mark_is_matched_to_its_draft_by_number_not_by_branch(self):
         # The live row for #1005 names the same branch as stale draft #1001, and it is held. #1001 is still listed.
         self.serve_pulls([self.rest_draft(1001, "shared-branch", 780)])
-        self.publish(sessions=[], pulls=[dict(self.mark(1005), branch="shared-branch", held=True)])
+        self.publish(sessions=[], pulls=[dict(self.mark(1005), branch="shared-branch", held=True),
+                                         self.live_pull(1001, "shared-branch")])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1001 (shared-branch)"]))
 
