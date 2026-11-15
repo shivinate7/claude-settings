@@ -15024,6 +15024,22 @@ class ReviewArgs(ReviewEnv):
                 self.assertEqual(rc, 2, "%s exited %s, not 2: %s" % (" ".join(argv), rc, out + err))
                 self.assertNotIn("Traceback", err, out + err)
 
+    def test_the_usage_text_no_longer_says_every_record_must_be_sonnet(self):
+        """The module docstring's --review-record usage no longer says MODEL must be sonnet on every record. The first round takes its row's model, so
+        only the fix check is held to sonnet on every record (decision agent-model-cap, the round rows)."""
+        text = " ".join((merge.__doc__ or "").split())
+        self.assertNotIn("must be sonnet on every record", text, "the usage text still says MODEL must be sonnet on every record")
+
+    def test_the_usage_text_names_the_fix_verifier_as_the_one_record_line_that_must_be_sonnet(self):
+        text = " ".join((merge.__doc__ or "").split())
+        self.assertRegex(text, re.compile(r"fix check[^.;]*must be sonnet|must be sonnet[^.;]*fix check", re.IGNORECASE),
+                         "the usage text does not name the fix check as the one record line that must be sonnet")
+
+    def test_the_usage_text_says_round_one_takes_its_rows_model_or_unknown(self):
+        sentences = re.split(r"(?<=\.)\s", " ".join((merge.__doc__ or "").split()))
+        self.assertTrue(any("first round" in s and "row" in s and "unknown" in s for s in sentences),
+                        "the usage text does not say round 1 takes its row's model or unknown")
+
 class ReviewRecordWrite(ReviewEnv):
     """`merge <pr> --review-record` prints the record for the pull request's live head. It posts nothing and pushes nothing: the lane posts it."""
 
@@ -15740,15 +15756,7 @@ class ReviewRoundModel(ReviewEnv):
         # One home (decision agent-model-cap): the --round check reads the round rows of the record the guard reads, so a changed row
         # changes this verdict with no code edit. Without a second-round row, the --round check refuses an opus reviewer, so this case
         # passes only because the record's row lifts that refusal.
-        root = tempfile.mkdtemp(dir=run_folder())
-        pointer = os.path.join(root, "pointer")
-        os.makedirs(os.path.join(pointer, "docs", "decisions"))
-        with open(os.path.join(pointer, "docs", "decisions", "agent-model-cap.md"), "w", encoding="utf-8") as handle:
-            handle.write("| Role | Round | Model | Effort |\n|---|---|---|---|\n| reviewer | 2 | opus | high |\n")
-        config = os.path.join(root, "config")
-        os.makedirs(config)
-        with open(os.path.join(config, "CLAUDE.md"), "w", encoding="utf-8") as handle:
-            handle.write("@%s/CLAUDE.md\n" % pointer.replace(os.sep, "/"))
+        config = self.round_row_config(("| reviewer | 2 | opus | high |",))
         with unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
             rc, out, err = self.run_args("7", "--review-record", *self.round_flags("1:reviewer:sonnet:FAIL", "2:reviewer:opus:PASS"))
         self.assertEqual(rc, 0, "round 2 on opus was refused under a record whose round 2 row names opus:\n" + out + err)
@@ -15765,6 +15773,104 @@ class ReviewRoundModel(ReviewEnv):
         self.assertIn("--round 3", err, "the refusal of round 3 on opus does not name round 3")
         self.assertIn("sonnet", err, "the refusal of round 3 on opus does not name sonnet")
         self.assertNotIn(REVIEW_MARKER, out, "a refused round 3 on opus still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    # The round rows of decision agent-model-cap, as its table writes them. One home: a case that needs other rows passes its own to round_row_config.
+    ROUND_ROWS = ("| reviewer | 1 guard | sonnet | xhigh |", "| reviewer | 1 other | haiku | xhigh |", "| reviewer | 2 | sonnet | high |",
+                  "| reviewer | 3 | sonnet | xhigh |", "| reviewer | fix verifier | sonnet | xhigh |")
+
+    def round_row_config(self, rows=ROUND_ROWS):
+        """-> the CLAUDE_CONFIG_DIR of a pointer checkout whose agent-model-cap record holds a round table of `rows`. The guard and the merge tool
+        read that table through this pointer, so a case sets the rows and the reader is the code under test. Temp files live in this test's folder."""
+        pointer = os.path.join(self.t, "round-pointer")
+        os.makedirs(os.path.join(pointer, "docs", "decisions"), exist_ok=True)
+        with open(os.path.join(pointer, "docs", "decisions", "agent-model-cap.md"), "w", encoding="utf-8") as handle:
+            handle.write("| Role | Round | Model | Effort |\n|---|---|---|---|\n" + "\n".join(rows) + "\n")
+        config = os.path.join(self.t, "round-config")
+        os.makedirs(config, exist_ok=True)
+        with open(os.path.join(config, "CLAUDE.md"), "w", encoding="utf-8") as handle:
+            handle.write("@%s/CLAUDE.md\n" % pointer.replace(os.sep, "/"))
+        return config
+
+    def round_one_flags(self, guard, model, verdict="FAIL"):
+        """The review flags for a record whose only round is the first round on `model`, with Guard or check `guard`, at the live head."""
+        return ("--kind", "normal", "--guard", guard, "--head", self.head(), "--round", f"1:reviewer:{model}:{verdict}")
+
+    def round_one_flag_lines(self, err):
+        """The stderr lines that name the first round: the flag a first-round model earns against its row (decision agent-model-cap, the round rows)."""
+        return [line for line in err.splitlines() if "round 1" in line.lower()]
+
+    def test_a_round_one_on_haiku_with_guard_no_prints_unchanged_and_flags_nothing(self):
+        # Control: the `1 other` row is haiku, so haiku with Guard or check no matches its row. The record prints as given, with no flag.
+        config = self.round_row_config()
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
+            rc, out, err = self.run_args("7", "--review-record", *self.round_one_flags("no", "haiku"))
+        self.assertEqual(rc, 0, "round 1 on haiku with --guard no was refused:\n" + out + err)
+        self.assertIn("Round 1: reviewer, haiku, FAIL", out.splitlines(), "round 1 on haiku with --guard no is not printed unchanged:\n" + out)
+        self.assertEqual(self.round_one_flag_lines(err), [], "round 1 on haiku with --guard no was flagged, though haiku is its row")
+
+    def test_a_round_one_on_haiku_with_guard_yes_is_printed_and_flagged_not_refused(self):
+        # The `1 guard` row is sonnet, so haiku on a guard or check change is a flag: the record still prints, unchanged, and exits 0.
+        config = self.round_row_config()
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
+            rc, out, err = self.run_args("7", "--review-record", *self.round_one_flags("yes", "haiku"))
+        self.assertEqual(rc, 0, "round 1 on haiku with --guard yes was refused, but a mismatch with the row is a flag:\n" + out + err)
+        self.assertIn("Round 1: reviewer, haiku, FAIL", out.splitlines(), "round 1 on haiku with --guard yes is not printed unchanged:\n" + out)
+        flags = self.round_one_flag_lines(err)
+        self.assertTrue(flags, "round 1 on haiku with --guard yes is not flagged against its sonnet row:\n" + err)
+        self.assertTrue(any("haiku" in line and "sonnet" in line for line in flags),
+                        "the round 1 flag does not name the model given (haiku) and the row's model (sonnet):\n" + "\n".join(flags))
+
+    def test_a_round_one_on_sonnet_with_guard_yes_prints_with_no_flag(self):
+        # Control: sonnet is the `1 guard` row, so the same record with sonnet has no flag.
+        config = self.round_row_config()
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
+            rc, out, err = self.run_args("7", "--review-record", *self.round_one_flags("yes", "sonnet", "PASS"))
+        self.assertEqual(rc, 0, "round 1 on sonnet with --guard yes was refused:\n" + out + err)
+        self.assertIn("Round 1: reviewer, sonnet, PASS", out.splitlines(), "round 1 on sonnet with --guard yes is not printed unchanged:\n" + out)
+        self.assertEqual(self.round_one_flag_lines(err), [], "round 1 on sonnet with --guard yes was flagged, though sonnet is its row")
+
+    def test_a_round_one_with_an_unknown_model_is_printed_as_unknown_and_never_filled_in(self):
+        # A model the lane does not know reads `unknown`: it is accepted for the first round with either guard flag, and no row model replaces it.
+        config = self.round_row_config()
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
+            for guard in ("no", "yes"):
+                with self.subTest(guard=guard):
+                    rc, out, err = self.run_args("7", "--review-record", *self.round_one_flags(guard, "unknown"))
+                    self.assertEqual(rc, 0, f"round 1 on unknown with --guard {guard} was refused:\n" + out + err)
+                    self.assertIn("Round 1: reviewer, unknown, FAIL", out.splitlines(),
+                                  f"round 1 on unknown with --guard {guard} is not printed as unknown:\n" + out)
+                    parse_text(self, posted_body(self, out))
+
+    def test_parse_review_reads_a_round_row_whose_model_is_unknown(self):
+        text = record_text(rounds=("Round 1: reviewer, unknown, FAIL", "Round 2: reviewer, sonnet, PASS"))
+        self.assertEqual(parse_text(self, text)["rounds"], [(1, "reviewer", "unknown", "FAIL"), (2, "reviewer", "sonnet", "PASS")],
+                         "parse_review does not read a round row whose model is unknown back as written")
+
+    def test_a_round_two_on_unknown_is_refused_with_the_round_named(self):
+        # Control: the first round on unknown, then the second round on sonnet, prints a record. The second round on unknown is refused: rounds after the first equal their row.
+        config = self.round_row_config()
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
+            rc, out, err = self.run_args("7", "--review-record", *self.round_flags("1:reviewer:unknown:FAIL", "2:reviewer:sonnet:PASS"))
+            self.assertEqual(rc, 0, "the control (round 1 on unknown, round 2 on sonnet) was refused:\n" + out + err)
+            rc, out, err = self.run_args("7", "--review-record", *self.round_flags("1:reviewer:unknown:FAIL", "2:reviewer:unknown:PASS"))
+        self.assertEqual(rc, 2, "round 2 on unknown was accepted, but rounds 2 and up must equal their row:\n" + out + err)
+        self.assertIn("--round 2", err, "the refusal of round 2 on unknown does not name round 2")
+        self.assertNotIn(REVIEW_MARKER, out, "a refused round 2 on unknown still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_rounds_that_start_at_two_are_refused_and_the_remedy_gives_round_one_its_real_model_or_unknown(self):
+        # Control: the same rounds, starting at the first round on haiku, print a record. The second round alone is refused, and the refusal says what the first round needs.
+        config = self.round_row_config()
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
+            rc, out, err = self.run_args("7", "--review-record", *self.round_flags("1:reviewer:haiku:FAIL", "2:reviewer:sonnet:PASS"))
+            self.assertEqual(rc, 0, "the control (round 1 on haiku, then round 2) was refused:\n" + out + err)
+            rc, out, err = self.run_args("7", "--review-record", *self.round_flags("2:reviewer:sonnet:PASS"))
+        self.assertEqual(rc, 2, "a record that starts at round 2 was accepted:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused record that starts at round 2 still printed a record")
+        self.assertIn("round 1", err, "the refusal of rounds that start at 2 does not name round 1:\n" + err)
+        self.assertIn("real model", err, "the refusal of rounds that start at 2 does not tell the lane to give round 1 its real model:\n" + err)
+        self.assertIn("unknown", err, "the refusal of rounds that start at 2 does not say unknown when the model is not known:\n" + err)
         self.assertNotIn("Traceback", err)
 
 class ReviewNoRestart(ReviewEnv):

@@ -33,7 +33,9 @@
                           unless HEAD is the Head of the newest earlier record on the PR, read from the PR's issue comments since the PR opened, and that record
                           has no Fix check line or a PASS one (owner item 741); after a PASS one, when SHA is a merge commit (a fix after a merge of main), that record reads done and SHA's first
                           parent is HEAD and its second parent is on the base, with no edit beyond git's own merge (a merge that conflicts may edit its conflicted paths only).
-                          MODEL must be sonnet on every record (exit 2 otherwise).
+                          The fix check's MODEL must be sonnet (exit 2 otherwise), and a reviewer's later rounds must equal their round row's model.
+                          The first round takes its row's model (the `1 guard` row with --guard yes, else the `1 other` row), or `unknown`; a first-round model
+                          below its row prints with a stderr flag and is not refused.
                           A review log stays done when the live head differs from its Head only by clean merges of main: each
                           commit after Head is a merge with two parents, its second parent on main and its tree `git merge-tree --write-tree` of them.
                           Any commit with one parent ends the walk as stale. `merge --reviewed` proves it
@@ -4310,13 +4312,15 @@ REVIEW_SHA = r"[0-9a-f]{40}"
 REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix verifier is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
 REVIEW_FIX_ROW = "fix verifier"  # the round cell of a fix verifier's row in the model record's round rows (decision agent-model-cap)
 
-def review_round_model(n):
+def review_round_model(n, guard=False):
     """-> the model word a reviewer's round `n` (a number, or REVIEW_FIX_ROW) runs: the model record's round row, read through the guard's
     reader (hooks/guard.py role_round_table), else the guard's fallback. A round past REVIEW_LAST_ROUND reads the last round's row.
+    `guard` (a guard or check change) makes the first round read the `1 guard` row, the only round whose row differs by kind.
     Reads the record once per call; the guard is imported here for the reason guard_hits gives."""
     import guard as hook_guard
     rounds = hook_guard.role_round_table(hook_guard.pointer_checkout())
-    return hook_guard.role_round_model(rounds, REVIEW_ROLES[0], str(min(n, REVIEW_LAST_ROUND)) if isinstance(n, int) else n)
+    kind = "guard" if guard and n == 1 else "other"
+    return hook_guard.role_round_model(rounds, REVIEW_ROLES[0], str(min(n, REVIEW_LAST_ROUND)) if isinstance(n, int) else n, kind)
 
 def __getattr__(name):
     """REVIEW_FIX_GUARD_MODEL, the model every fix verifier runs (owner item 444 a; decision pr-review-record): the round row's fallback in the
@@ -5412,9 +5416,14 @@ def main(argv, host=None, lock=None, hosts=None):
                 want = review_round_model(n)
                 if want not in model.lower():
                     p.error(f"--round {n}: a reviewer's round {n} runs {want}, not {model!r}; no round runs another model (decision agent-model-cap, the round rows)")
+            elif role == REVIEW_ROLES[0] and n == 1:  # the first round is flagged, not refused: the lane may not know its reviewer's model
+                import guard as hook_guard
+                want, got = review_round_model(1, a.guard == "yes"), hook_guard.role_model_rank(model)
+                if want and got is not None and got < hook_guard.role_model_rank(want):  # no row for the first round leaves nothing to flag against
+                    print(f"merge: round 1 ran {model}, below its row's {want} (decision agent-model-cap, the round rows)", file=sys.stderr)
         if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant)) is None:
-            p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3" if not a.grant
-                    else "--round: with --grant the rounds must start at 1, rise by one at a time and end at 4")
+            p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3; give round 1 with its real model, or unknown if not known" if not a.grant
+                    else "--round: with --grant the rounds must start at 1, rise by one at a time and end at 4; give round 1 with its real model, or unknown if not known")
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, --unlock, --reviewed, or --role TIER")
     try:
