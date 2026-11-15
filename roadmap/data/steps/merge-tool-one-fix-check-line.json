@@ -1,0 +1,14 @@
+{
+ "id": "merge-tool-one-fix-check-line",
+ "title": "Measure whether the merge tool's one-fix-check-line limits drop real fix checks from a record (#3505 sighting)",
+ "status": "open",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Relayed by the coordinator at 10:23 and 10:24 CST Nov 15 from runner 10's words, none read by triage. Runner 10 states two limits of the merge tool: (1) it takes ONE fix-check line per record; (2) it refuses a PASS fix check after an earlier log whose fix check is FAIL. So the #3505 lane's first fix check (haiku, FAIL on length only, read 16321a9e) is not in the record chain. Concern: these limits may drop real fix checks from a record. Size of the loss unmeasured; one sighting (#3505). Ask: measure whether real fix checks are dropped, then decide. No lane started.",
+ "source": "runner 10 via the coordinator, relayed to triage 10:23 and 10:24 CST Nov 15",
+ "note": "Filed 10:25 CST Nov 15 by triage as a low open note, no lane. Relayed from runner 10, not read by triage: the merge tool takes one fix-check line per record and refuses a PASS fix check after an earlier log whose fix check is FAIL, so #3505's first fix check (haiku, FAIL on length only) is not in the record chain. Loss unmeasured; one sighting. Ask: measure whether real fix checks are dropped, then decide.",
+ "updatedAt": "2026-11-15T10:25:00-06:00"
+}
