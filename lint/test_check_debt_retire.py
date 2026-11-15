@@ -7,7 +7,7 @@ working folder to the file named by RETIRE_MARKS, so a case shows that a Retire 
 No case waits on a clock. The Retire-run cases pass a fake run_state, so no case reads the network.
 The CI entry cases (CiEntry, CiWorkflow) run the CLI on a PATH with no gh, and read checks.yml by its steps.
 """
-import atexit, inspect, json, os, re, shutil, subprocess, sys, tempfile, unittest, unittest.mock
+import atexit, json, os, re, shutil, subprocess, sys, tempfile, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -124,19 +124,12 @@ class Case(unittest.TestCase):
         return D.check(self.dir, self.base, head=head or self.head, pr_body=pr_body, run_state=run_state)
 
     def draft_findings(self, deferred=None, draft=True, pr_body="", run_state=None):
-        """The findings of this head read as a draft's: `draft`, and the `deferred` list when one is given. A check with no
-        draft parameter runs as it always did, so a case reads that check's answer, never a TypeError."""
-        kw = {}
-        if "draft" in inspect.signature(D.check).parameters:
-            kw["draft"] = draft
-            if deferred is not None:
-                kw["deferred"] = deferred
-        return D.check(self.dir, self.base, head=self.head, pr_body=pr_body, run_state=run_state, **kw)
+        """The findings of this head read as a draft's: `draft`, and the `deferred` list (None gives no list)."""
+        return D.check(self.dir, self.base, head=self.head, pr_body=pr_body, run_state=run_state, draft=draft, deferred=deferred)
 
     def draft_retired(self, draft, pr_body, run_state):
-        """retired() for this head with the draft flag, when retired() takes it (see draft_findings)."""
-        kw = {"draft": draft} if "draft" in inspect.signature(D.retired).parameters else {}
-        return D.retired(self.dir, self.base, head=self.head, pr_body=pr_body, run_state=run_state, **kw)
+        """retired() for this head with the draft flag."""
+        return D.retired(self.dir, self.base, head=self.head, pr_body=pr_body, run_state=run_state, draft=draft)
 
     def ran(self):
         """(script name, working folder) for each fixture script that ran, in the order it ran."""

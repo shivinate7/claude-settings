@@ -2857,12 +2857,12 @@ class RetireCite(unittest.TestCase):
         """(problems, notes) of the silent-undo check on `head`, cited by `body` with the reader `runs`.
         strict: the case needs the excuse, so check() must take run_state; a missing parameter is a named red.
         Otherwise the reader is passed only when check() takes it, so on a check without the parameter the case
-        reads the finding it keeps. draft: passed only when check() takes it, as the reader is."""
+        reads the finding it keeps. draft: passed as given, when it is not None."""
         params = inspect.signature(C.check).parameters
         if strict:
             self.assertIn("run_state", params, NO_EXCUSE)
         kw = {"run_state": runs} if "run_state" in params else {}
-        if draft is not None and "draft" in params:
+        if draft is not None:
             kw["draft"] = draft
         return C.check(self.r.dir, "origin/main", head, pr_body=body, **kw)
 

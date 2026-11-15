@@ -5175,9 +5175,9 @@ class GhHalf(Env):
         self.set(draft=True)
         before = self.refs()
         real, seen = merge.undo_check, []
-        def spy(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None):
+        def spy(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None, draft=False):
             seen.append((base_ref, sh(wt, "git", "rev-parse", "HEAD")))  # the check runs on the PR head's worktree
-            return real(wt, base_ref, unknown_ok, pr_body, run_state, retire_head)
+            return real(wt, base_ref, unknown_ok, pr_body, run_state, retire_head, draft)
         with unittest.mock.patch.object(merge, "undo_check", spy):
             rc, out = self.run_merge("7", host=self.gh_host())
         self.assertEqual(rc, 0, out)
@@ -6566,6 +6566,26 @@ class DebtRetire(Env):
         rc, out = self.run_merge("7")
         self.assertEqual(rc, 0, "scope: preview did not reach its verdict: " + out)
         self.assertEqual(len(calls), 1, "preview did not call the Retire check once with unknown CI")
+
+    DEFERRED = "deferred to confirm: no run exists yet"  # debt_check's line for a draft's deferred close (coordinator pick A)
+
+    def test_a_draft_preview_names_its_deferred_close_only_when_head_ci_is_not_green(self):
+        """A draft's preview with green head CI returns from debt_check before any close is judged: no deferred line, and no Retire test runs.
+        With CI not green the close is deferred and named, and still no Retire test runs (coordinator pick A). The test writes its marker when
+        it runs, and exits red, so a run would refuse the preview."""
+        marker = os.path.join(self.t, "retire-ran.txt")
+        self.pr_on_debt(1, test_text="import pathlib, sys\npathlib.Path(%r).write_text('ran', encoding='utf-8')\nsys.exit(1)\n" % marker)
+        self.host.draft = True
+        self.ci_closes_a_debt("green")
+        rc, out = self.run_merge("7")
+        self.assertNotIn(self.DEFERRED, out, "a draft with green head CI named its deferred close: " + out)
+        self.assertFalse(os.path.exists(marker), "a draft with green head CI ran its Retire test: " + out)
+        self.assertEqual(rc, 0, "a draft with green head CI was refused: " + out)
+        self.ci_closes_a_debt("pending: checks")
+        rc, out = self.run_merge("7")
+        self.assertIn("merge: debt retire-target: %s" % self.DEFERRED, out, "a draft with pending head CI named no deferred close: " + out)
+        self.assertFalse(os.path.exists(marker), "a draft with pending head CI ran its Retire test: " + out)
+        self.assertEqual(rc, 0, "a draft with pending head CI was refused, not deferred: " + out)
 
     # The lock outlasts the long check that confirm runs, undo_check, which has no bound. Each check call is preceded by its own extend_for, so the
     # lock is never left to the take's fixed expiry under a check. confirm runs no debt check (ruling R2, owner 14:07 CST Nov 10).
@@ -19701,7 +19721,7 @@ class DraftReady(CloudSession):
         DebtRetire.pr_on_debt(self, test_exit)
         DebtRetire.ci_closes_a_debt(self, "green")
 
-    DEFERRED = "deferred to confirm: no run exists yet"  # debt_check's line for a draft's close, and the detail of its pass (coordinator pick A)
+    DEFERRED = DebtRetire.DEFERRED  # debt_check's line for a draft's close, and the detail of its pass
 
     def ready_fast_checks(self):
         """`merge 7 --fast-checks` with the ready checks answering pass -> (rc, text). The ready check must run, or the case proves nothing.
