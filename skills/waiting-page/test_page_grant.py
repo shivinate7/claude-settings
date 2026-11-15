@@ -581,6 +581,41 @@ class AsLane(Base):
                                               answer_fields={"choice": "overturn"}), pick="overturn")
         self.assertCounted(r, verdict("overturn"))
 
+    def test_open_item_with_no_lane_counted_with_as_lane(self):
+        """An open item with no `lane` counts with --as-lane: the flag is read only for a routed close, so an open item
+        ignores it. Scope first: the item counts with no --as-lane, so the refusal below would be for the flag alone."""
+        self.assertCounted(self.check(self.repo(), self.pair(), pick="a"), verdict("a"))
+        r = self.check(self.repo(), self.pair(), pick="a", as_lane="other-lane")
+        self.assertCounted(r, verdict("a"))
+
+    def test_open_item_with_lane_of_another_lane_counted_with_as_lane(self):
+        """An open item with `lane` set to LANE counts with --as-lane of another lane: an open item is not a routed close,
+        so its `lane` is not compared. The relay case holds `lane` on an open item, and the flag does not refuse it.
+        Scope first: the same open item counts with no --as-lane."""
+        self.assertCounted(self.check(self.repo(), self.pair(item_fields={"lane": LANE}), pick="a"), verdict("a"))
+        r = self.check(self.repo(), self.pair(item_fields={"lane": LANE}), pick="a", as_lane="other-lane")
+        self.assertCounted(r, verdict("a"))
+
+    def test_closed_arbiter_overturn_with_as_lane_of_another_lane_counted(self):
+        """An arbiter overturn counts with a mismatched --as-lane, as it does with none: the flag is read only for a routed
+        close, and an arbiter ruling is never one. The item holds LANE and a home, so the mismatch is real.
+        Scope first: the same overturn counts with no --as-lane."""
+        last = {"choice": "overturn", "note": "", "at": AT}
+        self.assertCounted(self.check(self.repo(), self.pair(item_fields=routed(arbiter=True, lastAnswer=last),
+                                                             answer_fields={"choice": "overturn"}), pick="overturn"),
+                           verdict("overturn"))
+        r = self.check(self.repo(), self.pair(item_fields=routed(arbiter=True, lastAnswer=last),
+                                              answer_fields={"choice": "overturn"}), pick="overturn", as_lane="other-lane")
+        self.assertCounted(r, verdict("overturn"))
+
+    def test_routed_close_with_item_lane_padded_and_as_lane_counted(self):
+        """Pins today's behaviour on purpose: the item's `lane` is compared after strip, so a lane with surrounding spaces
+        counts with --as-lane equal to its trimmed slug. A padded lane written by a page edit still reaches its receiver.
+        Scope first: the unpadded lane counts with the same --as-lane."""
+        self.assertCounted(self.check(self.repo(), self.pair(item_fields=routed()), pick="a", as_lane=LANE), verdict("a"))
+        r = self.check(self.repo(), self.pair(item_fields=routed(lane="  " + LANE + " ")), pick="a", as_lane=LANE)
+        self.assertCounted(r, verdict("a"))
+
     def test_as_lane_is_in_command(self):
         """COMMAND is the line settings.json's Relayed Grant entry quotes, so the flag belongs in it."""
         command = load_checker().COMMAND
