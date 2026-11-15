@@ -1749,13 +1749,25 @@ test("a batch of many items with long owners is cut to 4 KiB and keeps Owners", 
   assert.ok(text.endsWith("…"), "the cut did not run");
 });
 
-test("an owner name is capped at 80 characters", async (t) => {
+// A cut owner shows its cut with an ellipsis, so "triag" never reads as a whole name (step saved-comment-truncates-owner).
+test("an owner name is capped at 80 characters and a cut one ends in an ellipsis", async (t) => {
   const long = { ...DECISION, owner: "q".repeat(300) };
   const page = await open(t, { items: [long] }); if (!page) return;
   await takePick(page, long); await send(page);
   await page.waitForFunction(() => window.__sent.length === 1);
   const text = (await sent(page))[0].text;
-  assert.ok(text.includes("q".repeat(80)) && !text.includes("q".repeat(81)));
+  assert.ok(text.includes("q".repeat(79) + "…") && !text.includes("q".repeat(80)));
+});
+
+test("an owner of 80 characters or fewer is shown whole; the sighted long owner shows its cut", async (t) => {
+  const exact = { ...DECISION, owner: "e".repeat(80) };
+  const sighted = { ...DECISION, id: "pick-sighted", n: 29, owner: "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 02:44 CST Nov 15; posted by triage" + " x".repeat(10) };
+  const page = await open(t, { items: [exact, sighted] }); if (!page) return;
+  await takePick(page, exact); await takePick(page, sighted); await send(page);
+  await page.waitForFunction(() => window.__sent.length === 1);
+  const text = (await sent(page))[0].text;
+  assert.ok(text.includes("e".repeat(80) + ","), "an 80-character owner was cut");
+  assert.match(text, /posted by tria…[,.]/);
 });
 
 test("pressing Send again while a batch is in flight does nothing", async (t) => {
