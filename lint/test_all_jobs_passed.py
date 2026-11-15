@@ -591,5 +591,61 @@ class ChildActionAndLayouts(unittest.TestCase):
         self.assertEqual(child_problems(text), [], "a push-only job left out of needs has problems under child_problems")
 
 
+def checks_with_if(text, expr):
+    """checks.yml with checks' job-level if replaced by `expr`, or removed when expr is None. None when checks has no one if line."""
+    body = job_block(text, "checks") or ""
+    lines = [ln for ln in body.splitlines(keepends=True) if ln.startswith("    if:")]
+    if len(lines) != 1:
+        return None
+    return text.replace(body, body.replace(lines[0], "" if expr is None else "    if: %s\n" % expr, 1), 1)
+
+
+def job_with_if(text, job, expr):
+    """checks.yml with a job-level if added under `job`'s header. None unless the header appears once."""
+    anchor = "  %s:\n" % job
+    if text.count(anchor) != 1:
+        return None
+    return text.replace(anchor, anchor + "    if: %s\n" % expr, 1)
+
+
+class ExemptionGate(unittest.TestCase):
+    """off_problems exempts checks from the rule that a needed job keeps no job-level if, when checks_if_problems finds its if
+    sound (test_windows_split.py). These cases pin the exemption through off_problems: a control, the ifs it must refuse, and an
+    if on another needed job, which keeps the rule. An exemption that takes any if fails (b), (c) and (d): the scratch mutant
+    named in the commit. A checks with no if is not in this gate: off_problems does not flag it, and checks_if_problems refuses it
+    through scope_problems (test_windows_split.py)."""
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+
+    def test_a_checks_with_its_gate_if_is_not_flagged(self):
+        # Control: the if the workflow has now passes the exemption, so off_problems reads checks clean.
+        self.assertIsNotNone(all_jobs(self.text).get("checks", {}).get("if"), "scope: checks has no job-level if, so the control reads nothing")
+        self.assertEqual(off_problems(self.text), [], "checks with its gate if is flagged, so the exemption refuses the if it should keep")
+
+    def test_b_checks_with_always_is_flagged(self):
+        text = checks_with_if(self.text, "${{ always() }}")
+        self.assertIsNotNone(text, "scope: checks.yml has no single job-level if line in checks to swap")
+        self.assertTrue(off_problems(text), "checks with always() passes the rules: its lint suite would run when scope did not succeed")
+
+    def test_c_checks_whose_if_drops_the_scope_result_is_flagged(self):
+        for label, expr in (
+            ("!cancelled() alone", "${{ !cancelled() }}"),
+            ("the shard results without the scope result",
+             "${{ !cancelled() && needs.checks-guard.result == 'success' && needs.checks-guard-2.result == 'success' }}"),
+        ):
+            with self.subTest(if_=label):
+                text = checks_with_if(self.text, expr)
+                self.assertIsNotNone(text, "scope: checks.yml has no single job-level if line in checks to swap")
+                self.assertTrue(off_problems(text), "checks with %s passes the rules: a skipped scope would still run its lint" % label)
+
+    def test_d_another_needed_job_with_a_job_level_if_is_still_flagged(self):
+        text = job_with_if(self.text, "checks-hooks", "${{ needs.scope.outputs.code == 'true' }}")
+        self.assertIsNotNone(text, "scope: checks-hooks' header is not in checks.yml once")
+        self.assertIsNone(all_jobs(self.text)["checks-hooks"]["if"], "scope: checks-hooks already has a job-level if")
+        self.assertTrue(off_problems(text), "checks-hooks with a job-level if passes the rules: the exemption reached another needed job")
+
+
 if __name__ == "__main__":
     unittest.main()
