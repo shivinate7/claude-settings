@@ -1,0 +1,10 @@
+{
+ "id": "coord-836-b-one-wait-per-ready-pr",
+ "at": "2026-11-14T20:20:00-06:00",
+ "title": "The Stop check keeps one wait per ready PR (coordinator pick)",
+ "ruling": "COORDINATOR'S pick, not the owner's, taken 20:20 CST Nov 14 under the owner's 20:18 CST Nov 14 words (\"Nothing can't be undone don't wait on me\", relayed by the consultant 20:20 CST; filed as ruling own-goal-dont-wait-on-me): page item 836 (pick-ci-wait-one-wait) option b, keep one wait per ready PR. Gain: no ready PR goes unchecked. Lose: a green line with no PR must close all waits or none, a new rule to write and test. The item is closed on this pick; the owner's own question on it (18:37 CST Nov 14, 'is B better') was answered in the item's context as a reading. Covers the act option b names, no variant. If the owner disagrees it reopens. Home: step ci-wait-stop-needs-checkin; decision ci-wait-reads-run-status.",
+ "quote": "Nothing can't be undone don't wait on me",
+ "source": "COORDINATOR'S pick under the owner's 20:18 CST Nov 14 chat words, relayed by the consultant 20:20 CST and by the coordinator 20:19 CST (triage did not read the chat); undoable; not the owner's own pick on the item; filed by triage",
+ "status": "open",
+ "step": "ci-wait-stop-needs-checkin"
+}

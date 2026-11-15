@@ -1,0 +1,10 @@
+{
+ "id": "coord-837-d-send-later-session-waits",
+ "at": "2026-11-14T20:20:00-06:00",
+ "title": "Session waits count send_later only; the four tools stay for event waits (coordinator pick)",
+ "ruling": "COORDINATOR'S pick, not the owner's, taken 20:20 CST Nov 14 under the owner's 20:18 CST Nov 14 words (\"Nothing can't be undone don't wait on me\", relayed by the consultant 20:20 CST; filed as ruling own-goal-dont-wait-on-me): page item 837 (pick-ci-wait-checkin-tools) is closed on option d, which triage added from the coordinator's words: send_later only for a session's own waits; the four tools (send_later, create_trigger, CronCreate, ScheduleWakeup) stay for event waits a session cannot poll. Neither a, b nor c as posted. Unmeasured: how many sessions wait with create_trigger or ScheduleWakeup (list_triggers 18:41 CST: 2 one-shot, 0 recurring, both runner 10's create_trigger check-ins); how the Stop check tells a session wait from an event wait is unbuilt and unread (the Stop check reads only the tool name, per the coordinator's Explore read at local main af2c312c). The coordinator's earlier recommendation was c (18:46 CST); it then chose d. Covers the act option d names, no variant. If the owner disagrees it reopens. Home: step ci-wait-stop-needs-checkin; decision ci-wait-reads-run-status.",
+ "quote": "Nothing can't be undone don't wait on me",
+ "source": "COORDINATOR'S pick under the owner's 20:18 CST Nov 14 chat words, relayed by the consultant 20:20 CST and by the coordinator 20:19 CST (triage did not read the chat); undoable; not the owner's own pick on the item; filed by triage",
+ "status": "open",
+ "step": "ci-wait-stop-needs-checkin"
+}
