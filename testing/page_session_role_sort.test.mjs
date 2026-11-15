@@ -268,7 +268,7 @@ test("each tier head has one line that names its key, and the line shows once on
   }
 });
 
-// ---------------------------------------------------------------- the sort key, the group count, and the repo heads (review round 2)
+// ---------------------------------------------------------------- the sort key, the group count, and the repo heads
 
 test("a group's stops are the union of its members' lists, so it sorts above an older solo with fewer", async (t) => {
   // The lists are {lane a, lane b} and {lane b, lane c}: each member has two, the union has three. The older solo has two.
@@ -367,7 +367,7 @@ test("at 1280 the first run in the rail's chips has no top gap: its label's marg
   assert.equal(first, "0px", "the first run's label has a top gap from .rrepo: " + first);
 });
 
-// ---------------------------------------------------------------- the meta that never answers, the loading line's status, the rail while held (review round 2)
+// ---------------------------------------------------------------- the meta that never answers, the loading line's status, the rail while held
 
 // db.d.ts: a store that goes quiet is time-limited at about 10 s, and the page's own wait is the one these cases run out on the fake clock.
 const META_WAIT_MS = 10_000;
