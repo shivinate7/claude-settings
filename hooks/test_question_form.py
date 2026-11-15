@@ -2842,6 +2842,22 @@ def case_kindless_update_with_a_goal_line_needs_the_waiting_line():
          "update", entry_of({"context": form_text(waiting="Waiting on:")}), (FORM_RULE, "Waiting on"))
 
 
+def case_kindless_update_with_a_why_yours_line_is_a_task():
+    # A kindless update whose context holds a Why yours line is a task, so it passes even when a Goal line opens it.
+    # The mirror control: the same text with the Why yours line taken out has no task marker, and is a decision.
+    task = "Goal: g\nWhy yours: y (measured 2026-11-10, x)\nSteps: s"
+    page("a kindless update whose task context opens with a Goal line and holds a Why yours line passes", "update",
+         entry_of({"context": task}), None)
+    page("a kindless update whose task context opens with a lower-case goal: line passes", "update",
+         entry_of({"context": task.replace("Goal:", "goal:")}), None)
+    page("a kindless update whose task context opens with an indented Goal line passes", "update",
+         entry_of({"context": task.replace("Goal:", "  Goal:")}), None)
+    page("a kindless update with a Goal line and no Why yours line is refused, naming Problem", "update",
+         entry_of({"context": "Goal: g\nSteps: s"}), (FORM_RULE, "Problem"))
+    page("a kindless update with a Goal line, no Why yours line and no Waiting on line is refused, naming Waiting on",
+         "update", entry_of({"context": form_text(waiting=None)}), (FORM_RULE, "Waiting on"))
+
+
 def case_update_null_recommendation_is_refused():
     # A null key names no option, so it is no recommendation. A null `recommended` beside a valid `pick` passes: the
     # valid key is the recommendation the page draws.
@@ -3024,7 +3040,8 @@ def main():
     for case in (case_recommend_base_passes, case_recommend_missing_or_unknown_is_refused,
                  case_legacy_pick_is_the_recommendation, case_why_is_required, case_waiting_on_line_is_required,
                  case_update_judges_only_the_fields_it_carries, case_str_replace_keeps_the_waiting_line,
-                 case_kindless_update_with_a_goal_line_needs_the_waiting_line, case_update_null_recommendation_is_refused,
+                 case_kindless_update_with_a_goal_line_needs_the_waiting_line,
+                 case_kindless_update_with_a_why_yours_line_is_a_task, case_update_null_recommendation_is_refused,
                  case_waiting_on_line_is_the_pages_line,
                  case_recommended_list_is_the_multi_form, case_recommend_exemptions_pass,
                  case_recommend_applies_to_a_port_and_a_set_without_kind, case_five_real_forms,
