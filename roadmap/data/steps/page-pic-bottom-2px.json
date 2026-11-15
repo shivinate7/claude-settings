@@ -1,0 +1,14 @@
+{
+ "id": "page-pic-bottom-2px",
+ "title": "A whole-drawn option picture loses 2px at its edge; its decision omits the removed 120 floor",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": ["page-pics-fill-card"],
+ "why": "From the lane on #2742 (page-pics-fill-card), relayed by the coordinator at 00:44 CST Nov 15; not fixed in #2742 so its head stays; not read by triage beyond the decision text. Two findings. (1) Every whole-drawn picture loses its bottom 2px: the box width adds the 2px border and the height does not (.dfitwrap is border-box). That contradicts \"draws whole\" in decision page-pic-fills-card. Present on main too. .opic.dif probably also loses 2px on the right (from the code; unmeasured). Triage measured nothing. (2) The decision's \"Departs from\" lists c193 item 3, c204 item 6 and c204 item 1, and does not name the removal of fitFrame's 120 floor (the lane records it in docs/design/page-pics-fill-card-notes.md line 90; the #2742 body says reference/designs.md lines 25 and 39 still say \"never narrower than 120px\" and lane skill-text-once carries the new rule). Read by triage 00:45 CST on the #2742 head 7657beb29a0d (open draft; the decision lives on that branch, not on main).",
+ "source": "coordinator 00:44 CST Nov 15, from lane page-pics-fill-card (session_013NEJL2KAgB22ZA3BRbSpqU), PR #2742",
+ "note": "Builder follow-up, blocked by #2742 (step page-pics-fill-card). Fix 1: a screen change, so a designer first, then the builder, then a design reviewer at every size and theme (CLAUDE.md); measure the 2px on the box and on .opic.dif before changing code, never guess. Fix 2: a text edit to decision page-pic-fills-card so Departs from names the removed 120 floor. No owner question (coordinator). Filed 00:45 CST Nov 15.",
+ "updatedAt": "2026-11-15T00:45:00-06:00"
+}
