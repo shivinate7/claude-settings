@@ -127,6 +127,7 @@ scorecard: not a probe. It reads the group lines from stdin and rewrites the lay
 """
 import bisect
 import difflib
+import http.client
 import json
 import os
 import re
@@ -1664,15 +1665,17 @@ FACTS_PR = re.compile(r"pr ([0-9]+) (open|merged)")
 FACTS_REF = re.compile(r"ref ([A-Za-z0-9._/-]+) (present|absent)")
 FACTS_REPO_FORM = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 FACTS_TIMEOUT = 20  # seconds per request: a hung API read must end as unknown, not stall the job
+FACTS_LABEL = re.compile(r"[\s*_]*facts[\s*_]*:", re.I)  # a line that reads like a Facts line, in any dress
+FACTS_LABEL_LINE = re.compile(r"^" + FACTS_LABEL.pattern, re.I | re.M)
 FACTS_FORMS = "a claim reads `pr <N> open|merged` or `ref <name> present|absent`"
 FACTS_VALUES = {"pr": ("open", "merged", "closed"), "ref": ("present", "absent")}
 
 
 def facts_api(repo, token, path):
-    """(HTTP status, parsed JSON body) of GET /repos/<repo>/<path>. A status other than 200 and 404, a transport error,
+    """(HTTP status, parsed JSON body) of GET /repos/<repo>[/<path>]. A status other than 200 and 404, a transport error,
     a timeout or a body that is not JSON is CannotRun: an unread fact is never a pass."""
     request = urllib.request.Request(
-        "https://api.github.com/repos/%s/%s" % (repo, path),
+        "https://api.github.com/repos/" + repo + ("/" + path if path else ""),
         headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
                  "User-Agent": "compliance-probes-facts", "X-GitHub-Api-Version": "2022-11-28"})
     try:
@@ -1682,7 +1685,8 @@ def facts_api(repo, token, path):
         if err.code != 404:
             raise CannotRun("GitHub answered %d for %s" % (err.code, path))
         return 404, None
-    except (OSError, ValueError) as err:  # URLError, timeouts and a bad status line are all OSError or ValueError
+    except (OSError, ValueError, http.client.HTTPException) as err:
+        # URLError and timeouts are OSError; a bad status line or a short body is HTTPException, which is neither.
         raise CannotRun("GitHub cannot be read for %s: %s" % (path, type(err).__name__))
     try:
         return status, json.loads(body.decode("utf-8"))
@@ -1715,6 +1719,9 @@ def fact_value(kind, key):
     if kind == "ref":
         status, body = facts_api(repo, token, "git/ref/heads/" + urllib.parse.quote(key, safe="/"))
         if status == 404:
+            # The same 404 answers a repo the token cannot see, so absent is trusted only when the repo itself reads.
+            if facts_api(repo, token, "")[0] != 200:
+                raise CannotRun("repo %s cannot be read, so ref %s is not known absent" % (repo, key))
             return "absent"
         if not isinstance(body, dict) or "ref" not in body:
             raise CannotRun("GitHub sent no ref for %s" % key)
@@ -1726,13 +1733,18 @@ def fact_value(kind, key):
     return "merged" if body["merged"] else body["state"]
 
 
-def facts_claims(text):
+def facts_claims(text, rel):
     """([(line number, claim text or None, why it is a gap or None)], the Facts lines read): one entry per claim of
-    the record's one well-placed Facts line, plus one per Facts line that is misplaced or a second."""
+    the record's one well-placed Facts line, plus one per Facts line that is misplaced or a second, and one per line
+    that reads like a Facts line but is not the exact `Facts:` form. A line inside a code fence is never read."""
     lines = text.splitlines()
+    outside = {n for _, _, rows in paragraph_rows(text, rel) for n, _ in rows}
     out, seen = [], 0
     for number, line in enumerate(lines, 1):
+        if number not in outside or not FACTS_LABEL.match(line):
+            continue
         if not line.startswith("Facts:"):
+            out.append((number, line.strip(), "the label is not the exact `Facts:` at the start of the line"))
             continue
         seen += 1
         if seen > 1:
@@ -1754,7 +1766,7 @@ def probe_facts(root):
             text = read(root, rel)
             if text is None:
                 continue
-            claims, seen = facts_claims(text) if "Facts:" in text else ([], 0)
+            claims, seen = facts_claims(text, rel) if FACTS_LABEL_LINE.search(text) else ([], 0)
             files += 1 if seen else 0
             for number, claim, why in claims:
                 shown = "%s: %s:%d" % (claim, rel, number)
