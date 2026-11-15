@@ -4,6 +4,6 @@
 
 **Where.** `hooks/stale_install.py`, `check()` and its call to `reinstall()`.
 
-**Decision.** none.
+**Decision.** `stale-install-cost` (the cost record: the retry cost, and the open owner call on one `git ls-remote` per cloud prompt).
 
 **Retire.** After a reinstall that did not reach the tip, the hook skips the installer for that tip, for the rest of the session or for a bounded time. A stamp that the hook itself reads holds the skip. A case in `hooks/test_reinstall_stale.py` proves one installer run per tip.
