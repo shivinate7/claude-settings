@@ -205,8 +205,10 @@ def core(sentence):
     return sentence.strip().rstrip(".?!")
 
 
-def assert_refused(case, result, item_number, sentence):
-    """A refusal is a (matched, reason) pair whose reason names the item number and the sentence."""
+def assert_refused(case, result, item_number, sentence, echo=True):
+    """A refusal is a (matched, reason) pair whose reason names the item number and, unless `echo` is False, the
+    sentence. The judge reads a sentence with its code span blanked and its line breaks joined, so a case whose
+    sentence holds either one passes echo=False."""
     case.assertIsNotNone(result, "'%s' was allowed: a refusal naming item %s was expected"
                          % (core(sentence), item_number))
     case.assertIsInstance(result, tuple, "answered_claim_hit() returned %r, not a (matched, reason) pair" % (result,))
@@ -215,8 +217,9 @@ def assert_refused(case, result, item_number, sentence):
     case.assertIsInstance(reason, str, "the refusal's reason is %r, not text" % (reason,))
     case.assertIn(item_number, reason, "the refusal for '%s' does not name item %s: %r"
                   % (core(sentence), item_number, reason[:160]))
-    case.assertIn(core(sentence), reason, "the refusal for item %s does not name the sentence '%s'"
-                  % (item_number, core(sentence)))
+    if echo:
+        case.assertIn(core(sentence), reason, "the refusal for item %s does not name the sentence '%s'"
+                      % (item_number, core(sentence)))
 
 
 def assert_allowed(case, result, sentence):
@@ -322,6 +325,36 @@ class PassTests(unittest.TestCase):
         sentence = "item 874 needs the owner's answer: cite it, or say \"recommended, not answered\"."
         assert_allowed(self, send(self, sentence, refusing()), sentence)
 
+    def test_the_remedy_citing_the_owner_answer_and_its_time_passes(self):
+        # The refusal's own remedy: an owner answer cited with its time is the answer the page does not hold.
+        repo = refusing()
+        assert_refused(self, send(self, "Item 874 is answered.", repo), "874", "Item 874 is answered.")  # scope
+        sentence = "Item 874 (owner, 2026-11-15 13:30 CST) is answered."
+        result = send(self, sentence, repo)
+        self.assertIsNone(result, "'%s' was refused: a claim that cites the owner's answer and its time must pass: %r"
+                          % (core(sentence), str(result)[:160]))
+
+    def test_a_move_between_lists_that_names_an_item_passes(self):
+        repo = refusing()
+        assert_refused(self, send(self, "item 874 is already answered.", repo), "874",
+                       "item 874 is already answered.")  # scope: the bare claim is refused
+        sentence = "Move item 874 from the answered list to the open list."
+        assert_allowed(self, send(self, sentence, repo), sentence)
+
+    def test_a_wait_until_an_answer_passes(self):
+        repo = refusing()
+        assert_refused(self, send(self, "item 874 is already answered.", repo), "874",
+                       "item 874 is already answered.")  # scope: the bare claim is refused
+        sentence = "Wait until item 874 is answered before you merge."
+        assert_allowed(self, send(self, sentence, repo), sentence)
+
+    def test_a_correction_that_an_answer_is_missing_passes(self):
+        repo = refusing()
+        assert_refused(self, send(self, "item 874 is already answered.", repo), "874",
+                       "item 874 is already answered.")  # scope: the bare claim is refused
+        sentence = "Correction: I wrote that item 874 was answered, and it is not."
+        assert_allowed(self, send(self, sentence, repo), sentence)
+
     def test_a_message_that_claims_nothing_passes(self):
         assert_allowed(self, send(self, NO_CLAIM, refusing()), NO_CLAIM)
 
@@ -405,6 +438,22 @@ class RefuseTests(unittest.TestCase):
         sentence = "item 874 is already answered."
         message = "detail " * 2500 + "\n" + sentence
         assert_refused(self, send(self, message, refusing()), "874", sentence)
+
+    def test_a_plural_items_reference_is_refused(self):
+        sentence = "Items 874 and 875 are answered."
+        assert_refused(self, send(self, sentence, refusing()), "874", sentence)
+
+    def test_an_item_number_with_a_letter_suffix_is_refused(self):
+        sentence = "Item 874d is answered."
+        assert_refused(self, send(self, sentence, refusing()), "874", sentence)
+
+    def test_an_item_number_in_code_formatting_is_refused(self):
+        sentence = "Item `874` is answered."
+        assert_refused(self, send(self, sentence, refusing()), "874", sentence, echo=False)
+
+    def test_an_item_split_by_a_line_break_is_refused(self):
+        message = "Item 874 has been\nanswered by the owner."
+        assert_refused(self, send(self, message, refusing()), "874", message, echo=False)
 
 
 class StoreStateTests(unittest.TestCase):
