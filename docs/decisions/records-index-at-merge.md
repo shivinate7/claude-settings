@@ -6,9 +6,14 @@ Each repo that keeps records has one generated index page, `docs/records.md`. It
 debt with a one-line gist. Only the merge tool rebuilds the page. A branch never edits the page by hand.
 
 Until the cutover (decision `all-repos-switch-together`), the tool rebuilds the page on the integration branch before the branch goes ready. After it, the tool rebuilds the page on each lane branch before that PR merges. `merge <pr> --confirm`
-on a draft PR is that step, and it never merges. It refuses a head that does not hold the base tip, as
-`--confirm` does, and a head that carries a claim. It commits the page alone, pushes it, and stops: mark
-the PR ready, then run `--confirm` again. The tool sends no GraphQL, so the batch runner marks the PR ready
+on a draft PR is that step (`draft_step`), and it never merges main. On the default base, it refuses a head that
+conflicts with the base or cannot be read (`holds_base`), and a head whose last commit carries a Record-claim (`head_claim`). It commits the page
+alone, pushes it, and stops: mark the PR ready, then run `--confirm` again. A head that lacks the tip but merges
+cleanly is not refused. `merge <pr> --ready` runs the same step with `merge_main=True`. On the default base, it first
+merges origin/<base> into a head that lacks the tip and merges cleanly (`merge_base_in`; owner ruling
+`own-840-a-ready-merges-main-skip-page-commits`, page item 840 a, 2026-11-14 19:56 CST; ruling file on branch
+`roadmap`). Any merge and any stale page commit go out in one plain push. Neither command merges a pull request.
+The tool sends no GraphQL, so the batch runner marks the PR ready
 by its session's route (route pr-ready-mcp-cloud), after the draft run of the pushed head shows (skill
 ci-hygiene). So the branch is final at ready, and the ready run is the merge run. The step claims no
 record numbers. It takes no merge lock. A PR that turns draft after the first read is the one case: the step runs
