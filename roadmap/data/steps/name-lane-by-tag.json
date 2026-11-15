@@ -6,6 +6,6 @@
  "phase": "later",
  "why": "09:28 CST Nov 15 (coordinator 09:27 CST, relayed): the lane start-checks-after-call queued \"name-lane-by-tag\" and did not build it. Triage has only the name, plus the PR body of #3503 line: machine-load-brake line 14 says \"A parent_session_id alone makes no lane: triage and the batch runner carry one\", so the started-session flag names a lane by its cs-build:lane tag. Triage checked the roadmap steps (grep lane tag, name-lane-by-tag, by tag): no step carries the idea; start-checks-after-call and start-session-not-pretooluse mention the tag only as a premise. The lane's wording of the ask is not on record; ask the lane (session_013NEJKzvNSpeqiQVskuCLsv) for it before any build. Low. Not started. Unmeasured: how often a session is misnamed lane or non-lane by parent_session_id.",
  "source": "coordinator 09:27 CST Nov 15, relayed from lane start-checks-after-call (#3503)",
- "note": "Low. Not started. Wording of the ask is the lane's and is missing here. Link: start-checks-after-call (#3503).",
- "updatedAt": "2026-11-15T09:28:00-06:00"
+ "note": "Low. Not started. Wording of the ask is the lane's and is missing here. Link: start-checks-after-call (#3503). 11:21 CST Nov 15 slip (coordinator 11:19, relayed): at 11:15 it typed a wrong lane id (windows-sweep) and the send failed; it re-sent from the saved id. Guard that would have stopped it: none built; copy ids from the roster.",
+ "updatedAt": "2026-11-15T11:21:00-06:00"
 }

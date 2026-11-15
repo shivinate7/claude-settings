@@ -2,13 +2,14 @@
  "id": "rewrite-merge-decisions-for-lane-merge",
  "title": "Rewrite standing-merge-grant and session-tiers in place for lanes merging their own claude-settings PRs (low)",
  "priority": "low",
- "status": "open",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "owner": "coordinator",
  "blockedBy": [],
- "updatedAt": "2026-11-15T11:20:00-06:00",
+ "updatedAt": "2026-11-15T11:21:00-06:00",
  "why": "Owner ruling own-lanes-merge-claude-settings-prs (11:12 CST Nov 15, via the consultant) overturns line 16 of decision standing-merge-grant (2026-11-01, \"option C absolutely not correct\"). Decisions standing-merge-grant and session-tiers (lines about 72-75, 87, 102 on main) still say a lane never merges. A docs lane rewrites both in place, within the consultant's reading (the whole route `merge --ready` then `--confirm` for the lane's own PR; no red main, no refusal bypass, nothing for other repos; relayed, not read by triage). Coordinator was told; starting the lane is its call. Open: whether the 'only the batch runner marks ready' grant in claude-settings .claude/CLAUDE.md changes (unasked).",
  "source": "owner via the consultant 11:12 CST Nov 15; coordinator told by triage",
- "note": "Open, low. No lane started; the coordinator decides. Filed 11:20 CST Nov 15."
+ "note": "Doing, low. Docs lane lanes-merge-own-pr-text started by the coordinator (session_013NEJL3457AGvKgVXYy9L3s; coordinator 11:19 CST Nov 15, relayed, not read by triage): part 1 reads which code or config refuses a lane's merge; part 2 rewrites standing-merge-grant line 16, session-tiers and others in place; touches no CLAUDE.md. Runner 10 and open lanes told (merge act only; coordinator 11:14-11:15). The coordinator's wording said marking ready stays with runner 10; the consultant's later reading (11:15) is that a lane marks via `merge --ready`: see ruling own-self-merge-and-combine. Filed 11:20 CST; updated 11:21.",
+ "lane": "session_013NEJL3457AGvKgVXYy9L3s"
 }
