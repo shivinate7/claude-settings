@@ -1,11 +1,11 @@
 {
   "title": "The batch runner merges only the commit CI ran on",
   "why": "A merge go with no head can land a commit CI never ran on; #2274 makes the auto-mode entry \"Batch Runner Merge\" allow only `merge <pr> --confirm --head <sha>`.",
-  "note": "PR #2274 (head 289711ca7), round 3 passed. Blocked on owner page item 461 (runner-merge-needs-head): a settings.json change needs the owner's word. It narrows the entry. On a yes, #2274 joins batch 69. Filed from the coordinator, 04:28 CST Nov 9. Owner pick on the waiting page (13:09 CST Nov 9): item 461 a. The settings change in #2274 is allowed as written: the batch runner merges only the commit CI ran on. #2274 joins a batch. Done: #2274 merged in batch 70 (PR #2498, 0e6509a96, 00:52 CST Nov 10).",
+  "note": "PR #2274 (head 289711ca7), round 3 passed. Blocked on owner page item 461 (runner-merge-needs-head): a settings.json change needs the owner's word. It narrows the entry. On a yes, #2274 joins batch 69. Filed from the coordinator, 04:28 CST Nov 9. Owner pick on the waiting page (13:09 CST Nov 9): item 461 a. The settings change in #2274 is allowed as written: the batch runner merges only the commit CI ran on. #2274 joins a batch. Done: #2274 merged in batch 70 (PR #2498, 0e6509a96, 00:52 CST Nov 10).\n\n12:38 CST Nov 15 (coordinator, relayed, runner's practice; no step named merge-needs-current-base exists, this is the nearest): runner 10 now marks a lane PR without `--ready` when the merge tool says clean (\"origin/main has commits the head lacks, and the merge of the two is clean. The green run stands\").",
   "phase": "now",
   "owner": "lane",
   "lane": "archived, handoff at handoffs/session_013NEJKzw6Mmu5eviHC3vobt.md on archive/session-handoffs-2026-11-10",
   "status": "done",
   "order": 900,
-  "updatedAt": "2026-11-10T11:20:00-06:00"
+  "updatedAt": "2026-11-15T12:42:00-06:00"
 }

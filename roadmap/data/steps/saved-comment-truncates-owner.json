@@ -1,15 +1,15 @@
 {
- "id": "saved-comment-truncates-owner",
- "title": "The page's \"Saved on the waiting page\" comment cut the item owner strings",
- "status": "todo",
- "repo": "shivinate7/claude-settings",
- "phase": "next",
- "priority": "low",
- "lane": "",
- "owner": "triage",
- "blockedBy": [],
- "why": "One sighting, 11:30 CST Nov 15: the page's \"Saved on the waiting page\" comment read \"Owners: coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 02:44 CST Nov 15; posted by triag, coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 01:20 CST Nov 15, from lane lane-. Items: 869 a, 863 b.\" The item owner strings are cut (\"triag\", \"lane lane-\"). Cause unmeasured. Not fixed. No lane. Harm unknown: the wake still named the right items and choices.",
- "source": "triage, comment of 11:30 CST Nov 15",
- "note": "Filed 11:34 CST Nov 15 by triage. Note only, one sighting, cause unmeasured; no lane.",
- "updatedAt": "2026-11-15T11:34:00-06:00"
+  "id": "saved-comment-truncates-owner",
+  "title": "The page's \"Saved on the waiting page\" comment cut the item owner strings",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "priority": "low",
+  "lane": "session_013NEJL2oWGS1KjFhpeMBUWi",
+  "owner": "triage",
+  "blockedBy": [],
+  "why": "One sighting, 11:30 CST Nov 15: the page's \"Saved on the waiting page\" comment read \"Owners: coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 02:44 CST Nov 15; posted by triag, coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 01:20 CST Nov 15, from lane lane-. Items: 869 a, 863 b.\" The item owner strings are cut (\"triag\", \"lane lane-\"). Cause unmeasured. Not fixed. No lane. Harm unknown: the wake still named the right items and choices.\n\n12:36 CST Nov 15 (coordinator, relayed; its pick, none owner-typed, undoable): lane saved-comment-truncates-owner started 12:29-12:31 CST after the REST reset, session session_013NEJL2oWGS1KjFhpeMBUWi. Lane 23.",
+  "source": "triage, comment of 11:30 CST Nov 15",
+  "note": "Filed 11:34 CST Nov 15 by triage. Note only, one sighting, cause unmeasured; no lane.",
+  "updatedAt": "2026-11-15T12:40:00-06:00"
 }

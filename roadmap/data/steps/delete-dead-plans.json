@@ -1,13 +1,13 @@
 {
- "id": "delete-dead-plans",
- "title": "Delete the dead plans (stalled-steps, plugin-assess-three, trial-results, trial-briefs) and repoint docs/debts/notes.md:1954",
- "status": "open",
- "repo": "shivinate7/claude-settings",
- "phase": "now",
- "owner": "coordinator",
- "blockedBy": [],
- "why": "11:31 CST Nov 15 (consultant ordered the coordinator to start; relayed, not read by triage): delete the plans stalled-steps, plugin-assess-three, trial-results and trial-briefs, and repoint docs/debts/notes.md:1954. Lane ids not relayed; the coordinator starts it.",
- "source": "Consultant order 11:31 CST Nov 15, via the coordinator 11:34 (relayed; not read by triage)",
- "note": "Open. Guard or check: unknown. The coordinator starts the lane. Filed 11:39 CST Nov 15.",
- "updatedAt": "2026-11-15T11:39:00-06:00"
+  "id": "delete-dead-plans",
+  "title": "Delete the dead plans (stalled-steps, plugin-assess-three, trial-results, trial-briefs) and repoint docs/debts/notes.md:1954",
+  "status": "open",
+  "repo": "shivinate7/claude-settings",
+  "phase": "now",
+  "owner": "coordinator",
+  "blockedBy": [],
+  "why": "11:31 CST Nov 15 (consultant ordered the coordinator to start; relayed, not read by triage): delete the plans stalled-steps, plugin-assess-three, trial-results and trial-briefs, and repoint docs/debts/notes.md:1954. Lane ids not relayed; the coordinator starts it.",
+  "source": "Consultant order 11:31 CST Nov 15, via the coordinator 11:34 (relayed; not read by triage)",
+  "note": "Open. Guard or check: unknown. The coordinator starts the lane. Filed 11:39 CST Nov 15.\n\n12:38 CST Nov 15 (coordinator pick, undoable, not owner-typed; relayed): lane dead-plans-delete (#3511, docs-only: deletes plans stalled-steps, plugin-assess-three, trial-results) asked whether to delete trial-briefs too. Pick: leave it, live decisions cite its briefs as a rule's home. #3511 handed to runner 10.",
+  "updatedAt": "2026-11-15T12:42:00-06:00"
 }
