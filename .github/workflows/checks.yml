@@ -1937,7 +1937,7 @@ jobs:
         run: python merge/test_cmd.py
 
       - name: Reviewed-cursor fixture suite
-        if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') }}
         run: python merge/test_reviewed_cursor.py
 
   checks-windows-merge-2:
