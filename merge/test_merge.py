@@ -16436,14 +16436,22 @@ class ReviewCleanMainMerge(ReviewEnv):
 
 class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
     """A lane-lint PASS carries across a clean merge of main. The merge tool proves the merge: two
-    parents, the second on the base's main, git's own merge tree of its parents, and nothing else changed since the PASS. The lint carries across clean
-    merges of main only: a claim or records-page commit after a clean merge is not carried here. The old direct form, a claim or page straight on the
-    PASS, stays. Any other form is not carried, and a read that fails is not carried, never passed. The carry does not depend on the stamp config. Cases call lint_carried with its
+    parents, the second on the base's main, git's own merge tree of its parents, and nothing else changed since the PASS. A claim or records-page
+    commit made after a clean merge carries too, so the walk may mix clean merges with those commits. The old direct form, a claim or page straight on the
+    PASS, stays. A claim or page made before a merge is not carried, and so is any other form, such as a merge with a change or a hand-edited page.
+    A read that fails is not carried, never passed. The carry does not depend on the stamp config. Cases call lint_carried with its
     current signature, through the scripted host of --reviewed (reviewed_host); lint_check and --reviewed each get one case."""
 
     def setUp(self):
         super().setUp()
         self.use_fake_records()
+
+    def direct_claim(self, fx):
+        """-> a record claim straight on the reviewed head, after a check that it carries: the old direct form, the control each case below starts from."""
+        claim = self.claim_over(fx.fixed, {"docs/decisions/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        self.assertTrue(self.carry(fx, claim), "control: a record claim straight on the reviewed head does not carry, so the cases below prove nothing")
+        return claim
 
     def test_a_a_lint_pass_carries_across_clean_merges_of_main(self):
         fx = self.real_commits()
@@ -16453,19 +16461,19 @@ class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
         self.assertTrue(self.carry(fx, fx.clean), "a lane-lint PASS on the reviewed head does not carry across one clean merge of main")
         self.assertTrue(self.carry(fx, fx.clean2), "a lane-lint PASS on the reviewed head does not carry across two clean merges of main")
 
-    def test_b_a_claim_after_a_clean_merge_is_not_carried(self):
+    def test_b_a_claim_after_a_clean_merge_is_carried(self):
         fx = self.real_commits()
         self.assertEqual(fx.parents[fx.clean], [fx.fixed, fx.main], "fixture: the clean merge's parents are not the reviewed head and main")
         claim = self.claim_over(fx.clean, {"docs/decisions/second.md": record("D-002", "second")})
         self.facts(fx, [claim])
-        self.assertFalse(self.carry(fx, claim), "a claim commit after a clean merge of main carried the PASS: the lint carries across clean merges of main only")
+        self.assertTrue(self.carry(fx, claim), "a claim commit after a clean merge of main did not carry the PASS")
 
-    def test_b_a_records_page_after_a_clean_merge_is_not_carried(self):
+    def test_b_a_records_page_after_a_clean_merge_is_carried(self):
         fx = self.real_commits()
         page = self.tool_page(fx.clean)
         self.facts(fx, [page])
         self.assert_page_scope(page, fx.clean)
-        self.assertFalse(self.carry(fx, page), "a generated records page after a clean merge of main carried the PASS: the lint carries across clean merges of main only")
+        self.assertTrue(self.carry(fx, page), "a generated records page after a clean merge of main did not carry the PASS")
 
     def test_b_a_hand_edited_records_page_after_a_clean_merge_is_not_carried(self):
         fx = self.real_commits()
@@ -16478,6 +16486,70 @@ class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
         self.assert_page_scope(hand, fx.clean)
         self.assertIn("hand line", sh(self.co, "git", "show", f"{hand}:{merge.RECORDS_PAGE}"), "fixture: the page commit does not hold the hand edit")
         self.assertFalse(self.carry(fx, hand), "a hand-edited records page after a clean merge of main carried the PASS: the page is the generator's output or no carry")
+
+    def test_b_b_two_claims_after_a_clean_merge_are_carried(self):
+        fx = self.real_commits()
+        first = self.claim_over(fx.clean, {"docs/decisions/second.md": record("D-002", "second")})
+        second = self.claim_over(first, {"docs/decisions/third.md": record("D-003", "third")})
+        self.facts(fx, [first, second])
+        self.assertEqual(fx.parents[second], [first], "fixture: the second claim does not sit on the first claim")
+        self.assertTrue(self.carry(fx, second), "two claim commits after a clean merge of main did not carry the PASS")
+
+    def test_b_c_a_claim_after_a_clean_merge_that_touches_another_file_is_not_carried(self):
+        fx = self.real_commits()
+        self.direct_claim(fx)
+        claim = self.claim_over(fx.clean, {"docs/decisions/second.md": record("D-002", "second"), "notes.txt": "notes\n"})
+        self.facts(fx, [claim])
+        self.assertEqual(fx.parents[claim], [fx.clean], "fixture: the claim does not sit on the clean merge")
+        self.assertIn("notes.txt", sh(self.co, "git", "diff-tree", "--no-commit-id", "--name-only", "-r", claim).split(),
+                      "fixture: the claim does not touch notes.txt, so the case below tests nothing")
+        self.assertFalse(self.carry(fx, claim), "a claim after a clean merge of main that also touches notes.txt carried the PASS: only record files carry")
+
+    def test_b_d_a_claim_after_a_conflict_resolved_by_hand_is_not_carried(self):
+        fx = self.real_commits()
+        self.direct_claim(fx)
+        self.assertEqual(fx.parents[fx.conflicted], [fx.fixed, fx.main3], "fixture: the conflicted merge's parents are not the reviewed head and main3")
+        claim = self.claim_over(fx.conflicted, {"docs/decisions/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        self.assertFalse(self.carry(fx, claim), "a claim after a merge of a conflict resolved by hand carried the PASS")
+
+    def test_b_e_a_claim_after_a_clean_merge_reads_no_lint_when_git_cannot_merge(self):
+        fx = self.real_commits()
+        real_sh = merge.sh
+
+        def sh_without_merge_tree(args, *a, **k):
+            if "merge-tree" in args:
+                return 128, "fixture: git merge-tree fails"
+            return real_sh(args, *a, **k)
+        patch = unittest.mock.patch.object(merge, "sh", sh_without_merge_tree)
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.direct_claim(fx)  # the control, under the failing merge-tree: the claim route reads no merge, so it still carries
+        claim = self.claim_over(fx.clean, {"docs/decisions/second.md": record("D-002", "second")})
+        self.facts(fx, [claim])
+        self.assertFalse(self.carry(fx, claim), "a claim after a clean merge of main carried the PASS while git's merge-tree fails: a merge git cannot read is no carry")
+        host = self.reviewed_host(fx, claim, comments=[review_comment(1, 7, record_text(head=claim, rounds=REVIEW_PASS)), lint_of(7, fx.fixed)])
+        rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {claim[:9]} no lint: ",
+                         "the --reviewed line of a claim after a clean merge does not read no lint while git's merge-tree fails:\n" + out)
+
+    def test_b_f_a_claim_before_a_clean_merge_is_not_carried(self):
+        fx = self.real_commits()
+        claim = self.direct_claim(fx)
+        merged = self.git_commit(claim, {"b.txt": "b\n"}, fx.main)
+        self.facts(fx, [merged])
+        self.assertEqual(fx.parents[merged], [claim, fx.main], "fixture: the merge's parents are not the claim and main")
+        self.assertFalse(self.carry(fx, merged), "a claim before a clean merge of main carried the PASS: the carry crosses a claim only when it comes after a clean merge")
+
+    def test_b_g_a_claim_then_a_clean_merge_then_a_page_is_not_carried(self):
+        fx = self.real_commits()
+        claim = self.direct_claim(fx)
+        merged = self.git_commit(claim, {"b.txt": "b\n"}, fx.main)
+        page = self.tool_page(merged)
+        self.facts(fx, [merged, page])
+        self.assert_page_scope(page, merged)
+        self.assertFalse(self.carry(fx, page), "a claim, then a clean merge of main, then a generated records page carried the PASS: the claim comes before the merge, which the carry does not cross")
 
     def test_c_a_plain_commit_after_a_clean_merge_is_not_carried(self):
         fx = self.real_commits()
@@ -16673,6 +16745,17 @@ class LintPageCarryWithoutStampKinds(ReviewEnv, RecordsEnv):
         self.assertTrue(self.carry(fx, claim), "control: a claim commit on the reviewed head does not carry on the default base, so the case below proves nothing")
         self.no_kinds_base(fx)
         self.assertFalse(self.carry(fx, claim), "a claim commit carried the PASS when the base holds no stamp kinds: no file there is a record")
+
+    def test_f_a_generated_page_after_a_clean_merge_is_carried_when_the_base_has_no_stamp_kinds(self):
+        fx = self.real_commits()
+        on_head = self.tool_page(fx.fixed)
+        page = self.tool_page(fx.clean)
+        self.facts(fx, [on_head, page])
+        self.assert_page_scope(page, fx.clean)
+        self.assertTrue(self.carry(fx, on_head), "control: a generated records page on the reviewed head does not carry on the default base, so the case below proves nothing")
+        self.no_kinds_base(fx)
+        self.assertTrue(self.carry(fx, on_head), "control: a generated records page on the reviewed head does not carry when the base holds no stamp kinds")
+        self.assertTrue(self.carry(fx, page), "a generated records page after a clean merge of main did not carry the PASS when the base holds no stamp kinds")
 
 
 class ReviewUnknownReads(ReviewEnv):
