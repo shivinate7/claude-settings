@@ -2825,6 +2825,131 @@ def case_departs_ruling_ranks_the_topic_first():
     check("departs ruling ranking: the refusal makes no model call", r.calls == [], tcj.detail(r))
 
 
+# ------------------------------------------------------------------ generic words in a Departs line, and the cite's id
+#
+# Review round 1 of the Departs-line ruling (decision question-form) found a false alarm and a bypass. The false alarm:
+# a Departs from line whose only shared words with a ruling are generic (main, adds, check, form, field, line) is
+# refused. The bypass: `Based on (ruling): decisions/<stem>` clears the step ruling whose id is that stem.
+GENERIC_RULING = "ruled-generic-form-line"
+GENERIC_RULING_TEXT = "Owner: main adds one check to each form field line."
+GENERIC_DEPARTS = ("Departs from: main — adds a timer check to the report",
+                   "Departs from: main — adds a form field line check")
+STEM_STEP = "ruled-store-one-home"
+STEM_TEXT = "Ruling (owner, Nov 13): a closed routed grant counts toward the grant route."
+STEM_DEPARTS = "Departs from: main refuses a closed routed grant — a closed routed grant counts"
+STEM_BASED = "Based on (read): the grant check refuses a closed item on main"
+
+
+def stem_repo():
+    """The repo of the cite cases: a step ruling and a decision record that share the id STEM_STEP."""
+    return tcj.make_repo("departs-cite-stem",
+                         decisions={STEM_STEP: "Owner: a closed routed grant counts toward the grant route."},
+                         steps={STEM_STEP: STEM_TEXT})
+
+
+def stem_box(cite_line):
+    return tcj.incident_box(departs=STEM_DEPARTS, based=(STEM_BASED, cite_line))
+
+
+def case_departs_generic_words_pass():
+    # The ruling shares only generic words with each Departs from line, so no shared word is a topic: one model call,
+    # no deny. Scope first: the ruling is a candidate, so the pass is the check's and not an absent ruling.
+    import question_form  # the one form check (hooks/question_form.py)
+    repo = tcj.make_repo("departs-generic-words")
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files({GENERIC_RULING: fixture.entry(
+        GENERIC_RULING, at="2026-11-13T18:24:00-06:00", ruling=GENERIC_RULING_TEXT, supersedes=tcj.SUPERSEDES)}),
+        tcj.ROOT)
+    for departs in GENERIC_DEPARTS:
+        box = tcj.incident_box(departs=departs)
+        check("departs generic %r: the box passes chat_hit" % departs, question_form.chat_hit(box) == ("", ""),
+              str(question_form.chat_hit(box)))
+        listed = tcj.ruled_candidates(box, repo)
+        check("departs generic %r: the ruling is a candidate, as ruled:%s:" % (departs, GENERIC_RULING),
+              any(c.startswith("ruled:%s:" % GENERIC_RULING) for c in listed), str(listed)[:200])
+        r = tcj.run_hook(tcj.question_input(box=box, cwd=repo), answer=tcj.ALLOW)
+        check("departs generic %r: its shared words are all generic, so one model call and no deny" % departs,
+              r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, tcj.detail(r))
+
+
+def case_departs_cite_of_a_decision_stem_does_not_clear_a_step_ruling():
+    # `decisions/<stem>` names the decision record, not the step ruling of the same id, so it must not clear that ruling.
+    import question_form  # the one form check (hooks/question_form.py)
+    repo = stem_repo()
+    box = stem_box("Based on (ruling): decisions/%s" % STEM_STEP)
+    check("departs cite stem: the box passes chat_hit, so the ruling check is what decides it",
+          question_form.chat_hit(box) == ("", ""), str(question_form.chat_hit(box)))
+    listed = tcj.ruled_candidates(box, repo)
+    check("departs cite stem: the step ruling is a candidate, as %s:" % STEM_STEP,
+          any(c.startswith(STEM_STEP + ":") for c in listed), str(listed)[:200])
+    r = tcj.run_hook(tcj.question_input(box=box, cwd=repo), answer=tcj.ALLOW)
+    check("departs cite stem: the decisions/ cite does not clear the step ruling, so the question is refused as past-ruling",
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling"), tcj.detail(r))
+    check("departs cite stem: the reason names the step id %s" % STEM_STEP, STEM_STEP in r.reason(), r.reason()[:200])
+    check("departs cite stem: the refusal makes no model call", r.calls == [], tcj.detail(r))
+
+
+def cited_step_clears(label, cite_line):
+    """One cite line that names the step ruling STEM_STEP clears it: one model call, no deny."""
+    import question_form  # the one form check (hooks/question_form.py)
+    repo = stem_repo()
+    box = stem_box(cite_line)
+    check("departs cite %s: the box passes chat_hit" % label, question_form.chat_hit(box) == ("", ""),
+          str(question_form.chat_hit(box)))
+    listed = tcj.ruled_candidates(box, repo)
+    check("departs cite %s: the step ruling is a candidate, as %s:" % (label, STEM_STEP),
+          any(c.startswith(STEM_STEP + ":") for c in listed), str(listed)[:200])
+    r = tcj.run_hook(tcj.question_input(box=box, cwd=repo), answer=tcj.ALLOW)
+    check("departs cite %s: the line names the step ruling, so one model call and no deny" % label,
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, tcj.detail(r))
+
+
+def case_departs_cite_bare_and_ruled_ids_clear_a_step_ruling():
+    cited_step_clears("bare id", "Based on (ruling): %s" % STEM_STEP)
+    cited_step_clears("ruled: id", "Based on (ruling): ruled:%s" % STEM_STEP)
+
+
+def case_departs_cite_bold_and_bulleted_clear_a_step_ruling():
+    cited_step_clears("bold", "**Based on (ruling):** %s" % STEM_STEP)
+    cited_step_clears("bulleted", "- Based on (ruling): %s" % STEM_STEP)
+
+
+# A GREEN CONTROL BY DESIGN (review round 1, item 3 of decision question-form): the Departs match reads only the ruling's
+# own words, and the metadata _ruled_candidates appends (owner, open, not on main, supersedes) never counts. The ruling
+# shares two words with the Departs focus, so one metadata word would not hit. The whole candidate line, with its
+# metadata, shares seven, so the metadata would hit if it counted. The case passes on ed4b39cdb because the strip holds
+# on the real output; it guards the one home of that format (RULED_META is written against _ruled_candidates).
+META_RULING = "ruled-meta-check"
+META_RULING_TEXT = "Owner: a routed answer counts toward the account."
+META_REF = "closed-routed-grant"
+META_DEPARTS = "Departs from: main lists the open supersedes closed grant — routed counts"
+
+
+def case_departs_ruling_metadata_words_never_count():
+    import question_form  # the one form check (hooks/question_form.py)
+    repo = tcj.make_repo("departs-metadata-words")
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files({META_RULING: fixture.entry(
+        META_RULING, at="2026-11-13T18:24:00-06:00", ruling=META_RULING_TEXT,
+        supersedes=[{"kind": "main-sentence", "ref": META_REF}])}), tcj.ROOT)
+    box = tcj.good_box(goal=tcj.INCIDENT_GOAL, problem=tcj.INCIDENT_PROBLEM, based=tcj.INCIDENT_BASED,
+                       options=tcj.INCIDENT_OPTIONS, departs=META_DEPARTS)
+    check("departs metadata: the box passes chat_hit", question_form.chat_hit(box) == ("", ""),
+          str(question_form.chat_hit(box)))
+    listed = [c for c in tcj.ruled_candidates(box, repo) if c.startswith("ruled:%s:" % META_RULING)]
+    check("departs metadata scope: the ruling is a candidate, as ruled:%s:" % META_RULING, len(listed) == 1,
+          str(listed)[:300])
+    line = listed[0] if listed else ""
+    focus = question_form._words(question_form.departs_text(META_DEPARTS))
+    ruling_shared = focus & question_form._words(META_RULING_TEXT)
+    check("departs metadata scope: the ruling's own text shares fewer than 3 words with the Departs focus",
+          len(ruling_shared) < 3, str(sorted(ruling_shared)))
+    line_shared = focus & question_form._words(line)
+    check("departs metadata scope: the whole candidate line, metadata included, shares 3 or more words with the focus",
+          len(line_shared) >= 3, str(sorted(line_shared)))
+    r = tcj.run_hook(tcj.question_input(box=box, cwd=repo), answer=tcj.ALLOW)
+    check("departs metadata: only the ruling's own words count, so one model call and no deny",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, tcj.detail(r))
+
+
 def main():
     for case in (case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
                  case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
@@ -2877,7 +3002,10 @@ def main():
                  case_departs_ruling_no_overlap_passes, case_departs_ruling_unvetted_line_passes,
                  case_departs_ruling_index_lines_never_trigger, case_departs_ruling_two_shared_words_pass,
                  case_departs_ruling_closed_entry_never_triggers, case_departs_ruling_step_ruling_hits,
-                 case_departs_ruling_ranks_the_topic_first):
+                 case_departs_ruling_ranks_the_topic_first,
+                 case_departs_generic_words_pass, case_departs_cite_of_a_decision_stem_does_not_clear_a_step_ruling,
+                 case_departs_cite_bare_and_ruled_ids_clear_a_step_ruling,
+                 case_departs_cite_bold_and_bulleted_clear_a_step_ruling, case_departs_ruling_metadata_words_never_count):
         try:
             case()
         except Exception as exc:
