@@ -10,6 +10,7 @@
     python3 lint/compliance_probes.py supersede <child root>
     python3 lint/compliance_probes.py slugs <child root>
     python3 lint/compliance_probes.py restates <child root>
+    python3 lint/compliance_probes.py aligned <child root>
     python3 lint/compliance_probes.py hooks <child root>
     python3 lint/compliance_probes.py scorecard <child root> < group-lines
 
@@ -1329,9 +1330,14 @@ def probe_words(root):
     return finish("words", lines, "in shape", 0)
 
 
+def probe_aligned(root):
+    # Stub: always clear until the real check replaces it.
+    return finish("aligned", [], "in shape - stub, nothing read", 0)
+
+
 GROUPS = {"layout": probe_layout, "design": probe_design, "lanecap": probe_lanecap, "playwright": probe_playwright,
           "ios": probe_ios, "words": probe_words, "supersede": probe_supersede, "slugs": probe_slugs,
-          "restates": probe_restates, "hooks": probe_hooks, "scorecard": scorecard}
+          "restates": probe_restates, "aligned": probe_aligned, "hooks": probe_hooks, "scorecard": scorecard}
 
 
 def main(argv):
