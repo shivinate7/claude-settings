@@ -414,7 +414,7 @@ def case_str_replace():
 # ------------------------------------------------------------------ a stands:true item is an ordinary item
 
 def case_stands_gets_no_relaxed_stake_rule():
-    # Owner ruling, 13:04 CST Nov 13: no stood pick. The stake rule is judged on the form (decision_form_hit),
+    # A stands item gets no relaxed stake rule. The stake rule is judged on the form (decision_form_hit),
     # not item_hit: item_hit refuses a write that names a field the page does not draw before it reads the form.
     bare = page_item(problem="Problem: which job runs it, and why it needs your word.", stands=True)
     verdict("a stands:true decision with a bare Problem line gets no relaxed stake rule",

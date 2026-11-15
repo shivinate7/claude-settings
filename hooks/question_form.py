@@ -107,7 +107,7 @@ FORM_REASON = ("A question to the owner states the form, in this order: a line \
                "his word>\" where stake is one of %s, and one to three lines \"Based on (<kind>): <one "
                "premise>\" where kind is one of %s. Each option states its gain and its loss."
                % (", ".join(OWNER_STAKES), ", ".join(PREMISE_KINDS)))
-PAGE_FORM_REASON = FORM_REASON + (" On the waiting page the lines go in `context`, and each option has a "
+PAGE_FORM_REASON = FORM_REASON + (" On the page the lines go in `context`, and each option has a "
                                   "non-empty `gain` and `lose`.")
 CHAT_FORM_REASON = FORM_REASON + (" In the question box the lines go in the question text, and each "
                                   "option's description holds \"Gain: <text>\" and \"Lose: <text>\".")
