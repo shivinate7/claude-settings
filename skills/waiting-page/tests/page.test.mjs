@@ -185,7 +185,9 @@ test("a rule question starts blank, my pick is starred in its card, and a tap on
   const page = await open(t); if (!page) return;
   assert.equal(await page.locator(`input[name="g-${DECISION.id}"]:checked`).count(), 0, "an option is preselected");
   const star = page.locator(`label[for="o-${DECISION.id}-a"] .pick`);
-  assert.match(await star.textContent(), /Red is bold\./);
+  await need(card(page, DECISION).locator(".recline"), `No. ${DECISION.n} draws no card-level Recommended line`);
+  assert.match(await card(page, DECISION).locator(".recline").textContent(), /Red is bold\./);
+  assert.doesNotMatch(await star.textContent(), /Red is bold\./, "the star still prints the why, which the Recommended line carries");
   assert.equal(await star.locator("svg").count(), 1, "the pick box holds no inline sparkle icon");
   assert.doesNotMatch(await star.textContent(), /[★⭐]/, "the pick box still holds a star character");
   assert.equal(await page.locator(`label[for="o-${DECISION.id}-b"] .pick`).count(), 0, "the star sits on a second option");
@@ -8012,7 +8014,9 @@ test("a pick that is not a valid list shows no star; a valid list does", async (
   const page = await open(t, { items: [...bad, good] }); if (!page) return;
   for (const it of [...bad.slice(0, 4), good]) await needBoxes(page, it, 3);
   assert.equal(await card(page, good).locator(".opt .pick").count(), 2, "a valid list is not starred on each pick");
-  assert.match(await page.locator(`#item-${good.id} .opt:has(#o-${good.id}-a) .pick`).textContent(), /Red and Green cover it\./);
+  await need(card(page, good).locator(".recline"), `No. ${good.n} draws no card-level Recommended line`);
+  assert.match(await card(page, good).locator(".recline").textContent(), /Red and Green cover it\./);
+  assert.doesNotMatch(await page.locator(`#item-${good.id} .opt:has(#o-${good.id}-a) .pick`).textContent(), /Red and Green cover it\./, "the star on Red still prints the why, which the Recommended line carries");
   for (const it of bad) assert.equal(await card(page, it).locator(".opt .pick").count(), 0, `${it.id}: a star shows for a bad pick`);
 });
 
