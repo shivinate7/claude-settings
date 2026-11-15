@@ -9414,6 +9414,22 @@ class RecordsRebuild(RecordsEnv):
         self.assertIsNotNone(found, "the --ready run printed no hint after its stays-a-draft reason:\n" + out)
         self.assertIn(found.group(1), remedy, "the remedy's ready step is not the text the --ready hint prints:\n" + remedy + "\n" + out)
 
+    def test_the_claim_head_stop_on_the_draft_step_gives_the_ready_hint_and_no_second_order(self):
+        # The draft step refuses a claim head with one mark-ready order: ready_hint, the text the --ready run prints. Its cloud order
+        # (MCP draft=false, then --confirm) is inside that hint, so the order is not asserted step by step here. "ready by hand" is a second wording.
+        self.claim_head()
+        self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", "origin/feat").strip(), "D-002",
+                         "precondition: the head holds no Record-claim")
+        before = self.refs()
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), before, "a push on a claim head the draft step refused")
+        self.assertEqual(self.host.readies, [], out)
+        line = printed(out, "holds a Record-claim")
+        self.assertTrue(line, "the draft step printed no claim-head stop:\n" + out)
+        self.assertIn(merge.ready_hint(7), line, "the claim-head stop does not give the one ready hint:\n" + out)
+        self.assertNotIn("ready by hand", line, "the claim-head stop gives a second, hand-ready wording of the order:\n" + out)
+
     def test_the_ready_preview_does_not_refuse_a_claim_to_make_or_a_claim_held(self):
         # The refusal is for a stale page with nothing to claim or resume. A claim to make, and a claim the head holds, do not refuse.
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})  # the default config: a record to claim
