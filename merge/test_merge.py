@@ -12966,35 +12966,107 @@ class RedMainBrake(Env):
         self.assertIn("UNKNOWN", out, "the refusal does not read the unresolved breaking merge as UNKNOWN")
         self.assertIn(unresolved[:9], out, "the refusal does not name the breaking merge it could not read")
 
-    def git_naming_breaking_merge_fails(self, breaking, failure):
-        """Patch merge.sh: a git call that names the breaking merge fails, as a git error or as a timeout `failure` says. -> (the patch, the calls it failed)."""
+    def stub_git_call(self, match, failure, reply=None):
+        """Patch merge.sh: the one git call that `match(args)` picks fails, as a git error or a timeout `failure` says, or answers `reply` (rc, text).
+        Every other call runs as it does. -> (the patch, the calls it took)."""
         real_sh, seen = merge.sh, []
         def stub(args, *a, **k):
-            if "git" in args and any(breaking[:9] in x for x in args if isinstance(x, str)):
+            if "git" in args and match(args):
                 seen.append(args)
                 if failure == "timeout":
                     raise subprocess.TimeoutExpired(args, 1)
-                return 128, "fatal: the revert's tree cannot be read (test stub)"
+                return reply or (128, "fatal: the stubbed git call failed (test stub)")
             return real_sh(args, *a, **k)
         return unittest.mock.patch.object(merge, "sh", stub), seen
 
-    def assert_unreadable_revert_refuses(self, failure):
+    def assert_revert_check_unknown(self, call, failure, reply=None):
+        """The revert check's one git call `call(B, head)` picks fails. The reason flag lifts nothing: the refusal reads UNKNOWN, never as a no."""
         B = self.land_breaking_merge()
         head = self.pr_head_after(B, drops=self.DROPS_LANE, from_main=True)
         self.assert_head_scope(head, B, exact=True)
-        patch, seen = self.git_naming_breaking_merge_fails(B, failure)
+        patch, seen = self.stub_git_call(call(B, head), failure, reply)
         with patch:
             rc, out, before = self.red_base_with_reason_flag(B, "revert of the breaking merge")
-        self.assertTrue(seen, "no git call named the breaking merge, so the stub failed no read of the revert's tree")
-        self.assertFalse(getattr(self.host, "merged", False), f"the reason flag lifted a red base whose revert's tree could not be read ({failure})")
+        self.assertTrue(seen, "the stub took no call of the revert check, so it failed no read the case names")
+        self.assertFalse(getattr(self.host, "merged", False), f"the reason flag lifted a red base when the revert check could not read ({failure})")
         self.refused_by_red_main(rc, out, before)
-        self.assertIn("UNKNOWN", out, f"the refusal does not read the unreadable revert as UNKNOWN ({failure})")
+        self.assertIn("UNKNOWN", out, "the refusal does not read the unreadable revert check as UNKNOWN")
+        self.assertNotIn("not the revert of the breaking merge", out, "the unreadable read is reported as a no, which is a stop that names no unknown")
 
-    def test_a_revert_whose_tree_cannot_be_read_by_a_git_error_refuses_as_unknown(self):
-        self.assert_unreadable_revert_refuses("git error")
+    def test_a_revert_check_whose_breaking_sha_does_not_resolve_is_unknown(self):
+        # the revert check's first read, rev-parse of the breaking sha, fails: the other reads run, and the refusal is UNKNOWN
+        self.assert_revert_check_unknown(lambda B, head: lambda args: f"{B[:9]}^{{commit}}" in args, "git error")
 
-    def test_a_revert_whose_tree_cannot_be_read_by_a_timeout_refuses_as_unknown(self):
-        self.assert_unreadable_revert_refuses("timeout")
+    def test_a_revert_check_whose_merge_tree_errors_is_unknown(self):
+        # only the merge-tree call of the revert tree fails, by a git error
+        self.assert_revert_check_unknown(lambda B, head: lambda args: "merge-tree" in args and f"--merge-base={B}" in args, "git error")
+
+    def test_a_revert_check_whose_merge_tree_times_out_is_unknown(self):
+        # only the merge-tree call of the revert tree times out
+        self.assert_revert_check_unknown(lambda B, head: lambda args: "merge-tree" in args and f"--merge-base={B}" in args, "timeout")
+
+    def test_a_revert_check_whose_diff_errors_is_unknown(self):
+        # only the diff of the head against the revert tree fails, by a git error
+        self.assert_revert_check_unknown(lambda B, head: lambda args: "diff" in args and "--quiet" in args and head in args, "git error")
+
+    def test_a_revert_check_whose_diff_times_out_is_unknown(self):
+        # only the diff of the head against the revert tree times out
+        self.assert_revert_check_unknown(lambda B, head: lambda args: "diff" in args and "--quiet" in args and head in args, "timeout")
+
+    def test_a_merge_tree_that_fails_with_no_conflict_line_is_unknown_not_a_no(self):
+        # rc 1 is a conflict only when merge-tree names one; a failure that names no conflict is no proof either way, so it is UNKNOWN
+        self.assert_revert_check_unknown(lambda B, head: lambda args: "merge-tree" in args and f"--merge-base={B}" in args, "git error",
+                                         reply=(1, "fatal: 9a6ce0ef988cdd08ebf4a0a99224663c96fb4bf9 not something we can merge"))
+
+    def test_a_merge_tree_that_conflicts_is_a_no_and_refuses_as_not_the_revert(self):
+        # control: rc 1 with a CONFLICT line is the revert that does not apply, so the pull request is no revert, and the stop is a no, not UNKNOWN
+        B = self.land_breaking_merge()
+        head = self.pr_head_after(B, drops=self.DROPS_LANE, from_main=True)
+        self.assert_head_scope(head, B, exact=True)
+        patch, seen = self.stub_git_call(lambda args: "merge-tree" in args and f"--merge-base={B}" in args, "git error",
+                                         reply=(1, "0" * 40 + "\nCONFLICT (content): Merge conflict in lane-2650.txt"))
+        with patch:
+            rc, out, before = self.red_base_with_reason_flag(B, "revert of the breaking merge")
+        self.assertTrue(seen, "the stub took no merge-tree call of the revert check")
+        self.assertFalse(getattr(self.host, "merged", False), "the reason flag lifted a red base for a revert that conflicts")
+        self.refused_by_red_main(rc, out, before)
+        self.assertNotIn("UNKNOWN", out, "a conflict is read as UNKNOWN, though merge-tree named the conflict")
+        self.assert_refused_as_not_the_revert(out, B)
+
+    def revert_merged_main_red(self):
+        """The breaking merge B lands and its revert lands as pull request #2651, so main's head M merges the revert R as its second parent. Main stays
+        red: a red run sits on M, above the revert. -> (B, A, R, M, runs, jobs), the page as `go` takes it."""
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        top = [(main_run(904, "failure", sha=M, message="Merge pull request #2651 from o/revert-2651"), [main_job("scope", "success"), main_job("checks", "failure", 20)])]
+        runs, jobs = self.breaking_page(B, A, top=top)
+        return B, A, R, M, runs, jobs
+
+    def test_an_empty_pull_request_after_the_revert_merged_is_refused_under_the_reason_flag(self):
+        # main is still red after the revert merged; an empty head, whose tree is main's, undoes nothing, so the reason flag lifts nothing for it
+        B, A, R, M, runs, jobs = self.revert_merged_main_red()
+        head = self.pr_head_after(from_main=True)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", f"{head}^{{tree}}"), sh(self.co, "git", "rev-parse", "origin/main^{tree}"),
+                         "the fixture's head is not empty: its tree is not main's")
+        rc, out, before = self.go(runs, jobs, "--base-red-ok", "this batch carries the fix", pulls={2651: self.revert_pull(2651, R)})
+        self.assertFalse(getattr(self.host, "merged", False), "the reason flag lifted a red main for an empty head, which is no revert of the breaking merge")
+        self.refused_by_red_main(rc, out, before)
+        self.assert_refused_as_not_the_revert(out, B)
+
+    def test_a_fix_pull_request_after_the_revert_merged_is_refused_under_the_reason_flag(self):
+        # control: main is still red after the revert merged, and the head is a real fix, not the revert: the reason flag lifts nothing for it
+        B, A, R, M, runs, jobs = self.revert_merged_main_red()
+        head = self.pr_head_after("fix", from_main=True)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertNotEqual(sh(self.co, "git", "rev-parse", f"{head}^{{tree}}"), sh(self.co, "git", "rev-parse", "origin/main^{tree}"),
+                            "the fixture's head is empty: it adds no file to main")
+        rc, out, before = self.go(runs, jobs, "--base-red-ok", "this batch carries the fix", pulls={2651: self.revert_pull(2651, R)})
+        self.assertFalse(getattr(self.host, "merged", False), "the reason flag lifted a red main for a fix that is not the revert of the breaking merge")
+        self.refused_by_red_main(rc, out, before)
+        self.assert_refused_as_not_the_revert(out, B)
 
 
 class PinnedMismatchStopsMain(Env):
