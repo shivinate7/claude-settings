@@ -215,8 +215,8 @@ Child CI runs the same probe through the action `actions/claude-md-cites`, after
 ## Aligned
 
 `$PY $P/lint/compliance_probes.py aligned .` runs in a pull request, with `BASE_SHA`, `HEAD_SHA` and `PR_BODY` set
-(the action sets them). It finds a record and a rule unit that cites it moving apart: the record changes and no
-citing unit does, or a citing unit changes and its record does not. A unit cites a record by its slug alone in a
+(the action sets them). It finds a record and a rule unit that cites it moving apart. Either the record changes and no citing unit
+does, or a citing unit changes and its record does not. A unit cites a record by its slug alone in a
 code span, or by the `<!-- rule:X -->` anchor the record's `Home:` line names. A PR body line
 `Rules checked: <record> — no change` clears one record (decision child-cites-not-copies). It reads one
 `git diff` and writes nothing. The fix goes in the PR: change the unit, or add the line.
