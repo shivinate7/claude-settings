@@ -751,8 +751,8 @@ class CannotClaimTests(trg.SameTurnWriter, unittest.TestCase):
             with self.subTest(line=line):
                 out = self.stop([trg.human("check the callers"), trg.assistant_text(line)])
                 self.assert_passes(out, "a round 1 false alarm: %r" % line)
-        # Re-pointed 2026-11-15 13:30 CST (owner ruling; decision cant-claim-needs-probe): a claim of an act outside the table
-        # needs one call in its turn. The call is unrelated, so the line is still no claim on the table path.
+        # The probe form (decision cant-claim-needs-probe) needs one call in the turn of a claim about an act outside the
+        # table. The call here is unrelated to the claim, and the form counts it anyway, so the line passes.
         out = self.stop([trg.human("check the callers"), *ok_bash("git status", "tu_probe"),
                          trg.assistant_text("I can't open the file in the editor.")])
         self.assert_passes(out, "a round 1 false alarm: an editor line with one call in its turn")
@@ -1691,8 +1691,8 @@ class CannotClaimTests(trg.SameTurnWriter, unittest.TestCase):
 
     def test_cc_red_f2_noun_between_the_verb_and_pr_is_no_claim(self):
         # Catches: the pr-open window reading any noun between the verb and PR, so "open the logs for PR 12" claims pr-open.
-        # The turn holds one unrelated call: the probe form (decision cant-claim-needs-probe, owner ruling 2026-11-15 13:30
-        # CST) needs a call in a turn that says an act cannot be done.
+        # The turn holds one unrelated call: the probe form (decision cant-claim-needs-probe) needs a call in a turn that
+        # says an act cannot be done.
         for line in ("I can't open the logs for PR 12.", "I can't open the diff for PR 12.",
                      "I can't create the tag for PR 12."):
             with self.subTest(line=line):
@@ -1757,7 +1757,7 @@ class CannotClaimTests(trg.SameTurnWriter, unittest.TestCase):
 
     def test_cc_green_pr_for_another_number_is_no_claim(self):
         # Control: a preposition (for, of, to) after the object ends the window, so these are no claim. The turn holds one
-        # unrelated call: the probe form (decision cant-claim-needs-probe, owner ruling 2026-11-15 13:30 CST) needs a call.
+        # unrelated call: the probe form (decision cant-claim-needs-probe) needs a call.
         lines = ("I can't open the logs for PR 12.", "I can't open the diff for PR 12.",
                  "I can't create the tag for PR 12.")
         for line in lines:
@@ -2159,8 +2159,8 @@ class CannotClaimTests(trg.SameTurnWriter, unittest.TestCase):
     def test_cc_red_a_claim_on_a_non_pr_or_docs_object_is_no_claim(self):
         # Catches: a merge, an open or an update whose object is not a PR, read as a PR claim with no try, so a claim about
         # config files, CI logs or docs blocked.
-        # The turn holds one unrelated call: the probe form (decision cant-claim-needs-probe, owner ruling 2026-11-15 13:30
-        # CST) needs a call in a turn that says an act cannot be done.
+        # The turn holds one unrelated call: the probe form (decision cant-claim-needs-probe) needs a call in a turn that
+        # says an act cannot be done.
         for prompt, line in (("merge the config files", "I can't merge these two config files."),
                              ("open the CI logs", "I can't open the PR's CI logs."),
                              ("update the docs", "I can't update the docs for PR 12.")):
@@ -2778,8 +2778,8 @@ class CannotClaimTests(trg.SameTurnWriter, unittest.TestCase):
                     self.assertIn("Hand-off guard", reason, "the block is not the hand-off guard's: %s" % reason)
                     self.assertNotIn(PROBE_RULE, reason, "the probe rule joins a hand-off line: %s" % reason)
 
-    # ---- round 1 review of cant-claim-needs-probe. Each red below has zero tool calls in its turn and is red on the head it
-    # was written on (21605b0a95). Each comment names the cause the red reads on that head.
+    # ---- Reds for the probe form. Each red below has zero tool calls in its turn. Each comment names the cause the red
+    # fails for.
 
     def test_cc_red_probe_failed_word_with_no_call_blocks(self):
         # Catches: "it failed" read as naming its check. The bare check word, with a subject that is not the writer, passes
