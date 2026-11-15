@@ -1,7 +1,7 @@
 Grant: <owner words that started the consultant>, <time>
 Consultant brief: {{topic}}. Plan file: {{plan_file}}.
 
-The owner starts the consultant on demand, in claude-settings. It tags itself `cs-build:consultant`, and no coordinator starts it.
+The owner starts the consultant on demand, in claude-settings. The consultant is not a tier: the owner starts it, and no coordinator sets its tag. The guard reads the tag `cs-build:consultant`.
 
 ## Task
 

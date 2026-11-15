@@ -18,7 +18,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   The arbiter is a separate role that holds a repo's ruling and grant voice (decision `session-tiers`, Arbiter).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
-  The consultant tags itself `cs-build:consultant`: the owner starts it, and no coordinator does.
+  The consultant is not a tier: the owner starts it, and no coordinator sets its tag. The guard reads the tag `cs-build:consultant`.
   A lane also gets `cs-topic:<topic slug>`, its one topic, and a `cs-step:<step id>` for each step it takes, so triage can see each step is live.
   It plans, briefs, verifies and reports, and builds only as rule `roles-orchestrator-never-builds` allows. A change that touches a rule's behaviour, a check's verdict or product code goes to a lane. Long reads go to read-only agents: the red-run reads, each `merge --touches` read of an open PR, and audits. It keeps lane state, the briefs and the talk with the owner.
 - **Triage.** A standing session. It writes the roadmap. Only triage writes a new step,
@@ -99,8 +99,8 @@ A spawner is a session that starts its own agents. Each session role is a set of
   read-only agents (Explore, refuter), to gather evidence. It builds nothing, starts no lanes and grants no Opus.
   Batch checks go to the batch runner. It compacts in place. Each ruling it makes goes to the page writer, which
   adds a closed item with an Overturn choice (decision `session-tiers`, Arbiter).
-- **Consultant.** A session the owner starts on demand, in claude-settings. It tags itself `cs-build:consultant`,
-  and no coordinator starts it. It talks with the owner and runs read-only audits. It keeps one plan file, rewritten in place. It sends
+- **Consultant.** A session the owner starts on demand, in claude-settings. The consultant is not a tier: the owner starts
+  it, and no coordinator sets its tag. The guard reads the tag `cs-build:consultant`. It talks with the owner and runs read-only audits. It keeps one plan file, rewritten in place. It sends
   each ruling to triage. A finding about another repo goes to that repo's triage. It builds, merges and decides
   nothing: an arbiter decides, and a consultant helps the owner decide. It ends when its plan lands. The name
   "advisor" is not used, since the built-in second opinion has it (decision `session-tiers`, Consultant).
