@@ -106,15 +106,19 @@
                           process kept, file or timer.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"] [--with PR,PR,...] [--touched-tests]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
-                          --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
+                          --base origin/<base>` in a temporary detached worktree. A PR gives its head and base; a
                           commit or ref is linted against --base (default main). A PR on a base other than main also FAILs when its head lacks that base's head (never lifted). A FAIL step refuses. An unknown refuses unless
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. A lint that ran no lint
-                          CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no lock, merges
-                          and pushes nothing, except that a PASS on a PR number posts one comment on it, as the account that runs it
+                          CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no lock and merges
+                          no pull request. A PASS on a PR number posts one comment on it, as the account that runs it
                           (the join and --reviewed count only an owner's); any session may run it, cloud included. Cost per call: one
                           ci-job run (about 550 s, measured once on one PR head), one worktree, and on a PASS one comment post.
                           Every head, a ref or commit too, is first merged into origin/<base> with `git merge-tree --write-tree`. A conflict FAILs,
-                          naming the base (never lifted).
+                          naming the base (never lifted), and nothing is resolved or pushed. A PR on main (not an integration PR, not a Record-claim head)
+                          whose head lacks main's tip is linted as the merge commit of the head and the tip. After a full PASS (the lint, the mutation test
+                          and the touched tests) that merge commit is pushed to the PR's branch with a plain push, and the PASS line and the comment name
+                          it, so the PASS head is the merged head. A refused push stops with no comment. A FAIL, an unknown, a lifted unknown and a batch
+                          runner's pre-join call push nothing. Cost of the push: one `git push` per call, only when the head is behind main.
                           A PR number is also checked against each other open PR of its lane (a draft counts; a PR whose body holds a
                           session URL the linted PR's body holds). Order: the stack stop, the base check, the cross-measure, then the ci-job
                           run. An unknown in the first three stops before the ci-job run, and --lint-unknown-ok never lifts it. A FAIL in the base
@@ -2237,10 +2241,10 @@ def holds_base(wt, base_ref, sha, raise_unread=False):
         raise Unread(text)
     return text, None
 
-def push_branch(wt, branch, lease=None, cite=""):
-    """A plain push. Never force: a moved branch refuses it, and nothing reaches origin.
+def push_branch(wt, branch, lease=None, cite="", source="HEAD"):
+    """A plain push of `source` (HEAD by default; lane_lint passes its merge commit, which `wt` holds as an object). Never force: a moved branch refuses it, and nothing reaches origin.
     `lease`, a sha, makes it a force-with-lease push that lands only while origin still holds that sha: a batch rebuild is the one caller. `cite` ends the stop's text: that caller passes its own."""
-    c, out = git(wt, "push", "-q", *([f"--force-with-lease=refs/heads/{branch}:{lease}"] if lease else []), "origin", f"HEAD:refs/heads/{branch}")
+    c, out = git(wt, "push", "-q", *([f"--force-with-lease=refs/heads/{branch}:{lease}"] if lease else []), "origin", f"{source}:refs/heads/{branch}")
     if c:
         raise Stop(f"the push of {branch} was refused. Nothing is on origin from this run. Run again.{' ' + cite if cite else ''}\n{out}")
 
@@ -3126,19 +3130,23 @@ def refuse_incomplete_tree(wt, head, base, tree=None):
 
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False, mutate_run=True, pre_join=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
-    in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
+    in a temporary detached worktree, removed on every exit. Takes no lock. Pushes nothing, except the one merge commit below. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR, and a stacked PR (base other than main) whose head lacks its base's head stops first.
     Then every head, a ref or commit too, is merged into origin/<base> with merge_reason: a conflict is a FAIL that names the base, and an unknown is a Stop.
     Once those pass, the merged tree is made a commit (`git commit-tree`, first parent the base tip, second the head) and the lint worktree checks it out, so every step
     and the touched tests read the files of the merge, not the head's older copy, and a diff of the base against HEAD or the work tree shows only the lane's own changes.
-    The first parent is the base tip that merge_reason merged, never a later read of origin/<base>. ci-job gets the head as CI_JOB_HEAD_SHA, so its
-    `github.event.pull_request.head.sha` is the pushed head, not the merge commit. A commit-tree or checkout that fails is an UnknownStop, which no flag lifts.
+    The first parent is the base tip that merge_reason merged, never a later read of origin/<base>. A commit-tree or checkout that fails is an UnknownStop, which no flag lifts.
+    A pull request on the default branch, not an integration PR and not a `pre_join` call, whose head holds no Record-claim and lacks that base tip is linted as M instead:
+    the merge commit of the head (first parent) and the tip (second), made with base_merge_message and the tree merge_reason read. The lint commit's second parent is then M,
+    and ci-job gets M as CI_JOB_HEAD_SHA, so its `github.event.pull_request.head.sha` is M. For any other target the second parent is the head, and CI_JOB_HEAD_SHA is the head.
+    M is pushed only after the lint, the mutation test and the touched tests all pass (a plain push of M to the pull request's branch, never forced). A refused push (the branch moved) is a Stop
+    that posts nothing. A FAIL, an unknown (lifted or not) and a conflict push nothing; a conflict is never resolved here. The PASS line and the comment name M, the head that passed.
     Then cross_measure checks a PR's head against the lane's other open PRs and `with_prs`: an unknown there is a Stop too.
     A FAIL above (the base conflict, a clash that counts) or an unknown stops before the ci-job run, as one refusal that lists every FAIL block; the ci-job never runs beside it.
     Any other target is a commit or ref. ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     A FAIL above, and exit 1 of ci-job (a FAIL), refuse always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
-    A PASS on a pull request number posts the lane-lint comment (lint_body) naming the head it read, which `--reviewed` and the join require; a failed post
+    A PASS on a pull request number posts the lane-lint comment (lint_body) naming the head it read (M when M was pushed), which `--reviewed` and the join require; a failed post
     prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing.
     A head whose diff touches a mutation test file runs the mutation test at the hand-off lint. The batch runner's pre-join lint (`pre_join`, a recorded
     batch-runner role) skips it when a hand-off PASS comment names the live head, and runs it for any other head; a local batch runner records no role, so it always runs it.
@@ -3165,7 +3173,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     else:
         head, base = lane_head_and_base(root, target, base)
         tmp, wt = add_worktree(root, head)
-    touched = None
+    touched, pushed_merge = None, None
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
         pin_notes, fails, reports, stop = [], [], [], ""
         refuse_incomplete_tree(wt, head, base)
@@ -3195,16 +3203,25 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                 say(f"merge: draft run of {head[:9]} is {draft}, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *draft_lines)
         if fails or stop:  # as on main, a counted FAIL or an unknown ends the run before the ci-job
             raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop if stop else LANE_LINT_REMEDY]))
-        # The lint tree is a merge commit of the base (first parent) and the head, so every file is the merged copy and HEAD is clean: a step that diffs the
-        # base against HEAD or the work tree reads only the lane's own changes, and the history steps see the lane's commits under one merge commit.
+        # A pull request on the default branch whose head lacks the tip the merge read: M, the merge commit of the head and that tip, is what the lint reads and a
+        # pass pushes (never read again from origin/<base>). Any other target lints a merge commit of the tip and the head that is never pushed.
+        # An unreadable ancestry (None) is no push, as is a Record-claim head: a merge commit on top would hide the claim from own_claim.
+        if (target.isdigit() and not is_integration_pr(info) and not pre_join and base == default_branch(root)
+                and not head_claim(wt, head) and ancestor(wt, merged[1], head) is False):
+            c, made = git(wt, *identity(wt), "commit-tree", merged[0], "-p", head, "-p", merged[1], "-m", base_merge_message(base, info["branch"]))
+            if c:
+                raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the merge of the head with {base} could not be made: {made} {LANE_LINT_CITE}")
+            pushed_merge = made.strip()
+        # The lint tree is a merge commit of the base (first parent) and the head (second; M when pushed), so every file is the merged copy and HEAD is clean: a step
+        # that diffs the base against HEAD or the work tree reads only the lane's own changes, and the history steps see the lane's commits under one merge commit.
         c, made = sh(["git", "-C", wt, "-c", "user.name=merge-lane-lint", "-c", "user.email=merge-lane-lint@invalid", "commit-tree", merged[0],
-                      "-p", merged[1], "-p", head, "-m", f"lane-lint merge of {head[:9]} into {base}"])
+                      "-p", merged[1], "-p", pushed_merge or head, "-m", f"lane-lint merge of {head[:9]} into {base}"])
         merge_commit = made.strip()
         c2, out = (c, made) if c else git(wt, "checkout", "-q", "--detach", merge_commit)
         if c2:
             raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the merge of the head with {base} could not be made the lint worktree's HEAD: {out} {LANE_LINT_CITE}")
         refuse_incomplete_tree(wt, head, base, merge_commit)
-        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes, head_sha=head)
+        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes, head_sha=pushed_merge or head)
         if state == "pass" and touched_tests:
             touched = run_touched_tests(wt, base, head)
         mutate, mutate_fails, skipped = "", [], False
@@ -3238,17 +3255,21 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
             raise Liftable("\n".join([f"the touched tests of {short} against {base} are unknown, not a pass:", *unknowns,
                                       'Run it where the test can finish, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
     if state == "pass":
+        if pushed_merge:  # last, after every check above passed: a refusal (the branch moved) posts nothing and prints no PASS
+            push_branch(root, info["branch"], source=pushed_merge)
+            short = pushed_merge[:9]
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
         counts = f"; touched tests: {touched[0]} run, {len(touched[1])} skipped" if touched is not None else ""
-        tail = "The batch runner may take this head, or join it to a batch." if target.isdigit() else "No comment is posted for a ref or commit, so this does not satisfy the join."
+        tail = (f"The merge of {base} into the lane was pushed to {info['branch']}. " if pushed_merge else "") + "The batch runner may take this head, or join it to a batch." if target.isdigit() else "No comment is posted for a ref or commit, so this does not satisfy the join."
         say(f"PASS: lint of {short} against {base} passes{named}{counts}{'; ' + mutate if mutate else ''}. {tail}", *pin_notes, *report_lines)
         if target.isdigit():  # a ref or commit has no pull request to carry the comment
             n = int(target)
+            named_head = pushed_merge or head
             try:
-                host.post_comment(n, lint_body(n, head))
+                host.post_comment(n, lint_body(n, named_head))
             except Stop as e:  # the lint stands; only the proof on the PR is missing, so say how to get it
                 say(f"merge: the lane-lint comment was not posted on #{n}: {' '.join(str(e).split())} The join and `merge --reviewed` read no PASS for {short} until it is. "
-                    f"Run `merge --lane-lint {n}` again, or post this comment on #{n} as the repo's owner:", *lint_body(n, head).splitlines())
+                    f"Run `merge --lane-lint {n}` again, or post this comment on #{n} as the repo's owner:", *lint_body(n, named_head).splitlines())
             if is_integration_pr(info):  # after the proof, so a refused close or reopen still leaves the PASS on the pull request
                 close_replaced(host, n, info)
                 reopen_dropped(host, n, info)
@@ -4107,10 +4128,14 @@ def fast_checks(root, cfg, n, host, info):
         drop_worktree(root, tmp, wt)
     return 0
 
+def base_merge_message(base, branch):
+    """The message of a merge of origin/<base> into a lane branch: merge_base_in's merge and lane_lint's pushed merge commit share it."""
+    return f"Merge origin/{base} into {branch}"
+
 def merge_base_in(wt, base, branch):
     """Merge origin/<base> into the head checked out in `wt`: a merge commit, parents the head then the tip, no fast-forward. -> its sha.
     Local only: nothing is pushed. The caller has read the merge as clean (holds_base), so a merge that fails here is a Stop, and the tree is left as it was."""
-    c, out = git(wt, *identity(wt), "merge", "--no-ff", "-q", "-m", f"Merge origin/{base} into {branch}", f"origin/{base}")
+    c, out = git(wt, *identity(wt), "merge", "--no-ff", "-q", "-m", base_merge_message(base, branch), f"origin/{base}")
     if c:
         _, aborted = git(wt, "merge", "--abort")
         raise Stop(f"the merge of origin/{base} into {branch} failed, so nothing was pushed {BASE_CITE}: {' '.join(out.split())[:200]}"
@@ -5710,7 +5735,7 @@ def build_parser():
     p.add_argument("-C", "--repo-dir", default=None, metavar="PATH", help="act in the checkout at PATH, not the one the process stands in; the last value wins")
     p.add_argument("--confirm", action="store_true")
     p.add_argument("--express", action="store_true", help="with --confirm: merge a prose-only PR whose body names a ruling in origin/roadmap's store; any other PR refuses")
-    p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
+    p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges no pull request; a PR on main behind main's tip is linted merged, and a full pass pushes that merge commit to its branch")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--with", dest="with_prs", default=None, metavar="PR,PR,...", help="with --lane-lint on a PR number: also check the head against each named open PR (a comma list), even one of another session")
@@ -5871,7 +5896,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 raise Stop("not in a git checkout " + LANE_LINT_CITE)
             with release_on_signals():  # a signal ends the run through lane_lint's `finally`, which removes the worktree
                 with_prs = parse_with(a.with_prs, int(a.pr)) if a.with_prs is not None else ()  # a bad list stops before any read
-                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok, with_prs, a.touched_tests, pre_join=read_merge_role() == "batch-runner")  # before the role check and any lock: it merges and pushes nothing
+                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok, with_prs, a.touched_tests, pre_join=read_merge_role() == "batch-runner")  # before the role check and any lock: it merges no pull request, and pushes only the merge commit of a lane behind main after a full pass
         if a.release_check:
             try:
                 c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=a.repo_dir)  # -C names the checkout; None is the process directory's
