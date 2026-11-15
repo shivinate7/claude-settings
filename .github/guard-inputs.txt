@@ -21,3 +21,4 @@ bin/sim-test
 actions/ci-alarm/events.json
 .github/stamp.json
 .claude/layout-extras.json
+package-lock.json

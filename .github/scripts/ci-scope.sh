@@ -146,16 +146,21 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
   # windows_guard has its own pass: the case table above skips a .md path, and an input such as agents/builder.md is one. The list is
   # .github/guard-inputs.txt (the one list); an unreadable or empty list turns the flag on.
   globs=$(sed 's/#.*//; s/[[:space:]]//g' .github/guard-inputs.txt 2>/dev/null | grep -v '^$')
+  # The pass reads the diff NUL-separated: git quotes a non-ASCII name in the newline form, and the quoted text matches no glob.
+  # A second read that gives no path (a failed read) turns the flag on.
   if [ -z "$globs" ]; then
     on="$on windows_guard "
   else
-    while IFS= read -r f; do
-      case "$f" in .github/guard-inputs.txt|.github/scripts/ci-scope.sh|.github/workflows/checks.yml) on="$on windows_guard "; continue ;; esac
+    n=0
+    while IFS= read -r -d '' f; do
+      n=$((n + 1))
+      case "$f" in .github/guard-inputs.txt|.github/scripts/ci-scope.sh|.github/scripts/green-head.sh|.github/workflows/checks.yml|.gitattributes) on="$on windows_guard "; continue ;; esac
       while IFS= read -r g; do
         # shellcheck disable=SC2254  # the list's globs are the case patterns
         case "$f" in $g) on="$on windows_guard "; break ;; esac
       done <<< "$globs"
-    done <<< "$files"
+    done < <(git diff --name-only --no-renames -z "$range" 2>/dev/null)
+    [ "$n" -gt 0 ] || on="$on windows_guard "
   fi
   # A new file under a landed dir (landed-dirs.txt, the one list) changes what test_install_src and
   # the guard suite see. An unreadable or empty list turns everything on.
