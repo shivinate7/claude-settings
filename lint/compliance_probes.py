@@ -89,9 +89,9 @@ aligned: a record and the rule sentences that cite it change together in a pull 
   records of the child's own decisions folder (layout.candidates). A unit is one sentence: from the end of the
   previous `<!-- rule:X -->` anchor, or the paragraph's start, to its own anchor. A sentence cites a record by its
   slug alone in a code span, or by the anchor its Home line names, at base or at head (a deleted record is still
-  cited). A sentence changed when a diff line touches it and its text, whitespace aside, is not among the
-  sentences of the lines the diff removes from that file: an edit to a sibling on the same line, or a move with
-  the text kept, is no change. When a record file changes, each citing sentence needs a change of its own; when
+  cited). A sentence changed when a diff line touches it and its text, whitespace aside, is not a sentence of
+  that file's base side, which the diff's hunks rebuild from the head file: an edit to a sibling on the same
+  line, or a move with the text kept, is no change. When a record file changes, each citing sentence needs a change of its own; when
   a citing sentence changes, its record needs to be in the diff. A PR body line `Rules checked: <record> — no
   change` clears one record. An item names the record, the file and the sentence's first line. A missing
   BASE_SHA or HEAD_SHA, or a diff, folder or file that cannot be read, makes the group unknown. The walk skips
@@ -1456,11 +1456,10 @@ def walked(root):
 
 
 def diff_changes(root, base, head):
-    """({path: the head-side line numbers the pull request changes}, {path: the text of each line it removes}), from one
-    `git diff` of base...head. A path with no line (a binary file, a mode change) is left out. A deletion marks the lines
-    either side of it. The removed lines of two hunks are split by an empty line, so text from separate places never
-    joins into one sentence. A hunk is read by its counts, so a changed line that starts `+++ ` or `@@ ` is no header. A
-    deleted file takes its old path. Departs from the parser of lint/stale_cites.py (`added_markdown_lines`): that one
+    """({path: the head-side line numbers the pull request changes}, {path: [(head start, head count, [the text of each
+    line the hunk removes])]}), from one `git diff` of base...head. A path with no line (a binary file, a mode change)
+    is left out. A deletion marks the lines either side of it. A hunk is read by its counts, so a changed line that
+    starts `+++ ` or `@@ ` is no header. A deleted file takes its old path. Departs from the parser of lint/stale_cites.py (`added_markdown_lines`): that one
     keeps added .md lines only, from its own git start, and imports the hooks; this group also needs the removed
     lines and the deletion marks, from the one read."""
     if base.startswith("-") or head.startswith("-"):
@@ -1469,7 +1468,7 @@ def diff_changes(root, base, head):
                   "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", "%s...%s" % (base, head), "--")
     if done is None or done.returncode != 0:
         raise CannotRun("the diff %s...%s cannot be read" % (base[:12], head[:12]))
-    changed, removed, path, old = {}, {}, None, None
+    changed, hunks, path, old = {}, {}, None, None
     rows, i = done.stdout.decode("utf-8", "replace").split("\n"), 0
     while i < len(rows):
         row = rows[i]
@@ -1493,19 +1492,19 @@ def diff_changes(root, base, head):
             new = 1 if hunk.group(3) is None else int(hunk.group(3))
             if not new:
                 changed[path].update(n for n in (number, number + 1) if n > 0)
-            if gone and removed.get(path):
-                removed[path].append("")
+            lines = []
+            hunks.setdefault(path, []).append((number, new, lines))
             while (gone or new) and i < len(rows):
                 body = rows[i]
                 i += 1
                 if body.startswith("-"):
                     gone -= 1
-                    removed.setdefault(path, []).append(body[1:].rstrip("\r"))
+                    lines.append(body[1:].rstrip("\r"))
                 elif body.startswith("+"):
                     new -= 1
                     changed[path].add(number)
                     number += 1
-    return changed, removed
+    return changed, hunks
 
 
 def flat(text):
@@ -1513,10 +1512,20 @@ def flat(text):
     return " ".join(text.split())
 
 
+def base_lines(text, hunks):
+    """The base side of a file: its head `text` with each hunk's head lines put back to the lines it removed. It is
+    read from the one diff, so it costs no git call. A hunk that adds no line removes after its head start line."""
+    lines = text.splitlines()
+    for start, count, gone in reversed(hunks):
+        at = start if not count else start - 1
+        lines[at:at + count] = gone
+    return lines
+
+
 def old_sentences(lines, rel):
-    """The `flat` text of each sentence in `lines`, the lines the diff removes from `rel`, cut as head sentences are
-    (`paragraph_rows`, `split_sentences`). A fence line is read as a blank line: a hunk may hold one fence line of a pair,
-    and a fence is no sentence."""
+    """The `flat` text of each sentence in `lines`, a file's base side, cut as head sentences are (`paragraph_rows`,
+    `split_sentences`). A fence line is read as a blank line, so a base fence left open never makes the group unknown;
+    the code in a fence then reads as sentences that no rule sentence matches."""
     text = "\n".join("" if FENCE.match(line) else line for line in lines)
     return {flat(s) for _, _, rows in paragraph_rows(text, rel, span_continues=True) for _, _, s in split_sentences(rows)}
 
@@ -1575,25 +1584,28 @@ def probe_aligned(root):
     if not base or not head:
         raise CannotRun("BASE_SHA and HEAD_SHA, the two commits of the pull request, are not both set")
     checked = {m.group(1) for m in map(RULES_CHECKED.match, (l.strip() for l in os.environ.get("PR_BODY", "").splitlines())) if m}
-    changes, removed = diff_changes(root, base, head)
+    changes, hunks = diff_changes(root, base, head)
     wheres, records = decision_records(root)
     if not changes:
         return finish("aligned", [], "in shape - the pull request changes no file", 0)
     changed = {os.path.basename(path)[:-len(".md")] for path in changes if path.endswith(".md") and os.path.dirname(path) in wheres}
     for slug in changed:
         # A record the PR deleted, or whose Home line it changed, is still cited by the anchor it held at base.
-        gone = [line for where in wheres for line in removed.get(where + "/" + slug + ".md", [])]
+        gone = [line for where in wheres for _, _, lines in hunks.get(where + "/" + slug + ".md", []) for line in lines]
         old = records.setdefault(slug, [])
         old.extend(a for a in home_anchors("\n".join(gone)) if a not in old)
     units, files = child_unit_spans(root, rule_scope(root), walked(root), span_continues=True, sentences=True)
     hits, was = [], {}
     for rel, first, last, unit in units:
-        # A diff line touches the sentence, and its text is new: a sibling edited on its line, or the sentence moved
-        # with its text kept, leaves the text among the removed sentences.
+        # A diff line touches the sentence, and its text is not a sentence of the file's base side: a sibling edited on
+        # its line, or the sentence moved with its text kept, leaves its text there.
         moved = not changes.get(rel, set()).isdisjoint(range(first, last + 1))
         if moved:
             if rel not in was:
-                was[rel] = old_sentences(removed.get(rel, []), rel)
+                text = read(root, rel)
+                if text is None:
+                    raise CannotRun("cannot read %s" % rel)
+                was[rel] = old_sentences(base_lines(text, hunks.get(rel, [])), rel)
             moved = flat(unit) not in was[rel]
         for slug in sorted(cited_records(unit, records)):
             if slug in checked:
