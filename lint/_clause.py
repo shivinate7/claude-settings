@@ -51,7 +51,9 @@ CANNOT_FORMS = CANT_FORMS + ("can not",) + COULD_NOT_FORMS + ("no way to", "no w
                 "haven't been able to", "hasn't been able to", "have not been able to", "has not been able to",
                 "not allowed to", "not permitted to", "not going to be able to", "not authorized to", "not authorised to",
                 "don't have access to", "do not have access to", "doesn't have access to", "does not have access to",
-                "lack permission to", "lacks permission to", "blocked from", "forbidden from") + tuple(
+                "lack permission to", "lacks permission to", "blocked from", "forbidden from",
+                "have no access to", "has no access to", "have no access", "has no access", "no access to",
+                "unable") + tuple(
     "%s %s" % (be, able)
     for be in _BE_NT_FORMS for able in ("able to", "allowed to", "permitted to", "going to be able to")) + tuple(
     "%s have %s%s to" % (verb, the, noun)
