@@ -23,7 +23,9 @@
       "mcp__claude-artifacts__watch",
       "mcp__claude-code-remote__add_repo",
       "mcp__claude-code-remote__archive_session",
-      "mcp__claude-code-remote__send_message"
+      "mcp__claude-code-remote__send_message",
+      "Bash(~/.claude/bin/merge --ready *)",
+      "Bash(verdict ~/.claude/bin/merge --ready *)"
     ],
     "deny": [
       "Read(.env)",
@@ -207,6 +209,16 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/start_check.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "SessionEnd": [
@@ -371,6 +383,11 @@
             "type": "command",
             "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/local_time.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/stale_install.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
+            "timeout": 120
           }
         ]
       }

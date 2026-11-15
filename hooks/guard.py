@@ -201,6 +201,17 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        that holds a `<` or no letter or digit is a refusal. A lane `create_session` whose prompt has the marker
                        line is judged the same way against its own tags, with no transcript read. A message without the marker reads no transcript. An
                        override lifts it.
+  lane-step-dup       deny. A lane brief (the lane-one-topic marker) or a `create_session` tagged `cs-step:<step>` while
+                       another live session, not the brief's target, carries that step and shares a cs-repo tag with the
+                       subject (the target's record, or the create's own tags), read from this transcript's
+                       list_sessions reads. A session whose newest row is archived is not live. The reason names the
+                       carrier. A brief to a target that carries the step passes. With no carrier found, no whole
+                       list_sessions read (a chain from no cursor, each next read's after_id the page before's last
+                       row id, the last has_more false, none filtered), a target with no current record, and a
+                       subject with no cs-repo tag are refusals. Steps and tags match without case. The same call is also
+                       refused while an open pull request of the cs-repo has the step's head (shared_names.lane_head_refs),
+                       and the reason names it, unless the brief or prompt says `continues #N` or `replaces #N`, or the
+                       target carries the step. A pull request read that fails is a refusal. An override lifts it.
   message-time-matches-clock
                        deny. A send_message whose first non-blank line opens with a header stamp: a label of 1 to 4 words,
                        then `,` or `:` or a dash spaced on both sides, an optional date, then `H:MM` or `HH:MM`, an
@@ -625,7 +636,7 @@ while True:
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit, self_role_child_hit, self_role_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, stamp_hit, trust_card_hit, written_time_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, stamp_hit, step_dup_hit, step_pr_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
         _loading = "guard_frozen"
@@ -3646,7 +3657,7 @@ def step_up_hit(tool: str, tool_input) -> str:
 def step_up_reason(prompt: str, role, model, rounds=None) -> str:
     """The step-up refusal for a brief whose marker and model disagree, or "". The model each marker needs is its round row
     (role_round_model; `rounds` is role_round_table's read, read here when not given). The second round must name its row's model exactly.
-    A later round or a fix verifier must not name a model below its row; above it passes here, and the Opus ceiling judges Opus."""
+    A later round, a fix verifier or a guard-marked reviewer brief must not name a model below its row; above it passes here, and the Opus ceiling judges Opus."""
     model = str(model or "").strip().lower()
     role = role_key(role)
     if rounds is None:
@@ -3662,6 +3673,10 @@ def step_up_reason(prompt: str, role, model, rounds=None) -> str:
         want = role_round_model(rounds, role, ROLE_ROUND_FIX)
         if want and (not model or (named is not None and named < ROLE_MODEL_RANK.index(want))):
             return "Reviewer fix verifier runs on %s. Spawn it with model %s." % (want.capitalize(), want)
+    if role == "reviewer" and review_guard_marked(prompt):
+        want = role_round_model(rounds, role, "1", "guard")
+        if want and (not model or (named is not None and named < ROLE_MODEL_RANK.index(want))):
+            return "Reviewer round 1 on a guard or check change runs on %s. Spawn it with model %s." % (want.capitalize(), want)
     if role == "builder" and builder_third_round(prompt):
         want = role_round_model(rounds, role, "3")
         if want and (named is None or named < ROLE_MODEL_RANK.index(want)):
@@ -7056,6 +7071,14 @@ def judge(payload) -> None:
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
+    # A brief or a create naming a step another live session of the repo carries (rule lane-step-dup).
+    doubled = step_dup_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    if doubled:
+        refuse(tool, "deny", "lane-step-dup", doubled[1], doubled[0])
+    # The same call, for an open lane pull request that holds the step (rule lane-step-dup, part two).
+    held = step_pr_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    if held:
+        refuse(tool, "deny", "lane-step-dup", held[1], held[0])
     # A lane brief that names a bare session id (rule brief-ids-in-roster).
     named_id = brief_roster_hit(tool, tool_input, cwd)
     if named_id:

@@ -851,7 +851,10 @@ class LintMode(unittest.TestCase):
         subprocess.run(["git", "init", "-q", "-b", "main", self.root], check=True, env=ENV)
 
     def test_lint_mode_lists_exactly_the_lint_steps_of_checks(self):
-        # An independent read: the checks job's single-line run: commands, matched by a pattern written here.
+        # The checks job's lint steps, read from checks.yml. Each single-line run: command is matched by a pattern written here.
+        # Each uses: step is matched by bin/ci-job's KNOWN_ACTION and LOCAL_ACTION, the patterns it plans lint steps from,
+        # so no action name is copied here.
+        ci_job = load_ci_job()
         want, name, inside = [], None, False
         with open(CHECKS, encoding="utf-8") as f:
             for line in f:
@@ -866,9 +869,11 @@ class LintMode(unittest.TestCase):
                              r"pipx run [\w.-]+==[\w.]+ [^|&;]*)$", line)
                 if m and "mutate" not in m.group(1):
                     want.append(name)
-                if re.match(r"^        uses: \S*actions/(?:ste-lint|code-check|zizmor)\s*$", line):
-                    want.append(name)  # a known action: ci-job runs its one home's command in its place
+                m = re.match(r"^        uses: (\S+)(?: #.*)?\s*$", line)
+                if m and (ci_job.KNOWN_ACTION.fullmatch(m.group(1)) or ci_job.LOCAL_ACTION.fullmatch(m.group(1))):
+                    want.append(name)  # a known action, or this repo's own local action: ci-job plans each as a lint step
         self.assertGreater(len(want), 20)
+        self.assertTrue({"Code check", ZIZMOR, "Rules and records move together"} <= set(want), want)
         # --base HEAD: an empty diff, so the selector picks no suite and only the lint steps are planned.
         done = plan_job("checks", "--lint", "--plan", "--base", "HEAD", cwd=os.path.join(HERE, ".."))
         lines = [ln for ln in done.stdout.splitlines() if ln.startswith("would run ") and not SUMMARY.match(ln)]
@@ -877,7 +882,6 @@ class LintMode(unittest.TestCase):
             self.assertTrue(any(ln.split("  ", 1)[-1].startswith(expected) or ("  " + expected) in ln for ln in lines),
                             "missing %r in %s" % (expected, done.stdout))
         self.assertNotIn("test_guard", done.stdout)
-        self.assertTrue({"Code check", ZIZMOR} <= set(want), want)
 
     def test_a_new_lint_step_is_picked_up(self):
         code, lines, out = plan_lint(self.root, workflow(

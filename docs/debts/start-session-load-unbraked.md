@@ -1,9 +1,9 @@
-# A session start meets no load brake
+# A session start on a full machine is flagged, not stopped
 
-**What.** `start_session` is no longer refused on a full machine. The load brake read the load only inside the PreToolUse guard, and that hook cannot list `start_session` (it makes the desktop app show its start card on every start). Mac lanes start by `start_session`, so a lane can start while memory is over 95% or the disk is under 5 GB free.
+**What.** Status: open. A started session on a full machine gets a flag from its own start check (`hooks/start_check.py` `flag_text`, decision `start-checks-after-call`, the start checks run in the started session). The flag asks a lane to do no work and to tell its parent. A model can ignore it, and nothing stops the start. Whether the desktop app delivers the flag to a `start_session` session is unknown. Mac lanes start by `start_session`, which no PreToolUse guard can judge (decision `start-session-not-pretooluse`, start_session is not judged at PreToolUse). Main stops no `start_session` at full, since PR 3501.
 
-**Where.** `load_hit` and `START_TOOLS` in `hooks/guard.py` (the tool is listed, but no hook call reaches it). `hooks/start_session_audit.py` reads no load.
+**Where.** `hooks/start_check.py` (`flag_text`). `load_hit` and `START_TOOLS` in `hooks/guard.py` list the tool, but no hook call reaches it. `hooks/start_session_audit.py` reads no load.
 
-**Decision.** `start-session-not-pretooluse` (start_session is not gated at PreToolUse). `machine-load-brake` (the machine-load brake).
+**Decision.** `start-session-not-pretooluse`. `start-checks-after-call`. `machine-load-brake` (the machine-load brake).
 
-**Retire.** Something stops a lane start on a full machine, and it adds no PreToolUse hook on `start_session`. One route: the coordinator's own Agent or Task call carries the check. Another: the audit stops a session started at full. The owner picks the route. Closed when a case in `hooks/test_guard.py` shows that start refused or stopped on a full reading. The case is red on today's code.
+**Retire.** A route that stops a full-machine start and that a model cannot ignore. The owner picks the route. Closed when that stop is in place and a case in `hooks/test_start_check.py` shows it. Until then this debt stays open.
