@@ -61,19 +61,22 @@ GLOSSARY = "GLOSSARY.md"
 
 
 def find_root():
-    """The repo this check reads: the one the script lives in (also through a per-file symlink install), else the
-    one it runs from. A cloud copy sits in ~/.claude/lint, whose parent holds no GLOSSARY.md."""
-    own = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    """The repo this check reads. A cloud copy sits in ~/.claude/lint and a local install links each file there, so
+    the script's own folder is a repo only when run in place. Else the repo the run starts in wins, so a link run
+    from repo B reads B, not the link's target. B's top is the root even with no glossary, so the FAIL names B's
+    GLOSSARY.md, never ~/.claude. Outside any repo, a link install reads its target repo."""
+    own = os.path.dirname(HERE)
     if os.path.isfile(os.path.join(own, GLOSSARY)):
         return own
     try:
         r = _nowindow.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, encoding="utf-8")
-        top = r.stdout.strip() if r.returncode == 0 else ""
+        top = os.path.normpath(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else ""
     except OSError:  # no git on PATH
         top = ""
-    if top and os.path.isfile(os.path.join(top, GLOSSARY)):
-        return os.path.normpath(top)
-    return os.path.dirname(HERE)
+    if top:
+        return top
+    linked = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    return linked if os.path.isfile(os.path.join(linked, GLOSSARY)) else own
 
 
 ROOT = find_root()
