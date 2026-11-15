@@ -2992,18 +2992,24 @@ def mutate_run_check(wt):
             env["MUTATE_SHARD"] = shard
         plan.append((job, body, cap, env, shard or "1/1"))
 
+    def progress(line):  # a closed or broken stdout (BrokenPipeError, an OSError) must not end the shard: a progress line never changes a verdict
+        try:
+            say(line)
+        except OSError:
+            pass
+
     def run_one(job, body, cap, env, label):
         start = time.monotonic()
         start_error = ""
         tag = f"mutation test shard {label}"
-        say(f"{tag}: start, job {job}, cap {cap} min")
+        progress(f"{tag}: start, job {job}, cap {cap} min")
         stop, interval = threading.Event(), MUTATE_HEARTBEAT_SECONDS
         def heartbeat():  # the runner's stdout is captured, so these lines are the only sign a long shard is alive; no mutant id, as none is read here
             while not stop.wait(interval):
-                say(f"{tag}: running, {round(time.monotonic() - start)} s")
+                progress(f"{tag}: running, {round(time.monotonic() - start)} s")
         beat = threading.Thread(target=heartbeat, name="mutate-heartbeat", daemon=True)
-        beat.start()
         try:
+            beat.start()
             c, out = sh(shlex.split(body), cwd=wt, env=env, timeout=cap * 60, live_stderr=True)
         except subprocess.TimeoutExpired:
             c, out = None, ""
@@ -3011,14 +3017,16 @@ def mutate_run_check(wt):
             c, out, start_error = None, "", f"{type(e).__name__}: {e}"
         finally:  # every path ends the thread, so none outlives the call or prints after the end line
             stop.set()
-            beat.join()
+            if beat.is_alive():  # a thread that never started cannot be joined
+                beat.join()
+        if start_error:
+            progress(f"{tag}: did not start")
+            return "mutation test run did not start", [f"the mutation test command could not start ({start_error}), so no mutation test run was made"]
         wall = round(time.monotonic() - start) if c is not None else cap * 60
         counts = mutate_report_counts(out)
         killed, survived, unknown, unread, tally, wrong = counts or (0, 0, 0, 0, False, 0)
-        say(f"{tag}: end, {wall} s, killed {killed}, survived {survived}, unknown {unknown}")
+        progress(f"{tag}: end, {wall} s, killed {killed}, survived {survived}, unknown {unknown}")
         failures = []
-        if start_error:
-            return "mutation test run did not start", [f"the mutation test command could not start ({start_error}), so no mutation test run was made"]
         if c is None or wall > cap * 60:
             failures.append(f"the mutation test run took {wall} s, past the {cap}-minute cap of job {job}")
         if counts is None:
