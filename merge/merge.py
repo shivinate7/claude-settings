@@ -3675,7 +3675,8 @@ def base_verdict(root, host, base):
 
 def exact_revert(root, base, short, head):
     """-> (verdict, why) for `head`, a pull request head, against the breaking merge `short` (the 9-hex sha base_state names): "yes" when its tree is the tree
-    `git revert -m 1 <merge>` gives on origin/<base>, so its net diff against the base is that revert and nothing else; "no" when it is not; "unknown" when a read
+    `git revert -m 1 <merge>` gives on origin/<base> and is not the base's own tree, so its net diff against the base is that revert and nothing else; "empty" when
+    it is the base's own tree (the revert is already in the base, and a no-op lifts nothing); "no" when it is neither; "unknown" when a read
     failed (git error or timeout). The revert tree is made with merge-tree: the merge as the common ancestor, the base head as ours, the merge's first parent as theirs."""
     try:
         c, full = git(root, "rev-parse", "--verify", "--quiet", f"{short}^{{commit}}")
@@ -3683,12 +3684,17 @@ def exact_revert(root, base, short, head):
             return "unknown", f"{short} does not resolve to one commit in this clone ({full[:120] or 'no output'})"
         c, out = git(root, "merge-tree", "--write-tree", f"--merge-base={full}", f"origin/{base}", f"{full}^1")
         tree = (out.splitlines() or [""])[0]
-        if c == 1:
+        if c == 1 and "CONFLICT" in out:  # merge-tree exits 1 for an unreadable input too (merge_reason), so only a CONFLICT line says the revert does not apply
             return "no", f"`git revert -m 1 {short}` does not apply cleanly on {base}, so no tree is its revert"
         if c or not re.fullmatch(r"[0-9a-f]{40}", tree):
             return "unknown", f"the tree of `git revert -m 1 {short}` could not be read ({out[:120] or 'no output'})"
         c, out = git(root, "diff", "--quiet", head, tree)
         if c == 0:
+            c, out = git(root, "diff", "--quiet", head, f"origin/{base}")  # once the revert is in the base, its tree is the base's and an empty head matches it: a no-op undoes nothing
+            if c == 0:
+                return "empty", f"it changes nothing against {base}, whose tree already is the tree of `git revert -m 1 {short}`"
+            if c != 1:
+                return "unknown", f"the diff of the head against {base} could not be read ({out[:120] or 'no output'})"
             return "yes", ""
         if c == 1:
             return "no", f"its tree is not the tree of `git revert -m 1 {short}` on {base}"
@@ -3696,9 +3702,9 @@ def exact_revert(root, base, short, head):
     except (subprocess.TimeoutExpired, OSError) as e:
         return "unknown", f"a git read for the revert check failed: {type(e).__name__}"
 
-def red_base(root, host, base, red_ok="", head=""):
+def red_base(root, host, base, red_ok="", info=None):
     """The red-main check (decision no-merge-onto-red-main): refuse while the base's latest completed run has a red job, or cannot be read.
-    --base-red-ok "<reason>" is a reason flag, as --undo-check-unknown-ok is, and Claude may type it with a reason: the way out for an unknown read whose cause the reason names, or for a red that names no breaking merge. When the red names a breaking merge, it lifts only for `head`, the pull request head, when that head is the exact revert of that merge (exact_revert; ruling own-791-2-narrow-revert-first); any other head is refused, and a revert check that cannot read is UNKNOWN and refuses. A lift is logged and returns its reason, for record_lift.
+    --base-red-ok "<reason>" is a reason flag, as --undo-check-unknown-ok is, and Claude may type it with a reason: the way out for an unknown read whose cause the reason names, or for a red that names no breaking merge. When the red names a breaking merge, it lifts only for `info["head"]`, the pull request head (fetched here, as open_worktree does), when that head is the exact revert of that merge (exact_revert; ruling own-791-2-narrow-revert-first); any other head is refused, and a revert check that cannot read is UNKNOWN and refuses. A lift is logged and returns its reason, for record_lift.
     Once that revert is merged with its tree proven, base_verdict reads the base green (revert_proven), so no flag is needed after it, for later merges too, until a run on the
     revert or above it is red; a revert whose tree is not proven leaves the base red until its own run on the base is green."""
     verdict, detail = base_verdict(root, host, base)
@@ -3714,10 +3720,15 @@ def red_base(root, host, base, red_ok="", head=""):
         if broke:
             named = re.search(rf"{re.escape(BREAKING_MERGE)} commit ([0-9a-f]{{9}})", detail)
             short = named.group(1) if named else "(unnamed)"
-            kind, why = exact_revert(root, base, short, head) if named and head else ("unknown", "the breaking merge's sha or the pull request head is missing")
+            if named and info:
+                info = fetch_pr_head(root, info, base)  # the head and origin/<base> are read from this clone: a head it lacks would read UNKNOWN on every run
+            kind, why = exact_revert(root, base, short, info["head"]) if named and info else ("unknown", "the breaking merge's sha or the pull request head is missing")
             if kind == "unknown":
                 raise UnknownStop(f"{what}\nNo batch merges onto a red {base}. Whether this pull request is the revert of the breaking merge {short} is UNKNOWN, not a pass: {why}. "
                                   f"{RED_FLAG} lifts a red {base} for the exact revert of that merge only, so an unknown read lifts nothing. Run again when the read works. {RED_CITE}")
+            if kind == "empty":
+                raise Stop(f"{what}\nNo batch merges onto a red {base}. This pull request is not the revert of the breaking merge {short}: {why}, and a no-op lifts nothing. "
+                           f"{RED_FLAG} lifts a red {base} for the exact revert of that merge only, and that revert is already in {base}. {RED_CITE}")
             if kind == "no":
                 raise Stop(f"{what}\nNo batch merges onto a red {base}. This pull request is not the revert of the breaking merge {short}: {why}. "
                            f"Under {RED_FLAG} only that exact revert merges onto this red {base}: open a revert PR of {short} with no other change and merge it with {RED_FLAG} \"<reason>\". {RED_CITE}")
@@ -4216,7 +4227,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             return draft_step(root, cfg, n, host, info)
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         with timed_phase("main-run"):
-            record_lift(lifts, RED_FLAG, red_base(root, host, base, red_ok, info["head"]))
+            record_lift(lifts, RED_FLAG, red_base(root, host, base, red_ok, info))
         if express:  # the worktree opens early: the classifier reads the head's diff
             tmp, wt = open_worktree(root, info, base)
             no_express = express_refusal(root, wt, base_ref, info)
