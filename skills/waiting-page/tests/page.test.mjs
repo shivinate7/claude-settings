@@ -2563,20 +2563,22 @@ test("repo sub-groups: the rail row of a tier with two repos starts each repo's 
   assert.deepEqual(runs.map((r) => r.chips), [["own-1", "own-2"], ["alpha-1"]], "the chip runs do not follow the tier's card order");
 });
 
-// Case 7, control: the Answered section keeps no sub-groups, in the section or on the rail, and stays newest first.
-test("repo sub-groups control: the Answered section and its rail row draw no repo sub-groups and stay newest first", async (t) => {
-  const items = [inRepo("ans-own", 1, "acme/sample-repo"), inRepo("ans-alpha", 2, "acme/alpha"), inRepo("ans-beta", 3, "acme/beta")];
-  const answers = { ...answerOf(items[0], "a", { at: "2026-10-26T09:00:00Z" }), ...answerOf(items[1], "a", { at: "2026-10-28T09:00:00Z" }), ...answerOf(items[2], "a", { at: "2026-10-27T09:00:00Z" }) };
+// Case 7: the Answered section and its rail row draw one sub-group per repo, this repo first, newest first inside each.
+test("repo sub-groups answered: the Answered section and its rail row draw one sub-group per repo, this repo first, newest first inside each", async (t) => {
+  const items = [inRepo("ans-own", 1, "acme/sample-repo"), inRepo("ans-alpha", 2, "acme/alpha"), inRepo("ans-beta", 3, "acme/beta"), inRepo("ans-own2", 4, "acme/sample-repo")];
+  const answers = { ...answerOf(items[0], "a", { at: "2026-10-26T09:00:00Z" }), ...answerOf(items[1], "a", { at: "2026-10-28T09:00:00Z" }), ...answerOf(items[2], "a", { at: "2026-10-27T09:00:00Z" }), ...answerOf(items[3], "a", { at: "2026-10-29T09:00:00Z" }) };
   const page = await open(t, { items, meta: SAMPLE, answers }); if (!page) return;
-  assert.deepEqual(await cardsIn(page, "#tier-answered"), ["ans-alpha", "ans-beta", "ans-own"], "the Answered section is not newest first");
-  assert.equal((await repoGroups(page, "answered")).length, 0, "the Answered section draws repo sub-groups");
-  assert.deepEqual(await railChipsIn(page, "answered"), ["ans-alpha", "ans-beta", "ans-own"], "the Answered rail row is not newest first");
-  assert.equal((await railRuns(page, "answered")).length, 0, "the Answered rail row draws repo chip runs");
+  const groups = await answeredGroups(page);
+  assert.ok(groups, "the Answered section is not on the page");
+  assert.deepEqual(cardsOf(groups), [["ans-own2", "ans-own"], ["ans-alpha"], ["ans-beta"]], "the Answered sub-groups are not this repo first, then each repo at its first answer's place, newest first inside each");
+  const runs = await railRuns(page, "answered");
+  assert.ok(runs, "the rail has no Answered row");
+  assert.deepEqual(runs.map((r) => r.chips), [["ans-own2", "ans-own"], ["ans-alpha"], ["ans-beta"]], "the Answered rail row does not draw the same repo runs");
 });
 
 // Answered by repo (the designer's questions-sorted-answered mockup): the Answered section draws one sub-group per repo, this repo first,
 // then each other repo at its first answer's place, newest first inside each. The rail's Answered row draws the same runs.
-// Names start "repo sub-groups answered:". The control above keeps the old flat Answered order and is not changed here.
+// Names start "repo sub-groups answered:".
 const ansLine = (n, repo, sent) => mk("ans-" + n, n, { status: "closed", closed: sent, lastAnswer: { choice: "a", at: sent, note: "" }, repo, reply: "Filed.", home: "step " + n });
 // The mockup's six answers. Flat newest first is 61 59 60 58 55 57; this repo's three come first, then ledger-app's two, then trail-notes' one.
 const ANS_REPOS = [
