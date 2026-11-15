@@ -1,0 +1,14 @@
+{
+ "id": "fix-check-chains-from-descendant",
+ "title": "A fix check chains from a head that descends from the reviewed head (merge.py)",
+ "priority": "next",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T15:03:00-06:00",
+ "why": "[15:01 CST Nov 15, triage] A lane on merge.py that lets a fix check chain from a head that descends from the reviewed head; the two refusals (fix-check head rule, fresh-round-1 restart rule) form a loop (debt draft fix-check-refuses-after-pass in roadmap/outbox/triage.md; cases #3341, #3357, #3505). Queued by triage 15:01 CST, not started, undoable. Guard or check: yes (unverified). (source: coordinator 14:59/15:00 CST, relayed by triage; lane-read, unverified by triage; not owner-typed, undoable) New step.",
+ "source": "coordinator 14:59/15:00 CST, relayed by triage; queued by triage 15:01 CST; not owner-typed",
+ "note": "Todo. Let a fix check chain from a head that descends from the reviewed head. Queued 15:01 CST, not started. Guard or check: yes (unverified)."
+}
