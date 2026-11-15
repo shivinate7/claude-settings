@@ -3520,6 +3520,13 @@ class AlignedEdges(AlignedSteps, unittest.TestCase):
         repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
         self.assert_refused(repo, where, ALIGNED_ROUND, drop=("HEAD_SHA",))
 
+    def test_an_unreadable_diff_names_the_full_depth_remedy(self):
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        code, out, err = self.probe_pr(repo, base="1" * 40)
+        self.assertEqual(code, 2, out + err)
+        self.assertIn("fetch-depth: 0", out, "the unknown line does not name the fix for a shallow checkout: %s" % out)
+
     def test_an_unreadable_base_sha_is_unknown(self):
         base, _ = self.cited()
         repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
