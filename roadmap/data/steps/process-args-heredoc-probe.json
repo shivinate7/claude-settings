@@ -4,11 +4,11 @@
  "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "heredoc-text-guards",
+ "lane": "session_013NEJL1tcKPHXbDyDsoxvPR",
  "owner": "coordinator",
  "blockedBy": [],
- "why": "Possible false alarm (coordinator 09:06 CST Nov 14, relayed from the round-2 reviewer of lane silent-undo-trailer-rewrite; the guard record unread by the coordinator and triage; unproven): the process-args guard refused a plain heredoc that writes a probe file, with no process listing in the command. Rule: before routing around a refusal, read the guard's record; if it seems to allow the act, the report flags a possible false alarm. First act of a lane: read the guard record, reproduce on the heredoc, red then green, with a control that a command that really lists process arguments is still refused. Kin: builder-probe-false-alarm (ready; a builder writing a probe under /tmp), heredoc-keep-gap-cases. A check change: round 3 applies if the verdict changes. One sighting; rate unmeasured. LANE 20:29 CST Nov 14 (coordinator 20:27): lane heredoc-text-guards started (session id unread by triage); it measures the three guards' false alarms first (counts gh-write 3, draft-pr 2, process-args 1; minutes unmeasured), one reader for heredoc text in guard_core, a real command stays refused, red first, net-value test at round 3.",
+ "why": "Possible false alarm (coordinator 09:06 CST Nov 14, relayed from the round-2 reviewer of lane silent-undo-trailer-rewrite; the guard record unread by the coordinator and triage; unproven): the process-args guard refused a plain heredoc that writes a probe file, with no process listing in the command. Rule: before routing around a refusal, read the guard's record; if it seems to allow the act, the report flags a possible false alarm. First act of a lane: read the guard record, reproduce on the heredoc, red then green, with a control that a command that really lists process arguments is still refused. Kin: builder-probe-false-alarm (ready; a builder writing a probe under /tmp), heredoc-keep-gap-cases. A check change: round 3 applies if the verdict changes. One sighting; rate unmeasured. LANE 20:29 CST Nov 14 (coordinator 20:27): lane heredoc-text-guards started (session id unread by triage); it measures the three guards' false alarms first (counts gh-write 3, draft-pr 2, process-args 1; minutes unmeasured), one reader for heredoc text in guard_core, a real command stays refused, red first, net-value test at round 3. LANE 20:31 CST Nov 14 (coordinator 20:29): lane heredoc-text-guards is session_013NEJL1tcKPHXbDyDsoxvPR.",
  "source": "coordinator 09:06 CST Nov 14, from lane silent-undo-trailer-rewrite",
  "note": "Filed 09:12 CST Nov 14 by triage. Tracker: the coordinator. No lane yet.",
- "updatedAt": "2026-11-14T20:29:00-06:00"
+ "updatedAt": "2026-11-14T20:31:30-06:00"
 }
