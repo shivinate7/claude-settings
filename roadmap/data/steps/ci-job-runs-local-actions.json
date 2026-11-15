@@ -1,13 +1,13 @@
 {
-  "id": "ci-job-runs-local-actions",
-  "title": "bin/ci-job runs local actions, so the lane lint reads claude-md-cites instead of unknown",
-  "status": "todo",
-  "phase": "next",
-  "repo": "shivinate7/claude-settings",
-  "owner": "coordinator",
-  "blockedBy": [],
-  "why": "03:19 CST Nov 15 (coordinator, relayed from lane rules-decisions-aligned, PR #3492). bin/ci-job cannot run the local action claude-md-cites, so the lane lint reads unknown for it; the lane lifted that with --lint-unknown-ok (reason logged by the tool). A lint of a change to the aligned check therefore never reads the claude-md-cites check. Harm it stops: a green lane lint over an unread check. Kin: step ci-job-local-action (silent-undo, a different action).",
-  "note": "Queued from lane hand-in #3492. Harm: a green lane lint over an unread check (claude-md-cites).",
-  "source": "Coordinator message 03:19 CST Nov 15, relaying lane rules-decisions-aligned.",
-  "updatedAt": "2026-11-15T03:19:30-06:00"
+ "id": "ci-job-runs-local-actions",
+ "title": "bin/ci-job runs local actions, so the lane lint reads claude-md-cites instead of unknown",
+ "status": "todo",
+ "phase": "next",
+ "repo": "shivinate7/claude-settings",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "03:19 CST Nov 15 (coordinator, relayed from lane rules-decisions-aligned, PR #3492). bin/ci-job cannot run the local action claude-md-cites, so the lane lint reads unknown for it; the lane lifted that with --lint-unknown-ok (reason logged by the tool). A lint of a change to the aligned check therefore never reads the claude-md-cites check. Harm it stops: a green lane lint over an unread check. Kin: step ci-job-local-action (silent-undo, a different action).\n03:54 CST Nov 15 (coordinator, relayed): lane session_013NEJL1n5fHYUp26YMBkvZu started 03:52 CST. Owner item 874 (act-3492-lint-unknown-ok) asks whether runner 10 may pass #3492's unknown on claude-md-cites with --lint-unknown-ok, or wait for this lane; option a is the coordinator's recommendation, not the owner's.",
+ "note": "Queued from lane hand-in #3492. Harm: a green lane lint over an unread check (claude-md-cites).",
+ "source": "Coordinator message 03:19 CST Nov 15, relaying lane rules-decisions-aligned.",
+ "updatedAt": "2026-11-15T03:54:00-06:00"
 }
