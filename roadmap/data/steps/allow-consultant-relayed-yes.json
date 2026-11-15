@@ -7,8 +7,8 @@
  "phase": "next",
  "owner": "triage",
  "blockedBy": [],
- "why": "Relayed by the coordinator 11:24 CST Nov 15, from runner 12 (not verified by triage; not from the consultant): the owner wants a consultant-relay allow rule for classifier refusals, built by runner 12's builder on branch allow-consultant-relayed-yes. The owner's typed words as reported: `override 2h` (11:16 CST) and \"yes retry #172\" (11:17 CST), on step ios-adblock-merge-text-820c. Triage has not seen the typed words. This widens what a guard accepts, so it needs the owner's word on the page if the ruling is not already typed. Ask: the consultant confirms whether the owner typed it. No pick. Coordinator: no merge this turn.",
+ "why": "Relayed by the coordinator 11:24 CST Nov 15, from runner 12 (not verified by triage; not from the consultant): the owner wants a consultant-relay allow rule for classifier refusals, built by runner 12's builder on branch allow-consultant-relayed-yes. The owner's typed words as reported: `override 2h` (11:16 CST) and \"yes retry #172\" (11:17 CST), on step ios-adblock-merge-text-820c. Triage has not seen the typed words. This widens what a guard accepts, so it needs the owner's word on the page if the ruling is not already typed. Ask: the consultant confirms whether the owner typed it. No pick. Coordinator: no merge this turn.\n\n11:25 CST Nov 15, owner's own words via the consultant (relayed, not read by triage): \"i alrdys ent the override\". So a typed override already went in; which act it covered is unknown to triage. It answers triage's question whether the owner typed an override (the `override 2h` of 11:16 relayed by runner 12), as far as that: the owner says he sent an override. The 'yes retry #172' text stays unconfirmed.",
  "source": "Runner 12 via the coordinator, 11:24 CST Nov 15 (relayed; not read by triage)",
- "note": "Open. Guard or check: yes. No lane yet (a branch name was relayed; no lane id). Waiting on the consultant's confirmation of the owner's words. Filed 11:26 CST Nov 15.",
- "updatedAt": "2026-11-15T11:26:00-06:00"
+ "note": "Open. Guard or check: yes. No lane yet (a branch name was relayed; no lane id). Owner says (11:25 CST, via the consultant) an override already went in; act covered unknown; 'yes retry #172' unconfirmed. Filed 11:26 CST Nov 15.",
+ "updatedAt": "2026-11-15T11:28:00-06:00"
 }

@@ -1,0 +1,14 @@
+{
+ "id": "checked-never-no-escape",
+ "title": "The handoff-checked-stamp remedy offers `Checked never` as an escape; remove it (guard or check)",
+ "priority": "now",
+ "status": "open",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "OWNER ASK, verbatim, 11:25 CST Nov 15, via the consultant (typos kept): \"i alrdys ent the override and ya it also lets it get pass by saying neevr which kills any of the teeth no?\". It is about the handoff-checked-stamp remedy: \"or write `Checked never` on it\". Where the remedy lives (triage grep of origin/roadmap and ~/claude-settings-main hooks/ and docs/, 11:27 CST): hooks/guard.py line 1334 prints \"Remedy: check each premise below, then repeat the call, or write `Checked never` on it.\" Also hooks/guard.py line 475 (docstring: an unchanged stamp, `Checked never`, a `ruling`...) and hooks/precompact_handoff.py line 679 (`Checked never` needs no judging); tests use the phrase at hooks/test_precompact_handoff.py lines 1105, 1106, 1237, 1238, 1435; docs/plans/r42-part2-design.md lines 17 and 18 use it. Whether removing it breaks those tests and docs: unmeasured. The consultant's pick, its own and NOT the owner's: remove the escape, so the only remedies are to check the premise or delete it. Whether the owner's point is right (that `Checked never` lets a stamp pass): unmeasured by triage.",
+ "source": "Owner via the consultant, 11:25 CST Nov 15 (relayed; not read by triage); triage grep 11:27 CST",
+ "note": "Open. Guard or check: yes. The coordinator starts the lane; not started at filing. File and line of the remedy found: hooks/guard.py:1334 (see why). Consultant's pick (not the owner's): remove the escape. Filed 11:28 CST Nov 15.",
+ "updatedAt": "2026-11-15T11:28:00-06:00"
+}
