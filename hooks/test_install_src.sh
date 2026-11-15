@@ -5375,27 +5375,19 @@ caseR4() {
   r345_check "$name" "$h/.claude-cfg/.claude-settings-install.json" || return
   ok "$name"
 }
-# caseR5: the skills copy fails after rm -rf, with no root trick. The config folder's path is made long, 250 bytes short of
-# the machine's PATH_MAX (getconf: 4096 on Linux, 1024 on macOS), so a copy of a file four folders deep runs past PATH_MAX
-# while the clone's copy stays short. The first install copies r5-deep whole and writes its record. The fixture then adds a
-# file four folders deep in r5-deep, past the limit under the config folder. The second install's tree hash matches the copy
-# it recorded, so it removes the copy (rm -rf) and the copy fails. The first run's record is removed, so the second run's
-# record is the only one that can exist.
+# caseR5: the skills copy fails after rm -rf. The install runs with a stand-in `cp` first on its PATH. It fails the copy of the
+# r5-deep skill folder while a flag file exists and runs the real cp otherwise, so the failure does not depend on a path
+# length, a file mode or the user, and it is the same on macOS and Linux. The first install copies r5-deep whole and writes its
+# record. The fixture then adds a file to r5-deep. The second install's tree hash matches the copy it recorded, so it removes
+# the copy (rm -rf) and the stand-in fails the copy. The first run's record is removed, so the second run's record is the only
+# one that can exist.
 caseR5() {
   name="caseR5: a cloud install whose skills copy fails after rm -rf writes no install record and does not exit 0 quietly"
   fx="$work/r5-fx"; h="$work/r5-home"; scratch="$work/r5-scratch"; bin="$work/r5-bin"
+  r5_flag="$work/r5-cp-fails"; r5_log="$work/r5-cp-calls.log"
   mkdir -p "$h" "$scratch"
-  r5_max=$(getconf PATH_MAX / 2>/dev/null); case "$r5_max" in ''|*[!0-9]*) r5_max=4096 ;; esac
-  r5_target=$((r5_max - 250))
-  r5_cfg="$h"; r5_i=0
-  while [ $((${#r5_cfg} + 201)) -le "$r5_target" ]; do
-    r5_i=$((r5_i + 1)); r5_cfg="$r5_cfg/$(printf 'd%0199d' "$r5_i")"
-  done
-  r5_rem=$((r5_target - ${#r5_cfg} - 1))
-  [ "$r5_rem" -ge 1 ] && r5_cfg="$r5_cfg/$(printf 'e%0*d' "$r5_rem" 0 | cut -c1-"$r5_rem")"
-  mkdir -p "$r5_cfg"
+  r5_cfg="$h/.claude-cfg"
   r5_rec="$r5_cfg/.claude-settings-install.json"
-  r5_k=$(printf 'k%0119d' 0)
   make_github_fixture "$fx"
   mkdir -p "$fx/src/skills/r5-deep"
   printf 'a skill with one file\n' > "$fx/src/skills/r5-deep/SKILL.md"
@@ -5404,38 +5396,39 @@ caseR5() {
   git -C "$fx/src" push -q "$fx/bare.git" HEAD:refs/heads/main
   write_redirect "$h" "$fx/bare.git"
   make_curl_stub "$bin" fail-tarball
-  cloud_install "$h" "$scratch" "$bin" main "CLAUDE_CONFIG_DIR=$r5_cfg"
+  r5_realcp=$(command -v cp)
+  printf '#!/bin/sh\nfor a in "$@"; do\n  case "$a" in\n    */skills/r5-deep) if [ -f "%s" ]; then echo "cp $*" >> "%s"; exit 1; fi ;;\n  esac\ndone\nexec "%s" "$@"\n' "$r5_flag" "$r5_log" "$r5_realcp" > "$bin/cp"
+  chmod +x "$bin/cp"
+  cloud_install "$h" "$scratch" "$bin"
   if [ "$rc" -ne 0 ] || [ ! -f "$r5_cfg/skills/r5-deep/SKILL.md" ] || [ ! -f "$r5_rec" ]; then
     bad "$name" "setup: the first install did not copy r5-deep and write its record (install exit $rc: $(install_problems))"
     return
   fi
   rm -f "$r5_rec"
-  mkdir -p "$fx/src/skills/r5-deep/$r5_k/$r5_k/$r5_k/$r5_k"
-  printf 'deep\n' > "$fx/src/skills/r5-deep/$r5_k/$r5_k/$r5_k/$r5_k/deep.md"
+  printf 'more\n' > "$fx/src/skills/r5-deep/EXTRA.md"
   git -C "$fx/src" add -A
-  git -C "$fx/src" -c user.email=t@example.com -c user.name=t commit -q -m "deep file in the skill"
+  git -C "$fx/src" -c user.email=t@example.com -c user.name=t commit -q -m "second file in the skill"
   git -C "$fx/src" push -q "$fx/bare.git" HEAD:refs/heads/main
-  r5_dest="$r5_cfg/skills/r5-deep/$r5_k/$r5_k/$r5_k/$r5_k/deep.md"
-  r5_src="$h/claude-settings/skills/r5-deep/$r5_k/$r5_k/$r5_k/$r5_k/deep.md"
-  if [ "${#r5_dest}" -lt "$r5_max" ] || [ "${#r5_src}" -ge "$r5_max" ]; then
-    bad "$name" "scope: the seed does not put the copy past PATH_MAX (copy path ${#r5_dest} bytes, clone path ${#r5_src} bytes)"
-    return
-  fi
-  cloud_install "$h" "$scratch" "$bin" main "CLAUDE_CONFIG_DIR=$r5_cfg"
+  : > "$r5_flag"
+  cloud_install "$h" "$scratch" "$bin"
   if [ ! -f "$r5_cfg/agents/builder.md" ]; then
     bad "$name" "scope: the agents folder did not land on the second run (install exit $rc: $(install_problems)), so the run did not reach the case"
+    return
+  fi
+  if [ ! -s "$r5_log" ]; then
+    bad "$name" "scope: the stand-in cp was never asked for the r5-deep copy on the second run, so no copy failed"
     return
   fi
   if [ -n "$(find "$r5_cfg/backups/skills" -name 'r5-deep*' 2>/dev/null)" ]; then
     bad "$name" "scope: the second run backed the old copy up instead of removing it, so the rm -rf did not run"
     return
   fi
-  if [ ! -f "$r5_src" ]; then
-    bad "$name" "scope: the clone has no deep file, so an absent copy proves nothing (install problems: $(install_problems))"
+  if [ ! -f "$h/claude-settings/skills/r5-deep/EXTRA.md" ]; then
+    bad "$name" "scope: the clone has no second file, so an absent copy proves nothing (install problems: $(install_problems))"
     return
   fi
-  if [ -n "$(find "$r5_cfg/skills/r5-deep" -name deep.md 2>/dev/null)" ]; then
-    bad "$name" "scope: the deep file was copied, so the skills copy did not fail"
+  if [ -e "$r5_cfg/skills/r5-deep/EXTRA.md" ]; then
+    bad "$name" "scope: the second file was copied, so the skills copy did not fail"
     return
   fi
   r345_check "$name" "$r5_rec" || return
