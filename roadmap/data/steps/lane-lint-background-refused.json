@@ -1,0 +1,14 @@
+{
+ "id": "lane-lint-background-refused",
+ "title": "A lane can run `merge --lane-lint` itself: the harness no longer refuses its background verdict run",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Finding (consultant 23:45 CST Nov 14, relayed to triage as data; its read, unchecked by triage; n=1 so far): a lane cannot run `merge --lane-lint`, because the harness refuses a background verdict run. Runner 10 runs the lane lint for each rebase lane for now. Harm: every hand-in waits on runner 10 for one more command, against the owner's 20:17 CST Nov 14 goal (ruling own-goal-max-efficiency-accurate-fast). Not read by triage: the exact refusal words, which lane hit it, the harness rule behind it. First act of a lane: reproduce the refusal in one lane, copy its exact words, then say whether the fix is a foreground run, a harness allowance, or a change in how the lane starts the run; a change that lets a guarded act through is a widening and goes to the coordinator first. Kin: step records-page-before-ready (the rebase lanes' hand-in route), ruling own-draft-rebase-lanes.",
+ "source": "consultant 23:45 CST Nov 14 (to triage)",
+ "note": "Filed 23:46 CST Nov 14 by triage. Ready, no lane. Tracker: the coordinator. Workaround today: runner 10 runs `merge --lane-lint` for each rebase lane. Not built.",
+ "updatedAt": "2026-11-14T23:46:00-06:00"
+}
