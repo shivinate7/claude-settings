@@ -1,41 +1,47 @@
 #!/usr/bin/env python3
-"""Fixture suite for the lost-work rows of the batch review (merge/merge.py reviewed_block): one row per open lane pull request in
-each of five states, so a batch review names every lane pull request that work could be lost on.
+"""Fixture suite for the lost-work rows of `merge --reviewed` (merge/merge.py reviewed_lines and reviewed_block) and for the ledger of
+`merge --reviewed --live FILE --ledger` (reviewed_ledger). One row for each open lane pull request in a state where work could be lost, and one
+row for each pushed branch with no pull request (state f).
 
 Run: python3 merge/test_lost_work.py
 
 THE CONTRACT THE CASES PIN (the builder meets it):
-- reviewed_block(h, live=None) takes the publisher's --live file. The file is read as the roadmap build reads it (skills/roadmap/build.py
-  live_work, with the record branch's steps). The return stays (lines, ok). live=None reads no file.
-- A row is one line: `lost-work #<n> (<state>): <why>; owner <owner>`. The owner is the role LOST_WORK_OWNER names, except that a row for
-  state b names the lane's session id (the session in the pull request body's footer). An unreadable lane prints one line
-  `lost-work #<n> unknown: <why>` and names no state.
-- LOST_WORK_OWNER (merge/merge.py) maps a, b, b-archived, c, d and e to their owners.
-- a: a done review log older than 6 h (h.now() less its created_at), and neither another open pull request on the base nor the base holds
-  its head (Host.holds_head, the local-git reader).
-- b: an open or bad review log whose lane was not told after tell_lanes sent its message. A lane that is archived gets b-archived.
-- c: no review log, and the lane is idle (completed or review ready) with its newest thread (live file, `pr` = n) more than 12 h
-  before h.now(). A lane row with no status_bucket reads unknown: `lost-work #<n> unknown: <why>; owner coordinator`.
+- reviewed_lines(h, cfgrel=None, live=None) and reviewed_block(h, cfgrel=None, live=None) take the publisher's --live file. The file is read as the
+  roadmap build reads it: merge.load_roadmap_build() gives the build module, whose live_work reads the file with the record branch's steps. live=None
+  reads no file and prints no lost-work row. reviewed_block keeps (lines, ok); ok is False when a row reads unknown.
+- `merge --reviewed --live FILE` (the plain run, through reviewed_lines) prints the rows after the reviewed lines.
+- A row is one line: `lost-work #<n> (<state>): <why>; owner <owner>`. The owner is merge.LOST_WORK_OWNER[state], except that a row for state b
+  names the lane session in the pull request body's footer, and the coordinator when the footer names none or that lane is archived (b-archived).
+  An unreadable lane prints one line `lost-work #<n> unknown: <why>; owner coordinator` and names no state.
+- LOST_WORK_OWNER maps a, b, b-archived, c, d, e and f to their owners (the owner of f is the coordinator).
+- No lane mail: nothing is sent to a lane.
+- a: a done review log older than LOST_WORK_DONE_HOURS (6 h), and neither another open pull request's head nor the base holds its head
+  (Host.holds_head, the local-git reader).
+- b: an open or bad review log whose created_at is older than LOST_WORK_DONE_HOURS (6 h) at h.now(). A younger log lists no row. A stale log
+  (its head moved since) is no b row: it reads under state c's rule. The owner is the footer's session, else the coordinator.
+- c: no review log (or a stale one, naming an older head), and the lane idle (status_bucket completed or review ready) with its newest thread
+  (live file, `pr` = n) more than 12 h before h.now(). A lane row with no status_bucket reads unknown.
 - d: the pull request's lane session (footer) is archived.
 - e: the pull request's head ref names a step (lane_head_refs) that is doing, and that step's lane session is absent or archived.
-- A pull request in two states gets one row for each.
-- Cost: no gh call beyond the reviewed read's (the count case). The lost-work rows read the live file and git only.
-- f: a branch on origin, ahead of main, with no open pull request and no `archive/` prefix. `main` and `batch-*` are never listed. Its row is
-  `lost-work branch <name> (f): <why>; owner <owner>`; the owner is the coordinator (LOST_WORK_OWNER["f"]). The branch list comes from the
-  live file's branches list and the ahead counts from local git: no gh call per branch. Its newest commit is six hours old or more
-  (LOST_WORK_DONE_HOURS, the six-hour constant): a younger branch lists no row.
+- A pull request in two states gets one row for each. An unreadable live file, or a footer session the live lanes do not list, reads unknown.
+- f: a branch on origin, ahead of main, with no open pull request (its tip is no pull request head), and no `archive/` copy. `main`, `batch-*` and
+  `archive/*` are never listed. Its row is `lost-work branch <name> (f): <why>; owner coordinator`. The branch list comes from the live file's
+  branches list, the ahead counts and the heads from local git, with one fetch of the branches (Host.fetch_lost_work_refs) and no gh call.
+  Its newest commit is LOST_WORK_DONE_HOURS (6 h) old or more: a younger branch lists no row.
   A branch named as the repo's record branch (lint/layout.py record_branch: the extras file's "record-branch" key, else roadmap) lists no row.
   A "record-branch" key that is not a branch name reads the branch list unknown: `lost-work branches unknown: WHY; owner coordinator`, no branch row.
-- reviewed_ledger(h, live, verdicts, subsumed) -> (rows, count_line, ok), the ledger. Its rows are the lost-work rows, one per pull request and one
-  per f branch (pr = the branch name), with the keys in LEDGER_FIELDS, ordered by pr; the newest review log's state is under review_log. It
-  reads the live file once, through lost_work_rows. `verdicts` is the path of docs/backlog-drain/verdicts.tsv: a header row, then tab-separated
-  PR, verdict, kind, step, head (the first 12 characters of the pull request's head), reason. A row is sorted only when its verdict is keep,
-  rebuild or close and its head is the live head. count_line is `unsorted: N`, or `unsorted: unknown-read` when any read stopped (the verdicts
-  file, the subsumed file or the lost-work rows): then ok is False. Each stopped read's why line goes to stderr.
-- The command line: `merge --reviewed --live FILE --ledger [--out FILE] --verdicts FILE` (build_parser).
+- reviewed_ledger(h, live, verdicts, subsumed=None) -> (rows, count_line, ok). Its rows are the lost-work rows, one per pull request and one per f
+  branch (pr = the branch name), with the keys in LEDGER_FIELDS, ordered by pr; review_log is the newest review log's state. `verdicts` is the
+  path of docs/backlog-drain/verdicts.tsv: a header row, then tab-separated PR, verdict, kind, step, head (the first 12 characters of the pull
+  request's head), reason. A row is sorted only when its verdict is keep, rebuild or close and its head is the live head. count_line is
+  `unsorted: N`, or `unsorted: unknown-read` when any read stopped (the verdicts file, the subsumed file, the lost-work rows or the branch fetch):
+  then ok is False. Each stopped read's why line goes to stderr.
+- The command line: `merge --reviewed --live FILE --ledger [--out FILE] --verdicts FILE [--subsumed FILE]` (build_parser). A stopped read exits 1
+  and writes no --out.
+- Cost: no gh call beyond the review read's own: the live file, git and the branch fetch add none.
 
-Each case runs reviewed_block over a PullsHost (merge/test_merge.py, imported, not copied) on one roadmap checkout whose origin is a
-local bare repo behind the GitHub remote name (insteadOf), so Host.holds_head reads real git. The clock is the host's, a fixed NOW.
+Each case runs reviewed_block over a PullsHost (merge/test_merge.py, imported, not copied) on one roadmap checkout whose origin is a local bare repo
+behind the GitHub remote name (insteadOf), so Host.holds_head reads real git. The clock is the host's, a fixed NOW. Pushes go to origin by name.
 """
 import contextlib
 import datetime
@@ -52,8 +58,8 @@ from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import merge  # noqa: E402  merge/merge.py, the batch review under test
-import test_merge as tm  # noqa: E402  PullsHost, batch_pull, record_text, lint_of and the other fakes: the one home, imported not copied
+import merge  # noqa: E402  merge/merge.py, the review read under test
+import test_merge as tm  # noqa: E402  PullsHost, batch_pull, batch_run, review_comment, lint_of: the one home, imported not copied
 sys.path.insert(1, str(HERE.parent / "lint"))
 sys.path.insert(2, str(HERE.parent / "skills" / "roadmap"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
@@ -69,7 +75,7 @@ ARCHIVED, IDLE, RUNNING = "SESSION_STATUS_ARCHIVED", "SESSION_STATUS_IDLE", "SES
 NOW = datetime.datetime(2026, 11, 13, 16, 0, tzinfo=datetime.timezone.utc).timestamp()  # the host's clock: every age is measured from it
 ROUNDS_DONE = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, sonnet, PASS")
 ROUNDS_OPEN = ("Round 1: reviewer, sonnet, FAIL",)
-LOST_ROW = re.compile(r"^lost-work #(\d+) \(([a-e])\): (.+); owner (.+)$")
+LOST_ROW = re.compile(r"^lost-work #(\d+) \(([a-f])\): (.+); owner (.+)$")
 UNKNOWN_ROW = re.compile(r"^lost-work #(\d+) unknown: (.+)$")
 BRANCH_ROW = re.compile(r"^lost-work branch (\S+) \(f\): (.+); owner (\S+)$")
 BRANCH = "claude/ecstatic-euler-capib9"  # the incident branch: pushed, one commit ahead of main, no pull request (state f)
@@ -77,8 +83,6 @@ BRANCH_FILE = "docs/plans/r42-part2-design.md"
 BRANCH_TEXT = "R42 part 2 design\n"
 VERDICT_COLUMNS = ("PR", "verdict", "kind", "step", "head", "reason")  # the verdicts.tsv header row
 LEDGER_FIELDS = {"pr", "step", "state", "group", "review_log", "age_h", "commits_not_on_main", "subsumed_by", "files", "verdict", "sorted"}
-NO_MAIL = (0, "")
-NO_ROUTE = (1, "no route to the lane")
 COMMIT_MINUTES = 48 * 60  # a commit's default age on the host's clock: two days, past the six-hour floor of a branch (state f)
 
 # Made in setUpModule, not at import, so a helper that imports this file leaks no folder.
@@ -95,13 +99,13 @@ def tearDownModule():
 
 
 def iso_before(minutes):
-    """An ISO UTC time `minutes` before the host's clock, shaped as a record's created_at and a thread's lastActivity."""
+    """An ISO UTC time `minutes` before the host's clock, shaped as a review log's created_at and a thread's lastActivity."""
     when = datetime.datetime.fromtimestamp(NOW, datetime.timezone.utc) - datetime.timedelta(minutes=minutes)
     return when.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def owner_of(key):
-    """The owner LOST_WORK_OWNER names for state `key`. A missing constant or key reads as text that fails the case by name."""
+    """The owner merge.LOST_WORK_OWNER names for state `key`. A missing constant or key reads as text that fails the case by name."""
     return (getattr(merge, "LOST_WORK_OWNER", None) or {}).get(key, "no LOST_WORK_OWNER entry for state %s" % key)
 
 
@@ -118,6 +122,11 @@ def rows_for(lines, n):
     return sorted(found)
 
 
+def lost_rows(lines):
+    """-> the lines that are a lost-work row for a pull request (not a branch row, not a count)."""
+    return [line for line in lines if line.startswith("lost-work #")]
+
+
 def branch_rows(lines, name):
     """-> the sorted (why, owner) of each lost-work branch row (state f) that names branch `name`."""
     matches = [BRANCH_ROW.match(line) for line in lines]
@@ -130,25 +139,24 @@ def row_of(rows, pr):
 
 
 class LostWorkFixture(unittest.TestCase):
-    """The one roadmap checkout every case in this file builds on. The record branch holds step c3, doing under session_gone. Each case adds
-    its pull requests, pushed branches and lanes, writes the live file, and reads what reviewed_block or reviewed_ledger prints."""
+    """The one roadmap checkout every case in this file builds on. The record branch holds step c3, doing under session_gone, and step c4, doing
+    under session_gone4 (no lane row for either). Each case adds its pull requests, pushed branches and lanes, writes the live file, and reads what
+    reviewed_block, reviewed_lines or reviewed_ledger gives."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
-        steps = {"c3": dict(roadmap.STEP, order=3, status="doing", lane="session_gone")}
+        steps = {"c3": dict(roadmap.STEP, order=3, status="doing", lane="session_gone"),
+                 "c4": dict(roadmap.STEP, order=4, status="doing", lane="session_gone4")}
         self.repo = roadmap.make_repo(self.tmp.name, steps=steps)
         self.bare = pathlib.Path(self.tmp.name) / "origin.git"
         roadmap.git(self.tmp.name, "init", "-q", "--bare", str(self.bare))
         roadmap.git(self.repo, "remote", "add", "origin", REMOTE)
         roadmap.git(self.repo, "config", "url.%s.insteadOf" % self.bare, REMOTE)
-        roadmap.git(self.repo, "push", "-q", str(self.bare), "main")
+        roadmap.git(self.repo, "push", "-q", "origin", "main")
         self.main = roadmap.git(self.repo, "rev-parse", "main").strip()
         self.live = pathlib.Path(self.tmp.name) / "live.json"
         self.heads, self.pulls, self.comments, self.checks, self.sessions, self.threads = {}, [], [], {}, [], []
         self.branches = []  # the live file's branches list: each pushed branch, the publisher's read of origin
-        role = mock.patch.object(merge, "read_merge_role", lambda: "batch-runner")  # the lane mail gate: a session with no batch-runner role sends nothing
-        role.start()
-        self.addCleanup(role.stop)
         self.publish()
 
     def tearDown(self):
@@ -173,23 +181,25 @@ class LostWorkFixture(unittest.TestCase):
 
     def push_branch(self, name, sha):
         """Push branch `name` to origin at `sha`, and list it in the live file's branches, as the publisher does. No pull request is opened."""
-        roadmap.git(self.repo, "push", "-q", str(self.bare), "%s:refs/heads/%s" % (sha, name))
+        roadmap.git(self.repo, "push", "-q", "origin", "%s:refs/heads/%s" % (sha, name))
         self.branches.append({"name": name})
 
-    def pr(self, n, parent=None, head_ref=None, session="session_a", record=None, at=60, files=None):
-        """Open pull request n on main. `record` is "done" or "open", posted `at` minutes before now (a done record comes with a lane-lint
-        PASS at its head), or None for no record. `session` is the lane session in the body's footer (None: no footer). `files` (path -> text)
-        are the files its commit adds."""
+    def pr(self, n, parent=None, head_ref=None, session="session_a", log=None, at=60, files=None):
+        """Open pull request n on main. `log` is "done", "open" or "bad", a review log posted `at` minutes before now (a done log comes with a
+        lane-lint PASS at its head, a bad one does not parse), or None for no review log. `session` is the lane session in the body's footer (None:
+        no footer). `files` (path -> text) are the files its commit adds."""
         sha = self.commit_on(parent or self.main, files, "pr %d" % n)
-        roadmap.git(self.repo, "push", "-q", str(self.bare), "%s:refs/pull/%d/head" % (sha, n))
+        roadmap.git(self.repo, "push", "-q", "origin", "%s:refs/pull/%d/head" % (sha, n))
         self.heads[n] = sha
         body = "Lane work.\n\nhttps://claude.ai/code/%s" % session if session else ""
         self.pulls.append({**tm.batch_pull(n, sha, head_ref=head_ref, created_at="2026-11-01T00:00:00Z"), "body": body})
         self.checks[sha] = [tm.batch_run("checks", "completed", "success")]
-        if record:
-            rounds = ROUNDS_DONE if record == "done" else ROUNDS_OPEN
+        if log == "bad":
+            self.comments.append(tm.review_comment(1000 + n * 10, n, merge.REVIEW_MARKER + "\nnot a review log\n", created=iso_before(at)))
+        elif log:
+            rounds = ROUNDS_DONE if log == "done" else ROUNDS_OPEN
             self.comments.append(tm.review_comment(1000 + n * 10, n, tm.record_text(rounds=rounds, head=sha, n=n), created=iso_before(at)))
-            if record == "done":
+            if log == "done":
                 self.comments.append(tm.lint_of(n, sha))
 
     def lane(self, sid, status=RUNNING, bucket=roadmap.BUCKET_WORKING, step="c1"):
@@ -201,21 +211,20 @@ class LostWorkFixture(unittest.TestCase):
         self.threads.append({"title": "work on #%d" % n, "state": "working", "lastActivity": iso_before(minutes), "pr": n})
 
     def publish(self, read_at=None):
-        """Write the live file: the lanes and threads so far, read `read_at` (default five minutes ago)."""
+        """Write the live file: the lanes, threads and branches so far, read `read_at` (default five minutes ago)."""
         value = {"readAt": read_at or roadmap.iso_ago(5), "threads": list(self.threads), "pulls": [], "items": [],
                  "sessions": list(self.sessions), "branches": list(self.branches)}
         self.live.write_text(json.dumps(value), encoding="utf-8")
 
-    def host(self, count_gh=False, mail_result=NO_MAIL):
+    def host(self, count_gh=False):
         """A PullsHost over the pull requests so far, on this checkout (holds_head runs git here) and the fixed clock."""
-        h = tm.PullsHost(list(self.pulls), dict(self.checks), comments=list(self.comments), repo=REPO_SLUG, count_gh=count_gh,
-                         mail_result=mail_result)
+        h = tm.PullsHost(list(self.pulls), dict(self.checks), comments=list(self.comments), repo=REPO_SLUG, count_gh=count_gh)
         h.cwd, h.now = str(self.repo), (lambda: NOW)
         return h
 
     def block(self, h, live=True):
-        """The lines of reviewed_block(h), read with the live file when `live`. A merge.py with no live= seam reads the lines alone, so the
-        case fails on its missing row and not on the signature."""
+        """The lines of reviewed_block(h), read with the live file when `live`. A merge.py with no live= seam reads the lines alone, so the case
+        fails on its missing row and not on the signature."""
         if "live" not in inspect.signature(merge.reviewed_block).parameters:
             return merge.reviewed_block(h)[0]
         lines, _ok = merge.reviewed_block(h, live=str(self.live) if live else None)
@@ -228,28 +237,33 @@ class LostWorkFixture(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"kinds": {}, **keys}), encoding="utf-8")
 
+
 class LostWorkRows(LostWorkFixture):
-    """reviewed_block's lost-work rows: the five pull request states, and the pushed branches (state f)."""
+    """reviewed_block's lost-work rows: the six states (a to f) and the pushed branches (state f). Each negative case lists, in the same run, a
+    pull request or branch that must be listed, so a missing row cannot pass a negative case."""
 
-    # State a: a done record older than 6 h, in no batch.
+    # State a: a done review log older than 6 h, in no other pull request's head.
 
-    def test_a_done_pr_in_no_batch_past_six_hours_lists_one_row(self):
-        self.pr(7, record="done", at=361)
+    def test_a_done_pr_past_six_hours_lists_one_row(self):
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
         self.publish()
         lines = self.block(self.host())
-        self.assertEqual(rows_for(lines, 7), [("a", owner_of("a"))], "no state-a row for #7, a done record 361 minutes old: %r" % lines)
+        self.assertEqual(rows_for(lines, 7), [("a", owner_of("a"))], "no state-a row for #7, a done review log 361 minutes old: %r" % lines)
 
     def test_a_done_pr_just_under_six_hours_lists_no_row(self):
-        self.pr(7, record="done", at=359)
+        self.pr(7, log="done", at=359)
+        self.pr(8, log="done", at=361, session="session_b")  # control: the same run lists #8, past the six-hour line
         self.lane("session_a")
+        self.lane("session_b")
         self.publish()
         lines = self.block(self.host())
+        self.assertEqual(rows_for(lines, 8), [("a", owner_of("a"))], "control: no state-a row for #8, a done review log 361 minutes old: %r" % lines)
         self.assertEqual(rows_for(lines, 7), [], "a row for #7 at 359 minutes, under the six-hour line: %r" % lines)
 
     def test_a_done_pr_held_by_another_open_pr_lists_no_row(self):
         # The control: alone, #7 is in no batch and lists its row. Then #9's head holds #7's head, so #7 is in a batch.
-        self.pr(7, record="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
         self.publish()
         lines = self.block(self.host())
@@ -258,87 +272,141 @@ class LostWorkRows(LostWorkFixture):
         lines = self.block(self.host())
         self.assertEqual(rows_for(lines, 7), [], "a row for #7 though #9 holds its head, so #7 is in a batch: %r" % lines)
 
-    def test_a_done_pr_whose_head_main_already_holds_lists_no_row(self):
+    def test_a_done_pr_whose_head_base_already_holds_lists_no_row(self):
         # The control: while main does not hold #7's head, #7 lists its row. Then main moves on to that head, so the head is an ancestor of
-        # main, nothing is left to merge, and batch_candidates leaves #7 out too.
-        self.pr(7, record="done", at=361)
+        # main, nothing is left to merge, and the row goes. main moves by origin, the fixture's own remote.
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
         self.publish()
         lines = self.block(self.host())
         self.assertEqual(rows_for(lines, 7), [("a", owner_of("a"))], "control: no state-a row for #7 while main does not hold its head: %r" % lines)
         self.main = self.heads[7]
-        roadmap.git(self.repo, "push", str(self.bare), "%s:refs/heads/main" % self.main)
+        roadmap.git(self.repo, "push", "-q", "origin", "%s:refs/heads/main" % self.main)
         lines = self.block(self.host())
         self.assertEqual(rows_for(lines, 7), [], "a state-a row for #7 whose head main already holds, so nothing is left to merge: %r" % lines)
 
-    # State b: an open record whose lane was not told.
+    # State b: an open or bad review log older than LOST_WORK_DONE_HOURS (6 h). Nothing is sent to a lane; a younger log lists no row, so a pull
+    # request under normal review does not read as lost.
 
-    def test_b_open_record_whose_lane_was_not_told_lists_a_row_for_the_lane(self):
-        self.pr(7, record="open", at=30)
+    def test_b_open_review_log_lists_a_row_naming_its_lane(self):
+        self.pr(7, log="open", at=421)
         self.lane("session_a")
         self.publish()
-        lines = self.block(self.host(mail_result=NO_ROUTE))
+        lines = self.block(self.host())
         self.assertEqual(rows_for(lines, 7), [("b", "session_a")], "no state-b row for #7 naming session_a, its lane: %r" % lines)
 
-    def test_b_open_record_whose_lane_was_told_lists_no_row(self):
-        self.pr(7, record="open", at=30)
+    def test_b_bad_review_log_lists_a_row_naming_its_lane(self):
+        self.pr(7, log="bad", at=421)
         self.lane("session_a")
         self.publish()
-        lines = self.block(self.host(mail_result=NO_MAIL))
-        self.assertEqual(rows_for(lines, 7), [], "a row for #7 though its lane was sent its message: %r" % lines)
+        lines = self.block(self.host())
+        self.assertEqual(rows_for(lines, 7), [("b", "session_a")], "no state-b row for #7, whose review log does not parse, naming session_a: %r" % lines)
+
+    def test_b_review_log_younger_than_six_hours_lists_no_row(self):
+        self.pr(7, log="open", at=10)
+        self.pr(9, log="bad", at=10, session="session_c")
+        self.pr(8, log="open", at=421, session="session_b")  # control: #8's log, 7 h old, lists its row in the same run
+        self.lane("session_a")
+        self.lane("session_b")
+        self.lane("session_c")
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(rows_for(lines, 8), [("b", "session_b")], "control: no state-b row for #8, whose open review log is 7 h old: %r" % lines)
+        self.assertEqual(rows_for(lines, 7), [], "a state-b row for #7, whose open review log is 10 min old, under the six-hour line: %r" % lines)
+        self.assertEqual(rows_for(lines, 9), [], "a state-b row for #9, whose bad review log is 10 min old, under the six-hour line: %r" % lines)
+
+    def test_b_review_log_seven_hours_old_lists_a_row(self):
+        self.pr(7, log="open", at=420)  # 7 h, which is 420 minutes: past the six-hour line
+        self.lane("session_a")
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(rows_for(lines, 7), [("b", "session_a")], "no state-b row for #7, whose open review log is 7 h old: %r" % lines)
+
+    def test_b_stale_review_log_older_than_six_hours_keeps_the_state_c_rule(self):
+        self.pr(7, log="open", at=421)
+        self.pr(8, log="open", at=421, session="session_b")  # control: #8's log at its own head, past six hours, lists its b row
+        self.lane("session_a", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
+        self.lane("session_b")
+        self.thread(7, minutes=781)
+        # The head of #7 moves: its open log names the old head, so the log is stale and counts as no log (state c's rule).
+        old = self.heads[7]
+        sha = self.commit_on(old, None, "newer")
+        roadmap.git(self.repo, "push", "-q", "origin", "%s:refs/pull/7/head" % sha)
+        self.heads[7] = sha
+        pull = next(p for p in self.pulls if p["number"] == 7)
+        pull["head"] = {**pull["head"], "sha": sha}
+        self.checks[sha] = self.checks[old]
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(rows_for(lines, 8), [("b", "session_b")], "control: no state-b row for #8, whose open review log is past six hours at its head: %r" % lines)
+        self.assertEqual(rows_for(lines, 7), [("c", owner_of("c"))], "#7's stale open log, older than six hours, should keep state c's rule, not state b: %r" % lines)
 
     def test_b_with_an_archived_lane_names_the_coordinator(self):
-        self.pr(7, record="open", at=30)
+        self.pr(7, log="open", at=421)
         self.lane("session_a", status=ARCHIVED, bucket=roadmap.BUCKET_COMPLETED)
         self.publish()
-        rows = rows_for(self.block(self.host(mail_result=NO_ROUTE)), 7)
+        rows = rows_for(self.block(self.host()), 7)
         self.assertIn(("b", owner_of("b-archived")), rows, "no state-b row for #7 that names the coordinator, the owner of an archived lane: %r" % rows)
         self.assertNotIn(("b", "session_a"), rows, "the state-b row for #7 names the archived session, not the coordinator: %r" % rows)
 
-    def test_b_open_record_with_no_footer_names_the_coordinator(self):
-        self.pr(7, record="open", at=30, session=None)  # no session in the footer: no lane to tell, so the coordinator owns the row
+    def test_b_open_review_log_with_no_footer_names_the_coordinator(self):
+        self.pr(7, log="open", at=421, session=None)  # no session in the footer: no lane to name, so the coordinator owns the row
         self.publish()
         rows = rows_for(self.block(self.host()), 7)
         self.assertEqual(rows, [("b", "coordinator")], "no state-b row for #7, whose body has no session footer, that names the coordinator: %r" % rows)
 
-    # State c: no review record, and the lane idle over 12 h.
+    def test_b_done_review_log_lists_no_b_row(self):
+        self.pr(7, log="done", at=60)
+        self.pr(8, log="open", at=421, session="session_b")  # control: the open log of #8 lists its row in the same run
+        self.lane("session_a")
+        self.lane("session_b")
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(rows_for(lines, 8), [("b", "session_b")], "control: no state-b row for #8, whose open review log names session_b: %r" % lines)
+        self.assertEqual(rows_for(lines, 7), [], "a state-b row for #7, whose review log is done: %r" % lines)
 
-    def test_c_no_record_and_lane_idle_past_twelve_hours_lists_a_row(self):
-        self.pr(7, record=None)
+    # State c: no review log, and the lane idle over 12 h.
+
+    def test_c_no_log_and_lane_idle_past_twelve_hours_lists_a_row(self):
+        self.pr(7, log=None)
         self.lane("session_a", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
         self.thread(7, minutes=781)
         self.publish()
         lines = self.block(self.host())
-        self.assertEqual(rows_for(lines, 7), [("c", owner_of("c"))], "no state-c row for #7, idle 781 minutes with no record: %r" % lines)
+        self.assertEqual(rows_for(lines, 7), [("c", owner_of("c"))], "no state-c row for #7, idle 781 minutes with no review log: %r" % lines)
 
     def test_c_lane_idle_just_under_twelve_hours_lists_no_row(self):
-        self.pr(7, record=None)
+        self.pr(7, log=None)
+        self.pr(8, log=None, session="session_b")  # control: #8 idle past the line lists its row
         self.lane("session_a", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
+        self.lane("session_b", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
         self.thread(7, minutes=719)
+        self.thread(8, minutes=781)
         self.publish()
         lines = self.block(self.host())
+        self.assertEqual(rows_for(lines, 8), [("c", owner_of("c"))], "control: no state-c row for #8, idle 781 minutes: %r" % lines)
         self.assertEqual(rows_for(lines, 7), [], "a row for #7 at 719 minutes idle, under the twelve-hour line: %r" % lines)
 
-    def test_c_stale_record_counts_as_no_record(self):
-        self.pr(7, record="done", at=60)
+    def test_c_stale_review_log_counts_as_no_log(self):
+        self.pr(7, log="done", at=60)
         self.lane("session_a", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
         self.thread(7, minutes=781)
         self.publish()
         control = [state for state, _owner in rows_for(self.block(self.host()), 7)]
-        self.assertNotIn("c", control, "control: #7 with a current done record gets a state-c row: %r" % control)
-        # The pull request head moves: the done record names the old head, so it is stale and counts as no record.
+        self.assertNotIn("c", control, "control: #7 with a current done review log gets a state-c row: %r" % control)
+        # The pull request head moves: the done log names the old head, so it is stale and counts as no log.
         old = self.heads[7]
         sha = self.commit_on(old, None, "newer")
-        roadmap.git(self.repo, "push", "-q", str(self.bare), "%s:refs/pull/7/head" % sha)
+        roadmap.git(self.repo, "push", "-q", "origin", "%s:refs/pull/7/head" % sha)
         self.heads[7] = sha
         pull = next(p for p in self.pulls if p["number"] == 7)
         pull["head"] = {**pull["head"], "sha": sha}
         self.checks[sha] = self.checks[old]
         rows = [state for state, _owner in rows_for(self.block(self.host()), 7)]
-        self.assertIn("c", rows, "no state-c row for #7, whose done record names an older head, so it counts as no record: %r" % rows)
+        self.assertIn("c", rows, "no state-c row for #7, whose done review log names an older head, so it counts as no log: %r" % rows)
 
     def test_c_lane_with_no_status_bucket_reads_unknown_not_no_row(self):
-        self.pr(7, record=None)
+        self.pr(7, log=None)
         self.lane("session_a", status=IDLE, bucket=None)  # a lane row with no status_bucket: whether it is idle is unread
         self.thread(7, minutes=2000)
         self.publish()
@@ -347,49 +415,58 @@ class LostWorkRows(LostWorkFixture):
         self.assertTrue(rows[0][1].endswith("; owner coordinator"), "the unknown row for #7 is not owned by the coordinator: %r" % rows[0][1])
 
     def test_c_lane_whose_bucket_is_a_session_bucket_keeps_today_no_row(self):
-        # The control: a working lane carries a SESSION_BUCKETS name and is not idle, so it reads as today: no row and no unknown row.
-        self.pr(7, record=None)
+        # The control: #8's idle lane lists its row. #7's lane is working, so it reads as today: no row and no unknown row.
+        self.pr(7, log=None)
+        self.pr(8, log=None, session="session_b")
         self.lane("session_a", status=IDLE, bucket=roadmap.BUCKET_WORKING)
+        self.lane("session_b", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
         self.thread(7, minutes=2000)
+        self.thread(8, minutes=2000)
         self.publish()
         lines = self.block(self.host())
+        self.assertEqual(rows_for(lines, 8), [("c", owner_of("c"))], "control: no state-c row for #8, whose lane is completed and idle: %r" % lines)
         self.assertEqual(rows_for(lines, 7), [], "a row for #7, whose lane is working and not idle: %r" % lines)
 
     # State d: the lane is archived and the pull request is open.
 
     def test_d_archived_lane_with_an_open_pr_lists_a_row(self):
-        self.pr(7, record="done", at=60)
+        self.pr(7, log="done", at=60)
         self.lane("session_a", status=ARCHIVED, bucket=roadmap.BUCKET_COMPLETED)
         self.publish()
         lines = self.block(self.host())
         self.assertEqual(rows_for(lines, 7), [("d", owner_of("d"))], "no state-d row for #7, whose lane is archived: %r" % lines)
 
     def test_d_live_lane_with_an_open_pr_lists_no_row(self):
-        self.pr(7, record="done", at=60)
+        self.pr(7, log="done", at=60)
+        self.pr(8, log="done", at=60, session="session_b")  # control: #8's archived lane lists its row
         self.lane("session_a")
+        self.lane("session_b", status=ARCHIVED, bucket=roadmap.BUCKET_COMPLETED)
         self.publish()
         lines = self.block(self.host())
+        self.assertEqual(rows_for(lines, 8), [("d", owner_of("d"))], "control: no state-d row for #8, whose lane is archived: %r" % lines)
         self.assertEqual(rows_for(lines, 7), [], "a row for #7 whose lane is live: %r" % lines)
 
     # State e: the step is doing and its lane is gone.
 
     def test_e_doing_step_whose_lane_is_gone_lists_a_row(self):
-        self.pr(7, head_ref="c3", record="done", at=60, session="session_gone")
+        self.pr(7, head_ref="c3", log="done", at=60, session="session_gone")
         self.publish()  # no session row for session_gone: the lane is gone
         lines = self.block(self.host())
         self.assertEqual(rows_for(lines, 7), [("e", owner_of("e"))], "no state-e row for #7, on doing step c3 whose lane is gone: %r" % lines)
 
     def test_e_doing_step_whose_lane_is_live_lists_no_row(self):
-        self.pr(7, head_ref="c3", record="done", at=60, session="session_gone")
+        self.pr(7, head_ref="c3", log="done", at=60, session="session_gone")
+        self.pr(8, head_ref="c4", log="done", at=60, session="session_gone4")  # control: doing step c4, whose lane is gone, lists its row
         self.lane("session_gone", step="c3")
         self.publish()
         lines = self.block(self.host())
+        self.assertEqual(rows_for(lines, 8), [("e", owner_of("e"))], "control: no state-e row for #8, on doing step c4 whose lane is gone: %r" % lines)
         self.assertEqual(rows_for(lines, 7), [], "a row for #7 on doing step c3 whose lane is live: %r" % lines)
 
     # Two states at once: one row for each.
 
     def test_a_pr_in_two_states_gets_one_row_for_each(self):
-        self.pr(7, record="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a", status=ARCHIVED, bucket=roadmap.BUCKET_COMPLETED)
         self.publish()
         lines = self.block(self.host())
@@ -399,15 +476,17 @@ class LostWorkRows(LostWorkFixture):
     # Failure classes: a false row on a healthy pull request, and an unreadable lane that must read unknown.
 
     def test_a_healthy_pr_lists_no_lost_work_row(self):
-        self.pr(7, record="done", at=60)
+        self.pr(7, log="done", at=60)
+        self.pr(8, log="done", at=361)  # control: #8 past the six-hour line lists its row in the same run
         self.lane("session_a")
         self.thread(7, minutes=5)
         self.publish()
         lines = self.block(self.host())
-        self.assertEqual([line for line in lines if line.startswith("lost-work ")], [], "a false row on a healthy pull request: %r" % lines)
+        self.assertEqual(rows_for(lines, 8), [("a", owner_of("a"))], "control: no state-a row for #8, a done review log 361 minutes old: %r" % lines)
+        self.assertEqual(rows_for(lines, 7), [], "a false row on a healthy pull request: %r" % lines)
 
     def test_unreadable_lane_data_prints_an_unknown_row_not_no_row(self):
-        self.pr(7, record=None)
+        self.pr(7, log=None)
         self.lane("session_a", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
         self.thread(7, minutes=781)
         self.publish()
@@ -418,15 +497,32 @@ class LostWorkRows(LostWorkFixture):
         self.assertEqual([state for state, _why in rows], ["unknown"], "a stale live file gives #7 no unknown row: %r" % rows)
 
     def test_footer_session_absent_from_the_live_lanes_gives_an_unknown_row(self):
-        self.pr(7, record="done", at=60, session="session_nowhere")  # no lane row for session_nowhere: the footer names a lane the read does not hold
+        self.pr(7, log="done", at=60, session="session_nowhere")  # no lane row for session_nowhere: the footer names a lane the read does not hold
         self.publish()
         rows = rows_for(self.block(self.host()), 7)
         self.assertEqual([state for state, _why in rows], ["unknown"], "no unknown row for #7, whose footer session is absent from the live lanes: %r" % rows)
 
-    # Cost, empty and full-size states.
+    # The plain run, and the live file's cost.
+
+    def test_plain_reviewed_run_prints_the_lost_work_rows(self):
+        self.pr(7, log="done", at=361)
+        self.lane("session_a")
+        self.pr(8, log=None, session="session_b")
+        self.lane("session_b", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
+        self.thread(8, minutes=781)
+        self.publish()
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
+            try:
+                merge.main(["--reviewed", "--live", str(self.live)], host=self.host())
+            except SystemExit:
+                pass  # the parser refuses --live until the rows are wired: the case then fails on the missing row
+        lines = stdout.getvalue().splitlines()
+        self.assertEqual(rows_for(lines, 7), [("a", owner_of("a"))], "merge --reviewed --live FILE prints no state-a row for #7: %r" % lines)
+        self.assertEqual(rows_for(lines, 8), [("c", owner_of("c"))], "merge --reviewed --live FILE prints no state-c row for #8: %r" % lines)
 
     def test_the_lost_work_rows_add_no_gh_call_to_the_review_read(self):
-        self.pr(7, record=None)
+        self.pr(7, log=None)
         self.lane("session_a", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
         self.thread(7, minutes=781)
         self.publish()
@@ -437,26 +533,37 @@ class LostWorkRows(LostWorkFixture):
                          "the live file adds gh calls to the review read: %r over %r" % (with_live.gh_calls, without_live.gh_calls))
         self.assertEqual(rows_for(lines, 7), [("c", owner_of("c"))], "no state-c row for #7 in the live run: %r" % lines)
 
+    def test_no_live_file_reads_no_file_and_prints_no_row(self):
+        self.pr(7, log="done", at=361)
+        self.lane("session_a")
+        self.publish()
+        with_live = self.block(self.host(), live=True)  # control: the same run with the live file lists #7's row
+        self.assertEqual(rows_for(with_live, 7), [("a", owner_of("a"))], "control: no state-a row for #7 with the live file: %r" % with_live)
+        without_live = self.block(self.host(), live=False)
+        self.assertEqual(lost_rows(without_live), [], "lost-work rows print with no live file: %r" % without_live)
+
     def test_no_open_pr_lists_no_lost_work_row(self):
+        self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))  # control: the branch lists its state-f row
         self.publish()
         lines = self.block(self.host())
-        self.assertEqual([line for line in lines if line.startswith("lost-work ")], [], "a row with no open pull request: %r" % lines)
+        self.assertEqual(len(branch_rows(lines, BRANCH)), 1, "control: no state-f row for %s with no open pull request: %r" % (BRANCH, lines))
+        self.assertEqual(lost_rows(lines), [], "a row for a pull request with no open pull request: %r" % lines)
 
     def test_full_size_batch_lists_only_the_pr_in_a_state(self):
-        # Twenty-five pull requests whose records are open and told, and one with no record whose lane is idle past 12 h.
+        # Twenty-five healthy pull requests (a done review log 60 minutes old, its lane live), and one with no review log whose lane is idle past 12 h.
         self.lane("session_a")
         for n in range(2, 27):
-            self.pr(n, record="open", at=30)
-        self.pr(40, record=None, session="session_b")
+            self.pr(n, log="done", at=60)
+        self.pr(40, log=None, session="session_b")
         self.lane("session_b", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
         self.thread(40, minutes=781)
         self.publish()
         lines = self.block(self.host())
-        rows = [line for line in lines if line.startswith("lost-work ")]
+        rows = lost_rows(lines)
         self.assertEqual([row.split(":")[0] for row in rows], ["lost-work #40 (c)"], "a row on a healthy pull request among 26: %r" % lines)
         self.assertEqual(rows_for(lines, 40), [("c", owner_of("c"))], "no state-c row for #40 in the full-size batch: %r" % lines)
 
-    # State f: a pushed branch ahead of main, with no open pull request and no archive/ prefix. Each negative case lists, in the same run, the
+    # State f: a pushed branch ahead of main, with no open pull request and no archive/ copy. Each negative case lists, in the same run, the
     # branch that must stay listed, so a missing row cannot pass a negative case.
 
     def test_f_pushed_branch_ahead_of_main_with_no_pr_lists_a_row(self):
@@ -476,7 +583,7 @@ class LostWorkRows(LostWorkFixture):
         self.assertEqual(branch_rows(lines, "archive/claude/old-plan"), [], "a state-f row for an archive/ branch: %r" % lines)
 
     def test_f_branch_with_an_open_pr_lists_no_f_row(self):
-        self.pr(7, head_ref="claude/pr-held", record=None, session=None)
+        self.pr(7, head_ref="claude/pr-held", log=None, session=None)
         self.push_branch("claude/pr-held", self.heads[7])
         self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
         self.publish()
@@ -505,7 +612,7 @@ class LostWorkRows(LostWorkFixture):
     def test_f_branch_whose_tip_an_open_pr_holds_lists_no_row(self):
         held = self.commit_on(self.main, {"docs/held.md": "h\n"})
         self.push_branch("claude/under-a-pr", held)
-        self.pr(7, parent=held, head_ref="claude/other-name", record=None, session=None)  # open pull request #7 holds the branch's tip, under another head ref
+        self.pr(7, parent=held, head_ref="claude/other-name", log=None, session=None)  # open pull request #7 holds the branch's tip, under another head ref
         self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
         self.publish()
         lines = self.block(self.host())
@@ -514,7 +621,7 @@ class LostWorkRows(LostWorkFixture):
 
     def test_f_incident_branch_still_lists_beside_the_archive_and_pr_filters(self):
         # The control for the two skips above: the incident branch lists while an archive/ branch and an open pull request are in the same run.
-        self.pr(7, record=None, session=None)
+        self.pr(7, log=None, session=None)
         self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
         self.push_branch("archive/claude/other", self.commit_on(self.main, {"docs/o.md": "o\n"}))
         self.publish()
@@ -524,18 +631,18 @@ class LostWorkRows(LostWorkFixture):
         # The control is the incident branch, which has no pull request and lists. Pull request #9 is closed unmerged, and #10 is merged by a
         # squash, so its branch tip is not on main. Each head ref holds its branch's tip, and neither branch lists. The heads are read through
         # refs/pull/*/head with local git, so the gh calls of the review read do not change with them.
-        self.pr(7, record=None, session=None)
+        self.pr(7, log=None, session=None)
         self.publish()
         without_heads = self.host(count_gh=True)
         self.block(without_heads)
         closed = self.commit_on(self.main, {"docs/closed.md": "c\n"})
-        roadmap.git(self.repo, "push", "-q", str(self.bare), "%s:refs/pull/9/head" % closed)
+        roadmap.git(self.repo, "push", "-q", "origin", "%s:refs/pull/9/head" % closed)
         self.push_branch("claude/closed-pr", closed)
         squashed = self.commit_on(self.main, {"docs/squashed.md": "s\n"})
-        roadmap.git(self.repo, "push", "-q", str(self.bare), "%s:refs/pull/10/head" % squashed)
+        roadmap.git(self.repo, "push", "-q", "origin", "%s:refs/pull/10/head" % squashed)
         self.push_branch("claude/squashed-pr", squashed)
         self.main = self.commit_on(self.main, {"docs/squashed.md": "s\n"}, "Squash pull request 10")
-        roadmap.git(self.repo, "push", "-q", str(self.bare), "%s:refs/heads/main" % self.main)
+        roadmap.git(self.repo, "push", "-q", "origin", "%s:refs/heads/main" % self.main)
         self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
         self.publish()
         with_heads = self.host(count_gh=True)
@@ -558,7 +665,7 @@ class LostWorkRows(LostWorkFixture):
         self.assertEqual(branch_rows(lines, "batch-132"), [], "a state-f row for the integration branch batch-132: %r" % lines)
 
     def test_f_listing_adds_no_gh_call_to_the_review_read(self):
-        self.pr(7, record="done", at=60)
+        self.pr(7, log="done", at=60)
         self.lane("session_a")
         self.publish()
         without = self.host(count_gh=True)
@@ -585,8 +692,8 @@ class LostWorkRows(LostWorkFixture):
     def test_f_branch_age_floor_is_the_six_hour_constant(self):
         # The floor is the six-hour constant, pinned by its name LOST_WORK_DONE_HOURS: a branch whose newest commit is 359 min old lists no row,
         # and one at 361 min lists its row.
-        floor = merge.LOST_WORK_DONE_HOURS
-        self.assertEqual(floor, 6, "the six-hour constant LOST_WORK_DONE_HOURS is %r h, not 6 h" % floor)
+        floor = getattr(merge, "LOST_WORK_DONE_HOURS", None)
+        self.assertEqual(floor, 6, "the six-hour constant merge.LOST_WORK_DONE_HOURS is %r, not 6 h" % (floor,))
         self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
         self.push_branch("claude/over-the-floor", self.commit_on(self.main, {"docs/over.md": "over\n"}, minutes=60 * floor + 1))
         self.push_branch("claude/under-the-floor", self.commit_on(self.main, {"docs/under.md": "under\n"}, minutes=60 * floor - 1))
@@ -651,15 +758,15 @@ class LostWorkRows(LostWorkFixture):
     def test_lost_work_rows_name_the_review_log_not_the_record(self):
         # One row for each of states a, b and c. Each names the review log, the glossary's term for the pull request comment: the word record
         # stands for a file, so no row names one.
-        self.pr(7, record="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
-        self.pr(8, record="open", at=30, session="session_b")
+        self.pr(8, log="open", at=421, session="session_b")
         self.lane("session_b")
-        self.pr(9, record=None, session="session_c")
+        self.pr(9, log=None, session="session_c")
         self.lane("session_c", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
         self.thread(9, minutes=781)
         self.publish()
-        lines = self.block(self.host(mail_result=NO_ROUTE))
+        lines = self.block(self.host())
         for n, state in ((7, "a"), (8, "b"), (9, "c")):
             found = [line for line in lines if line.startswith("lost-work #%d (%s):" % (n, state))]
             with self.subTest(pr=n, state=state):
@@ -678,7 +785,7 @@ class LostWorkOwners(unittest.TestCase):
 
 class LostWorkLedger(LostWorkFixture):
     """reviewed_ledger: one row per lost-work pull request and per pushed branch in state f, each with its verdict from the verdicts file. The
-    ledger reads the live file through the batch review's reader, so the states it names are the states the batch review names."""
+    ledger reads the live file through the batch review's reader, so the states it names are the states the review names."""
 
     def ledger(self, h, verdicts, subsumed=None):
         """-> (rows, count_line, ok) of merge.reviewed_ledger over this checkout's live file and the verdicts file at `verdicts`, and the subsumed
@@ -701,18 +808,18 @@ class LostWorkLedger(LostWorkFixture):
         return (n, verdict, "code", "c1", (head or self.heads[n])[:12], "reason")
 
     def test_a_lost_pr_row_has_the_fields_the_ledger_names(self):
-        self.pr(7, record="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
         self.publish()
         rows, _count, _ok = self.ledger(self.host(), self.verdict_file(self.verdict(7)))
         row = row_of(rows, 7)
-        self.assertIsNotNone(row, "no ledger row for #7, a done record 361 minutes old: %r" % rows)
+        self.assertIsNotNone(row, "no ledger row for #7, a done review log 361 minutes old: %r" % rows)
         self.assertEqual(set(row), LEDGER_FIELDS, "the ledger row's keys are not the fields the ledger names: %r" % sorted(row))
         self.assertEqual(row["state"], "a", "the ledger row for #7 names state %r, not a: %r" % (row["state"], row))
         self.assertIs(row["sorted"], True, "#7 has a verdict at its live head and reads sorted %r: %r" % (row["sorted"], row))
 
     def test_the_ledger_row_names_its_review_log_state_under_review_log(self):
-        self.pr(7, record="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
         self.publish()
         rows, _count, _ok = self.ledger(self.host(), self.verdict_file(self.verdict(7)))
@@ -721,50 +828,50 @@ class LostWorkLedger(LostWorkFixture):
         self.assertEqual(row.get("review_log"), "done", "the ledger row for #7 has no review_log state done, its newest review log: %r" % row)
 
     def test_a_pr_with_no_verdict_is_unsorted(self):
-        self.pr(7, record="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
         self.publish()
         rows, count, _ok = self.ledger(self.host(), self.verdict_file())
         row = row_of(rows, 7)
-        self.assertIsNotNone(row, "no ledger row for #7, a done record 361 minutes old: %r" % rows)
+        self.assertIsNotNone(row, "no ledger row for #7, a done review log 361 minutes old: %r" % rows)
         self.assertIs(row["sorted"], False, "#7 has no verdict and reads sorted %r: %r" % (row["sorted"], row))
         self.assertEqual(count, "unsorted: 1", "the count line for one pull request with no verdict: %r" % count)
 
     def test_a_pr_with_a_verdict_at_its_live_head_is_sorted(self):
-        self.pr(7, record="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
         self.publish()
         rows, count, _ok = self.ledger(self.host(), self.verdict_file(self.verdict(7, "rebuild")))
         row = row_of(rows, 7)
-        self.assertIsNotNone(row, "no ledger row for #7, a done record 361 minutes old: %r" % rows)
+        self.assertIsNotNone(row, "no ledger row for #7, a done review log 361 minutes old: %r" % rows)
         self.assertIs(row["sorted"], True, "#7 has a verdict at its live head and reads sorted %r: %r" % (row["sorted"], row))
         self.assertEqual(row["verdict"], "rebuild", "the verdict of #7 is %r, not the one the file gives: %r" % (row["verdict"], row))
         self.assertEqual(count, "unsorted: 0", "the count line when every row has a verdict: %r" % count)
 
     def test_a_verdict_at_an_old_head_is_stale_and_unsorted(self):
-        self.pr(7, record="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
         self.publish()
         rows, count, _ok = self.ledger(self.host(), self.verdict_file(self.verdict(7, head="0" * 40)))
         row = row_of(rows, 7)
-        self.assertIsNotNone(row, "no ledger row for #7, a done record 361 minutes old: %r" % rows)
+        self.assertIsNotNone(row, "no ledger row for #7, a done review log 361 minutes old: %r" % rows)
         self.assertIs(row["sorted"], False, "#7's verdict names another head, so it is stale, yet #7 reads sorted: %r" % row)
         self.assertEqual(count, "unsorted: 1", "the count line for one stale verdict: %r" % count)
 
     def test_the_unsorted_count_is_one_number_over_all_rows(self):
-        self.pr(7, record="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
-        self.pr(8, record="open", at=30, session="session_b")
+        self.pr(8, log="open", at=421, session="session_b")
         self.lane("session_b")
-        self.pr(9, record="done", at=60, session="session_d")
+        self.pr(9, log="done", at=60, session="session_d")
         self.lane("session_d", status=ARCHIVED, bucket=roadmap.BUCKET_COMPLETED)
         self.publish()
-        rows, count, _ok = self.ledger(self.host(mail_result=NO_ROUTE), self.verdict_file(self.verdict(7)))
+        rows, count, _ok = self.ledger(self.host(), self.verdict_file(self.verdict(7)))
         self.assertEqual([row.get("pr") for row in rows], [7, 8, 9], "scope: the ledger rows are not #7 (a), #8 (b) and #9 (d): %r" % rows)
         self.assertEqual(count, "unsorted: 2", "the count line for three rows, two with no verdict: %r" % count)
 
     def test_a_missing_verdicts_file_leaves_every_row_unsorted_and_reads_unknown(self):
-        self.pr(7, record="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
         self.publish()
         rows, count, ok = self.ledger(self.host(), pathlib.Path(self.tmp.name) / "no-such-verdicts.tsv")
@@ -774,7 +881,7 @@ class LostWorkLedger(LostWorkFixture):
         self.assertIs(ok, False, "a missing verdicts file leaves ok True: %r" % ok)
 
     def test_an_unreadable_verdicts_file_reads_unknown_never_clear(self):
-        self.pr(7, record="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
         self.publish()
         directory = pathlib.Path(self.tmp.name) / "verdicts-dir"
@@ -786,18 +893,18 @@ class LostWorkLedger(LostWorkFixture):
         self.assertIs(ok, False, "an unreadable verdicts file leaves ok True: %r" % ok)
 
     def test_a_verdict_word_outside_keep_rebuild_close_is_unsorted(self):
-        self.pr(7, record="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
         self.publish()
         rows, count, _ok = self.ledger(self.host(), self.verdict_file(self.verdict(7, "maybe")))
         row = row_of(rows, 7)
-        self.assertIsNotNone(row, "no ledger row for #7, a done record 361 minutes old: %r" % rows)
+        self.assertIsNotNone(row, "no ledger row for #7, a done review log 361 minutes old: %r" % rows)
         self.assertIs(row["sorted"], False, "#7's verdict word is maybe, not keep, rebuild or close, yet #7 reads sorted: %r" % row)
         self.assertEqual(count, "unsorted: 1", "the count line for one unknown verdict word: %r" % count)
 
     def test_a_healthy_pr_gets_no_ledger_row(self):
-        self.pr(7, record="done", at=361)
-        self.pr(12, record="done", at=60)  # healthy: a done record 60 minutes old, its lane live
+        self.pr(7, log="done", at=361)
+        self.pr(12, log="done", at=60)  # healthy: a done review log 60 minutes old, its lane live
         self.lane("session_a")
         self.publish()
         rows, _count, _ok = self.ledger(self.host(), self.verdict_file(self.verdict(7), self.verdict(12)))
@@ -805,8 +912,8 @@ class LostWorkLedger(LostWorkFixture):
         self.assertIsNone(row_of(rows, 12), "a ledger row for #12, a healthy pull request: %r" % rows)
 
     def test_rows_are_ordered_by_pr_and_a_rerun_writes_the_same_output(self):
-        self.pr(9, record="done", at=361)
-        self.pr(7, record="done", at=361)
+        self.pr(9, log="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
         self.publish()
         verdicts = self.verdict_file(self.verdict(7), self.verdict(9))
@@ -817,12 +924,12 @@ class LostWorkLedger(LostWorkFixture):
         self.assertEqual(first[1:], second[1:], "a rerun counts other unsorted rows: %r" % (first[1:],))
 
     def test_files_are_the_paths_the_pr_changes_against_its_merge_base(self):
-        self.pr(7, record="done", at=361, files={BRANCH_FILE: BRANCH_TEXT})
+        self.pr(7, log="done", at=361, files={BRANCH_FILE: BRANCH_TEXT})
         self.lane("session_a")
         self.publish()
         rows, _count, _ok = self.ledger(self.host(), self.verdict_file(self.verdict(7)))
         row = row_of(rows, 7)
-        self.assertIsNotNone(row, "no ledger row for #7, a done record 361 minutes old: %r" % rows)
+        self.assertIsNotNone(row, "no ledger row for #7, a done review log 361 minutes old: %r" % rows)
         self.assertEqual(row["files"], [BRANCH_FILE], "the files of #7 are not the paths its commit changes: %r" % row)
 
     def test_a_pushed_branch_gets_a_ledger_row_with_its_files(self):
@@ -835,10 +942,13 @@ class LostWorkLedger(LostWorkFixture):
         self.assertEqual(row["files"], [BRANCH_FILE], "the files of %s are not the paths it changes: %r" % (BRANCH, row))
 
     def test_the_ledger_reads_the_live_file_once_as_the_batch_review_does(self):
-        self.pr(7, record="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
         self.publish()
-        build = merge.load_roadmap_build()  # one module object, so the spy sees each read the ledger and the review make
+        loader = getattr(merge, "load_roadmap_build", None)
+        if loader is None:
+            self.fail("merge.load_roadmap_build is not defined, so the lost-work rows cannot read the live file through the roadmap build")
+        build = loader()  # one module object, so the spy sees each read the ledger and the review make
         with mock.patch.object(build, "live_work", wraps=build.live_work) as reads, mock.patch.object(merge, "load_roadmap_build", lambda: build):
             self.block(self.host())
             batch = reads.call_count
@@ -848,22 +958,22 @@ class LostWorkLedger(LostWorkFixture):
         self.assertEqual(ledger, 1, "the ledger reads the live file %d times, not once as the batch review does" % ledger)
 
     def test_the_ledger_and_the_batch_review_name_the_same_states(self):
-        self.pr(7, record="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
-        self.pr(8, record="open", at=30, session="session_b")
+        self.pr(8, log="open", at=421, session="session_b")
         self.lane("session_b")
-        self.pr(9, record=None, session="session_c")
+        self.pr(9, log=None, session="session_c")
         self.lane("session_c", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
         self.thread(9, minutes=781)
-        self.pr(10, record="done", at=60, session="session_d")
+        self.pr(10, log="done", at=60, session="session_d")
         self.lane("session_d", status=ARCHIVED, bucket=roadmap.BUCKET_COMPLETED)
-        self.pr(11, head_ref="c3", record="done", at=60, session="session_gone")
-        self.pr(12, record="done", at=60)
+        self.pr(11, head_ref="c3", log="done", at=60, session="session_gone")
+        self.pr(12, log="done", at=60)
         self.publish()
-        lines = self.block(self.host(mail_result=NO_ROUTE))
+        lines = self.block(self.host())
         batch = {n: "".join(state for state, _owner in rows_for(lines, n)) for n in range(7, 13)}
         self.assertEqual(batch, {7: "a", 8: "b", 9: "c", 10: "d", 11: "e", 12: ""}, "scope: the batch review's states are not one per pull request: %r" % lines)
-        rows, _count, _ok = self.ledger(self.host(mail_result=NO_ROUTE), self.verdict_file())
+        rows, _count, _ok = self.ledger(self.host(), self.verdict_file())
         ledger = {n: (row_of(rows, n) or {}).get("state", "") for n in range(7, 13)}
         self.assertEqual(ledger, batch, "the ledger names other states than the batch review names: %r" % rows)
 
@@ -876,8 +986,8 @@ class LostWorkLedger(LostWorkFixture):
     def test_full_size_batch_writes_only_the_pr_in_a_state(self):
         self.lane("session_a")
         for n in range(2, 27):
-            self.pr(n, record="open", at=30)
-        self.pr(40, record=None, session="session_b")
+            self.pr(n, log="done", at=60)  # healthy: a done review log 60 minutes old, its lane live
+        self.pr(40, log=None, session="session_b")
         self.lane("session_b", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
         self.thread(40, minutes=781)
         self.publish()
@@ -894,32 +1004,23 @@ class LostWorkLedger(LostWorkFixture):
             parsed = None
         self.assertIsNotNone(parsed, "merge's command line refuses `merge --reviewed --live FILE --ledger --out FILE --verdicts FILE`")
 
-    def test_a_failed_lane_send_in_the_ledger_exits_one_and_writes_no_out(self):
-        self.pr(7, record="open", at=30, session="session_b")  # its lane is told by mail, and the send fails
-        self.lane("session_b")
-        self.publish()
-        out = pathlib.Path(self.tmp.name) / "lost-prs.json"
-        argv = ["--reviewed", "--live", str(self.live), "--ledger", "--out", str(out), "--verdicts", str(self.verdict_file())]
-        stderr = io.StringIO()
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
-            rc = merge.main(argv, host=self.host(mail_result=NO_ROUTE))
-        self.assertIn("was not sent", stderr.getvalue(), "scope: the failed lane send prints no line naming it: %r" % stderr.getvalue())
-        self.assertEqual(rc, 1, "a failed lane send in --ledger exits %r, not 1: %s" % (rc, stderr.getvalue()))
-        self.assertFalse(out.exists(), "--ledger wrote %s though a lane send failed" % out)
-
     # The stopped reads of --ledger other than the verdicts file. A stopped read reads unknown: the count line is unsorted: unknown-read, the exit
     # is 1, --out is not written, and the why line goes to stderr, since stdout holds the ledger.
 
     def run_cli(self, host, subsumed=None):
         """-> (rc, stdout lines, stderr lines, the --out path) of merge.main over the ledger command line on this checkout, with --subsumed FILE
-        when `subsumed` is given. The verdicts file holds its header row only."""
+        when `subsumed` is given. The verdicts file holds its header row only. A refused command line gives its exit code, and no case crashes on it."""
         out = pathlib.Path(self.tmp.name) / "lost-prs.json"
         argv = ["--reviewed", "--live", str(self.live), "--ledger", "--out", str(out), "--verdicts", str(self.verdict_file())]
         if subsumed is not None:
             argv += ["--subsumed", str(subsumed)]
         stdout, stderr = io.StringIO(), io.StringIO()
+        rc = None
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            rc = merge.main(argv, host=host)
+            try:
+                rc = merge.main(argv, host=host)
+            except SystemExit as e:
+                rc = e.code
         return rc, stdout.getvalue().splitlines(), stderr.getvalue().splitlines(), out
 
     def fail_branch_fetch(self, host):
@@ -933,7 +1034,7 @@ class LostWorkLedger(LostWorkFixture):
         return calls
 
     def test_a_failed_branch_fetch_reads_the_ledger_count_unknown(self):
-        self.pr(7, record="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
         self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
         self.publish()
@@ -946,7 +1047,7 @@ class LostWorkLedger(LostWorkFixture):
         self.assertEqual(count, "unsorted: unknown-read", "a failed branch fetch gives the count line %r, not unknown-read" % count)
 
     def test_a_failed_branch_fetch_in_the_cli_exits_one_writes_no_out_and_says_why_on_stderr(self):
-        self.pr(7, record="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
         self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
         self.publish()
@@ -960,7 +1061,7 @@ class LostWorkLedger(LostWorkFixture):
         self.assertEqual(out[-1:], ["unsorted: unknown-read"], "the count line of a failed branch fetch is not unknown-read: %r" % out[-1:])
 
     def test_a_missing_subsumed_file_reads_the_ledger_count_unknown(self):
-        self.pr(7, record="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
         self.publish()
         missing = pathlib.Path(self.tmp.name) / "no-such-subsumed.txt"
@@ -970,7 +1071,7 @@ class LostWorkLedger(LostWorkFixture):
         self.assertEqual(count, "unsorted: unknown-read", "a missing subsumed file gives the count line %r, not unknown-read" % count)
 
     def test_a_missing_subsumed_file_in_the_cli_exits_one_writes_no_out_and_says_why_on_stderr(self):
-        self.pr(7, record="done", at=361)
+        self.pr(7, log="done", at=361)
         self.lane("session_a")
         self.publish()
         missing = pathlib.Path(self.tmp.name) / "no-such-subsumed.txt"
