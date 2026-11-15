@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  # The one daily run (owner page item 880, 11:53 CST Nov 15): a push runs the Linux fast jobs only, and this run adds every job a
+  # push skips (the Windows jobs, the mutation jobs, the macOS jobs). 08:47 UTC, off the hour, so it avoids the top-of-hour load.
+  schedule:
+    - cron: "47 8 * * *"
   workflow_dispatch:
     inputs:
       full_ste_audit:
@@ -1237,6 +1241,7 @@ jobs:
   pointer-windows:
     runs-on: windows-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # Cap 10 min, about 2.4x the slowest of 30 runs, 4.2 min, for install-set.test.ps1 on a slow runner
     # (decision ci-job-caps).
     timeout-minutes: 10
@@ -1658,6 +1663,7 @@ jobs:
   checks-windows:
     runs-on: windows-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # Cut F moved the guard suite out. Run time since the install.sh leg left is unmeasured; 10 min leaves room.
     timeout-minutes: 10
     steps:
@@ -1767,6 +1773,7 @@ jobs:
   checks-mutate-guard:
     runs-on: ubuntu-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # The step grew from 193 s to 400 s (batch 4), then ran 580 s or more before the 10 min cap cut it (run 41786084869).
     # Faster slow kills cut the local run 710 s to 651 s (4 jobs). Batch 7's lanes add mutants. On main, the coordinator
     # measured lane PR 1163 alone at 946 s locally (+236 s) and lane PR 1157 at 768 s (+58 s). If those add up and the
@@ -1805,6 +1812,7 @@ jobs:
   checks-mutate-guard-b:
     runs-on: ubuntu-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # Shard 2/3 of the guard mutation test; see checks-mutate-guard. Provisional 60 min cap until 5 green runs (ci-job-caps); unmeasured until the first PR run.
     timeout-minutes: 60
     steps:
@@ -1828,6 +1836,7 @@ jobs:
   checks-mutate-guard-c:
     runs-on: ubuntu-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # Shard 3/3 of the guard mutation test; see checks-mutate-guard. Provisional 60 min cap until 5 green runs (ci-job-caps); unmeasured until the first PR run.
     timeout-minutes: 60
     steps:
@@ -1864,6 +1873,7 @@ jobs:
   mutation-report:
     runs-on: ubuntu-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -1898,6 +1908,7 @@ jobs:
   checks-windows-guard:
     runs-on: windows-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # Full guard suite in 3 shards, on a ready pull_request too since R62 (the figures below are push runs). A 2-shard split ran 19:31 and past 20:00 (cancelled) under the old
     # 20 min cap (runs 42406480975, 42408558620), so each of 3 shards takes a third of the cases. Under that cap, 11 main push
     # runs from 42700538152 to 43038567637 (Nov 9 to Nov 11) cut a shard at 20.05 to 20.08 min with no red test; green shards took
@@ -1924,7 +1935,7 @@ jobs:
   checks-windows-guard-2:
     runs-on: windows-latest
     needs: scope
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     # A shard of checks-windows-guard: its figures and cap are there.
     timeout-minutes: 75
     steps:
@@ -1948,7 +1959,7 @@ jobs:
   checks-windows-guard-3:
     runs-on: windows-latest
     needs: scope
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     # A shard of checks-windows-guard: its figures and cap are there.
     timeout-minutes: 75
     steps:
@@ -1974,6 +1985,7 @@ jobs:
   checks-windows-merge:
     runs-on: windows-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # Push figures; a ready PR run carries the full suite since R62, unmeasured. 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The newest 29 completed push runs on main, latest attempt of each (run 42522167511 to run 43206612905):
     # 29 green, median 17.6, slowest 21.2 min (run 43155288101). All 5 merge shards share cap 75. The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 75
@@ -2007,7 +2019,7 @@ jobs:
   checks-windows-merge-2:
     runs-on: windows-latest
     needs: scope
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     # A shard of checks-windows-merge, with the same cap.
     # 29 green, median 16.8, slowest 20.7 min (run 43197518392), same window as checks-windows-merge.
     # Cap 75 is shared by the 5 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
@@ -2033,7 +2045,7 @@ jobs:
   checks-windows-merge-3:
     runs-on: windows-latest
     needs: scope
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     # A shard of checks-windows-merge, with the same cap.
     # 29 green, median 17.1, slowest 21.2 min (run 43197518392), same window as checks-windows-merge.
     # Cap 75 is shared by the 5 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
@@ -2059,7 +2071,7 @@ jobs:
   checks-windows-merge-4:
     runs-on: windows-latest
     needs: scope
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     # A shard of checks-windows-merge, with the same cap.
     # 29 green, median 16.5, slowest 21.1 min (run 43136344305), same window as checks-windows-merge.
     # Cap 75 is shared by the 5 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
@@ -2085,7 +2097,7 @@ jobs:
   checks-windows-merge-5:
     runs-on: windows-latest
     needs: scope
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     # A shard of checks-windows-merge, with the same cap.
     # 29 green, median 16.0, slowest 18.2 min (run 43119184355), same window as checks-windows-merge.
     # Cap 75 is shared by the 5 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
@@ -2113,6 +2125,7 @@ jobs:
   checks-windows-sweep:
     runs-on: windows-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
     timeout-minutes: 75
     steps:
@@ -2141,6 +2154,7 @@ jobs:
   checks-windows-rest:
     runs-on: windows-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # Cap 60 min, provisional and unmeasured: half the suites of the old job (slowest 31.7 min), so about half the time (decision ci-job-caps).
     timeout-minutes: 60   # provisional
     steps:
@@ -2276,6 +2290,7 @@ jobs:
   checks-windows-rest-2:
     runs-on: windows-latest
     needs: scope
+    if: ${{ github.event_name != 'push' }}
     # Cap 60 min, provisional and unmeasured: see checks-windows-rest (decision ci-job-caps).
     timeout-minutes: 60   # provisional
     steps:
