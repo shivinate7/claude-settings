@@ -2945,6 +2945,30 @@ class TouchedTests(LaneFixture):
         self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
         self.assert_pushed_lint(runs[0]["head"], old, "main", text=text)
 
+    def test_a_touched_test_unknown_and_lifted_behind_main_pushes_nothing(self):
+        old = self.push_lane({"lint/test_budget.py": logged_test(self.touched_log, "lint/test_budget.py", BUDGET)})
+        tip = self.head("main")
+        self.assertFalse(self.contains(old, tip), "precondition: the head holds origin/main's tip, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        real_sh = merge.sh
+
+        def time_out_the_touched_test(args, *rest, **kwargs):  # the touched test never ends: its run times out, which reads as unknown
+            if any(isinstance(a, str) and a.endswith("lint/test_budget.py") for a in args):
+                raise subprocess.TimeoutExpired(args, 1)
+            return real_sh(args, *rest, **kwargs)
+
+        with unittest.mock.patch.object(merge, "sh", time_out_the_touched_test):
+            rc, text = self.flagged("--lane-lint", "7", "--touched-tests")
+            self.assertEqual(rc, 1, "a touched test that times out did not refuse without a reason (rc %r): %s" % (rc, text))
+            self.assertRegex(text, r"(?i)unknown", "a touched test that times out does not read as unknown: " + text)
+            self.assertEqual(self.head("feat"), old, "an unknown touched test without a reason moved origin's branch: " + text)
+            rc, text = self.flagged("--lane-lint", "7", "--touched-tests", "--lint-unknown-ok", "the test runner is being fixed")
+        self.assertEqual(rc, 0, "the unknown touched test was not lifted by a reason (rc %r): %s" % (rc, text))
+        self.assertEqual(pass_lines(text), [], "a lifted unknown touched test printed a PASS line: " + text)
+        self.assertEqual(self.head("feat"), old, "a lifted unknown touched test moved origin's branch: " + text)
+        self.assertEqual(self.host.posted, [], "a lifted unknown touched test posted a lane-lint comment: " + text)
+        self.assert_pushed_lint(self.lint_calls()[0]["head"], old, "main", tip=tip, text=text)
+
 
 def real_ci_steps(names=BATCH_CI_STEPS):
     """(name, CI step text) of `names` in checks.yml's checks job, in file order, read by the shared parser."""
@@ -5099,6 +5123,8 @@ class MergedLintTree(LaneFixture):
     main did not make, a failed base fetch) are green on the old code as well."""
 
     SHARED = "shared/fixture.txt"  # a file the cases edit on main and on the lane head
+    ORIGIN_REPO = "origin-owner/repo"  # the repository the fixture's origin is, as a pull request's base names it
+    FORK_REPO = "fork-owner/repo"  # the repository a pull request's head lives in when it comes from a fork
     commit_on = CrossMeasure.commit_on  # the one home of a pushed commit on a branch: CrossMeasure's
     own_writes = CrossMeasure.own_writes  # the head's pushed commit: CrossMeasure's
     clash = CrossMeasure.clash  # the merge-tree precondition, read in the second clone: CrossMeasure's
@@ -5530,6 +5556,90 @@ class MergedLintTree(LaneFixture):
         rc, text, _ = self.lint_once("--lane-lint", "7")
         self.assertEqual(rc, 0, text)
         self.assertEqual(asked, [old], "the draft run was read for %s, not the pre-merge head %s: %s" % ([s[:9] for s in asked], old[:9], text))
+
+    def test_a_behind_main_lane_whose_mutation_test_fails_pushes_nothing(self):
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        _, tip = self.behind_main()
+        old = self.push_lane({script: mutate_script(self.mutate_log, out=real_tally(693, survived=1)), WORKFLOW_REL: workflow_of(body)})
+        self.assertFalse(self.contains(old, tip), "precondition: the lane holds origin/main's new tip, so the case probes nothing")
+        rc, text, run = self.lint_once("--lane-lint", "7")
+        self.assertEqual(rc, 1, text)
+        self.assertRegex(text, r"(?i)mutation", "the refusal does not name the mutation test: " + text)
+        self.assertEqual(pass_lines(text), [], text)
+        self.assertEqual(len(self.mutation_test_calls()), 1, "scope: the mutation test did not run once: " + text)
+        self.assert_push_free(old, text)
+        self.assert_pushed_lint(run["head"], old, "main", tip=tip, text=text)
+
+    def test_a_behind_main_lane_whose_mutation_test_passes_pushes_its_merge_commit(self):  # the control
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        _, tip = self.behind_main()
+        old = self.push_lane({script: mutate_script(self.mutate_log, out=real_tally(694)), WORKFLOW_REL: workflow_of(body)})
+        rc, text, run = self.lint_once("--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len(self.mutation_test_calls()), 1, "scope: the mutation test did not run once: " + text)
+        pushed = self.head("feat")
+        self.assertNotEqual(pushed, old, "a passing lint pushed nothing: " + text)
+        self.assertEqual(self.assert_pushed_lint(run["head"], old, "main", tip=tip, text=text), pushed,
+                         "the lint's merge commit is not the pushed commit: " + text)
+
+    def script_repos(self, head_repo, base_repo=ORIGIN_REPO):
+        """The head and base repositories a pull request reads as, for the fork check. The fake's pr() carries neither field, so each read
+        of it adds `head_repo` and `base_repo` (full names: owner/name)."""
+        real_pr = self.host.pr
+
+        def pr(n):
+            info = real_pr(n)
+            info["head_repo"], info["base_repo"] = head_repo, base_repo
+            return info
+
+        self.host.pr = pr
+
+    def assert_lints_as_today(self, old, rc, text):
+        """A pull request that gets no merge lints as it does without one: rc 0, a PASS line naming its head, origin's branch left at that head,
+        and any comment on it naming that head."""
+        self.assertEqual(self.head("feat"), old, "the run moved origin's branch off the head: " + text)
+        self.assertEqual(rc, 0, text)
+        lines = pass_lines(text)
+        self.assertEqual(len(lines), 1, text)
+        self.assertIn(old[:9], lines[0], "the PASS line does not name the head: " + text)
+        self.assert_comments_name(old, text)
+
+    def test_an_unreadable_ancestry_behind_main_pushes_nothing(self):
+        old, _ = self.behind_main()
+        self.use_ci_job(PASSING, 0)
+        with unittest.mock.patch.object(merge, "ancestor", return_value=None) as seam:
+            rc, text = self.run_lane("--lane-lint", "7")
+        self.assertTrue(seam.called, "scope: the ancestry read did not run, so the case probes nothing: " + text)
+        self.assertEqual(self.head("feat"), old, "an unreadable ancestry moved origin's branch: " + text)
+        self.assert_comments_name(old, text)
+
+    def test_a_closed_pr_behind_main_gets_no_merge_and_no_push(self):
+        old, _ = self.behind_main()
+        self.host.pr_state = "CLOSED"
+        self.use_ci_job(PASSING, 0)
+        rc, text, _ = self.lint_once("--lane-lint", "7")
+        self.assert_lints_as_today(old, rc, text)
+
+    def test_a_fork_pr_behind_main_gets_no_merge_and_no_push(self):
+        old, _ = self.behind_main()
+        self.script_repos(self.FORK_REPO)
+        self.use_ci_job(PASSING, 0)
+        rc, text, _ = self.lint_once("--lane-lint", "7")
+        self.assert_lints_as_today(old, rc, text)
+
+    def test_a_same_repo_open_pr_behind_main_still_pushes_its_merge_commit(self):  # the control: the fork gate reads the repositories, not the lane
+        _, tip = self.behind_main()
+        self.script_repos(self.ORIGIN_REPO)
+        old = self.head("feat")
+        self.use_ci_job(PASSING, 0)
+        rc, text, run = self.lint_once("--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        pushed = self.head("feat")
+        self.assertNotEqual(pushed, old, "a same-repo open PR pushed nothing: " + text)
+        self.assertEqual(self.assert_pushed_lint(run["head"], old, "main", tip=tip, text=text), pushed,
+                         "the lint's merge commit is not the pushed commit: " + text)
 
 
 class ReplacedAtHandIn(LaneFixture):
