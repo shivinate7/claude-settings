@@ -38,6 +38,7 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from workflow_steps import CHECKS_SUITE_JOBS, gating_text, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
+import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
 CHECKS = os.environ.get("CHECKS_YML") or os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 MIN_JOBS = 3
 
@@ -429,11 +430,12 @@ FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "check
          "code", "guard", "sweep", "shoot"]
 
 
-def eval_value(expr, event, flag_value, draft=False, nightly_skip="", push_skip="", results=None, needs=()):
+def eval_value(expr, event, flag_value, draft=False, nightly_skip="", push_skip="", results=None, needs=(), steps=None):
     """The value of an `${{ }}` expression, as eval_if reads it. With `results` None, every status function reads True, as
     eval_if always has. With `results` ({job: result}), needs.<job>.result reads that job's result, and the status functions
     read the jobs in `needs`: success() is all of them succeeded, failure() any failed, cancelled() False (the run is not
-    cancelled), always() True. Any other reference raises, so a case never reads a value it did not set."""
+    cancelled), always() True. With `steps` ({step id: {output: value}}), steps.<id>.outputs.<name> reads that output.
+    Any other reference raises, so a case never reads a value it did not set."""
     e = expr.strip()
     if e.startswith("${{") and e.endswith("}}"):
         e = e[3:-2]
@@ -452,6 +454,8 @@ def eval_value(expr, event, flag_value, draft=False, nightly_skip="", push_skip=
     e = re.sub(rf"needs\.{re.escape(PUSH_SKIP_JOB)}\.outputs\.skip\b", repr(push_skip), e)
     if results is not None:
         e = re.sub(r"needs\.([\w-]+)\.result", lambda m: repr(results[m.group(1)]), e)
+    if steps is not None:
+        e = re.sub(r"steps\.([\w-]+)\.outputs\.([\w-]+)", lambda m: repr(steps[m.group(1)][m.group(2)]), e)
     e = re.sub(r"!(?!=)", " not ", e)
     return eval(e, {"__builtins__": {}})
 
@@ -3360,12 +3364,56 @@ class CiCoverageCollector(unittest.TestCase):
 DEBT_PROOF_VAR = "DEBT_RETIRE_SHARD_PROVEN"
 GUARD_PATH = "hooks/test_guard.py"
 RETIRE_RUN = re.compile(r"(?:^|\s)lint/check_debt_retire\.py(?:\s|$)", re.M)
+TREE_STEP = "debt_proof_tree"  # the step id whose `equal` output says the merge commit and the PR head hold one tree
+
+
+def checks_steps(text):
+    """The step blocks of checks, in order."""
+    return step_blocks(job_block(text, CHECKS_JOB) or "")
+
+
+def tree_repo(folder, merge_of):
+    """A scratch repo in `folder`. The PR head H adds b.txt to the base. HEAD is a merge commit whose parent is H and whose tree
+    is H's when merge_of is "head", else the base's. Returns H's sha."""
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+
+    def git(*args):
+        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args],
+                              cwd=folder, capture_output=True, text=True, env=env, check=True).stdout.strip()
+
+    git("init", "-q", "-b", "main")
+    with open(os.path.join(folder, "a.txt"), "w", encoding="utf-8") as f:
+        f.write("base\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "base")
+    base = git("rev-parse", "HEAD")
+    with open(os.path.join(folder, "b.txt"), "w", encoding="utf-8") as f:
+        f.write("head\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "head")
+    head = git("rev-parse", "HEAD")
+    tree = git("rev-parse", "HEAD^{tree}" if merge_of == "head" else base + "^{tree}")
+    git("checkout", "-q", "--detach", git("commit-tree", tree, "-p", head, "-m", "merge"))
+    return head
+
+
+def run_step_script(script, folder, head_sha):
+    """The step's script run as its runner runs it (bash -e, in `folder`) with the env the step gives it. Returns (the outputs
+    the script wrote, the process)."""
+    out = os.path.join(folder, "github-output.txt")
+    env = {**os.environ, "HEAD_SHA": head_sha, "GITHUB_OUTPUT": out, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+    got = subprocess.run(["bash", "-e", "-c", script], cwd=folder, capture_output=True, text=True, env=env)
+    if not os.path.exists(out):
+        return {}, got
+    with open(out, encoding="utf-8") as f:
+        return dict(line.split("=", 1) for line in f.read().splitlines() if "=" in line), got
+
 
 
 class ChecksShardGate(unittest.TestCase):
     """checks waits for the two guard shards, and the Debt retire check takes their proof from them (owner item 852, the debt step's repeat run of the guard suite). A shard
     job's result alone is no proof: a job whose steps all skip reads success. So the var is set only when both shards succeeded
-    and the scope flag says the shards ran, on a pull request."""
+    and the scope flag says the shards ran, and the merge commit they checked out holds the PR head's tree (TREE_STEP)."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
@@ -3383,18 +3431,22 @@ class ChecksShardGate(unittest.TestCase):
     def test_g2_checks_runs_iff_scope_succeeded_whatever_the_shards_did(self):
         self.assertEqual(checks_if_problems(job_needs_of(self.text, CHECKS_JOB), job_if_of(self.text, CHECKS_JOB)), [])
 
-    def test_g3_the_debt_step_sets_the_proof_only_when_both_shards_and_the_scope_flag_hold(self):
+    def test_g3_the_debt_step_sets_the_proof_only_when_both_shards_the_scope_flag_and_the_trees_hold(self):
         env = step_env(self.debt_step())
         self.assertIn(DEBT_PROOF_VAR, env, "checks.yml: the Debt retire check sets no %s, so the guard shards' proof never reaches it" % DEBT_PROOF_VAR)
         needs = ("scope", *LINUX_GUARD_SHARD)
         wrong = []
-        for s1, s2, flag, event in itertools.product(GATE_RESULTS, GATE_RESULTS, ("true", "false", ""), GATE_EVENTS):
+        for s1, s2, flag, equal in itertools.product(GATE_RESULTS, GATE_RESULTS, ("true", "false", ""), ("true", "false")):
             results = {"scope": "success", "checks-guard": s1, "checks-guard-2": s2}
-            got = eval_value(env[DEBT_PROOF_VAR], event, flag, results=results, needs=needs)
+            try:
+                got = eval_value(env[DEBT_PROOF_VAR], "pull_request", flag, results=results, needs=needs,
+                                 steps={TREE_STEP: {"equal": equal}})
+            except KeyError as e:
+                self.fail("checks.yml: %s reads %s, which no step in checks sets" % (DEBT_PROOF_VAR, e))
             got = "" if got is None else str(got).lower() if isinstance(got, bool) else got
-            want = GUARD_PATH if (s1, s2, flag, event) == ("success", "success", "true", "pull_request") else ""
+            want = GUARD_PATH if (s1, s2, flag, equal) == ("success", "success", "true", "true") else ""
             if got != want:
-                wrong.append("shard 1 %s, shard 2 %s, scope flag %r, %s: %s=%r" % (s1, s2, flag, event, DEBT_PROOF_VAR, got))
+                wrong.append("shard 1 %s, shard 2 %s, scope flag %r, trees equal %s: %s=%r" % (s1, s2, flag, equal, DEBT_PROOF_VAR, got))
         self.assertFalse(wrong, "%s is set wrongly in %d cases, first: %s" % (DEBT_PROOF_VAR, len(wrong), wrong[:1]))
 
     def test_g4_the_run_condition_check_refuses_each_wrong_if(self):
@@ -3410,6 +3462,38 @@ class ChecksShardGate(unittest.TestCase):
                 self.assertTrue(checks_if_problems(needs, expr), label)
         with self.subTest(defect="the form the design uses is accepted"):
             self.assertEqual(checks_if_problems(needs, "${{ !cancelled() && needs.scope.result == 'success' }}"), [])
+
+    def test_g5_a_tree_step_in_checks_runs_before_the_debt_step_and_reads_the_pr_head(self):
+        steps = checks_steps(self.text)
+        ids = [step_key(st, "id") for st in steps]
+        self.assertIn(TREE_STEP, ids, "checks.yml: no step in checks has id %s (ids present: %s), so nothing compares the merge commit's tree with the PR head's" % (TREE_STEP, [i for i in ids if i]))
+        tree = steps[ids.index(TREE_STEP)]
+        debt = [i for i, st in enumerate(steps) if RETIRE_RUN.search(run_body(st) or "")]
+        self.assertTrue(debt, "scope: checks has no Debt retire step")
+        self.assertLess(ids.index(TREE_STEP), debt[0], "the tree step runs after the Debt retire step, so the debt step's var reads no result")
+        self.assertIn("HEAD_SHA", step_env(tree), "the tree step has no HEAD_SHA, so it cannot read the PR head's tree")
+
+    def test_g6_the_tree_step_reads_equal_only_when_the_merge_commit_and_the_pr_head_hold_one_tree(self):
+        steps = checks_steps(self.text)
+        ids = [step_key(st, "id") for st in steps]
+        self.assertIn(TREE_STEP, ids, "checks.yml: no step in checks has id %s (ids present: %s)" % (TREE_STEP, [i for i in ids if i]))
+        script = run_body(steps[ids.index(TREE_STEP)])
+        self.assertTrue(script, "checks.yml: the tree step has no run script")
+        for label, merge_of, head_is_readable, want_equal in (
+            ("the merge commit and the PR head hold one tree", "head", True, True),
+            ("the merge commit's tree differs from the PR head's", "base", True, False),
+            ("the PR head's sha cannot be read", "head", False, False),
+        ):
+            with self.subTest(case=label):
+                folder = tempfile.mkdtemp(prefix="tree-", dir=_test_temp.run_folder())
+                self.addCleanup(shutil.rmtree, folder, True)
+                head = tree_repo(folder, merge_of)
+                outs, got = run_step_script(script, folder, head if head_is_readable else "0" * 40)
+                equal = outs.get("equal", "")
+                if want_equal:
+                    self.assertEqual(equal, "true", "the tree step did not report the equal trees: %s" % got.stderr[-300:])
+                else:
+                    self.assertNotEqual(equal, "true", "the tree step reported equal trees for: %s" % label)
 
 
 if __name__ == "__main__":
