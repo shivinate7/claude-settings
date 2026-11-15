@@ -198,11 +198,11 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .recline p { margin: 0; }
 .recline .rechead { font-size: 15px; }
 .recline .rechead > b { font-weight: 700; }
-.recline .rechead.one { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.recline .rechead.single { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .recline .rechead .rn { font-weight: 600; }
 .recline .key { display: inline-block; max-width: none; vertical-align: 1px; border-color: var(--gold-ink); color: var(--gold-ink); background: transparent; }
 /* Inside a sentence the chip keeps the line's height, so the first line does not sit lower than the rest. */
-.recline .rechead.one .key { height: 20px; min-width: 22px; line-height: 17px; padding-inline: 4px; vertical-align: 2px; }
+.recline .rechead.single .key { height: 20px; min-width: 22px; line-height: 17px; padding-inline: 4px; vertical-align: 2px; }
 .recline .rl { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; font-weight: 600; }
 .recline ol { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; }
 .recline li { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 8px; align-items: baseline; }
@@ -1536,7 +1536,7 @@ function recLine(it) {
   const full = (k) => String(((it.options || []).find((o) => o.key === k) || {}).label || letterOf(it, k)), ranked = it.ranked === true;
   const chip = (k) => h("span", { class: "key" }, letterOf(it, k));
   let head;
-  if (!isMulti(it)) head = h("p", { class: "rechead one", title: full(ks[0]) }, h("b", {}, "Recommended:"), " ", chip(ks[0]), " ", h("span", { class: "rn" }, full(ks[0])));
+  if (!isMulti(it)) head = h("p", { class: "rechead single", title: full(ks[0]) }, h("b", {}, "Recommended:"), " ", chip(ks[0]), " ", h("span", { class: "rn" }, full(ks[0])));
   else head = [h("p", { class: "rechead" }, h("b", {}, ranked ? "Recommended, in order:" : "Recommended:")),
     h("ol", { class: ranked ? "inorder" : "unordered", "aria-label": ranked ? "Recommended order" : "Recommended options" },
       ks.map((k, i) => h("li", {}, ranked ? h("span", { class: "ord" }, ordinal(i + 1)) : null, chip(k), h("span", { class: "rl", title: full(k) }, full(k)))))];
