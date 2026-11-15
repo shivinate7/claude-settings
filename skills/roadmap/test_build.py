@@ -7,6 +7,7 @@ import contextlib
 import datetime
 import email.message
 import hashlib
+import http.client
 import inspect
 import io
 import json
@@ -3238,7 +3239,8 @@ class ReadyAndDraftRows(UpkeepFixture):
                     self.assertEqual(count, 1, "a %s that is not a JSON bool reads the row as one entry" % key)
                     self.assertTrue(detail.startswith("unknown (sessions not read: "), detail)
                     self.assertIn("1 pull rows skipped", detail)
-                    self.assertRegex(detail, r"REST read: 2 stale-looking drafts?: ")
+                    self.assertRegex(detail, r"REST read: 2 stale-looking drafts?\b")
+                    self.assertNotIn("#1001", detail, "an unusable live file named a draft's number")
 
     def test_held_draft_with_no_updated_at_still_reads_the_row_unknown(self):
         # held does not exempt a REST row from the shape check: the row reads one unknown entry, and the control
@@ -3259,7 +3261,8 @@ class ReadyAndDraftRows(UpkeepFixture):
         count, detail = self.row(out, self.DRAFT)
         self.assertEqual(count, 1, "the row was %r" % (detail,))
         self.assertTrue(detail.startswith("unknown (sessions not read: ") and "--live" in detail, detail)
-        self.assertRegex(detail, r"REST read: 1 stale-looking drafts?: #1001")
+        self.assertRegex(detail, r"REST read: 1 stale-looking drafts?\b")
+        self.assertNotIn("#1001", detail, "an unusable live file named a draft's number")
 
 
 class StaleDraftRestRead(UpkeepFixture):
@@ -3396,12 +3399,16 @@ class StaleDraftRestRead(UpkeepFixture):
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (draft-stale)"]))
 
     def test_the_row_reads_rest_not_the_live_pulls_list(self):
-        # The live pulls list holds a stale draft, #1001, that REST does not return. The row lists REST's #1002 only.
+        # The live pulls list holds a stale draft, #1001, that REST does not return: the row does not list it. REST's
+        # #1002 has no live pulls row, so its held and reviewLog marks are unread and the row reads it unknown.
         live = dict(self.mark(1001), draft=True, createdAt=iso_ago(780), branch="live-only")
         self.serve_pulls([self.rest_draft(1002, "rest-draft", 780)])
         self.publish(sessions=[], pulls=[live])
-        count, detail = self.row(self.out_with_live(), self.DRAFT)
-        self.assertEqual((count, self.entries(detail)), (1, ["#1002 (rest-draft)"]))
+        count, detail = self.row_or_named_crash()
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown ("), detail)
+        self.assertIn("#1002", detail)
+        self.assertNotIn("live-only", detail, "the live pulls list fed the row")
 
     def test_a_fresh_live_file_and_a_clean_rest_read_reads_no_entry(self):
         # The control: a whole read with no stale draft reads the row clear, with no line at all.
@@ -3489,7 +3496,8 @@ class StaleDraftRestRead(UpkeepFixture):
         self.assertEqual(count, 1, "the row was %r" % (detail,))
         self.assertTrue(detail.startswith("unknown (sessions not read: "), detail)
         self.assertIn("the live file was read", detail)
-        self.assertRegex(detail, r"REST read: 1 stale-looking drafts?: #1001")
+        self.assertRegex(detail, r"REST read: 1 stale-looking drafts?\b")
+        self.assertNotIn("#1001", detail, "an unusable live file named a draft's number")
 
     def test_a_stale_live_file_with_no_stale_drafts_still_reads_one_unknown_entry(self):
         # Never an empty row: a clean REST read under a stale live file is unknown, not clear.
@@ -3506,7 +3514,8 @@ class StaleDraftRestRead(UpkeepFixture):
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual(count, 1, "the row was %r" % (detail,))
         self.assertTrue(detail.startswith("unknown (sessions not read: ") and "no sessions list" in detail, detail)
-        self.assertRegex(detail, r"REST read: 1 stale-looking drafts?: #1001")
+        self.assertRegex(detail, r"REST read: 1 stale-looking drafts?\b")
+        self.assertNotIn("#1001", detail, "an unusable live file named a draft's number")
 
     def test_a_mark_is_matched_to_its_draft_by_number_not_by_branch(self):
         # The live row for #1005 names the same branch as stale draft #1001, and it is held. #1001 is still listed.
@@ -3514,6 +3523,57 @@ class StaleDraftRestRead(UpkeepFixture):
         self.publish(sessions=[], pulls=[dict(self.mark(1005), branch="shared-branch", held=True)])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1001 (shared-branch)"]))
+
+    def row_or_named_crash(self, live=True):
+        """The DRAFT row's (count, detail) from one build. A build that raises fails the case with a named cause."""
+        try:
+            if live:
+                out = self.out_with_live()
+            else:
+                _, out = self.build_from_main()
+        except Exception as err:
+            self.fail("the build raised %s instead of reading the row as one unknown entry" % type(err).__name__)
+        return self.row(out, self.DRAFT)
+
+    def test_a_transport_error_mid_read_reads_one_unknown_entry_and_does_not_crash(self):
+        # http.client raises these from inside the read, past HTTPError and OSError. Each ends as one unknown entry,
+        # never a raised exception and never a partial list: page 1's stale #1001 is not listed.
+        failures = {"IncompleteRead": http.client.IncompleteRead(b"partial body"),
+                    "BadStatusLine": http.client.BadStatusLine("garbage"),
+                    "HTTPException": http.client.HTTPException("transport failed")}
+        for name, failure in failures.items():
+            with self.subTest(name):
+                self.serve_pulls(self.stale_first_page(), failure)
+                self.publish(sessions=[])
+                count, detail = self.row_or_named_crash()
+                self.assertEqual(count, 1, "the row was %r" % (detail,))
+                self.assertTrue(detail.startswith("unknown ("), detail)
+                self.assertNotIn("#1001", detail)
+
+    def test_a_stale_draft_with_no_live_pulls_row_reads_unknown_and_is_not_listed(self):
+        # The live file is fresh but has no pulls row for #1001, so its held and reviewLog marks are unread. The draft
+        # is not listed: the row reads one unknown entry.
+        self.serve_pulls([self.rest_draft(1001, "old-1001", 780)])
+        self.publish(sessions=[], pulls=[])
+        count, detail = self.row_or_named_crash()
+        self.assertEqual(count, 1, "the row was %r" % (detail,))
+        self.assertTrue(detail.startswith("unknown ("), detail)
+        self.assertIn("#1001", detail)
+
+    def test_an_unusable_live_file_names_a_count_of_stale_drafts_not_their_numbers(self):
+        # The sessions are unknown, so the unknown entry counts the stale-looking REST drafts and names none of them:
+        # no number and no branch. fresh-1003 is not stale and is not counted.
+        self.serve_pulls([self.rest_draft(1001, "old-1001", 780), self.rest_draft(1002, "old-1002", 780),
+                          self.rest_draft(1003, "fresh-1003", 60)])
+        for name, stale_live in (("live file read 90 minutes ago", True), ("no live file", False)):
+            with self.subTest(name):
+                if stale_live:
+                    self.publish(read_at=iso_ago(90), sessions=[])
+                count, detail = self.row_or_named_crash(live=stale_live)
+                self.assertEqual(count, 1, "the row was %r" % (detail,))
+                self.assertRegex(detail, r"REST read: 2 stale-looking drafts?\b", detail)
+                for named in ("#1001", "#1002", "old-1001", "old-1002"):
+                    self.assertNotIn(named, detail, "the unusable read named a draft: %s" % named)
 
 
 class DoneWithoutCheck(UpkeepFixture):
