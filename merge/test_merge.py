@@ -20234,6 +20234,42 @@ class DraftReady(CloudSession):
         self.assertEqual(self.host.readies, [], "a draft whose merge could not be read was marked ready:\n" + text)
         self.assertTrue(self.host.batch_pulls[101]["draft"], "a draft whose merge could not be read went ready:\n" + text)
 
+    # A draft's --confirm runs the same records step as --ready, but only --ready merges main into the head: a confirm on a draft pushes what
+    # the page needs and no merge. The ready pull request is left as it is, whatever main holds.
+
+    def test_a_confirm_on_a_draft_that_lacks_the_tip_with_a_current_page_pushes_no_merge(self):
+        old = self.lane(101, page=True, debt=True)
+        self.main_moves()
+        self.host.batch_pulls[101]["draft"] = True
+        rc, text = self.run_merge("101", "--confirm")
+        self.assertEqual(self.head("lane-101"), old, "a --confirm on a draft pushed a merge of main, which only --ready may push:\n" + text)
+        self.assertEqual(self.lane_pushes(), [], "a --confirm on a draft pushed to the lane:\n" + text)
+        self.assertEqual(rc, 0, text)
+        self.assertIn("is current. Nothing was pushed.", text)
+
+    def test_a_confirm_on_a_draft_that_lacks_the_tip_with_a_stale_page_pushes_only_the_page_commit(self):
+        old = self.lane(101, debt=True)
+        self.main_moves()
+        self.host.batch_pulls[101]["draft"] = True
+        rc, text = self.run_merge("101", "--confirm")
+        pushed = self.head("lane-101")
+        self.assertEqual(self.parents(pushed), [old], "the pushed head is not the page commit on the old head alone; a merge of main went with it:\n" + text)
+        self.assertEqual(self.log1("%s", pushed), merge.PAGE_SUBJECT, "the pushed head is not the records page commit:\n" + text)
+        self.assertEqual(self.lane_pushes(), [pushed], "the run pushed the lane other than once:\n" + text)
+        self.assertEqual(rc, 0, text)
+
+    def test_ready_on_a_pull_request_that_is_ready_already_pushes_nothing_though_main_moved(self):  # the guard in the --ready dispatch
+        old = self.lane(101, debt=True)
+        self.main_moves()
+        self.host.batch_pulls[101]["draft"] = False  # already ready: the guard must leave it alone, with no push and no mark
+        rc, text = self.ready_run()
+        self.assertEqual(self.head("lane-101"), old, "--ready on a ready pull request pushed to its head:\n" + text)
+        self.assertEqual(self.lane_pushes(), [], "--ready on a ready pull request pushed to the lane:\n" + text)
+        self.assertEqual(rc, 0, text)
+        self.assertIn("is ready already", text)
+        self.assertEqual(self.host.readies, [], "--ready on a ready pull request asked the host to mark it ready:\n" + text)
+        self.assertFalse(self.host.batch_pulls[101]["draft"], "a ready pull request went back to draft:\n" + text)
+
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
 # The run's record names no case. The two cases here are the ones the fix's patch edits the body of, so the names come from that patch.
