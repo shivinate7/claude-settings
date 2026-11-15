@@ -158,7 +158,7 @@
                           merges no pull request, takes no lock and needs no merge role. A red head or a head that conflicts with the base is not marked ready.
                           A repo with merge.readyChecks gets the pre-ready run: the checks, the debt-close lint and the open-PR clash (the head against every
                           other open PR on its base), each one line `pass NAME`, `fail NAME: why` or `unknown NAME: why`, before any push. A PR on a base
-                          other than the default branch is checked on the merge of its head with that base.
+                          other than the default branch gets its ci-job steps run on the merge of its head with that base.
   merge <pr> --fast-checks  the pre-ready run alone, on a dry merge of the PR onto its base (a temporary worktree and one commit object, no ref). Read-only means no lock,
                           no push, no ready mark, no comment, no records page; it still fetches (writes refs and FETCH_HEAD) and adds a worktree (.git/worktrees).
                           Exit 0 only when every line is a pass.
@@ -3924,7 +3924,7 @@ def draft_step(root, cfg, n, host, info, merge_main=False):
     if not default:
         say(f"merge: {base} is not the default branch ({cfg['defaultBranch']}). The records page is rebuilt only for it. Nothing was pushed.")
     if default or checks:  # one worktree, one open_worktree call, on either base
-        tmp, wt = open_worktree(root, info, base) if default else open_merge_worktree(root, info, base)  # another base: the checks read the merge, a head behind it included
+        tmp, wt = open_worktree(root, info, base) if default else open_merge_worktree(root, info, base)  # another base: the ci-job steps read the merge, a head behind it included; the debt-close lint and the clash read info["head"]
         try:
             pre = (root, host, info)
             if not default:
