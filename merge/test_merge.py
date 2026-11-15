@@ -198,6 +198,12 @@ class FakeHost:
     def head_state(self, n, sha=None):  # the real Host.head_state takes the head's sha too
         return self.state
 
+    def holds_head(self, head, other):  # no base holds a head this fake reads: a record's head is a past head only where a case says so
+        return False
+
+    def commit_read(self, sha):  # no commit has a parent: a walk from the live head ends at once, so a head this fake never had reads as no past head
+        return [], None
+
     def base_state(self, base, flows):  # main's latest run is green unless a case says so (RedMainBrake)
         return "green", ""
 
@@ -11278,15 +11284,17 @@ def live_nightly():
 class MainRunsHost(FakeHost, merge.Host):
     """FakeHost for the flow; the real Host.base_state over scripted REST. `main_runs`: main's push runs, newest first. `jobs`: run id -> jobs.
     `runs_fail` / `jobs_fail`: that read fails with this text. `jobs_fail_of`: run id -> the text its jobs read fails with.
-    `texts`: head sha -> the workflow file's text on that head (a head not in it reads as NO_IF_WORKFLOW). `text_fail`: every file read fails with this text."""
+    `texts`: head sha -> the workflow file's text on that head (a head not in it reads as NO_IF_WORKFLOW). `text_fail`: every file read fails with this text.
+    `pulls`: {number: REST row} of the pull requests the page holds (None: the own one only). `heads`: head sha -> the checks state head_state reads for it."""
     base_state = getattr(merge.Host, "base_state", None)
 
-    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None, texts=None, text_fail=None):
+    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None, texts=None, text_fail=None, pulls=None, heads=None):
         FakeHost.__init__(self, root, other)
         self.ignore, self.cwd, self.warned = {}, root, set()
         self.main_runs, self.jobs, self.runs_fail, self.jobs_fail, self.reads = main_runs, jobs, runs_fail, jobs_fail, []
         self.jobs_fail_of = jobs_fail_of or {}
         self.texts, self.text_fail = texts or {}, text_fail
+        self.pulls, self.head_states = pulls, heads or {}
 
     def file_at_head(self, rel, extra, fields):
         """`contents/<path>` read at a head: the ref is a field or a query. Raw when the Accept header asks for raw, else the JSON reply with base64 content."""
@@ -11317,6 +11325,15 @@ class MainRunsHost(FakeHost, merge.Host):
         if fail:
             raise merge.Stop(f"reading {rel} from GitHub failed: {fail}")
         return self.jobs[int(m.group(1))]
+
+    def head_state(self, n, sha=None):
+        """The checks state a case scripts for a head (`heads`), else the FakeHost default. A case with `pulls` has no other pull request: a number
+        not on that page is no pull request, so its checks read unknown."""
+        if sha in self.head_states:
+            return self.head_states[sha]
+        if self.pulls is not None and n != self.own_number and n not in self.pulls:
+            return f"unknown (pull request #{n} is not on the page)"
+        return FakeHost.head_state(self, n, sha)
 
 
 class RedMainBrake(Env):
@@ -12366,6 +12383,466 @@ class RedMainBrake(Env):
         """Main's head, as the other clone reads it after a fetch: the commit the PR head reverts."""
         sh(self.other, "git", "fetch", "-q", "origin")
         return sh(self.other, "git", "rev-parse", "origin/main")
+
+    # The revert lift (brief revert-merge-lifts-red-main; decision no-merge-onto-red-main). Main is red at the breaking merge B, pull request #2650,
+    # red again on its re-run. A revert of B lands as pull request #2651: main's head M is a merge commit whose second parent R is the revert, so the
+    # tree of M is the tree of R. The commits are real git; the runs and the pull requests are the fake's, keyed by those commits.
+    def land_breaking_merge(self, pr=2650):
+        """Lane pull request #pr lands on main as a merge commit. The runs a case scripts say whether it breaks the checks. -> its sha."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", f"lane-{pr}", "origin/main")
+        put(os.path.join(o, f"lane-{pr}.txt"), f"lane {pr}\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", f"Lane {pr}"); sh(o, "git", "push", "-q", "origin", f"lane-{pr}")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        sh(o, "git", "merge", "-q", "--no-ff", "-m", f"Merge pull request #{pr} from o/lane-{pr}", f"lane-{pr}")
+        sh(o, "git", "push", "-q", "origin", "main")
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def land_revert(self, pr, reverted, extra=None, catch_up=False, titled=None, note=None):
+        """The revert of commit `reverted` lands on main as pull request #pr, as a merge commit. `extra` names a file the merge adds of its own, so the
+        merge's tree is not the revert's tree. The feat branch takes the new main, as a lane does. `catch_up` pushes a commit to main after `reverted`,
+        then makes the pull request's head a merge of that main over the revert, so the revert sits one parent below that head. `titled` makes the head
+        a commit with that title that reverts nothing. `note` is a body for the merge commit's message, after its title. -> (the pull request's head,
+        which is the revert unless a flag says otherwise, and main's new head)."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", f"revert-{pr}", "origin/main")
+        if titled:
+            put(os.path.join(o, f"titled-{pr}.txt"), "not a revert\n")
+            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", titled)
+        else:
+            mainline = ["-m", "1"] if len(sh(o, "git", "rev-list", "--parents", "-n", "1", reverted).split()) > 2 else []
+            sh(o, "git", "revert", "--no-edit", *mainline, reverted)
+        if catch_up:  # main moves on, and the head merges that main over the revert
+            self.commit_on_main(f"Catch up main for #{pr}", f"catch-up-{pr}.txt")
+            sh(o, "git", "checkout", "-q", f"revert-{pr}")
+            sh(o, "git", "fetch", "-q", "origin")
+            sh(o, "git", "merge", "-q", "--no-ff", "-m", f"Merge branch 'main' into revert-{pr}", "origin/main")
+        revert = sh(o, "git", "rev-parse", "HEAD")
+        sh(o, "git", "push", "-q", "origin", f"revert-{pr}")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        sh(o, "git", "merge", "-q", "--no-ff", "--no-commit", revert)
+        if extra:
+            put(os.path.join(o, extra), "added by the merge\n")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", f"Merge pull request #{pr} from o/revert-{pr}", *(["-m", note] if note else []))
+        sh(o, "git", "push", "-q", "origin", "main")
+        main = sh(o, "git", "rev-parse", "HEAD")  # read before feat is checked out below
+        head_takes_base(self)
+        return revert, main
+
+    def land_proven_revert(self):
+        """The breaking merge lands, red again on its re-run, and its revert lands as pull request #2651. -> (B, A, R, M): B the breaking merge, A its
+        parent, R the revert, M main's head. The revert's tree is proven and its checks are green by default. The scope is asserted."""
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        return B, A, R, M
+
+    def commit_on_main(self, subject, name):
+        """One commit pushed straight to origin's main from the other clone: a records push above whatever main holds. -> main's new head."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, name), f"{subject}\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", subject); sh(o, "git", "push", "-q", "origin", "main")
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def commit_on_feat(self, subject, name):
+        """One commit on feat, its own file, pushed: the lane's work under test."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        put(os.path.join(o, name), f"{subject}\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", subject); sh(o, "git", "push", "-q", "origin", "feat")
+
+    def assert_revert_on_main(self, breaking, revert, head):
+        """Scope first: the fixture is what each case says before its subject runs. Main's head is the revert's merge, and the revert names `breaking`."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", "origin/main"), head, "the fixture's main head is not the merge of the revert")
+        self.assertEqual(sh(self.co, "git", "rev-parse", "origin/main^2"), revert, "the fixture's main head does not merge the revert as its second parent")
+        self.assertIn(f"This reverts commit {breaking}", sh(self.co, "git", "log", "-1", "--format=%B", revert), "the fixture's revert does not name the breaking merge")
+
+    def assert_revert_one_parent_deeper(self, breaking, head, main):
+        """Scope first: main's second parent is the pull request's head, and that head's first parent is the revert of `breaking`. Neither main nor the
+        head says the revert, so the revert's depth is the only thing that refuses the lift."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", "origin/main"), main, "the fixture's main head is not the merge of the pull request")
+        self.assertEqual(sh(self.co, "git", "rev-parse", "origin/main^2"), head, "the fixture's main head does not merge the pull request's head as its second parent")
+        revert = sh(self.co, "git", "rev-parse", "origin/main^2^1")
+        self.assertIn(f"This reverts commit {breaking}", sh(self.co, "git", "log", "-1", "--format=%B", revert), "the fixture's revert, one parent below the head, does not name the breaking merge")
+        for c in (main, head):
+            self.assertNotIn("This reverts commit", sh(self.co, "git", "log", "-1", "--format=%B", c), "the fixture puts the revert line on a commit the lift reads")
+
+    def assert_first_parent_chain(self, *newest_first):
+        """Scope first: main's first-parent chain, from its head down, is these commits in this order."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-list", "--first-parent", f"-n{len(newest_first)}", "origin/main").split(), list(newest_first),
+                         "the fixture's main does not have the first-parent chain the case names")
+
+    def revert_pull(self, pr, head):
+        """Pull request #pr as the pulls read gives it once its revert has merged: closed, with the revert as its head."""
+        return REST.pull(pr, head, f"revert-{pr}", "main", state="closed", merged=True)
+
+    def merge_run_of(self, id_, sha, pr):
+        """Main's push run `id_` on the merge commit of pull request #pr, empty as a push run is once the revert's tree is proven: no suite ran."""
+        return (main_run(id_, "success", sha=sha, message=f"Merge pull request #{pr} from o/revert-{pr}"), self.EMPTY_PUSH)
+
+    def breaking_page(self, breaking, green, top=(), attempt=2):
+        """Main's runs, newest first: `top`, (run, jobs) pairs on the head, then the breaking run 903 at `breaking`, red, and red again on its re-run
+        when `attempt` is 2, and the green run 902 beneath it at `green`. -> (runs, jobs) as `go` takes them."""
+        runs = [run for run, _ in top] + [main_run(903, "failure", sha=breaking, run_attempt=attempt, message="Merge pull request #2650 from o/lane-2650"),
+                                          main_run(902, "success", sha=green, message="base files")]
+        jobs = {**{run["id"]: j for run, j in top}, 903: [main_job("scope", "success"), main_job("checks", "failure", 20)], 902: self.RAN_PUSH}
+        return runs, jobs
+
+    def refused_by_red_main(self, rc, out, before):
+        """A refusal by the red-main check itself: a pin that refused for another reason would pass with no proof of the red-main stop."""
+        RedMainBrake.refused(self, rc, out, before)
+        self.assertIn("No batch merges onto a red main", out, "the merge is refused, but not by the red-main check")
+
+    def test_a_revert_merged_with_its_tree_proven_lifts_a_red_main(self):
+        # class 1: the revert of the breaking merge is on main, its tree is the revert's and its checks are green: the red main lifts, with no flag
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        rc, out, _ = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.merged(rc, out)
+
+    def test_a_merge_titled_as_a_revert_onto_a_red_main_is_refused_when_it_reverts_nothing(self):
+        # class 2: the lane's own commit has a revert's title, but main's breaking merge is not reverted by anything: a title proves nothing
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        head_takes_base(self)
+        self.commit_on_feat("Revert the flaky lane change", "flaky-note.txt")
+        runs, jobs = self.breaking_page(B, A)
+        rc, out, before = self.go(runs, jobs)
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_revert_whose_merge_tree_differs_from_the_revert_is_not_proven_and_refuses(self):
+        # class 3, tree: main's merge adds a file of its own, so main's tree is not the revert's tree, though the revert names the breaking merge
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B, extra="stray.txt")
+        self.assert_revert_on_main(B, R, M)
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_revert_whose_check_is_not_green_is_not_proven_and_refuses(self):
+        # class 3, check: the revert's own head has a check still pending, so its tree is not proven green
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)}, heads={R: "pending: checks"})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_revert_with_no_pull_request_on_the_page_is_not_proven_and_refuses(self):
+        # class 3, pull request: the merge names #2651, which the pull request read cannot find, so the revert's head is never read
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_first_red_names_no_breaking_merge_so_its_revert_proves_nothing(self):
+        # class 3, no blame: the breaking run is red once, so no merge is named, and a revert of it cannot be told to be the one that fixes it
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)], attempt=1)
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_revert_proven_on_main_is_unknown_and_refuses_when_the_runs_read_fails(self):
+        # class 4, the page: the runs read fails, so main is unknown, never clear, though the revert on main would prove it
+        B = self.land_breaking_merge()
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        rc, out, before = self.go([], {}, pulls={2651: self.revert_pull(2651, R)}, runs_fail="gh: HTTP 500: Server Error")
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("UNKNOWN", out, "a failed runs read is not called red or clear: it is unknown")
+
+    def test_a_revert_whose_check_read_is_unknown_is_not_proven_and_refuses(self):
+        # class 4, the proof: the revert's checks cannot be read, which is unknown, and an unknown check proves nothing
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)}, heads={R: "unknown (HTTP 500: Internal Server Error)"})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_revert_of_the_revert_refuses_even_with_its_tree_proven(self):
+        # class 5: main's head reverts the first revert, not the breaking merge. Its tree and its checks are proven, so only the named commit refuses it
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        R2, M2 = self.land_revert(2652, R)
+        self.assert_revert_on_main(R, R2, M2)
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(906, M2, 2652), self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R), 2652: self.revert_pull(2652, R2)})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_reland_that_reverts_the_landing_merge_refuses_even_with_its_tree_proven(self):
+        # class 5, the landing merge: a re-land made with `git revert -m 1` names the merge that landed the revert, not the revert. Its own tree and checks
+        # are proven, and so are the revert's, so only the re-land check on the landing commit refuses it
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        R2, M2 = self.land_revert(2652, M)
+        self.assert_revert_on_main(M, R2, M2)
+        self.assertNotIn(f"This reverts commit {R}", sh(self.co, "git", "log", "-1", "--format=%B", R2), "the fixture's re-land names the revert, not the landing merge")
+        self.assertEqual(sh(self.co, "git", "rev-parse", f"{M2}^{{tree}}"), sh(self.co, "git", "rev-parse", f"{R2}^{{tree}}"), "the fixture's re-land merge does not carry the re-land's tree")
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(906, M2, 2652), self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R), 2652: self.revert_pull(2652, R2)})
+        self.assertNotEqual(rc, 0, "a re-land of the revert lifted the red main: the claim went through")
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_revert_landed_with_a_reason_flag_that_quotes_the_revert_line_still_lifts(self):
+        # the merge tool writes each reason as one `Reason flag:` line (lift_message), so a quoted revert line never starts a line. Only the revert says
+        # `This reverts commit B` at a line start, so exactly one commit names B and the revert lifts. Pinned as today's behaviour
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B, note=merge.lift_message({merge.RED_FLAG: f"This reverts commit {B}."}))
+        self.assert_revert_on_main(B, R, M)
+        body = sh(self.co, "git", "log", "-1", "--format=%B", M)
+        self.assertIn(f"This reverts commit {B}", body, "the fixture's landing merge does not quote the revert line")
+        self.assertIsNone(re.search(rf"(?m)^This reverts commit {B}", body), "the fixture's quoted revert line starts a line of the landing merge")
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        rc, out, _ = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.merged(rc, out)
+
+    def test_a_landing_merge_with_the_revert_line_at_a_line_start_refuses_today_a_false_refusal(self):
+        # FINDING, pinned as today's behaviour. The exactly-one rule counts each commit whose message has the revert line at a line start, the landing
+        # merge included, so this merge makes two and the proven revert is refused. The merge tool writes no such line (its reason is one `Reason flag:`
+        # line). Whether another merge route writes one is unmeasured. Flip this pin when the rule counts the revert alone
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B, note=f"This reverts commit {B}.")
+        self.assert_revert_on_main(B, R, M)
+        self.assertIsNotNone(re.search(rf"(?m)^This reverts commit {B}", sh(self.co, "git", "log", "-1", "--format=%B", M)), "the fixture's landing merge does not quote the revert line at a line start")
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_red_schedule_run_beside_the_revert_still_refuses(self):
+        # class 6, red: a red run of another group on main beside the breaking run, though the revert is proven
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        sched = main_run(905, "failure", sha=M, event="schedule")
+        runs, jobs = self.breaking_page(B, A, top=[(sched, [main_job("checks", "failure", 20), main_job("scope", "success")]), self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 905", out)
+        self.assertIn("run 903", out)
+
+    def test_a_cancelled_run_beside_the_revert_still_refuses(self):
+        # class 6, cancelled: a cancelled run with no red job on main beside the breaking run is unknown, so it refuses with the revert proven
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        sched = main_run(905, "cancelled", sha=M, event="schedule")
+        runs, jobs = self.breaking_page(B, A, top=[(sched, [main_job("scope", "success"), main_job("checks", "cancelled", 2)]), self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 905", out)
+        self.assertIn("run 903", out)
+
+    def test_a_re_run_in_flight_beside_the_revert_still_refuses(self):
+        # class 6, in flight: a re-run of a schedule run still going is unknown, and it refuses beside the breaking run with the revert proven
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        sched = main_run(905, None, status="in_progress", sha=M, event="schedule", run_attempt=2)
+        runs, jobs = self.breaking_page(B, A, top=[(sched, []), self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_revert_whose_own_main_run_failed_does_not_lift_a_red_main(self):
+        # the revert's tree is proven, but its own run on main, on the revert's merge, failed its suite: the lift must not read that red run as clear
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        red_top = (main_run(904, "failure", sha=M, message="Merge pull request #2651 from o/revert-2651"),
+                   [main_job("scope", "success"), main_job("checks", "failure", 20)])
+        runs, jobs = self.breaking_page(B, A, top=[red_top])
+        self.assertEqual((runs[0]["id"], runs[0]["head_sha"], runs[0]["conclusion"]), (904, M, "failure"),
+                         "the fixture's newest run is not the failed run on the revert's merge")
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.assertIn("actions/runs/904/jobs", self.host.reads, "the revert's own red run was not judged, so the refusal could not name it")
+        self.assertNotEqual(rc, 0, "the revert's own failed run on main lifted the red main: the merge went through")
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 904", out, "the refusal does not name the revert's own red run 904")
+        self.assertIn("checks: fail", out)
+
+    def test_a_revert_whose_own_first_run_is_still_going_lifts_a_red_main(self):
+        # the route both rulings name (own-745-b, own-823-b): a revert whose tree is proven lifts the red main while its own first run is still going
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        R, M = self.land_revert(2651, B)
+        self.assert_revert_on_main(B, R, M)
+        going = (main_run(904, None, status="in_progress", sha=M, message="Merge pull request #2651 from o/revert-2651"), [])
+        runs, jobs = self.breaking_page(B, A, top=[going])
+        self.assertEqual((runs[0]["id"], runs[0]["status"], runs[0]["run_attempt"]), (904, "in_progress", 1),
+                         "the fixture's newest run is not a first attempt still going")
+        rc, out, _ = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.assertNotIn("actions/runs/904/jobs", self.host.reads, "a run still going is not judged, so it is not read")
+        self.assertEqual(rc, 0, "the revert with its own first run still going is refused by the red main, though its tree is proven\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+
+    def test_a_revert_whose_head_merged_main_after_it_lifts_a_red_main_with_its_tree_proven(self):
+        # the head merges a catch-up of main over the revert, so the revert sits one parent below main's second parent. The revert is merged, and its
+        # tree and its checks are proven, so it lifts the red main as a revert at the head does.
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        H, M = self.land_revert(2651, B, catch_up=True)
+        self.assert_revert_one_parent_deeper(B, H, M)
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        rc, out, _ = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, H)})
+        self.assertEqual(rc, 0, "a proven revert one parent below main's second parent did not lift the red main\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+
+    # The lift reads the revert below main's head too. An unrelated merge or commit above the revert does not stop the lift, and a red run from the revert
+    # up to the head does. The first two cases refuse a lift that reads the head alone. The next three refuse a lift that does not look at the red runs above the revert.
+    def test_a_lane_merge_landing_on_a_proven_revert_leaves_the_next_merge_lifted(self):
+        # merges resume at the revert, with its run pending (ruling 745 b): the lane merge L lands on the revert while both runs are still going
+        B, A, R, M = self.land_proven_revert()
+        L = self.land_breaking_merge(2660)
+        head_takes_base(self)
+        self.assert_first_parent_chain(L, M)
+        runs, jobs = self.breaking_page(B, A, top=[
+            (main_run(905, None, status="in_progress", sha=L, message="Merge pull request #2660 from o/lane-2660"), []),
+            (main_run(904, None, status="in_progress", sha=M, message="Merge pull request #2651 from o/revert-2651"), [])])
+        rc, out, _ = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.assertEqual(rc, 0, "a lane merge on top of the proven revert stops the next merge's lift\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+
+    def test_a_direct_commit_above_a_proven_revert_leaves_the_next_merge_lifted(self):
+        # a records push with no suite run sits on the revert: it is no verdict, so the breaking run stays the red one, and the lift reads the revert below it
+        B, A, R, M = self.land_proven_revert()
+        D = self.commit_on_main("Record the lane's ruling", "records.txt")
+        head_takes_base(self)
+        self.assert_first_parent_chain(D, M)
+        runs, jobs = self.breaking_page(B, A, top=[(main_run(905, "success", sha=D, message="Record the lane's ruling"), self.EMPTY_PUSH),
+                                                   self.merge_run_of(904, M, 2651)])
+        rc, out, _ = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.assertEqual(rc, 0, "a direct commit above the proven revert stops the next merge's lift\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+
+    def test_a_red_lane_merge_above_a_proven_revert_refuses_and_names_it(self):
+        # the lane merge L is red again on its re-run, and a records push above it is the head with its run pending: the red run is below the head
+        B, A, R, M = self.land_proven_revert()
+        L = self.land_breaking_merge(2660)
+        D = self.commit_on_main("Record the lane's ruling", "records.txt")
+        head_takes_base(self)
+        self.assert_first_parent_chain(D, L, M)
+        runs, jobs = self.breaking_page(B, A, top=[
+            (main_run(906, None, status="in_progress", sha=D, message="Record the lane's ruling"), []),
+            (main_run(905, "failure", sha=L, run_attempt=2, message="Merge pull request #2660 from o/lane-2660"),
+             [main_job("scope", "success"), main_job("checks", "failure", 20)]),
+            self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.assertFalse(getattr(self.host, "merged", False), "a red lane merge above the revert did not stop the lift: the merge went through")
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 905", out, "the refusal does not name the red lane merge above the revert")
+
+    def test_a_red_schedule_run_above_a_proven_revert_refuses_and_names_it(self):
+        # a schedule run red on the lane merge above the revert is a second red run, so the lift stops, whatever its group
+        B, A, R, M = self.land_proven_revert()
+        L = self.land_breaking_merge(2660)
+        D = self.commit_on_main("Record the lane's ruling", "records.txt")
+        head_takes_base(self)
+        self.assert_first_parent_chain(D, L, M)
+        runs, jobs = self.breaking_page(B, A, top=[
+            (main_run(906, None, status="in_progress", sha=D, message="Record the lane's ruling"), []),
+            (main_run(905, "failure", sha=L, event="schedule"), [main_job("scope", "success"), main_job("checks", "failure", 20)]),
+            self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.assertFalse(getattr(self.host, "merged", False), "a red schedule run above the revert did not stop the lift: the merge went through")
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 905", out, "the refusal does not name the red schedule run above the revert")
+
+    def test_a_red_run_on_the_revert_below_a_lane_merge_refuses(self):
+        # the revert's own first run failed, and a lane merge L landed on it with its run pending: the failed run is below the head, where a check of
+        # the head does not see it
+        B, A, R, M = self.land_proven_revert()
+        L = self.land_breaking_merge(2660)
+        head_takes_base(self)
+        self.assert_first_parent_chain(L, M)
+        runs, jobs = self.breaking_page(B, A, top=[
+            (main_run(905, None, status="in_progress", sha=L, message="Merge pull request #2660 from o/lane-2660"), []),
+            (main_run(904, "failure", sha=M, message="Merge pull request #2651 from o/revert-2651"),
+             [main_job("scope", "success"), main_job("checks", "failure", 20)])])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.assertFalse(getattr(self.host, "merged", False), "a red run on the revert, below a lane merge, did not stop the lift: the merge went through")
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 904", out, "the refusal does not name the revert's own red run 904")
+        self.assertIn("checks: fail", out)
+
+    # The two guards of revert_proven that no case above reaches: one red run only, and the page read at main's head. Each case is the green control
+    # for the other: the proven revert with nothing beside it lifts (test_a_revert_merged_with_its_tree_proven_lifts_a_red_main).
+    def test_a_red_schedule_run_on_an_older_commit_beside_the_blamed_red_refuses_the_lift(self):
+        # a nightly red on A, an older commit, beside the blamed push red under the proven revert: the red count stops the lift
+        B, A, R, M = self.land_proven_revert()
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        nightly = main_run(898, "failure", event="schedule", sha=A)
+        runs.append(nightly)
+        jobs[898] = [main_job("scope", "success"), main_job("checks", "failure", 20)]
+        self.assertNotEqual(nightly["head_sha"], M, "the fixture's nightly is on main's head, not an older commit")
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.assertFalse(getattr(self.host, "merged", False), "a red nightly beside the blamed push red did not stop the lift: the merge went through")
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 898", out, "the refusal does not name the red nightly beside the blamed push red")
+
+    def test_a_proven_revert_with_no_run_of_its_own_on_the_page_refuses_as_stale(self):
+        # main's head is the proven revert, but the page's newest run is on another commit, so the verdict is not read at main's head: the lift stops
+        B, A, R, M = self.land_proven_revert()
+        runs, jobs = self.breaking_page(B, A, top=[(main_run(906, None, status="in_progress", sha="f" * 40), [])])
+        self.assertNotIn(M, [r["head_sha"] for r in runs], "the fixture's page holds a run on the revert's merge")
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.assertFalse(getattr(self.host, "merged", False), "a revert read off a page that is not at main's head lifted the red main: the merge went through")
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
+
+    def test_a_merge_whose_head_is_titled_as_a_revert_with_no_revert_line_stays_refused(self):
+        # pin, fail closed: main's second parent is titled as a revert and the tree and checks would pass, but no commit names the breaking merge
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        X, M = self.land_revert(2651, B, titled='Revert "Lane 2650"')
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", "origin/main^2"), X, "the fixture's main head does not merge the titled head as its second parent")
+        self.assertTrue(sh(self.co, "git", "log", "-1", "--format=%s", X).startswith("Revert"), "the fixture's second parent is not titled as a revert")
+        self.assertNotIn("This reverts commit", sh(self.co, "git", "log", "-1", "--format=%B", X), "the fixture's titled head names a revert")
+        runs, jobs = self.breaking_page(B, A, top=[self.merge_run_of(904, M, 2651)])
+        rc, out, before = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, X)})
+        self.assertNotEqual(rc, 0, "a head titled as a revert lifted the red main: the merge went through")
+        self.refused_by_red_main(rc, out, before)
+        self.assertIn("run 903", out)
 
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
@@ -14659,12 +15136,6 @@ class ReviewFixRules(unittest.TestCase):
                 self.assertIn("design reviewer", why, f"why does not name the design reviewer: {why!r}")
                 self.assertIn(note, why, f"why does not name the design reviewer's round line: {why!r}")
 
-    def test_a_fix_pass_with_no_round_recorded_is_open_and_says_no_round(self):
-        # the empty state: no round is recorded, so the fix check has no round to count as passing
-        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=(), kind="docs-only")
-        self.assertEqual(state, "open", "a fix check PASS with no round recorded must not read done")
-        self.assertIn("no round", why, f"why does not say no round is recorded: {why!r}")
-
     def test_a_fix_pass_after_round_three_with_guard_no_is_done(self):
         state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="no")
         self.assertEqual(state, "done", f"a fix check PASS after round 3 of a change with no guard must read done: {why!r}")
@@ -15590,6 +16061,21 @@ class ReviewCleanMainMerge(ReviewEnv):
         self.assertNotIn("unknown", list_line(self, out, 7), "the stale line says unknown: the walk stopped on a read, not on the conflicted merge")
         self.assertIn(top, host.commit_reads, "the walk did not read the empty commit, so the case tests nothing")
 
+    def test_i_a_clean_merge_of_main_after_a_fix_verifier_under_an_earlier_design_fail_does_not_read_done(self):
+        # Catches: the clean-merge re-read of live_review_state reading the newest record alone, so a record with no round line reads done over the
+        # earlier design reviewer FAIL. The record is stale only by the clean merge of main, so that re-read decides. Control: the same chain with the
+        # design reviewer PASS reads done at the clean merge.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        newest = record_text(head=fx.fixed, rounds=(), fix=(fix_verifier_line(head=fx.pre, verdict="PASS"),))
+        self.assertEqual(record_state(self, newest, head=fx.fixed), "done", "scope: the newest record alone must read done at its own head")
+        for design, state in (("PASS", "done"), ("FAIL", "open")):
+            with self.subTest(design=design):
+                earlier = record_text(head=fx.pre, rounds=("Round 1: reviewer, sonnet, PASS", f"Round 1: design-reviewer, opus, {design}"))
+                comments = [review_comment(1, 7, earlier), review_comment(2, 7, newest), lint_of(7, fx.clean)]
+                self.reviewed_line(self.reviewed_host(fx, fx.clean, comments=comments), fx.clean, state,
+                                   f"the newest record must read {state} at the clean merge of main, with the earlier design reviewer {design}")
+
 
 class ReviewUnknownReads(ReviewEnv):
     """A commit the checkout lacks reads unknown, never a conflict. A main-only clone fetches origin's heads once when a parent is missing, so a
@@ -15937,8 +16423,12 @@ class ReviewNoRestart(ReviewEnv):
     """`merge <pr> --review-record` refuses a record whose rounds restart on a pull request that already holds rounds (decision pr-review-record;
     rule roles-review-cap-three). The earlier records are the pull request's review comments, oldest first, as review_comments reads them. A
     record is refused when an earlier record that parses holds rounds and the new record's top round is below the earlier top, or equals it
-    below REVIEW_LAST_ROUND without a --fix-check. A comment that does not parse, or that names another pull request, is skipped. A refusal exits 2
-    and prints nothing on stdout. Each accepted case is a control: it prints a record on main and after the change."""
+    below REVIEW_LAST_ROUND without a --fix-check. A record with no round line and a --fix-check is no restart: its fix check passes, or fails and
+    needs a new lane (owner, page item 741, 14:01 CST). A record may open at the last round after a failed second round, or after a failed fix
+    check with no second round written, and then holds that last round alone. A comment that does not parse, or that names another pull request, is skipped. A refusal exits 2 and prints
+    nothing on stdout. A record with no round line is refused after an earlier record whose last design reviewer line is FAIL or PARTIAL, or after
+    records with no design reviewer line that follow it, since it holds no design reviewer line to clear that hold. A FAIL fix verifier clears no hold,
+    so it is accepted beside one. Each accepted case is a control: it prints a record on main and after the change."""
 
     EARLIER_FIX_FROM = "1e" * 20  # the head a fix check's fix diff started from: a fix check line never names its own record's Head
     GRANT = REVIEW_GRANT_TEXT  # the owner's grant of a fourth review pass, bound to this pull request
@@ -15948,9 +16438,9 @@ class ReviewNoRestart(ReviewEnv):
         """A host whose pull request 7 is at the live head, with the review comments `bodies`, oldest first."""
         return self.record_host(*(review_comment(i, 7, body) for i, body in enumerate(bodies, 1)), head=self.head())
 
-    def review_argv(self, *rounds, fix=None, grant=None):
+    def review_argv(self, *rounds, fix=None, grant=None, kind="normal"):
         """The argv of `--review-record` for the live head: the --round values in order, then --fix-check and --grant when given."""
-        argv = ["7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head()]
+        argv = ["7", "--review-record", "--kind", kind, "--guard", "no", "--head", self.head()]
         argv += [flag for r in rounds for flag in ("--round", r)]
         if fix is not None:
             argv += ["--fix-check", fix]
@@ -16110,6 +16600,355 @@ class ReviewNoRestart(ReviewEnv):
         self.assert_refused(rc, out, err)
         self.assertEqual(self.at(err, self.REMEDY_CARRY), -1, "the restart refusal offers carry by tree on a tree it could not read:\n" + err)
         self.assertIn("is unknown", err, "the restart refusal does not say the tree is unknown:\n" + err)
+
+    FIX_HEAD = "2e" * 20  # the reviewed head of a fix check record, which holds no round line
+
+    def chain_host(self, *bodies):
+        """host_with(*bodies), after each earlier record parses, so a refusal in a case below is the new record's and not a scope miss."""
+        for body in bodies:
+            parse_text(self, body)
+        return self.host_with(*bodies)
+
+    def assert_refused_with_no_record(self, rc, out, err):
+        """A refusal that prints no record: exit 2, nothing on stdout, and no traceback. The text of the refusal is the case's own."""
+        self.assertEqual(rc, 2, "the record was accepted, but it should be refused:\n" + out + err)
+        self.assertEqual(out, "", "a refused record printed to stdout")
+        self.assertNotIn("Traceback", err)
+
+    def test_round_three_after_round_one_and_a_failed_fix_verifier_is_accepted(self):
+        # A failed first round, then a failed fix verifier with no second round written: the third round runs, and its record holds that round
+        # alone. The fix verifier's record holds no round line.
+        round_one = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        fix_verifier = record_text(head=self.FIX_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="FAIL"),))
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(round_one, fix_verifier))
+        self.assert_accepted(rc, out, err)
+
+    def test_a_fix_verifier_only_record_that_passes_after_round_one_is_accepted(self):
+        # A failed first round, then a record with no round line whose fix verifier PASSes at the first round's reviewed head. It is no restart:
+        # it holds no round line, and its fix verifier is the line that passes.
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        fix = f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"
+        rc, out, err = self.run_args(*self.review_argv(fix=fix), host=self.chain_host(earlier))
+        self.assert_accepted(rc, out, err)
+
+    def test_round_three_alone_after_a_failed_round_two_is_accepted(self):
+        # The control for the refusals below: a third round runs after a failed second round (owner, page item 741, 14:01 CST), and its record holds
+        # that round alone.
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(earlier))
+        self.assert_accepted(rc, out, err)
+
+    def test_round_three_alone_after_a_passed_round_two_is_refused(self):
+        # A passed second round is done, so no third round follows it (owner, page item 741, 14:01 CST).
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"))
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(earlier))
+        self.assert_refused_with_no_record(rc, out, err)
+
+    def test_round_three_repeating_a_passed_round_two_is_refused(self):
+        # The same refusal for a record that repeats the earlier rounds before its third round, as a full record does. The repeat form after a
+        # failed second round is accepted by test_a_round_three_record_that_lists_the_earlier_rounds_is_accepted.
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"))
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS", "3:reviewer:sonnet:PASS"),
+                                     host=self.chain_host(earlier))
+        self.assert_refused_with_no_record(rc, out, err)
+
+    def test_round_three_alone_on_haiku_is_refused(self):
+        # The third round runs sonnet on the round row (decision agent-model-cap). The sonnet twin is test_round_three_alone_after_a_failed_round_two_is_accepted.
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:haiku:PASS"), host=self.chain_host(earlier))
+        self.assert_refused_with_no_record(rc, out, err)
+
+    def test_a_first_record_that_skips_round_one_is_refused(self):
+        # The control is test_the_first_record_on_a_pull_request_is_accepted: the first round alone is accepted as a first record. The third round
+        # alone is not.
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.host_with())
+        self.assert_refused_with_no_record(rc, out, err)
+
+    def test_round_three_after_an_unparseable_earlier_comment_is_accepted_with_no_type_error(self):
+        # Control: the third round after the two FAIL records is accepted. The comment below starts with the record marker, so the repo's comment read
+        # keeps it, and its Kind line does not parse: the parser reads it as None. The new record must be accepted beside it with no TypeError.
+        round_one = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        round_two = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
+        unparseable = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 2: reviewer, sonnet, FAIL",), kind="bogus")
+        for body in (round_one, round_two):
+            parse_text(self, body)
+        self.assertIsNone(review_fn(self, "parse_review")(unparseable), "fixture: the broken comment parses, so it is no unparseable earlier comment")
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(round_one, round_two))
+        self.assert_accepted(rc, out, err)
+        try:
+            rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.host_with(round_one, unparseable, round_two))
+        except TypeError as exc:
+            self.fail(f"round 3 after an unparseable earlier comment raised TypeError: {exc}")
+        self.assert_accepted(rc, out, err)
+
+    def test_round_three_after_a_passed_fix_verifier_on_a_failed_second_round_is_refused(self):
+        # Control: the third round after the failed second round alone is accepted, so the refusal below comes from the passed fix verifier that
+        # follows it. The fix verifier holds no round line, and its fix diff starts at the second round's head.
+        round_two = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
+        fix_verifier = record_text(head=self.FIX_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="PASS"),))
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(round_two))
+        self.assert_accepted(rc, out, err)
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(round_two, fix_verifier))
+        self.assert_refused_with_no_record(rc, out, err)
+
+    def removed_host(self, *bodies):
+        """host_with(*bodies) for a pull request whose only file is removed, which a delete-only record reads as a delete."""
+        return self.record_host(*(review_comment(i, 7, body) for i, body in enumerate(bodies, 1)), head=self.head(),
+                                files=[pr_file("old.txt", status="removed")])
+
+    def test_a_delete_only_record_that_repeats_round_one_is_refused_unless_a_fix_verifier_comes_with_it(self):
+        # The restart refusal stops at the last round of every change, as main does. A delete-only change owes one round, so the cap is still
+        # the last round of the review, not its row's: a repeat of round one with no fix verifier is refused. The control is the same record
+        # with a fix verifier that starts at the earlier head.
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",), kind="delete-only")
+        host = self.removed_host(earlier)
+        fix = f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS", kind="delete-only", fix=fix), host=host)
+        self.assert_accepted(rc, out, err)
+        rc, out, err = self.run_args(*self.review_argv("1:reviewer:sonnet:PASS", kind="delete-only"), host=host)
+        self.assert_refused(rc, out, err)
+
+    def test_round_three_alone_after_a_failed_round_one_and_a_passed_fix_verifier_is_refused(self):
+        # A passed fix verifier ends the review, so a third round after it is refused. The control is the same chain with a failed fix verifier,
+        # which test_round_three_after_round_one_and_a_failed_fix_verifier_is_accepted accepts.
+        round_one = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        fix_verifier = record_text(head=self.FIX_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="PASS"),))
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(round_one, fix_verifier))
+        self.assert_refused_with_no_record(rc, out, err)
+        self.assertIn("needs a failed round 2, or a failed fix verifier", err, "the refusal does not name the failed round 2 or fix check it needs")
+
+    def test_a_third_round_after_an_earlier_third_round_is_refused_as_a_second_round_three(self):
+        # Control: a third round after an earlier chain of a failed first and second round is accepted, so the refusal below comes from the
+        # third round the pull request already holds.
+        earlier_two = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(earlier_two))
+        self.assert_accepted(rc, out, err)
+        earlier_three = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_FAILED_THREE)
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(earlier_three))
+        self.assert_refused_with_no_record(rc, out, err)
+        self.assertIn("already holds a round 3", err, "the refusal does not name the third round the pull request already holds")
+
+    def test_round_three_alone_after_a_passed_first_round_is_refused(self):
+        # Control: a third round after a failed first round and a failed fix verifier is accepted, so the refusal below comes from the passed first
+        # round alone.
+        failed_one = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        failed_fix = record_text(head=self.FIX_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="FAIL"),))
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(failed_one, failed_fix))
+        self.assert_accepted(rc, out, err)
+        passed_one = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)
+        rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(passed_one))
+        self.assert_refused_with_no_record(rc, out, err)
+        self.assertIn("needs a failed round 1", err, "the refusal does not name the failed first round it needs")
+
+    def design_only_argv(self):
+        """The argv of a record with no round line and one fix verifier that PASSes at REVIEW_OLD_HEAD, the head of the earlier record."""
+        return self.review_argv(fix=f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS")
+
+    def design_line_values(self, text):
+        """-> the verdicts of the design reviewer lines of a parsed record, in position order, so a case checks its own fixture."""
+        return [v for _, role, _, v in parse_text(self, text)["rounds"] if role == "design-reviewer"]
+
+    def assert_refused_naming_design(self, rc, out, err):
+        """A refusal of a record that would clear an earlier design reviewer hold: exit 2, nothing on stdout, no traceback, and the design reviewer named."""
+        self.assertEqual(rc, 2, "a record with no round line cleared an earlier design reviewer hold, and was accepted:\n" + out + err)
+        self.assertEqual(out, "", "a refused record printed to stdout")
+        self.assertNotIn("Traceback", err)
+        self.assertIn(merge.REVIEW_CITE, err)
+        self.assertRegex(err, r"design[ -]reviewer", "the refusal does not name the design reviewer")
+
+    def test_a_fix_verifier_only_record_after_an_earlier_design_line_fail_is_refused(self):
+        # A record with no round line holds no design reviewer line, so it cannot answer the earlier record's design reviewer line. The earlier
+        # record reads open on its own (scope), so the refusal is the design line's. A FAIL and a PARTIAL both refuse.
+        for verdict in ("FAIL", "PARTIAL"):
+            with self.subTest(verdict=verdict):
+                earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, PASS", f"Round 1: design-reviewer, opus, {verdict}"))
+                state, why = record_verdict(self, earlier, head=REVIEW_OLD_HEAD)
+                self.assertEqual(state, "open", f"scope: an earlier record whose design reviewer line is {verdict} must read open: {why!r}")
+                rc, out, err = self.run_args(*self.design_only_argv(), host=self.chain_host(earlier))
+                self.assert_refused_naming_design(rc, out, err)
+
+    def test_a_fix_verifier_that_fails_after_an_earlier_design_line_fail_is_accepted(self):
+        # The design hold guards against a PASS that ends the review over a design reviewer FAIL. A FAIL fix verifier ends nothing, so the hold refuses only a PASS.
+        # Control: the same record with a PASS fix verifier is refused by the hold, so the acceptance below comes from the FAIL alone.
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, FAIL"))
+        self.assertEqual(record_verdict(self, earlier, head=REVIEW_OLD_HEAD)[0], "open", "scope: the earlier record must read open on its own")
+        fix = f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}"
+        rc, out, err = self.run_args(*self.review_argv(fix=f"{fix}:PASS"), host=self.chain_host(earlier))
+        self.assert_refused_naming_design(rc, out, err)
+        rc, out, err = self.run_args(*self.review_argv(fix=f"{fix}:FAIL"), host=self.chain_host(earlier))
+        self.assert_accepted(rc, out, err)
+
+    def test_a_fix_verifier_only_record_after_an_earlier_design_line_pass_is_accepted(self):
+        # Control for the refusal above: the earlier record's last design reviewer line is PASS, or the record holds no design reviewer line, so the
+        # same record is accepted and prints the record.
+        cases = (("PASS", ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, PASS"), ["PASS"]),
+                 ("absent", ("Round 1: reviewer, sonnet, PASS",), []))
+        for label, rounds, values in cases:
+            with self.subTest(design_line=label):
+                earlier = record_text(head=REVIEW_OLD_HEAD, rounds=rounds)
+                self.assertEqual(self.design_line_values(earlier), values, "scope: the earlier record's design reviewer lines")
+                rc, out, err = self.run_args(*self.design_only_argv(), host=self.chain_host(earlier))
+                self.assert_accepted(rc, out, err)
+
+    def test_the_last_design_line_by_position_decides_a_fix_verifier_only_record(self):
+        # The newest earlier record's last design reviewer line decides, by position across its rounds. A later PASS line clears an earlier FAIL,
+        # and a later FAIL keeps an earlier PASS from clearing the hold, so no earlier line alone decides.
+        cases = (
+            (("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS",
+              "Round 2: design-reviewer, opus, PASS"), "PASS"),
+            (("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, PASS", "Round 2: reviewer, sonnet, PASS",
+              "Round 2: design-reviewer, opus, FAIL"), "FAIL"),
+        )
+        for rounds, last in cases:
+            with self.subTest(last=last):
+                earlier = record_text(head=REVIEW_OLD_HEAD, rounds=rounds)
+                self.assertEqual(self.design_line_values(earlier)[-1], last, "scope: the last design reviewer line of the earlier record")
+                rc, out, err = self.run_args(*self.design_only_argv(), host=self.chain_host(earlier))
+                if last == "PASS":
+                    self.assert_accepted(rc, out, err)
+                else:
+                    self.assert_refused_naming_design(rc, out, err)
+
+    def run_after_a_design_line_chain(self, verdict):
+        """-> (rc, out, err) of a record with no round line after an earlier record whose last design reviewer line is `verdict`, through a
+        second record with no round line at FIX_HEAD, which holds no design reviewer line. The second's fix verifier PASSes at REVIEW_OLD_HEAD."""
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", f"Round 1: design-reviewer, opus, {verdict}"))
+        second = record_text(head=self.FIX_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="PASS"),))
+        self.assertEqual(record_verdict(self, earlier, head=REVIEW_OLD_HEAD)[0], "open", "scope: the earlier record must read open on its own")
+        self.assertEqual(self.design_line_values(second), [], "scope: the second record holds no design reviewer line, so only the walk reaches the earlier one")
+        argv = self.review_argv(fix=f"{self.FIX_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS")
+        for body in (earlier, second):
+            parse_text(self, body)
+        # the second record's fix verifier is the newest one, so the live head is read as a plain commit: listed with no parents
+        host = self.record_host(*(review_comment(i, 7, body) for i, body in enumerate((earlier, second), 1)), head=self.head(), commits={self.head(): []})
+        return self.run_args(*argv, host=host)
+
+    def test_a_fix_verifier_only_record_after_a_design_line_fail_through_another_is_refused(self):
+        # A record with no round line that follows another such record is refused too: the refusal walks back through records with no design
+        # reviewer line to the last one that has such a line, as the reader does. The control below changes only the earlier design line.
+        rc, out, err = self.run_after_a_design_line_chain("FAIL")
+        self.assert_refused_naming_design(rc, out, err)
+
+    def test_a_fix_verifier_only_record_after_a_design_line_pass_through_another_is_accepted(self):
+        # Control for the refusal above: the earlier record's last design reviewer line is PASS, so the walk stops there and the same record is accepted.
+        rc, out, err = self.run_after_a_design_line_chain("PASS")
+        self.assert_accepted(rc, out, err)
+
+class ReviewFixAfterRoundThree(ReviewEnv):
+    """The chain of a Guard or check change: a failed first round (haiku), a failed second round (sonnet), a passing third round (sonnet, net value
+    zero), then a sonnet fix check that PASSes at a later head. A fix check after a passing last round is accepted, as a fix after a merge of main
+    is (owner, page item 741, 14:01 CST). Each record is built with record_text() and read back by review_state at its own head."""
+
+    R1, R2, R3 = "96" * 20, "64" * 20, "a9" * 20  # the heads of rounds 1 to 3: 40 hex, distinct from every other head here
+    FIX = "ba" * 20  # the live head after the fix diff; the fix check's reviewed head is R3
+    FIXED_MODEL = merge.REVIEW_FIX_GUARD_MODEL
+
+    ROUNDS_ONE_TO_THREE = ("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, sonnet, PASS")
+    ROUND_ARGV = ("--round", "1:reviewer:haiku:FAIL", "--round", "2:reviewer:sonnet:FAIL", "--round", "3:reviewer:sonnet:PASS", "--net-value", "zero")
+
+    def round_records(self):
+        """The records of the first three rounds, oldest first. The third round's record repeats the first two, as a fresh full review at a head
+        that moved after the second round did (decision pr-review-record)."""
+        return [record_text(head=self.R1, rounds=("Round 1: reviewer, haiku, FAIL",), guard="yes"),
+                record_text(head=self.R2, rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, sonnet, FAIL"), guard="yes"),
+                record_text(head=self.R3, rounds=self.ROUNDS_ONE_TO_THREE, guard="yes", net="zero")]
+
+    def chain_pulls(self, *bodies, head=FIX, commits=None):
+        """Pull request 7 at `head`, with the review comments `bodies`, oldest first. The bodies are not parsed here: whether the merge tool reads
+        them is what each case measures, so a refusal names the tool's reading and never a fixture's."""
+        return self.record_host(*(review_comment(i, 7, body) for i, body in enumerate(bodies, 1)), head=head, commits=commits or {})
+
+    def record_argv(self, head, *extra):
+        """The argv of `--review-record` on a Guard or check change: the head, then `extra`."""
+        return ["7", "--review-record", "--kind", "normal", "--guard", "yes", "--head", head, *extra]
+
+    def fix_argv(self, reviewed, verdict="PASS", head=FIX):
+        """The argv of a sonnet fix check whose fix diff starts at `reviewed`, written for the head `head`."""
+        return self.record_argv(head, "--fix-check", f"{reviewed}:reviewer:{self.FIXED_MODEL}:{verdict}")
+
+    def test_round_three_then_a_fix_verifier_pass_is_accepted_and_reads_done(self):
+        r1, r2, r3 = self.round_records()
+        rc, out, err = self.run_args(*self.record_argv(self.R3, *self.ROUND_ARGV), host=self.chain_pulls(r1, r2, head=self.R3))
+        self.assertEqual(rc, 0, "round 3 after a failed round 2 was refused:\n" + out + err)
+        self.assertEqual(record_state(self, posted_body(self, out), head=self.R3), "done", "the printed round 3 does not read done")
+        rc, out, err = self.run_args(*self.fix_argv(self.R3), host=self.chain_pulls(r1, r2, r3))
+        self.assertEqual(rc, 0, "a fix check PASS after a passing round 3 was refused:\n" + out + err)
+        body = posted_body(self, out)
+        self.assertEqual(parse_text(self, body)["fix"], (self.R3, "reviewer", self.FIXED_MODEL, "PASS"), "the printed fix check line is not the one given")
+        self.assertEqual(record_state(self, body, head=self.FIX), "done", "the printed fix check does not read done at the live head")
+
+    def test_a_fix_verifier_fail_after_a_passing_round_three_is_printed_and_leaves_the_pull_request_open(self):
+        rc, out, err = self.run_args(*self.fix_argv(self.R3, verdict="FAIL"), host=self.chain_pulls(*self.round_records()))
+        self.assertEqual(rc, 0, "a failed fix check after a passing round 3 was refused:\n" + out + err)
+        state, why = record_verdict(self, posted_body(self, out), head=self.FIX)
+        self.assertEqual(state, "open", "a failed fix check after a passing round 3 does not leave the pull request open")
+        self.assertIn("fix verifier failed", why)
+
+    def test_a_fix_verifier_whose_reviewed_head_is_not_the_newest_record_head_is_refused(self):
+        bodies = self.round_records()
+        for reviewed in (self.R2, self.R1, "2e" * 20):
+            with self.subTest(reviewed=reviewed):
+                rc, out, err = self.run_args(*self.fix_argv(reviewed), host=self.chain_pulls(*bodies))
+                self.assertEqual(rc, 2, f"a fix check starting at {reviewed[:9]}, not the newest record's head, was not refused:\n" + out + err)
+                self.assertEqual(out, "", "a refused fix check printed to stdout")
+                self.assertIn("--fix-check", err, "the refusal does not name --fix-check")
+                self.assertNotIn("Traceback", err)
+
+    def test_a_second_fix_verifier_chained_after_a_passing_fix_verifier_is_accepted(self):
+        first_live = "ca" * 20  # the head the first fix check was written for; the second fix check's fix diff starts here
+        first = record_text(head=first_live, rounds=(), fix=(fix_verifier_line(head=self.R3),), guard="yes")
+        host = self.chain_pulls(*self.round_records(), first, commits={self.FIX: [first_live]})
+        rc, out, err = self.run_args(*self.fix_argv(first_live), host=host)
+        self.assertEqual(rc, 0, "a second fix check after a passing fix check was refused:\n" + out + err)
+        self.assertEqual(record_state(self, posted_body(self, out), head=self.FIX), "done", "the printed second fix check does not read done")
+
+class ReviewPastHead(ReviewEnv):
+    """`merge <pr> --review-record --head SHA` takes an earlier head of the pull request, one the pull request had before its live head (decision
+    pr-review-record). A head the pull request never had is still refused. The live head's own record is the control for both cases."""
+
+    def host_at(self, fx, live):
+        """Pull request 7 at `live`, with the repo's commits, trees and compares as fx gives them, and no review comments."""
+        return PullsHost([batch_pull(7, live)], {}, commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+
+    def record_argv(self, head):
+        """The argv of a first-round PASS record for pull request 7 at `head`."""
+        return ("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", head, "--round", "1:reviewer:sonnet:PASS")
+
+    def test_a_record_for_an_earlier_head_of_the_pull_request_is_accepted(self):
+        # fixed is a commit the pull request had before plain, its live head: plain is a commit on fixed. The record is for fixed.
+        fx = self.real_commits()
+        host = self.host_at(fx, fx.plain)
+        rc, out, err = self.run_args(*self.record_argv(fx.plain), host=host)
+        self.assertEqual(rc, 0, "control: the live head's own record was refused:\n" + out + err)
+        rc, out, err = self.run_args(*self.record_argv(fx.fixed), host=host)
+        self.assertEqual(rc, 0, "a record for an earlier head of the pull request was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["head"], fx.fixed)
+
+    def test_a_record_for_a_head_the_pull_request_never_had_is_refused(self):
+        # feat is a branch off seed. Its commit is in no history of plain, so the pull request never had it.
+        fx = self.real_commits()
+        host = self.host_at(fx, fx.plain)
+        rc, out, err = self.run_args(*self.record_argv(fx.plain), host=host)
+        self.assertEqual(rc, 0, "control: the live head's own record was refused:\n" + out + err)
+        rc, out, err = self.run_args(*self.record_argv(fx.feat), host=host)
+        self.assertNotEqual(rc, 0, "a record for a head the pull request never had was accepted:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused record still printed a record")
+        self.assertIn("the pull request head is", err, "the refusal does not name the head mismatch:\n" + err)
+        self.assertNotIn("Traceback", err)
+
+    def test_a_head_that_main_holds_is_refused_as_a_past_head(self):
+        # after_main is a commit on main's second commit, which main holds. The walk from the live head reaches main2 before any other commit, and
+        # main holds main2, so the walk stops there: main2 is no past head of the pull request.
+        fx = self.real_commits()
+        after_main = self.git_commit(fx.main2, {"g.txt": "g\n"})
+        host = PullsHost([batch_pull(7, after_main)], {}, commits={**fx.parents, after_main: [fx.main2]}, trees=fx.trees, compares=fx.on_main)
+        rc, out, err = self.run_args(*self.record_argv(after_main), host=host)
+        self.assertEqual(rc, 0, "control: the live head's own record was refused:\n" + out + err)
+        rc, out, err = self.run_args(*self.record_argv(fx.main2), host=host)
+        self.assertNotEqual(rc, 0, "a record for a head main holds was accepted as a past head:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused record still printed a record")
+        self.assertIn("not the reviewed", err, "the refusal does not name the head mismatch:\n" + err)
+        self.assertNotIn("Traceback", err)
 
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
@@ -16295,6 +17134,62 @@ class ReviewedList(ReviewEnv):
         _, line = self.rollup_line({REVIEW_OLD_HEAD: [batch_run("all-jobs-passed", "completed", "success")]})
         self.assertIn("no lint", line, "a green rollup on another head must not clear the live head: " + line)
         self.assertNotIn("lint skipped", line, line)
+
+    MID_HEAD = "3e" * 20  # the head of a record that a later fix verifier starts from
+
+    def chain_listing(self, *bodies):
+        """The `--reviewed` listing of the stored chain `bodies`, oldest first, at REVIEW_HEAD with its lane lint PASS, so a done record reads done."""
+        comments = [review_comment(i, 7, body) for i, body in enumerate(bodies, 1)] + [lint_of(7, REVIEW_HEAD)]
+        return self.listing([batch_pull(7, REVIEW_HEAD)], comments)
+
+    def test_a_fix_verifier_only_record_does_not_read_done_over_an_earlier_design_line_fail(self):
+        # A stored chain: an earlier record whose last design reviewer line is FAIL or PARTIAL, then a record with no round line whose fix verifier
+        # PASSes at that record's head. The newest record reads done on its own (scope), so the earlier design hold must keep the line from done.
+        newest = record_text(head=REVIEW_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="PASS"),))
+        self.assertEqual(record_state(self, newest, head=REVIEW_HEAD), "done", "scope: the newest record alone must read done")
+        for verdict in ("FAIL", "PARTIAL"):
+            with self.subTest(verdict=verdict):
+                earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, PASS", f"Round 1: design-reviewer, opus, {verdict}"))
+                self.assertEqual(record_state(self, earlier, head=REVIEW_OLD_HEAD), "open", "scope: the earlier record must read open on its own")
+                host, rc, out, err = self.chain_listing(earlier, newest)
+                self.assertEqual(rc, 0, out + err)
+                self.assertNotRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ",
+                                    f"the newest record read done over an earlier design reviewer {verdict}, so the design hold was dropped")
+
+    def test_a_fix_verifier_only_record_reads_done_over_an_earlier_design_line_pass_or_none(self):
+        # Control for the chain above: the earlier record's last design reviewer line is PASS, or it holds none, so the newest record reads done.
+        newest = record_text(head=REVIEW_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="PASS"),))
+        cases = (("PASS", ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, PASS")),
+                 ("absent", ("Round 1: reviewer, sonnet, PASS",)))
+        for label, rounds in cases:
+            with self.subTest(design_line=label):
+                earlier = record_text(head=REVIEW_OLD_HEAD, rounds=rounds)
+                host, rc, out, err = self.chain_listing(earlier, newest)
+                self.assertEqual(rc, 0, out + err)
+                self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+
+    def test_a_design_line_fail_holds_through_two_fix_verifier_only_records(self):
+        # The hold passes each record with no design reviewer line, not only the one before the newest. The middle record is a fix verifier on the
+        # earlier head, and the newest is a fix verifier on the middle head. Alone, each of the two reads done (scope).
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL"))
+        middle = record_text(head=self.MID_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="PASS"),))
+        newest = record_text(head=REVIEW_HEAD, rounds=(), fix=(fix_verifier_line(head=self.MID_HEAD, verdict="PASS"),))
+        self.assertEqual(record_state(self, middle, head=self.MID_HEAD), "done", "scope: the middle record alone must read done")
+        self.assertEqual(record_state(self, newest, head=REVIEW_HEAD), "done", "scope: the newest record alone must read done")
+        host, rc, out, err = self.chain_listing(earlier, middle, newest)
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ",
+                            "the newest record read done over an earlier design reviewer FAIL, through a fix verifier-only record")
+
+    def test_a_later_design_line_pass_ends_the_hold_through_fix_verifier_only_records(self):
+        # Control for the chain above: a full record at the middle head whose design reviewer PASSes ends the hold, so the newest reads done.
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL"))
+        passed = record_text(head=self.MID_HEAD, rounds=("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, PASS"))
+        newest = record_text(head=REVIEW_HEAD, rounds=(), fix=(fix_verifier_line(head=self.MID_HEAD, verdict="PASS"),))
+        self.assertEqual(record_state(self, passed, head=self.MID_HEAD), "done", "scope: the middle record alone must read done")
+        host, rc, out, err = self.chain_listing(earlier, passed, newest)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
 
 class ReleaseHost(PullsHost):
     """A PullsHost for `merge --release-check`. A number in `closed` answers `pulls/<n>` as a closed pull request (the open list leaves it out),
@@ -16646,6 +17541,22 @@ class ReleaseCheck(ReviewEnv):
         self.assert_fails_alone(self.line_of(lines, 8), 8, rf"the record is for head {fx.fixed[:9]}")
         self.assertEqual(self.line_of(lines, 7), "#7 PASS", err)
         self.assertEqual(rc, 1, err)
+
+    def test_check_2_a_fix_verifier_only_record_after_an_earlier_design_fail_fails_the_release_check(self):
+        # Catches: release_check reading the newest record alone, so a record with no round line reads done over the design reviewer FAIL of an
+        # earlier record, which review_state holds open. Control: the same pair with the design reviewer PASS passes, so the FAIL is the one reason.
+        fix = fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="PASS")
+        newest = record_text(head=self.head(), rounds=(), fix=(fix,))
+        self.assertEqual(record_state(self, newest, head=self.head()), "done", "scope: the newest record alone must read done at the live head")
+        for design in ("PASS", "FAIL"):
+            with self.subTest(design=design):
+                earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, PASS", f"Round 1: design-reviewer, opus, {design}"))
+                rc, lines, err, _ = self.release([7], comments=[review_comment(1, 7, earlier), review_comment(2, 7, newest)])
+                if design == "PASS":
+                    self.assertEqual((rc, lines), (0, ["#7 PASS"]), err)
+                else:
+                    self.assert_fails_alone(self.line_of(lines, 7), 7, r"design reviewer")
+                    self.assertEqual(rc, 1, err)
 
     # Check 3: the newest record is unedited
 

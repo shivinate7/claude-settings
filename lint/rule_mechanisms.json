@@ -241,7 +241,7 @@
       "mechanism": {
         "kind": "check",
         "ref": "merge/merge.py",
-        "test": "merge/test_merge.py::GhHalf.test_a_red_main_run_read_through_gh_refuses_the_merge"
+        "test": "merge/test_merge.py::RedMainBrake.test_a_revert_merged_with_its_tree_proven_lifts_a_red_main"
       }
     },
     "git-never-discard-output": {
