@@ -3192,6 +3192,9 @@ class RestatesRuleFiles(RestatesSteps, unittest.TestCase):
         rel = kind_path("rules") + "/merge.md"
         self.assert_refused(self.child("- " + grant_line(), rel=rel), rel + ":1")
 
+    def test_a_copy_in_a_skill_file_is_not_read_by_restates(self):  # the aligned scope is not this group's: no file read
+        self.assert_passes(self.child("- " + grant_line(), rel="skills/x/SKILL.md"), files=0)
+
     def test_an_unreadable_docs_rules_file_is_unknown(self):
         repo = self.write_unreadable(Repo(self), "docs/rules/bad.md")
         code, out, err = repo.probe("restates")
@@ -3361,7 +3364,7 @@ class AlignedSteps:
         code, out, err = self.probe_pr(repo, **kw)
         if files is not None:
             self.assertIn("in shape - %d rule file(s) read" % files, head(out),
-                          "the probe did not read %d rule file(s) first: %s%s" % (files, out, err))
+                          "the verdict line is not 'in shape - %d rule file(s) read': %s%s" % (files, out, err))
         self.assertTrue(head(out).startswith("aligned: in shape"), "the PR is refused or not read: %s%s" % (out, err))
         self.assertEqual(code, 0, "the verdict is in shape but the exit is not 0: %s%s" % (out, err))
 
@@ -3395,6 +3398,11 @@ class AlignedRecord(AlignedSteps, unittest.TestCase):
         base, where = self.cited()
         repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
         self.assert_refused(repo, where, ALIGNED_ROUND, "Rules checked:", body="")
+
+    def test_a_refusal_names_the_re_read_remedy_and_the_rules_checked_line(self):  # red on ae13fcab: no remedy named re-read
+        base, where = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, where, "re-read", "clean what rotted", "Rules checked:", body="")
 
     def test_a_citing_unit_change_without_its_record_is_refused(self):  # item 2, the reverse direction
         base, where = self.cited()
@@ -3526,7 +3534,15 @@ class AlignedScopeSkillsAgents(AlignedSteps, unittest.TestCase):
         text, _ = para_file([ALIGNED_PARA_FIRST, ALIGNED_PARA_CITE])
         base = {ALIGNED_SKILL: text, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38)}
         edited, _ = para_file(["Run the check now.", ALIGNED_PARA_CITE])
-        self.assert_clear(self.pr(base, {ALIGNED_SKILL: edited}))
+        self.assert_clear(self.pr(base, {ALIGNED_SKILL: edited}), files=1)
+
+    def test_an_edit_to_the_last_sentence_of_a_one_line_skill_paragraph_is_in_shape(self):
+        # Three sentences on one line: the citing one is in the middle and is not edited. Only the last one changes.
+        line = "Run the check first. Decision `%s` holds the rule. Then tidy up." % ALIGNED_ROUND
+        text, _ = para_file([line])
+        base = {ALIGNED_SKILL: text, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38)}
+        edited, _ = para_file([line.replace("Then tidy up.", "Then tidy up now.")])
+        self.assert_clear(self.pr(base, {ALIGNED_SKILL: edited}), files=1)
 
     def test_an_edit_to_the_citing_sentence_alone_in_a_skill_paragraph_is_refused(self):  # green control
         text, first = para_file([ALIGNED_PARA_FIRST, ALIGNED_PARA_CITE])
@@ -3537,7 +3553,7 @@ class AlignedScopeSkillsAgents(AlignedSteps, unittest.TestCase):
 
     def test_an_unclosed_fence_in_an_untouched_skill_file_does_not_make_a_docs_only_pr_unknown(self):
         base = {"skills/u/SKILL.md": "```\n- an unclosed fence in a skill file\n", "docs/notes.md": "Old note.\n"}
-        self.assert_clear(self.pr(base, {"docs/notes.md": "New note.\n"}))
+        self.assert_clear(self.pr(base, {"docs/notes.md": "New note.\n"}), files=1)
 
 
 class AlignedScanner(AlignedSteps, unittest.TestCase):
