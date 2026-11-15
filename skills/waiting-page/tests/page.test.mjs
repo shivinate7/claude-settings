@@ -1237,6 +1237,70 @@ for (const width of [430, 390, 360]) {
   });
 }
 
+// ---------------------------------------------------------------- long unbroken words in the Questions tab
+
+// A word with no space or hyphen has no break point, so it must wrap inside its box or it widens the page. Each fixture puts one such
+// word in one place the Questions tab sets text in a box: the Lands in line (.dest), a thread reply in an answered line (.thread .reply)
+// and an option's trade-off text (.opt .tr).
+const UNBROKEN = "x".repeat(90);
+const WRAP_DEST = mk("wrap-dest", 41, { home: "PR #2906; step " + UNBROKEN });
+const WRAP_TR = mk("wrap-tr", 42, { options: [{ ...opt("a", "Red"), gain: UNBROKEN }, opt("b", "Blue")] });
+// A closed item is one line in the Answered section, folded until Show answer opens its reply. open() waits for the first item's card,
+// so DECISION stays on the page.
+const WRAP_REPLY = mk("wrap-reply", 43, { status: "closed", closed: "2026-11-09T15:00:00Z", home: "step:ask-phase-out", reply: UNBROKEN });
+// box: the element that holds the word, found by its text, so a page that drops the word fails at the scope check, not as "no overflow".
+const WRAP_LINE = { what: "the Lands in line", items: [WRAP_DEST], box: ".dest" };
+const WRAP_REPLY_CASE = { what: "the thread reply in an answered line", items: [DECISION, WRAP_REPLY], open: WRAP_REPLY, box: "#tier-answered .thread .reply" };
+const WRAP_TRADE = { what: "the option's trade-off text", items: [WRAP_TR], box: ".opt .tr div > span:not(.s)" };
+async function openWrap(t, c, { width = 1280, scheme = "light" } = {}) {
+  const page = await open(t, { items: c.items, viewport: { width, height: 900 }, scheme }); if (!page) return null;
+  if (c.open) {
+    await mustHave(page, `#tier-answered #lrow-${c.open.id}`, `Show answer on the line of No. ${c.open.n}`);
+    await page.click(`#tier-answered #lrow-${c.open.id}`);
+  }
+  return page;
+}
+
+for (const c of [WRAP_LINE, WRAP_REPLY_CASE, WRAP_TRADE]) {
+  for (const width of [360, 390, 430]) {
+    for (const scheme of ["light", "dark"]) {
+      test(`${c.what} with an unbroken 90-character word never widens the Questions tab, at ${width} wide, ${scheme} scheme`, async (t) => {
+        const page = await openWrap(t, c, { width, scheme }); if (!page) return;
+        const box = page.locator(c.box).filter({ hasText: UNBROKEN });
+        assert.equal(await box.count(), 1, `no ${c.what} holds the unbroken word`);
+        const { sw, iw } = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth }));
+        assert.ok(sw <= iw, `${c.what} widens the page to ${sw} px on a ${iw} px screen`);
+      });
+    }
+  }
+}
+
+test("the Lands in line with a 90-character word computes overflow-wrap: anywhere and min-width: 0", async (t) => {
+  const page = await openWrap(t, WRAP_LINE); if (!page) return;
+  await mustHave(page, ".dest", `the Lands in line of No. ${WRAP_DEST.n}`);
+  const cs = await page.locator(".dest").first().evaluate((e) => ({ wrap: getComputedStyle(e).overflowWrap, min: getComputedStyle(e).minWidth }));
+  assert.equal(cs.wrap, "anywhere", `the Lands in line's overflow-wrap is ${cs.wrap}, not anywhere`);
+  assert.equal(cs.min, "0px", `the Lands in line's min-width is ${cs.min}, not 0px`);
+});
+
+test("the thread reply with a 90-character word computes overflow-wrap: anywhere and min-width: 0", async (t) => {
+  const page = await openWrap(t, WRAP_REPLY_CASE); if (!page) return;
+  await mustHave(page, ".thread .reply", `the reply of No. ${WRAP_REPLY.n}`);
+  const cs = await page.locator(".thread .reply").first().evaluate((e) => ({ wrap: getComputedStyle(e).overflowWrap, min: getComputedStyle(e).minWidth }));
+  assert.equal(cs.wrap, "anywhere", `the thread reply's overflow-wrap is ${cs.wrap}, not anywhere`);
+  assert.equal(cs.min, "0px", `the thread reply's min-width is ${cs.min}, not 0px`);
+});
+
+test("the option's trade-off text with a 90-character word computes overflow-wrap: anywhere and min-width: 0", async (t) => {
+  const page = await openWrap(t, WRAP_TRADE); if (!page) return;
+  // Scope first: the one trade-off text that holds the unbroken word, so a page that drops it fails by name.
+  const span = page.locator(".opt .tr div > span:not(.s)").filter({ hasText: UNBROKEN });
+  assert.equal(await span.count(), 1, `no trade-off text holds the unbroken word of No. ${WRAP_TR.n}`);
+  const cs = await span.evaluate((e) => ({ wrap: getComputedStyle(e).overflowWrap, min: getComputedStyle(e).minWidth }));
+  assert.equal(cs.wrap, "anywhere", `the trade-off text's overflow-wrap is ${cs.wrap}, not anywhere`);
+  assert.equal(cs.min, "0px", `the trade-off text's min-width is ${cs.min}, not 0px`);
+});
+
 test("an item that is not a look question never warns about pictures, with or without a named design", async (t) => {
   const plain = mk("not-a-look", 37, { options: LOOK_OPTS.map(({ design, ...o }) => o), pick: "a" });
   const named = mk("names-a-design", 38, { options: LOOK_OPTS, pick: "a" });
