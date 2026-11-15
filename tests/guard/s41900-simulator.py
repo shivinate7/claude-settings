@@ -679,6 +679,24 @@ LEASE_SLOT_UDID = {"1": "3553660D-315C-4B9C-8614-039D7A5B637E",     # Duo 1
                    "2": "801F55F4-F666-4C6D-AB04-7DF77C953974",     # Duo 2
                    "pro": "86F9268A-A905-4B82-9BC0-D7EBB682D341"}   # iPhone 18 Pro
 LEASE_DUO1, LEASE_DUO2, LEASE_PRO = LEASE_SLOT_UDID["1"], LEASE_SLOT_UDID["2"], LEASE_SLOT_UDID["pro"]
+def _lease_reuse_key():
+    """The key bin/sim-lease puts on a reuse lease, read from the tool: a rename there changes this value, and the guard
+    (which reads the same constant) still tells a reuse lease from an own-boot one. A missing constant fails here."""
+    import importlib.machinery, importlib.util
+    path = os.path.join(HERE, "..", "bin", "sim-lease")
+    loader = importlib.machinery.SourceFileLoader("sim_lease_key", path)
+    spec = importlib.util.spec_from_loader("sim_lease_key", loader)
+    mod = importlib.util.module_from_spec(spec)
+    keep, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        loader.exec_module(mod)
+    finally:
+        sys.dont_write_bytecode = keep
+    assert isinstance(getattr(mod, "REUSE_KEY", None), str), "bin/sim-lease has no REUSE_KEY"
+    return mod.REUSE_KEY
+
+
+LEASE_REUSE_KEY = _lease_reuse_key()
 LEASE_DECOY = "1A2B3C4D-0000-4000-8000-0000000000D6"  # named "Duo 1", but not Duo 1's UDID: a name match would allow it
 LEASE_PID = os.getpid()    # a live holder for the whole run
 LEASE_OTHER_PID = 4243     # another session's holder, live in the fake ps
@@ -935,7 +953,7 @@ def register_simulator_lease_cases():
     # A reuse lease takes a device that is already booted, so the boot is not this session's. Its record carries the
     # reuse marker, and the marker keeps the lease from allowing a boot. The own-boot lease beside it, the same slot
     # and device without the marker, still allows one.
-    reused = dict(lease_entry("1"), reuse=LEASE_DUO1)
+    reused = dict(lease_entry("1"), **{LEASE_REUSE_KEY: LEASE_DUO1})
     lease_launch("lease: a reuse lease of Duo 1 does not allow a launch of Duo 1 by name", "deny",
                  lease_fixture("reuse_slot1", rows, live, [reused]), device=duo1, rule=LEASE_RULE)
     lease_launch("lease: a reuse lease of Duo 1 does not allow a launch of Duo 1 by udid", "deny",

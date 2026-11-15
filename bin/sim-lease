@@ -72,6 +72,9 @@ SLOT2_5MIN = 60.0  # slot 2 needs the 5-minute load under this
 # The device each slot boots: the one home of the device IDs (skills/ios-apps/SKILL.md, Phone simulators). The guard
 # reads it to match a lease to the device an MCP launch names (hooks/guard.py sim_boot_refusal); `take --udid` prints
 # it, so bin/sim-test keeps no UDID.
+# The key a reuse lease carries (the UDID of the booted device it took). The one home of the name: the guard reads it from
+# here (hooks/guard.py), so a rename here cannot leave the guard checking a stale copy.
+REUSE_KEY = "reuse"
 SLOT_UDID = {
     "1": "3553660D-315C-4B9C-8614-039D7A5B637E",    # Duo 1
     "2": "801F55F4-F666-4C6D-AB04-7DF77C953974",    # Duo 2
@@ -223,9 +226,9 @@ def lease_of_entry(entry, slot, udid, now):
     """The lease record for a queue entry granted slot: the entry without its queue-only fields, with slot, device UDID (udid
     is the reused device, None for an own boot) and the grant time. A reuse lease keeps `reuse`, set to the UDID it got
     (one of several when the entry listed more), so a reader tells it from an own-boot lease."""
-    rec = {k: v for k, v in entry.items() if k not in ("reuse", "reuse_any", "seen")}
+    rec = {k: v for k, v in entry.items() if k not in (REUSE_KEY, "reuse_any", "seen")}
     if udid:
-        rec["reuse"] = udid
+        rec[REUSE_KEY] = udid
     return dict(rec, slot=slot, udid=udid or SLOT_UDID[slot], granted=stamp(now))
 
 
@@ -236,7 +239,7 @@ def first_fresh(queue, now, skip):
 
 def reuse_udids(entry):
     """The devices a reuse entry may take, in the order given: `reuse_any` when several, else the one `reuse`."""
-    return entry.get("reuse_any") or ([entry["reuse"]] if entry.get("reuse") else [])
+    return entry.get("reuse_any") or ([entry[REUSE_KEY]] if entry.get(REUSE_KEY) else [])
 
 
 def decide(data, entry, load, now, skip):
@@ -246,7 +249,7 @@ def decide(data, entry, load, now, skip):
     if first is None or first["pid"] != entry["pid"]:
         return None
     held = {e["slot"] for e in data["leases"]}
-    if entry.get("reuse"):
+    if entry.get(REUSE_KEY):
         # A reuse skips the load bars: the phone is booted already. It waits only for its own slot, and a pro excludes the rest.
         # With several devices it takes the first whose slot is free: the one grant logic for one or many.
         for udid in reuse_udids(entry):
@@ -304,7 +307,7 @@ def cmd_take(args):
         return 2
     entry = {"pid": pid, "start": started, "device": args.device, "session": session}
     if args.reuse:
-        entry["reuse"] = args.reuse[0]  # the first, a string: a reader of one reuse (queue_state in the tests) keeps working
+        entry[REUSE_KEY] = args.reuse[0]  # the first, a string: a reader of one reuse (queue_state in the tests) keeps working
         if len(args.reuse) > 1:
             entry["reuse_any"] = list(args.reuse)
     # A TERM or INT while waiting leaves through the finally block, which drops the queue place.

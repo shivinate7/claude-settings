@@ -5580,7 +5580,7 @@ def sim_lease_holds(session: str, udids: list) -> bool:
         lease = importlib.util.module_from_spec(spec)
         loader.exec_module(lease)
         held = {lease.SLOT_UDID[e["slot"]].casefold() for e in lease.live_leases()
-                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID and not e.get("reuse")}
+                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID and not e.get(lease.REUSE_KEY)}
     except Exception:
         return False
     finally:

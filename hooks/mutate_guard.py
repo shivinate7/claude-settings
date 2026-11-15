@@ -3189,8 +3189,8 @@ MUTATIONS = [
      "lease: an MCP launch naming the shut-down device in lowercase is refused by the lease"),
     # The lease allow (ruling 5): one mutant per arm of guard.sim_lease_holds and of bin/sim-lease's read.
     ("simulator-boot-lease: the lease's session is not compared",
-     '                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID and not e.get("reuse")}',
-     '                if e.get("slot") in lease.SLOT_UDID and not e.get("reuse")}', "guard",
+     '                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID and not e.get(lease.REUSE_KEY)}',
+     '                if e.get("slot") in lease.SLOT_UDID and not e.get(lease.REUSE_KEY)}', "guard",
      "lease: another session's live slot 1 lease on Duo 1 does not allow this session", "posix"),
     ("simulator-boot-lease: an empty session may match an empty lease session",
      '    if not session or not udids:\n        return False',
@@ -3241,7 +3241,7 @@ MUTATIONS = [
      '"pro": "86F9268A-A905-4B82-9BC0-D7EBB682D342",', "simlease",
      "lease allow: this session's live pro lease", "posix"),
     ("simulator-boot-lease: a reuse lease allows a boot of its device",
-     ' and e.get("slot") in lease.SLOT_UDID and not e.get("reuse")}',
+     ' and e.get("slot") in lease.SLOT_UDID and not e.get(lease.REUSE_KEY)}',
      ' and e.get("slot") in lease.SLOT_UDID}', "guard",
      "lease: a reuse lease of Duo 1 does not allow a launch of Duo 1 by name", "posix"),
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
