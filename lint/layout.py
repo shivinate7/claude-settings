@@ -286,9 +286,8 @@ WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta")  # what the
 
 def artifacts(root):
     """[{id, role, links, collections, export}] from the "artifacts" key of `root`'s extras file, in order; []
-    for a repo with no extras file or no key. `collections` and `export` are filled in: the waiting-page role exports
-    the five waiting collections to the waiting-data folder of the record branch, any other role needs its own
-    `collections` and exports to `artifacts/<id>/`. A page-only entry (any other role, `"collections": []`) exports its page
+    for a repo with no extras file or no key. `export` is required: the entry's git path, or false. `collections` is
+    filled in for the waiting-page role, as the five waiting collections; any other role needs its own `collections`. A page-only entry (any other role, `"collections": []`) exports its page
     and files and no database; an empty list is refused on the waiting-page role, and a missing key on any other. An entry with `"export": false` (never the waiting-page role) is held and never exported: it needs
     no collections and reads with `export` False and `collections` []. LayoutError, naming the entry by its id, for an email as an account label, a
     repeated id, an id over 32 characters, a link url that is no artifact link, an entry-level `url` or `account`, a second waiting-page role or an unsafe path."""
