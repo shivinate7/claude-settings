@@ -24,6 +24,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 import session_role  # noqa: E402  the one home of the role file (hooks/session_role.py)
+import shared_names  # noqa: E402  the one home of the merge role read (hooks/shared_names.py read_merge_role)
 import guard_merge  # noqa: E402  the guard's local roadmap proof, read from the role file (hooks/guard_merge.py)
 
 RUN_FOLDER = _test_temp.run_folder()
@@ -265,22 +266,22 @@ class LocalRoleProof(SessionRoleCase):
 
 
 class MergeRoleFault(SessionRoleCase):
-    """merge/merge.py read_merge_role: when the local role reader raises, the merge reads no role, and the read does not crash.
+    """shared_names.read_merge_role, which merge/merge.py imports: when the local launcher read raises, the merge reads no role, and the read does not crash.
     The case lives here because the mutation run selects the hooks suites for merge/merge.py, not merge/test_merge.py."""
 
     def test_the_merge_role_read_gives_no_role_when_the_role_reader_raises(self):
         sys.path.insert(0, os.path.join(HERE, "..", "merge"))
-        import merge as merge_tool  # noqa: E402  merge/merge.py, the merge tool's own reader
+        import merge as merge_tool  # noqa: E402  merge/merge.py, which imports the merge role read from shared_names
         with mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": SID}), \
-                mock.patch.object(session_role, "own_role", side_effect=RuntimeError("injected")) as reader:
-            # the local branch runs only with no cloud id; a cloud id reads its own file and never calls the role reader
+                mock.patch.object(shared_names, "read_launcher_record", side_effect=RuntimeError("injected")) as reader:
+            # the local branch runs only with no cloud id; a cloud id reads its own file and never calls the launcher read
             os.environ.pop("CLAUDE_CODE_REMOTE", None)
             os.environ.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
             try:
                 role = merge_tool.read_merge_role()
             except Exception as e:  # a crash in the fallback is a failed assert here, not an error
                 self.fail("a role reader that raised crashed the merge's role read: %r" % (e,))
-        self.assertTrue(reader.called, "the role read never reached the local role reader, so the case proved nothing")
+        self.assertTrue(reader.called, "the role read never reached the local launcher read, so the case proved nothing")
         self.assertIsNone(role, "a role reader that raised gave the merge a role")
 
 
