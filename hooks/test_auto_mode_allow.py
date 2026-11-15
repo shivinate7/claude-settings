@@ -145,9 +145,10 @@ RELAYED_CLOSED = (("closed item", "a closed item"), ("routed close", "routed clo
 # inside the parenthesis. A reversed clause or an either/or clause refuses a routed close, the opposite of the ruling.
 RELAYED_CLOSED_ORDER = r"closed item that is neither a routed close.*lane.*home.*lastAnswer\.at.*nor an arbiter overturn"
 # --as-lane sits inside the routed-close parenthesis, after `lastAnswer.at` and before "nor an arbiter overturn",
-# where the check that page_grant.routed_close runs with the receiver's own lane is named.
+# and it must be equal to that `lane`: the check that page_grant.routed_close runs with the receiver's own lane
+# (ruling own-844-a). "for any lane" would let a routed close from another lane through.
 RELAYED_CLOSED_AS_LANE_ORDER = (r"closed item that is neither a routed close.*lane.*home.*lastAnswer\.at"
-                                r".*--as-lane.*nor an arbiter overturn")
+                                r".*--as-lane.*equal to that `lane`.*nor an arbiter overturn")
 # Each term the Relayed Grant entry's Covers text names for its one settings change.
 RELAYED_SETTINGS_COVERS = (("one settings change", "one settings change"),
                            ("label names the settings file and entry", r"label.*?settings file.*?entry"),
@@ -487,8 +488,8 @@ class RelayedGrantIsAllowed(unittest.TestCase):
         clause = never_covers(allow_entry(RELAYED))
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Grant entry")
         self.assertRegex(clause, "(?i)" + RELAYED_CLOSED_AS_LANE_ORDER,
-                         "Never covers does not put --as-lane inside the routed close, after lastAnswer.at and "
-                         "before nor an arbiter overturn")
+                         "Never covers does not say the check ran with --as-lane equal to that `lane`, inside the "
+                         "routed close, after lastAnswer.at and before nor an arbiter overturn")
 
     def test_never_covers_wins_over_covers(self):
         entry = allow_entry(RELAYED)
