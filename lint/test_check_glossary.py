@@ -13,7 +13,8 @@ for its slug.
 Each case builds a temp tree: a copy of the module, the rule-audit module it reads rule markers
 from, and the files it checks. The diff cases also make a temp git repo and set
 refs/remotes/origin/main, the base the script diffs against. GLOSSARY_UNDER_TEST overrides the
-module path.
+module path. The installed-copy cases run the check from folders shaped as install.sh lands them: a
+copy in a home's .claude/lint (cloud), or a symlink per file into the repo (local).
 """
 import importlib.util
 import os
@@ -27,9 +28,23 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
-MODULE = os.environ.get("GLOSSARY_UNDER_TEST") or os.path.join(HERE, "check_glossary.py")
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+MODULE =os.environ.get("GLOSSARY_UNDER_TEST") or os.path.join(HERE, "check_glossary.py")
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
+
+RUN_FOLDER = None  # this run's folder: every temp tree of this file lives under it (test-temp-standard)
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+
+
+def tearDownModule():
+    if RUN_FOLDER and os.path.isdir(RUN_FOLDER):
+        tracked_tree.rm_tree(RUN_FOLDER)  # teardown removes the run folder
+
 
 CLAUDE_MD = "# Rules\n\nOne rule.<!-- rule:one-rule -->\n"
 HEAD = "# Glossary\n\n## Terms\n\n| Term | Meaning | Home | Not |\n|---|---|---|---|\n"
@@ -41,7 +56,7 @@ ROWS = ("| handoff | A session's notes file. | `docs/handoff.md` | `handover` |\
 class Fixture(unittest.TestCase):
     def setUp(self):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_glossary.py")
-        self.tree = tempfile.mkdtemp(prefix="gls_")
+        self.tree = tempfile.mkdtemp(dir=RUN_FOLDER, prefix="gls_")
         self.addCleanup(tracked_tree.rm_tree, self.tree)
         tracked_tree.copy_tracked(self.tree, "lint", "hooks")  # rule_audit.py and the check's other imports
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_glossary.py"))
@@ -55,12 +70,13 @@ class Fixture(unittest.TestCase):
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
 
-    def run_check(self, *args, ci=False):
+    def run_check(self, *args, ci=False, script=None, cwd=None, extra_env=None):
         env = {k: v for k, v in os.environ.items() if k != "CI"}
         if ci:
             env["CI"] = "true"
-        r = subprocess.run([sys.executable, os.path.join(self.tree, "lint", "check_glossary.py"), *args],
-                           cwd=self.tree, capture_output=True, encoding="utf-8", env=env)
+        env.update(extra_env or {})
+        r = subprocess.run([sys.executable, script or os.path.join(self.tree, "lint", "check_glossary.py"), *args],
+                           cwd=cwd or self.tree, capture_output=True, encoding="utf-8", env=env)
         return r.returncode, r.stdout + r.stderr
 
     def git(self, *args):
@@ -1112,6 +1128,121 @@ def plural_forms(word):
     if word.endswith("ies"):
         out.add(word[:-3] + "y")
     return out
+
+
+class InstalledRootTests(Fixture):
+    """The check run the way a session runs it: from an installed copy, never from the repo's own lint/ folder.
+
+    install.sh (land_dir, put_file) lands each shipped file in ~/.claude/lint and ~/.claude/hooks: a plain copy
+    for a cloud session, a symlink into the repo for a local one. The check must read the repo it runs in. In the
+    installed shape its own folder is ~/.claude, which holds no GLOSSARY.md.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.base_repo()  # the fixture is a git repo with origin/main as its base, as in a session
+        self.home = tempfile.mkdtemp(dir=RUN_FOLDER, prefix="home_")  # outside the repo, as ~ is
+        self.addCleanup(tracked_tree.rm_tree, self.home)
+        self.installed = os.path.join(self.home, ".claude", "lint", "check_glossary.py")
+        self.repo_copy = os.path.join(self.tree, "lint", "check_glossary.py")
+
+    def install_copy(self):
+        """Cloud shape: a plain copy of each shipped folder."""
+        shutil.copytree(os.path.join(self.tree, "lint"), os.path.join(self.home, ".claude", "lint"))
+        shutil.copytree(os.path.join(self.tree, "hooks"), os.path.join(self.home, ".claude", "hooks"))
+
+    def install_links(self):
+        """Local shape: one symlink per file, never a link to a folder."""
+        try:
+            for folder in ("lint", "hooks"):
+                dest = os.path.join(self.home, ".claude", folder)
+                os.makedirs(dest)
+                for name in os.listdir(os.path.join(self.tree, folder)):
+                    src = os.path.join(self.tree, folder, name)
+                    if os.path.isfile(src):
+                        os.symlink(src, os.path.join(dest, name))
+        except (OSError, NotImplementedError):
+            self.skipTest("the file system refuses symlinks")
+
+    def outside_repo(self):
+        """A folder with no repo above it, and the env that stops git from looking above the run folder."""
+        cwd = tempfile.mkdtemp(dir=RUN_FOLDER, prefix="cwd_")
+        self.addCleanup(tracked_tree.rm_tree, cwd)
+        return cwd, {"GIT_CEILING_DIRECTORIES": os.path.dirname(cwd)}
+
+    @staticmethod
+    def spellings(path):
+        """A path as a message may print it: as given, its real path (macOS /private/var), and with / separators."""
+        forms = set()
+        for p in (path, os.path.realpath(path)):
+            forms.update((p, p.replace(os.sep, "/")))
+        return forms
+
+    def test_cloud_copy_run_from_a_repo_folder_reads_the_repo_glossary(self):
+        self.install_copy()
+        self.assertFalse(os.path.islink(self.installed), "scope: the cloud shape is a copy, not a link")
+        self.assertFalse(os.path.exists(os.path.join(self.home, ".claude", "GLOSSARY.md")),
+                         "scope: a GLOSSARY.md sits beside the installed copy")
+        docs = os.path.join(self.tree, "docs")  # under the repo: the root is the repo's top, not this folder
+        code, out = self.run_check("docs/notes.md", script=self.repo_copy, cwd=docs)
+        self.assertEqual(code, 0, "control: the repo's own copy must pass from a repo folder\n" + out)
+        code, out = self.run_check("docs/notes.md", script=self.installed, cwd=docs)
+        self.assertNotIn("Traceback", out, "the installed copy did not start\n" + out)
+        self.assertNotIn("cannot be read", out, "the installed copy did not read the repo's GLOSSARY.md\n" + out)
+        self.assertEqual(code, 0, out)
+
+    def test_cloud_copy_flags_a_not_name_from_the_repo_glossary(self):
+        self.install_copy()
+        code, out = self.run_check("docs/handover.md", script=self.repo_copy)
+        self.assertEqual(code, 1, "control: the repo's own copy must flag the not name\n" + out)
+        self.assertIn("docs/handover.md", out, "control: the repo's own copy must name the path\n" + out)
+        code, out = self.run_check("docs/handover.md", script=self.installed)
+        self.assertNotIn("Traceback", out, "the installed copy did not start\n" + out)
+        self.assertNotIn("cannot be read", out, "the installed copy did not read the repo's GLOSSARY.md\n" + out)
+        self.assertEqual(code, 1, out)
+        self.assertIn("docs/handover.md", out, "the installed copy did not apply the repo glossary's not name\n" + out)
+
+    def test_local_symlinked_copy_from_a_non_repo_folder_reads_the_repo_glossary(self):
+        self.install_links()
+        cwd, env = self.outside_repo()
+        self.assertTrue(os.path.islink(self.installed), "scope: the local shape is a symlink into the repo")
+        self.assertFalse(os.path.exists(os.path.join(self.home, ".claude", "GLOSSARY.md")),
+                         "scope: a GLOSSARY.md sits beside the installed copy")
+        code, out = self.run_check("docs/notes.md", script=self.repo_copy, cwd=cwd, extra_env=env)
+        self.assertEqual(code, 0, "control: the repo's own copy must pass from a non-repo folder\n" + out)
+        code, out = self.run_check("docs/notes.md", script=self.installed, cwd=cwd, extra_env=env)
+        self.assertNotIn("Traceback", out, "the installed copy did not start\n" + out)
+        self.assertNotIn("cannot be read", out, "the installed copy did not read the repo's GLOSSARY.md\n" + out)
+        self.assertEqual(code, 0, out)
+
+    def test_no_glossary_anywhere_fails_and_names_the_path_it_tried(self):
+        self.install_copy()
+        cwd, env = self.outside_repo()
+        tried = os.path.join(self.home, ".claude", "GLOSSARY.md")
+        self.assertFalse(os.path.exists(tried), "scope: a GLOSSARY.md sits beside the installed copy")
+        self.assertFalse(os.path.exists(os.path.join(cwd, "GLOSSARY.md")), "scope: a GLOSSARY.md sits in the cwd")
+        code, out = self.run_check("docs/notes.md", script=self.repo_copy, cwd=cwd, extra_env=env)
+        self.assertEqual(code, 0, "control: the repo's own copy must pass from a non-repo folder\n" + out)
+        code, out = self.run_check("docs/notes.md", script=self.installed, cwd=cwd, extra_env=env)
+        self.assertNotIn("Traceback", out, "the installed copy did not start\n" + out)
+        self.assertEqual(code, 1, "the check passed with no glossary anywhere\n" + out)
+        self.assertIn("FAIL", out, "exit 1 without a FAIL line\n" + out)
+        self.assertTrue(any(form in out for form in self.spellings(tried)),
+                        "the FAIL line does not name the path it tried\n" + out)
+
+    def test_cloud_copy_checks_the_real_repo_glossary(self):
+        """Full size: the repo's own GLOSSARY.md, read by a cloud copy run from the repo root (the production shape)."""
+        self.install_copy()
+        real = os.path.dirname(HERE)
+        self.assertTrue(os.path.isfile(os.path.join(real, "GLOSSARY.md")), "scope: the repo has no GLOSSARY.md")
+        self.assertFalse(os.path.exists(os.path.join(self.home, ".claude", "GLOSSARY.md")),
+                         "scope: a GLOSSARY.md sits beside the installed copy")
+        code, out = self.run_check("README.md", script=MODULE, cwd=real)
+        self.assertEqual(code, 0, "control: the repo's own copy must pass\n" + out)
+        code, out = self.run_check("README.md", script=self.installed, cwd=real)
+        self.assertNotIn("Traceback", out, "the installed copy did not start\n" + out)
+        self.assertNotIn("cannot be read", out, "the installed copy did not read the repo's GLOSSARY.md\n" + out)
+        self.assertEqual(code, 0, out)
 
 
 class RepoGlossaryTests(unittest.TestCase):
