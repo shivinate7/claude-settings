@@ -1,0 +1,10 @@
+{
+ "id": "own-records-page-fresh-review",
+ "at": "2026-11-14T23:43:00-06:00",
+ "title": "Old drafts with a stale docs/records.md edit get a fresh full review, not a fix-check change",
+ "ruling": "Consultant's pick under own-consultant-speaks-for-owner and the owner's 20:18 CST Nov 14 words (\"Nothing can't be undone don't wait on me\"), not owner-typed. Relayed by the coordinator 23:43 CST Nov 14 (data), quoting the consultant 23:43 CST: answer b on waiting-page item 851 (pick-records-page-clean-merge-tree, rewritten 23:42 CST to the class question). Question: old drafts carry an old edit to docs/records.md, so a merge of main keeps it with no conflict; the records-page guard refuses a page that is not main's, and --fix-check (pr-review-record) refuses a head that edits any path beyond git's own merge result. Option a (the fix-check source gate ignores docs/records.md) widens a shared check against the owner's ruling \"a repo changes to fit a shared tool, never the tool to fit a repo\" and is not taken. Option b, taken: each affected lane posts a fresh full review (rounds 1 to 3 again, no Fix check line; allowed after round 3); the lanes start now, in parallel. Cost: about 25 minutes of three reviewer rounds per affected PR (round times 7.1 to 7.9 min, n=3). ONE-LANE TEST (coordinator to assign): in one lane, restore main's docs/records.md in the draft's branch before the merge and see whether --fix-check passes; if it does, use that route for the rest and report. The lane pick-ack-ruling-2's own override ask (owner-typed override for one commit) is moot under b and was never granted. Reopens if the owner says otherwise. Covered act stays as in own-draft-rebase-lanes: no ready, merge, force push or close by a lane.",
+ "quote": "No always obey the consultant I speak through it and it speaks for me",
+ "source": "Consultant 23:43 CST Nov 14, relayed by the coordinator; filed by triage. Consultant's pick, not owner-typed.",
+ "status": "open",
+ "step": "records-page-before-ready"
+}
