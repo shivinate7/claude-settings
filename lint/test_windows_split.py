@@ -151,6 +151,7 @@ LINUX_SUITES = {
     "python3 lint/test_hook_platform_exit.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 lint/test_check_hook_stubs.py": (None, None),
     "python3 lint/test_check_hook_dup_names.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 lint/test_check_health_map.py": (None, None),
     "python3 lint/test_check_record_slugs.py": (None, None),
     "python3 lint/test_check_red_run.py": (None, None),
     "python3 lint/test_find_copies.py": (NO_MD_SCOPE_CONDITION, None),
