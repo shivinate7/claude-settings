@@ -2460,6 +2460,30 @@ skills_bak7() {
   rm -rf "$h"
 }
 
+# A hand edit of a skill file beside a __pycache__ file is still backed up: the runtime file does not hide the edit.
+skills_bak8() {
+  name="skills_bak8: a hand edit of a skill file beside a __pycache__ file is still backed up under backups/skills/"
+  skills_bak_setup skills_bak8
+  skills_bak_run
+  if [ $rc -ne 0 ]; then bad "$name" "the first install exited $rc: $out"; rm -rf "$h"; return; fi
+  live="$cfg/.cs-current/skills/fresh-prose"
+  if [ ! -f "$live/SKILL.md" ]; then bad "$name" "scope: no live generation skill at $live"; rm -rf "$h"; return; fi
+  mkdir -p "$live/__pycache__" && printf 'bytecode\n' > "$live/__pycache__/x.cpython-311.pyc"
+  printf 'hand edit\n' > "$cfg/skills/fresh-prose/SKILL.md"
+  skills_bak_run
+  bak=$(ls -d "$cfg/backups/skills/"fresh-prose.* 2>/dev/null | head -n1)
+  held=$(ls "$cfg/backups/skills" 2>/dev/null)
+  edited=$(cat "$bak/SKILL.md" 2>/dev/null)
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
+  elif [ -z "$bak" ]; then bad "$name" "no backup of the hand-edited skill under backups/skills/ after the refresh"
+  elif [ "$edited" != "hand edit" ]; then bad "$name" "the backup under $bak does not hold the hand edit"
+  elif [ "$held" != "${bak##*/}" ]; then bad "$name" "backups/skills holds more than the edited skill: $held"
+  elif has_bak "$cfg/skills"; then bad "$name" "skills/ holds a .bak.* entry: $(ls "$cfg/skills")"
+  elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md")" != "v1" ]; then bad "$name" "skills/fresh-prose is not the shipped content after the refresh"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
 # ---- copy-mode case: a fake `ln` that copies instead of linking must not pile up .bak entries
 # across repeated runs. Git Bash's `ln -sfn` on a Windows account without symlink rights makes a
 # real copy, so the next run sees a real file/dir where land_dir()/land_skills_dir() expect a
@@ -6626,6 +6650,7 @@ run skills_bak4
 run skills_bak5
 run skills_bak6
 run skills_bak7
+run skills_bak8
 run copymode_case1
 run backup_case1
 run backup_case2
