@@ -375,6 +375,8 @@ MAIN_STEPS = [
     'Agent push form fixture suite',
     'Skill model rows check',
     'Skill model rows fixture suite',
+    'Project-ops roles check',
+    'Project-ops roles fixture suite',
     'Python 3.9 floor check',
     'Python 3.9 floor fixture suite',
     'No-window spawn check',
