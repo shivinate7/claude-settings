@@ -430,7 +430,7 @@ report (see the park branch below). A `none` answer on this path gets no new opt
 - Changed. A kept answer with no `act: "park"` and a new `at` is a new answer: the owner changed it. Route it again, relay it with the new `at`,
   and rewrite `lastAnswer`.
 - Withdrawn. The owner withdraws a routed answer in chat. The writer then reopens the item (`status` open, `closed` and `lane` dropped with
-  `{"__delete__": true}`, `added` now, a new `n`), deletes `answers/<id>`, and tells the receiver the act is withdrawn. For an older open item, if a kept answer
+  `{"__delete__": true}`, `added` now, a new `n`), deletes `answers/<id>` in the same `batch` call as that update, and tells the receiver the act is withdrawn. For an older open item, if a kept answer
   is gone at the owning session's re-read, the owner withdrew it: the session drops `lane` and nothing else, leaves the item open as unanswered, and tells the receiver.
 - Chat answer. A chat answer closes the item (decision questions-go-to-owner, and the busy-lane rule), so no page answer
   can follow. Steps 2 to 4 skip their delete, and the writer sets `lastAnswer` from it. It has no `answers/<id>`, so
@@ -440,6 +440,7 @@ report (see the park branch below). A `none` answer on this path gets no new opt
 The writer reads each `kept-answer:` line at its wake ("Keep the page on main's code", step 2). The item is closed and its answer is still kept:
 re-read `answers/<id>`, then delete it (pinned to its version). A closed item with `lane` and `lastAnswer` is routed, so no line names it: it stays closed and its answer stays until the done report. The writer reopens it only on a withdraw (see the busy-lane path).
 A closed item with `waits` is named too ("is closed with waits"), since a chat answer can close an item during a wait: when its wait has ended, drop `waits`, then delete `answers/<id>`.
+An item named "is open" has an `answers/<id>` older than its `added`: delete it. The page already shows that item open. An update that bumps `added` deletes the record in the same `batch` call, never in a second call.
 A `kept-answer: unknown` line means that the check did not run: fetch again.
 
 Never-ending wait. The owning session checks the receiver at each turn start while it holds a lane item. It reads every page
@@ -468,7 +469,7 @@ While an item has `waits`, steps 2 to 4 and the busy-lane path never delete `ans
    roadmap upkeep row "page rulings not on their step" checks.
 2. Close the item: `ArtifactData update items/<id> {"status": "closed", "closed": "<now, ISO UTC with a trailing Z>"}`, pinned to the version
    you read (`if_version`). If the close conflicts, the owner marked the item read in the meantime: read it again and retry the close. Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
-   in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The busy-lane path skips this delete until the done report. The page shows a closed
+   in the same update. Delete `answers/<id>` in the same `batch` call as the close, so the answer cannot count for a later item. The busy-lane path skips this delete until the done report. The page shows a closed
    item as one line, with its home and its reply, until the owner marks it read. The page shows `lastAnswer` as the answer on the opened line, and on an item left open (steps 3 and 4) and on a routed closed item (a busy lane).
 3. If the answer is `none` with no clear direction, and you can write new `options`, `recommended` and `why` from the
    note in this same turn, act in this order. A `multi` item's new `recommended` is a list. First ask the chat
@@ -476,14 +477,14 @@ While an item has `waits`, steps 2 to 4 and the busy-lane path never delete `ans
    Do this before the write:
    the earlier chat question still cites the id, and the guard (rule `option-labels-match-chat`) compares the new
    labels to the newest chat question's lines. Then write the new options and set `added` to now. Write `lastAnswer`
-   from the answer in the same update, without `choice`. On an item that carries `shown`, keep every shown option and append the new ones, or open a fresh item. The freeze refuses new options that replace shown ones. Then delete
-   `answers/<id>` (pinned to its version), and leave the item open. Say in the terminal that the item has new
+   from the answer in the same update, without `choice`. On an item that carries `shown`, keep every shown option and append the new ones, or open a fresh item. The freeze refuses new options that replace shown ones. Delete
+   `answers/<id>` (pinned to its version) in the same `batch` call as that update, and leave the item open. Say in the terminal that the item has new
    options. If you cannot write them in this turn,
    close the item (step 2) with a home that names the rework, and add a fresh item when the options are
    ready. A `none` answer with a clear direction never takes this fallback: the busy-lane rule sorts it. An open item never says it is being reworked (guard rule `rework-off-page`). If the note is not
    enough to write the options, ask in the terminal what the owner wants.
-4. If any other answer is not clear, rewrite the item's `context`, write `lastAnswer` from the answer, delete
-   `answers/<id>` (pinned to its version), and leave the item open. Say in the terminal what was not clear.
+4. If any other answer is not clear, rewrite the item's `context` and write `lastAnswer` from the answer; delete
+   `answers/<id>` (pinned to its version) in the same `batch` call as that update, and leave the item open. Say in the terminal what was not clear.
 5. An `overturn` answer: the item's `owner` session reopens the ruling's item in one update to `items/<id>`:
    - `kind` `decision`, `status` `open`, `arbiter` false (the page tests `=== true`; an update merges and cannot drop a field), and `added` now.
    - A new `recommended` and `why`: its own recommendation. Never keep the arbiter's pick and why as the page's
@@ -492,7 +493,7 @@ While an item has `waits`, steps 2 to 4 and the busy-lane path never delete `ans
      "Your stake:" line that states the goal, money, risk, rule or what cannot be undone. The owner-judge
      guard refuses an update with `kind` `decision` and `context` that lacks it.
 
-   Then delete `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.
+   Delete `answers/<id>` (pinned to its version) in the same `batch` call as that update. The ruling's record stands until the new answer is filed.
 
 A parked answer (`answers/park.<id>`, or an item's answer with `act: "park"` under `answers/<item id>`): the writer waits 10 seconds after its `at`, as for an item's answer, so it never routes an act inside the Undo window.
 Then it reads the answer again (`ArtifactData get`). If it is gone, the owner undid or withdrew it: leave the entry, and rule nothing.
