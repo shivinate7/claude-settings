@@ -2,9 +2,11 @@
 # The stable mover's one step. Run in a checkout whose origin is the repo. HEAD_SHA is the commit of a
 # finished main run, RUN_CONCLUSION is that run's conclusion, RUN_EVENT is its event and RUN_PROVEN is "true"
 # when the push skip proved a push run. It moves origin's stable branch to HEAD_SHA only when the run succeeded,
-# the run covers the slow legs (a schedule run, which runs every job, or a push run the push skip proved: a green
-# Linux-only push run does not, owner page item 880, 11:53 CST Nov 15), HEAD_SHA is on origin's main, and HEAD_SHA
-# descends from stable (a fast-forward). GH_TOKEN, when set, authenticates the push; a local origin needs none.
+# the run covers the slow legs (a schedule run, or a push run the push skip proved: a green Linux-only push run
+# does not, owner page item 880, 11:53 CST Nov 15), HEAD_SHA is on origin's main, and HEAD_SHA
+# descends from stable (a fast-forward). A schedule run that nightly-skip skipped runs no job and still counts:
+# the skip requires every push since the green daily to be proven. GH_TOKEN, when set, authenticates the push;
+# a local origin needs none.
 set -u
 head="${HEAD_SHA:-}"
 conclusion="${RUN_CONCLUSION:-}"
