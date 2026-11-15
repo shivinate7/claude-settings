@@ -33,7 +33,8 @@ the desktop app has none.
 
   Stop --nudge (stdin: session_id, transcript_path, stop_hook_active) -- reads the last
   main-chain, non-synthetic assistant entry's usage, if above 0 (input + cache_creation +
-  cache_read tokens) as the context size. Overhead = the first such entry's size. Messages
+  cache_read tokens) as the context size. Overhead = the smaller of the first such entry's size and the first one after
+  the newest compact_boundary record (no boundary: the first one). Messages
   = size - overhead, at least 0 (a proxy: record hook-inputs-carry-token-counts). Bucket =
   index of the highest checkpoint that messages reached, -1 below the first, and -1 when
   messages is 0 (checkpoints(compact_threshold(limit) - overhead): 200k, +150k while below
@@ -62,6 +63,9 @@ the desktop app has none.
   file). Silent when the handoff is absent or complete. Cost: one small read of the prompt file and of
   the handoff at each Stop; no new log, hook, file or process start. Spec: docs/decisions/precompact-handoff.md,
   item 14.
+  It also blocks once per newest event of three kinds that this session landed after the handoff's mtime (a merge,
+  a ruling relay, a role change; see "Handoff lag" below), kept as "lag_event" in the same nudge.json. Cost: one
+  stat of the handoff and one read of the transcript at each Stop; no new file, timer or process start.
 
   The required sections are the names on the marker line `<!-- handoff-sections: A | B | ... -->` in
   step 4 of the installed prompt file, read at run time by missing_sections(); no code holds the list.
@@ -742,6 +746,15 @@ def _same_path(a, b):
     return norm(a) == norm(b)
 
 
+def _transcript_module():
+    """lint/_transcript, the one reader of transcript records, imported from the repo's lint folder."""
+    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
+    import _transcript
+    return _transcript
+
+
 def backed_premises(transcript, need, handoff):
     """The ids of `need` ([(id, tokens)] from stamp_changes) that the session's own transcript backs, or None when the
     transcript cannot be read or `need` is not a list of (id, tokens) pairs (the caller fails open). Evidence is a
@@ -754,11 +767,8 @@ def backed_premises(transcript, need, handoff):
             isinstance(pair, (list, tuple)) and len(pair) == 2 and isinstance(pair[0], str)
             and isinstance(pair[1], (list, tuple)) for pair in need):
         return None
-    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
-    if lint not in sys.path:
-        sys.path.insert(0, lint)
     try:
-        import _transcript
+        _transcript = _transcript_module()
         records = _transcript.read_transcript(transcript)
     except (OSError, ValueError):
         return None
@@ -994,12 +1004,15 @@ def window_limit(model=None):
 def _checkpoint_facts(payload, state):
     """(size, messages) when the context size passed a new checkpoint, else None. Sets state["bucket"]
     when the transcript gave a size."""
-    size = overhead = model = None
+    size = overhead = rebased = model = None
     with open(payload.get("transcript_path", ""), "r", encoding="utf-8") as f:
         for line in f:
             try:
                 entry = json.loads(line)
             except ValueError:
+                continue
+            if entry.get("type") == "system" and entry.get("subtype") == "compact_boundary":
+                rebased = None  # the context restarts here: the next usable entry is the new overhead
                 continue
             if entry.get("type") != "assistant" or entry.get("isSidechain") is True:
                 continue
@@ -1012,10 +1025,16 @@ def _checkpoint_facts(payload, state):
             if n > 0:
                 if overhead is None:
                     overhead = n
+                if rebased is None:
+                    rebased = n
                 size = n
                 model = msg.get("model") or model
     if size is None:
         return None
+    # After a compaction the first entry is no longer the overhead when a later one is smaller; a large first
+    # entry would otherwise keep the room at compact_threshold - overhead, too small for any checkpoint.
+    if rebased is not None:
+        overhead = min(overhead, rebased)
     # Proxy (record hook-inputs-carry-token-counts): the first turn is mostly overhead.
     messages = max(size - overhead, 0)
     if messages == 0:
@@ -1229,6 +1248,82 @@ def owner_waits_gap(payload):
         return ""
 
 
+# --- Handoff lag --------------------------------------------------------------------------
+# The Stop blocks once per newest event this session landed after the handoff's last write (its mtime):
+# a merge, a ruling relay or a role change. Each is a moment the handoff should have recorded.
+#   merge: a successful mcp__github__merge_pull_request call, or a successful Bash call of the merge tool
+#     with --confirm (guard_merge.merge_tool_args reads which segment runs the tool; a preview is no merge).
+#   ruling relay: a successful send tool call (_transcript.SEND_TOOLS) whose message holds the word ruling.
+#   role change: an assistant text line `Role: <role>`.
+# Cost per Stop with a handoff: one stat of it and one read of the transcript; the newest flagged event is
+# kept as "lag_event" in the same nudge.json. No timer, process or other file. Any read error gives None.
+LAG_ROLES = ("coordinator", "lane", "consultant", "batch runner", "triage")
+_LAG_ROLE_LINE = re.compile(r"^[ \t]*Role:[ \t]*(?:%s)\b" % "|".join(LAG_ROLES), re.M)
+_LAG_RULING = re.compile(r"\brulings?\b", re.I)
+
+
+def _lag_merge(use):
+    """Whether this tool_use is a merge: the MCP merge call, or a Bash call that runs the merge tool with --confirm."""
+    name, given = use.get("name"), use.get("input")
+    if not isinstance(given, dict):
+        return False
+    if name == "mcp__github__merge_pull_request":
+        return True
+    command = given.get("command")
+    # The cheap filter: guard_merge is imported only for a command that can be the merge tool's confirm.
+    if name != "Bash" or not isinstance(command, str) or "--confirm" not in command:
+        return False
+    import guard_core
+    import guard_merge
+    for segment in guard_core.split_segments(command):
+        args = guard_merge.merge_tool_args(segment)
+        if args is not None and "--confirm" in args:
+            return True
+    return False
+
+
+def _lag_relay(use, send_tools):
+    given = use.get("input")
+    message = given.get("message") if isinstance(given, dict) else None
+    return use.get("name") in send_tools and isinstance(message, str) and bool(_LAG_RULING.search(message))
+
+
+def handoff_lag_event(payload):
+    """The epoch time of the newest merge, ruling relay or role change this session made after the handoff's
+    mtime, or None: no handoff, no such event, or any read that fails (the caller fails open)."""
+    try:
+        if payload.get("agent_id"):
+            return None
+        session_id = payload.get("session_id", "")
+        if not session_id:
+            return None
+        mtime = os.stat(handoff_path(session_id)).st_mtime
+        _transcript = _transcript_module()
+        records = _transcript.read_transcript(payload.get("transcript_path", ""))
+        failed = _transcript.failed_tool_use_ids(records)
+        answered = {b.get("tool_use_id") for rec in records for b in _transcript.tool_results(rec)}
+        newest = None
+        for rec in records:
+            if rec.get("isSidechain") or rec.get("agent_id") or rec.get("type") != "assistant":
+                continue
+            when = _entry_time(rec)
+            if when is None or when <= mtime or (newest is not None and when <= newest):
+                continue
+            landed = any(
+                use.get("id") in answered and use.get("id") not in failed
+                and (_lag_merge(use) or _lag_relay(use, _transcript.SEND_TOOLS))
+                for use in _transcript.tool_uses(rec))
+            content = (rec.get("message") or {}).get("content")
+            role = isinstance(content, list) and any(
+                isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)
+                and _LAG_ROLE_LINE.search(b["text"]) for b in content)
+            if landed or role:
+                newest = when
+        return newest
+    except Exception:
+        return None
+
+
 def run_nudge(payload):
     try:
         record_dir(payload.get("session_id", ""), payload.get("cwd"))
@@ -1247,7 +1342,7 @@ def run_nudge(payload):
     except Exception:
         pass
     before = dict(state)
-    facts, missing = None, []
+    facts, missing, lag = None, [], None
     reason = ""
     try:
         facts = _checkpoint_facts(payload, state)
@@ -1258,6 +1353,12 @@ def run_nudge(payload):
             missing = _unflagged_missing(session_id, state)
         except Exception as e:
             sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)
+    if not facts and not missing:  # either of those blocks already says to rewrite the handoff
+        lag = handoff_lag_event(payload)
+        if lag is not None and state.get("lag_event") != lag:
+            state["lag_event"] = lag
+        else:
+            lag = None
     try:
         if state != before:
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1274,6 +1375,10 @@ def run_nudge(payload):
             reason = ("Your handoff at %s lacks these sections: %s. Rewrite the whole file with each under "
                       "its own ## heading, per step 4 of %s."
                       % (handoff_path(session_id), ", ".join(missing), prompt_path()))
+        elif lag is not None:
+            reason = ("This session merged, relayed a ruling or changed its role after your handoff at %s was "
+                      "last written. Rewrite the whole file now, per step 4 of %s. Then continue."
+                      % (handoff_path(session_id), prompt_path()))
         else:
             reason = ""
     except Exception as e:
