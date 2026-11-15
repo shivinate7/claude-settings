@@ -716,12 +716,13 @@ RECORD_AFTER = RECORD_BEFORE.replace(
 
 class RecordCiteTests(RepoCase):
     def repo_with(self, record, newer=None, older=None):
-        repo = self.make_repo("r", store=fixture.ruling_files({
+        self.n = getattr(self, "n", 0) + 1
+        repo = self.make_repo("r%d" % self.n, store=fixture.ruling_files({
             OLD_ID: older or fixture.entry(OLD_ID, at=OVERTAKEN_AT),
             NEW_ID: newer or fixture.entry(NEW_ID, at=OVERTAKING_AT, ruling=OVERTAKING_TEXT, supersedes=None,
                                            supersedes_none="x")}))
         self.folder = os.path.join(repo, "docs", "decisions")
-        os.makedirs(self.folder)
+        os.makedirs(self.folder, exist_ok=True)
         with open(os.path.join(self.folder, "all-repos-switch-together.md"), "w", encoding="utf-8") as f:
             f.write(record)
         fixture.git(repo, "add", "-A")
@@ -750,6 +751,23 @@ class RecordCiteTests(RepoCase):
     def test_a_cite_inside_an_html_comment_is_no_cite(self):
         hidden = RECORD_BEFORE + "<!-- see own-820-c-five-repos -->\n"
         self.assertEqual(len(ruled_store.check_records(self.repo_with(hidden))[0]), 1)
+
+    def test_a_comment_opener_inside_code_or_a_fence_hides_nothing_and_a_multiline_comment_does(self):
+        code = RECORD_BEFORE + "Use `<!--` to open.\n" + "```\n<!--\n```\n" + "Later own-820-c-five-repos?\n"
+        self.assertEqual(ruled_store.check_records(self.repo_with(code))[0], [], "a real cite after a code opener was lost")
+        multi = RECORD_BEFORE + "<!-- note\nsee own-820-c-five-repos\n-->\n"
+        self.assertEqual(len(ruled_store.check_records(self.repo_with(multi))[0]), 1)
+        unclosed = RECORD_BEFORE + "<!-- never closed\nsee own-820-c-five-repos\n"
+        self.assertEqual(len(ruled_store.check_records(self.repo_with(unclosed))[0]), 1)
+
+    def test_a_file_that_is_not_utf8_prints_its_name_and_never_crashes(self):
+        repo = self.repo_with(RECORD_AFTER)
+        with open(os.path.join(self.folder, "bad.md"), "wb") as f:
+            f.write(b"caf\xe9 own-degen-home-switch-now\n")
+        fixture.git(repo, "add", "-A")
+        proc = subprocess.run([sys.executable, MODULE, "records", repo], capture_output=True, text=True, timeout=60)
+        self.assertIn("bad.md", proc.stdout)
+        self.assertEqual(proc.returncode, 0)
 
     def test_a_ruling_that_only_mentions_the_older_one_without_a_verb_overtakes_nothing(self):
         plain = fixture.entry(NEW_ID, at=OVERTAKING_AT, supersedes=None, supersedes_none="x",

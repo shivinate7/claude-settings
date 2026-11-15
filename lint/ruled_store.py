@@ -416,8 +416,44 @@ def overtaking_pairs(entries):
 
 
 def _record_lines(text):
-    """The record's lines with each HTML comment blanked, line count kept, so a hidden cite counts as none."""
-    return HTML_COMMENT.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text).split("\n")
+    """The file's lines with each HTML comment blanked, line count kept, so a hidden cite counts as none. A `<!--` inside a
+    fenced block or an inline code span opens no comment, and a comment with no `-->` ends at the end of the file."""
+    out, fence, i, n = [], None, 0, len(text)
+    for row in text.split("\n"):
+        mark = re.match(r" {0,3}(`{3,}|~{3,})", row)
+        if mark and (fence is None or mark.group(1)[0] == fence[0] and len(mark.group(1)) >= len(fence)):
+            fence = None if fence else mark.group(1)
+        out.append((row, fence is not None and not mark))
+    result, comment = [], False
+    for row, in_fence in out:
+        if in_fence and not comment:
+            result.append(row)
+            continue
+        buf, pos = [], 0
+        while pos < len(row):
+            if comment:
+                end = row.find("-->", pos)
+                if end < 0:
+                    buf.append(" " * (len(row) - pos))
+                    pos = len(row)
+                else:
+                    buf.append(" " * (end + 3 - pos))
+                    pos, comment = end + 3, False
+            elif row[pos] == "`":
+                run = re.match(r"`+", row[pos:]).group(0)
+                close = row.find(run, pos + len(run))
+                stop = close + len(run) if close >= 0 else pos + len(run)
+                buf.append(row[pos:stop])
+                pos = stop
+            elif row.startswith("<!--", pos):
+                comment = True
+                buf.append("    ")
+                pos += 4
+            else:
+                buf.append(row[pos])
+                pos += 1
+        result.append("".join(buf))
+    return result
 
 
 def check_records(repo_dir, only=None):
@@ -439,7 +475,8 @@ def check_records(repo_dir, only=None):
         try:
             with open(os.path.join(repo_dir, *rel.split("/")), encoding="utf-8-sig") as f:
                 lines = _record_lines(f.read().replace("\r\n", "\n"))
-        except OSError:
+        except (OSError, ValueError):
+            print("ruled-store: unknown, cannot read %s" % rel)
             continue
         body = "\n".join(lines)
         for older, newer in pairs:
