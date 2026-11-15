@@ -18,7 +18,7 @@
                           Record-claim head). A FAIL or an unknown stops the step with the step lines and the log: nothing pushed, not
                           marked ready, and no flag lifts it. A repo with no list runs no ready check, and one line says so.
                           Cost per draft-step ready: one ci-job run per job of the list, and one worktree; the run time is unmeasured for a step subset
-                          (the 3600 s lint bound applies). No new file but ci-job's own log.
+                          (the 3600 s lint bound applies), and a head that lacks the default base's tip adds one merge commit, one more local `git merge` start and one push even when its page is current (a head that holds the tip with a current page pushes none; any head pushes at most once). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
                           A confirm in the cloud needs a lane-lint PASS for the head's sha. Any pull request skips it, a lane PR included, when the all-jobs-passed rollup is green on that exact head:
                           then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
@@ -150,12 +150,15 @@
                           lane lines (a lane the roadmap's live file shows done and safe to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step's status is set to todo or done), then a summary line. A lane that waits (a step not done, an open pull, an open item) prints no line, except a lane only stale drafts hold: that prints one `joint (close #N ...; archive archive/<branch> ...; archive lane <id>)` line, counted among the lanes to archive. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
                           posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
-  merge <pr> --ready      a lane's one act on its own draft: the draft step of --confirm (rebuild the records page, run the repo's ready
-                          checks, push the page, ask the host to mark the PR ready) and nothing more. A PR that is ready already is left as it is. It
-                          never merges, takes no lock and needs no merge role. A red head or a head that conflicts with the base is not marked ready.
+  merge <pr> --ready      a lane's one act on its own draft: the draft step of --confirm (on the default branch, merge origin/<base> into
+                          the head when the head lacks its tip and the merge is clean; rebuild the records page; run the repo's ready checks: the ci-job
+                          steps on that final tree, the debt-close lint and the open-PR clash on the pre-merge head; one plain push of the merge commit and
+                          the page commit, either one alone, or no push when the head holds the tip and its page is current; ask the host to mark the PR
+                          ready) and nothing more. A PR that is ready already is left as it is. It
+                          merges no pull request, takes no lock and needs no merge role. A red head or a head that conflicts with the base is not marked ready.
                           A repo with merge.readyChecks gets the pre-ready run: the checks, the debt-close lint and the open-PR clash (the head against every
                           other open PR on its base), each one line `pass NAME`, `fail NAME: why` or `unknown NAME: why`, before any push. A PR on a base
-                          other than the default branch is checked on the merge of its head with that base.
+                          other than the default branch gets its ci-job steps run on the merge of its head with that base.
   merge <pr> --fast-checks  the pre-ready run alone, on a dry merge of the PR onto its base (a temporary worktree and one commit object, no ref). Read-only means no lock,
                           no push, no ready mark, no comment, no records page; it still fetches (writes refs and FETCH_HEAD) and adds a worktree (.git/worktrees).
                           Exit 0 only when every line is a pass.
@@ -1586,7 +1589,10 @@ class Host:
         group that is not empty keeps the newest run. A schedule run is judged as it is.
         A red verdict's detail also holds breaking_line's segment for each red run judged (one per file and group), the head group's first: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).
         One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A newest-first walk of the push group's
-        green runs costs one jobs read each, down to the first that is not empty (the newest, when it ran a suite). A failed read is unknown."""
+        green runs costs one jobs read each, down to the first that is not empty (the newest, when it ran a suite). A failed read is unknown.
+        A red verdict also leaves `self.base_facts` for revert_proven, as data the prose cannot carry: `blamed` (the full head shas of the breaking merges), `red` (red runs judged),
+        `others` (red entries without a run, cancelled runs and re-runs in flight beside the red), `head` (the head sha of the newest run read) and `red_heads` (the head sha of each red run judged). Every other verdict leaves it None."""
+        self.base_facts = None  # a red verdict sets it below; any other verdict, and any stop, leaves it None
         try:
             if os.path.dirname(ALARM_EVENTS) not in sys.path:
                 sys.path.insert(0, os.path.dirname(ALARM_EVENTS))
@@ -1681,9 +1687,12 @@ class Host:
             # push run that broke the base. The head group (push, dispatch) goes first, so its breaking merge or re-run leads the detail red_base reads.
             order = sorted(red_runs, key=lambda r: (self.BASE_EVENTS[r["event"]] != self.BASE_EVENTS["push"], age[r["id"]]))
             blame = [s for s in (self.breaking_line(judged, r) for r in order) if s]
+            blamed = [first["head_sha"] for first in (self.breaking_run(judged, r)[0] for r in order) if first and first.get("head_sha") and self.blames(first)]  # full shas, as data: the detail prose holds nine characters
         except (Stop, ValueError, KeyError, TypeError, AttributeError, ImportError) as e:
             return "unknown", " ".join(str(e).split())
         if red:
+            self.base_facts = {"blamed": blamed, "red": len(red_runs), "others": len(red) - len(red_runs) + len(cancelled) + len(unknown), "head": base_head,
+                               "red_heads": [r.get("head_sha") for r in red_runs]}
             return "red", " | ".join(red + blame + cancelled)
         return ("unknown", " | ".join(unknown + cancelled)) if unknown or cancelled else ("green", "")
 
@@ -1695,32 +1704,43 @@ class Host:
         A first red (`run_attempt` 1) is not blamed: its segment names `gh run rerun <id> --failed`, and red_base puts that before the reason flag, because a
         flaky run is the likelier cause. Red again on a re-run (`run_attempt` above 1), the segment names the run's commit and its pull request, read from
         the number in the head commit's first line: `Merge pull request #N` for a merge commit, `(#N)` last for a squash. A schedule run names neither, and its first-red text promises no blame: it tests the head at run time."""
+        first, stop = self.breaking_run(judged, newest_red)
+        if stop or first is None:
+            return stop
+        sha = str(first.get("head_sha"))[:9]
+        if not self.blames(first):
+            if (first.get("run_attempt") or 1) <= 1:
+                return (f"run {first['id']} is the first red run after a green one, at {sha}: `{RERUN_REMEDY} {first['id']} --failed` re-runs its failed jobs, "
+                        + ("and as a schedule run it is never blamed on a commit, even if that re-run is red again" if first["event"] == "schedule"
+                           else "and it is blamed on its pull request only if that re-run is red again"))
+            return (f"run {first['id']} is a schedule run, red again on its re-run: it tested the base's head when it ran, so no commit or pull request is named for it")
+        head = (first.get("head_commit") or {}).get("message") or first.get("display_title") or ""
+        n = pull_number_in_title(head.splitlines()[0] if head else "")
+        return f"{BREAKING_MERGE} commit {sha} (run {first['id']}, red again on its re-run), " + (f"pull request #{n}" if n else "no pull request number in its message")
+
+    def breaking_run(self, judged, newest_red):
+        """-> (run, stop): the first red run with a green parent that breaking_line's walk finds, as the run itself so a caller reads its full sha as data.
+        (None, None) when none is known; (None, text) when a run still going stops the walk."""
         key = (newest_red["path"], self.BASE_EVENTS[newest_red["event"]])
         first = None
         for r in judged[judged.index(newest_red):]:
             if (r["path"], self.BASE_EVENTS[r["event"]]) != key:
                 continue
             if r["status"] != "completed":  # an older run still going (a re-run in flight): the run under it may be red or green, so no run is blamed
-                return f"the run that broke the base is unknown: run {r['id']} (attempt {r.get('run_attempt')}) is still going, so the walk to the first red run after a green one stops there. Run again once it ends"
+                return None, f"the run that broke the base is unknown: run {r['id']} (attempt {r.get('run_attempt')}) is still going, so the walk to the first red run after a green one stops there. Run again once it ends"
             if r["conclusion"] == "success":
                 break
             if r["conclusion"] not in ("skipped", "neutral", "cancelled"):
                 first = r
         else:
-            return None  # no green parent on the page: the breaking run is not known
-        if first is None:
-            return None
-        sha = str(first.get("head_sha"))[:9]
-        if (first.get("run_attempt") or 1) <= 1:
-            return (f"run {first['id']} is the first red run after a green one, at {sha}: `{RERUN_REMEDY} {first['id']} --failed` re-runs its failed jobs, "
-                    + ("and as a schedule run it is never blamed on a commit, even if that re-run is red again" if first["event"] == "schedule"
-                       else "and it is blamed on its pull request only if that re-run is red again"))
-        if first["event"] == "schedule":  # a nightly tests the base's head at run time, not the commit that started it: that commit is no suspect
-            return (f"run {first['id']} is a schedule run, red again on its re-run: it tested the base's head when it ran, so no commit or pull request is named for it")
-        head = (first.get("head_commit") or {}).get("message") or first.get("display_title") or ""
-        line = head.splitlines()[0] if head else ""
-        m = re.match(r"Merge pull request #(\d+)\b", line) or re.search(r"\(#(\d+)\)\s*$", line)
-        return f"{BREAKING_MERGE} commit {sha} (run {first['id']}, red again on its re-run), " + (f"pull request #{m.group(1)}" if m else "no pull request number in its message")
+            return None, None  # no green parent on the page: the breaking run is not known
+        return first, None
+
+    @staticmethod
+    def blames(first):
+        """True when the breaking run `first` names its commit as the breaking merge: red again on a re-run, and not a schedule run (a nightly tests the
+        base's head at run time, not the commit that started it, so that commit is no suspect). The one home of that test: breaking_line and base_state's blamed list both ask it."""
+        return (first.get("run_attempt") or 1) > 1 and first["event"] != "schedule"
 
     @staticmethod
     def settle(red, pending, r_red, r_pending):
@@ -3559,17 +3579,99 @@ def ignore_checks(cfg):
         out[e["name"]] = e["reason"]
     return out
 
+def pull_number_in_title(line):
+    """-> the pull request number in a commit's first line, as a string, or None: `Merge pull request #N` for a merge commit, `(#N)` last for a squash."""
+    m = re.match(r"Merge pull request #(\d+)\b", line) or re.search(r"\(#(\d+)\)\s*$", line)
+    return m.group(1) if m else None
+
+REVERT_WALK_MAX = 200  # commits revert_proven reads from the breaking merge up to the base's head; a longer walk is not proven
+
+def _shas(read):
+    """A git list read (rc, out) -> its 40-hex shas in order, or None when the read failed, any line is not a sha, or it holds more than REVERT_WALK_MAX."""
+    c, out = read
+    lines = out.split()
+    if c or len(lines) > REVERT_WALK_MAX or not all(re.fullmatch(r"[0-9a-f]{40}", x) for x in lines):
+        return None
+    return lines
+
+def revert_proven(root, host, base):
+    """True when a red base is lifted by a revert already merged with its tree proven (ruling own-823-b-revert-merge-lifts-red, decision no-merge-onto-red-main).
+    Merges resume when the revert merges, with its run still going (ruling own-745-b-resume-at-revert), and stay resumed while unrelated commits land above it.
+    Read from the facts base_state left on the host (`base_facts`), never from its prose. All must hold:
+    - exactly one red run, no cancelled run, no re-run in flight and no other red read beside it, and exactly one breaking merge B, named by its full sha;
+    - origin/<base> is the head the runs were read at, and B is its ancestor;
+    - of every commit from B up to the head (any parent, so a revert under a catch-up merge counts; at most REVERT_WALK_MAX), exactly one, R, says `This reverts commit <B>`;
+    - no commit there names R, or the commit that landed R, as reverted (a re-land);
+    - the landing commit is the oldest commit of the head's first-parent line that holds R. Its title names pull request N (`Merge pull request #N`, or `(#N)` for a squash);
+    - the landing commit's tree is the tree of N's head, and that head's checks read green (Host.head_state, the one reader);
+    - the red run sits on B or between B and the landing commit, never on the landing commit or above it (the revert's own run, or a later merge, failed).
+    A first red names no breaking merge, so it never lifts. Any read that fails, or a walk past the cap, is not proven: unknown never reads clear.
+    Skipped runs are no evidence here. Cost accepted by the owner: a revert that does not fix the failure reads clear until the next full run."""
+    facts = getattr(host, "base_facts", None)
+    if not facts or len(facts["blamed"]) != 1 or facts["red"] != 1 or facts["others"]:
+        return False
+    sha = facts["blamed"][0]
+    try:
+        c, head = git(root, "rev-parse", f"origin/{base}")
+        if c or head != facts["head"] or git(root, "merge-base", "--is-ancestor", sha, head)[0]:
+            return False
+        c, out = git(root, "log", "-z", "--format=%H%n%B", f"-n{REVERT_WALK_MAX + 1}", f"{sha}..{head}")
+        said = [e.strip("\n").partition("\n") for e in out.split("\0") if e.strip()]
+        if c or len(said) > REVERT_WALK_MAX or not all(re.fullmatch(r"[0-9a-f]{40}", x) for x, _, _ in said):
+            return False
+
+        def reverting(s):  # the commits whose message says `This reverts commit <s>`; a longer hex (another sha that starts with s) is no match
+            line = re.compile(rf"(?m)^This reverts commit {re.escape(s)}(?![0-9a-f])")
+            return [x for x, _, text in said if line.search(text)]
+        reverts = reverting(sha)
+        if len(reverts) != 1:
+            return False
+        revert = reverts[0]
+        chain = _shas(git(root, "rev-list", "--first-parent", f"-n{REVERT_WALK_MAX + 1}", f"{sha}..{head}"))
+        holds = _shas(git(root, "rev-list", "--ancestry-path", f"-n{REVERT_WALK_MAX + 1}", f"{revert}..{head}"))
+        if chain is None or holds is None:
+            return False
+        landed = next((x for x in reversed(chain) if x == revert or x in holds), None)  # chain is newest first
+        if landed is None or reverting(revert) or reverting(landed):
+            return False
+        above = _shas(git(root, "rev-list", "--ancestry-path", f"-n{REVERT_WALK_MAX + 1}", f"{landed}..{head}"))
+        if above is None:
+            return False
+        below = ({sha} | {x for x, _, _ in said}) - set(above) - {landed}
+        if not all(r in below for r in facts["red_heads"]):
+            return False
+        title = git(root, "log", "-1", "--format=%s", landed)
+        n = pull_number_in_title(title[1])
+        if title[0] or not n:
+            return False
+        kept = {k: getattr(host, k) for k in ("base", "branch") if hasattr(host, k)}
+        try:
+            info = host.pr(int(n))  # a read that also sets host.base and host.branch to that pull request's: put them back
+        finally:
+            for k, v in kept.items():
+                setattr(host, k, v)
+        trees = [git(root, "rev-parse", f"{x}^{{tree}}") for x in (landed, info["head"])]
+        return not any(c for c, _ in trees) and trees[0][1] == trees[1][1] and head_not_green(host.head_state(int(n), sha=info["head"])) is None
+    except (Stop, subprocess.TimeoutExpired, OSError, KeyError, ValueError, IndexError, TypeError):
+        return False
+
 def base_verdict(root, host, base):
-    """host.base_state over the workflow files on origin/<base>. A failed read of them is unknown."""
+    """host.base_state over the workflow files on origin/<base>, with a red lifted to green when revert_proven says the revert of the breaking merge landed on the base with its
+    tree proven and no red run on it or above it. The one place both the preview and red_base read, so they print one verdict. A failed read of the workflow files is unknown."""
     try:
         flows = base_workflows(root, f"origin/{base}")
     except (Stop, subprocess.TimeoutExpired, OSError) as e:
         return "unknown", " ".join(str(e).split())
-    return host.base_state(base, flows)
+    verdict, detail = host.base_state(base, flows)
+    if verdict == "red" and revert_proven(root, host, base):
+        return "green", ""
+    return verdict, detail
 
 def red_base(root, host, base, red_ok=""):
     """The red-main check (decision no-merge-onto-red-main): refuse while the base's latest completed run has a red job, or cannot be read.
-    --base-red-ok "<reason>" is a reason flag, as --undo-check-unknown-ok is, and Claude may type it with a reason: the way out for the batch that carries the fix (a revert PR of the breaking merge among them), or for an unknown read whose cause the reason names. A lift is logged and returns its reason, for record_lift."""
+    --base-red-ok "<reason>" is a reason flag, as --undo-check-unknown-ok is, and Claude may type it with a reason: the way out for the batch that carries the fix (a revert PR of the breaking merge among them), or for an unknown read whose cause the reason names. A lift is logged and returns its reason, for record_lift.
+    Once that revert is merged with its tree proven, base_verdict reads the base green (revert_proven), so no flag is needed after it, for later merges too, until a run on the
+    revert or above it is red; a revert whose tree is not proven leaves the base red until its own run on the base is green."""
     verdict, detail = base_verdict(root, host, base)
     if verdict == "green":
         return
@@ -3586,7 +3688,8 @@ def red_base(root, host, base, red_ok=""):
     carries = f"if this batch carries the fix, or the unknown read has a known cause, run again with the reason flag {RED_FLAG} \"<reason>\"."
     if broke:  # the revert PR is the batch that carries the fix: its own Drops-lines trailer covers each file the silent-undo check names, and the reason flag lifts no silent-undo finding
         way = (f"Open a revert PR for the breaking merge named above (`git revert -m 1 <commit>` for a merge commit) and merge it with the reason flag {RED_FLAG} \"<reason>\". "
-               f"Merges resume once the revert's run on main is green: until then its run is pending and the breaking red stays the newest. "
+               f"Merges resume at once when that revert is on {base} with its tree proven (the revert's PR checks are green and the tree of the merge that landed it is the revert PR's tree), and stay resumed until a run on that merge or above it is red; "
+               f"any other revert waits until its run on main is green (a green run that ran the suite), and until then its run is pending and the breaking red stays the newest. "
                f"The revert PR needs a Drops-lines trailer for each file the silent-undo check names (a revert of a merge that edits and adds files is flagged \"whole file restored\" and \"file deleted\"), "
                f"and so does a re-land that reverts the revert; the reason flag {RED_FLAG} does not lift that check. "
                f"Or, {carries}")
@@ -3804,7 +3907,7 @@ def ready_job_groups(checks):
 
 def pre_ready_rows(wt, n, base, checks, pre):
     """The pre-ready run: one ci-job run per job of `merge.readyChecks` `checks` in the tree `wt` (ready_job_groups), then, when `pre` is (root, host, info), the debt-close lint
-    on `wt` and the open-PR clash of the PR's head, each once. Prints one verdict line per check, `pass NAME`, `fail NAME: why` or `unknown NAME: why`, all before any
+    and the open-PR clash of the PR's head info["head"] (the lint reads it through `wt`'s git), each once. Prints one verdict line per check, `pass NAME`, `fail NAME: why` or `unknown NAME: why`, all before any
     refusal; NAME is the declared entry.
     -> (rows, (state, lines, log)): rows of (verdict, name, detail), and the jobs' ci_job_run answers combined: state fail over unknown over pass, lines and log joined.
     Each job's steps are read from that job's own lines, so a step name two jobs hold reads only its own job.
@@ -3892,10 +3995,22 @@ def fast_checks(root, cfg, n, host, info):
         drop_worktree(root, tmp, wt)
     return 0
 
-def draft_step(root, cfg, n, host, info):
+def merge_base_in(wt, base, branch):
+    """Merge origin/<base> into the head checked out in `wt`: a merge commit, parents the head then the tip, no fast-forward. -> its sha.
+    Local only: nothing is pushed. The caller has read the merge as clean (holds_base), so a merge that fails here is a Stop, and the tree is left as it was."""
+    c, out = git(wt, *identity(wt), "merge", "--no-ff", "-q", "-m", f"Merge origin/{base} into {branch}", f"origin/{base}")
+    if c:
+        _, aborted = git(wt, "merge", "--abort")
+        raise Stop(f"the merge of origin/{base} into {branch} failed, so nothing was pushed {BASE_CITE}: {' '.join(out.split())[:200]}"
+                   + (f" The abort said: {' '.join(aborted.split())[:200]}" if aborted.strip() else ""))
+    return git(wt, "rev-parse", "HEAD")[1]
+
+def draft_step(root, cfg, n, host, info, merge_main=False):
     """`merge <pr> --confirm` on a draft: rebuild the records page on the head, push it, mark the pull request ready, and
     stop. So the branch is final at ready, and the ready confirm pushes nothing (decision records-index-at-merge).
-    Takes no lock, claims no number and never merges: a claim stays at the ready confirm.
+    merge_main (only `merge <pr> --ready` passes it): on the default base, a head that lacks the tip but merges cleanly with it first gets a merge commit of origin/<base>: the page is rebuilt on the merged tree, a stale page is one more commit, the ready checks run once (the ci-job steps on that final tree; the debt-close lint and the open-PR clash on the pre-merge head info["head"]), and one plain push sends the merge commit and any page commit. Without it, as on `--confirm`, a head that lacks the tip pushes no merge.
+    A conflict, a Record-claim head and a base other than the default push no merge. A failed merge, check or push leaves the pull request a draft.
+    Takes no lock, claims no number and merges no pull request: a claim stays at the ready confirm.
     A repo that declares merge.readyChecks also runs them first, on the tree the step would push, before any push and before the
     ready mark, on every path (the ready checks, decision lanes-run-no-full-ci-job). One ci-job run per job, in one worktree."""
     base = info["base"]
@@ -3909,7 +4024,7 @@ def draft_step(root, cfg, n, host, info):
     if not default:
         say(f"merge: {base} is not the default branch ({cfg['defaultBranch']}). The records page is rebuilt only for it. Nothing was pushed.")
     if default or checks:  # one worktree, one open_worktree call, on either base
-        tmp, wt = open_worktree(root, info, base) if default else open_merge_worktree(root, info, base)  # another base: the checks read the merge, a head behind it included
+        tmp, wt = open_worktree(root, info, base) if default else open_merge_worktree(root, info, base)  # another base: the ci-job steps read the merge, a head behind it included; the debt-close lint and the clash read info["head"]
         try:
             pre = (root, host, info)
             if not default:
@@ -3924,24 +4039,31 @@ def draft_step(root, cfg, n, host, info):
                 stale, stands = holds_base(wt, f"origin/{base}", info["head"])
                 if stale:  # holds_base ends with the remedy
                     raise Stop(("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " Nothing was pushed.")
+                merged = None
                 if stands:
                     say(f"merge: {stands}. The green run stands.")
+                    if merge_main:
+                        merged = merge_base_in(wt, base, info["branch"])  # the clean merge holds_base read; the page and the checks below read its tree
+                        say(f"merge: {base} is merged into {info['branch']} at {merged[:9]}, here only. Nothing is pushed yet.")
                 rebuilt = rebuild_records(wt)
                 sha = commit_claim(wt, None) if rebuilt else None
                 if checks:
-                    run_ready_checks(wt, n, base, checks, pre=pre)  # on the page commit when there is one, so what is checked is what is pushed
-                if rebuilt:
+                    run_ready_checks(wt, n, base, checks, pre=pre)  # the ci-job steps read the final tree in wt; the debt-close lint (its diff and each Retire test's scratch worktree) and the open-PR clash read the pre-merge head in info
+                if rebuilt or merged:
                     push_branch(wt, info["branch"])
-                    say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")
+                    if merged:
+                        say(f"merge: the merge of {base} pushed to {info['branch']}.")
+                    if rebuilt:
+                        say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")
                 else:
                     say(f"merge: the records page on {info['branch']} at {info['head'][:9]} is current. Nothing was pushed.")
         finally:
             drop_worktree(root, tmp, wt)
     ok, why = host.ready(n)
     if ok:
-        say(f"merge: #{n} is ready now. Nothing was merged. When its run is green, run --confirm again to merge.")
+        say(f"merge: #{n} is ready now. No pull request was merged. When its run is green, run --confirm again to merge.")
     else:
-        say(f"merge: #{n} stays a draft ({' '.join(why.split()) or 'no reason given'}). Mark it ready after its draft run shows, then run --confirm again to merge. Nothing was merged.")
+        say(f"merge: #{n} stays a draft ({' '.join(why.split()) or 'no reason given'}). Mark it ready after its draft run shows, then run --confirm again to merge. No pull request was merged.")
     return 0
 
 READY_PAGE_CLEANUP_SECONDS = 10  # the worktree's removal gets its own budget: a read that spent its deadline must still clean up
@@ -4306,7 +4428,7 @@ REVIEW_KINDS, REVIEW_GUARDS = ("normal", "delete-only", "docs-only"), ("yes", "n
 REVIEW_ROLES, REVIEW_VERDICTS = ("reviewer", "design-reviewer"), ("PASS", "FAIL", "PARTIAL")
 REVIEW_NETS = ("not owed", "zero", "positive", "negative")
 REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
-REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
+REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds. The cap no review row may pass (the guard's REVIEW_POLICY_CAP; this file does not load the guard at import). A change's own last round is its review row's.
 REVIEW_GRANT = r"item \d+ [a-z], owner, \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CST|CDT)"  # the owner's grant of one round past REVIEW_LAST_ROUND
 REVIEW_SHA = r"[0-9a-f]{40}"
 REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix verifier is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
@@ -4322,12 +4444,23 @@ def review_round_model(n, guard=False):
     kind = "guard" if guard and n == 1 else "other"
     return hook_guard.role_round_model(rounds, REVIEW_ROLES[0], str(min(n, REVIEW_LAST_ROUND)) if isinstance(n, int) else n, kind)
 
+def review_policy(kind, guard):
+    """-> (owed, last, net) for a change of this kind and Guard or check: the model record's review row, read through the guard's reader
+    (hooks/guard.py review_policy_table), else REVIEW_POLICY_FALLBACK. owed is the round a PASS must reach, last the final round, net true when
+    a failed final round still owes its net value. Reads the record once per call, like review_round_model."""
+    import guard as hook_guard
+    return hook_guard.review_policy(hook_guard.review_policy_table(hook_guard.pointer_checkout()), kind, guard)
+
 def __getattr__(name):
     """REVIEW_FIX_GUARD_MODEL, the model every fix verifier runs (owner item 444 a; decision pr-review-record): the round row's fallback in the
-    guard, read on use so this file holds no copy and does not load the guard at import. The checks read review_round_model, which also reads the record's row."""
+    guard, read on use so this file holds no copy and does not load the guard at import. The checks read review_round_model, which also reads the record's row.
+    REVIEW_POLICY_FALLBACK, the review rows' built-in rule, is read the same way."""
     if name == "REVIEW_FIX_GUARD_MODEL":
         import guard as hook_guard
         return hook_guard.ROLE_ROUND_FALLBACK[(REVIEW_ROLES[0], REVIEW_FIX_ROW, "other")]
+    if name == "REVIEW_POLICY_FALLBACK":
+        import guard as hook_guard
+        return hook_guard.REVIEW_POLICY_FALLBACK
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 def grant_valid(cite):
@@ -4357,9 +4490,9 @@ def review_body(n, head, kind, guard, rounds, net, fix=None, grant=None):
 
 def parse_review(text):
     """-> {n, head, kind, guard, rounds, net, fix, grant}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
-    malformed or out of order, round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. `grant` is None, or the text of the one
+    malformed or out of order, Kind is docs-only with Guard or check yes, round numbers skip or open at neither 1 nor REVIEW_LAST_ROUND, or a round is above REVIEW_LAST_ROUND. `grant` is None, or the text of the one
     optional `Grant: #<pr>, <REVIEW_GRANT>` line directly after Guard or check, whose PR is the record's own; with it the rounds must reach round REVIEW_LAST_ROUND + 1, and without it
-    they stop at REVIEW_LAST_ROUND. `fix` is None, or the one optional
+    they stop at REVIEW_LAST_ROUND. The rounds open at 1, or at REVIEW_LAST_ROUND. `fix` is None, or the one optional
     `Fix check: <40-hex reviewed head>, reviewer, <model>, PASS|FAIL` line (after the rounds, before Net value) as a (head, role, model, verdict)
     tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. Trailing blank lines are allowed. The
     record ends at the first line that is exactly `---`; it and everything after it (the GitHub attribution footer) are ignored."""
@@ -4378,7 +4511,7 @@ def parse_review(text):
     n, head, kind, guard = (m.group(1) for m in fields)
     if kind not in REVIEW_KINDS or guard not in REVIEW_GUARDS or net.group(1) not in REVIEW_NETS:
         return None
-    if kind == "docs-only" and guard == "yes":  # docs-only means no guard or check (decision docs-only-prs-skip-review)
+    if kind == "docs-only" and guard == "yes":  # a docs-only change touches no guard or check (decision docs-only-prs-skip-review)
         return None
     g = re.fullmatch(r"Grant: (.*)", lines[5], re.ASCII)
     bound = grant_pr(g.group(1)) if g else None
@@ -4398,7 +4531,7 @@ def parse_review(text):
         if not m:
             return None
         i = int(m.group(1))
-        if i not in (last, last + 1) or i < 1 or i > ceiling:
+        if (i not in (last, last + 1) and not (last == 0 and i == REVIEW_LAST_ROUND)) or i < 1 or i > ceiling:  # a record may open at REVIEW_LAST_ROUND when a failed second round or a failed fix verifier stands behind it; the CLI reads that chain (round_three_refusal)
             return None
         rounds.append((i, *m.group(2, 3, 4)))
         last = i
@@ -4406,19 +4539,30 @@ def parse_review(text):
         return None
     return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix, "grant": grant}
 
-def review_state(rec, head):
+def last_design_line(recs):
+    """-> (round, verdict) of the last design-reviewer line, by position, in the newest of the parsed records `recs` (oldest first, None skipped) that holds
+    one, else None. The one home of the walk back through records with no design reviewer line, for review_state's reader and the --review-record refusal."""
+    for r in reversed([r for r in recs if r]):
+        line = next(((i, v) for i, role, _, v in reversed(r["rounds"]) if role == REVIEW_ROLES[1]), None)
+        if line:
+            return line
+    return None
+
+def review_state(rec, head, earlier=()):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
-    The done rules follow roles-review-cap-three and the decision pr-review-record. A passing round, or a passing sonnet fix check
-    after any round (whatever that round's verdict), ends the review for every change, Guard or check yes or no, with no net value owed.
-    The last round is all PASS, or a fix check PASS counts as that round passing (every fix check runs on sonnet), and the last
-    design-reviewer line (by position, across all rounds) is PASS or absent; or Kind is delete-only, Guard or check is no and the first
-    round is done; or Kind is docs-only with no round. Net value negative holds the change. A design-reviewer FAIL or PARTIAL as the
-    last such line keeps the PASS path open, and the why of a delete-only done names it.
-    A failed round with no fix check is open. The builder's third try runs the final round (a Grant line adds one more after it): a failed
-    final round is done when Guard or check is no, or when Net value is zero or positive, and open while a guard or check change owes its net value.
+    `earlier` is this pull request's earlier parsed records, oldest first. A record with no round line carries the last design-reviewer line of the
+    newest earlier record that holds one (last_design_line), so a fix verifier alone cannot read done over a design reviewer FAIL or PARTIAL.
+    The done rules follow roles-review-cap-three and the decision pr-review-record: a passing round, or a passing sonnet fix verifier, ends
+    the review for every change, Guard or check yes or no, with no net value owed. The last round is all PASS, or a fix verifier PASS counts as
+    that round passing (every fix verifier runs on sonnet), and the last design-reviewer line (by position, across all rounds) is PASS
+    or absent; or the row owes no round and none is recorded. The rounds a pass must reach, the final round and whether net value is owed
+    come from the change's review row (review_policy: the model record's second table, decision agent-model-cap). Net value negative holds
+    the change. A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a final-round done names it.
+    A failed round is open. A failed final round (the row's last, or the granted one past it) is done when the row owes no net value, or
+    when Net value is zero or positive, and open while a row that owes its net value has none.
     A fix check (rec["fix"], decision hold-unsafe-after-round-3) is not a round and is read after the held rule. A FAIL is open, whatever the
-    rounds say. A non-sonnet fix check is open. With no round recorded it is open. A PASS counts as the last recorded round passing, even when that round failed.
-    """
+    rounds say. A non-sonnet fix check is open. A PASS counts as the last recorded round passing, even when that round failed. With no round recorded it is done when the row owes a
+    round after a pass (the fix verifier is the first passing reviewer), and open when the row owes none."""
     if rec is None:
         return "bad", "the newest record does not parse"
     if rec["head"] != head:
@@ -4427,7 +4571,7 @@ def review_state(rec, head):
         return "held", "net value is negative"
     rounds = rec["rounds"]
     top = max((i for i, *_ in rounds), default=0)
-    design = next(((i, v) for i, role, _, v in reversed(rounds) if role == REVIEW_ROLES[1]), None)  # the last design-reviewer line, by position
+    design = last_design_line([*earlier, rec] if not rounds else [rec])  # the last design-reviewer line, by position; a record with no round line walks back
     bad = design if design and design[1] != "PASS" else None
     note = f"; the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}" if bad else ""
     fix = rec.get("fix")
@@ -4436,32 +4580,81 @@ def review_state(rec, head):
     fix_model = review_round_model(REVIEW_FIX_ROW) if fix else None
     if fix and fix[2].lower() != fix_model:
         return "open", f"the fix check must run on {fix_model}, not {fix[2]}"
-    if fix and not top:
+    owed, last, net_owed = review_policy(rec["kind"], rec["guard"])  # the model record's review row for this change
+    if fix and not top and not owed:
         return "open", "the fix check passed, but no round is recorded"
-    final = REVIEW_LAST_ROUND + bool(rec.get("grant"))  # REVIEW_LAST_ROUND is the final round, and a Grant line adds one
+    final = last + bool(rec.get("grant"))  # the row's last round, or a granted round after it, is the final round
     top_pass = all(v == "PASS" for i, _, _, v in rounds if i == top)
-    passed = top and (fix or top_pass)  # a fix PASS, read here, counts as round `top` passing
+    reached = top and (fix or top_pass)  # a fix PASS, read here, counts as round `top` passing
+    passed = (reached and top >= owed) or bool(fix and not top)  # a pass below the rounds the row owes does not end the review; a fix verifier PASS with no round is the first passing reviewer
     # the why keeps a failed round in view, so a fix PASS never reads as a passed round
-    lead = f"round {top} is FAIL, and the fix check passed" if fix and not top_pass else f"round {top} passed"
-    if passed and not bad:  # a passing round, or a fix check after a passed round, ends the review, a guard or check change too
+    lead = "the fix verifier passed" if not top else f"round {top} is FAIL, and the fix check passed" if fix and not top_pass else f"round {top} passed"
+    if passed and not bad:  # a passing round or fix verifier ends the review, a guard or check change too (owner item 741)
         return "done", lead
     if top >= final:  # a passing final round is done above, so this reads a failed one
-        if rec["guard"] == "no":
-            return "done", f"round {final} is done, no guard or check changed" + note
+        if not net_owed:
+            return "done", f"round {final} is done, no net value owed" + note
         if rec["net"] in ("zero", "positive"):
             return "done", f"round {final} is done, net value {rec['net']}" + note
         if bad and (fix or all(v == "PASS" for i, role, _, v in rounds if i == top and role == REVIEW_ROLES[0])):  # the reviewer passed and the design reviewer did not
             return "open", f"{lead}, but the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}"
         return "open", f"round {final} is done on a guard or check change, and its net value is owed"
-    if rec["kind"] == "delete-only" and rec["guard"] == "no" and top >= 1:  # before the design hold: the first review closes a delete-only change with no guard or check
-        return "done", "delete-only change, round 1 is done" + note
     if passed:
         return "open", f"{lead}, but the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}"
-    if rec["kind"] == "delete-only" and top == 1:
-        return "open", "round 1 failed on a guard or check change, so rounds 2 and 3 are owed"
-    if rec["kind"] == "docs-only" and not rounds:
-        return "done", "docs-only change, no round owed"
+    if reached:
+        return "open", f"{lead}, but this kind of change owes {owed} rounds"
+    if not rounds and not owed:
+        return "done", "no round owed for this kind of change"
     return "open", f"round {top} is not passed" if top else "no round is recorded"
+
+def round_three_refusal(a, earlier):
+    """-> the reason a new record's last round (REVIEW_LAST_ROUND) is refused, or "" (decision pr-review-record, the done rules: every change is done at
+    the first round or fix verifier that passes, so the last round follows only a failed second round). `a` is the parsed command line, `earlier` this
+    pull request's parsed earlier records, oldest first. An earlier entry that did not parse is None and is skipped. A record that holds the second
+    and the last round is refused when its rounds up to the second already read done. A record that opens at the last round stands on the chain:
+    no record from the newest one holding a second round onward may read done (a passed fix verifier after a failed second round reads done), or,
+    with no second round written, the first round must have failed and every earlier fix verifier must have failed (a failed fix verifier stands
+    in for a failed second round). A last round after an earlier last round is refused. Reads no host."""
+    earlier = [e for e in earlier if e]
+    rounds = [r for r in a.round if r[0] <= 2]
+    if not any(r[0] == REVIEW_LAST_ROUND for r in a.round):
+        return ""
+    def done(rec):
+        return review_state(rec, rec["head"])[0] == "done"
+    if min(r[0] for r in a.round) < REVIEW_LAST_ROUND:  # the record repeats the earlier rounds before its last one
+        shown = {"head": a.head, "kind": a.kind, "guard": a.guard, "net": a.net_value, "rounds": rounds, "fix": None, "grant": None}
+        return "round 3 follows a passed round 2, and a pass ends the review." if rounds and done(shown) else ""
+    if any(r[0] >= REVIEW_LAST_ROUND for e in earlier for r in e["rounds"]):
+        return "this pull request already holds a round 3."
+    two = [i for i, e in enumerate(earlier) if any(r[0] == 2 for r in e["rounds"])]
+    if two:
+        if any(done(e) for e in earlier[two[-1]:]):
+            return "round 3 follows a failed round 2, and a passed round or fix verifier after it ends the review."
+        return ""
+    one = [e for e in earlier if any(r[0] == 1 for r in e["rounds"])]
+    fixes = [e["fix"] for e in earlier if e["fix"]]
+    if not one or done(dict(one[-1], fix=None)):
+        return "a record that opens at round 3 needs a failed round 1 on this pull request before it."
+    if not fixes or any(f[3] != "FAIL" for f in fixes):
+        return "a record that opens at round 3 needs a failed round 2, or a failed fix verifier, before it."
+    return ""
+
+def pr_had_head(h, head, live, base):
+    """True when `head` is a head the pull request had before its live head `live`: a commit on `live`'s first-parent line (a push, or a clean merge of
+    main, each leaves the earlier head first) that the base `base` does not hold. The walk reads each commit's parents (commit_read) and whether the base holds
+    it (holds_head) and stops at the first commit the base holds, or after REVIEW_MERGE_WALK commits. A force-pushed head is on no such line, so it reads False.
+    A failed read raises Stop. Cost: two reads per commit walked."""
+    sha = live
+    for _ in range(REVIEW_MERGE_WALK):
+        if h.holds_head(sha, base):
+            return False
+        if sha == head:
+            return True
+        parents, _tree = h.commit_read(sha)
+        if not parents:
+            return False
+        sha = parents[0]
+    return False
 
 REVIEW_MERGE_WALK = 50  # the most commits (clean merges of main) clean_merges_after walks between a record's head and the live head
 
@@ -4591,7 +4784,7 @@ def restart_remedies(h, n, last, head):
 
 REVIEW_SURVIVAL_UNKNOWN = "whether only clean merges of main follow the reviewed head is unknown"  # the why of a stale record whose clean-merge read could not run
 
-def live_review_state(h, rec, live, main, claims=None, source=None):
+def live_review_state(h, rec, live, main, claims=None, earlier=(), source=None):
     """-> (state, why) of the parsed record `rec` for the live head `live`: the one home of that read, for `merge --reviewed` (reviewed_read) and the
     lane Stop hook (lint/report_guard.py). It is review_state, except that a stale record whose live head is its Head plus clean merges of main
     (clean_merges_after) reads as it does at its Head (decision pr-review-record). A clean-merge read that cannot run keeps the state stale, and
@@ -4605,13 +4798,14 @@ def live_review_state(h, rec, live, main, claims=None, source=None):
     if rec is None and source is not None:
         try:
             got = carry_source(h, source, live)
+            rows = h.source_comments(source)[0].get(source) or []  # cached by carry_source: the source's records, whose earlier ones the walk back reads
         except (Stop, subprocess.TimeoutExpired, OSError) as e:
             return "unknown", f"whether the record of #{source} carries by tree is unknown ({' '.join(str(e).split())[:300]})"
         if got is None:
             return "none", f"no record of #{source} carries to this head by tree"
-        state, why = review_state(got[0], got[0]["head"])
+        state, why = review_state(got[0], got[0]["head"], own_records(source, [r[0] for r in rows[:-1]]))
         return state, f"carried from #{source} by tree; {why}"
-    state, why = review_state(rec, live)
+    state, why = review_state(rec, live, earlier)
     if state != "stale":
         return state, why
     try:
@@ -4619,7 +4813,7 @@ def live_review_state(h, rec, live, main, claims=None, source=None):
             return state, why
     except (Stop, subprocess.TimeoutExpired, OSError) as e:
         return state, f"{why}; {REVIEW_SURVIVAL_UNKNOWN} ({' '.join(str(e).split())[:300]})"
-    state, why = review_state(rec, rec["head"])
+    state, why = review_state(rec, rec["head"], earlier)
     return state, why + "; the head is the reviewed head plus clean merges of main"
 
 def rollup_green(h, n, head):
@@ -4705,6 +4899,10 @@ def lint_check(h, n, info, root, cfgrel):
     if lint != "pass":
         raise Stop(f"#{n} at {info['head'][:9]} is not ready to join: {LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`, then join again. {LANE_LINT_CITE}")
 
+def own_records(n, bodies):
+    """-> the parsed records among `bodies` that name pull request `n`, in order: the earlier records review_state walks back through."""
+    return [e for e in (parse_review(b) for b in bodies) if e and e["n"] == n]
+
 def reviewed_read(h, cfgrel=None):
     """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
@@ -4732,7 +4930,7 @@ def reviewed_read(h, cfgrel=None):
         else:
             rec = parse_review(bodies[-1])
             rec = rec if rec and rec["n"] == n else None
-            state, why = live_review_state(h, rec, sha, main, cfgrel)
+            state, why = live_review_state(h, rec, sha, main, cfgrel, own_records(n, bodies[:-1]))
         if state == "done":
             lint = lint_state(lints.get(n, []), sha)
             if lint == "none" and lint_carried(root, cfgrel, d["base"]["ref"], n, lint_passed(lints.get(n, [])), sha, h, source_lint_passed(h, n, d.get("body"))[1]):
@@ -4997,7 +5195,8 @@ def release_check(root, h, numbers, lints, root_why=None, cfgrel=None):
                 body, created, updated = rows[-1]  # only the newest record counts
                 rec = parse_review(body)
                 rec = rec if rec and rec["n"] == n else None
-                state, why = live_review_state(h, rec, i["head"], default, cfgrel) if default else review_state(rec, i["head"])  # no default branch read: no walk, the why of that read follows below
+                before = own_records(n, [r[0] for r in rows[:-1]])
+                state, why = live_review_state(h, rec, i["head"], default, cfgrel, before) if default else review_state(rec, i["head"], before)  # no default branch read: no walk, the why of that read follows below
                 if state != "done":
                     out.append(why)
                 if created is None or updated is None:
@@ -5298,7 +5497,7 @@ def build_parser():
     p.add_argument("--with", dest="with_prs", default=None, metavar="PR,PR,...", help="with --lane-lint on a PR number: also check the head against each named open PR (a comma list), even one of another session")
     p.add_argument("--touched-tests", action="store_true", help="with --lane-lint: after the lint passes, run the test files the diff touches in the lint worktree; a failing test refuses, a timeout is unknown (lifted by --lint-unknown-ok)")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
-    p.add_argument("--ready", action="store_true", help="mark a lane's draft pull request ready, once: the records step and the repo's ready checks, then the host's mark; a ready pull request is left as it is; merges nothing, takes no lock")
+    p.add_argument("--ready", action="store_true", help="mark a lane's draft pull request ready, once: on the default branch a merge of origin/<base> into a head that lacks its tip, the records step and the repo's ready checks, then the host's mark; a ready pull request is left as it is; merges no pull request, takes no lock")
     p.add_argument("--fast-checks", action="store_true", help="the pre-ready run on a dry merge of the pull request onto its base, read-only: one pass, fail or unknown line per check; takes no lock, pushes nothing, marks nothing ready, posts nothing")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
@@ -5422,8 +5621,8 @@ def main(argv, host=None, lock=None, hosts=None):
                 if want and got is not None and got < hook_guard.role_model_rank(want):  # no row for the first round leaves nothing to flag against
                     print(f"merge: round 1 ran {model}, below its row's {want} (decision agent-model-cap, the round rows)", file=sys.stderr)
         if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant)) is None:
-            p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3; give round 1 with its real model, or unknown if not known" if not a.grant
-                    else "--round: with --grant the rounds must start at 1, rise by one at a time and end at 4; give round 1 with its real model, or unknown if not known")
+            p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3; a record may open at round 3 after a failed round 2 or a failed fix verifier; give round 1 with its real model, or unknown if not known" if not a.grant
+                    else "--round: with --grant the rounds must start at 1, rise by one at a time and end at 4; a record may open at round 3; give round 1 with its real model, or unknown if not known")
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, --unlock, --reviewed, or --role TIER")
     try:
@@ -5495,7 +5694,7 @@ def main(argv, host=None, lock=None, hosts=None):
         if a.review_record:
             if info["state"] != "OPEN":
                 raise Stop(f"the pull request is {info['state']} " + REVIEW_CITE)
-            if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
+            if info["head"] != a.head and not pr_had_head(h, a.head, info["head"], info["base"]):  # a head the pull request never had must not relabel the old rounds as current
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
             files = h.pr_files(a.pr, info["changed_files"])
             hits = guard_hits([p for p, _, _ in files])
@@ -5507,10 +5706,19 @@ def main(argv, host=None, lock=None, hosts=None):
             earlier = [e for e in (parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])) if not (e and e["n"] != a.pr)]  # a record for another PR is no earlier record here, as --reviewed reads it
             earlier_top = max((r[0] for e in earlier if e for r in e["rounds"]), default=0)
             new_top = max((r[0] for r in a.round), default=0)
-            # a new record may not lower the top round an earlier record holds, and below REVIEW_LAST_ROUND it may not repeat that top round without a fix verifier of its own (a head moved after the last round posts rounds 1..REVIEW_LAST_ROUND again, and a granted round past it is above)
-            if earlier_top and (new_top < earlier_top or (new_top == earlier_top and new_top < REVIEW_LAST_ROUND and not a.fix_check)):
+            # a new record may not lower the top round an earlier record holds, and below REVIEW_LAST_ROUND it may not repeat that top round without a fix verifier of its own (a head moved after the last round posts rounds 1..REVIEW_LAST_ROUND again, and a granted round past it is above).
+            # The cap is REVIEW_LAST_ROUND for every change, not its review row's last round: a row that owes one round would let a repeat of the first round pass with no fix verifier. A record with no round line and a fix verifier is no restart
+            if earlier_top and not (a.fix_check and not a.round) and (new_top < earlier_top or (new_top == earlier_top and new_top < REVIEW_LAST_ROUND and not a.fix_check)):
                 print(f"merge: this record restarts the review: it has the same or fewer rounds than an earlier record on this pull request, stops below round {REVIEW_LAST_ROUND}, and has no fix verifier. "
                       + restart_remedies(h, a.pr, earlier[-1], a.head) + " " + REVIEW_CITE, file=sys.stderr)
+                return 2
+            why = round_three_refusal(a, earlier)
+            if why:
+                print(f"merge: {why} " + REVIEW_CITE, file=sys.stderr)
+                return 2
+            held = last_design_line(earlier) if a.fix_check and a.fix_check[3] == "PASS" and not a.round else None  # a FAIL fix verifier ends no review, so only a PASS one could hide a design reviewer FAIL
+            if held and held[1] != "PASS":
+                print(f"merge: a record with no round line cannot clear the design reviewer's {held[1]} in round {held[0]} of an earlier record. Post a full record whose design reviewer PASSes. " + REVIEW_CITE, file=sys.stderr)
                 return 2
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
                 last = earlier[-1] if earlier else None
@@ -5580,7 +5788,7 @@ def main(argv, host=None, lock=None, hosts=None):
             if not info["draft"]:
                 say(f"merge: #{a.pr} is ready already. Nothing was changed.")
                 return 0
-            return draft_step(root, cfg, a.pr, h, info)
+            return draft_step(root, cfg, a.pr, h, info, merge_main=True)
         checked = None  # the head the lane-lint PASS names; confirm refuses any other
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and isinstance(h, Host) and not info["draft"]:  # a scripted host that is no Host brings its own reads; a draft is the records step, never a join
             lint_check(h, a.pr, info, root, a.config)
