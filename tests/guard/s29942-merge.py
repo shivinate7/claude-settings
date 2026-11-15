@@ -4,17 +4,23 @@ REPO_RULE = "merge-confirm-repo"
 REPO_A = os.path.join(ROOT, "repo-o-a")       # origin github.com/o/a
 REPO_B = os.path.join(ROOT, "repo-o-b")       # origin github.com/o/b
 REPO_HASH = os.path.join(ROOT, "repo#a")      # origin github.com/o/a, a path that holds a `#`
-MERGE_ORIGINS = {REPO_A: "https://github.com/o/a", REPO_B: "https://github.com/o/b", REPO_HASH: "https://github.com/o/a"}
+REPO_DEGEN = os.path.join(ROOT, "repo-shivinate7-degen")  # origin github.com/shivinate7/degen, another repo of the owner's
+MERGE_ORIGINS = {REPO_A: "https://github.com/o/a", REPO_B: "https://github.com/o/b", REPO_HASH: "https://github.com/o/a",
+                 REPO_DEGEN: "https://github.com/shivinate7/degen"}
 
 
 def _build_merge_origins():
-    """The three checkouts of the merge-confirm-repo cases: see MERGE_ORIGINS."""
+    """The four checkouts of the merge-confirm-repo cases: see MERGE_ORIGINS."""
     _build_origins(MERGE_ORIGINS)
 
 
 lazy_fixture(list(MERGE_ORIGINS), _build_merge_origins)
 CLOUD_ENV = {**ROLE_ENV, "CLAUDE_CODE_REMOTE": "true"}  # decide() drops CLAUDE_CODE_REMOTE, then applies a case's env
 TX_A = role_path("repo-o-a")             # a lane whose record names cs-repo:o/a
+TX_LANE_CS = role_path("repo-lane-o-a-settings")  # a lane whose record names cs-repo:o/a and cs-repo:shivinate7/claude-settings
+TX_LANE_CS_ONLY = role_path("repo-lane-claude-settings")  # a lane whose record names cs-repo:shivinate7/claude-settings only
+TX_DEGEN = role_path("repo-lane-degen")  # a lane whose record names cs-repo:shivinate7/degen only
+TX_LANE_NONE = role_path("repo-lane-none")  # a lane whose record names no repo
 TX_RUNNER = role_path("repo-runner-claude-settings")
 TX_RUNNER_A = role_path("repo-runner-o-a")  # a batch runner whose record names cs-repo:o/a
 TX_SOLO_A = role_path("repo-solo-o-a")      # a session whose record has no cs-build tag and names cs-repo:o/a
@@ -80,22 +86,41 @@ repo_case("--ready from this checkout's repo is allowed for a batch runner", "al
 repo_case("--ready with --repo-dir naming this checkout is allowed for a batch runner from another directory", "allow",
           f"{MERGE_SHIM} --repo-dir '{REPO_A}' 5 --ready", REPO_B, TX_RUNNER_A)
 repo_case("--ready from this checkout's repo is allowed for a session with no cs-build tag", "allow", f"{MERGE_SHIM} 5 --ready", REPO_A, TX_SOLO_A)
-# RED on the current guard: a lane's own record carries cs-build:lane and its repo, so the repo proof alone lets --ready through. The lane is
-# refused with no merge role file in its config dir (LT_EMPTY). The refusal's rule is not pinned: the fix names it.
+# The lane rule judges a lane whose record names claude-settings (ruling own-lanes-merge-claude-settings-prs). These lanes name o/a and
+# claude-settings: cwd is o/a, so the repo proof passes and only the lane's refusal can deny. The lane has no merge role file (LT_EMPTY).
 for _command in (f"{MERGE_SHIM} 5 --ready", f"{MERGE_SHIM} --repo-dir '{REPO_A}' 5 --ready", f"cd '{REPO_A}' && {MERGE_SHIM} 5 --ready"):
-    sh("lane --ready is refused with no merge role file: " + _command, _command, "deny", cwd=REPO_A, env=CLOUD_ENV, transcript=TX_A,
-       config=LT_EMPTY)  # cwd is the lane's own repo, so the repo proof passes and only the lane's refusal can deny
+    sh("lane --ready is refused with no merge role file: " + _command, _command, "deny", rule=ROLE_RULE, cwd=REPO_A, env=CLOUD_ENV,
+       transcript=TX_LANE_CS, config=LT_EMPTY)
+# A lane in claude-settings's own checkout, its record naming claude-settings only, is refused by the lane rule.
+sh("lane in claude-settings: --ready is refused by the lane rule", f"{MERGE_SHIM} 5 --ready", "deny", rule=ROLE_RULE, cwd=LANE_REPO,
+   env=CLOUD_ENV, transcript=TX_LANE_CS_ONLY, config=LT_EMPTY)
+# A lane whose record names only another repo is not judged by the lane rule, so its `--ready` from its own checkout is allowed, as on main.
+# Red on the current guard, which refuses every lane. The working directory decides the repo, as for --confirm.
+for _command, _where in ((f"{MERGE_SHIM} 5 --ready", REPO_DEGEN), (f"{MERGE_SHIM} --repo-dir '{REPO_DEGEN}' 5 --ready", REPO_A),
+                         (f"cd '{REPO_DEGEN}' && {MERGE_SHIM} 5 --ready", REPO_A)):
+    sh("lane of another repo: --ready is allowed: " + _command, _command, "allow", cwd=_where, env=CLOUD_ENV, transcript=TX_DEGEN,
+       config=LT_EMPTY)
+# A lane with no repo tag: the repo proof denies its --ready, as on main. The lane rule does not decide it, so the deny names the repo rule.
+sh("lane with no repo tag: --ready is denied by the repo rule, not the lane rule", f"{MERGE_SHIM} 5 --ready", "deny", rule=REPO_RULE,
+   lacks=ROLE_RULE, cwd=REPO_A, env=CLOUD_ENV, transcript=TX_LANE_NONE, config=LT_EMPTY)
 # A lane's `update_pull_request` with draft false marks a pull request ready, which the batch runner does (ruling own-lanes-merge-claude-
-# settings-prs). So a lane's record is refused on that call, on its own pull request and on another. Today only the records page's freshness
-# is judged (guard.py refuse_ready_page), so these are red on the current guard. The refusal's rule is not pinned: the fix names it.
+# settings-prs). So a lane whose record names claude-settings is refused on that call, on its own pull request and on another. The refusal's
+# rule is not pinned here; the lane `--ready` rows above pin it.
 def lane_mcp_ready(name, expected, transcript, **tool_input):
     add(name, expected, tool="mcp__github__update_pull_request", cwd=REPO_A, transcript=transcript, env=CLOUD_ENV, config=LT_EMPTY,
         **tool_input)
 
 
-lane_mcp_ready("lane MCP update with draft false on its own pull request is refused", "deny", TX_A, owner="o", repo="a", pullNumber=5, draft=False)
-lane_mcp_ready("lane MCP update with draft false on another pull request is refused", "deny", TX_A, owner="o", repo="a", pullNumber=9,
+lane_mcp_ready("lane MCP update with draft false on its own pull request is refused", "deny", TX_LANE_CS, owner="o", repo="a", pullNumber=5,
                draft=False)
+lane_mcp_ready("lane MCP update with draft false on another pull request is refused", "deny", TX_LANE_CS, owner="o", repo="a", pullNumber=9,
+               draft=False)
+# A lane whose record names only another repo, or no repo, is not judged by the lane rule: its draft-false update is allowed, as on main.
+# Red on the current guard, which refuses every lane's draft-false update.
+lane_mcp_ready("lane MCP update with draft false from a lane of another repo is allowed", "allow", TX_DEGEN, owner="o", repo="a", pullNumber=5,
+               draft=False)
+lane_mcp_ready("lane MCP update with draft false from a lane with no repo tag is allowed", "allow", TX_LANE_NONE, owner="o", repo="a",
+               pullNumber=5, draft=False)
 # Controls, green on the current guard and kept: a batch runner, or a session with no cs-build tag, may mark ready. A lane may edit a title
 # and may set draft true, a return to draft, since neither marks a pull request ready.
 lane_mcp_ready("MCP update with draft false from a batch runner is allowed", "allow", TX_RUNNER_A, owner="o", repo="a", pullNumber=5,

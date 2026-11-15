@@ -519,6 +519,9 @@ RUNNER_TAGS = ["cs-build:batch-runner", "cs-repo:o/r"]
 COORD_TAGS = ["cs-build:coordinator", "cs-repo:o/r"]
 TRIAGE_TAGS = ["cs-build:triage", "cs-repo:o/r"]  # the record branch's one writer (roadmap-one-writer)
 MERGE_SHIM = "~/.claude/bin/merge"
+# A lane's proof, for `--role lane` and the lane `--ready` refusal, needs this repo tag beside cs-build:lane: no lane role file exists
+# in another repo (ruling own-lanes-merge-claude-settings-prs).
+CS_REPO_TAG = "cs-repo:" + ARCH_REPO_SETTINGS
 
 
 def role_use(tool_id, name, tool_input=None):
@@ -731,6 +734,12 @@ ROLE_LINES = {
     # merge-confirm-repo shapes (section 5h): a lane that names o/a, a runner that names claude-settings, a runner whose
     # only repo is a child's, and an own record with no tags at all.
     "repo-o-a": role_call("g1", ["cs-build:lane", "cs-repo:o/a"]),
+    # Lane shapes for the lane `--ready` and draft-false refusals: a lane that also names claude-settings is judged; a lane of
+    # another repo, or with no repo tag, is not.
+    "repo-lane-o-a-settings": role_call("g1", ["cs-build:lane", "cs-repo:o/a", CS_REPO_TAG]),
+    "repo-lane-claude-settings": role_call("g1", ["cs-build:lane", CS_REPO_TAG]),
+    "repo-lane-degen": role_call("g1", ["cs-build:lane", "cs-repo:shivinate7/degen"]),
+    "repo-lane-none": role_call("g1", ["cs-build:lane"]),
     "repo-runner-claude-settings": role_call("g1", ["cs-build:batch-runner", "cs-repo:shivinate7/claude-settings"]),
     "repo-runner-children": role_call("g1", ["cs-build:batch-runner", "cs-repo:shivinate7/mailaudit"]),
     "repo-empty-tags": role_call("g1", []),
@@ -860,8 +869,11 @@ ROLE_LINES = {
         ARCH_LANE_TAGS, {"": ARCH_COPY_BRANCH}))),
     # Ruling own-lanes-merge-claude-settings-prs: a lane records `--role lane --step <slug>`. The step must be a cs-step tag of the
     # lane's own newest record; a title, another session's record, or a triage record never gives it.
-    "lane-step": role_call("g1", ARCH_LANE_TAGS),
-    "lane-step-old": role_call("g1", STEP_OLD_TAGS),
+    "lane-step": role_call("g1", ARCH_LANE_TAGS + [CS_REPO_TAG]),
+    "lane-step-old": role_call("g1", STEP_OLD_TAGS + [CS_REPO_TAG]),
+    # A lane whose own step is `own`, in another repo, and with no repo tag: the lane role is not proven by either.
+    "lane-step-degen": role_call("g1", ["cs-build:lane", "cs-step:own", "cs-repo:shivinate7/degen"]),
+    "lane-step-none": role_call("g1", ["cs-build:lane", "cs-step:own"]),
     "lane-step-title": role_call("g1", LANE_TAGS, title="cs-step:" + ARCHIVE_SLUG),
     "lane-step-foreign": role_call("g1", ARCH_LANE_TAGS, session=ROLE_OTHER),
     "lane-step-then-no-step": role_call("g1", ARCH_LANE_TAGS) + role_call("g2", LANE_TAGS),
@@ -1019,6 +1031,10 @@ for _lane_prefix in ("", "cd somewhere && "):
         _lane_cmd = _lane_prefix + _lane_form + " --role lane --step " + ARCHIVE_SLUG
         role_allow(_lane_cmd + " allows its own step", _lane_cmd, role_path("lane-step"))
         role_refuse(_lane_cmd + " is refused on a record with no cs-step tag", _lane_cmd, role_path("lane"))
+        # The lane role is proven only by a record that also names claude-settings. A lane of another repo, or with no repo tag, is refused.
+        _own_cmd = _lane_prefix + _lane_form + " --role lane --step own"
+        role_refuse(_own_cmd + " is refused on a degen lane's own step", _own_cmd, role_path("lane-step-degen"))
+        role_refuse(_own_cmd + " is refused on a lane with no repo tag", _own_cmd, role_path("lane-step-none"))
 # A role flag inside a wrapper is judged as the top-level call is: `bash -c` and `$(...)` run the merge tool, so their inner command is read
 # (guard_core.inner_commands, the one reader of the wrappers). The lane's own step may run inside a wrapper, and is pinned allowed here, the
 # shape the fix keeps. Another step, and the batch runner's role, are refused inside one. These are red on the current guard, which reads
