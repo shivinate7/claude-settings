@@ -14363,9 +14363,35 @@ class LaneRefusals(CloudSession):
         self.assert_refused_quietly("7", "--confirm", "--head", self.head())
         self.assertEqual(self.host.waits, [], "a lane's confirm waited on a red head under the lock")
 
+    def test_a_lane_is_refused_on_a_missing_required_check(self):
+        # A required check that has not reported reads pending (Host.head_state), and a confirm refuses a pending head with no wait.
+        self.host.state = "pending: checks"
+        self.host.checks = (None, "a required check is pending")
+        self.assert_refused_quietly("7", "--confirm", "--head", self.head())
+        self.assertEqual(self.host.waits, [], "a lane's confirm waited on a missing required check under the lock")
+
     def test_a_lane_role_with_no_step_is_refused_at_confirm(self):
         self.put_role("lane")
         self.assert_refused_quietly("7", "--confirm", "--head", self.head())
+
+
+class LaneRoleWriter(CloudSession):
+    """Ruling own-lanes-merge-claude-settings-prs: `merge --role lane --step <slug>` records this cloud session's lane role with its step,
+    and a lane with no step is refused and writes nothing. The step is what a lane's confirm later judges its pull request by."""
+
+    assert_writer_refused = MergeRoleCheck.assert_writer_refused  # one home of the writer refusal assertions
+
+    def test_role_lane_with_a_step_writes_the_lane_and_its_step(self):
+        self.assertEqual(self.role_files(), {})
+        rc, out, err = self.run_main("--role", "lane", "--step", "feat")
+        self.assertEqual(rc, 0, "the writer refused a lane's --role lane --step: " + out + err)
+        with open(self.role_file, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"session": ROLE_SESSION, "role": "lane", "step": "feat"}, "the writer did not record the lane and its step")
+        self.assertEqual(self.host.pr_calls, [], "the writer read the host")
+
+    def test_role_lane_with_no_step_is_refused_and_writes_nothing(self):
+        self.assert_writer_refused("--role", "lane")
+        self.assertEqual(self.role_files(), {})
 
 
 class StandingGrantSwitch(CloudSession):
@@ -14759,9 +14785,14 @@ CLOUD_ALLOW_FILE = os.path.join(HERE, "cloud_allow.json")
 # repo's own bin/merge. No rule runs merge/merge.py by path: that runs the working copy's file, which on an old lane branch has no role check.
 CLOUD_ALLOW_SHIMS = ("~/.claude/bin/merge",)
 CLOUD_ALLOW_RULES = tuple(f"Bash({shim} * --confirm{tail})" for shim in CLOUD_ALLOW_SHIMS for tail in ("", " *"))
-# A role rule allows one exact `merge --role <tier>` per tier in merge.MERGE_ROLES. No `*` and no word after the tier, so it cannot
-# pass --confirm or a PR number. The tiers come from decision session-tiers (the session tier design).
-CLOUD_ROLE_RULES = tuple(f"Bash({shim} --role {tier})" for shim in CLOUD_ALLOW_SHIMS for tier in sorted(merge.MERGE_ROLES))
+# A role rule allows one exact `merge --role <tier>` per tier in merge.MERGE_ROLES, except the lane. No `*` and no word after an exact tier,
+# so it cannot pass --confirm or a PR number. The tiers come from decision session-tiers (the session tier design). The lane's one rule is
+# `--role lane --step *` (ruling own-lanes-merge-claude-settings-prs, owner 11:12 CST Nov 15, 2026): its step is the only word after the
+# tier, and the only star. No other lane form is allowed.
+LANE_TIER = "lane"
+LANE_STEP_RULE = "Bash(~/.claude/bin/merge --role lane --step *)"
+CLOUD_ROLE_RULES = tuple(f"Bash({shim} --role {tier})" for shim in CLOUD_ALLOW_SHIMS
+                         for tier in sorted(merge.MERGE_ROLES - {LANE_TIER})) + (LANE_STEP_RULE,)
 # One left-to-right pass over a shell script: a quoted string, an escaped character, or a comment, whichever starts first. A `#` opens a
 # comment at a line start or after a space, `;`, `&`, `|` or `(`, never inside a string or in `$#` and `${#x}`.
 SH_TOKEN = re.compile(r"""'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?:^|(?<=[\s;&|(]))#[^\n]*""", re.M | re.S)
@@ -14854,12 +14885,14 @@ class CloudAllow(unittest.TestCase):
                 self.assertTrue(any(bash_rule_matches(rule, command) for rule in self.allow() if "--confirm" in rule),
                                 f"no confirm rule allows {command!r}")
 
-    # decision session-tiers: the coordinator never merges, so its role rule goes; the batch-runner rule stays
-    def test_the_rules_file_holds_three_rules_and_no_coordinator_role_rule(self):
+    # decision session-tiers: the coordinator never merges, so its role rule goes; the batch-runner rule stays. Ruling
+    # own-lanes-merge-claude-settings-prs adds the lane's one step rule, so the file holds four rules.
+    def test_the_rules_file_holds_four_rules_and_no_coordinator_role_rule(self):
         allow = self.allow()
-        self.assertEqual(len(allow), 3, allow)
+        self.assertEqual(len(allow), 4, allow)
         self.assertNotIn("Bash(~/.claude/bin/merge --role coordinator)", allow)
         self.assertIn("Bash(~/.claude/bin/merge --role batch-runner)", allow)
+        self.assertIn(LANE_STEP_RULE, allow)
 
     def test_the_rules_file_is_exactly_the_confirm_and_role_rules_of_the_home_shim(self):
         with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
@@ -14892,6 +14925,8 @@ class CloudAllow(unittest.TestCase):
         for rule in self.allow():
             with self.subTest(rule=rule):
                 self.assertNotEqual(rule, "Bash(*)")
+                if rule == LANE_STEP_RULE:  # the lane's one form: test_no_role_rule_holds_a_star_or_anything_after_the_tier pins its shape
+                    continue
                 m = role.fullmatch(rule)
                 if m:
                     self.assertIn(m.group(1), merge.MERGE_ROLES, f"{rule} names a tier the code does not know")
@@ -14904,6 +14939,10 @@ class CloudAllow(unittest.TestCase):
         self.assertEqual(len(role_rules), len(merge.MERGE_ROLES), "want one role rule per tier")
         for rule in role_rules:
             with self.subTest(rule=rule):
+                if rule == LANE_STEP_RULE:  # the lane's one form: one star, for the step, and nothing after it
+                    self.assertEqual(rule.count("*"), 1, rule)
+                    self.assertTrue(rule.endswith(" --step *)"), rule)
+                    continue
                 self.assertNotIn("*", rule)
                 self.assertTrue(rule.endswith(")"), rule)
                 self.assertIn(rule[:-1].rsplit(" ", 1)[1], merge.MERGE_ROLES)  # the tier is the last word: nothing after it
