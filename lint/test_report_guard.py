@@ -4539,6 +4539,11 @@ KEYS_DISTINCT = ("> **Input Needed** Two questions.\n> 1a) keep the apps\n> 1b) 
                  "> 2a) about 2x\n> 2b) under 80%")
 KEYS_NOW = "> **Input Needed** Keep the caps?\n> a) about 2x\n> b) under 80%"
 KEYS_EARLIER = "> **Input Needed** Keep the apps?\n> a) keep\n> b) remove"
+# A report that asks nothing: its Input Needed item says none, with a reason or a note. Its Done line cites the ruled
+# apps question, so a judge that reads the whole report finds a ruling to refuse with.
+NONE_TAILS = ("None — nothing waits on the owner.", "None (the apps ruling already covers it).",
+              "None: the apps ruling is in place.")
+STATUS_NONE = "> **Done** OTHER kept the apps ruling as it is.\n> **Input Needed** %s\n> **Next** wait for the merge"
 
 
 C153_MARK = "c153-5e7a"
@@ -4701,6 +4706,53 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         calls = self.model_calls()
         self.assertEqual(len(calls), 1)
         self.assertIn(C153_MARK, calls[0]["prompt"])
+
+    def test_a_none_input_needed_item_with_a_note_sends_no_question_to_the_judge(self):
+        # Catches: "None" with a reason read as an Input Needed item. That marks the whole report as asked, so the
+        # past-ruling judge reads a status report and refuses it (lint/report_guard.py asked_text, hooks/reply_judge.py
+        # has_input_needed). A report that asks nothing makes no model call and gets no past-ruling refusal.
+        for tail in NONE_TAILS:
+            with self.subTest(tail=tail):
+                self.reset_calls()
+                out, _ = self.stop(self.decided, STATUS_NONE % tail, answer=REFUSE_APPS)
+                self.assertEqual(self.model_calls(), [], "the past-ruling judge read a report with no question: %r" % tail)
+                self.assertNotIn("past-ruling", self.reason(out), out)
+
+    def test_a_quoted_question_in_a_status_line_sends_no_question_to_the_judge(self):
+        # Catches: a "?" inside double quotes read as a question asked now. The question check (asks_a_question) blanks
+        # quoted text, and the relay's prose check (prose_questions) must agree with it.
+        reply = ('> **Done** OTHER the refusal said "keep the apps?" and the check passed.\n'
+                 "> **Input Needed** None.\n> **Next** wait")
+        out, _ = self.stop(self.decided, reply, answer=REFUSE_APPS)
+        self.assertEqual(self.model_calls(), [], "the past-ruling judge read a quoted question as asked")
+        self.assertNotIn("past-ruling", self.reason(out), out)
+
+    def test_a_question_mark_in_a_status_line_still_reaches_the_judge(self):
+        # Guard rail, green on the old code: a report that asks by a "?" in a Next line still gets the check, after a
+        # lone inch mark that pairs with no other quote on its line.
+        reply = ('> **Done** OTHER set the 5" rack.\n> **Input Needed** None.\n'
+                 '> **Next** is the apps ruling still live for a 5" rack?')
+        out, _ = self.stop(self.decided, reply, answer=REFUSE_APPS)
+        self.assertEqual(len(self.model_calls()), 1, "a status-line question did not reach the judge")
+        self.assertIn("past-ruling", self.reason(out), out)
+
+    def test_a_real_input_needed_question_beside_a_status_line_is_still_refused(self):
+        # Guard rail, green on the old code: a real question in Input Needed still reaches the judge and is refused,
+        # with a status line before it.
+        reply = ("> **Done** OTHER kept the apps ruling as it is.\n"
+                 "> **Input Needed** Should the GitHub apps keep their access to claude-settings?\n> **Next** wait")
+        out, _ = self.stop(self.decided, reply, answer=REFUSE_APPS)
+        self.assertEqual(len(self.model_calls()), 1, "the Input Needed question did not reach the judge")
+        self.assertIn("past-ruling", self.reason(out), out)
+
+    def test_a_none_led_input_needed_item_that_asks_still_reaches_the_judge(self):
+        # Guard rail, green on the old code: an item that opens with "None" but then asks a question is still an item.
+        reply = ("> **Done** OTHER kept the apps ruling as it is.\n"
+                 "> **Input Needed** None waits on you, but should the GitHub apps keep their access to claude-settings?\n"
+                 "> **Next** wait")
+        out, _ = self.stop(self.decided, reply, answer=REFUSE_APPS)
+        self.assertEqual(len(self.model_calls()), 1, "a None-led question did not reach the judge")
+        self.assertIn("past-ruling", self.reason(out), out)
 
     def test_a_question_mark_inside_a_prose_line_triggers_the_check(self):
         self.stop(self.decided, "Ship the fix? Say go and I merge.", answer=tcj.ALLOW)
