@@ -254,10 +254,11 @@ TRACED_READS = (
 )
 
 
-# Tracked files the guard suite names as data: a fixture written into a temp tree, or a name inside a command string. The guard
-# reads the temp copy, never the repo file, and the trace opens none of them. Case (b) passes these names without a glob. Each
-# entry is checked against the suite every run, so an entry the suite stops naming fails too. A new name here needs its reason.
+# Tracked files the guard suite names as data: a fixture written into a temp tree, a name inside a command string, or a constant the
+# code compares and never opens. Case (b) passes these names without a glob. Each entry is checked against the suite every run, so
+# an entry the suite stops naming fails too. A new name here needs its reason, checked against the code line it cites.
 FIXTURE_NAMES = {
+    ".claude/CLAUDE.md": "a constant naming where a grant may land, compared by equality and never opened (hooks/feedback_guard.py:497)",
     "CLAUDE.md": "a fixture file written into a temp config or repo",
     "README.md": "a fixture repo file and a command string",
     "docs/records.md": "a fixture records page written into temp repos",
