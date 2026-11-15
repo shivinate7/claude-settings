@@ -530,7 +530,7 @@ class Scope(unittest.TestCase):
     # The waiting page export suite (skills/waiting-page/test_export_page.py) runs in checks-shoot, which runs only on `shoot`.
     # It reads these paths: hooks/question_form.py and hooks/_nowindow.py (through page_check.py), lint/_test_temp.py
     # (its run folder), and the steps it reads, in SKILL.md and in reference/copies-and-accounts.md and reference/repo-pages.md.
-    # Every reference/*.md is read by the page suite (skills/waiting-page/tests/page.test.mjs), whose job gates on `shoot` too.
+    # Every reference/*.md is read by the page suite (skills/waiting-page/tests/page.test.mjs), whose job is conditioned on `shoot` too.
     # Named failure: a PR that changes only one of them leaves `shoot` off, so the suite is skipped.
     def test_waiting_page_export_suite_paths_turn_on_shoot(self):
         for p in ("hooks/question_form.py", "hooks/_nowindow.py", "lint/_test_temp.py", "skills/waiting-page/SKILL.md",
@@ -567,8 +567,8 @@ class Scope(unittest.TestCase):
             self.fail("shoot stays off when a pull request changes only one of these export suite files, "
                       "so the suite is skipped:\n  " + "\n  ".join(missing))
 
-    # actions/playwright-setup has four callers (checks.yml): checks-guard and checks-guard-2 gate on checks_guard
-    # alone, and checks-shoot and checks-waiting-page gate on shoot alone. An edit to the action must set
+    # actions/playwright-setup has four callers (checks.yml): checks-guard and checks-guard-2 are conditioned on checks_guard
+    # alone, and checks-shoot and checks-waiting-page are conditioned on shoot alone. An edit to the action must set
     # checks_guard directly, with `shoot` for the two shoot jobs.
     # Named failure: the action arm sets code and shoot only, so checks-guard skips its install and guard suite.
     def test_playwright_action_edit_turns_on_the_checks_guard_job(self):
@@ -806,7 +806,7 @@ class RecordsOnlyPush(unittest.TestCase):
 
     # The shortcut turns off every job of a records-only push, the mutation-report job included, whatever the head ref.
     # The scope is asserted before the flag (P7): the shortcut applies, then mutation_report is read.
-    def test_records_only_mutation_report_skip_applies_batch_branch_is_false(self):
+    def test_records_only_mutation_report_skip_applies_integration_branch_is_false(self):
         facts = {}
         got = run([self.RECORDS], green=self.CODE, head_ref="batch-x", facts=facts)
         self.assertIs(facts.get("ancestor"), True, f"scope: GREEN_HEAD is not an earlier head of HEAD: {facts}")
@@ -825,7 +825,7 @@ class RecordsOnlyPush(unittest.TestCase):
 
     # The control beside the two cases above: GREEN_HEAD empty, so the shortcut does not apply and a batch pull request keeps
     # mutation_report on. The skip is asserted before the flag (P7).
-    def test_records_only_mutation_report_skip_does_not_apply_batch_branch_is_true(self):
+    def test_records_only_mutation_report_skip_does_not_apply_integration_branch_is_true(self):
         facts = {}
         got = run([self.RECORDS], green=self.CODE, green_head="", head_ref="batch-x", facts=facts)
         self.assertEqual(facts.get("delta"), [self.RECORDS], f"scope: the delta is not docs/records.md alone: {facts}")
@@ -929,7 +929,7 @@ class ModTestsRunsEveryCheck(unittest.TestCase):
 # lint runs only when a file it reads changed. The flags stay out of ALL, as DERIVED_FLAGS does, so the exact-set cases
 # above stay about the base flags.
 LINT_FLAGS = ("lint_red_run", "lint_plan_refuter", "lint_ruling_kind", "lint_comment_narration")
-LINT_STEPS = {  # flag -> the `name:` of the step it gates in checks.yml
+LINT_STEPS = {  # flag -> the `name:` of the step it controls in checks.yml
     "lint_red_run": "Red-run trailer",
     "lint_plan_refuter": "Plan refuter line",
     "lint_ruling_kind": "Ruling kind check",

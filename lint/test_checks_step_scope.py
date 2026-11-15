@@ -33,7 +33,7 @@ sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import workflow_steps as ws  # noqa: E402  the one home of the step parser
 from test_ci_scope import run as scope_run  # noqa: E402  ci-scope.sh run in a temp repo: the one home of the scope run
-from test_windows_split import NO_MD_SCOPE_CONDITION, eval_if, ungate, unwrap  # noqa: E402  the one home of the `if:` evaluator, the scope condition and the gate's form
+from test_windows_split import NO_MD_SCOPE_CONDITION, eval_if, drop_condition, unwrap  # noqa: E402  the one home of the `if:` evaluator, the scope condition and the condition's form
 
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 WORKFLOW = ".github/workflows/checks.yml"
@@ -654,9 +654,9 @@ class ScopeConditionOnNoMdSteps(ChecksStepBase):
         for name in NO_MD + NAMES_ONLY:
             with self.subTest(step=name):
                 got = if_of(self.named(steps, name))
-                # Outside the checks job, the records-only gate may follow the scope condition: `${{ (SCOPE) && GATE }}`.
-                gated_ok = name not in checks and ungate(unwrap(got)) == NO_MD_SCOPE_CONDITION
-                self.assertTrue(got == SCOPE_CONDITION or gated_ok, "step %r: if is %r, want the scope condition" % (name, got))
+                # Outside the checks job, the records-only condition may follow the scope condition: `${{ (SCOPE) && RECORDS_ONLY_CONDITION }}`.
+                conditioned_ok = name not in checks and drop_condition(unwrap(got)) == NO_MD_SCOPE_CONDITION
+                self.assertTrue(got == SCOPE_CONDITION or conditioned_ok, "step %r: if is %r, want the scope condition" % (name, got))
 
 
 class UnscopedAndPrOnlySteps(ChecksStepBase):
