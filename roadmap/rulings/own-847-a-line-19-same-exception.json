@@ -1,0 +1,10 @@
+{
+ "id": "own-847-a-line-19-same-exception",
+ "at": "2026-11-14T19:56:45-06:00",
+ "title": "Line 19 of the standing merge grant gets the same clean-merge exception as line 18.",
+ "ruling": "Owner, page item 847 (pick-grant-line-19-clean-merge), option a, saved 19:56:45 CST Nov 14 with no note: reword line 19 of docs/decisions/standing-merge-grant.md (the sentence \"Runner 10 also gives each new head a fix verifier and a fresh review log.\") with the same clean-merge exception as line 18, so a clean merge of main takes no fix verifier. The coordinator recommended a (18:48 CST); option a was not marked widening. The grant covers that one reword: line 19's sentence only, nothing else in the grant. Options b (delete the sentence) and c (leave it) are not chosen. Kin: ruling own-846-a-clean-merge-main-no-verifier (line 18). Triage read neither line.",
+ "quote": "a",
+ "source": "owner page save 19:56:45 CST Nov 14 (01:56:45Z Nov 15), comment thread 85e0636f, \"Items: 847 a, 844 a, 840 a\", no note; waiting/answers/pick-grant-line-19-clean-merge.json choice a. Owner. Filed by triage at 19:59 CST Nov 14.",
+ "status": "open",
+ "step": "grant-line-clean-merge-no-verifier"
+}

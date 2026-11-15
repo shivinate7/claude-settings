@@ -1,0 +1,10 @@
+{
+ "id": "own-840-a-ready-merges-main-skip-page-commits",
+ "at": "2026-11-14T19:56:45-06:00",
+ "title": "`merge --ready` pushes a merge of main, and the review record skips page-only commits.",
+ "ruling": "Owner, page item 840 (pick-ready-push-merge-main), option a, saved 19:56:45 CST Nov 14 with no note: merge main at ready, and the review record skips page-only commits (the lane's recommendation). Option a was marked widening (\"Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo\") and was not starred; the owner chose it knowingly. The coordinator had recommended d (with b as fallback). The grant covers the two acts option a names: `merge <pr> --ready` pushes a merge of main into the PR branch, and the review record's walk skips page-only commits. Its stated price: one more PR run per ready that pushes nothing today, and a wider record walk. It covers no other merge-tool write and no variant: not b (merge only, record goes stale), not d. Option a's gain as shown is that the trees are equal for at most 6 of the last 15 merges (the lane's count), so the push skip fires for part of them. Ruling own-830-c (CI scope skips every job on a records-only push after a fully green head) still stands and the ready records push stays; whether the PR run skips for a page-only commit is unknown (no code read). Kin: rulings push-skip-proven-tree, own-830-c-ci-scope-green-before-head; standing grant line 18 (standing-merge-grant.md). Triage read no code.",
+ "quote": "a",
+ "source": "owner page save 19:56:45 CST Nov 14 (01:56:45Z Nov 15), comment thread 85e0636f, \"Items: 847 a, 844 a, 840 a\", no note; waiting/answers/pick-ready-push-merge-main.json choice a. Owner. Filed by triage at 19:59 CST Nov 14.",
+ "status": "open",
+ "step": "ready-push-merges-main"
+}

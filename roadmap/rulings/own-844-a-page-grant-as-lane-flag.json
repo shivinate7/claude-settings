@@ -1,0 +1,10 @@
+{
+ "id": "own-844-a-page-grant-as-lane-flag",
+ "at": "2026-11-14T19:56:45-06:00",
+ "title": "page_grant gets an --as-lane flag, and #3224 edits the Relayed Grant entry's quoted command by that one flag.",
+ "ruling": "Owner, page item 844 (pick-page-grant-as-lane-flag), option a, saved 19:56:45 CST Nov 14 with no note. Option a as shown: add --as-lane <slug> to page_grant, so rule 4 counts a routed close only when it equals the item's lane and the owning session, on another lane, is refused. #3224 also edits the \"Relayed Grant\" allow entry's quoted command (one flag added, nothing else) so its pin stays green; #3308 then edits only the Never-covers clause on top. #3224 lands first, #3308 second, each alone. Option a was marked widening (\"Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo\") and was not starred; the owner chose it knowingly. The coordinator (18:39 CST) and lane page-grant recommended b; the owner's pick stands over them. Options b (prose only) and c (flag kept out of the entry's command) are not chosen. The grant covers exactly the acts option a names: the --as-lane flag, the one-flag edit of the entry's quoted command in #3224, and #3308's Never-covers clause edit. The entry edit is covered only because option a's text names it, and only as \"one flag added, nothing else\". It covers no other flag, no other edit of the entry or of any allow-list entry, and no variant. Known cost the item named: a session can still pass another lane (a form only an attacker writes). Kin: rulings own-748-b-rule-4, own-753-a-relayed-grant-entry, own-842-a-leave-out-fix-alone. Triage read no code.",
+ "quote": "a",
+ "source": "owner page save 19:56:45 CST Nov 14 (01:56:45Z Nov 15), comment thread 85e0636f, \"Items: 847 a, 844 a, 840 a\", no note; waiting/answers/pick-page-grant-as-lane-flag.json choice a. Owner. Filed by triage at 19:59 CST Nov 14.",
+ "status": "open",
+ "step": "fix-3224-own-count-closed"
+}

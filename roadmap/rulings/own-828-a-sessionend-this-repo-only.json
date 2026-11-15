@@ -1,0 +1,10 @@
+{
+ "id": "own-828-a-sessionend-this-repo-only",
+ "at": "2026-11-14T19:57:58-06:00",
+ "title": "At session end the sweep cleans this repo only; dead servers elsewhere wait for the daily job.",
+ "ruling": "Owner, page item 828 (pick-sessionend-machine-wide), option a, saved 19:57:58 CST Nov 14: \"This repo only at session end. Dead servers elsewhere wait for the daily job. This is what your 250 a pick says.\" The owner's note, recorded as his words and not as a changed option: \"i mean id imagine if our settings are running right then i shouldnt notice the difference between these options\". Option a was not marked widening and not starred (the item's text recommended b). The ruling covers option a as shown: the session-end sweep stops dead servers in this repo only, machine-wide work stays in the daily job, and the lane of #3238 changes janitor/session_end_sweep.py and the janitor decision the-janitor-is-one-machine-wide-sweep (\"Two triggers\") to say so. Option b (keep the machine-wide stop, record it as his reading of 250) is not chosen. It confirms ruling watchers-sessionend-250a; the \"machine-wide at session end\" reading in the janitor decision is withdrawn by this pick. The note is not a ruling that the two options are equal; it asks that settings that run right make the choice invisible to him. Triage read no code.",
+ "quote": "a",
+ "source": "owner page save 19:57:58 CST Nov 14 (01:57:58Z Nov 15), comment thread 85e0636f, \"Items: 828 a\" with the note above; waiting/answers/pick-sessionend-machine-wide.json choice a. Owner. Filed by triage at 19:59 CST Nov 14.",
+ "status": "open",
+ "step": "watcher-builtin-hook-survey"
+}
