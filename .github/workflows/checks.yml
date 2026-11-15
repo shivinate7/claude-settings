@@ -377,6 +377,9 @@ jobs:
       - name: Settings matcher fixture suite
         run: python3 lint/test_settings_matcher.py
 
+      - name: Start check wiring suite
+        run: python3 lint/test_start_check_wiring.py
+
       - name: Hook platform exit fixture suite
         if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 lint/test_hook_platform_exit.py
@@ -807,6 +810,10 @@ jobs:
       - name: Session start notice suite
         if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_session_start.py
+
+      - name: Start check suite
+        if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 hooks/test_start_check.py
 
       - name: Session role file suite
         run: python3 hooks/test_session_role.py
@@ -1479,6 +1486,10 @@ jobs:
       - name: Session start notice suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_session_start.py
+
+      - name: Start check suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_start_check.py
 
       - name: Refusal settle fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
@@ -2283,6 +2294,10 @@ jobs:
       - name: Session start notice suite
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_session_start.py
+
+      - name: Start check suite
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python hooks/test_start_check.py
 
       - name: Refusal settle fixture suite
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
