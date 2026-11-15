@@ -43,7 +43,7 @@ jobs:
   # summary. Scope waits on it, so a skip reaches every job through needs and the run is a visible success: nothing is cancelled,
   # since a cancelled run reads UNKNOWN and blocks merges. A failed read, or another daily still going, says skip=false: unknown runs
   # everything. The job itself starts on every event and its steps run on a schedule only: a job-level `if` would leave it skipped,
-  # and a skipped ancestor skips every job behind scope. Reads per daily: one schedule runs read, one push runs read (a page of 100),
+  # and a skipped ancestor skips every job behind scope. Reads per daily: one schedule runs read, one push runs read per page of 100, up to 5 pages,
   # one jobs read per push run since the green daily.
   nightly-skip:
     runs-on: ubuntu-latest
@@ -60,7 +60,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Decide whether the nightly can skip
+      - name: Decide whether the daily can skip
         id: decide
         if: ${{ github.event_name == 'schedule' }}
         shell: bash
@@ -637,6 +637,7 @@ jobs:
           bash actions/zizmor/test_action.sh
           bash actions/silent-undo/test_action.sh
           bash actions/stable-mover/test_action.sh
+          python3 actions/stable-mover/test_proof_step.py
           python3 actions/readme-links/test_readme_links.py
           bash githooks/main-ref/test_hook.sh
           bash githooks/test_pre_commit.sh

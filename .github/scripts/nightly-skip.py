@@ -24,7 +24,6 @@ Cost per daily, no file kept, no process kept: one schedule runs read, one push 
 import json
 import os
 import sys
-import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -58,8 +57,8 @@ def created(run):
 def runs_page(base, query, token):
     try:
         body = api_get(base + "?" + urllib.parse.urlencode(query), token)
-    except (urllib.error.URLError, OSError, ValueError) as ex:
-        raise Unknown("the runs read failed (%s)" % ex)
+    except Exception as ex:  # any read error (URLError, a cut-off http.client.IncompleteRead, bad JSON) is an unknown state
+        raise Unknown("the runs read failed (%s: %s)" % (type(ex).__name__, ex))
     page = body.get("workflow_runs") if isinstance(body, dict) else None
     if not isinstance(page, list):
         raise Unknown("the runs read has no workflow_runs list")
@@ -102,8 +101,8 @@ def read_live(env):
             url = "%s/repos/%s/actions/runs/%s/jobs?per_page=%d&page=%d" % (API, repo, run.get("id"), PAGE, number)
             try:
                 body = api_get(url, token)
-            except (urllib.error.URLError, OSError, ValueError) as ex:
-                raise Unknown("the jobs read of run %s failed (%s)" % (run.get("id"), ex))
+            except Exception as ex:  # any read error is an unknown state, as in runs_page
+                raise Unknown("the jobs read of run %s failed (%s: %s)" % (run.get("id"), type(ex).__name__, ex))
             page = body.get("jobs") if isinstance(body, dict) else None
             if not isinstance(page, list):
                 raise Unknown("the jobs read of run %s has no jobs list" % run.get("id"))
