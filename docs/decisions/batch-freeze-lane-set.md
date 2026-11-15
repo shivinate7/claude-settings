@@ -18,7 +18,7 @@ Why: batch 66 merged nothing in 5.5 hours (Nov 8, 14:50-20:20 CST). Runner 8 reb
 
 Sources: owner, 2026-11-08 20:24 CST: "get the fix asap so we can lift asap". Owner, 2026-11-08 20:31 CST: "this fix needs to be mechanized". Both are quoted in the coordinator's brief for this lane. The four rules above are the coordinator's wording of the fix, from that brief.
 
-Tool check: the merge tool no longer has `--batch-build` or `--batch-drop` (its usage names no batch to open or build; `merge/test_merge.py` pins both as unknown flags), so it enforces no lane-set freeze; it still refuses a malformed frozen block (`parse_freeze`). The owner's 20:31 CST ruling above put the check in the merge tool; that check left with the batch route.
+Tool check: the merge tool no longer has `--batch-build` or `--batch-drop` (its usage names no batch to open or build; `merge/test_merge.py` pins both as unknown flags), so it enforces no lane-set freeze. `parse_freeze` raises on a malformed frozen block, but `is_integration_pr` catches that and reads the PR as a lane PR, so nothing is refused. The owner's 20:31 CST ruling above put the check in the merge tool; that check left with the batch route.
 
 ## One-time exceptions
 
