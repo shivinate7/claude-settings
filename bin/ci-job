@@ -32,19 +32,23 @@
 # does. A local uses: (`$/actions/...`, `./actions/...`) runs the repo under test's own code_check.py or run.sh,
 # never another's: missing or failing, it FAILs. A remote uses: (`owner/repo/actions/code-check@ref`) runs the copy
 # beside ci-job, else (code-check, zizmor) the one in the checkout the global rules file names, else the step is
-# unknown and names the paths it looked at.
-# A local `uses:` that is none of those three runs only under --lint, from the tree under test's own actions/<name>/action.yml. A gate
-# read before any step runs refuses the action unless: runs.using is composite; every step is a `shell: bash` run: (no uses:, no
-# working-directory); the only expression in a run: is `${{ github.action_path }}`, read as the relative folder actions/<name> (the quotes
-# around that one token drop); and every run: line is a lint command, as above. A refusal runs no step, and its one unknown line names the
-# file, the line or the expression. Each step then runs as a workflow step does (its if:, env:, shell), with GITHUB_WORKSPACE set to the top
-# level, and the first FAIL ends the action, as in CI. The action prints one line: FAIL when a step fails (a probe's exit 1 and exit 2 both
-# read FAIL, since CI is red on both), else unknown when a step is unknown, else PASS. A step whose env needs the PR body
-# (github.event.pull_request.body) is unknown, since this runner has no PR body: an action with such a step reads unknown after its other
-# steps ran, and a FAIL of those still wins. Cost: one bin/verdict and one shell per step, in order on the main thread, never in the worker pool.
-# The code-check step's line names
+# unknown and names the paths it looked at. The code-check step's line names
 # the code_check.py that ran. When every failure code_check.py reports is a pinned tool that could not start, the
 # step is unknown; any other failure makes it FAIL, its reason naming the tools that could not start.
+# A local `uses:` that is none of those three runs only under --lint, from the tree under test's own actions/<name>/action.yml. The
+# `uses:` step's own if: and continue-on-error: read as a run: step's do (a false if: is skipped, an unreadable one or a continue-on-error is
+# unknown), and after a failed install the action reads unknown naming it. A gate read before any step runs refuses the action unless:
+# runs.using is composite; every step is a `shell: bash` run: (no uses:, no working-directory); the only expression in a run: is
+# `${{ github.action_path }}`, read as the relative folder actions/<name> (the quotes around that one token drop); and every run: line is
+# a lint command, as above. A refusal runs no step, and its one unknown line names the file, the line or the expression. Each step then
+# runs as a workflow step does (its if:, env:, shell), with GITHUB_WORKSPACE set to the top level, and the first FAIL ends the action, as
+# in CI. The action prints one line: FAIL when a step fails (a probe's exit 1 and exit 2 both read FAIL, since CI is red on both), else
+# unknown when a step is unknown, else PASS. A step whose env needs the PR body (github.event.pull_request.body) is unknown, since this
+# runner has no PR body: an action with such a step reads unknown after its other steps ran, and a FAIL of those still wins. The real
+# actions/claude-md-cites of PR #3492 (rules and records move together) reads unknown for another reason: its second step's run: holds
+# `HEAD_SHA="$(git ...)"` and `export HEAD_SHA`, which are not lint commands, so the gate refuses the whole action, names that first line,
+# and runs none of its steps. Cost: one bin/verdict and one shell per step, in order on the main thread, never in the worker pool; one
+# `git rev-parse` of the base per run with a base.
 # --lint with no --base takes origin/main as CI does and says so
 # in one line, because a run that skipped the pull-request steps read as a pass. With no origin/main, one unknown
 # line names each pull-request step it skips, and each such lint step (its if: reads true on a pull-request run) prints
@@ -415,6 +419,16 @@ def could_not_start(log, start):
     return unstarted, bool(errors) and len(unstarted) == len(set(errors))
 
 
+def if_held(step, pr):
+    """(state, why) when the step's if: stops it: unknown for an if: this runner cannot read, skipped for one that reads false. None when it runs."""
+    cond = condition(step_key(step, "if"), pr)
+    if cond is None:
+        return "unknown", "an if: this runner cannot read: %s" % step_key(step, "if")
+    if not cond:
+        return "skipped", "a pull-request step: pass --base to run it" if not pr else "a step that runs only off a pull request"
+    return None
+
+
 def plan(step, pr, values, top, lint=False, pinned=False):
     """(state, detail, argv, env, cwd): state is run, not run locally, skipped or unknown. lint: the run is --lint.
     pinned: --pinned on a run that executes, so a step pinned to a sha runs the harness of the tree at that sha."""
@@ -458,12 +472,9 @@ def plan(step, pr, values, top, lint=False, pinned=False):
         return "run", '"%s" "%s"' % (slashed(os.path.join(BIN, "ste-changed")), values["base"]), shell_argv(None), {PIN_NOTE_ENV: "1"} if lint else {}, None
     if step_key(step, "uses") is not None:
         return "not run locally", "an action (uses: %s); CI runs it" % step_key(step, "uses").split(" #")[0], None, None, None
-    cond = condition(step_key(step, "if"), pr)
-    if cond is None:
-        return "unknown", "an if: this runner cannot read: %s" % step_key(step, "if"), None, None, None
-    if not cond:
-        why = "a pull-request step: pass --base to run it" if not pr else "a step that runs only off a pull request"
-        return "skipped", why, None, None, None
+    held = if_held(step, pr)
+    if held:
+        return held[0], held[1], None, None, None
     body = run_body(step)
     if body is None:
         return "unknown", "no run: and no uses:", None, None, None
@@ -509,6 +520,8 @@ def action_steps(top, step):
             lines = f.read().splitlines()
     except (OSError, UnicodeError) as e:
         return None, "cannot read %s in the tree under test: %s" % (rel, getattr(e, "strerror", None) or e)
+    # A comment above step depth (under three spaces) would end the steps list below: drop it. A deeper one is a step's own text.
+    lines = [ln for ln in lines if not (ln.strip().startswith("#") and len(ln) - len(ln.lstrip()) < 3)]
     runs = next((i for i, ln in enumerate(lines) if re.fullmatch(r"runs:\s*", ln)), None)
     body = []
     for ln in lines[runs + 1:] if runs is not None else []:
@@ -559,6 +572,14 @@ def local_action(name, step, ctx, log, dry):
     """(state, the action's one line, True when a step ran or would run). state: FAIL, unknown, PASS, skipped, or
     would run (--plan). FAIL beats unknown, and the first FAIL ends the action, as in CI."""
     top, base, values, _ = ctx
+    # The uses: step's own continue-on-error: and if: read as plan() reads a run: step's.
+    if step_key(step, "continue-on-error") not in (None, "false"):
+        return "unknown", "continue-on-error: this runner reads no step as allowed to fail", False
+    held = if_held(step, bool(base))
+    if held and held[0] == "skipped" and not base and condition(step_key(step, "if"), True) is not False:
+        held = "unknown", "a pull-request step, skipped for want of a base (pass --base)"
+    if held:
+        return held[0], held[1], False
     steps, why = action_steps(top, step)
     if steps is None:
         return "unknown", why, False
@@ -835,6 +856,10 @@ def main(argv):
                 print("%-15s %s: --lint could not select suites: %s" % ("unknown", name, why))
                 continue
             if kind[n - 1] == "local":  # one line for the whole action, run here in order, never in the pool
+                if blocker:  # a step after a failed install runs nothing, as a lint step does
+                    tally["unknown"] += 1
+                    print("%-15s %s: --lint did not run it: install step %s did not finish" % ("unknown", name, blocker))
+                    continue
                 state, line, started = local_action(name, step, ctx, log, dry)
                 ran += started
                 ran_lint += started
@@ -848,7 +873,7 @@ def main(argv):
                     "this is a suite the diff does not pick%s" % ("" if base else " (no base to read a diff)") if suites[n - 1]
                     else "its run: is neither a lint nor an install command"))
                 continue
-            if kind[n - 1] == "install" and (blocker or not any(runs[n:])):
+            if kind[n - 1] == "install" and (blocker or not (any(runs[n:]) or "local" in kind[n:])):
                 print("%-15s %s: %s" % ("not run", name, "install step %s did not finish" % blocker if blocker
                                         else "no lint step after it will run"))
                 continue
