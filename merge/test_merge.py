@@ -11856,6 +11856,21 @@ class RedMainBrake(Env):
         self.assertIn("run 1950", out, "the red daily is not named, so the refusal does not say what stays red")
         self.assertIn("checks-windows-merge-3: fail", out)
 
+    def test_a_linux_red_daily_stays_red_under_a_green_push_run_that_skips_the_windows_and_mutation_jobs(self):
+        # The daily's red job is `checks`, a Linux job, so no step one finds a certain red: the push run's checks passed, and the rule reads
+        # the workflow file at the push run's head. The != push jobs stay needed there, so the skipped Windows job blocks the clear.
+        # Named failure: a rule that leaves the != push jobs out reads their skips as passed, and the push run clears the daily.
+        n_sha = f"{1971:040x}"
+        runs = [main_run(1971, "success", sha=n_sha, path=CHECKS_PATH), main_run(1970, "failure", event="schedule", path=CHECKS_PATH)]
+        jobs = {1970: [main_job("checks", "failure", 20), main_job("checks-windows-merge-3", "success", 19),
+                       main_job("checks-mutate-guard", "success", 19), main_job("all-jobs-passed", "skipped")],
+                1971: [main_job("checks", "success", 20), main_job("checks-windows-merge-3", "skipped"),
+                       main_job("checks-mutate-guard", "skipped"), main_job("all-jobs-passed", "skipped")]}
+        rc, out, before = self.go(runs, jobs, texts={n_sha: real_checks()})
+        self.refused(rc, out, before)
+        self.assertIn("run 1970", out, "the red daily is not named, so the refusal does not say what stays red")
+        self.assertIn(f"contents/{CHECKS_PATH}", self.host.reads, "the push run's workflow file was not read, so the rule never decided the clear")
+
     def test_a_green_dispatch_run_with_every_job_of_the_red_daily_lifts_main(self):
         n_sha = f"{1961:040x}"
         runs = [main_run(1961, "success", event="workflow_dispatch", sha=n_sha, path=CHECKS_PATH),

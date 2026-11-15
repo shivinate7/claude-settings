@@ -262,6 +262,15 @@ class DailyRedClear(unittest.TestCase):
         self.assertFalse(clear_rule.clears(self.R, n, PUSH, self.TEXT),
                          "a proven push run with its suite jobs skipped cleared a red daily: skipped is no pass")
 
+    def test_a_green_push_run_that_skips_the_windows_and_mutation_jobs_does_not_clear_a_linux_red_daily(self):
+        # The red job is a Linux job, so step one (red_stays) finds nothing: the rule reads the workflow and decides. The Windows and
+        # mutation jobs are not red in the daily, and their != push guard keeps them needed, so the push run's skip of them blocks the clear.
+        # Named failure: a rule that leaves a != push job out of the need reads the skip as passed, and the Linux-only push run clears the daily.
+        r = [job("checks", "failure"), job("checks-windows-merge-3", "success"), job("checks-mutate-guard", "success")]
+        n = [job("checks", "success"), job("checks-windows-merge-3", "skipped"), job("checks-mutate-guard", "skipped")]
+        self.assertFalse(clear_rule.clears(r, n, PUSH, self.TEXT),
+                         "a Linux-only green push run cleared a red Linux job of the daily: its skipped != push jobs were left out of the need")
+
     def test_a_green_dispatch_run_with_every_job_of_the_daily_clears_it(self):
         # Control: a dispatch runs every job, so every job the daily needed passed in it, and the red daily is lifted.
         n = [job("checks", "success"), job("checks-windows-merge-3", "success"), job("checks-mutate-guard", "success")]
