@@ -15440,6 +15440,30 @@ class ReviewEnv(Env):
         self.facts(fx, [M2, L])
         return M2, L
 
+    def remote_main_gone(self):
+        """Origin's main ref is deleted on the bare origin, so the refspec fetch_main_once makes (`+refs/heads/main:...`) exits non-zero, while the
+        checkout's own refs/remotes/origin/main keeps the tip it had. Other branches still fetch. -> that tip. The premises are asserted here."""
+        tip = self.main_tip()
+        sh(self.co, "git", "--git-dir", self.bare, "update-ref", "-d", "refs/heads/main")
+        r = subprocess.run(["git", "fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main"], cwd=self.co, capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0, "fixture: the fetch of main succeeds after main is deleted on origin")
+        self.assertEqual(self.main_tip(), tip, "fixture: a failed fetch moved the checkout's origin/main")
+        return tip
+
+    def count_main_fetches(self):
+        """Count each `git fetch` of main's refspec, the one fetch_main_once makes, and let every call through. -> the list of the counted argv."""
+        calls, real = [], merge.git
+
+        def git(root, *a, **k):
+            if a[:2] == ("fetch", "-q") and any(x.startswith("+refs/heads/main:") for x in a):
+                calls.append(a)
+            return real(root, *a, **k)
+
+        patch = unittest.mock.patch.object(merge, "git", git)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return calls
+
     def fork_merge(self, fx):
         """-> the sha of a merge of main into a commit off the reviewed head, which only this checkout holds: it is never pushed, so origin lacks it
         and a main-only clone cannot read it. The merge's tree is git's clean merge of its parents. Its parents and trees go into fx."""
@@ -17930,6 +17954,16 @@ class ReleaseCheck(ReviewEnv):
         rc, lines, err = self.replacement_release_real(fx, live=L, lint_head=L)
         self.assertEqual((rc, self.line_of(lines, 7)), (0, "#7 PASS"), err)
 
+    def test_replacement_release_f_a_failed_fetch_of_main_reads_the_release_line_unknown_never_none_or_pass(self):
+        fx = self.merge_carry_fixture()
+        self.remote_main_gone()
+        rc, lines, err = self.replacement_release_real(fx, live=fx.L, lint_head=fx.L)
+        line = self.line_of(lines, 7)
+        self.assertEqual(rc, 1, err)
+        self.assertTrue(line.startswith("#7 FAIL: "), "the release check did not refuse #7 when main's fetch failed: " + line)
+        self.assertIn("carries by tree is unknown", line, "a failed fetch of main did not read the release line unknown: " + line)
+        self.assertNotIn("no review record", line, "a failed fetch of main read none: " + line)
+
     def test_round3_2_a_carried_record_that_is_held_failed_or_open_refuses_the_release_check(self):
         # A carry changes the head test only, so the source's verdict is the release check's reason: held, a failed fix check, or open.
         failed_fix = fix_verifier_line(verdict="FAIL", head="1e" * 20)
@@ -19337,6 +19371,52 @@ class ReplacementCarry(ReviewEnv):
         rc, out, err = self.run_args(*self.merge_carry_review_args(fx.L, fix), host=self.merge_carry_host(fx, fx.L, self.source_record(fx.H)))
         self.assertEqual(rc, 2, "a fix verifier on a tree that needs the default branch was not refused:\n" + out + err)
         self.assertIn("unknown", err, "the refusal does not name the unknown read of the default branch:\n" + err)
+
+    def test_merge_carry_18_a_failed_fetch_of_main_reads_the_reviewed_line_unknown(self):
+        fx = self.merge_carry_fixture()
+        self.remote_main_gone()
+        host = self.merge_carry_host(fx, fx.L, self.source_record(fx.H), comments=[lint_of(7, fx.L)])
+        rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {fx.L[:9]} unknown: ", "a failed fetch of main did not read the --reviewed line unknown:\n" + out)
+
+    def test_merge_carry_19_a_failed_fetch_of_main_refuses_the_fix_verifier_source_check_as_unknown(self):
+        fx = self.merge_carry_fixture()
+        self.remote_main_gone()
+        fix = f"{fx.H}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS"
+        rc, out, err = self.run_args(*self.merge_carry_review_args(fx.L, fix), host=self.merge_carry_host(fx, fx.L, self.source_record(fx.H)))
+        self.assertEqual(rc, 2, "a fix verifier was accepted on a tree that needs main, when main's fetch failed:\n" + out + err)
+        self.assertIn("carries by tree is unknown", err, "a failed fetch of main did not refuse the source check as unknown:\n" + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier printed a record")
+
+    def test_merge_carry_20_a_second_carry_after_a_failed_fetch_of_main_is_unknown_and_fetches_no_more(self):
+        fx = self.merge_carry_fixture()
+        self.remote_main_gone()
+        calls = self.count_main_fetches()
+        host = self.merge_carry_host(fx, fx.L, self.source_record(fx.H))
+        for label in ("first", "second"):
+            with self.subTest(carry=label):
+                state, why = self.merge_carried(host, fx.L)
+                self.assertEqual(state, "unknown", f"the {label} carry in one run read {state}, not unknown, after main's fetch failed: {why}")
+        self.assertEqual(len(calls), 1, f"main was fetched {len(calls)} times in one run whose fetch failed, not once")
+
+    def test_merge_carry_21_an_equal_tree_carries_with_no_fetch_even_when_main_cannot_be_fetched(self):
+        fx = self.merge_carry_fixture()
+        self.remote_main_gone()
+        calls = self.count_main_fetches()
+        state, why = self.merge_carried(self.merge_carry_host(fx, fx.H_eq, self.source_record(fx.H)), fx.H_eq)
+        self.assertEqual(state, "done", f"an equal-tree carry read {state}, not done, while main could not be fetched: {why}")
+        self.assertEqual(calls, [], "an equal-tree carry fetched main, which it needs no tip for")
+
+    def test_merge_carry_22_two_carries_in_one_run_fetch_main_once(self):
+        fx = self.merge_carry_fixture()
+        calls = self.count_main_fetches()
+        host = self.merge_carry_host(fx, fx.L, self.source_record(fx.H))
+        for label in ("first", "second"):
+            with self.subTest(carry=label):
+                state, why = self.merge_carried(host, fx.L)
+                self.assertEqual(state, "done", f"the {label} carry in one run read {state}, not done: {why}")
+        self.assertEqual(len(calls), 1, f"main was fetched {len(calls)} times in one run with two carries, not once")
 
 class ReviewedRoots(ReviewEnv):
     """`merge --reviewed --root DIR [--root DIR ...]`. Output: one block per root, in the order given. A block is the header `repo <owner/name>:`,
