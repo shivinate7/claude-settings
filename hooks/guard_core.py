@@ -1513,6 +1513,17 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
     a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
     fails closed on an untrusted `cd` keeps doing so."""
+    where = None
+    for at, where in enumerate(segment_dirs(segments[:number + 1], shell_cwd, ends, failed_cd_stays)):
+        if at == number:
+            return where
+    return where
+
+
+def segment_dirs(segments, shell_cwd: str, ends=(), failed_cd_stays=False):
+    """dir_before_segment for every segment in one walk: yields each segment's folder in order, then
+    the folder after the last one. A caller that needs the folder of many segments reads them here,
+    since one dir_before_segment call per segment walks the command once per segment."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
     known = {}         # the variables the shell holds: plain assignments that ran here (`_track_variables`)
@@ -1520,14 +1531,13 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     unsure = False     # the last segment may have failed or not run: an assignment after its `&&` may not run
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     last_end = ""      # the operator that ended the last non-empty segment
-    for at, segment in enumerate(segments[:number + 1]):
+    for at, segment in enumerate(segments):
         marks = [(index, char) for index, char, quote in walk_quotes(segment) if not quote and char in "()"]
         groups = _subshell_opens(segment, marks)
         stack.extend((where, prev, dict(known), index in groups) for index, char in marks if char == "(")
         closes = sum(1 for _, char in marks if char == ")")
         end = ends[at] if at < len(ends) else ""
-        if at == number:
-            return None if skipping else where
+        yield None if skipping else where
         if not segment.strip():
             continue   # an operator at end of line then the newline leaves an empty part: it changes nothing
         if skipping:
@@ -1579,7 +1589,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         for _ in range(closes):
             if stack:
                 where, prev, known = _close_paren(stack, known)
-    return where
+    yield where
 
 
 # The value flags of a wrapper that move the program it runs into another folder first, so `env

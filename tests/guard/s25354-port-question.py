@@ -164,6 +164,89 @@ add("port question: file_path data with today's item is denied", "deny", "port-q
     doc_id="suspense-cards", file_path=PQ_FILE_BAD)
 add("port question: file_path data that departs is allowed", "allow", tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="set", collection="items", doc_id="suspense-cards", file_path=PQ_FILE_GOOD)
+
+# A copy install with the install's lint/ and skills/ beside its hooks/. question_form.py finds lint/layout.py
+# and skills/waiting-page/page.html from its own folder, which from guard.d/<id>/ holds neither. The waiting-page
+# rules then raise, and the guard allows the write it should refuse. The control is the flat deny above.
+QF_COPY = os.path.join(ROOT, "qfcopy")
+QF_COPY_GUARD = os.path.join(QF_COPY, "hooks", "guard.py")
+lazy_fixture([QF_COPY], lambda: guard_d_copy_build(QF_COPY, "qfcopy", with_lint=True))
+add("port question: a copy install with lint/ beside it denies a batch with today's item", "deny", "port-question",
+    tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch", guard=QF_COPY_GUARD,
+    writes=[{"op": "set", "collection": "answers", "doc_id": "a", "data": {"note": "x"}},
+            {"op": "set", "collection": "items", "doc_id": "suspense-cards", "data": pq_item()}])
+add("port question: a copy install with lint/ beside it allows a plain call (control)", "allow",
+    cwd=NOGIT, guard=QF_COPY_GUARD, command="ls")
+# A module that a copy install loads from hooks/guard.d/<id>/ finds the install's lint/ from there (decision
+# install-hooks-whole, item 13). Each module below looks for lint/ beside its own folder, which holds none in the
+# copy. The probe is a child python run with sys.path = [guard.d/<id>, hooks]. Scope first: the module must load
+# from the copy. The control also puts the copy's lint/ on the path, so a red comes only from the module's lookup.
+COPY_LINT_PROBE = r'''
+import json, sys, types
+set_dir, module, trigger, hooks = sys.argv[1:5]
+sys.path[:0] = [set_dir, hooks] + sys.argv[5:]
+sys.modules["guard"] = types.ModuleType("guard")  # decision_watch imports guard; the case is the lookup, not the guard
+error = None
+try:
+    __import__(module)
+    if trigger:
+        exec(trigger, {"mod": sys.modules[module]})
+except Exception as exc:
+    error = "%s: %s" % (type(exc).__name__, exc)
+where = lambda name: getattr(sys.modules.get(name), "__file__", None)
+print(json.dumps({"module": where(module), "helper": where("_transcript"), "error": error}))
+'''
+
+
+def copy_lint_case(module, trigger, control=False):
+    """A (label, check) pair: `module` loaded from the copy's guard.d folder finds the install's lint/ helper
+    (_transcript) once `trigger` runs. The control also puts the copy's lint/ on the path, and it reads the helper."""
+    def check():
+        materialize(QF_COPY)
+        set_dir = os.path.join(QF_COPY, "hooks", "guard.d", STREAM_COPY_ID)
+        lint = os.path.join(QF_COPY, "lint")
+        argv = [sys.executable, "-I", "-B", "-c", COPY_LINT_PROBE, set_dir, module, trigger,
+                os.path.join(QF_COPY, "hooks")] + ([lint] if control else [])
+        env = {k: v for k, v in os.environ.items() if k not in ("GUARD_UNDER_TEST", "PYTHONPATH")}
+        run = subprocess.run(argv, capture_output=True, text=True, env=env, timeout=120)
+        lines = run.stdout.strip().splitlines()
+        if run.returncode != 0 or not lines:
+            return False, "the probe did not run for %s: %s" % (module, run.stderr.strip()[-160:])
+        got = json.loads(lines[-1])
+        if got["module"] is not None and not os.path.realpath(got["module"]).startswith(
+                os.path.realpath(set_dir) + os.sep):
+            return False, "%s did not load from the guard.d copy: %r" % (module, got["module"])
+        if got["error"]:
+            return False, "%s, loaded from the guard.d copy, does not find lint/: %s" % (module, got["error"])
+        if got["module"] is None:
+            return False, "%s did not load at all, and the probe named no error" % module
+        if not os.path.realpath(got["helper"] or "").startswith(os.path.realpath(lint) + os.sep):
+            return False, "%s found its lint/ helper at %r, not the install's lint/" % (module, got["helper"])
+        return True, "%s, loaded from the guard.d copy, finds the install's lint/" % module
+    return check
+
+
+for _module, _trigger in (("override", "mod._text_of({})"), ("feedback_guard", ""),
+                          ("ruling_home", "mod._ensure_transcript_helpers()"), ("decision_watch", "")):
+    LOG_CHECKS_EXTRA.append(("port question: %s, loaded from a guard.d copy, finds the install's lint/" % _module,
+                             copy_lint_case(_module, _trigger)))
+    LOG_CHECKS_EXTRA.append(("port question: %s, loaded from a guard.d copy, finds lint/ when it is on the path (control)"
+                             % _module, copy_lint_case(_module, _trigger, control=True)))
+# A copy whose question_form.py will not import refuses a port item as guard-crash (decision install-hooks-whole):
+# the guard reaches question_form only inside each waiting-page check, which then raises, so the copy must refuse.
+BROKEN_MODULE = 'raise ImportError("this copy of the module was replaced by the case")\n'
+QF_BROKEN = os.path.join(ROOT, "qfbroken")
+
+
+def broken_qf_build():
+    guard_d_copy_build(QF_BROKEN, "qfbroken", with_lint=True)
+    write(os.path.join(QF_BROKEN, "hooks", "guard.d", STREAM_COPY_ID, "question_form.py"), BROKEN_MODULE)
+
+
+lazy_fixture([QF_BROKEN], broken_qf_build)
+add("port question: a copy whose question_form.py will not import refuses a port item as guard-crash",
+    "deny", None, carries=("guard-crash",), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set",
+    collection="items", doc_id="suspense-cards", data=pq_item(), guard=os.path.join(QF_BROKEN, "hooks", "guard.py"))
 add("port question: an unreadable file_path fails open", "allow", tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="set", collection="items", doc_id="suspense-cards",
     file_path=os.path.join(ROOT, "pq", "missing.json"))

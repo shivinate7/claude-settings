@@ -276,6 +276,13 @@ chained_ask("cap data: a multi-line quoted string naming a cat-write, piped to p
    "command [cap-ask-fix r1: a pipe into an interpreter fails closed]",
    "printf '%s' 'a note\ncat > " + PROJ_LOCAL + " " + CAP_KEY + "' | python hooks/guard.py", cwd=NOGIT,
    carries=("agent-model-cap",))
+
+sh("cap data: a heredoc body fed to python stdin naming a cat-write asks [r1 red, F5 call]",
+   "python hooks/guard.py <<'PAYLOAD'\n{\"tool_input\": {\"command\": \"cat > " + PROJ_LOCAL + " "
+   + CAP_KEY + "\"}}\nPAYLOAD", "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
+sh("cap data: a python heredoc that only prints a cat-write asks [r1 red, F5 call]",
+   "python3 - <<'PY'\nprint('cat > " + PROJ_LOCAL + " " + CAP_KEY + "')\nPY",
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
 sh("cap data: a heredoc body fed to python stdin naming a cat-write allows "
    "[step agent-model-cap-string-false-alarm: a false-alarm fix, interpreter string data that writes no file "
    "is not the act; incident 2026-11-02 01:16 CST]",

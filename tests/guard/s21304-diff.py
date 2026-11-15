@@ -401,6 +401,27 @@ LOG_CHECKS_EXTRA = _TaggedLogs([
 ])
 for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
+
+# The check-tail crash check, appended here because LOG_CHECKS_EXTRA is defined here. A crash allows the call,
+# so a decision row cannot see it: each command must log no guard-crash line. The run is pd_run, the one
+# guard-run step, which returns the decision and the guard.log rows of a run in a folder of its own.
+def tail_no_crash_case(index, command):
+    """check-tail: one guard run of `command` logs no guard-crash line (see TAIL_REDIRECT_ONLY)."""
+    def check():
+        decision, reason, rows = pd_run("tail-no-crash-%d" % index, {
+            "tool_name": "Bash", "tool_input": {"command": command}, "cwd": NOGIT})
+        if decision == "error":
+            return False, reason
+        crashes = [row[4] for row in rows if len(row) == 6 and row[2:4] == ["crash", "guard-crash"]]
+        if crashes:
+            return False, "the guard crashed and allowed the call: %s" % crashes[0]
+        return True, "no guard-crash line"
+    return check
+
+
+for _index, (_name, _command) in enumerate(TAIL_REDIRECT_ONLY + (TAIL_REDIRECT_THEN_COMMIT,)):
+    LOG_CHECKS_EXTRA.append(("check-tail: %s, the guard logs no crash" % _name,
+                             tail_no_crash_case(_index, _command)))
 # FLAG ORDER (pwsh-c-text-mode). POWERSHELL_CALL is one global that each judge sets for its own call. A
 # caller that reads it without setting it reads the last call's tool. Each pin reads one caller on a
 # PowerShell text, with the flag set by a PowerShell call, then judges a Bash call in this process and reads

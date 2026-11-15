@@ -1783,6 +1783,240 @@ def _build_branch():
         sys.exit("fixture setup failed in build_fixtures: BRANCHNOBASE unexpectedly has a "
                   "local main")
 
+
+def pr2015__build_push():
+    """The push destinations: the feat, main, trunk and upstream repos and their remotes."""
+    materialize(BRANCHREMOTE)  # PUSHLOCAL's origin is this bare remote, a local path
+    # ----------------------------------------------------------------- push destinations
+    for where, head, branch in ((PUSHFEAT, "main", "feat"), (PUSHMAIN, "main", "main"),
+                                (PUSHTRUNK, "trunk", "feat"), (PUSHTRUNKLOCAL, "trunk", "feat"),
+                                (PUSHNOHEAD, None, "feat"), (PUSHDETACHED, "main", None),
+                                (PUSHSAMETAG, "main", "main"), (RECROADMAP, "main", "roadmap"),
+                                (RECFORK, "main", "roadmap-fork"),
+                                (PUSHLOCAL, "main", "feat"), (PUSHLOCALSTRAY, "main", "feat"),
+                                (PUSHLOCALMAIN, "main", "main"),
+                                (PUSHSSH, "main", "feat"), (PUSHNOREMOTE, None, "feat")):
+        make_repo(where, {"base.txt": "base\n"})
+        if head:
+            origin = {PUSHLOCAL: slash(BRANCHREMOTE), PUSHLOCALSTRAY: slash(BRANCHREMOTE),
+                      PUSHLOCALMAIN: slash(BRANCHREMOTE), PUSHSSH: PUSHSSHURL}.get(where, PUSHREMOTE)
+            run_vcs(where, "remote", "add", "origin", origin)
+            run_vcs(where, "update-ref", "refs/remotes/origin/" + head, "HEAD")
+            run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD",
+                    "refs/remotes/origin/" + head)
+        if branch and branch != "main":
+            run_vcs(where, "checkout", "-q", "-b", branch)
+        if branch is None:
+            run_vcs(where, "checkout", "-q", "--detach")
+        if (head and run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0):
+            sys.exit("fixture setup failed in build_fixtures: origin/HEAD in %r unreadable" % where)
+
+    # Each remote fixture reads back the origin it was given (P7), so a case never judges a remote the build did
+    # not set. PUSHNOREMOTE must have no remote at all.
+    for where, want in ((PUSHLOCAL, slash(BRANCHREMOTE)), (PUSHLOCALSTRAY, slash(BRANCHREMOTE)),
+                        (PUSHLOCALMAIN, slash(BRANCHREMOTE)), (PUSHSSH, PUSHSSHURL)):
+        if run_vcs(where, "config", "--get", "remote.origin.url").stdout.strip() != want:
+            sys.exit("fixture setup failed in build_fixtures: %r needs origin %s" % (where, want))
+    if run_vcs(PUSHNOREMOTE, "remote").stdout.strip():
+        sys.exit("fixture setup failed in build_fixtures: PUSHNOREMOTE must have no remote")
+
+    # PUSHLOCALSTRAY's upstream is set by git (--set-upstream-to), then read back, so a case never judges a
+    # fixture without it.
+    run_vcs(PUSHLOCALSTRAY, "update-ref", "refs/remotes/origin/other", "HEAD")
+    run_vcs(PUSHLOCALSTRAY, "branch", "--set-upstream-to=origin/other", "feat")
+    if run_vcs(PUSHLOCALSTRAY, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip() \
+            != "origin/other":
+        sys.exit("fixture setup failed in build_fixtures: PUSHLOCALSTRAY needs upstream origin/other")
+
+    # PUSHLOCALMAIN tracks origin/main, set by git and read back, the same as PUSHMAINUP. Its checkout is main.
+    run_vcs(PUSHLOCALMAIN, "branch", "--set-upstream-to=origin/main", "main")
+    if run_vcs(PUSHLOCALMAIN, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip() \
+            != "origin/main":
+        sys.exit("fixture setup failed in build_fixtures: PUSHLOCALMAIN needs upstream origin/main")
+    if run_vcs(PUSHLOCALMAIN, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() != "main":
+        sys.exit("fixture setup failed in build_fixtures: PUSHLOCALMAIN must sit on main")
+
+    # The feat destination holds the remote-tracking refs that the push cost case's forms read: feat for
+    # a HEAD or bare push, lane/foo for a refspec push or HEAD:lane/foo. A local lane/foo is the source.
+    for args in (("update-ref", "refs/remotes/origin/feat", "HEAD"),
+                 ("update-ref", "refs/remotes/origin/lane/foo", "HEAD"), ("branch", "lane/foo")):
+        if run_vcs(PUSHFEAT, *args).returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: PUSHFEAT needs git %s" % " ".join(args))
+
+    # The fork names its record branch in the extras file, as lint/layout.py reads it (key record-branch).
+    write(os.path.join(RECFORK, ".claude", "layout-extras.json"),
+          json.dumps({"kinds": {}, "record-branch": "roadmap-fork"}) + "\n")
+
+    run_vcs(PUSHSAMETAG, "tag", "main")
+    if run_vcs(PUSHSAMETAG, "symbolic-ref", "-q", "--short", "HEAD").stdout.strip() != "heads/main":
+        sys.exit("fixture setup failed in build_fixtures: PUSHSAMETAG needs a tag named main that "
+                 "makes the short read of HEAD print an ambiguous name")
+
+    run_vcs(PUSHTRUNKLOCAL, "branch", "origin/trunk")
+    if (run_vcs(PUSHTRUNKLOCAL, "rev-parse", "--verify", "-q", "refs/heads/origin/trunk").returncode != 0
+            or run_vcs(PUSHTRUNKLOCAL, "symbolic-ref", "-q", "--short",
+                       "refs/remotes/origin/HEAD").stdout.strip() == "origin/trunk"):
+        sys.exit("fixture setup failed in build_fixtures: PUSHTRUNKLOCAL needs a local branch "
+                 "origin/trunk that makes `symbolic-ref --short` print an ambiguous name")
+
+    # A dangling origin/HEAD: it names origin/gone, which is missing. origin/main exists, so the read
+    # order gives main as the default branch.
+    make_repo(PUSHDANGLING, {"base.txt": "base\n"})
+    run_vcs(PUSHDANGLING, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHDANGLING, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHDANGLING, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/gone")
+    run_vcs(PUSHDANGLING, "checkout", "-q", "-b", "feat")
+    if (run_vcs(PUSHDANGLING, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0
+            or run_vcs(PUSHDANGLING, "rev-parse", "--verify", "-q",
+                       "refs/remotes/origin/HEAD^{commit}").returncode == 0
+            or run_vcs(PUSHDANGLING, "rev-parse", "--verify", "-q",
+                       "refs/remotes/origin/main^{commit}").returncode != 0):
+        sys.exit("fixture setup failed in build_fixtures: PUSHDANGLING needs a dangling origin/HEAD "
+                 "and a live origin/main")
+
+    # origin/HEAD unset, one remote branch: origin/main (PUSHNOHEADMAIN) or origin/master (PUSHONLYMASTER).
+    for where, remote_branch, absent in ((PUSHNOHEADMAIN, "main", "master"),
+                                         (PUSHONLYMASTER, "master", "main")):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
+        run_vcs(where, "update-ref", "refs/remotes/origin/" + remote_branch, "HEAD")
+        run_vcs(where, "checkout", "-q", "-b", "feat")
+        if (run_vcs(where, "symbolic-ref", "-q", "refs/remotes/origin/HEAD").returncode == 0
+                or run_vcs(where, "rev-parse", "--verify", "-q",
+                           "refs/remotes/origin/" + remote_branch + "^{commit}").returncode != 0
+                or run_vcs(where, "rev-parse", "--verify", "-q",
+                           "refs/remotes/origin/" + absent + "^{commit}").returncode == 0):
+            sys.exit("fixture setup failed in build_fixtures: %r needs origin/%s, no origin/%s and "
+                     "no origin/HEAD" % (where, remote_branch, absent))
+
+    # Two remotes with two default branches. `feat` tracks upstream/main, so a bare push goes there.
+    make_repo(PUSHUPSTREAM, {"base.txt": "base\n"})
+    for remote, default in (("origin", "develop"), ("upstream", "main")):
+        run_vcs(PUSHUPSTREAM, "remote", "add", remote, PUSHREMOTE)
+        run_vcs(PUSHUPSTREAM, "update-ref", "refs/remotes/%s/%s" % (remote, default), "HEAD")
+        run_vcs(PUSHUPSTREAM, "symbolic-ref", "refs/remotes/%s/HEAD" % remote,
+                "refs/remotes/%s/%s" % (remote, default))
+    run_vcs(PUSHUPSTREAM, "checkout", "-q", "-b", "feat")
+    run_vcs(PUSHUPSTREAM, "config", "push.default", "upstream")
+    run_vcs(PUSHUPSTREAM, "config", "branch.feat.remote", "upstream")
+    run_vcs(PUSHUPSTREAM, "config", "branch.feat.merge", "refs/heads/main")
+    if (run_vcs(PUSHUPSTREAM, "symbolic-ref", "refs/remotes/origin/HEAD").stdout.strip()
+            != "refs/remotes/origin/develop"
+            or run_vcs(PUSHUPSTREAM, "symbolic-ref", "refs/remotes/upstream/HEAD").stdout.strip()
+            != "refs/remotes/upstream/main"
+            or run_vcs(PUSHUPSTREAM, "config", "--get", "branch.feat.remote").stdout.strip() != "upstream"):
+        sys.exit("fixture setup failed in build_fixtures: PUSHUPSTREAM needs origin/HEAD -> develop, "
+                 "upstream/HEAD -> main and feat tracking upstream")
+
+    for where, mode, merge in ((PUSHUP, "upstream", "main"), (PUSHUPSELF, "upstream", "feat"),
+                               (PUSHNOUP, "upstream", None), (PUSHMATCH, "matching", None)):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
+        run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
+        run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        run_vcs(where, "checkout", "-q", "-b", "feat")
+        run_vcs(where, "config", "push.default", mode)
+        if merge:
+            run_vcs(where, "config", "branch.feat.remote", "origin")
+            run_vcs(where, "config", "branch.feat.merge", "refs/heads/" + merge)
+        if run_vcs(where, "config", "--get", "push.default").stdout.strip() != mode:
+            sys.exit("fixture setup failed in build_fixtures: push.default in %r" % where)
+
+    # The upstream shapes of rulings 206 a and 207 a. Each upstream is set by git itself (--track and
+    # --set-upstream-to), then read back, so a case never judges a fixture that lacks its upstream.
+    make_repo(PUSHSTRAY, {"base.txt": "base\n"})
+    run_vcs(PUSHSTRAY, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHSTRAY, "remote", "add", "fork", PUSHREMOTE)
+    run_vcs(PUSHSTRAY, "update-ref", "refs/remotes/origin/lane/x", "HEAD")
+    run_vcs(PUSHSTRAY, "checkout", "-q", "-b", "mylocal")
+    run_vcs(PUSHSTRAY, "branch", "--set-upstream-to=origin/lane/x", "mylocal")
+    run_vcs(PUSHSTRAY, "config", "push.default", "simple")
+
+    make_repo(PUSHSELF, {"base.txt": "base\n"})
+    run_vcs(PUSHSELF, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHSELF, "update-ref", "refs/remotes/origin/feat", "HEAD")
+    run_vcs(PUSHSELF, "checkout", "-q", "--track", "-b", "feat", "origin/feat")
+
+    for where, lane, base in ((PUSHLANE, "lane/foo", "main"), (PUSHLANEMASTER, "lane/bar", "master")):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
+        run_vcs(where, "update-ref", "refs/remotes/origin/" + base, "HEAD")
+        run_vcs(where, "checkout", "-q", "--track", "-b", lane, "origin/" + base)
+
+    make_repo(PUSHSTACK, {"base.txt": "base\n"})
+    run_vcs(PUSHSTACK, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHSTACK, "update-ref", "refs/remotes/origin/lane/base", "HEAD")
+    run_vcs(PUSHSTACK, "checkout", "-q", "--track", "-b", "lane/fix", "origin/lane/base")
+
+    make_repo(PUSHMAINUP, {"base.txt": "base\n"})
+    run_vcs(PUSHMAINUP, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHMAINUP, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHMAINUP, "branch", "--set-upstream-to=origin/main", "main")
+
+    # Its own name is on origin, so the implied pushes to it are silent. Built by git itself.
+    make_repo(PUSHOWNREF, {"base.txt": "base\n"})
+    run_vcs(PUSHOWNREF, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHOWNREF, "update-ref", "refs/remotes/origin/batch-1", "HEAD")
+    run_vcs(PUSHOWNREF, "update-ref", "refs/remotes/origin/lane-x", "HEAD")
+    run_vcs(PUSHOWNREF, "checkout", "-q", "-b", "lane-x")
+    run_vcs(PUSHOWNREF, "branch", "--set-upstream-to=origin/batch-1", "lane-x")
+
+    for where, upstream in ((PUSHSTRAY, "origin/lane/x"), (PUSHSELF, "origin/feat"),
+                            (PUSHLANE, "origin/main"), (PUSHLANEMASTER, "origin/master"),
+                            (PUSHSTACK, "origin/lane/base"), (PUSHMAINUP, "origin/main"),
+                            (PUSHOWNREF, "origin/batch-1")):
+        got = run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip()
+        if got != upstream:
+            sys.exit("fixture setup failed in build_fixtures: %r needs upstream %s, reads %r"
+                     % (where, upstream, got))
+    # The no-upstream cases ride on these two checkouts, so each must read back with no upstream.
+    for where in (PUSHFEAT, PUSHMAIN):
+        if run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0:
+            sys.exit("fixture setup failed in build_fixtures: %r must have no upstream" % where)
+    if (sorted(run_vcs(PUSHSTRAY, "remote").stdout.split()) != ["fork", "origin"]
+            or run_vcs(PUSHSTRAY, "config", "--get", "push.default").stdout.strip() != "simple"):
+        sys.exit("fixture setup failed in build_fixtures: PUSHSTRAY needs remotes fork and origin "
+                 "and push.default simple")
+    # Scope before subject (P7). The stray controls need origin/mylocal absent in PUSHSTRAY, and the ruling 432 a
+    # red rows need origin/lane-x present in PUSHOWNREF. Each is read back, so no case judges a fixture without it.
+    for where, ref, present in ((PUSHSTRAY, "refs/remotes/origin/mylocal", False),
+                                (PUSHOWNREF, "refs/remotes/origin/lane-x", True)):
+        if (run_vcs(where, "rev-parse", "-q", "--verify", ref).returncode == 0) != present:
+            sys.exit("fixture setup failed in build_fixtures: %r needs %s %s"
+                     % (where, ref, "present" if present else "absent"))
+
+    # The agent-worktree names and their near misses (rule push-agent-branch). Each reads back its own name
+    # in HEAD and no upstream, so a case judges the name it names and nothing inherited.
+    for where, branch in ((PUSHAGENT, "claude/agent-a22bb0ed47825117b"),
+                          (PUSHAGENTWT, "worktree-agent-a22bb0ed47825117b"),
+                          (PUSHAGENTBARE, "agent-a22bb0ed47825117b"),
+                          (PUSHAGENTNOTES, "agent-notes"),
+                          (PUSHAGENTMYABC, "my-agent-abc"),
+                          (PUSHAGENTMYHEX, "my-agent-a22bb0ed47825117b"),
+                          (PUSHAGENTSHORT, "agent-1234567"),
+                          (PUSHAGENTEIGHT, "agent-12345678")):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
+        run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
+        run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        run_vcs(where, "checkout", "-q", "-b", branch)
+        if run_vcs(where, "symbolic-ref", "-q", "HEAD").stdout.strip() != "refs/heads/" + branch:
+            sys.exit("fixture setup failed in build_fixtures: %r must be on branch %s" % (where, branch))
+        if run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0:
+            sys.exit("fixture setup failed in build_fixtures: %r must have no upstream" % where)
+    # The config-file autoSetupRemote (rule push-agent-branch). The key is written to this repo's own config,
+    # so a bare push reads it there, not from a `-c` override on the call.
+    make_repo(PUSHAGENTCFG, {"base.txt": "base\n"})
+    run_vcs(PUSHAGENTCFG, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHAGENTCFG, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHAGENTCFG, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    run_vcs(PUSHAGENTCFG, "checkout", "-q", "-b", "claude/agent-0c1d2e3f4a5b6c7d")
+    run_vcs(PUSHAGENTCFG, "config", "push.autoSetupRemote", "true")
+    if run_vcs(PUSHAGENTCFG, "config", "--get", "push.autoSetupRemote").stdout.strip() != "true":
+        sys.exit("fixture setup failed in build_fixtures: %r must set push.autoSetupRemote in its config" % PUSHAGENTCFG)
+    if run_vcs(PUSHAGENTCFG, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: %r must have no upstream" % PUSHAGENTCFG)
+
 # The bad packed-refs record: its name sorts before every ref the every-branch fixtures hold.
 BROKEN_REF = b"refs/heads/aaa-broken"
 
@@ -2480,6 +2714,14 @@ lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRAHEAD, PTRAHEADCFG, 
 lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
+
+lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
+              PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
+              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK, PUSHOWNREF,
+              PUSHLOCAL, PUSHLOCALSTRAY, PUSHLOCALMAIN, PUSHSSH, PUSHNOREMOTE,
+              PUSHAGENT, PUSHAGENTWT, PUSHAGENTBARE, PUSHAGENTNOTES, PUSHAGENTMYABC, PUSHAGENTMYHEX,
+              PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG],
+             pr2015__build_push)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
               PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK, PUSHOWNREF,

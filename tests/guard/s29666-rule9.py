@@ -54,6 +54,14 @@ def _build_lane_origins():
 
 
 lazy_fixture(list(LANE_ORIGINS), _build_lane_origins)
+
+add("lane-effort-pin: lane tag with the exact effort command is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium",
+    model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-effort-pin: lane tag with the effort command padded by space and a newline is denied",
+    "deny", "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="  /effort medium\n")
+add("lane-effort-pin: lane tag with the effort command and a trailing newline is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium\n")
 add("lane-effort-pin: lane tag with a grant line first and effort medium is allowed", "allow",
     tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     model="sonnet", source_url=LANE_SOURCE_URL)

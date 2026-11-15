@@ -775,6 +775,27 @@ def role_list_builder_check():
     return role_drift_names_check(pointer, ("builder", "OPUS_ROLES"), "builder moved to an opus row")
 
 
+
+for _label, pr2015__check in (
+    ("role-model: the owner's real decision file reads to the rows the guard enforces", role_real_table_check),
+    ("role-model: qualifier rows name no role, and a plain row reads its first Model word", role_rules_check),
+    ("role-model: the table is read at each spawn, so an edited row changes the next verdict", role_live_check),
+    ("role-model: a missing decision file logs one unread line and allows the spawn", role_unread_missing_check),
+    ("role-model: an unreadable decision file logs one unread line and allows the spawn", role_unread_bad_check),
+    ("role-model: a pinned agent file sorts before an unreadable one, so the pin reads True", role_pin_first_check),
+    ("role-model: an unreadable agent file sorts before a pinned one, so the read gives None", role_pin_unreadable_first_check),
+    ("role-list: the three role lists agree with the real decision record", role_list_real_check),
+    ("role-list: the junk keys the reader yields on the record cause no drift", role_list_junk_check),
+    ("role-list: test-author moved from a haiku row to sonnet drifts HAIKU_ROLES", role_list_haiku_check),
+    ("role-list: a new opus row role drifts OPUS_STANDING_ROLES", role_list_opus_check),
+    ("role-list: builder moved to an opus row drifts the override's OPUS_ROLES", role_list_builder_check),
+    ("refuter: guard_core names the refuter role in REFUTER_ROLE, the one home the cases read",
+     refuter_name_check),
+):
+    LOG_CHECKS_EXTRA.append((_label, pr2015__check))
+    FIXTURELESS_CHECKS.add(pr2015__check)
+
+
 for _label, _check in (
     ("role-model: the owner's real decision file reads to the rows the guard enforces", role_real_table_check),
     ("role-model: qualifier rows name no role, and a plain row reads its first Model word", role_rules_check),
@@ -1055,6 +1076,9 @@ role_model_allow("role-model: fix check: the same reviewer spawn as a Task on so
                  FIX_MARKER + ". Re-run the cases.", tool="Task")
 workflow_allow("role-model: fix check: Workflow reviewer on sonnet with the marker on line one is allowed",
                _step_flow("'%s. Re-run the cases.'" % FIX_MARKER, "agentType: 'reviewer', model: 'sonnet'"))
+
+role_model_allow("role-model: fix check: reviewer on haiku with the marker is allowed, at its own row", "reviewer",
+                 "haiku", FIX_MARKER + ". Re-run the cases.")
 # A fix verifier runs Sonnet, set per spawn, so Haiku is refused. The step-up judges it before the role row, and its
 # refusal names Sonnet and not Opus.
 add("role-model: fix verifier: reviewer on haiku with the marker is denied under roles-third-round-steps-up, names Sonnet",
@@ -1104,6 +1128,28 @@ role_model_refuse("role-model: Explore on sonnet names neither the round 1 sente
 role_model_refuse("role-model: test-author on sonnet names neither the round 1 sentence nor the fix check round form",
                   "test-author", "sonnet", "Write the failing cases.",
                   lacks=ROLE_LACKS + (ROUND_ONE_SENTENCE, ROUND_FIX_FORM))
+
+def flipped_guard_path(name, old, new):
+    """The guard, with one line of it replaced, run from a tree of its own: hooks/ holds every guard module, and
+    lint/ sits beside it, since the guard reads lint/layout.py from ../lint (without it the role table reads as
+    unread and every role-model arm passes). A line that is not found once, or is found twice, leaves the tree
+    unedited, so the case that names it fails on its first carry."""
+    root = os.path.join(ROOT, "flipped", name)
+    tree = os.path.join(root, "hooks")
+    mutate_shared.guard_tree(tree)
+    shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    try:
+        mutate_shared.apply_mutant(tree, old, new)
+    except (mutate_shared.StaleMutant, mutate_shared.AmbiguousMutant):
+        pass
+    return os.path.join(tree, "guard.py")
+
+
+# The first round is free: the copied guard's free-rounds constant reads every round, so the refusal names it among them.
+# Its sentence then says the test-author runs on its role's model, and does not say the first round runs on its row.
+FLIPPED_GUARD = flipped_guard_path("round-one-free", 'ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")',
+                                   'ROLE_REVIEWER_FREE_ROUNDS = ("1", "2", "3")')
 
 
 # ---- I: the reviewer's guard marker. A reviewer on Sonnet may run a guard or check diff when its brief carries the line

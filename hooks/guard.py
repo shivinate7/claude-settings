@@ -30,7 +30,7 @@ Every tool the guard judges, first of the refusals (`judge`, after the Read and 
 set_override_veto and session_home_keep):
   handoff-unread       deny. After compaction, a call from the main session while its handoff is
                        unread. The reason names the handoff and says to Read it. A payload with
-                       `agent_id` passes. An override lifts it. A failed import allows.
+                       `agent_id` passes. An override lifts it. A failed import of reread_check, or of its sibling precompact_handoff, refuses as guard-crash at load.
                        (precompact-handoff, item 9)
 
 Shell tools (Bash, PowerShell), in judge_shell order:
@@ -100,7 +100,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   verdict-pipe         deny. A `verdict` stage piped into another command: the exit is the last
                        stage's, and a filter can cut verdict's FAIL line.
   background-end       deny. A background command with no end note. (background-needs-end-note)
-  check-tail           deny. A named check piped into tail or head. (background-check-through-verdict)
+  check-tail           deny. A named check piped into any filter after the run, or a lint piped into
+                       any later command with a commit or push later in the call.
+                       (background-check-through-verdict)
   check-timeout        deny. A `merge --lane-lint` run in the foreground, or in the background under a
                        time limit below its bound. (background-check-through-verdict)
   playwright-browsers-path, playwright-install
@@ -572,6 +574,20 @@ def _install_ids_differ():
     return len(ids) > 1
 
 
+def _print_crash_refuse():
+    """Print the guard-crash refusal, the one text of it. It reads nothing from a guard module, so the load
+    failure below, which cannot trust one, prints it too."""
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "permissionDecision": "deny",
+        "permissionDecisionReason": (
+            "guard-crash: the guard is missing a part and cannot judge this call, so it refuses "
+            "every call, Bash and PowerShell too. Remedy: in your own terminal, not a Claude "
+            "session, run install.sh from the claude-settings checkout (Windows: install.ps1), "
+            "then retry. No override lifts this refusal, because the failed guard cannot check "
+            "the acts that no override lifts. "
+            "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))
+
+
 _load_deadline = time.monotonic() + _LOAD_WAIT_SECONDS
 _loading = "guard_core"   # the module being loaded, for the fallback line below
 while True:
@@ -665,6 +681,17 @@ while True:
         )
         _loading = "guard_wsl"
         from guard_wsl import WSL_REASON, wsl_hit
+        # Flat modules the guard reads on every call. A failed import takes this same wait-then-refuse
+        # path (decision install-hooks-whole), never a fallback that judges with the read missing.
+        # guard_kill imports proc_env above, so its failure surfaces under guard_kill's name.
+        _loading = "reread_check"
+        import reread_check
+        # reread_check never raises on its sibling, so the guard reads the gap: ph is None when the sibling is
+        # missing, will not import, or lacks a name in PH_NAMES. A reread_check with no unread_handoff is as bad.
+        if reread_check.ph is None:
+            raise ImportError("reread_check could not use precompact_handoff")
+        if not callable(getattr(reread_check, "unread_handoff", None)):
+            raise ImportError("reread_check has no unread_handoff")
 
         _loading = "install-id"
         if _install_ids_differ():
@@ -673,7 +700,7 @@ while True:
     except Exception as exc:
         if time.monotonic() < _load_deadline:
             time.sleep(_LOAD_STEP_SECONDS)
-            for _name in ("git_reads", "guard_core") + _FAMILY_MODULES:
+            for _name in ("git_reads", "guard_core", "reread_check", "precompact_handoff", "proc_env") + _FAMILY_MODULES:
                 sys.modules.pop(_name, None)
             importlib.invalidate_caches()
             _loading = "guard_core"
@@ -706,15 +733,7 @@ while True:
         except Exception:
             stopping = False
         if not stopping:
-            print(json.dumps({"hookSpecificOutput": {
-                "hookEventName": "PreToolUse", "permissionDecision": "deny",
-                "permissionDecisionReason": (
-                    "guard-crash: the guard is missing a part and cannot judge this call, so it refuses "
-                    "every call, Bash and PowerShell too. Remedy: in your own terminal, not a Claude "
-                    "session, run install.sh from the claude-settings checkout (Windows: install.ps1), "
-                    "then retry. No override lifts this refusal, because the failed guard cannot check "
-                    "the acts that no override lifts. "
-                    "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))
+            _print_crash_refuse()
         sys.exit(0)
 
 
@@ -3729,6 +3748,21 @@ def _layout_module():
     return layout
 
 
+def _question_form_module():
+    """hooks/question_form.py, told this file's folder, so a stamped copy in guard.d/<id>/ finds the install's
+    lint/ and skills/. The one home of the import. A copy whose question_form will not import, or lacks
+    use_hooks_home, refuses the call as guard-crash (decision install-hooks-whole): the SystemExit passes the
+    `except Exception` of each page check, so none of them allows on it."""
+    try:
+        import question_form
+        question_form.use_hooks_home(_HERE)
+    except Exception as exc:
+        record("", "deny", "guard-crash", cap_safe("question_form: " + type(exc).__name__ + ": " + str(exc), 200))
+        _print_crash_refuse()
+        sys.exit(0)
+    return question_form
+
+
 def record_branch_of(root):
     """The record branch of the checkout at `root`: lint/layout.py record_branch, else "roadmap" when the
     layout cannot be read."""
@@ -4812,7 +4846,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = verdict_pipe_hit(stripped)
     if matched:
         refuse(tool, "deny", "verdict-pipe", VERDICT_PIPE_REASON, matched)
-    matched = check_tail_hit(stripped, background)
+    matched = check_tail_hit(stripped, background, cwd)
     if matched:
         refuse(tool, "deny", "check-tail", CHECK_TAIL_REASON, matched)
     matched = check_timeout_hit(stripped, background, timeout_ms)
@@ -5055,7 +5089,7 @@ from shared_names import COMMENTS_TOOL, DATA_TOOL  # noqa: E402  the one home of
 def data_tool_judge(tool_input, cwd="", session_id=None):
     """((rule, matched), writes): data_tool_hit's verdict and the item writes it judged, for the rule that
     reads the writes again (page-item-design)."""
-    import question_form
+    question_form = _question_form_module()
     return question_form.page_item_hit(tool_input, cwd, session_id)
 
 
@@ -5143,7 +5177,7 @@ def page_stale_hit(tool_input, cwd):
     try:
         import contextlib
         import io
-        import question_form
+        question_form = _question_form_module()
         root = question_form.waiting_page_root(tool_input, cwd)
         if not root:
             return None
@@ -5228,7 +5262,7 @@ MOCKUP_HOME_FIX = " (decision mockup-home, a mockup kept off the repo is gone wi
 def mockup_home_hit(writes, tool_input, cwd):
     """(reason, matched) for the first `designs` entry of `writes` with no `file` or a refused one, else None.
     Fails open on any unread state."""
-    import question_form
+    question_form = _question_form_module()
     try:
         root = question_form.waiting_page_root(tool_input, cwd)
         found = question_form.design_file_problems(writes, root) if root else []
@@ -5247,7 +5281,7 @@ def page_design_hit(writes, tool_input, cwd):
     carries both `options` and `designs`: the checker needs the other half, which the write does not hold, so a
     partial update is allowed with one noted line. The pictured items of one call share one deadline. Fails open
     on any unread state."""
-    import question_form
+    question_form = _question_form_module()
     pictured = []
     for op, doc_id, data in question_form.design_writes(writes):
         if op == "update" and not (data.get("options") and data.get("designs")):
@@ -6999,12 +7033,8 @@ def judge(payload) -> None:
     guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd))
     session_home_keep(payload, tool, cwd)  # rule session-home's record, kept before any refusal can end the call
     # 0, handoff-unread. After compaction, no call the guard judges runs from the main session until it reads its handoff.
-    # Not in never_lifted: the owner may mean the call. A failed import allows.
-    try:
-        from reread_check import unread_handoff
-    except Exception:
-        unread_handoff = None
-    unread = unread_handoff(payload) if unread_handoff else ""
+    # Not in never_lifted: the owner may mean the call. A failed import of reread_check refuses as guard-crash at load.
+    unread = reread_check.unread_handoff(payload)
     if unread:
         refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)
     # 0. Each agent stays inside its own worktree.
@@ -7204,7 +7234,7 @@ def judge(payload) -> None:
         if not rule and item_writes:
             rule, matched = data_tool_label_hit(item_writes, payload.get("transcript_path"), cwd)
         if rule:
-            import question_form
+            question_form = _question_form_module()
         # One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
         if rule == "port-question":
             refuse(tool, "deny", "port-question", question_form.PAGE_REASONS["port-question"], matched)

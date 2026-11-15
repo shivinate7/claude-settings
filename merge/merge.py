@@ -5704,6 +5704,7 @@ def idle_lanes(live, repo_dir=None):
 
 def build_parser():
     """The one home of merge's command line. The guard (hooks/guard_merge.py) parses a command with this, so its reading of -C and --repo-dir is the tool's own.
+    Its long options are the names in MERGE_OPTIONS (hooks/merge_options.py), which the guard reads to name an argparse prefix; a test compares the two.
     allow_abbrev is off: a prefix such as `--repo` or `--confir` is an error, never the flag it starts."""
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0], allow_abbrev=False)
     p.add_argument("pr", nargs="?", help="a pull request number; with --lane-lint, a number or a commit or ref")

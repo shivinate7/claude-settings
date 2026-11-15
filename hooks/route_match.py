@@ -27,8 +27,12 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+from shared_names import install_root  # noqa: E402  stdlib only: the one home of the install root
+
 ROUTE_ROWS_SEAM = "GUARD_ROUTE_ROWS"
-ROUTE_ROWS_FILE = os.path.join(HERE, "route_rows.json")
+# A stamped copy in hooks/guard.d/<id>/ holds no rows file, so the path goes through the install root (decision
+# install-hooks-whole), the one home of the install lookup.
+ROUTE_ROWS_FILE = os.path.join(install_root(HERE), "hooks", "route_rows.json")
 # The rows file is data an owner edits, and Stop runs this match on every turn. A backtracking pattern over a
 # long command (a heredoc, a pasted log) could stall the Stop, so a match reads a bounded slice and skips a
 # pattern too long to be a plain act name. A route row names a verb at the start of a call, so the slice keeps it.

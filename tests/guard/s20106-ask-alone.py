@@ -23,6 +23,9 @@ sh("ask-alone: a one-command python heredoc holding a forced push asks, not deni
    "python3 - <<'PY'\n" + FORCE_PUSH + "\nPY", "ask", "force-push", cwd=PUSHFEAT)
 sh("ask-alone: a one-command python heredoc holding a hard reset in a worktree asks, not denies",
    "python3 - <<'PY'\n" + VCS + " reset --hard\nPY", "ask", "shared-tree", cwd=GITWT)
+
+sh("ask-alone: a one-command python heredoc holding a cap write asks, not denies",
+   "python3 - <<'PY'\n" + CAP_PLAIN + "\nPY", "ask", "agent-model-cap", cwd=PROJ)
 sh("cap data: a one-command python heredoc holding a cap write as text allows "
    "[step agent-model-cap-string-false-alarm: a false-alarm fix, interpreter string data that writes no file "
    "is not the act; incident 2026-11-02 01:16 CST]",

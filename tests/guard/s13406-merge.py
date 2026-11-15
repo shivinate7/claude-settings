@@ -207,6 +207,20 @@ for _name, _command, _lacks in (
     sh("gh-write-cloud: %s is refused in a cloud session" % _name, _command, "deny", GH_WRITE_RULE,
        cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY, lacks=(_lacks,))
 
+
+# Reads and the merge tool stay allowed in a cloud session.
+for _command in (
+    "gh pr view 12", "gh pr list", "gh pr diff 12", "gh pr checks 12", "gh pr status",
+    "gh issue view 3", "gh issue list", "gh auth status",
+    "gh api repos/x/y/pulls/1", "gh api repos/x/y/pulls/1 -q .body",
+    "gh api -X GET search/code -f q=foo", "gh api -X get search/code -f q=foo",
+    "gh api -XGET search/code -f q=foo", "gh api --method=GET search/code -f q=foo",
+    "gh api --method get search/code -f q=foo",
+    "merge 12 --confirm", "~/.claude/bin/merge 12 --confirm",
+):
+    sh("gh-write-cloud: %s is allowed in a cloud session" % _command, _command, "allow", cwd=NOGIT,
+       env=GH_WRITE_CLOUD)
+
 # Reads and the merge tool stay allowed in a cloud session.
 for _command in (
     "gh pr view 12", "gh pr list", "gh pr diff 12", "gh pr checks 12", "gh pr status",
@@ -276,6 +290,12 @@ add("merge-checks: the merge tool of the host denies on a failed head", "deny", 
 # The batch brake is removed: a merge is allowed while another ready pull request on the base has a required check pending,
 # by `gh pr merge` and by the host's merge tool. The merged pull request is 1, the other is 2 (its head is pr-two-head).
 BATCH_ON = GHBATCH + os.pathsep + PY_PATH
+
+sh("merge-batch: gh pr merge is refused while another ready pr has a required check pending",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries="#2", cwd=NOGIT, env_path=BATCH_ON, config=MERGECFG)
+add("merge-batch: the merge tool of the host is refused while another ready pr has a required check pending", "deny", "merge-checks",
+    carries="#2", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=1, repo="x", owner="y",
+    env_path=BATCH_ON, config=MERGECFG)
 sh("merge-batch: gh pr merge is allowed while another ready pr has a required check pending",
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=BATCH_ON, config=MERGECFG)
 add("merge-batch: the merge tool of the host is allowed while another ready pr has a required check pending", "allow",
@@ -290,6 +310,16 @@ add("merge-batch: the merge tool of the host is allowed when the other ready pr'
     env_path=GHBATCHDONE + os.pathsep + PY_PATH)
 sh("merge-batch: gh pr merge is allowed while another ready pr that holds this head has a required check pending",
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHBATCHCONTAIN + os.pathsep + PY_PATH)
+
+sh("merge-batch: gh pr merge is refused while another ready pr that does not hold this head has a required check pending",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries="#2", cwd=NOGIT, env_path=GHBATCHDIVERGED + os.pathsep + PY_PATH)
+sh("merge-batch: gh pr merge is refused while another ready pr holds this head but this head is behind main",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries="#2", cwd=NOGIT, env_path=GHBATCHBEHIND + os.pathsep + PY_PATH)
+# The guard's required names. A pinned merge.requiredChecks list is the list, with no protection read (STAMPREPO pins `checks`).
+# With no branch protection (a 404) every pending check on the other ready pull request counts. A protection read that fails any
+# other way is unknown, and a merge with an unknown read is denied.
+sh("merge-batch: with no branch protection a pending check on the other ready pr refuses gh pr merge",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries="#2", cwd=NOGIT, env_path=GHNOPROT + os.pathsep + PY_PATH)
 sh("merge-batch: gh pr merge is allowed while another ready pr that does not hold this head has a required check pending",
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHBATCHDIVERGED + os.pathsep + PY_PATH)
 sh("merge-batch: gh pr merge is allowed while another ready pr holds this head but this head is behind main",
@@ -300,6 +330,19 @@ sh("merge-batch: with no branch protection a pending check on the other ready pr
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHNOPROT + os.pathsep + PY_PATH)
 sh("merge-batch: with no branch protection a passed check on the other ready pr allows gh pr merge",
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHNOPROTDONE + os.pathsep + PY_PATH)
+
+sh("merge-batch: a protection read that fails with a server error is unknown, and denies gh pr merge",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries="unknown", cwd=NOGIT, env_path=GHPROT500 + os.pathsep + PY_PATH)
+sh("merge-batch: a protection read that fails on the network is unknown, and denies gh pr merge",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries="unknown", cwd=NOGIT, env_path=GHPROTNET + os.pathsep + PY_PATH)
+# A running workflow on another ready pull request holds the merge before its required check reports: scope runs first and checks needs it.
+sh("merge-batch: gh pr merge is refused while another ready pr's workflow runs, before its required check reports",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries=("#2", "ci-checks"), cwd=NOGIT, env_path=GHRUNBLOCK + os.pathsep + PY_PATH)
+add("merge-batch: the merge tool of the host is refused while another ready pr's workflow runs", "deny", "merge-checks",
+    carries=("#2", "ci-checks"), tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=1, repo="x", owner="y",
+    env_path=GHRUNBLOCK + os.pathsep + PY_PATH)
+sh("merge-batch: gh pr merge is refused while another ready pr's workflow is queued with no check rows",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries=("#2", "ci-checks"), cwd=NOGIT, env_path=GHRUNNONE + os.pathsep + PY_PATH)
 sh("merge-checks: a protection read that fails with a server error still allows gh pr merge on a green head",
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHPROT500 + os.pathsep + PY_PATH)
 sh("merge-checks: a protection read that fails on the network still allows gh pr merge on a green head",
