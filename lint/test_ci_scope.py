@@ -1190,6 +1190,12 @@ class WindowsGuardShards(unittest.TestCase):
                 shards = guard_shards_run(run(paths))
                 self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for the fail-safe path {paths}: {shards}")
 
+    # git quotes a name with non-ASCII bytes unless -z is given, so `"hooks/caf\303\251.py"` must still match hooks/*.
+    # Named failure: a path with a non-ASCII name matches no glob, so the guard shards stay off for a guard input.
+    def test_a_non_ascii_guard_input_name_turns_the_guard_shards_on(self):
+        shards = guard_shards_run(run(["hooks/café.py"]))
+        self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for the non-ASCII guard input hooks/café.py: {shards}")
+
     # The gate reads the flags on push, schedule and dispatch too: those events run everything, so the shards run.
     def test_push_schedule_and_dispatch_turn_the_guard_shards_on_for_a_docs_only_diff(self):
         for event in ("push", "schedule", "workflow_dispatch"):
