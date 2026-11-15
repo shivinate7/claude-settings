@@ -680,7 +680,7 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
             with open(target, "wb") as handle:
                 handle.write(raw)
             changed += 1
-    keep = APPEND_ONLY if design else ()
+    keep = APPEND_ONLY
     for label in have:
         if label not in want and label.split("/")[0] not in keep:
             os.remove(os.path.join(out, *label.split("/")))

@@ -272,7 +272,8 @@ WAITING_ROLE = "waiting-page"  # the role of the registry entry that is the repo
 ARTIFACT_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")  # a slug of 32 characters or fewer, as a record slug is (git-slug-then-claim-number)
 ROLE = re.compile(r"[a-z0-9][a-z0-9-]*")
 COLLECTION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
-WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta", "receipts")  # what the waiting page's database holds
+RECEIPTS = "receipts"  # the append-only collection: the waiting page's export never drops it, whatever an entry lists
+WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta", RECEIPTS)  # what the waiting page's database holds
 
 
 def artifacts(root):
@@ -325,6 +326,8 @@ def _registry(root, found, where):
             names = list(WAITING_COLLECTIONS)
         else:
             raise LayoutError("%s: %s (id %s) has no collections to export" % (where, label, entry_id))
+        if role == WAITING_ROLE and RECEIPTS not in names:  # an entry listing the old five still exports receipts
+            names = list(names) + [RECEIPTS]
         if no_export:
             target = False
         elif "export" in item:
