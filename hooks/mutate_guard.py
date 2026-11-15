@@ -2892,8 +2892,8 @@ MUTATIONS = [
     # ---- lane-repo-tag. Each mutant breaks one clause of the lane repo tag check, or of git_reads.github_repo and
     # origin_slug, the reading of a checkout's GitHub repo that the rule shares with the roadmap build.
     ("lane-repo-tag: the rule never fires",
-     '    if repo_tag_hit_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
-     '    if False and repo_tag_hit_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
+     '    if repo_tag_hit_tags:\n        hits.append(("lane-repo-tag"',
+     '    if False and repo_tag_hit_tags:\n        hits.append(("lane-repo-tag"',
      "guard", "lane-repo-tag: lane tag with no repo tag is denied"),
     ("lane-repo-tag: a tag in other case no longer matches",
      '        if repo and repo_tag_names(tag, repo):',
@@ -2968,8 +2968,8 @@ MUTATIONS = [
      '    missing = [k for k in ("model", "source_url")',
      "guard", "lane-start-settings: coordinator call with no model and no source_url is allowed"),
     ("lane-start-settings: the rule never refuses, so a lane with no model or source_url is allowed",
-     '    if lane_missing:\n        refuse(tool, "deny", "lane-start-settings"',
-     '    if False and lane_missing:\n        refuse(tool, "deny", "lane-start-settings"',
+     '    if lane_missing:\n        hits.append(("lane-start-settings"',
+     '    if False and lane_missing:\n        hits.append(("lane-start-settings"',
      "guard", "lane-start-settings: lane tag with no model is denied"),
     ("lane-start-settings: a value that is not text counts as present when its str() is not blank, so null, a number and a list are allowed",
      'if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]',
@@ -2979,12 +2979,12 @@ MUTATIONS = [
     # every other spawn. Each mutant breaks that choice, or the one lane-tag reading the floor and the three lane checks
     # share (is_lane_create_session). lane_tags holds no case handling; the casefold lives in is_lane_create_session.
     ("lane-floor: a lane create_session below the floor gets the no-model remedy again",
-     'LANE_MODEL_FLOOR_REASON if is_lane_create_session(tool, tool_input) else MODEL_FLOOR_REASON,',
-     'MODEL_FLOOR_REASON,',
+     'hits.append(("agent-model-floor", LANE_MODEL_FLOOR_REASON, floor_model))',
+     'hits.append(("agent-model-floor", MODEL_FLOOR_REASON, floor_model))',
      "guard", "floor lane: a lane create_session on haiku is denied with the lane remedy"),
     ("lane-floor: every floor refusal gets the lane remedy, so an Agent spawn names the lane inputs",
-     'LANE_MODEL_FLOOR_REASON if is_lane_create_session(tool, tool_input) else MODEL_FLOOR_REASON,',
-     'LANE_MODEL_FLOOR_REASON,',
+     '        refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)',
+     '        refuse(tool, "deny", "agent-model-floor", LANE_MODEL_FLOOR_REASON, floor_model)',
      "guard", "floor remedy: Agent on haiku keeps the no-model remedy"),
     ("lane-floor: is_lane_create_session is always False, so no lane check fires",
      '    return tool == CREATE_SESSION_TOOL and any(',
@@ -3008,8 +3008,8 @@ MUTATIONS = [
      '    return ""',
      "guard", "lane-title-slug: a lane start with a free title is denied"),
     ("lane-title-slug: the refusal never fires, so a lane start with a free title is allowed",
-     '    if lane_title:\n        refuse(tool, "deny", "lane-title-slug", LANE_TITLE_REASON, lane_title)',
-     '    if False and lane_title:\n        refuse(tool, "deny", "lane-title-slug", LANE_TITLE_REASON, lane_title)',
+     '    if lane_title:\n        hits.append(("lane-title-slug", LANE_TITLE_REASON, lane_title))',
+     '    if False and lane_title:\n        hits.append(("lane-title-slug", LANE_TITLE_REASON, lane_title))',
      "guard", "lane-title-slug: a lane start with a free title is denied"),
     ("lane-title-slug: the lane tag condition is dropped, so a triage start with a free title is refused",
      '    if not is_lane_create_session(tool, tool_input):\n        return ""\n    title = tool_input.get("title")',
@@ -3055,6 +3055,12 @@ MUTATIONS = [
      'LANE_TITLE_EXAMPLE_OPENING = _FORM_HEAD + "my-step" + _FORM_TAIL',
      'LANE_TITLE_EXAMPLE_OPENING = _FORM_HEAD + "N20" + _FORM_TAIL',
      "guard", "lane-title-slug: a lane start with a free title is denied"),
+    # ---- lane_start_hits, the one collection. This drops lane-effort-pin from it. No other mutant touches its line, and a
+    # dropped rule must show in the one-rule case, the count of seven, or both.
+    ("lane-effort-pin: the rule is left out of the lane-start collection, so a lane start with effort high alone is allowed",
+     '    if lane_prompt:\n        hits.append(("lane-effort-pin", LANE_EFFORT_REASON, lane_prompt))',
+     '    if False and lane_prompt:\n        hits.append(("lane-effort-pin", LANE_EFFORT_REASON, lane_prompt))',
+     "guard", "lane-start-pass: a lane start that breaks all seven lane-start rules"),
     # RULE roadmap-one-writer. A push to the record branch needs the triage tag in the own record, with no
     # set_session_tags call after it.
     ("roadmap-one-writer: the triage tag is not checked, so any own record is a proof",

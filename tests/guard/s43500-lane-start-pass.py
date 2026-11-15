@@ -145,7 +145,10 @@ def _lsp_round_trip_check():
         fields = json.loads(run.stdout)
     except ValueError as err:
         return False, "bin/lane-start printed no JSON object (%s): %s" % (err, run.stdout[:90])
-    got, reason = ov_call(LANE_TOOL, fields, LANE_REPO, ov_config("lane-start-round-trip"), "session_LSPRT01", 0)
+    # The start tags its step, so lane-step-dup reads this session's transcript: section 30130's lane-start-listed, a whole
+    # list read with no carrier, proves no other lane holds the step. Its stand-in pull request tool answers for this repo.
+    got, reason = ov_call(LANE_TOOL, fields, LANE_REPO, ov_config("lane-start-round-trip"), "session_LSPRT01", 0,
+                          env_path=fake_gh_path(LANE_START_GH), transcript=role_path("lane-start-listed"))
     if got != "allow" or reason:
         return False, "the helper's start is refused: %s (%s)" % (got, reason[:120])
     return True, "the helper's start is allowed silently"
@@ -186,6 +189,43 @@ add(LSP_TOKEN + ": a lane start that breaks all seven lane-start rules is one re
                   effort="high", model="haiku", source_url=None, title=LSP_BAD_TITLE))
 _lsp_log(LSP_TOKEN + ": all seven lane-start rules are named in judge order after the count line",
          _lsp_order_check(CASES[-1], LSP_ORDER))
+
+# ---- lane-step-dup in the one pass (part one: a live lane carries the start's step). A start that breaks one of the seven
+# and holds such a step is one refusal naming both rules. The carrier is a whole list read of this repo with one live lane
+# on the step. The start's own step is LSP_STEP_TAG, and its repo is the one the lane-repo-tag rule reads.
+LSP_STEP_TAG = "cs-step:lsp-step-held"
+LSP_STEP_TAGS = OWN_LANE_TAGS + [LSP_STEP_TAG]
+LSP_CARRIER = "session_LSPCARRIER01"
+LSP_STEP_REMEDY = "so this would start a second lane on one step"  # a fragment of lane-step-dup's reason
+
+
+def write_lsp_transcripts():
+    """The carrier's whole list read, written as JSONL under this run's role folder."""
+    os.makedirs(ROLE_DIR, exist_ok=True)
+    rows = [stepdup_row(LSP_CARRIER, STEPDUP_LIVE, ["cs-build:lane", LSP_STEP_TAG, "cs-repo:shivinate7/claude-settings"])]
+    with open(role_path("lsp-step-carrier"), "w", encoding="utf-8") as handle:
+        handle.write("\n".join(stepdup_list("l1", rows)) + "\n")
+
+
+lazy_fixture([role_path("lsp-step-carrier")], write_lsp_transcripts)
+# The red case: the start breaks lane-title-slug, the last of the seven, and lane-step-dup follows it in judge order.
+add(LSP_TOKEN + ": a lane start that breaks lane-title-slug and holds a step a live lane carries is one refusal of two rules",
+    "deny", LSP_ORDER[-1], tool=LANE_TOOL, cwd=LANE_REPO, transcript=role_path("lsp-step-carrier"),
+    env_path=fake_gh_path(LANE_START_GH),
+    carries=("lane-step-dup:", LSP_COUNT % 2, LSP_ORDER[-1] + ":", LSP_REMEDY[LSP_ORDER[-1]], LSP_STEP_REMEDY, LSP_CARRIER),
+    **_lsp_fields(tags=LSP_STEP_TAGS, title=LSP_BAD_TITLE))
+_lsp_log(LSP_TOKEN + ": a lane start that breaks one rule and holds a step a live lane carries names both in judge order",
+         _lsp_order_check(CASES[-1], (LSP_ORDER[-1], "lane-step-dup")))
+# Controls, green on head. The held step with every other rule met is lane-step-dup's alone, with no count line. The same
+# broken rule with no live lane on its step is that rule's alone, so lane-step-dup adds no line when it passes.
+add(LSP_TOKEN + ": a lane start that holds a step a live lane carries and breaks no other rule is refused under lane-step-dup alone",
+    "deny", "lane-step-dup", tool=LANE_TOOL, cwd=LANE_REPO, transcript=role_path("lsp-step-carrier"),
+    env_path=fake_gh_path(LANE_START_GH), carries=(LSP_CARRIER, LSP_STEP_REMEDY), lacks=_lsp_others("lane-step-dup"),
+    **_lsp_fields(tags=LSP_STEP_TAGS))
+add(LSP_TOKEN + ": a lane start that breaks lane-title-slug and holds no step a live lane carries is refused under that rule alone",
+    "deny", LSP_ORDER[-1], tool=LANE_TOOL, cwd=LANE_REPO, transcript=role_path("lane-start-listed"),
+    env_path=fake_gh_path(LANE_START_GH), carries=(LSP_REMEDY[LSP_ORDER[-1]],),
+    lacks=("lane-step-dup:", LSP_COUNT_WORDS), **_lsp_fields(tags=LSP_STEP_TAGS, title=LSP_BAD_TITLE))
 
 # ---- The override. One liftable rule per refusal: the first lifted, the second still refused, then the first again.
 _lsp_log(LSP_TOKEN + ": a one-act override lifts the first broken rule only, and the next is refused", _lsp_once_check)
