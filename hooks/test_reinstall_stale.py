@@ -6,12 +6,14 @@ Run it from the repository root:
 
     python3 hooks/test_reinstall_stale.py
 
-WHAT IT PROVES. In a cloud session the hook reads the install record, makes at most one `git ls-remote`
+WHAT IT PROVES. In a session the hook reads the install record, makes at most one `git ls-remote`
 of the recorded ref, and then does one of three things: stays silent when the tip is the recorded sha,
 reinstalls once with the recorded installer when the tip moved, or prints one unknown line when the read
-or the record fails. An installer that exits non-zero prints one failure line and is not retried. A restart
-line appears only for a changed path that a new session must read again, and a local diff that cannot run
-prints a restart unknown line.
+or the record fails. A local session runs the installer as `bash <installer>` in the clone with
+CS_STABLE_ONLY=1; a cloud session runs it with --cloud. A local session with no record stays silent. The
+bash is the one hooks/git_bash.py resolves, never a bare `bash`. An installer that exits non-zero
+prints one failure line and is not retried. A restart line appears only for a changed path that a new
+session must read again, and a local diff that cannot run prints a restart unknown line.
 After an installer run the hook reads the record again. A record that still names the old sha prints one line that
 the reinstall did not reach the tip, never a reinstall line. The installer gets the record's ref, and a hook input
 that no SessionStart entry fires on. At its timeout the installer gets SIGTERM before SIGKILL, and its child goes
@@ -22,13 +24,15 @@ THE SEAM. Each fixture is a bare origin, a seed that pushes to it, and a source 
 all under the run folder. HOME and CLAUDE_CONFIG_DIR point into the run folder, so the real ~/.claude is
 never read. A PATH shim on `git` logs each call's argv and then runs the real git. A stub installer logs
 each run, fetches origin as the real installer does, and writes the record when told. The cases read the
-hook's stdout, its exit code, the shim log and the stub log. They import nothing from the hook.
+hook's stdout, its exit code, the shim log and the stub log. They import nothing from the hook, except class
+WindowsBash, which fakes the bash resolver and the process start, then imports the hook for one call.
 
 The controls at the end (class Harness) pass on any tree. They prove the fixture and the shim work, so a
 red elsewhere belongs to the hook.
 """
 
 import ast
+import importlib
 import json
 import os
 import re
@@ -63,7 +67,8 @@ GIT_LOCATORS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECT
                 "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX")
 HOOK_ENV_DROP = GIT_LOCATORS + ("CLAUDE_CODE_REMOTE", "CLAUDE_CONFIG_DIR", "CLAUDE_SETTINGS_FETCH_TIMEOUT",
                                 "CLAUDE_SETTINGS_REF", "CLAUDE_SETTINGS_REINSTALL_TIMEOUT", "CS_HOOK_INPUT",
-                                "GIT_SHIM_LS_REMOTE", "GIT_SHIM_DIFF", "STUB_EXIT", "STUB_RECORD_SHA")
+                                "GIT_SHIM_LS_REMOTE", "GIT_SHIM_DIFF", "STUB_EXIT", "STUB_RECORD_SHA",
+                                "CS_STABLE_ONLY", "CLAUDE_SETTINGS_LOCK_WAIT")
 HOOK_ONLY = {"hooks/config_watch.py": "pass  # tweak\n"}
 COST_TERMS = (
     ("the process starts", r"(?i)process(?:es)? starts?|python starts?|starts? (?:one|a|1) python"),
@@ -96,9 +101,11 @@ exec "$GIT_SHIM_REAL" "$@"
 # exits 0 with no fetch: an installer whose fetch failed while the hook's ls-remote worked.
 STUB = r'''#!/bin/sh
 here=$(cd "$(dirname "$0")" && pwd -P)
-printf '%s\n' "$*" >> "$STUB_COUNTER"
+printf 'run:%s\n' "$*" >> "$STUB_COUNTER"
 printf 'CLAUDE_SETTINGS_REF=%s\n' "${CLAUDE_SETTINGS_REF-unset}" >> "$STUB_ENV_LOG"
 printf 'CS_HOOK_INPUT=%s\n' "${CS_HOOK_INPUT-unset}" >> "$STUB_ENV_LOG"
+printf 'CS_STABLE_ONLY=%s\n' "${CS_STABLE_ONLY-unset}" >> "$STUB_ENV_LOG"
+printf 'CWD=%s\n' "$(pwd -P)" >> "$STUB_ENV_LOG"
 [ -n "$STUB_EXIT" ] && exit "$STUB_EXIT"
 if [ -n "$STUB_RECORD_SHA" ]; then
   sha=$STUB_RECORD_SHA
@@ -375,10 +382,11 @@ class Fixture:
         return [argv for argv in self.git_calls() if subcommand(argv) == "ls-remote"]
 
     def installer_runs(self):
-        """Each stub run so far, as its arguments. The counter keeps every turn's runs."""
+        """Each stub run so far, as its arguments: "--cloud" for a cloud run, "" for a local run with none.
+        The counter keeps every turn's runs."""
         try:
             with open(self.counter, encoding="utf-8") as handle:
-                return [line.rstrip("\n") for line in handle if line.strip()]
+                return [line.rstrip("\n")[len("run:"):] for line in handle if line.startswith("run:")]
         except OSError:
             return []
 
@@ -499,16 +507,18 @@ class StaleInstall(unittest.TestCase):
         self.assertEqual(run.lines, [], "current install on stable printed %r, want silence" % run.lines)
         self.assertEqual(fx.installer_runs(), [], "current install on stable ran the installer")
 
-    # Not a cloud session: silent, exit 0, no git.
+    # Local with no install record (an install from before the record existed): silent, exit 0, no git.
+    # Local sessions with a record are checked in LocalRefresh; this case is the record-absent half.
 
-    def test_not_cloud_is_silent_with_no_git_call(self):
-        fx, old, new = behind(self._testMethodName)
-        self.assertNotEqual(fx.origin_tip("main"), fx.record_sha(), "scope: the fixture is not behind")
+    def test_local_without_record_is_silent_with_no_git_call(self):
+        fx = Fixture(self._testMethodName)
+        fx.clone()
+        self.assertFalse(os.path.exists(fx.record_path), "scope: a record exists")
         run = fx.run_hook(cloud=False)
-        self.assertEqual(run.rc, 0, "exit code outside a cloud session; stderr: %s" % run.tail())
-        self.assertEqual(run.lines, [], "printed %r outside a cloud session" % run.lines)
-        self.assertEqual(fx.git_calls(), [], "git ran outside a cloud session: %r" % fx.git_calls())
-        self.assertEqual(fx.installer_runs(), [], "the installer ran outside a cloud session")
+        self.assertEqual(run.rc, 0, "exit code locally without a record; stderr: %s" % run.tail())
+        self.assertEqual(run.lines, [], "printed %r locally without a record" % run.lines)
+        self.assertEqual(fx.git_calls(), [], "git ran locally without a record: %r" % fx.git_calls())
+        self.assertEqual(fx.installer_runs(), [], "the installer ran locally without a record")
 
     # The read cannot run: one unknown line, no install.
 
@@ -729,6 +739,146 @@ class StaleInstall(unittest.TestCase):
         self.assertFalse(os.path.exists(fx.lock_path),
                          "the install lock stayed after the timeout: the installer's TERM handler did not release it")
         self.assertFalse(pid_alive(grand), "the installer's child survived the timeout: the group was not signalled")
+
+
+class LocalRefresh(unittest.TestCase):
+    """A local session (CLAUDE_CODE_REMOTE unset) reads the record and refreshes the same way a cloud session does, except
+    that the installer is run as `bash <installer>` with no --cloud, in the clone, with CS_STABLE_ONLY=1."""
+
+    def test_local_tip_moved_runs_the_recorded_installer_once_in_the_clone(self):
+        fx, old, new = behind(self._testMethodName)
+        self.assertNotEqual(fx.origin_tip("main"), fx.record_sha(), "scope: origin is not ahead of the record")
+        run = fx.run_hook(cloud=False)
+        self.assertEqual(fx.installer_runs(), [""],
+                         "want one local installer run with no --cloud; got %r; stderr: %s"
+                         % (fx.installer_runs(), run.tail()))
+        seen = fx.installer_env()
+        self.assertEqual(seen.get("CS_STABLE_ONLY"), "1",
+                         "the installer got CS_STABLE_ONLY=%r, want 1" % seen.get("CS_STABLE_ONLY"))
+        self.assertEqual(seen.get("CLAUDE_SETTINGS_REF"), "main",
+                         "the installer got CLAUDE_SETTINGS_REF=%r, want the record's ref main"
+                         % seen.get("CLAUDE_SETTINGS_REF"))
+        self.assertEqual(seen.get("CWD"), os.path.realpath(fx.source),
+                         "the installer ran in %r, want the clone %r" % (seen.get("CWD"), fx.source))
+        self.assertEqual(run.lines, [REINSTALL % (new[:SHORT], old[:SHORT])],
+                         "want the reinstall line; stderr: %s" % run.tail())
+
+    def test_local_current_is_silent_and_runs_no_installer(self):
+        fx = current(self._testMethodName)
+        self.assertEqual(fx.origin_tip("main"), fx.record_sha(), "scope: origin and the record differ")
+        run = fx.run_hook(cloud=False)
+        self.assertEqual(run.lines, [], "local current install printed %r, want silence" % run.lines)
+        self.assertEqual(fx.installer_runs(), [], "local current install ran the installer")
+
+    def test_local_current_makes_one_ls_remote_read(self):
+        fx = current(self._testMethodName)
+        self.assertEqual(fx.origin_tip("main"), fx.record_sha(), "scope: origin and the record differ")
+        fx.run_hook(cloud=False)
+        self.assertEqual(fx.subcommands(), ["ls-remote"],
+                         "local git calls were %r, want one ls-remote" % fx.subcommands())
+
+    def test_local_ls_remote_failure_reports_unknown_and_installs_nothing(self):
+        fx, old, new = behind(self._testMethodName)
+        run = fx.run_hook(cloud=False, ls_remote="fail")
+        self.assertEqual(len(fx.ls_remote_calls()), 1, "the hook made %d ls-remote reads, want 1"
+                         % len(fx.ls_remote_calls()))
+        StaleInstall.assert_unknown(self, run)
+        self.assertEqual(fx.installer_runs(), [], "the installer ran after a failed local read")
+
+    def test_local_ls_remote_timeout_reports_unknown_and_installs_nothing(self):
+        fx, old, new = behind(self._testMethodName)
+        run = fx.run_hook(cloud=False, ls_remote="hang", timeout="1")
+        self.assertEqual(len(fx.ls_remote_calls()), 1, "the hook made %d ls-remote reads, want 1"
+                         % len(fx.ls_remote_calls()))
+        StaleInstall.assert_unknown(self, run)
+        self.assertEqual(fx.installer_runs(), [], "the installer ran after a timed-out local read")
+
+    def test_local_unknown_ref_reports_unknown_and_installs_nothing(self):
+        fx, old, new = behind(self._testMethodName, ref="nope")
+        self.assertNotIn("refs/heads/nope", fx.git("-C", fx.origin, "for-each-ref", "--format=%(refname)"),
+                         "scope: origin has a branch named nope")
+        run = fx.run_hook(cloud=False)
+        self.assertEqual([argv[-1] for argv in fx.ls_remote_calls()], ["refs/heads/nope"],
+                         "the hook did not read the recorded ref")
+        StaleInstall.assert_unknown(self, run)
+        self.assertEqual(fx.installer_runs(), [], "the installer ran for an unknown local ref")
+
+    def test_local_installer_failure_prints_one_failure_line(self):
+        fx, old, new = behind(self._testMethodName)
+        run = fx.run_hook(cloud=False, stub_exit="1")
+        self.assertEqual(len(fx.installer_runs()), 1, "scope: the local installer did not run once")
+        self.assertEqual(run.lines, [PREFIX + "reinstall failed (exit 1)"],
+                         "want one failure line, and no reinstalled line; stderr: %s" % run.tail())
+
+
+class NoWrites(unittest.TestCase):
+    """The hook writes no file. The config dir's names and mtimes read the same before and after a check."""
+
+    def snapshot(self, config):
+        found = {}
+        for dirpath, dirnames, filenames in os.walk(config):
+            for name in dirnames + filenames:
+                path = os.path.join(dirpath, name)
+                found[os.path.relpath(path, config)] = os.stat(path, follow_symlinks=False).st_mtime_ns
+        return found
+
+    def test_local_current_check_writes_no_file(self):
+        fx = current(self._testMethodName)
+        before = self.snapshot(fx.config)
+        self.assertTrue(before, "scope: the config dir holds no file to compare")
+        fx.run_hook(cloud=False)
+        self.assertEqual(self.snapshot(fx.config), before, "the local check changed the config dir")
+
+    def test_cloud_failing_check_writes_no_file(self):
+        fx = current(self._testMethodName)
+        before = self.snapshot(fx.config)
+        self.assertTrue(before, "scope: the config dir holds no file to compare")
+        fx.run_hook(ls_remote="fail")
+        self.assertEqual(len(fx.ls_remote_calls()), 1, "scope: the failing check did not run")
+        self.assertEqual(self.snapshot(fx.config), before, "the failing cloud check changed the config dir")
+
+    def test_local_failing_check_writes_no_file(self):
+        fx = current(self._testMethodName)
+        before = self.snapshot(fx.config)
+        self.assertTrue(before, "scope: the config dir holds no file to compare")
+        fx.run_hook(cloud=False, ls_remote="fail")
+        self.assertEqual(self.snapshot(fx.config), before, "the failing local check changed the config dir")
+
+
+class WindowsBash(unittest.TestCase):
+    """The reinstall's bash is the path hooks/git_bash.py resolves, never a bare `bash`: on Windows a bare name can
+    run the System32 WSL launcher. The resolver and the process start are faked, so no process starts."""
+
+    def test_reinstall_runs_the_path_the_resolver_gives(self):
+        sys.path.insert(0, HERE)
+        fake_bash = "/fake/Git/bin/bash.exe"
+        import git_bash  # the one home of bash resolution, a flat hooks/ file
+        saved_find = git_bash.find_git_bash
+        self.addCleanup(setattr, git_bash, "find_git_bash", saved_find)
+        git_bash.find_git_bash = lambda *args, **kwargs: fake_bash
+        sys.modules.pop("stale_install", None)
+        self.addCleanup(sys.modules.pop, "stale_install", None)
+        hook = importlib.import_module("stale_install")
+        launched = []
+
+        class Done:
+            pid = 0
+
+            def wait(self, timeout=None):
+                return 0
+
+        def fake_popen(argv, **kwargs):
+            launched.append(argv)
+            return Done()
+
+        saved_popen = hook._nowindow.Popen
+        self.addCleanup(setattr, hook._nowindow, "Popen", saved_popen)
+        hook._nowindow.Popen = fake_popen
+        record = {"ref": "main", "sha": "0" * 40, "source": HERE, "installer": os.path.join(HERE, "install.sh")}
+        hook.reinstall(record)
+        self.assertEqual(len(launched), 1, "scope: the reinstall started %d processes, want 1" % len(launched))
+        self.assertEqual(launched[0][0], fake_bash,
+                         "the reinstall ran %r, not the path git_bash gave (%r)" % (launched[0][0], fake_bash))
 
 
 class HookFile(unittest.TestCase):

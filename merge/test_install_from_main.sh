@@ -25,6 +25,8 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 # A cloud session exports this, and install.sh then writes settings.json as a file, not a link.
 # Case 24 sets it itself.
 unset CLAUDE_CODE_REMOTE
+# The narrow mode is set per case by refresh_run. A caller's value must not reach the other cases.
+unset CS_STABLE_ONLY
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/../lint/_test_git.sh"  # test-run signing opt-out
@@ -1893,7 +1895,138 @@ case58() {
   else ok "$name"; fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41 case42 case43 case44 case45 case46 case47 case48 case49 case50 case51 case52 case53 case54 case55 case56 case57 case58"
+# ---- The narrow refresh the local hook runs (hooks/stale_install.py, CS_STABLE_ONLY=1): cases 59 to 64 ----
+# refresh_run CLONE HOME SHIM REF OUT: the helper as the local hook runs it. It sets CS_STABLE_ONLY=1,
+# CLAUDE_SETTINGS_REF=REF and the hook's lock wait (40 s), so the caller's env does not reach it. Its output goes
+# to OUT.out and OUT.err. Sets rc when it runs in the foreground.
+refresh_run() {
+  ( cd "$1" && env HOME="$2" CLAUDE_CONFIG_DIR="$2/.claude-cfg" CLAUDE_SETTINGS_SEARCH_ROOTS=/nonexistent \
+      CS_STABLE_ONLY=1 CLAUDE_SETTINGS_REF="$4" CLAUDE_SETTINGS_LOCK_WAIT=40 MSYS=winsymlinks:nativestrict \
+      PATH="$3:$PATH" bash "$SCRIPT" ) > "$5.out" 2> "$5.err"
+  rc=$?
+}
+
+# record_field FILE KEY: the text of one string field of the install record, or "" when absent.
+record_field() { sed -n "s/.*\"$2\": \"\\([^\"]*\\)\".*/\\1/p" "$1" 2>/dev/null; }
+
+# ---- Case 59: two narrow runs at once on one install dir both end cleanly; the lock is gone; the record names stable ----
+# Two helper runs start together, as two sessions' hooks would. The lock makes one wait for the other. Each run ends
+# with exit 0 or a printed failure line, the pin is whole at stable's tip, the lock file is gone, and the record names that tip.
+case59() {
+  name="case59: two narrow helper runs at once on one install dir both end cleanly, the lock file is gone, and the record names stable's tip"
+  d="$work/case59"; h="$d/home"; mkdir -p "$h"
+  hook_fixture "$d" linked ahead payload
+  if [ "$c1" = "$c0" ]; then bad "$name" "FIXTURE stable did not move on"; return; fi
+  refresh_run "$d/clone" "$h" "$d/shim" stable "$d/a" & pa=$!
+  refresh_run "$d/clone" "$h" "$d/shim" stable "$d/b" & pb=$!
+  wait "$pa"; ra=$?
+  wait "$pb"; rb=$?
+  rec="$h/.claude-cfg/.claude-settings-install.json"
+  if [ "$ra" -ne 0 ] && [ ! -s "$d/a.err" ]; then bad "$name" "run a exited $ra and printed no failure line"
+  elif [ "$rb" -ne 0 ] && [ ! -s "$d/b.err" ]; then bad "$name" "run b exited $rb and printed no failure line"
+  elif [ -e "$h/.claude-cfg/.claude-settings-install.lock" ]; then bad "$name" "the install lock file is still there after both runs"
+  elif [ -n "$(git -C "$d/clone-live" status --porcelain --untracked-files=no)" ]; then bad "$name" "the pinned checkout has tracked changes after both runs"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c1" ]; then bad "$name" "the pin is at $(git -C "$d/clone-live" rev-parse HEAD), want stable's tip $c1"
+  elif [ ! -f "$rec" ]; then bad "$name" "no install record was written: a local whole install must record the tip it installed"
+  elif [ "$(record_field "$rec" sha)" != "$c1" ]; then bad "$name" "the record names $(record_field "$rec" sha), want stable's tip $c1"
+  else ok "$name"; fi
+}
+
+# ---- Case 60: a narrow run leaves a held main's tracked change, its branch and main as they were; the pin moves to stable ----
+# The clone's main is held by a linked worktree with a tracked edit. Origin's main moved on, touching no file that edit
+# is in, so an ordinary run would fast-forward main. The narrow run never moves main.
+case60() {
+  name="case60: a narrow run leaves a held main's tracked change, its branch and main as they were, and moves the pin to stable"
+  d="$work/case60"; h="$d/home"; mkdir -p "$h"
+  hook_fixture "$d" linked ahead payload
+  printf 'local edit\n' >> "$d/linked/notes.txt"
+  cp "$d/linked/notes.txt" "$d/notes.before"
+  if [ -z "$(git -C "$d/linked" status --porcelain --untracked-files=no)" ] || [ "$(git -C "$d/clone" rev-parse refs/heads/main)" != "$c0" ] || [ "$m1" = "$c0" ]; then
+    bad "$name" "FIXTURE the held main is not dirty at $c0, or origin's main did not move on"; return
+  fi
+  refresh_run "$d/clone" "$h" "$d/shim" stable "$d/e"
+  if [ "$rc" -ne 0 ]; then bad "$name" "narrow run exited $rc: $(cat "$d/e.err")"
+  elif ! cmp -s "$d/linked/notes.txt" "$d/notes.before"; then bad "$name" "the held main's tracked change was changed or lost"
+  elif [ "$(git -C "$d/linked" symbolic-ref -q HEAD)" != refs/heads/main ]; then bad "$name" "the linked worktree is no longer on main"
+  elif [ "$(git -C "$d/clone" rev-parse refs/heads/main)" != "$c0" ]; then bad "$name" "local main moved to $(git -C "$d/clone" rev-parse refs/heads/main), want it unmoved at $c0: a narrow run must not fast-forward main"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c1" ]; then bad "$name" "the pin is at $(git -C "$d/clone-live" rev-parse HEAD), want stable's tip $c1"
+  else ok "$name"; fi
+}
+
+# ---- Case 61: a narrow run with CLAUDE_SETTINGS_REF=main refuses: exit non-zero, one stderr line, pin and main unmoved ----
+# The narrow mode never moves local main, so it cannot follow main. Origin's main is ahead of the pin, so an ordinary
+# run would move both.
+case61() {
+  name="case61: a narrow run with CLAUDE_SETTINGS_REF=main exits non-zero with one stderr line, and moves neither the pin nor main"
+  d="$work/case61"; h="$d/home"; mkdir -p "$h"
+  hook_fixture "$d" linked ahead payload
+  if [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c0" ] || [ "$(git -C "$d/origin.git" rev-parse refs/heads/main)" != "$m1" ]; then
+    bad "$name" "FIXTURE the pin is not at $c0, or origin's main is not at $m1"; return
+  fi
+  refresh_run "$d/clone" "$h" "$d/shim" main "$d/i"
+  if [ "$rc" -eq 0 ]; then bad "$name" "the narrow run with REF=main exited 0: it must refuse"
+  elif [ "$(grep -c . "$d/i.err")" -ne 1 ]; then bad "$name" "want one stderr line, got: $(cat "$d/i.err")"
+  elif [ "$(git -C "$d/clone" rev-parse refs/heads/main)" != "$c0" ]; then bad "$name" "local main moved to $(git -C "$d/clone" rev-parse refs/heads/main), want $c0"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c0" ]; then bad "$name" "the pin moved to $(git -C "$d/clone-live" rev-parse HEAD), want $c0"
+  else ok "$name"; fi
+}
+
+# ---- Case 62: a narrow run whose origin has no stable exits non-zero, one stderr line; the pin and main stay ----
+# The clone still holds a stale origin/stable (c1). The narrow run must not pin that copy, nor follow local main.
+case62() {
+  name="case62: a narrow run whose origin has no stable exits non-zero with one stderr line, and moves neither the pin nor main"
+  d="$work/case62"; h="$d/home"; mkdir -p "$h"
+  hook_fixture "$d" linked ahead payload
+  git -C "$d/origin.git" update-ref -d refs/heads/stable
+  if git -C "$d/origin.git" rev-parse -q --verify refs/heads/stable >/dev/null; then bad "$name" "FIXTURE origin still has a stable branch"; return; fi
+  if [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c0" ] || [ "$(git -C "$d/origin.git" rev-parse refs/heads/main)" != "$m1" ]; then
+    bad "$name" "FIXTURE the pin is not at $c0, or origin's main is not at $m1"; return
+  fi
+  refresh_run "$d/clone" "$h" "$d/shim" stable "$d/i2"
+  if [ "$rc" -eq 0 ]; then bad "$name" "the narrow run with no origin stable exited 0: it must refuse"
+  elif [ "$(grep -c . "$d/i2.err")" -ne 1 ]; then bad "$name" "want one stderr line, got: $(cat "$d/i2.err")"
+  elif [ "$(git -C "$d/clone" rev-parse refs/heads/main)" != "$c0" ]; then bad "$name" "local main moved to $(git -C "$d/clone" rev-parse refs/heads/main), want $c0"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c0" ]; then bad "$name" "the pin moved to $(git -C "$d/clone-live" rev-parse HEAD), want $c0"
+  else ok "$name"; fi
+}
+
+# ---- Case 63 (control for 64): a narrow run that lands every folder writes the local record ----
+# The record names stable's tip, the clone as its source (not the pin), and the clone's installer. Red until the
+# local install writes a record.
+case63() {
+  name="case63: a narrow run that lands every folder writes the local install record: stable's tip, the clone as source, its installer"
+  d="$work/case63"; h="$d/home"; mkdir -p "$h"
+  hook_fixture "$d" linked ahead payload
+  refresh_run "$d/clone" "$h" "$d/shim" stable "$d/j1"
+  rec="$h/.claude-cfg/.claude-settings-install.json"
+  if [ "$rc" -ne 0 ]; then bad "$name" "narrow run exited $rc: $(cat "$d/j1.err")"
+  elif [ ! -f "$rec" ]; then bad "$name" "no install record was written by a local whole install"
+  elif [ "$(record_field "$rec" ref)" != stable ]; then bad "$name" "record ref is $(record_field "$rec" ref), want stable"
+  elif [ "$(record_field "$rec" sha)" != "$c1" ]; then bad "$name" "record sha is $(record_field "$rec" sha), want the pin's HEAD at stable's tip $c1"
+  elif [ "$(record_field "$rec" source)" != "$d/clone" ]; then bad "$name" "record source is $(record_field "$rec" source), want the clone $d/clone, not the pin"
+  elif [ "$(record_field "$rec" installer)" != "$d/clone/merge/install_from_main.sh" ]; then bad "$name" "record installer is $(record_field "$rec" installer), want $d/clone/merge/install_from_main.sh"
+  else ok "$name"; fi
+}
+
+# ---- Case 64: a narrow run with one failed landing writes no install record, and the hook never reports a reinstall ----
+# A plain file sits where the hooks folder lands, so the landing's mkdir fails and land_failed records it. The run exits 0
+# (a local run keeps its exit code), so only the record says the install is partly landed. Paired with case 63,
+# which is red until the local record exists.
+case64() {
+  name="case64: a narrow run with one failed landing writes no install record, and the hook never reports a reinstall"
+  d="$work/case64"; h="$d/home"; mkdir -p "$h/.claude-cfg"
+  hook_fixture "$d" linked ahead payload
+  printf 'a file where the hooks folder lands\n' > "$h/.claude-cfg/hooks"
+  refresh_run "$d/clone" "$h" "$d/shim" stable "$d/j2"
+  if [ ! -f "$h/.claude-cfg/hooks" ] || [ -d "$h/.claude-cfg/hooks" ]; then bad "$name" "FIXTURE the hooks landing did not fail: the file at hooks was replaced"; return; fi
+  if ! grep -q 'install.sh: end' "$h/.claude-cfg/claude-settings-install.log" 2>/dev/null; then bad "$name" "FIXTURE the installer did not reach its end line: $(cat "$d/j2.err")"; return; fi
+  if [ -e "$h/.claude-cfg/.claude-settings-install.json" ]; then bad "$name" "a partly landed install wrote a record, which would claim a tip that did not land"; return; fi
+  hook_out=$(printf '{}\n' | env HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" python3 "$REPO_ROOT/hooks/stale_install.py")
+  if printf '%s\n' "$hook_out" | grep -q reinstalled; then bad "$name" "the hook reported a reinstall after a failed landing: $hook_out"
+  else ok "$name"; fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41 case42 case43 case44 case45 case46 case47 case48 case49 case50 case51 case52 case53 case54 case55 case56 case57 case58 case59 case60 case61 case62 case63 case64"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
