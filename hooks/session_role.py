@@ -13,20 +13,17 @@ Cost: `write` is one small file write or delete per session start, plus the prun
 import contextlib
 import json
 import os
-import pathlib
 import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from guard_shared_tree import SESSION_ID_RE  # noqa: E402  the one home of the session id's shape
+from shared_names import SESSION_ID_RE, SESSION_ROLES, launcher_roles_dir, read_launcher_record  # noqa: E402,F401  the one home of the id's shape, the role set and the reader (stdlib only)
 
-SESSION_ROLES = ("coordinator", "triage", "batch-runner")  # what bin/claude-role may start; a lane is never launched
 STALE_SECONDS = 7 * 24 * 3600  # a role file this old belongs to a session that ended; `write` removes it
 
 
 def roles_dir():
-    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    return pathlib.Path(base) / "state" / "session-roles"
+    return launcher_roles_dir()
 
 
 def valid_id(sid):
@@ -35,19 +32,8 @@ def valid_id(sid):
 
 def own_record(sid):
     """The role file of session `sid` as a dict {"session", "role", "repo"}, or None: no id, an id outside the id shape, no file,
-    unreadable or malformed, a file that names another session, or a role outside SESSION_ROLES. The one reader."""
-    if not valid_id(sid):
-        return None
-    try:
-        data = json.loads((roles_dir() / (sid + ".json")).read_text(encoding="utf-8"))
-    except (OSError, ValueError):  # UnicodeDecodeError and JSONDecodeError are ValueErrors
-        return None
-    if not isinstance(data, dict) or data.get("session") != sid:
-        return None
-    role = data.get("role")
-    if not isinstance(role, str) or role not in SESSION_ROLES:  # a list is unhashable: test the type first
-        return None
-    return data
+    unreadable or malformed, a file that names another session, or a role outside SESSION_ROLES. Read by shared_names, the one reader."""
+    return read_launcher_record(sid)
 
 
 def own_role(sid):

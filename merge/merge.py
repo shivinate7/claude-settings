@@ -217,7 +217,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # required_check, pin_note and git_reads, loaded below
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
-from shared_names import MERGE_ROLES, read_merge_role as _cloud_merge_role, role_path  # noqa: E402,F401  the one home of the role-file reader; the guard's coordinator-scope rule reads it too
+from shared_names import MERGE_ROLES, read_merge_role, role_path  # noqa: E402,F401  the one home of the role-file readers, cloud and local; the guard's coordinator-scope rule reads it too
 import ruled_store  # noqa: E402  the one reader of the ruling store (lint/ruled_store.py)
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
@@ -5580,22 +5580,6 @@ def replaced_names(info, n):
         names += list(block["lanes"])
         dropped = block["dropped"]
     return [x for x in dict.fromkeys(names) if x != n and x not in dropped]
-
-def read_merge_role():
-    """This session's recorded merge role, or None: no session id (cloud, else the local CLAUDE_CODE_SESSION_ID with the launcher's file), no file, unreadable or malformed, another session's, or a tier outside MERGE_ROLES.
-    Every failure is None, so the check fails closed. An absent id never equals an absent record. A cloud id reads the role file through shared_names (the one home of that reader)."""
-    if not os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID"):
-        if os.environ.get("CLAUDE_CODE_REMOTE") == "true":  # a cloud session with no id has no role, whatever file is on disk
-            return None
-        # no cloud id: a local session reads the role the launcher recorded for its own id (hooks/session_role.py, the one reader)
-        try:
-            import session_role
-            role = session_role.own_role(os.environ.get("CLAUDE_CODE_SESSION_ID"))
-        except Exception:
-            return None
-        return role if role in MERGE_ROLES else None
-    return _cloud_merge_role()
-
 
 LOCAL_ROLE_REFUSAL = "this session may not merge: its own role record does not name the batch runner. Hand the pull request to the batch runner, or ask the owner. Nothing was claimed or pushed. " + ROLE_CITE
 

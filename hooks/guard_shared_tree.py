@@ -8,6 +8,7 @@ import re
 import tempfile
 
 import guard_core
+from shared_names import SESSION_ID_RE  # noqa: F401  the one home of the id's shape (stdlib only), shared with hooks/session_role.py; the guard reads it from here
 from guard_core import (
     GIT_CHECKOUT_TAKES_NAME, PATH_EXTENSION, PATH_PREFIX, REDIRECTION, _git, _inside_work_tree,
     _segment_git_c_target, basename, git_calls, long_flag_abbrev, pathspec_from_file_flag, porcelain,
@@ -541,7 +542,6 @@ def subject_state(subcommand: str, args, where: str):
 # SYMLINKS ARE RESOLVED ON BOTH SIDES, with `os.path.realpath`, so a symlink into the scratchpad
 # passes and a symlink out of it does not. An environment that names no scratchpad, or a session
 # id the payload does not carry, simply fails the test and keeps the old decision.
-SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._-]{8,200}$")
 
 
 def session_id_of(payload) -> str:

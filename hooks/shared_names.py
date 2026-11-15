@@ -198,11 +198,56 @@ def read_recorded_role() -> Optional[str]:
     return role if isinstance(role, str) else None
 
 
+# The tiers bin/claude-role may start; a lane is never launched. The one definition: hooks/session_role.py reads it from here.
+SESSION_ROLES = ("coordinator", "triage", "batch-runner")
+
+# A session id's shape, a full match. The one home: hooks/guard_shared_tree.py and hooks/session_role.py read it from here.
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._-]{8,200}$")
+
+# The folder under the state dir that holds the launcher's role files, one per local session.
+LAUNCHER_ROLES_DIR_NAME = "session-roles"
+
+
+def launcher_roles_dir() -> "pathlib.Path":
+    import pathlib  # inside the function, for the same reason as role_path
+    return pathlib.Path(config_dir()) / STATE_DIR_NAME / LAUNCHER_ROLES_DIR_NAME
+
+
+def read_launcher_record(sid: object) -> Optional[dict[str, Any]]:
+    """The launcher's role file of local session `sid` as a dict {"session", "role", "repo"}, or None: no id, an id outside
+    SESSION_ID_RE, no file, unreadable or malformed, a file that names another session, or a role outside SESSION_ROLES.
+    hooks/session_role.py writes the file and delegates its reads here."""
+    import json
+    if not isinstance(sid, str) or not SESSION_ID_RE.match(sid):
+        return None
+    try:
+        data = json.loads((launcher_roles_dir() / (sid + ".json")).read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # UnicodeDecodeError and JSONDecodeError are ValueErrors
+        return None
+    if not isinstance(data, dict) or data.get("session") != sid:
+        return None
+    role = data.get("role")
+    if not isinstance(role, str) or role not in SESSION_ROLES:  # a list is unhashable: test the type first
+        return None
+    return data
+
+
 def read_merge_role() -> Optional[str]:
     """This session's recorded merge role, or None: no session id, no file, unreadable or malformed, another session's,
     or a role outside MERGE_ROLES. Every failure is None, so the check fails closed. An absent id never equals an
-    absent record."""
-    role = read_recorded_role()
+    absent record. A cloud session (CLAUDE_CODE_REMOTE_SESSION_ID) reads the role file its own session recorded. With no
+    cloud id, a cloud session (CLAUDE_CODE_REMOTE=true) has no role, whatever file is on disk, and a local session reads
+    the launcher's file for CLAUDE_CODE_SESSION_ID."""
+    if os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID"):
+        role = read_recorded_role()
+    else:
+        if os.environ.get("CLAUDE_CODE_REMOTE") == "true":
+            return None
+        try:
+            record = read_launcher_record(os.environ.get("CLAUDE_CODE_SESSION_ID"))
+        except Exception:  # fail closed on any read the narrower handlers miss, such as a deeply nested file
+            return None
+        role = record["role"] if record else None
     return role if role in MERGE_ROLES else None
 
 
