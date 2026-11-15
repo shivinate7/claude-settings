@@ -1,0 +1,10 @@
+{
+ "id": "own-goal-dont-wait-on-me",
+ "at": "2026-11-14T20:18:00-06:00",
+ "title": "Sessions do not wait on the owner for a thing that can be undone",
+ "ruling": "Owner 20:18 CST Nov 14, in chat, relayed by the consultant at 20:20 CST: \"Nothing can’t be undone don’t wait on me\". Read as written, by the owner's own words only: do not wait on him for an act that can be undone. Consultant's reading for operations (not the owner's words, not filed as ruling): (a) a hook/rule/guard that blocks the 20:17 goal is stale under outcomes-stale-decision-protocol, and the grant to fix or remove it goes to a lane that builds it; review rounds and red-first stay; (b) sessions stop waiting on him: take the pick, name it under Done; where an act is truly one-way (a message to another person, spend, deleting the only copy, a live home device) take the undoable route (archive before delete, draft before send); (c) mark open page items whose only blocker is his word as 'proceed on the recommended option' unless one names a one-way act. Scope: each ruling covers the act it names, never a variant (rule outcomes-grant-covers-named-act). Reading item (c) is a bulk change to open page items; triage has NOT applied it (a bulk change needs a named act). AMBIGUITY, not a decision (rule building-surface-ambiguity): the owner's earlier ruling \"a repo changes to fit a shared tool, never the tool to fit a repo\" still stands for widening options unless he lifts it, and neither of these two sentences names it; so they do not by themselves lift it. Companion of own-goal-max-efficiency-accurate-fast.",
+ "quote": "Nothing can’t be undone don’t wait on me",
+ "source": "Owner chat 20:18 CST Nov 14, relayed by the consultant 20:20 CST Nov 14 (triage did not read the chat); filed by triage",
+ "status": "open",
+ "step": ""
+}
