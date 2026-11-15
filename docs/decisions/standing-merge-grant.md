@@ -4,7 +4,7 @@
 
 Owner rulings, 2026-10-10, 2026-10-29 16:47 CDT, 2026-10-29 20:33 CDT, 2026-10-30 15:06 CDT, 2026-11-01 17:37 CST, 2026-11-01 19:23 CST, 2026-11-02 14:02 CST, 2026-11-02 15:14 CST and 2026-11-02 15:38 CST. Owner rulings, 2026-11-13 13:12 CST, 2026-11-13 14:17 CST and 2026-11-13 23:40 CST. The coordinator holds a standing merge grant in claude-settings and in every repo of the owner (`shivinate7`). It is not a fixed list of repos. The batch runner merges under the coordinator's grant, so it has the same scope.
 
-Owner, 2026-11-01 21:34 CST: a batch runner runs every merge under the coordinator's grant. The coordinator never merges, except its own tiny-fix PR (ruling `own-tiny-fixes-b`).
+Owner, 2026-11-01 21:34 CST: a batch runner runs every merge under the coordinator's grant. The coordinator never merges, except its own tiny-fix PR (ruling `own-tiny-fixes-b`). The consultant merges its own PRs under the owner's 2026-11-15 12:09 and 14:10 CST rulings.
 
 - Owner, 19:23 CST, typed in the pr-acts-grant lane session: `yes coordinators can merge across repos that is okay it doens't need to juts be in its repo`.
 - Owner, 17:37 CST, relayed by the coordinator: `YOU HAVE EXPLICIT APPROVAL FOR ANY AND ALL REPOS YOU WANT OF MINE TO MARK PR READY, MERGE, REVIEW, ETC.` Per the 19:23 ruling, "REVIEW" there means reviewer agents.
@@ -30,7 +30,7 @@ Owner pick, 2026-10-30 15:06 CDT (waiting item `merge-grant-claude-md-line`, opt
 
 - The merge tool reads the switch from the base branch on origin, never from the pull request's tree. A pull request cannot turn its own grant on.
 - Absent key, or no `stamp.json`: the grant holds. That keeps the behaviour from before the switch. A merge tool older than the switch never meets an unknown field in a repo that leaves the key out.
-- `false`: in a cloud session, the merge tool refuses `merge <pr> --confirm` for the coordinator and the batch runner. The coordinator never merges, except its own tiny-fix PR (ruling `own-tiny-fixes-b`) (owner, 2026-11-01 21:34 CST). The batch runner holds no grant of its own, so it reads the same switch. The refusal names no key and no file, so a session does not learn to turn the grant back on.
+- `false`: in a cloud session, the merge tool refuses `merge <pr> --confirm` for the coordinator and the batch runner. The coordinator never merges, except its own tiny-fix PR (ruling `own-tiny-fixes-b`) (owner, 2026-11-01 21:34 CST). The consultant merges its own PRs under the owner's 2026-11-15 12:09 and 14:10 CST rulings. The batch runner holds no grant of its own, so it reads the same switch. The refusal names no key and no file, so a session does not learn to turn the grant back on.
 - A value that is not `true` or `false` stops the merge tool as a broken config.
 - Outside the cloud the switch changes nothing. There the tool cannot tell the owner from a session, and the owner must stay able to merge the pull request that turns the switch back on.
 - The owner withdraws the grant in a repo by setting the switch to `false` on main, or by telling a session to. A withdrawal in chat still binds every session. The switch makes the merge tool enforce it.
@@ -40,7 +40,7 @@ The owner's words, 2026-10-29 16:47 CDT, in web chat:
 - "Coordinator just keep it known u will have perpetual standing merge authority that i will withdraw when i decide so no need to ask about merging"
 - "on the other repos too for now"
 
-- A batch runner merges by pull request with the merge tool of each repo, on green checks and a done review (record `pr-review-record`) where one is required. The coordinator never merges, except its own tiny-fix PR (ruling `own-tiny-fixes-b`) (owner ruling, 2026-11-01 21:34 CST). A batch runner never asks the owner to merge. A lane session that a coordinator started never merges.
+- A batch runner merges by pull request with the merge tool of each repo, on green checks and a done review (record `pr-review-record`) where one is required. The coordinator never merges, except its own tiny-fix PR (ruling `own-tiny-fixes-b`) (owner ruling, 2026-11-01 21:34 CST). The consultant merges its own PRs under the owner's 2026-11-15 12:09 and 14:10 CST rulings. A batch runner never asks the owner to merge. A lane session that a coordinator started never merges.
 - The batch runner still builds the batches. It runs every merge under the coordinator's grant. It holds no grant of its own.
 - Auto mode allows that merge: `settings.json` `autoMode.allow`, entry "Batch Runner Merge" (owner, 2026-11-07 13:27 CST; decision `auto-mode-owner-acts`).
 - A batch runner's merge names the head its CI ran on, with `--head <sha>`. The coordinator's merge go carries that head (coordinator, 2026-11-08 12:55 CST; same ruling as decision `auto-mode-owner-acts`).
