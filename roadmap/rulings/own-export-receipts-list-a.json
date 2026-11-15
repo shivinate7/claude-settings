@@ -1,0 +1,10 @@
+{
+ "id": "own-export-receipts-list-a",
+ "at": "2026-11-15T01:00:00-06:00",
+ "title": "Receipts join the shared collection list, so the waiting-export check covers them; no second list.",
+ "ruling": "Coordinator's pick, not the owner's, undoable, relayed 01:00 CST Nov 15. Lane export-holds-every-record (session_013NEJL1Qfnv7hnVTmkR9NTZ, step status-page-size-cap) takes option (a): receipts are added to the shared collection list. That changes the waiting-export-check guard (hooks/feedback_guard.py:1362 reads layout.WAITING_COLLECTIONS). Tests N15 and N16 in hooks/test_waiting_export.py pinned the opposite and are re-pointed. A session that is writer and owner must export after a receipt write before it stops. A second five-name list would duplicate the constant (rule: an allow list points at the constant). Nothing for the owner. Triage read none of the code. Reopens if the owner says otherwise.",
+ "quote": "A second five-name list would duplicate the constant (rule: an allow list points at the constant).",
+ "source": "Coordinator message 01:00 CST Nov 15 to triage.",
+ "status": "open",
+ "step": "status-page-size-cap"
+}
