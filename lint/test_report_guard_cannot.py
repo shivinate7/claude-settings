@@ -5,7 +5,8 @@ A reply line that says an act cannot be done passes only when this turn holds a 
 carries a hand-off cite (a route row that says refused or asks, a dated `(measured ...)`, or a tool the session's
 classifier refused), and the line names its check: a backtick span, an MCP tool name, a word such as returned or
 refused, an HTTP 4xx, or a non-zero exit. A notice is no try, and a try before the last human message is no try. A
-Why yours line belongs to the hand-off guard, so this check skips it.
+Why yours line belongs to the hand-off guard, so this check skips it. A claim of an act outside that table is the probe
+form's (cant-claim-needs-probe): its turn needs one tool call, or the line carries a cite or the word unchecked.
 
 Each case runs the Stop hook as a subprocess, as the other report_guard suites do. The Stop runner, the transcript
 records and the run folder come from lint/test_report_guard.py, and the route-row seam from hooks/test_refusal_note.py,
@@ -32,6 +33,7 @@ import tracked_tree  # noqa: E402  copies the tracked lint and hooks folders, so
 HEAD = "Cannot-claim guard (rule output-never-hand-off-doable-step)"
 NO_TRY = "no failed try"
 NO_CHECK = "names no check"
+PROBE_RULE = "cant-claim-needs-probe"  # the probe form: a claim of an act outside the table, in a turn with no tool call
 OPEN_PR = "mcp__github__create_pull_request"
 REFUSED_ROW_ID = "r-archive"
 ROW_REFUSED = hook_base.route_row(REFUSED_ROW_ID, "archive_session", "refused", surface="local")
@@ -2564,6 +2566,198 @@ class CannotClaimTests(unittest.TestCase):
         line = "Because I tried it, I cannot push."
         out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"), landed_reply(line)])
         self.assert_blocked_for(out, NO_CHECK, line)
+
+    # ---- the probe form (rule output-never-hand-off-doable-step, enforced as cant-claim-needs-probe). A claim that this session
+    # cannot do an act outside the table needs backing: a tool call in its turn, the word unchecked, or a cite. A turn with
+    # none of them is refused. A table act stays with the cannot-claim check: one refusal, and the probe rule adds no reason.
+
+    def assert_probe_blocked(self, out, line):
+        """A block for the probe rule that lists `line` once and names `unchecked` as the way out. Returns the reason."""
+        self.assertIsNotNone(out, "no block came for %r" % line)
+        self.assertEqual(out.get("decision"), "block", "not a block: %s" % out)
+        reason = out.get("reason", "")
+        self.assertIn(PROBE_RULE, reason, "the block does not name the probe rule: %s" % reason)
+        self.assertIn("unchecked", reason, "the block does not name `unchecked` as the way out: %s" % reason)
+        self.assertEqual(reason.count(line), 1, "the claim line is not listed once: %s" % reason)
+        return reason
+
+    def assert_one_refusal(self, out, variant, line):
+        """A block with one refusal for `line`: the variant's reason lists it once, and the probe rule adds no reason."""
+        reason = self.assert_blocked_for(out, variant, line)
+        self.assertEqual(reason.count("Lines:"), 1, "more than one refusal in the block: %s" % reason)
+        self.assertNotIn(PROBE_RULE, reason, "the probe rule adds a second refusal to a table act: %s" % reason)
+        return reason
+
+    # ---- red: each fails on the current code, which reads no claim of an act outside the table.
+
+    def test_cc_red_import_claim_with_no_tool_call_blocks_for_a_probe(self):
+        # Catches: the incident shape. "import" names no table act, so the cannot-claim check never reads the line, and a turn
+        # with no tool call let a claim that the session cannot import the file through with no probe.
+        line = "I cannot import it myself."
+        self.assert_probe_blocked(self.stop([trg.human("import it"), trg.assistant_text(line)]), line)
+
+    def test_cc_red_probe_block_remedy_names_no_act(self):
+        # Catches: a remedy that names the act it refuses. The way out is one probe, or the word unchecked.
+        line = "I cannot import it myself."
+        reason = self.assert_probe_blocked(self.stop([trg.human("import it"), trg.assistant_text(line)]), line)
+        self.assert_remedy_names_no_act(reason)
+
+    def test_cc_red_have_no_access_to_blocks_for_a_probe(self):
+        # Catches: "have no access" and "no access to" missing from CANNOT_FORMS, so a claim of no access read as no claim.
+        line = "I have no access to the mail service."
+        self.assert_probe_blocked(self.stop([trg.human("check the mail service"), trg.assistant_text(line)]), line)
+
+    def test_cc_red_unable_to_reach_the_host_blocks_for_a_probe(self):
+        # Catches: a claim of an act outside the table passed because the table holds no reach-the-host act. The writer's
+        # subject is the contraction I'm, which the own-subject read must take as the writer's.
+        line = "I'm unable to reach the host."
+        self.assert_probe_blocked(self.stop([trg.human("reach the host"), trg.assistant_text(line)]), line)
+
+    def test_cc_red_a_tool_call_before_the_last_human_does_not_count_for_the_probe(self):
+        # Catches: a call of an earlier turn backing this turn's claim. The probe is a call after the last human message.
+        line = "I cannot import it myself."
+        out = self.stop([trg.human("import it"), *ok_bash("curl -sI https://example.com/", "tu_0"),
+                         trg.human("import it again"), trg.assistant_text(line)])
+        self.assert_probe_blocked(out, line)
+
+    def test_cc_red_unchecked_must_be_a_whole_word(self):
+        # Catches: the way out read as a substring, so a longer word that holds unchecked passed the claim.
+        line = "I cannot import it myself, uncheckeds."
+        self.assert_probe_blocked(self.stop([trg.human("import it"), trg.assistant_text(line)]), line)
+
+    def test_cc_red_have_no_access_to_a_table_act_takes_the_no_try_verdict(self):
+        # Catches: the new form on a table act (merge) read as no claim, so a PR claim with no try passed. It takes the
+        # verdict the cannot form takes: one no-try refusal, and no probe rule beside it.
+        line = "I have no access to merge PR 12."
+        self.assert_one_refusal(self.stop([trg.human("merge PR 12"), trg.assistant_text(line)]), NO_TRY, line)
+
+    def test_cc_red_a_peer_message_that_acks_no_send_starts_a_turn_for_the_probe(self):
+        # Catches: a send that the peer message does not ack, read as a call of this turn, so the claim after the message had a
+        # call behind it. The message is from a session the send did not reach, so it starts a turn, and the send is no call of it.
+        line = "I cannot import it myself."
+        out = self.stop([trg.human("import it"),
+                         use("mcp__claude-code-remote__send_message", {"session_id": "session_other", "message": "status?"},
+                             "tu_s"),
+                         done("tu_s", "sent"), trg.peer_msg("got it", from_session="session_peer"),
+                         trg.assistant_text(line)])
+        self.assert_probe_blocked(out, line)
+
+    def test_cc_red_a_claim_in_an_input_needed_line_blocks_for_a_probe(self):
+        # Catches: a blockquote skipped whole, so the claim under the Input Needed label, the hand-off form the owner reads,
+        # passed. The label opens the clause, so the claim has no subject but the writer's.
+        line = "I cannot import it myself."
+        self.assert_probe_blocked(self.stop([trg.human("import it"), trg.assistant_text(input_report(line))]), line)
+
+    def test_cc_red_a_full_size_probe_reply_blocks_once(self):
+        # Catches: the probe read only in short replies. A reply of 7,800 claims, each a sentence with no call, blocks once and
+        # lists its one distinct sentence once. The size is the full-size fixture of this file (test_cc_green_full_size_*).
+        line = "I cannot import it myself."
+        run = self.reply_run(" ".join([line] * 7800), timeout=120)
+        out = json.loads(run.stdout) if run.stdout.strip() else None
+        self.assert_probe_blocked(out, line)
+
+    # ---- green: the controls and the passes. Each passes on the current code and must keep passing once the probe rule lands.
+
+    def test_cc_pass_import_claim_with_one_tool_call_in_the_turn(self):
+        # Control: the same line with one call in its turn passes. Any call of the turn backs the probe, a success or not.
+        line = "I cannot import it myself."
+        out = self.stop([trg.human("import it"), *ok_bash("curl -sI https://example.com/", "tu_p"), trg.assistant_text(line)])
+        self.assert_passes(out, "a probe claim with one tool call in its turn")
+
+    def test_cc_pass_import_claim_with_unchecked_as_a_whole_word(self):
+        # The way out the remedy names: the word unchecked, plain or in a code span, in the claim's own sentence.
+        for line in ("I cannot import it myself, unchecked.", "I cannot import it myself, `unchecked`."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("import it"), trg.assistant_text(line)])
+                self.assert_passes(out, "a probe claim that says unchecked: %r" % line)
+
+    def test_cc_pass_quoted_or_code_span_import_claim_is_not_read(self):
+        forms = ('Their note says "I cannot import it myself."', "Quote it as `I cannot import it myself`.",
+                 "```\nI cannot import it myself.\n```\nThe fence above is a quote.")
+        for text in forms:
+            with self.subTest(form=text[:30]):
+                out = self.stop([trg.human("import it"), trg.assistant_text(text)])
+                self.assert_passes(out, "a probe claim held in quotes or code: %r" % text[:40])
+
+    def test_cc_pass_third_party_import_claim_is_not_read(self):
+        for line in ("The guard cannot import it myself.", "The lane cannot import it myself."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("import it"), trg.assistant_text(line)])
+                self.assert_passes(out, "a third-party subject: %r" % line)
+
+    def test_cc_pass_blockquoted_agent_report_import_claim_is_not_read(self):
+        # An agent's report, quoted in a blockquote, states the agent's claim and not this session's, so the probe reader
+        # skips it.
+        line = "> Agent report: I cannot import it myself."
+        out = self.stop([trg.human("import it"), trg.assistant_text(line)])
+        self.assert_passes(out, "a blockquoted agent report line")
+
+    def test_cc_pass_pasted_probe_refusal_is_not_read(self):
+        # The probe rule's own refusal, pasted back as a blockquote. Its Lines bullet holds the claim, which is no claim of this
+        # session.
+        pasted = ("> cant-claim-needs-probe (rule output-never-hand-off-doable-step): a line says an act cannot be done and "
+                  "this turn holds no tool call. Remedy: run one probe, or say `unchecked`. Lines:\n"
+                  "> - I cannot import it myself.")
+        out = self.stop([trg.human("import it"), trg.assistant_text(pasted)])
+        self.assert_passes(out, "a pasted probe refusal")
+
+    def test_cc_pass_import_question_is_not_read(self):
+        for line in ("Cannot I import it myself?", "I cannot import it myself, can I?"):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("import it"), trg.assistant_text(line)])
+                self.assert_passes(out, "a question: %r" % line)
+
+    def test_cc_pass_route_or_measured_cite_on_an_import_claim_passes(self):
+        cases = (("I cannot import it myself (route %s)." % REFUSED_ROW_ID, [ROW_REFUSED]),
+                 ("I cannot import it myself (measured 2026-11-15, probe).", []))
+        for line, rows in cases:
+            with self.subTest(line=line):
+                out = self.stop([trg.human("import it"), trg.assistant_text(line)], rows=rows)
+                self.assert_passes(out, "a cite that backs the claim: %r" % line)
+
+    def test_cc_control_table_act_with_no_tool_call_gives_one_refusal(self):
+        # The cannot form on a table act with no call: the no-try refusal, once. The probe rule joins it on no line.
+        line = "I cannot open the PR."
+        self.assert_one_refusal(self.stop([trg.human("open a PR"), trg.assistant_text(line)]), NO_TRY, line)
+
+    def test_cc_pass_stop_hook_active_is_quiet_for_an_import_claim(self):
+        # Under stop_hook_active only the rewrite checks run, so a probe claim is not refused again on the rewrite.
+        out = self.stop([trg.human("import it"), trg.assistant_text("I cannot import it myself.")], active=True)
+        self.assert_passes(out, "the rewrite of a probe claim")
+
+    def test_cc_pass_peer_ack_after_a_send_keeps_the_turn(self):
+        # The send of this turn to the peer is the call its ack answers. The ack starts no turn, so the send stays in the
+        # turn and the claim has a call in its turn.
+        line = "I cannot import it myself."
+        out = self.stop([trg.human("import it"),
+                         use("mcp__claude-code-remote__send_message", {"session_id": "session_peer", "message": "status?"},
+                             "tu_s"),
+                         done("tu_s", "sent"), trg.peer_msg("got it", from_session="session_peer"),
+                         trg.assistant_text(line)])
+        self.assert_passes(out, "a probe claim whose send is acked in the same turn")
+
+    def test_cc_control_have_no_access_to_a_table_act_with_a_failed_try_passes(self):
+        # The new form on a table act, with its failed try and check named: the pass the cannot form already gives.
+        line = "I have no access to merge PR 12: `gh pr merge 12` exited 1."
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+        self.assert_passes(out, "the new form, backed by its failed merge and named")
+
+    def test_cc_control_why_yours_no_access_keeps_the_hand_off_verdict(self):
+        # The hand-off guard already reads "no access" as a capability word. The new form must keep that verdict: a Why yours
+        # line with no cite is the hand-off's refusal and nothing else, and a dated cite passes. The probe rule never joins it.
+        measured = "Why yours: I have no access to push from here (measured 2026-11-15, the mail service needs your login)."
+        cases = (("Why yours: I have no access to push from here.", False), (measured, True))
+        for line, cited in cases:
+            with self.subTest(line=line):
+                out = self.stop([trg.human("push from here"),
+                                 trg.assistant_text(input_report("Push the branch from your computer.", line))])
+                if cited:
+                    self.assert_passes(out, "a Why yours line with a dated cite")
+                else:
+                    self.assertIsNotNone(out, "no block came for a Why yours line with no cite")
+                    reason = out.get("reason", "")
+                    self.assertIn("Hand-off guard", reason, "the block is not the hand-off guard's: %s" % reason)
+                    self.assertNotIn(PROBE_RULE, reason, "the probe rule joins a hand-off line: %s" % reason)
 
 
 if __name__ == "__main__":
