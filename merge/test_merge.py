@@ -14405,9 +14405,9 @@ class StandingMergeRole(CloudSession):
         self.scripted_records(record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
         self.assert_standing_refused()
 
-    # ---- the size bound: a rule-text pull request is small. merge.STANDING_MAX_LINES (additions plus deletions) and
-    # merge.STANDING_MAX_FILES are read by name, so the cases follow the bound the merge module names. A docs-only pull
-    # request is not bounded.
+    # ---- the size bound: a rule-text pull request is small. merge.STANDING_MAX_LINES counts the lines a file adds, because
+    # Host.pr_files carries no deletions. merge.STANDING_MAX_FILES counts the changed files. Both are read by name, so the
+    # cases follow the bound the merge module names. A docs-only pull request is not bounded.
     RULE_PATHS = ("CLAUDE.md", "agents/a.md", "agents/b.md", "skills/b/SKILL.md", "skills/c/SKILL.md")
     DOC_PATHS = ("docs/a.md", "docs/b.md", "docs/c.md", "docs/d.md", "docs/e.md")
 
