@@ -84,7 +84,9 @@ TGT_LINES = {
     "list-other": TGT_OWN + tgt_list("l1", [(ROSTER_LANE, ["cs-build:lane", TGT_OTHER_TAG])]),
     "get-same": TGT_OWN + tgt_get("g1", ROSTER_LANE, ["cs-build:lane", TGT_REPO_TAG]),
     "create-same": TGT_OWN + tgt_create("c1", ["cs-build:lane", TGT_REPO_TAG], ROSTER_LANE),
+    "create-other": TGT_OWN + tgt_create("c1", ["cs-build:lane", TGT_OTHER_TAG], ROSTER_LANE),
 }
+TGT_PARENT = "session_PARENT01"  # the parent_session_id that role_record writes into every own record
 
 
 def write_tgt_transcripts():
@@ -133,6 +135,14 @@ tgt_send("target-id-in-roster: a lane seen on a get_session record tagged with t
          ROSTER_LANE, transcript=tgt_path("get-same"), env=TGT_SELF_ENV)
 tgt_send("target-id-in-roster: a lane seen on a create_session result tagged with the sender's repo is allowed", "allow",
          ROSTER_LANE, transcript=tgt_path("create-same"), env=TGT_SELF_ENV)
+# The parent. The alias and the id the sender's own get_session names as its parent pass, with no list read.
+tgt_send("target-id-in-roster: the parent alias @parent is allowed", "allow", "@parent", cwd=ROSTER_REPO)
+tgt_send("target-id-in-roster: the parent alias parent is allowed", "allow", "parent", cwd=ROSTER_REPO)
+tgt_send("target-id-in-roster: the parent id that the sender's own get_session names is allowed", "allow", TGT_PARENT,
+         transcript=tgt_path("own-only"), env=TGT_SELF_ENV)
+# A lane the sender created passes whatever cs-repo tag it carries: the create_session result is the sender's own sighting.
+tgt_send("target-id-in-roster: a lane the sender created, tagged with another repo's cs-repo, is allowed", "allow",
+         ROSTER_LANE, transcript=tgt_path("create-other"), env=TGT_SELF_ENV)
 
 # Fail open: neither source can be read. The send is allowed, and one stderr line says the roster is unknown. decide
 # drops a run's stderr, so this check runs the guard through a wrapper that writes its stderr to a file, and reads it.
