@@ -254,7 +254,15 @@ After each build the roadmap build script prints the upkeep list for the triage 
   `unknown (sessions not read: <why>; REST read: N stale-looking drafts)`, a count with no number or branch, never a
   clear row. When the REST read cannot finish whole (no token or GitHub name, an HTTP error, a transport error cut
   short, a rate limit, a reply that is not a JSON list, a row of the wrong shape, over 20 pages) the row is one
-  `unknown (<why>)` entry;
+  `unknown (<why>)` entry. `--sessions-source NAME` (default `live-file`) names where this row reads the live
+  sessions. `live-file` is the behaviour above. A name in `SESSION_SOURCES` (`build.py`) replaces the live file's
+  sessions for the lane check: its reader is called with no arguments and returns `(rows, None)` or `(None, why)`,
+  rows being `{session id: [step id, ...]}`, so the live file need not be fresh for sessions. `held` and
+  `reviewLog` still come from the live file's pulls rows, so a stale draft with no usable live row reads
+  `unknown (#N ...)`. A name the registry does not hold reads `unknown (sessions source NAME is not wired)`. A
+  reader that gives a why, raises or returns a bad shape reads the one `unknown (sessions not read: ...)` entry.
+  The registry holds only `live-file` until the owner names a source (owner page item 894), so no token or
+  network source is wired, and the cost line above is unchanged: no new REST read;
 - page rulings not on their step: each closed waiting-page item whose `home` is a step that is not
   done, where none of that step's `note`, `why` or `ask` cites the item. The `home` is trimmed, an
   optional leading `step ` (in any case) is dropped, and the rest must equal the step id exactly. A cite

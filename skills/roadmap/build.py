@@ -1,6 +1,14 @@
 """Bake a repo's roadmap into one read-only page that opens straight from disk.
 
     python3 ~/.claude/skills/roadmap/build.py --repo <checkout> [--record-branch NAME] [--out FILE] [--block]
+        [--sessions-source NAME]
+
+--sessions-source NAME (default live-file) names where the stale-draft row reads the live sessions. live-file is the
+live file's own sessions list. A name in SESSION_SOURCES replaces it for the lane check (live_lane_holds): its reader
+takes no arguments and returns (rows, None) or (None, why), rows being {session id: [step id, ...]}. held and reviewLog
+still come from the live file's pulls rows. A name the registry does not hold, or a reader that raises or returns a bad
+shape, reads the row unknown. The registry holds only live-file until the owner names a source (owner page item 894); no
+token or network source is wired, and no new REST read is made.
 
 The steps, topics and numbers come from the repo's record branch, under roadmap/data/. In a
 checkout that stands on the record branch, this script reads the working tree and writes
@@ -940,6 +948,9 @@ def main(argv=None):
                     help="the branch that holds roadmap/data/ (default: the checkout's record-branch key, else roadmap)")
     ap.add_argument("--main-branch", default="main", help="the branch whose merges carry Step: trailers")
     ap.add_argument("--live", help="the publisher's live-work file: project threads, open pull requests and branches")
+    ap.add_argument("--sessions-source", default=LIVE_FILE_SOURCE, metavar="NAME",
+                    help="where the stale-draft row reads the live sessions (default %s; SESSION_SOURCES holds the names)"
+                    % LIVE_FILE_SOURCE)
     ap.add_argument("--out", help="the page to write; needed unless the checkout stands on the record branch")
     ap.add_argument("--block", action="store_true",
                     help="write only the roadmap data block (needs --out), for the page writer to splice in")
@@ -1003,7 +1014,7 @@ def main(argv=None):
     for sid, mid, why in unread_files:
         print("%s: %s %s (%s)" % (MOCKUP_UNREAD_LINE, sid, mid, why))
     upkeep(data["steps"], added_at(source), marks, strays if not unread else ["unknown (%s)" % unread], info["live"],
-           slug, repo, args.main_branch, unread, ref)
+           slug, repo, args.main_branch, unread, ref, args.sessions_source)
     lines = stalled_lines(info["stalled"])
     if lines:
         print("\n".join(lines))
@@ -1307,25 +1318,74 @@ def open_pulls_rest(slug):
         REST_PAGE_CAP * REST_PAGE_SIZE, REST_PAGE_CAP)
 
 
-def stale_drafts(work, rest=None, now=None):
+LIVE_FILE_SOURCE = "live-file"
+# name -> reader of the sessions the lane check reads. `reader()` takes no arguments and returns (rows, None) or
+# (None, why), rows being liveRows-style: {session id: [step id, ...]}. LIVE_FILE_SOURCE maps to None: its sessions are
+# the live file's own list, which live_work reads, so it has no reader of its own. The registry holds only that name
+# until the owner names a source (owner page item 894); no token or network source is wired.
+SESSION_SOURCES = {LIVE_FILE_SOURCE: None}
+
+
+def read_sessions_source(name):
+    """(liveRows-style rows, None) or (None, why) from the registered reader `name`. A reader that raises, returns
+    something other than a pair, gives neither rows nor a why, or gives rows of the wrong shape reads (None, why). A
+    why the reader gives wins over rows it also gives."""
+    try:
+        got = SESSION_SOURCES[name]()
+    except Exception as err:  # a reader is outside code: whatever it raises reads unknown and never stops the build
+        return None, "the sessions source %s failed: %s" % (name, err or type(err).__name__)
+    bad = "the sessions source %s returned a bad shape" % name
+    if not isinstance(got, tuple) or len(got) != 2:
+        return None, bad
+    rows, why = got
+    if why is not None:
+        return (None, why) if isinstance(why, str) and why else (None, bad)
+    if not isinstance(rows, dict) or not all(isinstance(sid, str) and isinstance(ids, list)
+                                              and all(isinstance(k, str) for k in ids) for sid, ids in rows.items()):
+        return None, bad
+    return rows, None
+
+
+def unknown_inner(why):
+    """`why` without its `unknown (...)` wrapper, for a longer unknown entry."""
+    return why[len("unknown ("):-1] if why.startswith("unknown (") and why.endswith(")") else why
+
+
+def stale_drafts(work, rest=None, now=None, source=LIVE_FILE_SOURCE):
     """Entries for each draft pull whose updated_at is over STALE_DRAFT_HOURS before `now` with no live lane (an ended
-    lane holds none), or unknown entries. `rest` is open_pulls_rest's (rows, why); the live file gives only the
-    sessions and the held and reviewLog marks. A live file that cannot be read makes the row one unknown entry that
-    counts the stale-looking drafts and names none; a stale draft with no live pulls row reads unknown, naming its
-    number, never listed."""
+    lane holds none), or unknown entries. `rest` is open_pulls_rest's (rows, why). `source` names where the sessions
+    come from (SESSION_SOURCES). Under live-file they are the live file's sessions list, and a live file that cannot be
+    read makes the row one unknown entry that counts the stale-looking drafts and names none. A registered reader's rows
+    replace those sessions for the lane check, so the live file need not be fresh for them; the reader is read only
+    when a draft is stale, and one that gives a why, raises or returns a bad shape makes the same one unknown entry. A
+    name the registry does not hold reads `unknown (sessions source NAME is not wired)`. The held and reviewLog marks
+    come from the live pulls rows under every source. A stale draft with no live pulls row, or whose marks come from a
+    live file that is not usable, reads unknown naming its number, never listed."""
     rows, rest_why = rest if rest else (None, "unknown (the open pulls were not read)")
     if rest_why:
         return [rest_why]
+    if source not in SESSION_SOURCES:
+        return ["unknown (sessions source %s is not wired)" % source]
     now = now or datetime.datetime.now(datetime.timezone.utc)
     old = [p for p in rows if p["draft"] and (now - p["updated_at"]).total_seconds() > STALE_DRAFT_HOURS * 3600]
-    why = live_why(work)
+    marks_why = None  # why the live pulls marks cannot be trusted; live-file's check below covers its own
+    if source == LIVE_FILE_SOURCE:
+        lanes, why = work, live_why(work)
+    else:
+        lanes, why = {"liveRows": {}}, None
+        if old:
+            held_rows, why = read_sessions_source(source)
+            lanes = {"liveRows": held_rows}
+        marks_why = pair_why(work)
     if why:
-        inner = why[len("unknown ("):-1] if why.startswith("unknown (") and why.endswith(")") else why
-        return ["unknown (sessions not read: %s; REST read: %d stale-looking drafts)" % (inner, len(old))]
-    marks = {p["number"]: p for p in work["pulls"]}
+        return ["unknown (sessions not read: %s; REST read: %d stale-looking drafts)" % (unknown_inner(why), len(old))]
+    marks = {} if marks_why else {p["number"]: p for p in work["pulls"]}
     out = []
     for p in old:
-        if live_lane_holds(work, p["branch"]):
+        if live_lane_holds(lanes, p["branch"]):
+            continue
+        if marks_why:
+            out.append("unknown (#%d held and reviewLog are unread: %s)" % (p["number"], unknown_inner(marks_why)))
             continue
         # A draft with no live pulls row has unread held and reviewLog marks, so it reads unknown, never listed.
         if p["number"] not in marks:
@@ -1893,7 +1953,8 @@ def status_drift(steps, work, repo, main_branch, ref):
     return out, why
 
 
-def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None, ref=None):
+def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None, ref=None,
+           sessions_source=LIVE_FILE_SOURCE):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = open_steps(steps)
     live = {d.get("phase") for _, d in open_ if d.get("status") in LIVE_STATUS and d.get("phase")}
@@ -1930,7 +1991,7 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
             ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
             ("in progress with no live lane or open PR", unlaned(open_, marks, work)),
             ("ready todo steps", ready),
-            ("draft PRs over %d h with no live lane" % STALE_DRAFT_HOURS, stale_drafts(work, open_pulls_rest(slug), now)),
+            ("draft PRs over %d h with no live lane" % STALE_DRAFT_HOURS, stale_drafts(work, open_pulls_rest(slug), now, sessions_source)),
             ("dated claims to re-check before a lane starts", dated_claims(open_, now.date())),
             ("page rulings not on their step", unfiled(steps, work)),
             (IDLE_LANES_LINE, idle_lanes(work or {"read": "unknown (no --live file)"}, steps, marks, slug, repo, main_branch, unread)
