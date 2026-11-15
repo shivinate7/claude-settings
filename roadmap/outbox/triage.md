@@ -1909,9 +1909,4 @@ Triage 20:59 CST Nov 14: coordinator 20:58: lane reviewer-probes-blocked (sessio
 - 03:03 CST Nov 15 (coordinator, relayed; triage wrote): consultant pick (a) on PR 3484 filed as ruling own-3484-a (consultant pick, not owner-typed; reverses the separator sentence in local-time-central) and a dated note on step message-time-from-clock; two stray worktree folders (agent-a91e7003787e9ab5a-red, agent-afba24e4d26108fd8-red) noted on step worktree-removal-decision-repo-scope for the janitor sweep.
 - 03:07 CST Nov 15 (coordinator, relayed; triage wrote): PR 3461 merged 03:05:23 CST by runner 10 (REST: merged true, merge commit d8c75ee0f7c8, head 6ad1927a87fe); no other main merge since #3448; step reply-judge-glossary-names filed done; Part 10 line added; notes on PRs 3456, 3480, 3472, 3482 (CI and lints running).
 
-- 11:48 CST Nov 15 (triage, coordinator's pick on step supersedes-names-an-id): DEBT draft for docs/debts/supersedes-unchecked-after-cutoff.md, owed to main (a lane lands it):
-  - What. After the cutoff 11:33 CST Nov 15 the ruling check pairs a ruling with the record it overtakes by exact id. An entry changed before the cutoff keeps its old look-alike pairing and stays unchecked ("unread"). It informs a session and never governs a guard.
-  - Where. lint/ruled_store.py (check_entry, is_unchecked) and the entries in roadmap/rulings/ dated before the cutoff.
-  - Decision. ruled-store-one-home.
-  - Retire. Every entry dated before the cutoff carries an exact id, or triage closes it. Check: check_store reports no unchecked open entry dated before the cutoff. No test runs this check yet.
 - 11:48 CST Nov 15 (coordinator, relayed): debt session-start-handoff-text stays open; its Retire line must name `hands its reviewed branch` (a grep of hooks/session_start.sh for that phrase finds no match). Owed to docs/debts/session-start-handoff-text.md on main; lane session-start-tier-text lands it.

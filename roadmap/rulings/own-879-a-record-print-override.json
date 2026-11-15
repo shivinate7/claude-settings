@@ -1,0 +1,11 @@
+{
+ "id": "own-879-a-record-print-override",
+ "at": "2026-11-15T11:52:54-06:00",
+ "title": "PR 2701: the lane's record print is lifted once, by the owner's typed override",
+ "ruling": "Owner, page item 879 (pick-lift-record-print-2701), option a, \"A: Type an override for this one print (the lane's recommendation)\", saved on the page at 11:52 CST Nov 15 (2026-11-15T17:52:54Z), no note. The owner had typed `override 1h` at 11:46 CST Nov 15, and the lane then posted the record on PR 2701 (comment 6898659188; carry note 6898659844). ACT COVERED: that one record print on PR 2701, done under the typed override. One-time lift. NOT COVERED: any other print, any other PR, any later record refusal.",
+ "quote": "a",
+ "source": "waiting page database, collection answers, item pick-lift-record-print-2701 (2026-11-15T17:52:54Z, choice a, option type-override-one-print), read by triage; owner typed on the page. Override typed 11:46 CST (lane's report).",
+ "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: a one-time lift of one print on PR 2701; the item 862 refusal stays in force for every other print",
+ "step": "merge-role-raw-paths"
+}

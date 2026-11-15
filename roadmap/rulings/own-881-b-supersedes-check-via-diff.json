@@ -1,0 +1,11 @@
+{
+ "id": "own-881-b-supersedes-check-via-diff",
+ "at": "2026-11-15T11:52:54-06:00",
+ "title": "The ruling check covers changed old entries through a git diff of the store",
+ "ruling": "Owner, page item 881 (ruling-supersedes-names-id), option b, \"B: Check changed entries through a git diff of the store\", saved on the page at 11:52 CST Nov 15 (2026-11-15T17:52:54Z), no note. It REPLACES the coordinator's pick (11:43 CST, not owner-typed) to leave a changed old entry unchecked and file that as a debt. ACT COVERED: the lane on step supersedes-names-an-id builds a check that reads a git diff of the ruling store and checks each entry changed after the 11:33 CST Nov 15 cutoff. NOT COVERED: widening the check beyond changed entries (widening not set); any other store.",
+ "quote": "b",
+ "source": "waiting page database, collection answers, item ruling-supersedes-names-id (2026-11-15T17:52:54Z, choice b, option git-diff-store), read by triage; owner typed on the page.",
+ "status": "open",
+ "supersedes_none": "supersedes no ruling record: roadmap/rulings holds no record of the coordinator's pick; it lived only in the why of step supersedes-names-an-id and in the outbox debt draft supersedes-unchecked-after-cutoff (removed). Ruling own-ruling-names-overtaken-a (item 877) stays in force",
+ "step": "supersedes-names-an-id"
+}

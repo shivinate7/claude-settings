@@ -1,0 +1,16 @@
+{
+ "id": "own-880-free-slots",
+ "at": "2026-11-15T11:52:54-06:00",
+ "title": "Main push runs: free as many CI slots as possible; slow work may run later",
+ "ruling": "Owner, page item 880 (main-push-what-they-test), \"none of these\", saved on the page at 11:52 CST Nov 15 (2026-11-15T17:52:54Z). Owner's note, typed on the page, verbatim: \"go further than this free as many slots as u can if stuff can be ran later that works for me\". Coordinator 12:06 CST relayed the consultant's word: no redraw of the options; the owner's note is the ruling. CONSULTANT'S READING (the consultant's, not the owner's; relayed, not owner-typed): a main push runs only the Linux fast suites; every other leg (Windows, mutation shards, anything slow) moves to one daily run, which skips when every main head since the last run was proven green by its PR run. This reopens drop-nightly-schedule for those legs. BUILD SCOPE: not yet decided; no lane started. ACT COVERED: the owner's note as the direction for the step push-skip-measure; no build act. NOT COVERED: any particular schedule, leg split or skip rule (the reading above is not ruled). Widening not set.",
+ "quote": "go further than this free as many slots as u can if stuff can be ran later that works for me",
+ "source": "waiting page database, collection answers, item main-push-what-they-test (2026-11-15T17:52:54Z, choice none, note verbatim), read by triage; owner typed on the page. Reading: consultant 12:06 CST Nov 15 via coordinator, relayed.",
+ "status": "open",
+ "supersedes": [
+  {
+   "kind": "ruling",
+   "ref": "drop-nightly-schedule"
+  }
+ ],
+ "step": "push-skip-measure"
+}
