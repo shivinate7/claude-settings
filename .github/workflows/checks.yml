@@ -519,8 +519,8 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: python3 lint/check_ruling_kind.py --base "origin/$BASE_REF"
 
-      # Rule and record move together (decision child-cites-not-copies). The action's aligned step diffs base..HEAD and reads the PR body
-      # through env. No scope flag on purpose: decisions are .md files, so a docs-only pull request must run it. The `checks` job is read
+      # Rule and record move together (decision child-cites-not-copies). The action's aligned step diffs origin/<base>...HEAD and reads the PR
+      # body from the event file, and only when a gap needs it. No scope flag on purpose: decisions are .md files, so a docs-only pull request must run it. The `checks` job is read
       # by all-jobs-passed. The action reads the full-depth checkout above.
       - name: Rules and records move together
         if: ${{ github.event_name == 'pull_request' }}
