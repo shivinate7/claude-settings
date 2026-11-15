@@ -1,0 +1,10 @@
+{
+ "id": "own-archive-off-page",
+ "at": "2026-11-15T00:15:00-06:00",
+ "title": "Saved page data no longer needed on the page goes to an archive on the roadmap branch, not loaded to the page",
+ "ruling": "Owner 00:15 CST Nov 15, chat, typed: \"data thats been saved and no longer needed on the page doesnt need to be stored on the page it can just be an archival area committed ot the roadmap branch and not loaded to the page???\" Reading (triage's, not the owner's): closed or answered page data (closed items, their receipts, pinned answers, designs of closed items) whose copy is saved on the roadmap branch leaves the page database and the page file. It extends ruling page-git-is-home (git is the home, the database is the live view). Condition recorded by triage: nothing leaves the page until its archive copy is committed, pushed and read back, and the read-back count equals the page's count for that kind (deleting the only copy cannot be undone). The sentence ends in three question marks: the owner asked it as a question; triage reads it as his wish and takes no removal act under this record. The build is the step status-page-size-cap.",
+ "quote": "data thats been saved and no longer needed on the page doesnt need to be stored on the page it can just be an archival area committed ot the roadmap branch and not loaded to the page???",
+ "source": "owner chat 00:15 CST Nov 15 (read by triage directly in this session); ruling page-git-is-home; decision waiting-data-in-repo (the waiting/ folder on the record branch). Filed by triage.",
+ "status": "open",
+ "step": "status-page-size-cap"
+}
