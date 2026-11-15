@@ -1,0 +1,14 @@
+{
+ "id": "state-line-vs-live-facts-check",
+ "title": "Check a decision's State: line against live facts (low, note only)",
+ "priority": "low",
+ "status": "open",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T11:20:00-06:00",
+ "why": "Third candidate check from the #3471 lane (head 8d672383, record 6892637662; relayed by the coordinator 11:13 CST Nov 15, not read by triage): no merged check catches its stale-claim kinds; a decision's `State:` line could be checked against live facts. Unmeasured. Triage looked for a like step at 11:20 CST: none found (nearest, record-vs-later-ruling-check, checks a decision against a later ruling, a different check). No lane; it would ship inside the shared action actions/claude-md-cites (owner scope change 11:10 CST).",
+ "source": "#3471 lane via the coordinator, 11:13 CST Nov 15 (relayed)",
+ "note": "Open, low, a note. No lane started. Filed 11:20 CST Nov 15."
+}

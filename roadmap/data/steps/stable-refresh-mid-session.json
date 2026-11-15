@@ -6,8 +6,8 @@
  "phase": "next",
  "owner": "coordinator",
  "blockedBy": [],
- "why": "11:15 CST Nov 15 (owner's verbatim words, 11:11 CST Nov 15, via the consultant): \"\u201crefresh while a session runs is not built\u201d that should be fixed\". The consultant asks it be filed as an ask for lane stable-refresh-mid-session, which goes to the coordinator first (sent; the coordinator decides on the lane). Source of the quoted phrase: source not found by triage (grepped roadmap and main). Cause and size: unmeasured.",
+ "why": "11:15 CST Nov 15 (owner's verbatim words, 11:11 CST Nov 15, via the consultant): \"“refresh while a session runs is not built” that should be fixed\". The consultant asks it be filed as an ask for lane stable-refresh-mid-session, which goes to the coordinator first (sent; the coordinator decides on the lane). Source of the quoted phrase: source not found by triage (grepped roadmap and main). Cause and size: unmeasured.\n\n11:20 CST Nov 15 owner ask at the front of the queue, relayed by the coordinator 11:13 CST (not read by triage). Shape, from the consultant: no timer, no new process; read origin/stable's sha on a hook that already runs; reinstall only when it moved; swap the whole install; state the cost; a test proves it. Related: #3487 (draft d038577d1c66, step cloud-hooks-stale-copy) builds a part (cloud only, each prompt, origin's tip); the coordinator asked that lane five questions; #3141 is startup-only; the coordinator moved #3487 first in runner 10's queue.",
  "source": "Owner via the consultant, 11:11 CST Nov 15 (relayed; not read by triage)",
  "note": "Open, no lane yet. Coordinator decides whether to start lane stable-refresh-mid-session. Filed by triage 11:15 CST Nov 15; no cause or size claimed.",
- "updatedAt": "2026-11-15T11:14:00-06:00"
+ "updatedAt": "2026-11-15T11:20:00-06:00"
 }

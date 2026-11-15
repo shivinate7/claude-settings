@@ -1,0 +1,14 @@
+{
+ "id": "lift-mechanical-before-cleanup",
+ "title": "Lift ruling own-mechanical-before-cleanup into a decision on main (low)",
+ "priority": "low",
+ "status": "open",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T11:20:00-06:00",
+ "why": "Consultant 11:15 CST Nov 15 (relayed, not read by triage), answering triage's question: yes, queue the lane that lifts ruling own-mechanical-before-cleanup (owner, 11:07 CST Nov 15) into a decision on main. The coordinator starts the lane. Nobody has started it. The ruling stays open until its text is on main.",
+ "source": "consultant 11:15 CST Nov 15, relayed by triage",
+ "note": "Open, low. No lane started; the coordinator starts it. Filed 11:20 CST Nov 15."
+}
