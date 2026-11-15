@@ -412,6 +412,60 @@ def healthy_printer_no_stall():
     return problems
 
 
+@posix_case
+def leading_pause_then_command_is_no_stall():
+    """3b2. a leading `sleep 6` then `; echo done`, at quiet 2: the pause is a known silent wait, so no STALL, exit 0
+    (incident 2026-11-15: a 600 s pause then merge --lane-lint got a failure notice at 300 s while the job ran)"""
+    rc, text, _secs, _cmd = run_rewritten("sleep 6; echo done")
+    problems = expect(rc == 0, f"exit {rc}, want 0")
+    problems += expect("STALL:" not in text, "a STALL report came during a leading pause")
+    problems += expect(text == "done\n", f"output {text!r}")
+    reap()
+    return problems
+
+
+@posix_case
+def leading_pause_then_and_chain_is_no_stall():
+    """3b3. the same wait chained with `&&`"""
+    rc, text, _secs, _cmd = run_rewritten("sleep 6 && echo done")
+    problems = expect(rc == 0, f"exit {rc}, want 0")
+    problems += expect("STALL:" not in text, "a STALL report came during a leading pause")
+    reap()
+    return problems
+
+
+@posix_case
+def silence_after_the_leading_pause_still_stalls():
+    """3b4. a `sleep 3; sleep 30` job: the allowance is the first pause's own length, so the silent second one stalls"""
+    rc, text, _secs, _cmd = run_rewritten("sleep 3; sleep 30")
+    problems = expect(rc == 3, f"exit {rc}, want 3")
+    problems += expect("STALL:" in text, "no STALL after the wait's own length")
+    reap()
+    return problems
+
+
+@posix_case
+def a_later_pause_gets_no_allowance():
+    """3b5. `true; sleep 30` at quiet 2: only a leading pause is expected, so this stalls within about 4 s"""
+    rc, text, secs, _cmd = run_rewritten("true; sleep 30")
+    problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    reap()
+    return problems
+
+
+@case
+def wait_helper_heartbeat_is_inside_the_quiet_time():
+    """3b6. bin/wait-until and bin/wait-pid beat every HEARTBEAT_DEFAULT s, under the watcher's default quiet
+    time, so a wait through them is a known wait that never goes silent long enough to stall"""
+    sys.path.insert(0, HERE)
+    import wait_common
+    spec = importlib.util.spec_from_file_location("stall_watch_under_test", MODULE)
+    sw = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sw)
+    return expect(wait_common.HEARTBEAT_DEFAULT < sw.DEFAULT_QUIET,
+                  f"heartbeat {wait_common.HEARTBEAT_DEFAULT} s is not under the quiet time {sw.DEFAULT_QUIET} s")
+
+
 def exit_code_passes_through():
     """3c. exit 7 gives 7, with the output printed before it"""
     rc, text, _secs, _cmd = run_rewritten("echo before; exit 7")
