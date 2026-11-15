@@ -22,8 +22,8 @@ key. It never reuses main's.
    `waiting-page-colour` (#rrggbb) and `waiting-page-icon` (an .svg or .png path in the repo) first,
    then `docs/design/repo-colours.json`. Exit 2 means the colour is unknown: leave `brand` out. Never
    invent a colour. The page still checks each text colour for 4.5:1 contrast.
-4. Set the URL: `python3 ~/.claude/lint/layout.py set-waiting-page <repo root> <url> [account]`. `account` is a
-   plain label for your Claude account (default `current`), never an email. When the repo's extras file,
+4. Set the URL: `python3 ~/.claude/lint/layout.py set-waiting-page <repo root> <url> <label>`. `label` is a
+   required, plain name for your Claude account, such as `current`, never an email. When the repo's extras file,
    `.claude/layout-extras.json`, has a `waiting-page` role entry in `artifacts`, it sets that account's link in the
    entry's `links`: it replaces the account's link, or adds one beside the others. With no such entry, it writes the
    old `waiting-page` key once. Exit 0 wrote it. Exit 1 means nothing changed: the account's link names the same

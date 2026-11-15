@@ -304,8 +304,7 @@ def judge(args):
     pages = [e for e in entries if e["role"] == layout.WAITING_ROLE]
     if not pages:
         raise unknown("%s has no waiting-page entry in its artifacts registry" % args.root)
-    page_id = layout.artifact_id(args.page_url)
-    if not page_id or page_id not in {layout.artifact_id(link["url"]) for link in pages[0]["links"]}:
+    if not layout.is_waiting_page_url(args.root, args.page_url):
         raise not_counted("page URL is not the registered waiting page")
 
     answer = read_doc(args.fetched, "answers", args.item)

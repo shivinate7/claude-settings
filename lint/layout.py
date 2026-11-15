@@ -8,13 +8,13 @@ extras file with no mark does not roll a repo out. Its keys that are not about f
 ("waiting-page", "waiting-page-colour", "waiting-page-icon", "page-writer", "kind", "caution", "visibility",
 "devices", "shared-resources", "roadmap", "record-branch", "artifacts") read whenever the file exists (`has_extras()`). The
 "artifacts" key is the registry of the claude.ai artifacts the repo holds (`artifacts()`, decision waiting-data-in-repo).
-The "waiting-page" key holds the URL of the repo's waiting page (`waiting_page()`, skill waiting-page), the fallback after
-the registry entry whose role is "waiting-page";
+The registry entry whose role is "waiting-page" holds the repo's waiting page: its links, one per account (`waiting_page(root, account)`, skill waiting-page).
+The old "waiting-page" key holds the URL of that page for a repo with no such entry, or an entry with no links;
 "waiting-page-colour" (#rrggbb) and "waiting-page-icon" (an .svg or .png path in the repo) are its
 branding (`waiting_page_colour()`, `waiting_page_icon()`, read by lint/repo_colour.py). "page-writer" is the session id
 of the page's writer (`page_writer_key()`, read by the pick guard in lint/report_guard.py). The "record-branch" key
 names the branch of the record in a fork worktree (`record_branch()`); with no key it is "roadmap".
-`set_waiting_page()` writes the "waiting-page" key once, for triage; it never writes "rolled-out".
+`set_waiting_page()` writes one labelled link on the waiting-page entry, for triage, or the old key once when there is no entry; it never writes "rolled-out".
 
 BANDAID, named: a repo that has not rolled out is read where the shared tools read it before the
 layout, through the layout's "legacy" map, so no tool changes its verdict on a repo before then. A kind
@@ -267,7 +267,7 @@ def is_waiting_page_url(root, url):
     return bool(wanted) and any(artifact_id(link["url"]) == wanted for link in _page_links(root))
 
 
-ARTIFACTS = "artifacts"  # the extras key: the registry, a list of {id, url, role, account, collections, export}
+ARTIFACTS = "artifacts"  # the extras key: the registry, a list of {id, role, links, collections, export}
 WAITING_ROLE = "waiting-page"  # the role of the registry entry that is the repo's waiting page
 ARTIFACT_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")  # a slug of 32 characters or fewer, as a record slug is (git-slug-then-claim-number)
 ROLE = re.compile(r"[a-z0-9][a-z0-9-]*")
@@ -276,13 +276,13 @@ WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta")  # what the
 
 
 def artifacts(root):
-    """[{id, url, role, account, collections, export}] from the "artifacts" key of `root`'s extras file, in order; []
+    """[{id, role, links, collections, export}] from the "artifacts" key of `root`'s extras file, in order; []
     for a repo with no extras file or no key. `collections` and `export` are filled in: the waiting-page role exports
     the five waiting collections to the waiting-data folder of the record branch, any other role needs its own
     `collections` and exports to `artifacts/<id>/`. A page-only entry (any other role, `"collections": []`) exports its page
     and files and no database; an empty list is refused on the waiting-page role, and a missing key on any other. An entry with `"export": false` (never the waiting-page role) is held and never exported: it needs
-    no collections and reads with `export` False and `collections` []. LayoutError, naming the entry by its id, for an email as account, a
-    repeated id, an id over 32 characters, a url that is no artifact link, a second waiting-page role or an unsafe path."""
+    no collections and reads with `export` False and `collections` []. LayoutError, naming the entry by its id, for an email as an account label, a
+    repeated id, an id over 32 characters, a link url that is no artifact link, an entry-level `url` or `account`, a second waiting-page role or an unsafe path."""
     return _registry(root, _repo_keys(root).get(ARTIFACTS), _extras(root))
 
 
@@ -301,7 +301,7 @@ def _links(found, where):
         account, url = link["account"], link["url"]
         if not isinstance(account, str) or not account.strip() or account != account.strip() or "@" in account:
             raise LayoutError("%s: account is not a plain label, and never an email, in links" % at)
-        if not isinstance(url, str) or not url.startswith(ARTIFACT_LINK) or not artifact_id(url):
+        if not isinstance(url, str) or not ARTIFACT_URL.fullmatch(url):
             raise LayoutError("%s: url is not a claude.ai artifact link with an id, in links" % at)
         if account in seen:
             raise LayoutError("%s: two links for account %s, in links" % (at, account))
@@ -423,7 +423,7 @@ def waiting_page(root, account=None):
     return next((link["url"] for link in links if link["account"] == account), links[0]["url"])
 
 
-def set_waiting_page(root, url, account="current"):
+def set_waiting_page(root, url, account):
     """Write the waiting page URL into `root`'s extras file, creating the file when missing. A registry entry with the
     role "waiting-page" gets the link of `account` set: replaced when that account has one, else added after the others.
     True when that changed the file, False when the account's link already names the same artifact. With no such entry, the
@@ -735,14 +735,14 @@ if __name__ == "__main__":
     # python3 lint/layout.py caution <root>: the repo's caution level with its facts and acts.
     # python3 lint/layout.py shared-resources <root>: the repo's shared machines as JSON, [] when none.
     # python3 lint/layout.py artifacts <root>: the repo's artifact registry as JSON, [] when none.
-    # python3 lint/layout.py set-waiting-page <root> <url> [account]: set the link of that account label (default
-    # "current") on the waiting page entry in the extras file of <root>, or write the old key once when there is no
+    # python3 lint/layout.py set-waiting-page <root> <url> <label>: set the link of that account label on the
+    # waiting page entry in the extras file of <root>, or write the old key once when there is no
     # entry. Exit 0 wrote it; 1 already set (prints the URL); 2 bad URL, bad account, or unreadable or unwritable file.
     ROOT_VERBS = (WAITING_PAGE, "devices", "caution", SHARED_RESOURCES, ARTIFACTS)
-    if len(sys.argv) in (4, 5) and sys.argv[1] == "set-waiting-page":
+    if len(sys.argv) == 5 and sys.argv[1] == "set-waiting-page":
         try:
             here = os.path.abspath(sys.argv[2])
-            account = sys.argv[4] if len(sys.argv) == 5 else "current"
+            account = sys.argv[4]
             if set_waiting_page(here, sys.argv[3], account):
                 sys.exit(0)
             print(waiting_page(here, account))
@@ -751,7 +751,7 @@ if __name__ == "__main__":
             print("layout: %s" % err, file=sys.stderr)
             sys.exit(2)
     if not (len(sys.argv) == 4 and sys.argv[1] == "path" or len(sys.argv) == 3 and sys.argv[1] in ROOT_VERBS):
-        sys.exit("usage: layout.py path <root> <kind> | layout.py waiting-page|devices|caution|shared-resources|artifacts <root> | layout.py set-waiting-page <root> <url> [account]")
+        sys.exit("usage: layout.py path <root> <kind> | layout.py waiting-page|devices|caution|shared-resources|artifacts <root> | layout.py set-waiting-page <root> <url> <label>")
     try:
         here = os.path.abspath(sys.argv[2])
         if sys.argv[1] == WAITING_PAGE:
