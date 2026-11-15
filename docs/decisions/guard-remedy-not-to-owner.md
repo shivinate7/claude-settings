@@ -65,7 +65,7 @@ Text: `ANSWERED_REASON`, rule `answered-needs-source` (a claim of "answered" nee
 
 ### Recovered guard (any reply whose report shape holds)
 
-Text: two inline facts in `recovered_problem`. The two line forms below live here only.
+Text: two inline facts in `recovered_problem`. The two line forms below live here only. The refusal states each form with its `none` variant. It adds that a label counts where it starts an item in the report blockquote, also after a bullet and a Done-item tag.
 
 - If a compaction came before this report, and the report has no carry line since, add the missing line under Deviations, inside the report's blockquote:
   - `Recovered: <each fact, with its source: git, page or digest>`, or `Recovered: none`.
