@@ -181,6 +181,7 @@ LINUX_SUITES = {
     "python3 lint/test_check_agent_models.py": (None, None),
     "python3 lint/test_agent_push_form.py": (None, None),
     "python3 lint/test_check_skill_model_rows.py": (None, None),
+    "python3 lint/test_check_project_ops_roles.py": (None, None),
     "python3 lint/test_no_window_spawn.py": (None, None),
     "pwsh -NoProfile -File install.test.ps1": (LINUX_CODE, None),
     "python3 janitor/test_session_end_sweep.py": (LINUX_CODE, None),

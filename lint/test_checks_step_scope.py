@@ -185,6 +185,8 @@ MUST_STAY_UNSCOPED = [
     'Scratchpad owner fixture suite',  # runs test_guard.py, whose section files read skills/impeccable/SKILL.md
     'Guard wrappers fixture suite',  # runs test_guard.py through drive_test_guard
     'Skill model rows fixture suite',  # its checks job step has no `if:` (test_check_skill_model_rows.py pins it)
+    'Project-ops roles check',  # reads the session-tiers record and the project-ops templates at run time (audit hook, run-time open)
+    'Project-ops roles fixture suite',  # its real-repo case reads the same record and templates at run time
     'Reply judge fixture suite',  # reads CLAUDE.md at run time (hooks/test_reply_judge.py), so a CLAUDE.md-only pull request must run it
     'Nightly skip fixture suite',  # not audited yet, so it stays unscoped (fail safe)
     'Proc env read suite',  # not audited yet, so it stays unscoped (fail safe)
