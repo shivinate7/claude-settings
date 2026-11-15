@@ -104,6 +104,15 @@ HEADER = "rulings not on main: %d open (%d with no supersedes read yet), newest 
 DST_CDT = "2026-11-01T01:30:00-05:00"  # 06:30 UTC, the first 01:30 before the clocks go back
 DST_CST = "2026-11-01T01:10:00-06:00"  # 07:10 UTC, after the change: later, though its text sorts first
 RULING_LAND = "Rule one: keep the apps."
+# The ruling-ref rule's cutoff, as the owner's grant gives it (11:33 CST). The cases spell the instant out,
+# so they do not need the module to define a constant of that name.
+RULING_CUTOFF = "2026-11-15T11:33:00-06:00"
+BEFORE_CUTOFF = "2026-11-15T11:32:59-06:00"
+AFTER_CUTOFF = "2026-11-15T12:00:00-06:00"
+TARGET_LATER = "2026-11-15T13:00:00-06:00"
+CAUSE_NO_RULING = "names no ruling in the store"
+CAUSE_NOT_EARLIER = "names a ruling not earlier than it"
+CAUSE_BAD_REF = "ruling ref is empty or not a string"
 
 
 def load_module():
@@ -520,6 +529,16 @@ def step_file(slug, status):
     return {"roadmap/data/steps/%s.json" % slug: '{"slug": "%s", "status": "%s"}' % (slug, status)}
 
 
+def target_entry(rid, at=AT):
+    """A ruling that supersedes nothing, so it adds no ref to the shared-ref check: a ruling a case may name."""
+    return fixture.entry(rid, at=at, supersedes=None, supersedes_none="new question, supersedes nothing")
+
+
+def checking_entry(rid, ref, at=AFTER_CUTOFF):
+    """A ruling whose only supersedes is one ruling ref, `ref`. Dated after the cutoff unless `at` says otherwise."""
+    return fixture.entry(rid, at=at, supersedes=[{"kind": "ruling", "ref": ref}])
+
+
 class CheckStoreTests(RepoCase):
     def store_with(self, name, entries, steps=None):
         files = fixture.ruling_files(entries)
@@ -644,6 +663,137 @@ class CheckStoreTests(RepoCase):
         self.assertIn("step ruled-store-one-home is done but entry stepped is still open", proc.stdout + proc.stderr,
                       "check did not name the open entry on a done step")
 
+    def check_ref(self, name, targets, ref, rid="chk", at=AFTER_CUTOFF):
+        """check_store of `targets` plus one checking entry `rid`, dated `at`, whose only supersedes is the ref `ref`."""
+        entries = dict(targets)
+        entries[rid] = checking_entry(rid, ref, at)
+        return ruled_store.check_store(self.store_with(name, entries))
+
+    def assertOneRulingProblem(self, got, rid, cause):
+        """Exactly one problem line names `rid` and the word ruling, and that line names `cause`."""
+        lines = [line for line in got if names(line, rid) and names(line, "ruling")]
+        self.assertEqual(len(lines), 1, "want one ruling problem for %s, got %r" % (rid, got))
+        self.assertIn(cause, lines[0], "the ruling problem for %s names the wrong cause: %r" % (rid, lines[0]))
+
+    def test_an_exact_ruling_id_with_trailing_prose_passes(self):
+        targets = {"own-820-c": target_entry("own-820-c", at=AT)}
+        got = self.check_ref("exact", targets, "own-820-c keeps the store to one place")
+        self.assertEqual(got, [], "an exact ruling id with prose after it was flagged: %r" % got)
+
+    def test_a_near_miss_ruling_id_is_flagged(self):
+        targets = {"own-820-c": target_entry("own-820-c", at=AT)}
+        self.assertEqual(self.check_ref("near-miss-ok", targets, "own-820-c keeps the store to one place"), [],
+                         "control: the exact id did not pass")
+        got = self.check_ref("near-miss", targets, "own-802-c keeps the store to one place")
+        self.assertOneRulingProblem(got, "chk", CAUSE_NO_RULING)
+
+    def test_a_prefix_of_a_ruling_id_is_flagged(self):
+        targets = {"own-820-c-five-repos": target_entry("own-820-c-five-repos", at=AT)}
+        self.assertEqual(self.check_ref("prefix-ok", targets, "own-820-c-five-repos keeps the store to one place"), [],
+                         "control: the full id did not pass")
+        got = self.check_ref("prefix", targets, "own-820-c keeps the store to one place")
+        self.assertOneRulingProblem(got, "chk", CAUSE_NO_RULING)
+
+    def test_a_ruling_id_not_in_the_store_is_flagged(self):
+        targets = {"own-820-c": target_entry("own-820-c", at=AT)}
+        self.assertEqual(self.check_ref("absent-ok", targets, "own-820-c keeps the store to one place"), [],
+                         "control: the stored id did not pass")
+        got = self.check_ref("absent", targets, "own-999-z keeps the store to one place")
+        self.assertOneRulingProblem(got, "chk", CAUSE_NO_RULING)
+
+    def test_a_ruling_ref_naming_its_own_entry_is_flagged(self):
+        targets = {"own-820-c": target_entry("own-820-c", at=AT)}
+        self.assertEqual(self.check_ref("self-ok", targets, "own-820-c keeps the store to one place", rid="own-901-a"),
+                         [], "control: a ref to an earlier ruling did not pass")
+        got = self.check_ref("self", targets, "own-901-a keeps the store to one place", rid="own-901-a")
+        self.assertOneRulingProblem(got, "own-901-a", CAUSE_NOT_EARLIER)
+
+    def test_a_ruling_ref_naming_a_later_ruling_is_flagged(self):
+        targets = {"own-820-c": target_entry("own-820-c", at=AT),
+                   "own-911-b": target_entry("own-911-b", at=TARGET_LATER)}
+        self.assertEqual(self.check_ref("later-ok", targets, "own-820-c keeps the store to one place"), [],
+                         "control: a ref to an earlier ruling did not pass")
+        got = self.check_ref("later", targets, "own-911-b keeps the store to one place")
+        self.assertOneRulingProblem(got, "chk", CAUSE_NOT_EARLIER)
+
+    def test_a_ruling_ref_naming_a_ruling_at_the_same_instant_is_flagged(self):
+        targets = {"own-820-c": target_entry("own-820-c", at=AT),
+                   "own-921-b": target_entry("own-921-b", at=AFTER_CUTOFF)}
+        self.assertEqual(self.check_ref("same-ok", targets, "own-820-c keeps the store to one place"), [],
+                         "control: a ref to an earlier ruling did not pass")
+        got = self.check_ref("same", targets, "own-921-b keeps the store to one place")
+        self.assertOneRulingProblem(got, "chk", CAUSE_NOT_EARLIER)
+
+    def test_an_empty_ruling_ref_is_flagged(self):
+        targets = {"own-820-c": target_entry("own-820-c", at=AT)}
+        self.assertEqual(self.check_ref("empty-ok", targets, "own-820-c keeps the store to one place"), [],
+                         "control: a valid ref did not pass")
+        got = self.check_ref("empty", targets, "")
+        self.assertOneRulingProblem(got, "chk", CAUSE_BAD_REF)
+
+    def test_a_ruling_ref_that_is_not_a_string_is_flagged(self):
+        targets = {"own-820-c": target_entry("own-820-c", at=AT)}
+        self.assertEqual(self.check_ref("string-ok", targets, "own-820-c keeps the store to one place"), [],
+                         "control: a valid ref did not pass")
+        for index, ref in enumerate((None, 42)):
+            with self.subTest(ref=ref):
+                got = self.check_ref("not-a-string-%d" % index, targets, ref)
+                self.assertOneRulingProblem(got, "chk", CAUSE_BAD_REF)
+
+    def test_a_ruling_ref_on_an_entry_before_the_cutoff_is_not_checked(self):
+        repo = self.store_with("before", {"chk": checking_entry("chk", "Rule-one keeps the apps.", at=AT)})
+        self.assertEqual(ids(ruled_store.ruled_entries(repo)), ["chk"], "control: the entry did not read")
+        self.assertEqual(ruled_store.check_store(repo), [],
+                         "an entry dated before the cutoff was checked for its ruling ref")
+
+    def test_the_cutoff_is_compared_as_an_instant_not_as_text(self):
+        # 12:00 UTC is 06:00 CST, before the cutoff, though its text sorts after the cutoff's 11:33.
+        repo = self.store_with("utc-before", {
+            "chk": checking_entry("chk", "Rule-one keeps the apps.", at="2026-11-15T12:00:00+00:00")})
+        self.assertEqual(ids(ruled_store.ruled_entries(repo)), ["chk"], "control: the entry did not read")
+        self.assertEqual(ruled_store.check_store(repo), [],
+                         "an entry dated before the cutoff by instant was checked: text order was used")
+
+    def test_a_target_is_compared_as_an_instant_not_as_text(self):
+        # 12:00 -05:00 is 11:00 CST, earlier than the checking entry's 11:50 CST, though its text sorts after it.
+        targets = {"own-820-c": target_entry("own-820-c", at=AT),
+                   "own-911-b": target_entry("own-911-b", at="2026-11-15T12:00:00-05:00")}
+        got = self.check_ref("target-instant", targets, "own-911-b keeps the store to one place",
+                             at="2026-11-15T11:50:00-06:00")
+        self.assertEqual(got, [], "an earlier ruling by instant was flagged as not earlier: %r" % got)
+
+    def test_a_ruling_ref_is_checked_from_the_cutoff_instant_on(self):
+        repo = self.store_with("cutoff", {
+            "chk-before": checking_entry("chk-before", "Rule-one keeps the apps.", at=BEFORE_CUTOFF),
+            "chk-at": checking_entry("chk-at", "Rule-two keeps the store.", at=RULING_CUTOFF),
+        })
+        got = ruled_store.check_store(repo)
+        self.assertEqual([line for line in got if names(line, "chk-before") and names(line, "ruling")], [],
+                         "an entry one second before the cutoff was checked for its ruling ref: %r" % got)
+        self.assertOneRulingProblem(got, "chk-at", CAUSE_NO_RULING)
+
+    def test_a_supersedes_none_entry_after_the_cutoff_passes(self):
+        repo = self.store_with("none-after", {"chk": fixture.entry(
+            "chk", at=AFTER_CUTOFF, supersedes=None, supersedes_none="new question, supersedes nothing")})
+        self.assertEqual(ids(ruled_store.ruled_entries(repo)), ["chk"], "control: the entry did not read")
+        self.assertEqual(ruled_store.check_store(repo), [], "a supersedes_none entry after the cutoff was flagged")
+
+    def test_a_store_of_many_rulings_flags_only_the_bad_ref(self):
+        entries = {}
+        for number in range(25):
+            entries["own-%03d" % number] = target_entry("own-%03d" % number, at=AT)
+            entries["chk-%03d" % number] = checking_entry(
+                "chk-%03d" % number, "own-%03d keeps the store to one place" % number,
+                at="2026-11-15T12:%02d:00-06:00" % number)
+        entries["chk-bad"] = checking_entry("chk-bad", "own-999-z keeps the store to one place",
+                                            at="2026-11-15T12:30:00-06:00")
+        repo = self.store_with("many", entries)
+        self.assertEqual(len(ruled_store.ruled_entries(repo)), 51, "control: the store did not read whole")
+        got = ruled_store.check_store(repo)
+        self.assertEqual(len([line for line in got if names(line, "ruling")]), 1,
+                         "want one ruling problem in 51 entries: %r" % got)
+        self.assertOneRulingProblem(got, "chk-bad", CAUSE_NO_RULING)
+
 
 class CostAndCliTests(RepoCase):
     def test_reading_the_store_starts_one_ls_tree_and_one_cat_file(self):
@@ -695,6 +845,48 @@ class CostAndCliTests(RepoCase):
         self.assertEqual(failed.returncode, 1, "check on a store with a migrated entry exited %d, want 1"
                          % failed.returncode)
         self.assertIn("migrated", failed.stdout + failed.stderr, "check did not name the entry it refused")
+
+    def assertUnknown(self, proc):
+        """check exited 3 and printed a line that starts with unknown: the store could not be read, not clean."""
+        text = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, 3, "check on an unreadable store exited %d, want 3: %s"
+                         % (proc.returncode, text))
+        self.assertTrue(any(line.startswith("unknown") for line in text.splitlines()),
+                        "check on an unreadable store printed no line that starts with unknown: %r" % text)
+
+    def test_check_exits_three_and_says_unknown_when_git_cannot_start(self):
+        repo = self.make_repo("no-git", store=fixture.ruling_files({"ok": fixture.entry("ok")}))
+        empty_path = os.path.join(self.root, "empty-path")
+        os.makedirs(empty_path)
+        self.assertEqual(ids(ruled_store.ruled_entries(repo)), ["ok"], "control: the store does not read with git")
+        self.assertIsNone(shutil.which("git", path=empty_path), "scope: git is still found on the empty PATH")
+        with mock.patch.dict(os.environ, {"PATH": empty_path}):
+            self.assertEqual(ruled_store.read_store(repo)[1], "unreadable",
+                             "git that cannot start did not read as unreadable")
+        proc = subprocess.run([sys.executable, MODULE, "check", repo], capture_output=True, text=True, timeout=60,
+                              env=dict(os.environ, PATH=empty_path))
+        self.assertUnknown(proc)
+
+    def test_check_exits_three_and_says_unknown_when_a_ruling_blob_is_lost(self):
+        repo = self.make_repo("lost-blob", store=fixture.ruling_files({"ok": fixture.entry("ok")}))
+        blob = fixture.git(repo, "rev-parse", "%s:%s/ok.json" % (fixture.STORE_REF, RULINGS_DIR))
+        loose = os.path.join(repo, ".git", "objects", blob[:2], blob[2:])
+        self.assertTrue(os.path.isfile(loose), "scope: the ruling blob is not a loose object that can be removed")
+        self.assertEqual(ids(ruled_store.ruled_entries(repo)), ["ok"],
+                         "control: the store does not read before the loss")
+        os.remove(loose)
+        self.assertEqual(ruled_store.read_store(repo)[1], "unreadable", "a lost ruling blob did not read as unreadable")
+        self.assertUnknown(subprocess.run([sys.executable, MODULE, "check", repo], capture_output=True, text=True,
+                                          timeout=60))
+
+    def test_check_on_an_absent_store_exits_zero_and_is_not_unknown(self):
+        repo = self.make_repo("absent", main={"README.md": "main\n"})
+        self.assertEqual(ruled_store.read_store(repo)[1], "absent",
+                         "scope: a repo with no store did not read as absent")
+        proc = subprocess.run([sys.executable, MODULE, "check", repo], capture_output=True, text=True, timeout=60)
+        self.assertEqual(proc.returncode, 0, "check on an absent store exited %d: %s" % (proc.returncode, proc.stderr))
+        self.assertFalse(any(line.startswith("unknown") for line in (proc.stdout + proc.stderr).splitlines()),
+                         "check on an absent store printed an unknown line: %r" % proc.stdout)
 
 
 def tearDownModule():
