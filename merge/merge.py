@@ -3848,8 +3848,7 @@ def merge_base_in(wt, base, branch):
 def draft_step(root, cfg, n, host, info):
     """`merge <pr> --confirm` on a draft: rebuild the records page on the head, push it, mark the pull request ready, and
     stop. So the branch is final at ready, and the ready confirm pushes nothing (decision records-index-at-merge).
-    On the default base, a head that lacks the tip but merges cleanly with it first gets a merge commit of origin/<base> (owner ruling, waiting-page
-    item 840 a): the page is rebuilt on the merged tree, a stale page is one more commit, the ready checks run once on that final tree, and one plain push sends both.
+    On the default base, a head that lacks the tip but merges cleanly with it first gets a merge commit of origin/<base>: the page is rebuilt on the merged tree, a stale page is one more commit, the ready checks run once on that final tree, and one plain push sends both.
     A conflict, a Record-claim head and a base other than the default push no merge. A failed merge, check or push leaves the pull request a draft.
     Takes no lock, claims no number and never merges: a claim stays at the ready confirm.
     A repo that declares merge.readyChecks also runs them first, on the tree the step would push, before any push and before the
