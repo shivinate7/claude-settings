@@ -8,11 +8,11 @@ question-form holds the ruling; rule `style-question-form` holds the text.
 
 ("", "") is a pass. hooks/call_judge.py calls chat_hit and page_item_hit; hooks/guard.py data_tool_hit calls
 page_item_hit, which filters the ArtifactData writes by collection and url and then calls item_hit; a write to another page gets only the check for an option keyed none. Nothing here writes a file. The only processes it starts are the git reads of past_rulings (the roadmap step notes, and the ruled store: one ls-tree, one cat-file, and one more when an entry names `lands_in`), for a caller that makes a model call anyway.
-departs_ruling_hit reads only text and candidates it is given: no process, no file.
+departs_ruling_hits reads only text and candidates it is given: no process, no file.
 
     past_rulings(text, repo_root, focus=None) -> (candidates, unknown)   the decision, debt and step rulings the judge
                                               reads; `focus` (the Departs from text) ranks its overlap first under the caps
-    departs_ruling_hit(text, candidates) -> (ruling id, line)   an open ruling the Departs from line shares 3+ words with
+    departs_ruling_hits(text, candidates) -> [(ruling id, line)]   each uncited open ruling on the Departs from topic
     key_overlap(reply, earlier)   -> clashing option keys     lint/report_guard.py rule question-keys
 
 THE FORM. A decision on the page (in `context`), or a chat question with 2+ options (in `question`):
@@ -1843,7 +1843,7 @@ CHAT_REASONS = {"uniform-pick": CHAT_WIDENS_REASON, "press-link": CHAT_PRESS_LIN
 # ruling sentences of the `roadmap` ref's step notes (the 30 with the most word overlap). Closed page items are
 # always unknown: a hook cannot call the Artifact tool, and the decision records carry their rulings.
 # Cost: one git process, only when the caller already makes a model call; no file written.
-# `departs_ruling_hit` adds no process: it compares the Departs from line with the candidates already read.
+# `departs_ruling_hits` adds no process: it compares the Departs from line with the candidates already read.
 PAST_RULING_RULE = "past-ruling"
 UNVETTED_LINE = re.compile(r"^[ \t>*+-]*Unvetted:[ \t]*\S", re.I | re.M)
 UNREADABLE = "unreadable"
@@ -1877,33 +1877,41 @@ def departs_text(text) -> str:
 
 # A Based on (ruling) line: the question names the ruling it builds on (the kind check is BASED_LINE's, this reads the text).
 BASED_RULING_LINE = labelled_line(r"Based on[ \t]*\(ruling\)")
-DEPARTS_SHARED_MIN = 3
-# Words of a form-shaped Departs from line ("main adds a check to the form field line") that every such line holds:
-# they never count toward the overlap, or one generic ruling refuses them all. Not in STOPWORDS: other checks keep them.
-DEPARTS_GENERIC = frozenset(("main", "adds", "check", "line", "form", "field"))
+DEPARTS_SHARED_MIN, DEPARTS_HITS_TOP = 3, 3
+# Words every Departs from line tends to hold: the form's own ("main adds a check to the form field line") and the
+# verbs any line about a check uses ("refuses", "allows", "reads"). They never count toward the overlap, or one ruling
+# on an unrelated check refuses every line. Not in STOPWORDS: other checks keep them. `item` stays a topic word.
+DEPARTS_GENERIC = frozenset(("main", "adds", "check", "line", "form", "field", "refuses", "refuse", "allows", "allow",
+                             "lets", "reads", "read", "opens", "counts", "names", "marks", "uses", "makes", "takes",
+                             "gives"))
 # A ruled-store candidate ends with its metadata; the check reads the ruling only, since a supersedes ref holds topic words.
 RULED_META = re.compile(r" \((?:owner [^()]*; open, not on main; supersedes .*)\)(?: \(unchecked, not law\))?$", re.S)
 
 
-def departs_ruling_hit(text, candidates):
-    """(ruling id, candidate line) of the first open ruling whose words share DEPARTS_SHARED_MIN or more with the Departs
-    from lines of `text`, when no `Based on (ruling)` line of `text` names that id (bare or with `ruled:`); else ("", "").
-    A candidate counts when its id starts `ruled:` or is a step id, never `decisions/` or `debts/`. An `Unvetted:` line skips it."""
+def departs_ruling_hits(text, candidates) -> list:
+    """[(ruling id, candidate line)] of each open ruling, first-seen order, one per id, that shares DEPARTS_SHARED_MIN or
+    more words with the Departs from lines of `text` and at least half of their non-generic words, when no
+    `Based on (ruling)` line of `text` names that id (bare or with `ruled:`). A candidate counts when its id starts
+    `ruled:` or is a step id, never `decisions/` or `debts/`. An `Unvetted:` line skips the check."""
     focus = _words(departs_text(text)) - DEPARTS_GENERIC
     if not focus or has_unvetted(text):
-        return "", ""
+        return []
     cited = " ".join(BASED_RULING_LINE.findall(text))
+    hits, seen = [], set()
     for line in candidates:
         rid, _, body = line.partition(": ")
-        if not body or rid.startswith(("decisions/", "debts/")):
+        if not body or rid in seen or rid.startswith(("decisions/", "debts/")):
+            continue
+        shared = len(focus & _words(RULED_META.sub("", body)))
+        # Half the line's own topic words: a long line that brushes a ruling on two or three words is another topic.
+        if shared < DEPARTS_SHARED_MIN or 2 * shared < len(focus):
             continue
         bare = rid[len("ruled:"):] if rid.startswith("ruled:") else rid
-        if len(focus & _words(RULED_META.sub("", body))) < DEPARTS_SHARED_MIN:
-            continue
         # A "/" before the id is a record path (`decisions/<stem>`), not the step ruling.
         if not re.search(r"(?<![\w/-])%s(?![\w-])" % re.escape(bare), cited):
-            return rid, line
-    return "", ""
+            seen.add(rid)
+            hits.append((rid, line))
+    return hits
 
 
 def _ruling_text(body) -> str:

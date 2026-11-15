@@ -33,8 +33,10 @@ Veto (an act no override lifts): an Explore spawn whose model field is neither s
 is the Explore row of agent-model-cap, a model guard. Every other refusal is liftable.
 
 A question (a box with 2+ options, a page decision) also gets item 8, the past-ruling check. First the Departs from lines
-are matched against the open rulings (question_form.departs_ruling_hit): a hit refuses with no model call, unless the
-question cites that ruling under `Based on (ruling)` or carries an `Unvetted:` line. Then question_form.past_rulings
+are matched against the open rulings (question_form.departs_ruling_hits): a hit refuses with no model call, unless the
+question cites that ruling under `Based on (ruling)` or carries an `Unvetted:` line; one refusal names up to three
+uncited rulings. Item 8 tells the model to read the Departs from line against each listed ruling first, since only it
+can match a ruling worded apart from the line. Then question_form.past_rulings
 adds the decision, debt and step rulings to the same one model call. The check always runs; a task gets it too. When it cannot
 run (a model error, a source that exists and cannot be read, or a refusal that cites a record the model was not
 shown), the question is refused with the Unvetted remedy, unless its own text carries an `Unvetted:` line. An absent
@@ -133,7 +135,9 @@ SPAWN_PROMPT = (
 # Item 8, the past-ruling check: the one text, for the chat box, the page and lint/report_guard.py (a relayed
 # question). The candidate rulings follow the reply line, built by question_form.candidates_block.
 PAST_RULING_ITEM = (
-    "Past rulings. The text after the reply line lists past rulings, one per line as `<id>: <text>`. Refuse when "
+    "Past rulings. The text after the reply line lists past rulings, one per line as `<id>: <text>`. "
+    "First compare the question's `Departs from` line with each listed ruling, and when a ruling already answers what "
+    "that line changes, refuse and name that ruling's id. Also refuse when "
     "the question asks the owner to decide what a listed ruling already decides, or when its premise is "
     "something a standing decision already explains (such as asking what a rule means when a decision says why "
     "it was set so). A question whose `Based on (ruling): ...` line names that ruling (its id or slug) passes: "
@@ -381,19 +385,26 @@ def past_ruling_context(payload, units):
 
 
 DEPARTS_RULING_REASON = (
-    "the Departs from line shares its topic with the open ruling %s: %s Cite it under `Based on (ruling): %s`, or change "
-    "the question so it does not ask what that ruling settled.")
+    "the Departs from line shares its topic with the open ruling(s) %s, uncited: %s Cite each under "
+    "`Based on (ruling): <id>` (%s), or change the question so it does not ask what those rulings settled.")
 
 
 def departs_ruling_refusal(units, candidates):
-    """The reason to refuse a question whose Departs from line meets an open ruling it does not cite, else ""."""
+    """The reason to refuse a question whose Departs from lines meet open rulings it does not cite, else "". It names up
+    to DEPARTS_HITS_TOP of them, so one resubmit can cite them all."""
     import question_form
+    hits, seen = [], set()
     for marker, _ in units:
-        rid, line = question_form.departs_ruling_hit(marker, candidates)
-        if rid:
-            return DEPARTS_RULING_REASON % (rid, " ".join(line.split())[:240], rid)
-    return ""
-
+        for rid, line in question_form.departs_ruling_hits(marker, candidates):
+            if rid not in seen:
+                seen.add(rid)
+                hits.append((rid, line))
+    hits = hits[:question_form.DEPARTS_HITS_TOP]
+    if not hits:
+        return ""
+    ids = [rid for rid, _ in hits]
+    quoted = " ".join("[%s] %s" % (rid, " ".join(line.partition(": ")[2].split())[:120]) for rid, line in hits)
+    return DEPARTS_RULING_REASON % (", ".join(ids), quoted, "; ".join("`Based on (ruling): %s`" % rid for rid in ids))
 
 
 def main():
