@@ -7,8 +7,8 @@
  "lane": "",
  "owner": "triage",
  "blockedBy": [],
- "why": "Owner picked item 542 c at 11:06 CST Nov 13: PR #2778 merges as built (the hold keeps an item open while his reply waits, up to 7 days), and a new step adds a Close now button.",
+ "why": "Owner picked item 542 c at 11:06 CST Nov 13: PR #2778 merges as built (the hold keeps an item open while his reply waits, up to 7 days), and a new step adds a Close now button.\n\nLane note 00:26 CST Nov 15 (coordinator 00:25 CST, relayed): stays todo. It waits for #2778 to merge (see its note) and for the drain (ruling drain-first-hold); the coordinator starts its lane then. No lane now.",
  "source": "owner 11:06 CST Nov 13, item 542 c; coordinator 11:08 CST",
  "note": "Built after #2778 merges, with a red test and a design pass (screen change: designer and design reviewer). New work: starts after the drain (ruling drain-first-hold). Item 542 closes once #2778 is in a batch.",
- "updatedAt": "2026-11-13T11:07:44-06:00"
+ "updatedAt": "2026-11-15T00:26:01-06:00"
 }

@@ -1,14 +1,14 @@
 {
  "id": "page-n-meaning-doc",
  "title": "The page tells the owner that an item number is a stable answer number, not a database id or a slug",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "later",
- "lane": "",
+ "lane": "session_013NEJL1AosWCKPhA6x3tr55",
  "owner": "coordinator",
  "blockedBy": [],
- "why": "Owner 13:14 CST Nov 12, verbatim: \"are these numbers on the artifact actual raw numbers or database ids or slugs so no one gets confused\". It was answered in chat only (feedback inbox entry fb-1314-2, text not read by triage); no step held it. What the skill says today (read, skills/waiting-page/SKILL.md line 52): an item's `n` is a stable number the owner answers by; the document key is a slug of the question. So a number is neither the database key nor a slug. Unread by triage: whether page.html labels the number anywhere the owner can see. Ask: confirm the page says so where the owner sees a number (a one-line label or hover text), or close the step by pointing at the label. Small doc or page-text fix; undoable.",
+ "why": "Owner 13:14 CST Nov 12, verbatim: \"are these numbers on the artifact actual raw numbers or database ids or slugs so no one gets confused\". It was answered in chat only (feedback inbox entry fb-1314-2, text not read by triage); no step held it. What the skill says today (read, skills/waiting-page/SKILL.md line 52): an item's `n` is a stable number the owner answers by; the document key is a slug of the question. So a number is neither the database key nor a slug. Unread by triage: whether page.html labels the number anywhere the owner can see. Ask: confirm the page says so where the owner sees a number (a one-line label or hover text), or close the step by pointing at the label. Small doc or page-text fix; undoable.\n\nLane started 00:24 CST Nov 15 (coordinator 00:25 CST, relayed): lane session_013NEJL1AosWCKPhA6x3tr55, \"the page says an item number is a stable answer number\". It read running and parented to the coordinator in list_sessions.",
  "source": "owner chat 13:14 CST Nov 12; page-asks pass 00:35 CST Nov 15 (row A15)",
  "note": "Filed 00:19 CST Nov 15 by triage. Ready, no lane. The answer lives only in chat. Tracker: the coordinator.",
- "updatedAt": "2026-11-15T00:19:00-06:00"
+ "updatedAt": "2026-11-15T00:26:01-06:00"
 }
