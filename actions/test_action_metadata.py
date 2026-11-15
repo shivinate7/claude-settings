@@ -34,8 +34,9 @@ def problems(text):
                     block = len(m[1])
         keys = [k for _, k in stack]
         allowed = bool(keys) and keys[0] == "runs" and bool(OK_KEYS & set(keys[1:]))
+        output_value = len(keys) == 3 and keys[0] == "outputs" and keys[2] == "value"  # a composite's output reads a step's output here
         for e in EXPR.finditer(line):
-            if not allowed:
+            if not (allowed or output_value):
                 out.append((n, "expression outside runs with/env/run/if: " + e[0]))
             for c in BAD_CTX.finditer(e[1]):
                 out.append((n, "context '%s' unavailable in composite actions: %s" % (c[1], e[0])))
@@ -62,6 +63,20 @@ class ActionMetadata(unittest.TestCase):
         self.assertEqual(problems("runs:\n  steps:\n    - env:\n        A: ${{ toJSON(needs) }}\n")[0][0], 4)
         self.assertEqual(problems("runs:\n  steps:\n    - run: ${{ matrix.x }}\n")[0][0], 3)
         self.assertEqual(problems("runs:\n  steps:\n    - env:\n        A: ${{ inputs.needs }}\n"), [])
+
+    def test_an_output_value_expression_is_allowed_and_no_other_output_expression_is(self):
+        # A composite's output reads a step's output in `value`. No other place under outputs or any other top-level key may hold one.
+        self.assertEqual(problems("outputs:\n  skip:\n    description: x\n    value: ${{ steps.decide.outputs.skip }}\n"), [],
+                         "an output's value expression is the one place under outputs that may hold one")
+        self.assertEqual(problems("outputs:\n  skip:\n    description: ${{ inputs.a }}\n")[0][0], 3,
+                         "an expression in an output's description is refused")
+        self.assertEqual(problems("outputs:\n  skip:\n    sub:\n      value: ${{ steps.x.outputs.y }}\n")[0][0], 4,
+                         "a value nested deeper than the output's own value is refused")
+        self.assertEqual(problems("inputs:\n  a:\n    value: ${{ inputs.b }}\n")[0][0], 3,
+                         "a value under a key other than outputs is refused")
+        bad = problems("outputs:\n  skip:\n    value: ${{ needs.x.outputs.y }}\n")
+        self.assertEqual(len(bad), 1, "a context composite actions cannot read stays refused under an output's value")
+        self.assertIn("context 'needs'", bad[0][1])
 
 
 if __name__ == "__main__":

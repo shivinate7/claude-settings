@@ -441,6 +441,80 @@ class Selector(unittest.TestCase):
         self.assertNotIn(a, macos, "a Windows-only test is in files_macos, though no macOS job runs it")
         self.assertTrue(skipped_on(stdout, a, MACOS_KEY), f"the log does not name {a} as skipped on macOS")
 
+    # R61 part 4: the macOS leg of a draft lane runs only for a file whose subject is macOS. This fixture's macOS job runs a
+    # shared suite (hooks/test_ci_wake.py) and the launchd installer's suite, so the lists are the filter's, not checks.yml's.
+    MAC_BOTH_CI = dedent("""\
+        name: fixture checks
+        on: pull_request
+        jobs:
+          macos:
+            runs-on: macos-latest
+            steps:
+              - run: python3 hooks/test_ci_wake.py
+              - run: python3 janitor/test_install_launchd.py
+        """)
+
+    def test_a_shared_test_the_macos_job_runs_is_left_out_of_files_macos_with_a_reason(self):
+        """hooks/test_ci_wake.py is a suite for every OS. The macOS job runs it, but a lane that touches only it touches no
+        macOS subject, so it is absent from files_macos and the log names it as skipped on macOS."""
+        shared = "hooks/test_ci_wake.py"
+        _, macos, stdout = self.per_os(with_checks({shared: "old\n", "janitor/test_install_launchd.py": "old\n"}, self.MAC_BOTH_CI),
+                                       {shared: "new\n"})
+        self.assertNotIn(shared, macos, f"{shared} is in files_macos, though it is not a macOS subject")
+        self.assertTrue(skipped_on(stdout, shared, MACOS_KEY), f"the log does not name {shared} as skipped on macOS")
+
+    def test_a_product_file_outside_macos_lists_no_macos_test(self):
+        """A change to hooks/ci_wake.py selects its test hooks/test_ci_wake.py. That is no macOS subject, so files_macos
+        does not list it."""
+        shared = "hooks/test_ci_wake.py"
+        base = {shared: "old\n", "hooks/ci_wake.py": "old\n", "janitor/test_install_launchd.py": "old\n"}
+        _, macos, stdout = self.per_os(with_checks(base, self.MAC_BOTH_CI), {"hooks/ci_wake.py": "new\n"})
+        self.assertNotIn(shared, macos, f"a change to hooks/ci_wake.py lists {shared} in files_macos")
+        self.assertTrue(skipped_on(stdout, shared, MACOS_KEY), f"the log does not name {shared} as skipped on macOS")
+
+    def test_a_macos_subject_test_stays_in_files_macos(self):
+        """janitor/test_install_launchd.py tests the launchd installer, a macOS subject: it stays in files_macos."""
+        mac = "janitor/test_install_launchd.py"
+        _, macos, _ = self.per_os(with_checks({mac: "old\n", "hooks/test_ci_wake.py": "old\n"}, self.MAC_BOTH_CI), {mac: "new\n"})
+        self.assertIn(mac, macos, f"{mac} tests the launchd installer, a macOS subject, and is not in files_macos")
+
+    def test_a_product_file_with_macos_code_lists_its_macos_test(self):
+        """A change to janitor/install_launchd.py, the macOS installer, selects janitor/test_install_launchd.py, which runs
+        on macOS. The shared suite is not selected, so files_macos holds the installer's test alone."""
+        mac = "janitor/test_install_launchd.py"
+        base = {mac: "old\n", "janitor/install_launchd.py": "old\n", "hooks/test_ci_wake.py": "old\n"}
+        _, macos, _ = self.per_os(with_checks(base, self.MAC_BOTH_CI), {"janitor/install_launchd.py": "new\n"})
+        self.assertEqual(macos, [mac], "a change to the macOS installer does not list its macOS test alone")
+
+    # A hooks test is a macOS subject, whatever its name, when its own text names a macOS thing (darwin, macos,
+    # launchd, uname -s, Darwin or xcrun). The selector reads the file to tell.
+    MAC_HOOK_CI = dedent("""\
+        name: fixture checks
+        on: pull_request
+        jobs:
+          macos:
+            runs-on: macos-latest
+            steps:
+              - run: python3 hooks/test_wrappers.py
+              - run: python3 hooks/test_pure_helpers.py
+        """)
+
+    def test_a_hooks_test_that_fakes_a_darwin_uname_stays_in_files_macos(self):
+        """hooks/test_wrappers.py fakes a Darwin uname for install.sh. Its own text names uname -s and Darwin, so it is a
+        macOS subject whatever its name, and it stays in files_macos."""
+        wrappers = "hooks/test_wrappers.py"
+        base = {wrappers: "old\n", "hooks/test_pure_helpers.py": "old\n"}
+        _, macos, _ = self.per_os(with_checks(base, self.MAC_HOOK_CI),
+                                  {wrappers: 'uname_stub=$(uname -s)  # fakes Darwin for install.sh\n'})
+        self.assertIn(wrappers, macos, f"{wrappers} fakes a Darwin uname, so it is a macOS subject, and is not in files_macos")
+
+    def test_a_plain_pure_python_hooks_test_is_left_off_the_macos_leg(self):
+        """hooks/test_pure_helpers.py has no macOS word in its text, so it is a shared suite: files_macos does not list it."""
+        plain = "hooks/test_pure_helpers.py"
+        base = {plain: "old\n", "hooks/test_wrappers.py": "old\n"}
+        _, macos, _ = self.per_os(with_checks(base, self.MAC_HOOK_CI), {plain: "def test_add():\n    assert 1 + 1 == 2\n"})
+        self.assertNotIn(plain, macos, f"{plain} has no macOS word, yet files_macos lists it")
+
     # Row 2: a .ps1 source maps to its own .test.ps1 and install-*.test.ps1 beside it.
     def test_a_ps1_source_lists_its_test_and_its_dash_tests(self):
         base = {"install.ps1": "old\n", "install.test.ps1": "old\n", "install-no-gap.test.ps1": "old\n"}
@@ -862,22 +936,21 @@ class Selector(unittest.TestCase):
                          "a backslash-joined run line did not resolve its command to node --test")
 
     # Item 4: a chain before the test path is not a command word. The run line exits 1, naming its line.
-    def chained_line_exits_1(self, run):
-        """A checks.yml whose one windows run line is `run`, with a test changed. Exit 1, no output, the line named."""
-        a = "lint/test_a.py"
+    def run_line_exits_1(self, run, a="lint/test_a.py"):
+        """A checks.yml whose one windows run line is `run`, with test `a` changed. Exit 1, no output, the line named."""
         text = ("name: fixture checks\non: pull_request\njobs:\n  windows:\n    runs-on: windows-latest\n"
                 f"    steps:\n      - run: {run}\n")
         stderr = self.exits_1(with_checks({a: "old\n"}, text), {a: "new\n"})
-        self.assertIn(f"line {self.line_of(text, run)}", stderr, f"the exit does not name the chained run line: {stderr}")
+        self.assertIn(f"line {self.line_of(text, run)}", stderr, f"the exit does not name the run line: {stderr}")
 
     def test_a_chain_and_before_the_test_path_exits_1_naming_its_line(self):
-        self.chained_line_exits_1("python3 lint/gen.py && python3 lint/test_a.py")
+        self.run_line_exits_1("python3 lint/gen.py && python3 lint/test_a.py")
 
     def test_a_chain_semicolon_before_the_test_path_exits_1_naming_its_line(self):
-        self.chained_line_exits_1("python3 lint/gen.py; python3 lint/test_a.py")
+        self.run_line_exits_1("python3 lint/gen.py; python3 lint/test_a.py")
 
     def test_a_chain_pipe_before_the_test_path_exits_1_naming_its_line(self):
-        self.chained_line_exits_1("python3 lint/gen.py | python3 lint/test_a.py")
+        self.run_line_exits_1("python3 lint/gen.py | python3 lint/test_a.py")
 
     # Item 4 control: a chain after the test path leaves the command word as the path's own command.
     def test_a_chain_after_the_test_path_still_resolves_the_command(self):
@@ -934,6 +1007,64 @@ class Selector(unittest.TestCase):
         self.assertEqual(windows, [a], "a backtick-continued powershell run line did not list its test on Windows")
         self.assertEqual(self.commands_of(outputs, "commands_windows"), {a: "python"},
                          "a backtick-continued powershell run line did not resolve its command to python")
+
+    # An interpreter named by its absolute path reads as that interpreter: the basename is the command word.
+    def run_line_in_both_jobs(self, a, run):
+        """A checks.yml whose windows and macos jobs each run `run`, with test `a` changed. -> outputs, exit 0 checked."""
+        text = ("name: fixture checks\non: pull_request\njobs:\n"
+                "  windows:\n    runs-on: windows-latest\n    steps:\n"
+                f"      - run: {run}\n"
+                "  macos:\n    runs-on: macos-latest\n    steps:\n"
+                f"      - run: {run}\n")
+        outputs, _ = self.run_outputs(with_checks({a: "old\n"}, text), {a: "new\n"})
+        return outputs
+
+    def test_a_bin_bash_run_line_reads_as_bash_on_the_windows_and_macos_jobs(self):
+        a = "lint/test_x.sh"
+        outputs = self.run_line_in_both_jobs(a, "/bin/bash lint/test_x.sh")
+        windows, macos = self.os_lists(outputs)
+        self.assertEqual(windows, [a], "files_windows does not list the test the Windows job runs by /bin/bash")
+        self.assertEqual(macos, [a], "files_macos does not list the test the macOS job runs by /bin/bash")
+        self.assertEqual(self.commands_of(outputs, "commands_windows"), {a: "bash"},
+                         "commands_windows does not read /bin/bash as bash")
+        self.assertEqual(self.commands_of(outputs, "commands_macos"), {a: "bash"},
+                         "commands_macos does not read /bin/bash as bash")
+
+    def test_a_usr_bin_python3_run_line_reads_as_python3_on_the_windows_and_macos_jobs(self):
+        a = "lint/test_x.py"
+        outputs = self.run_line_in_both_jobs(a, "/usr/bin/python3 lint/test_x.py")
+        windows, macos = self.os_lists(outputs)
+        self.assertEqual(windows, [a], "files_windows does not list the test the Windows job runs by /usr/bin/python3")
+        self.assertEqual(macos, [a], "files_macos does not list the test the macOS job runs by /usr/bin/python3")
+        self.assertEqual(self.commands_of(outputs, "commands_windows"), {a: "python3"},
+                         "commands_windows does not read /usr/bin/python3 as python3")
+        self.assertEqual(self.commands_of(outputs, "commands_macos"), {a: "python3"},
+                         "commands_macos does not read /usr/bin/python3 as python3")
+
+    # Controls: a path that names no interpreter, or a basename that only starts with one, still exits 1 naming its line.
+    def test_an_absolute_path_that_is_not_an_interpreter_exits_1_naming_its_line(self):
+        self.run_line_exits_1("/tmp/evil lint/test_x.sh", a="lint/test_x.sh")
+
+    def test_an_absolute_bashx_basename_exits_1_naming_its_line(self):
+        self.run_line_exits_1("/bin/bashx lint/test_x.sh", a="lint/test_x.sh")
+
+    def test_an_absolute_path_outside_the_interpreter_dirs_exits_1(self):
+        self.run_line_exits_1("/tmp/bash lint/test_x.sh", a="lint/test_x.sh")
+
+    # The real checks.yml at HEAD, the full-size state. Its shell-macos job runs the duo-fold harness by /bin/bash, so
+    # touching that test must read the line, not fail on it.
+    def test_the_real_checks_yml_at_head_reads_the_shell_macos_bin_bash_line(self):
+        a = "lint/test_duo_fold.sh"
+        with open(os.path.join(HERE, "..", ".github", "workflows", "checks.yml"), encoding="utf-8") as f:
+            real_lines = [line.strip() for line in f.read().splitlines()]
+        self.assertIn("run: /bin/bash lint/test_duo_fold.sh", real_lines,
+                      "the real checks.yml runs no test by /bin/bash, so this case probes nothing")
+        outputs, _ = self.run_outputs({a: "old\n"}, {a: "new\n"})
+        windows, macos = self.os_lists(outputs)
+        self.assertEqual(windows, [], "files_windows lists the duo-fold test, which no Windows job runs")
+        self.assertEqual(macos, [a], "files_macos does not list the duo-fold test the shell-macos job runs")
+        self.assertEqual(self.commands_of(outputs, "commands_macos"), {a: "bash"},
+                         "commands_macos does not read the shell-macos job's /bin/bash line as bash")
 
 
 if __name__ == "__main__":

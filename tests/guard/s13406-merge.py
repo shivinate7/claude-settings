@@ -273,13 +273,13 @@ add("merge-checks: the merge tool of the host denies on a pending head", "deny",
 add("merge-checks: the merge tool of the host denies on a failed head", "deny", "merge-checks",
     carries="settled: red", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12,
     repo="x", owner="y", env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
-# The batch brake (roadmap step c195): a merge is refused while another ready pull request on the base has a required check
-# pending, by `gh pr merge` and by the host's merge tool. The merged pull request is 1, the other is 2 (its head is pr-two-head).
+# The batch brake is removed: a merge is allowed while another ready pull request on the base has a required check pending,
+# by `gh pr merge` and by the host's merge tool. The merged pull request is 1, the other is 2 (its head is pr-two-head).
 BATCH_ON = GHBATCH + os.pathsep + PY_PATH
-sh("merge-batch: gh pr merge is refused while another ready pr has a required check pending",
-   "gh pr merge 1 --squash", "deny", "merge-checks", carries="#2", cwd=NOGIT, env_path=BATCH_ON, config=MERGECFG)
-add("merge-batch: the merge tool of the host is refused while another ready pr has a required check pending", "deny", "merge-checks",
-    carries="#2", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=1, repo="x", owner="y",
+sh("merge-batch: gh pr merge is allowed while another ready pr has a required check pending",
+   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=BATCH_ON, config=MERGECFG)
+add("merge-batch: the merge tool of the host is allowed while another ready pr has a required check pending", "allow",
+    tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=1, repo="x", owner="y",
     env_path=BATCH_ON, config=MERGECFG)
 sh("merge-batch: gh pr merge is allowed when the other ready pr's required check has passed",
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHBATCHDONE + os.pathsep + PY_PATH)
@@ -290,29 +290,28 @@ add("merge-batch: the merge tool of the host is allowed when the other ready pr'
     env_path=GHBATCHDONE + os.pathsep + PY_PATH)
 sh("merge-batch: gh pr merge is allowed while another ready pr that holds this head has a required check pending",
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHBATCHCONTAIN + os.pathsep + PY_PATH)
-sh("merge-batch: gh pr merge is refused while another ready pr that does not hold this head has a required check pending",
-   "gh pr merge 1 --squash", "deny", "merge-checks", carries="#2", cwd=NOGIT, env_path=GHBATCHDIVERGED + os.pathsep + PY_PATH)
-sh("merge-batch: gh pr merge is refused while another ready pr holds this head but this head is behind main",
-   "gh pr merge 1 --squash", "deny", "merge-checks", carries="#2", cwd=NOGIT, env_path=GHBATCHBEHIND + os.pathsep + PY_PATH)
-# The guard's required names. A pinned merge.requiredChecks list is the list, with no protection read (STAMPREPO pins `checks`).
-# With no branch protection (a 404) every pending check on the other ready pull request counts. A protection read that fails any
-# other way is unknown, and a merge with an unknown read is denied.
-sh("merge-batch: with no branch protection a pending check on the other ready pr refuses gh pr merge",
-   "gh pr merge 1 --squash", "deny", "merge-checks", carries="#2", cwd=NOGIT, env_path=GHNOPROT + os.pathsep + PY_PATH)
+sh("merge-batch: gh pr merge is allowed while another ready pr that does not hold this head has a required check pending",
+   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHBATCHDIVERGED + os.pathsep + PY_PATH)
+sh("merge-batch: gh pr merge is allowed while another ready pr holds this head but this head is behind main",
+   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHBATCHBEHIND + os.pathsep + PY_PATH)
+# The batch brake is removed: no other ready pull request's checks, and no base protection read, refuse a merge.
+# A protection read that fails with a server error or on the network does not deny a merge whose head reads green.
+sh("merge-batch: with no branch protection a pending check on the other ready pr does not refuse gh pr merge",
+   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHNOPROT + os.pathsep + PY_PATH)
 sh("merge-batch: with no branch protection a passed check on the other ready pr allows gh pr merge",
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHNOPROTDONE + os.pathsep + PY_PATH)
-sh("merge-batch: a protection read that fails with a server error is unknown, and denies gh pr merge",
-   "gh pr merge 1 --squash", "deny", "merge-checks", carries="unknown", cwd=NOGIT, env_path=GHPROT500 + os.pathsep + PY_PATH)
-sh("merge-batch: a protection read that fails on the network is unknown, and denies gh pr merge",
-   "gh pr merge 1 --squash", "deny", "merge-checks", carries="unknown", cwd=NOGIT, env_path=GHPROTNET + os.pathsep + PY_PATH)
-# A running workflow on another ready pull request holds the merge before its required check reports: scope runs first and checks needs it.
-sh("merge-batch: gh pr merge is refused while another ready pr's workflow runs, before its required check reports",
-   "gh pr merge 1 --squash", "deny", "merge-checks", carries=("#2", "ci-checks"), cwd=NOGIT, env_path=GHRUNBLOCK + os.pathsep + PY_PATH)
-add("merge-batch: the merge tool of the host is refused while another ready pr's workflow runs", "deny", "merge-checks",
-    carries=("#2", "ci-checks"), tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=1, repo="x", owner="y",
+sh("merge-checks: a protection read that fails with a server error still allows gh pr merge on a green head",
+   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHPROT500 + os.pathsep + PY_PATH)
+sh("merge-checks: a protection read that fails on the network still allows gh pr merge on a green head",
+   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHPROTNET + os.pathsep + PY_PATH)
+# A running or queued workflow on another ready pull request does not hold a merge: the batch brake that read it is removed.
+sh("merge-batch: gh pr merge is allowed while another ready pr's workflow runs, before its required check reports",
+   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHRUNBLOCK + os.pathsep + PY_PATH)
+add("merge-batch: the merge tool of the host is allowed while another ready pr's workflow runs", "allow",
+    tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=1, repo="x", owner="y",
     env_path=GHRUNBLOCK + os.pathsep + PY_PATH)
-sh("merge-batch: gh pr merge is refused while another ready pr's workflow is queued with no check rows",
-   "gh pr merge 1 --squash", "deny", "merge-checks", carries=("#2", "ci-checks"), cwd=NOGIT, env_path=GHRUNNONE + os.pathsep + PY_PATH)
+sh("merge-batch: gh pr merge is allowed while another ready pr's workflow is queued with no check rows",
+   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHRUNNONE + os.pathsep + PY_PATH)
 sh("merge-batch: gh pr merge is allowed when the other ready pr's workflow has finished",
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHRUNDONE + os.pathsep + PY_PATH)
 NEED_ON = GHNEED + os.pathsep + PY_PATH
@@ -958,13 +957,17 @@ role_refuse("a lone quote in a comment does not hide the call on the next line",
 # RECFORK on roadmap-fork (its extras name that branch).
 RECORD_RULE = "roadmap-one-writer"
 RECORD_LACKS = ("origin roadmap", "HEAD:roadmap")  # the refusal never names the push it refuses
+# The remedy sends the session to fetch, then run `git merge-base --is-ancestor <commit> origin/<record branch>`,
+# so the owner is asked to push only a commit the record branch lacks. `git branch -r --contains` is not the check:
+# a commit on a lane branch alone would read as already on the record branch.
+RECORD_CARRIES = ("git fetch origin", "git merge-base --is-ancestor", "origin/<record branch>", "ask the owner only when")
 LANE_TRANSCRIPT = role_path("lane")
 TRIAGE_TRANSCRIPT = role_path("triage")
 
 
 def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, **kw):
     """A git push the guard refuses under roadmap-one-writer. The reason names the rule, never the push."""
-    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, lacks=RECORD_LACKS,
+    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, carries=RECORD_CARRIES, lacks=RECORD_LACKS,
        transcript=transcript, env=env, cwd=cwd, **kw)
 
 
@@ -1120,8 +1123,10 @@ def record_push_cost_case():
     default base, costs one `git symbolic-ref` for
     origin/HEAD and one `git rev-parse --verify` per candidate branch tried, until one exists. A `git show`
     runs only when a marker finding needs its line read. The layout and extras files
-    are read once each. A spawn log cannot show a file read, so that cost is unmeasured here. The
-    transcript is read only when the push reaches the record branch: a push to another branch passes
+    are read once each. A spawn log cannot show a file read, so that cost is unmeasured here. The red-run
+    check (rule red-run, decision red-run-trailer-on-test-commits) adds one `git log` per push that reaches a
+    readable base, and no diff read of its own, so each row above that reaches a base counts one `log`.
+    The transcript is read only when the push reaches the record branch: a push to another branch passes
     with an unreadable transcript, and a push to the record branch with one is refused. A stand-in git
     on PATH logs each spawn."""
     if os.name == "nt":
@@ -1152,19 +1157,21 @@ def record_push_cost_case():
 
     for label, tail, want, *cwd in (
         ("a refspec push to lane/foo", "push origin lane/foo",
-         {"rev-parse": 1, "symbolic-ref": 1, "diff": 1, "rev-list": 1}),
-        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1, "rev-list": 1}),
-        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1, "rev-list": 1}),
-        ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "config": 1, "diff": 1}),
-        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1, "config": 1, "diff": 1}),
+         {"rev-parse": 1, "symbolic-ref": 1, "diff": 1, "rev-list": 1, "log": 1}),
+        ("a HEAD push", "push origin HEAD",
+         {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1, "rev-list": 1, "log": 1}),
+        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1, "rev-list": 1, "log": 1}),
+        ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "config": 1, "diff": 1, "log": 1}),
+        ("a literal destination, HEAD:main", "push origin HEAD:main",
+         {"rev-parse": 1, "config": 1, "diff": 1, "log": 1}),
         ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo",
-         {"rev-parse": 1, "diff": 1, "rev-list": 1}),
+         {"rev-parse": 1, "diff": 1, "rev-list": 1, "log": 1}),
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
-         {"rev-parse": 2, "symbolic-ref": 1, "diff": 3, "rev-list": 1}),
+         {"rev-parse": 2, "symbolic-ref": 1, "diff": 3, "rev-list": 1, "log": 1}),
         # A stray push: HEAD on a branch tracking another name. The destination's ref is read and is absent, so
         # the conflict check rejects that base and reads the upstream: two diff reads.
         ("a stray push, HEAD on a branch tracking another name", "push origin HEAD",
-         {"rev-parse": 2, "symbolic-ref": 2, "config": 1, "diff": 2, "rev-list": 1}, PUSHSTRAY),
+         {"rev-parse": 2, "symbolic-ref": 2, "config": 1, "diff": 2, "rev-list": 1, "log": 1}, PUSHSTRAY),
         # rule push-all-main. push_ask_hit alone reads, for a --all push to a network remote, the remote's config, the
         # current branch (the agent test), one for-each-ref of the tracking refs, and one for-each-ref of the local
         # branches when the tracking refs show no update. A glob reads the config and the same two for-each-ref reads.
@@ -1175,9 +1182,14 @@ def record_push_cost_case():
         ("a --all push to a network remote", "push --all origin",
          {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "for-each-ref": 2}),
         ("a glob push to a network remote", "push origin refs/heads/*:refs/heads/*",
-         {"rev-parse": 2, "symbolic-ref": 1, "config": 1, "for-each-ref": 2, "diff": 3, "rev-list": 1}),
+         {"rev-parse": 2, "symbolic-ref": 1, "config": 1, "for-each-ref": 2, "diff": 3, "rev-list": 1, "log": 1}),
         ("a --all push to a local-path origin", "push --all origin",
          {"rev-parse": 1, "symbolic-ref": 1, "config": 2}, PUSHLOCALAHEAD),
+        # rule red-run (decision red-run-trailer-on-test-commits): a push that sends a docs commit and no test path adds
+        # one `git log` for the rule's check, and no diff read of its own: the one diff is the conflict-markers base.
+        # RR_DOCS is built in section 43400, which loads after this one.
+        ("a push of a docs-only commit, no test path", "push origin topic",
+         {"config": 1, "diff": 1, "rev-list": 1, "rev-parse": 1, "symbolic-ref": 1, "log": 1}, RR_DOCS),
     ):
         kinds, lines = spawn_kinds(VCS + " " + tail, cwd[0] if cwd else PUSHFEAT)
         if kinds != want:
@@ -1200,7 +1212,8 @@ def record_push_cost_case():
         problems.append("a push to roadmap with an unreadable transcript: %s, want deny" % got)
     if problems:
         return False, "; ".join(problems)
-    return True, "one rev-parse per push, one more for a stray push, symbolic-ref for HEAD and bare, " \
+    return True, "one rev-parse per push, one more for a stray push, one git log for red-run, " \
+                 "symbolic-ref for HEAD and bare, " \
                  "push.default for bare only, one rev-list per pushed ref not to main or master; " \
                  "the transcript is read only at the record branch"
 
