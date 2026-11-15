@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The dry combine train (roadmap step combine-train-tool): fold the queued batches behind the frozen ones, in dry rounds, and print per-batch numbers.
 
-  python3 merge/combine_train.py --queue FILE --root DIR [--lint] [--from-rest]
+  python3 merge/combine_train.py (--queue FILE | --from-rest [--repo OWNER/NAME]) --root DIR [--lint]
 
 Standalone. merge.py never imports it, so it changes no merge verdict. It never runs `git push`, `gh pr ready`, `gh pr merge` or creates a pull request.
 Its writes are git objects (`git merge-tree`, `git commit-tree`) in the checkout DIR and one temporary worktree per batch, removed at the end.
@@ -23,15 +23,26 @@ is not built as a rule. The header line names the readings:
   (f) before any pairing, each queued member is merge-tested against origin/main in DIR. A member that clashes with main leaves by name with its
       paths and `(clash with main)`. A merge with main is no pair tried, and a main clash is not in the clash rate's numerator.
 
+--from-rest reads the queue from GitHub instead of a file, through merge.Host (the one home of the REST reads; this tool adds no REST client):
+Host.pages("pulls", fields={"state": "open"}) for the open pulls, then Host.head_read(n) for each ready one (a draft is not in the queue).
+  (g) the queue order is the PR number, ascending: REST holds no priority, and an owner's priority list is not read here.
+  (h) the state of a ready PR is its CI reading. Every `pending` PR is the in-ci batch (one batch, frozen). The first `green` PR in order is the
+      next-in-line batch (one PR, frozen). The other `green` PRs are the one queued batch that folds. A `red` PR is not queued and prints
+      `left out #N: red (<name>)`. An `unknown` PR prints `unknown (<why>)`, is not queued, and makes the exit code 2.
+Each queued PR's head sha is the REST read's. One `git fetch origin refs/pull/N/head ...` brings the heads into DIR; a head that is still missing after the
+fetch (or a failed fetch) is unknown for that PR, never a pass. --repo defaults to the origin of DIR; an origin that is no URL leaves the repo to `gh` run in DIR.
+The run prints the queue it read (one line per PR with its state) before the batches, and a last `wall seconds` line from the injected clock. Reads only: every REST call is a GET.
 The clash rate is the members a pair clash left out, over the pairs tried (a group merge and each retry of its members are each a pair).
 A number the tool did not measure prints `unknown` or `n/a (reason)`, never 0 and never a guess.
 Exit: 0 ok, 1 a member left out or a check failed, 2 something unknown or a run that could not start (a git that is not on PATH included).
 Cost: per fold, one `git merge-tree` start per member (against main) and per pair tried and one `git commit-tree` start per merge; per round, one ci-job run per job of the checks when they have a home;
 with --lint, one more ci-job run per batch. One temporary worktree per batch. Nothing is logged or left running.
+Cost of --from-rest on top: the gh reads (one pulls list, then per ready PR the pr, check, status and run reads of head_read), one git fetch, no write, no file, no process kept.
 """
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -46,10 +57,14 @@ BASE = "origin/main"
 STATES = ("in-ci", "next-in-line", "queued")
 FROZEN = ("in-ci", "next-in-line")
 NO_HOME = "unknown (fast-checks-before-ready not landed)"
-HEADER = ("combine-train: dry run, no push, no gh pr ready or merge. Readings used: (a) in-ci and next-in-line batches are frozen and the queued "
-          "batches behind them fold into one; (b) a clashing member leaves by name; (c) dry rounds ignore a move of main; "
-          "(d) the fast checks run once per round on its leading tip; (e) --lint runs once on a folded batch's final tree; "
-          "(f) each member is merge-tested against origin/main first, and a clash with main leaves by name. Queue schema: the tool's own.")
+HEADER_CORE = ("combine-train: dry run, no push, no gh pr ready or merge. Readings used: (a) in-ci and next-in-line batches are frozen and the queued "
+               "batches behind them fold into one; (b) a clashing member leaves by name; (c) dry rounds ignore a move of main; "
+               "(d) the fast checks run once per round on its leading tip; (e) --lint runs once on a folded batch's final tree; "
+               "(f) each member is merge-tested against origin/main first, and a clash with main leaves by name.")
+HEADER = HEADER_CORE + " Queue schema: the tool's own."
+REST_HEADER = (HEADER_CORE + " Queue read from GitHub, reads only: (g) the queue order is the PR number, ascending, because REST holds no priority "
+               "and an owner's priority list is not read here; (h) the state of a ready PR is its CI reading: pending is the in-ci batch, the first green "
+               "is the next-in-line batch, the other green ones are the queued batch that folds, red is left out by name, unknown is not queued.")
 
 
 class QueueError(Exception):
@@ -336,20 +351,23 @@ def main(argv, clock=None):
     p.add_argument("--queue", help="the queue JSON file")
     p.add_argument("--root", required=True, help="a checkout of the repo that holds the PR heads")
     p.add_argument("--lint", action="store_true", help="run `ci-job checks --lint` once on each folded batch's final tree")
-    p.add_argument("--from-rest", action="store_true", help="read the queue from GitHub (not built)")
+    p.add_argument("--from-rest", action="store_true", help="read the queue from GitHub REST (reads only) instead of --queue FILE")
+    p.add_argument("--repo", help="OWNER/NAME for --from-rest; default: the origin of --root")
     args = p.parse_args(argv)
-    if args.from_rest:
-        print("unknown (not built): --from-rest; give --queue FILE")
+    if args.from_rest and args.queue:
+        print("unknown: --from-rest and --queue cannot be given together; give one of them")
         return 2
-    if not args.queue:
-        print("unknown: no queue given; give --queue FILE")
-        return 2
-    try:
-        heads, batches = read_queue(args.queue)
-    except QueueError as e:
-        print(f"unknown: {e}")
+    if not args.from_rest and not args.queue:
+        print("unknown: no queue given; give --queue FILE or --from-rest")
         return 2
     try:
+        if args.from_rest:
+            return run_rest(args, clock)
+        try:
+            heads, batches = read_queue(args.queue)
+        except QueueError as e:
+            print(f"unknown: {e}")
+            return 2
         return run(args, heads, batches, clock)
     except OSError as e:  # a program that cannot start, in practice git missing from PATH
         print(f"unknown: a program cannot start ({e.filename or 'git'}: {e.strerror or e}); the dry fold needs git on PATH")
@@ -380,6 +398,95 @@ def run(args, heads, batches, clock):
                 lines, out, bad, unk = fold_batch(fname, folded, heads, steps, why, args.lint, clock, args.root)
                 print("\n".join(lines))
                 left, failed, unknown = left or out > 0, failed or bad, unknown or unk
+    return 2 if unknown else 1 if left or failed else 0
+
+
+def origin_repo(root):
+    """-> OWNER/NAME read from the origin URL of `root`, or None for an origin that is no URL (a path), which leaves the repo to `gh` run in `root`."""
+    code, out, _err = git(root, "remote", "get-url", "origin")
+    m = None if code else re.match(r"^(?:[a-z][a-z0-9+.-]*://[^/]+/|[^/@]+@[^/:]+:)(?:.*/)?([^/]+)/([^/]+?)(?:\.git)?/?$", out)
+    return f"{m.group(1)}/{m.group(2)}" if m else None
+
+
+def fetch_heads(root, members, heads):
+    """One `git fetch` of refs/pull/N/head for every member. -> {member: why} for each member whose head is not in `root` afterwards (all of them on a failed fetch)."""
+    code, out, err = git(root, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin", *[f"refs/pull/{m}/head" for m in members])
+    first = (err or out or "no output").splitlines()[0]
+    missing = {}
+    for m in members:
+        if code:
+            missing[m] = f"git fetch of refs/pull/{m}/head failed: {first}"
+        elif git(root, "cat-file", "-e", f"{heads[m]}^{{commit}}")[0]:
+            missing[m] = f"the head {heads[m][:9]} is not in the checkout after the fetch"
+    return missing
+
+
+def read_rest(host):
+    """-> (lines, in_ci, next_in_line, queued, heads, left_red, unknown): the queue read from GitHub, in PR order (reading g), by CI reading (h).
+    `lines` is one line per open PR with its state; `left_red` is [(n, name)]; `unknown` is True when a ready PR could not be read."""
+    rows = sorted(host.pages("pulls", fields={"state": "open"}), key=lambda r: int(r["number"]))
+    state, heads, left_red, unknown = {}, {}, [], False
+    in_ci, green = [], []
+    for row in rows:
+        n = int(row["number"])
+        if row.get("draft"):
+            state[n] = "draft, not queued"
+            continue
+        heads[n] = str(row["head"]["sha"])
+        verdict, detail = host.head_read(n)
+        if verdict == "pending":
+            in_ci.append(n)
+            state[n] = "pending, in the in-ci batch"
+        elif verdict == "green":
+            green.append(n)
+        elif verdict == "red":
+            left_red.append((n, detail))
+            state[n] = "red, not queued"
+        else:
+            unknown = True
+            state[n] = f"unknown ({detail or 'no reason given'}), not queued"
+    nxt, queued = green[:1], green[1:]
+    for n in nxt:
+        state[n] = "green, the next-in-line batch"
+    for n in queued:
+        state[n] = "green, in the queued batch"
+    return [f"queue #{n}: {state[n]}" for n in sorted(state)], in_ci, nxt, queued, heads, left_red, unknown
+
+
+def run_rest(args, clock):
+    """--from-rest: read the queue from GitHub through merge.Host, print it, then the batches as run() does. -> the exit code."""
+    start = clock()
+    print(REST_HEADER)
+    host = merge.Host(repo=args.repo or origin_repo(args.root), cwd=args.root)
+    try:
+        lines, in_ci, nxt, queued, heads, left_red, unknown = read_rest(host)
+    except Exception as e:  # a failed read (merge.Stop) or a reply that is no pull list: the queue is unknown, never empty
+        print(f"unknown: the open pulls could not be read from GitHub: {e}")
+        return 2
+    print("\n".join(lines))
+    for n, name in left_red:
+        print(f"left out #{n}: red ({name})")
+    left = bool(left_red)
+    failed = False
+    for name, members in (("in-ci", in_ci), ("next-in-line", nxt)):
+        if members:
+            print("\n".join(plain_block(name, name, members, "frozen")))
+    if queued:
+        missing = fetch_heads(args.root, queued, heads)
+        for n, why in missing.items():
+            print(f"left out #{n}: unknown ({why})")
+        unknown = unknown or bool(missing)
+        folded = [m for m in queued if m not in missing]
+        if folded:
+            steps, why = ready_steps(args.root)
+            block, out, bad, unk = fold_batch("queued", folded, heads, steps, why, args.lint, clock, args.root)
+            print("\n".join(block))
+            left, failed, unknown = left or out > 0, bad, unknown or unk
+    try:
+        wall = f"{float(clock()) - float(start):.2f}"
+    except (TypeError, ValueError):
+        wall = "unknown (the clock gave no number)"
+    print(f"wall seconds: {wall}")
     return 2 if unknown else 1 if left or failed else 0
 
 
