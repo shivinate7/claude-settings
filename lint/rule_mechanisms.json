@@ -224,8 +224,10 @@
     },
     "git-ci-wait-checks-in": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No hook sees that a cloud session is waiting on CI, or reads whether it set a send_later check-in. The ci-done comment covers the red-run wake; the check-in covers a lost wake."
+        "kind": "check",
+        "ref": "hooks/stall_watch.py",
+        "setting": {"file": "settings.json", "path": "hooks.Stop[*].hooks[*].command", "contains": "stall_watch.py"},
+        "reason": "The stall watch (hooks/stall_watch.py --stop) sees that a ready PR has a check-in. It does not read how long the wait is. The cap is a second mechanism, the guard rule ci-wait-cap (hooks/guard.py ci_wait_hit, decision ci-wait-cap-guard, test hooks/test_guard.py::ci-wait-cap: a CI check-in of 90 minutes is refused). It sees only the limit, not that each check-in is spaced wider than the last."
       }
     },
     "git-ci-done-comment-wakes": {
@@ -235,11 +237,11 @@
         "test": "actions/ci-done-comment/test_comment.py::Body.test_failed_job_is_named"
       }
     },
-    "git-no-merge-during-batch-ci": {
+    "git-red-main-reverts": {
       "mechanism": {
         "kind": "check",
         "ref": "merge/merge.py",
-        "test": "merge/test_merge.py::BatchBrake.test_confirm_refuses_while_another_ready_pr_has_a_required_check_pending"
+        "test": "merge/test_merge.py::RedMainBrake.test_a_revert_merged_with_its_tree_proven_lifts_a_red_main"
       }
     },
     "git-never-discard-output": {
@@ -285,7 +287,7 @@
     "git-integration-branch-merge": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Sequencing overlapping PRs into one integration branch and closing the originals is a manual coordination step. merge/merge.py refuses one part only: a batch that drops a lane by a revert (refuse_dropped_lane)."
+        "reason": "Whether each lane PR merges alone, on the review its risk needs, is a coordination step no check reads. merge/merge.py refuses a PR that is not green on its own head (git-never-merge-failing-ci) and a merge that drops a lane by a revert (refuse_dropped_lane)."
       }
     },
     "verification-screens-verdict": {
@@ -335,6 +337,12 @@
       "mechanism": {
         "kind": "unmechanized",
         "reason": "lint/ste_lint.py checks sentence style, not whether a published number or path has a reader that actually checked it."
+      }
+    },
+    "verification-counts-from-rest": {
+      "mechanism": {
+        "kind": "judgment",
+        "reason": "Model-judged by hooks/reply_judge.py, which flags a search total quoted as a count and never refuses (per reply-judge-samples-never-refuses)."
       }
     },
     "verification-report-unknown-reads": {
