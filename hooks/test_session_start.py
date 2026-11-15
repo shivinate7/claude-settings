@@ -656,7 +656,7 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         self.assertTrue(self.binds(self.lane_role_sentence(), r"\b(?:never|not|no)\b", r"--ready"),
                         "the lane role sentence does not say a lane never runs --ready")
 
-    def test_no_sentence_of_the_tier_line_says_a_lane_never_merges(self):
+    def test_no_sentence_of_the_role_line_says_a_lane_never_merges(self):
         told = [s for s in sentences(hook_role_line()) if self.lane_never_merges(s)]
         self.assertEqual(told, [], "the tier line still says a lane never merges: %r" % told)
 

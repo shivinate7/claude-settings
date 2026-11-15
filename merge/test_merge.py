@@ -14383,24 +14383,24 @@ def role_tuple_in_source(text, name):
     return None
 
 
-class GuardRoleTiersMatch(unittest.TestCase):
+class GuardRoleNamesMatch(unittest.TestCase):
     """The guard cannot import merge/merge.py, so hooks/guard_merge.py names the merge tiers in its own constants, ROLE_TIERS and
     LOCAL_ROLE_TIERS. These cases read those constants from the guard's source, never by import, and compare them with the merge tool's
     MERGE_ROLES and LOCAL_MERGE_ROLES, so a drifted copy goes red."""
 
     GUARD = os.path.join(os.path.dirname(HERE), "hooks", "guard_merge.py")
 
-    def guard_tiers(self, name):
+    def guard_role_names(self, name):
         with open(self.GUARD, encoding="utf-8") as f:
             found = role_tuple_in_source(f.read(), name)
         self.assertIsNotNone(found, f"hooks/guard_merge.py has no top-level {name} to compare with the merge tool")
         return found
 
-    def test_the_guard_role_tiers_are_the_merge_roles(self):
-        self.assertEqual(self.guard_tiers("ROLE_TIERS"), set(merge.MERGE_ROLES), "the guard's ROLE_TIERS drifted from merge.py MERGE_ROLES")
+    def test_the_guard_role_names_are_the_merge_roles(self):
+        self.assertEqual(self.guard_role_names("ROLE_TIERS"), set(merge.MERGE_ROLES), "the guard's ROLE_TIERS drifted from merge.py MERGE_ROLES")
 
-    def test_the_guard_local_role_tiers_are_the_local_merge_roles(self):
-        self.assertEqual(self.guard_tiers("LOCAL_ROLE_TIERS"), set(merge.LOCAL_MERGE_ROLES),
+    def test_the_guard_local_role_names_are_the_local_merge_roles(self):
+        self.assertEqual(self.guard_role_names("LOCAL_ROLE_TIERS"), set(merge.LOCAL_MERGE_ROLES),
                          "the guard's LOCAL_ROLE_TIERS drifted from merge.py LOCAL_MERGE_ROLES")
 
     # green controls (P2): the reader takes a literal tuple, and a drifted copy differs from the merge tool's set
@@ -14826,10 +14826,10 @@ CLOUD_ALLOW_RULES = tuple(f"Bash({shim} * --confirm{tail})" for shim in CLOUD_AL
 # so it cannot pass --confirm or a PR number. The tiers come from decision session-tiers (the session tier design). The lane's one rule is
 # `--role lane --step *` (ruling own-lanes-merge-claude-settings-prs, owner 11:12 CST Nov 15, 2026): its step is the only word after the
 # tier, and the only star. No other lane form is allowed.
-LANE_TIER = "lane"
+LANE_ROLE = "lane"
 LANE_STEP_RULE = "Bash(~/.claude/bin/merge --role lane --step *)"
-CLOUD_ROLE_RULES = tuple(f"Bash({shim} --role {tier})" for shim in CLOUD_ALLOW_SHIMS
-                         for tier in sorted(merge.MERGE_ROLES - {LANE_TIER})) + (LANE_STEP_RULE,)
+CLOUD_ROLE_RULES = tuple(f"Bash({shim} --role {role})" for shim in CLOUD_ALLOW_SHIMS
+                         for role in sorted(merge.MERGE_ROLES - {LANE_ROLE})) + (LANE_STEP_RULE,)
 # One left-to-right pass over a shell script: a quoted string, an escaped character, or a comment, whichever starts first. A `#` opens a
 # comment at a line start or after a space, `;`, `&`, `|` or `(`, never inside a string or in `$#` and `${#x}`.
 SH_TOKEN = re.compile(r"""'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?:^|(?<=[\s;&|(]))#[^\n]*""", re.M | re.S)
