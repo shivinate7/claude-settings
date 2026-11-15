@@ -5591,7 +5591,7 @@ def replaced_names(info, n):
 
 LANE_ROLE = "lane"  # a lane's merge role: its role record also names its step, and it merges only its own pull request (ruling own-lanes-merge-claude-settings-prs)
 MERGE_ROLES = {"batch-runner", LANE_ROLE}  # the roles that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
-LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose pull requests a lane merges itself: the owner's ruling covers it alone
+LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose pull requests a lane merges itself; the lane role covers it alone
 LOCAL_MERGE_ROLES = {"batch-runner"}  # the roles a local session's role file may name; the lane role is a cloud role only
 
 def role_path():
@@ -5632,7 +5632,7 @@ def read_merge_role():
 
 def lane_own_pr_refusal(info, h):
     """A lane's confirm is refused unless the pull request is in LANE_MERGE_REPO (the repo read from `h`, repo_full_name; a read that fails refuses), is its own and is ready: its head ref is one of lane_head_refs of the step its role record names, and it is no draft.
-    A draft would take the records step, which marks it ready, and only the batch runner does that. -> the refusal text, or None (not a lane, or its own ready pull request).
+    A draft would take the records step, which marks it ready, and only the batch runner does that. -> the refusal text without its cite (the raise adds it), or None (not a lane, or its own ready pull request).
     The text names neither flag it refuses."""
     from shared_names import lane_head_refs  # hooks/shared_names.py, the one home of a lane's head refs, on sys.path from the top of this file
     record = read_merge_record()
@@ -5643,11 +5643,11 @@ def lane_own_pr_refusal(info, h):
     except Exception:  # an unread repo is no proof of the one repo: fail closed
         in_repo = False
     if not in_repo:
-        return "a session with this merge role merges its own pull request in this repo only. Hand the pull request to the batch runner. Nothing was claimed or pushed. " + ROLE_CITE
+        return "a session with this merge role merges its own pull request in this repo only. Hand the pull request to the batch runner. Nothing was claimed or pushed."
     if info["branch"] not in lane_head_refs(record["step"]):
-        return "this session may merge only the pull request its own step carries, and this one has another head. Hand it to the batch runner. Nothing was claimed or pushed. " + ROLE_CITE
+        return "this session may merge only the pull request its own step carries, and this one has another head. Hand it to the batch runner. Nothing was claimed or pushed."
     if info["draft"]:
-        return "this session may merge only its own ready pull request, and this one is a draft. The batch runner marks a draft ready. Nothing was claimed or pushed. " + ROLE_CITE
+        return "this session may merge only its own ready pull request, and this one is a draft. The batch runner marks a draft ready. Nothing was claimed or pushed."
     return None
 
 LOCAL_ROLE_REFUSAL = "this session may not merge: its own role record does not name the batch runner. Hand the pull request to the batch runner, or ask the owner. Nothing was claimed or pushed. " + ROLE_CITE
@@ -6038,7 +6038,7 @@ def main(argv, host=None, lock=None, hosts=None):
             if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true":  # a lane's own-PR proof: before the lock, a claim or any write
                 why = lane_own_pr_refusal(info, h)
                 if why:
-                    raise Stop(why)
+                    raise Stop(why + " " + ROLE_CITE)
         if a.confirm and a.head and not relayed_head_holds(root, info["branch"], a.head, info["head"]):  # a relayed yes binds to the head at relay time (decision auto-mode-owner-acts): refused before the lock, a claim or any write
             raise Stop(HEAD_MOVED.format(n=a.pr))
         if not (a.reviewed and host):  # a test host brings its own checks, so --reviewed reads no config for it
