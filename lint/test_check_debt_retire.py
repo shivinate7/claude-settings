@@ -44,6 +44,7 @@ SESSION_URL = "https://claude.ai/code/session_013NEJL2SdAA1CCG5eTFVFVr"
 NO_RETIRED = "check_debt_retire has no retired(): a Retire-run cite cannot excuse a debt close (decision debt-close-runs-retire)"
 NO_CI_CHECK = ("check() has no ci_steps, draft or deferred parameter: a debt close whose Retire suite a CI step runs is not judged "
                "from the PR's CI run yet (ruling 2026-11-14 20:32 CST)")
+NO_CI_RETIRED = "retired() has no ci_steps or draft parameter: a deferred close must excuse no delete (ruling 2026-11-14 20:32 CST)"
 WORKFLOW = ".github/workflows/checks.yml"
 
 
@@ -778,6 +779,31 @@ class CiSteps(Case):
                 self.assertNotIn("python3 tests/test_fail.py", text, "%s: the remedy names a local run of the suite CI runs" % name)
                 self.assertNotIn("--force", text, "%s: the remedy names a forced push" % name)
                 self.assertNotIn("--no-verify", text, "%s: the remedy names a no-verify commit" % name)
+
+    def test_c23_a_matrix_row_judges_its_job_and_a_sibling_name_does_not_match(self):
+        """A matrix job's rows are named "<job> (<value>)" and judge that job. "shard-1-other" is a sibling name, not a row of shard-1,
+        so its red does not refuse shard-1's close. "shard-1 (b)" is a row of shard-1, so its red does."""
+        self.ci_close()
+        green = [ci_row("shard-1 (3.11)", sha=self.head), ci_row("shard-1 (3.12)", sha=self.head), ci_row("shard-2", sha=self.head)]
+        found = self.ci_findings(ci_steps=Runs(green + [ci_row("shard-1-other", conclusion="failure", sha=self.head)]))
+        self.assertEqual(self.ran(), [], "a matrix run sent the suite to a local run")
+        self.assertEqual(pairs(found), [], "a failing sibling job 'shard-1-other' refused shard-1's close: the match took a prefix, not a matrix row")
+        found = self.ci_findings(ci_steps=Runs(green + [ci_row("shard-1 (b)", conclusion="failure", sha=self.head)]))
+        self.assertEqual(pairs(found), [("d-ci", "red")], "a failing matrix row 'shard-1 (b)' did not refuse shard-1's close as red")
+
+    def test_c24_a_deferred_close_excuses_no_delete_and_a_judged_green_close_does(self):
+        """retired() excuses a delete only for a close that holds. A draft's CI-run close is deferred, so it excuses nothing; the same
+        close judged green on the head excuses the debt path."""
+        self.ci_close()
+        self.assertTrue({"ci_steps", "draft"} <= set(inspect.signature(D.retired).parameters), NO_CI_RETIRED)
+        body = "Retire-run: d-ci -- %s\n" % RUN_URL
+
+        def excused(draft, rows):
+            return D.retired(self.dir, self.base, head=self.head, pr_body=body, run_state=Runs(("success", self.head)),
+                             ci_steps=Runs(rows), draft=draft)
+        green = [ci_row("shard-1", sha=self.head), ci_row("shard-2", sha=self.head)]
+        self.assertEqual(excused(True, green), {}, "a deferred close on a draft excused its delete")
+        self.assertEqual(set(excused(False, green)), {"docs/debts/d-ci.md"}, "a close judged green on the head did not excuse its delete")
 
 
 class TemplateExcuses(unittest.TestCase):
