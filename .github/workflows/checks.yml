@@ -522,6 +522,13 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: python3 lint/check_ruling_kind.py --base "origin/$BASE_REF"
 
+      # Rule and record move together (decision child-cites-not-copies). The action's aligned step diffs origin/<base>...HEAD and reads the PR
+      # body from the event file, and only when a gap needs it. No scope flag on purpose: decisions are .md files, so a docs-only pull request must run it. The `checks` job is read
+      # by all-jobs-passed. The action reads the full-depth checkout above.
+      - name: Rules and records move together
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: $/actions/claude-md-cites
+
       - name: Silent undo fixture suite
         run: python3 lint/test_check_silent_undo.py
 
@@ -672,6 +679,9 @@ jobs:
       - name: Config watch fast-exit suite
         if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_config_watch_fast_exit.py
+
+      - name: Stale install suite
+        run: python3 hooks/test_reinstall_stale.py
 
       - name: Shared names suite
         run: python3 hooks/test_shared_names.py
