@@ -37,6 +37,8 @@ runs:
         # A push run is proven when its push-skip job succeeded and its scope job was skipped: every suite then rode a PR run,
         # the Windows and mutation legs included. A push run whose scope ran covers the Linux fast jobs only. A failed read is
         # UNKNOWN (exit 2), never proof.
+        # One of three homes of "proven push" (also clear_rule.py `empty_without_evidence` and nightly-skip.py `proven`). This is a bash
+        # composite step, so it cannot import their Python and reads the same two job conclusions with grep.
         proven=false
         if [ "$RUN_EVENT" = "push" ]; then
           jobs=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" --jq '.jobs[] | "\(.name)=\(.conclusion)"') \

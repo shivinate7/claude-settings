@@ -205,7 +205,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     PR 293 (the Windows merge-test slice), is the case for it. A CI step's `if:` names only its own
     scope flag, or a non-PR event (step 19).
 17. **Slice tests on a slow platform.** On PRs, run a platform-specific test slice. Run the full suite
-    on main and nightly, except on macOS (R61): every macOS run takes the slice, and a push to main
+    in the daily run, except on macOS (R61): every macOS run takes the slice, and a push to main
     starts no macOS job (a job-level `github.event_name != 'push'`, since a step-level skip still starts
     the runner). Slow legs run daily (owner item 880, 11:53 CST Nov 15). A push runs the Linux fast jobs
     only. The Windows, mutation and macOS jobs run in the one daily scheduled run, a pull request and a

@@ -8,18 +8,22 @@ visible success and scope reads its output. skip=true only when ALL of these hol
   (b) every push run of checks.yml on main created after that daily completed with success AND was proven by the push skip (its
       push-skip job succeeded and its scope job was skipped, so every Linux and slow job rode a PR run), and none is still going;
   (c) the newest push run of checks.yml on main has this run's head sha.
+With no push run after the green daily (main did not move; owner pick on item 893, relayed 14:14 CST Nov 15) it skips only when that
+daily's own head sha is this run's head sha; every other class stays skip=false.
 A push run that ran only the Linux fast jobs (scope ran) is unproven: the daily is the only run that covers the slow jobs for it.
 Any read failure, a missing page, a red, cancelled or running daily, and no prior daily write skip=false and say "unknown" or the
 reason. The push runs read must reach the green daily: a full page of push runs that ends newer than it hides the pushes after it.
 
 It also prints `range: <green daily head>..<this head> (<N> merges)` to stdout and to $GITHUB_STEP_SUMMARY: N counts the push runs
-created after the green daily (the newest successful daily other than this run). With none: `range: unknown (no green daily)`.
+created after the green daily (the newest successful daily other than this run); when the push read is a full page that never reached
+the daily, the line says `at least N merges`. With none: `range: unknown (no green daily)`.
 
 Input (env): REPO (owner/name), HEAD_SHA, GITHUB_RUN_ID (this run, whose own record never blocks), GH_TOKEN. RUNS_JSON is a stand-in
 for the read: a JSON list of run records in the shape of the Actions runs API, with a `jobs` list (the jobs API's name, status and
 conclusion) on each push run (lint/test_nightly_skip.py).
 Cost per daily, no file kept, no process kept: one schedule runs read, one push runs read per 100 push runs back to the green daily
-(usually one), and one jobs read per push run after it, newest first, stopping at the first push run that is not proven.
+(up to five pages), and one jobs read per push run after it, newest first, stopping at the first push run that is not proven.
+A day main did not move reads no jobs: the head compare decides.
 """
 import json
 import os
@@ -155,13 +159,21 @@ def proven(run, jobs_reader):
     return state.get("push-skip") == "success" and state.get("scope") == "skipped"
 
 
+def push_read_is_short(pushes, daily):
+    """True when the push runs read is a full page whose oldest run is newer than the daily: the pushes between them were not read."""
+    return len(pushes) >= PAGE and min(created(r) for r in pushes) > created(daily)
+
+
 def range_line(runs, head, self_id):
-    """The range line: the green daily's head to this head, and the push runs created after that daily."""
+    """The range line: the green daily's head to this head, and the push runs created after that daily. A push read that stopped
+    short of the daily gives a floor, so the count says "at least"."""
     daily = green_daily(runs, self_id)
     if daily is None:
         return "range: unknown (no green daily)"
-    merges = [r for r in runs if is_push(r) and created(r) > created(daily)]
-    return "range: %s..%s (%d merges)" % (daily.get("head_sha"), head, len(merges))
+    pushes = [r for r in runs if is_push(r)]
+    merges = [r for r in pushes if created(r) > created(daily)]
+    floor = "at least " if push_read_is_short(pushes, daily) else ""
+    return "range: %s..%s (%s%d merges)" % (daily.get("head_sha"), head, floor, len(merges))
 
 
 def decide(runs, head, self_id=None, jobs_reader=None):
@@ -177,15 +189,18 @@ def decide(runs, head, self_id=None, jobs_reader=None):
     if newest.get("conclusion") != "success":
         return False, "the newest daily concluded '%s', not success" % newest.get("conclusion")
     pushes = [r for r in runs if is_push(r)]
-    if len(pushes) >= PAGE and min(created(r) for r in pushes) > created(newest):
+    if push_read_is_short(pushes, newest):
         raise Unknown("the push runs page is full and does not reach the green daily")
     since = sorted((r for r in pushes if created(r) > created(newest)), key=created, reverse=True)
-    if not since:
-        return False, "no push run since the green daily, so there is nothing to prove"
     if len(since) > MAX_PUSH_RUNS:
         raise Unknown("more than %d push runs since the green daily" % MAX_PUSH_RUNS)
-    if max(pushes, key=created).get("head_sha") != head:
+    if pushes and max(pushes, key=created).get("head_sha") != head:
         return False, "the newest push run is not at this run's head"
+    if not since:
+        # The daily fires only on a day main moved (owner pick on item 893): the green daily at this very head ran every slow leg for it.
+        if newest.get("head_sha") == head:
+            return True, "no push run since the green daily, and it ran at this run's head"
+        return False, "no push run since the green daily, and it ran at another head, so this head is unknown"
     for r in since:
         if r.get("status") != "completed":
             return False, "push run %s is still running, which is unknown" % r.get("id")
