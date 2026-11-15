@@ -837,6 +837,9 @@ ROLE_LINES = {
     "lane-step-foreign": role_call("g1", ARCH_LANE_TAGS, session=ROLE_OTHER),
     "lane-step-then-no-step": role_call("g1", ARCH_LANE_TAGS) + role_call("g2", LANE_TAGS),
     "triage-step": role_call("g1", ARCH_TRIAGE_SLUG_TAGS),
+    # The repo-proof controls (section 29942): a batch runner, and a session with no cs-build tag, each naming the repo o/a.
+    "repo-runner-o-a": role_call("g1", ["cs-build:batch-runner", "cs-repo:o/a"]),
+    "repo-solo-o-a": role_call("g1", ["cs-repo:o/a"]),
 }
 
 
@@ -987,6 +990,18 @@ for _lane_prefix in ("", "cd somewhere && "):
         _lane_cmd = _lane_prefix + _lane_form + " --role lane --step " + ARCHIVE_SLUG
         role_allow(_lane_cmd + " allows its own step", _lane_cmd, role_path("lane-step"))
         role_refuse(_lane_cmd + " is refused on a record with no cs-step tag", _lane_cmd, role_path("lane"))
+# A role flag inside a wrapper is judged as the top-level call is: `bash -c` and `$(...)` run the merge tool, so their inner command is read
+# (guard_core.inner_commands, the one reader of the wrappers). The lane's own step may run inside a wrapper, and is pinned allowed here, the
+# shape the fix keeps. Another step, and the batch runner's role, are refused inside one. These are red on the current guard, which reads
+# only top-level segments.
+LANE_OTHER_CMD = MERGE_SHIM + " --role lane --step other-step"
+role_allow("a lane's own step inside bash -c is judged as the top-level call and allowed", 'bash -c "' + LANE_ROLE + '"', role_path("lane-step"))
+role_allow("a lane's own step inside a command substitution is judged as the top-level call and allowed", "echo $(" + LANE_ROLE + ")",
+           role_path("lane-step"))
+role_refuse("a lane's other step inside bash -c is refused", 'bash -c "' + LANE_OTHER_CMD + '"', role_path("lane-step"))
+role_refuse("a lane's other step inside a command substitution is refused", "echo $(" + LANE_OTHER_CMD + ")", role_path("lane-step"))
+role_refuse("a batch-runner role inside bash -c is refused on a lane record", 'bash -c "' + MERGE_SHIM + ' --role batch-runner"',
+            role_path("lane-step"))
 
 
 # =========================================================================== 5e-2. the record branch's one writer

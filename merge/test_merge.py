@@ -14375,6 +14375,43 @@ class LaneRefusals(CloudSession):
         self.assert_refused_quietly("7", "--confirm", "--head", self.head())
 
 
+def role_tuple_in_source(text, name):
+    """The strings of the top-level assignment `name = (...)` in a Python source text, read with ast and never imported. None when no such assignment is."""
+    for node in ast.parse(text).body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            return set(ast.literal_eval(node.value))
+    return None
+
+
+class GuardRoleTiersMatch(unittest.TestCase):
+    """The guard cannot import merge/merge.py, so hooks/guard_merge.py names the merge tiers in its own constants, ROLE_TIERS and
+    LOCAL_ROLE_TIERS. These cases read those constants from the guard's source, never by import, and compare them with the merge tool's
+    MERGE_ROLES and LOCAL_MERGE_ROLES, so a drifted copy goes red."""
+
+    GUARD = os.path.join(os.path.dirname(HERE), "hooks", "guard_merge.py")
+
+    def guard_tiers(self, name):
+        with open(self.GUARD, encoding="utf-8") as f:
+            found = role_tuple_in_source(f.read(), name)
+        self.assertIsNotNone(found, f"hooks/guard_merge.py has no top-level {name} to compare with the merge tool")
+        return found
+
+    def test_the_guard_role_tiers_are_the_merge_roles(self):
+        self.assertEqual(self.guard_tiers("ROLE_TIERS"), set(merge.MERGE_ROLES), "the guard's ROLE_TIERS drifted from merge.py MERGE_ROLES")
+
+    def test_the_guard_local_role_tiers_are_the_local_merge_roles(self):
+        self.assertEqual(self.guard_tiers("LOCAL_ROLE_TIERS"), set(merge.LOCAL_MERGE_ROLES),
+                         "the guard's LOCAL_ROLE_TIERS drifted from merge.py LOCAL_MERGE_ROLES")
+
+    # green controls (P2): the reader takes a literal tuple, and a drifted copy differs from the merge tool's set
+    def test_the_source_reader_takes_a_literal_and_a_drifted_copy_differs(self):
+        self.assertEqual(role_tuple_in_source('ROLE_TIERS = ("batch-runner", "lane")', "ROLE_TIERS"), {"batch-runner", "lane"},
+                         "the reader does not take a literal tuple")
+        self.assertIsNone(role_tuple_in_source('OTHER = ("batch-runner",)', "ROLE_TIERS"), "a missing assignment is read as present")
+        self.assertNotEqual(role_tuple_in_source('ROLE_TIERS = ("batch-runner",)', "ROLE_TIERS"), set(merge.MERGE_ROLES),
+                            "a copy without the lane tier is read as equal to MERGE_ROLES")
+
+
 class LaneRoleWriter(CloudSession):
     """Ruling own-lanes-merge-claude-settings-prs: `merge --role lane --step <slug>` records this cloud session's lane role with its step,
     and a lane with no step is refused and writes nothing. The step is what a lane's confirm later judges its pull request by."""

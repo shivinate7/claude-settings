@@ -16,6 +16,8 @@ lazy_fixture(list(MERGE_ORIGINS), _build_merge_origins)
 CLOUD_ENV = {**ROLE_ENV, "CLAUDE_CODE_REMOTE": "true"}  # decide() drops CLAUDE_CODE_REMOTE, then applies a case's env
 TX_A = role_path("repo-o-a")             # a lane whose record names cs-repo:o/a
 TX_RUNNER = role_path("repo-runner-claude-settings")
+TX_RUNNER_A = role_path("repo-runner-o-a")  # a batch runner whose record names cs-repo:o/a
+TX_SOLO_A = role_path("repo-solo-o-a")      # a session whose record has no cs-build tag and names cs-repo:o/a
 TX_CHILDREN = role_path("repo-runner-children")
 TX_EMPTY = role_path("repo-empty-tags")
 TX_NONE = role_path("no-record")
@@ -72,10 +74,17 @@ repo_case("--ready with --repo-dir naming another checkout is denied", "deny", f
 repo_case("--ready with -C naming another checkout is denied", "deny", f"{MERGE_SHIM} -C '{REPO_B}' 5 --ready", REPO_A, TX_A)
 repo_case("--ready after a cd into another checkout is denied", "deny", f"cd '{REPO_B}' && {MERGE_SHIM} 5 --ready", REPO_A, TX_A)
 repo_case("--ready with a record that proves no repo is denied", "deny", f"{MERGE_SHIM} 5 --ready", REPO_A, TX_NONE)
-# Controls: a lane marks its own draft ready once, from its own repo, and the proof passes, as --confirm's does.
-repo_case("--ready from this checkout's repo is allowed", "allow", f"{MERGE_SHIM} 5 --ready", REPO_A, TX_A)
-repo_case("--ready with --repo-dir naming this checkout is allowed from another directory", "allow",
-          f"{MERGE_SHIM} --repo-dir '{REPO_A}' 5 --ready", REPO_B, TX_A)
+# Controls: a batch runner marks its own draft ready from its own repo, and a session whose record has no cs-build tag does too, as on main.
+# Ruling own-lanes-merge-claude-settings-prs: the batch runner marks ready, so a lane's record is refused below, not allowed here.
+repo_case("--ready from this checkout's repo is allowed for a batch runner", "allow", f"{MERGE_SHIM} 5 --ready", REPO_A, TX_RUNNER_A)
+repo_case("--ready with --repo-dir naming this checkout is allowed for a batch runner from another directory", "allow",
+          f"{MERGE_SHIM} --repo-dir '{REPO_A}' 5 --ready", REPO_B, TX_RUNNER_A)
+repo_case("--ready from this checkout's repo is allowed for a session with no cs-build tag", "allow", f"{MERGE_SHIM} 5 --ready", REPO_A, TX_SOLO_A)
+# RED on the current guard: a lane's own record carries cs-build:lane and its repo, so the repo proof alone lets --ready through. The lane is
+# refused with no merge role file in its config dir (LT_EMPTY). The refusal's rule is not pinned: the fix names it.
+for _command in (f"{MERGE_SHIM} 5 --ready", f"{MERGE_SHIM} --repo-dir '{REPO_A}' 5 --ready", f"cd '{REPO_A}' && {MERGE_SHIM} 5 --ready"):
+    sh("lane --ready is refused with no merge role file: " + _command, _command, "deny", cwd=REPO_A, env=CLOUD_ENV, transcript=TX_A,
+       config=LT_EMPTY)  # cwd is the lane's own repo, so the repo proof passes and only the lane's refusal can deny
 # gh-write-cloud: the merge tool is no gh write, so a cloud merge it runs is allowed. merge-confirm-repo also judges it, so these run in
 # REPO_A with the lane record that names its repo: the allow is then gh-write-cloud's own, not a refusal of a missing record.
 for _command in ("merge 12 --confirm", MERGE_SHIM + " 12 --confirm"):
