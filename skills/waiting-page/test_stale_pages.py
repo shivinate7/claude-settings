@@ -2248,6 +2248,14 @@ class SessionLine(unittest.TestCase):
         self.assert_clean(r)
         self.assertEqual(r.stdout, "", "a record equal to main's blob printed a line:\n" + r.stdout)
 
+    def test_1_a_current_local_stamp_silences_a_record_that_lags_main(self):
+        root = self.root()
+        self.roadmap(root, self.record(self.other_blob))  # the record lags: it names a blob that is not main's
+        self.local_stamp(root, self.main_blob)  # the local stamp is current: one stamp equals main, so the page is not behind
+        r = self.session_run(root)
+        self.assert_clean(r)
+        self.assertEqual(r.stdout, "", "a current local stamp did not silence a record that lags:\n" + r.stdout)
+
     def test_2_a_record_differing_from_main_prints_the_behind_line(self):
         root = self.root()
         self.roadmap(root, self.record(self.other_blob))
