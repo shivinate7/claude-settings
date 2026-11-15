@@ -966,8 +966,11 @@ TRIAGE_TRANSCRIPT = role_path("triage")
 
 
 def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, **kw):
-    """A git push the guard refuses under roadmap-one-writer. The reason names the rule, never the push."""
-    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, carries=RECORD_CARRIES, lacks=RECORD_LACKS,
+    """A git push the guard refuses under roadmap-one-writer. The reason names the rule, never the push, and always
+    carries RECORD_CARRIES; a case's own `carries` (one phrase or several) is held in addition."""
+    extra = kw.pop("carries", ())
+    carries = RECORD_CARRIES + ((extra,) if isinstance(extra, str) else tuple(extra))
+    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, carries=carries, lacks=RECORD_LACKS,
        transcript=transcript, env=env, cwd=cwd, **kw)
 
 
