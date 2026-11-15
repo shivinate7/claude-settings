@@ -4,7 +4,8 @@
 
 A PR closes a debt when it deletes the debt file, or renames it out of `docs/debts/`. A rename inside that folder is not a close, unless its Retire paragraph changed: then it is a close, and the Retire text at base runs.
 
-- The shared merge tool reads the debt's Retire text at base. It runs each runnable check that text names, on the PR head, in preview and in confirm.
+- CI runs the check on every pull request that is not a draft (the `Debt retire check` step in `checks.yml`; the workflow skips drafts). The step runs main's copy of `lint/check_debt_retire.py` and the modules it imports (`lint/`, `hooks/`, read from `origin/$BASE_REF` into a scratch folder), so a PR cannot rewrite the check that judges its own close. It reads the debt's Retire text at base and runs each runnable check that text names, on the PR head, in a child that gets neither `GH_TOKEN` nor `GITHUB_TOKEN`. It reads the PR body from the event file, and a cited run through `gh` with the job's token. The workflow has no `edited` trigger, because it would rerun all CI on every body edit. So a cite added to the PR body after the run needs a new push, or a re-run on a fresh event, to count. The merge tool reads CI's verdict. Confirm runs no Retire check. It reads CI's verdict on the head once, before the claim, and never waits for it under the lock (`head_state`, `head_not_green` in `merge/merge.py`). A green run on a head that lacks base's tip stands when `holds_base` reads a clean merge-tree against the tip. Confirm reads it before the claim and again in `prove`; a conflict refuses. Preview runs the check only when the head's CI does not read green (red, pending or unknown), so it names the finding.
+- A read that finds no PR body reads unknown: exit 0 off CI, exit 1 on CI (the lenient local read; unknown is red on CI, decision `ci-unknown-is-red`). Outside CI the CLI has no PR body, so a close that needs a cite reads unknown, never prose. One exception to lane lint equal to the rest of CI: `ci-job checks --lint` (the merge tool's lane lint, `lane_lint` in `merge/merge.py`) does not run this step, because its run is more than one lint command and it needs the PR body only CI has. The batch CI run runs it. The merge tool and the CLI are two entry points that share the cited-run reader (`run_route`, `parse_run` in `lint/check_debt_retire.py`).
 - A red check refuses the close. A check that cannot run refuses it too (decision `ci-unknown-is-red`, an unknown read is red).
 - A PR with no runnable check is refused. The way out, for no runnable check or one that cannot run: the PR body holds `Retire-run: <slug> -- <run URL>`, for a run that succeeded on the PR head or on a descendant of it. A cite never clears a red check.
 - A runnable check is a backticked path in the Retire text. The path is tracked at head and named like a test file: `test_*.py`, `*_test.py`, `*.test.mjs`, `test_*.mjs` or `test_*.sh`. Its extension sets the runner: `python3`, `node --test` or `bash`. No shell, no model call.
@@ -12,11 +13,12 @@ A PR closes a debt when it deletes the debt file, or renames it out of `docs/deb
 
 Why: a docs-only PR skips review (decision `docs-only-prs-skip-review`, a docs-only PR gets no full review). So a debt can read as closed while its Retire check never ran. Audit 2026-11-06: 35 debt-delete commits since 2026-10-23, 9 of them markdown-only.
 
-Source: coordinator pick a for q_max #1163, 2026-11-12 12:51 CST (link the packages). Coordinator ruling 2026-11-06 13:00 CST (the `Retire-run:` form; a rename out of the folder counts as a close). Coordinator ruling 2026-11-06 13:35 CST (a rename inside the folder with a changed Retire is a close).
+Source: lane r2-merge-checks-run-in-ci, restart-plan R2 (owner 14:07 CST Nov 10: the merge tool runs no check that can refuse a green batch; batch #2551 was green in CI and refused at merge by this check's local limit). Coordinator pick a for q_max #1163, 2026-11-12 12:51 CST (link the packages). Coordinator ruling 2026-11-06 13:00 CST (the `Retire-run:` form; a rename out of the folder counts as a close). Coordinator ruling 2026-11-06 13:35 CST (a rename inside the folder with a changed Retire is a close).
 
 Kind: process
 Home: lint/check_debt_retire.py
 Home: merge/merge.py
 Home: lint/check_silent_undo.py
 Home: .github/pull_request_template.md
+Home: .github/workflows/checks.yml
 Check: lint/check_debt_retire.py

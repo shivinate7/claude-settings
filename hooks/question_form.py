@@ -1815,7 +1815,7 @@ def cross_repo_hit(op, data, page_repo, session_id=None):
 #
 # An item's `stops` lists what its answer stops (a lane slug, a PR number or a step id); the page sorts Blocking by the
 # count and shows it on the card. `holds` says the same in words, so each entry must appear in it, or the count and the
-# words drift apart (docs/design/section-sort-notes.md, ruling Q1).
+# words drift apart (docs/design/session-role-sort-notes.md, ruling Q1).
 STOPS_RULE = "stops-named-in-holds"
 STOPS_REASON = ("`stops` lists what the owner's answer stops: one string per lane (\"lane fix-proxy\"), PR (\"PR #1201\") or "
                 "step (\"step merge-queue\"), each once. `holds` names every entry in words, and `stops` needs `holds`. "

@@ -1063,7 +1063,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .top .inrepo { font-weight: 600; color: var(--acc); overflow-wrap: anywhere; }
 /* One sub-group per repo inside a tier: a neutral letter tile, the name, a count and a solid rule, unlike the seen divider's eye and dotted rule. */
 .subgrp { display: grid; gap: 12px; padding-top: 6px; min-width: 0; }
-.subhead { display: flex; align-items: center; gap: 8px; min-height: 28px; margin: 0; font: 700 15px/1.3 var(--body); color: var(--ink); }
+.subhead { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 28px; margin: 0; font: 700 15px/1.3 var(--body); color: var(--ink); }
 .subhead .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .subhead .ct { font: 600 12px var(--mono); color: var(--muted); }
 .subhead .rule { flex: 1 1 0; min-width: 24px; border-top: 1px solid var(--line); }
@@ -1071,7 +1071,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 /* The rail: each repo's run of chips starts with the same tile and the name, and the run wraps as one so a phone row never ends on a lone tile. */
 .rrun { display: inline-flex; flex-wrap: wrap; gap: 6px; max-width: 100%; min-width: 0; }
 @media (min-width: 961px) { .rrun { display: flex; flex-direction: column; gap: 4px; } }
-.rrepo { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; color: var(--muted); font: 600 13px var(--body); }
+.rrepo { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: 32px; color: var(--muted); font: 600 13px var(--body); }
 .rrepo .rmark { width: 20px; height: 20px; font-size: 11px; }
 /* The name shows at every size: two repos may share a first letter, so the tile alone never names a repo. */
 .rrepo .rn { min-width: 0; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1439,9 +1439,9 @@ function sorted() {
   const sentAt = (it) => Math.max(...mates(it).map((x) => Date.parse(sentOf(x).at) || 0));
   by.answered.sort((a, b) => sentAt(b) - sentAt(a) || a.n - b.n);
   // An item with no valid date counts as oldest, so it comes last among the new items (it is never seen, so seen items still follow it); a group sits at its newest member, as the Answered section does.
-  const born = (x) => { const t = ts(x.added); return t === Infinity ? -Infinity : t; };
+  const born = (x) => { const t = ts(K(x).added); return t === Infinity ? -Infinity : t; };
   const age = (it) => Math.max(...mates(it).map(born));
-  const dl = (it) => Math.min(...mates(it).map((x) => ts(x.by)));
+  const dl = (it) => Math.min(...mates(it).map((x) => ts(K(x).by)));
   // Newest first inside a tier (owner ruling page-newest-first, 2026-11-12 21:37 CST); rank and tiers still lead.
   const byAge = (a, b) => age(b) - age(a) || born(b) - born(a) || b.n - a.n;
   // The writer's `rank` (lower first) orders items inside a tier; an unranked item follows the ranked ones. A group takes its best member's rank.
@@ -2515,7 +2515,7 @@ function renderBar() {
   }
   $("barStatus").replaceChildren(...parts);
   const wd = withdrawn().length;
-  sa.disabled = !state.db || state.sending || !(st.length || wd);
+  sa.disabled = !state.db || state.sending || holdingForMeta() || !(st.length || wd);
   sa.textContent = !st.length && wd ? (wd === 1 ? "Withdraw answer" : "Withdraw " + wd + " answers") : st.length ? "Send " + st.length + (st.length === 1 ? " answer" : " answers") : "Send answers";
   $("copy").hidden = !(state.db === false || state.copyOffer);
 }
