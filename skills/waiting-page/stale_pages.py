@@ -112,8 +112,8 @@ Awaiting mode, run by the writer at a comment wake (SKILL.md, "Read the answers"
 
 <dir> holds threads.txt, the output of `ArtifactComments read` (every page, in order, the first page first), and
 report.md (the writer's report), read only when it is there.
-- First page: the first non-blank line reads `<N> comment thread(s)` or `No comment threads`. Else the file is a later
-  page alone: `unknown`, exit 2. A later page needs no header.
+- First page: a line reads `<N> comment thread(s)` or `No comment threads`, above the first `Thread` line. The tool's notice
+  lines above it are skipped. Else the file is a later page alone: `unknown`, exit 2. A later page needs no header.
 - A thread starts at a `Thread <uuid>` line; its next line begins `open` or `resolved`. A comment row is a line at
   exactly two spaces, `  [<who> - <ISO time>]` (with the tool's em dash). A text line carries a six-space `<token>| `
   prefix and never counts. A `  [location] <label>` row is the label. `[anchored at]`, `[region of]` and `[on text]`
@@ -933,7 +933,14 @@ def awaiting_mode(argv):
     if not text.strip():
         print("unknown: threads.txt in %s is empty" % args.awaiting)
         return 2
-    if not AWAITING_FIRST_PAGE.match(text.lstrip()):  # a continuation page alone lists only some of the threads
+    # The header is the first line before any Thread line; the tool's notice lines above it are skipped.
+    # A file that reaches a Thread line first is a continuation page, which lists only some of the threads.
+    above = []
+    for line in text.splitlines():
+        if re.fullmatch(r"Thread \S+\s*", line):
+            break
+        above.append(line.strip())
+    if not any(AWAITING_FIRST_PAGE.match(line) for line in above):
         print("unknown: threads.txt does not start with the first page")
         return 2
     threads, unknown = awaiting_threads(text)
