@@ -1371,10 +1371,10 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
     return "", ""
 
 
-# ---- merge --role: the tier is read from this session's own get_session record
-ROLE_TIERS = ("batch-runner", "lane")  # merge.py MERGE_ROLES names the same tiers
-LOCAL_ROLE_TIERS = ("batch-runner",)  # the tiers a local role file may name (merge.py LOCAL_MERGE_ROLES); the lane tier is a cloud tier only
-ROLE_STEP_TIER = "lane"  # the tier whose call also names a step (--step), proved by a cs-step tag of the own record
+# ---- merge --role: the role is read from this session's own get_session record
+ROLE_TIERS = ("batch-runner", "lane")  # glossary-ok: ROLE_TIERS is the existing name; merge.py MERGE_ROLES names the same roles
+LOCAL_ROLE_TIERS = ("batch-runner",)  # glossary-ok: the name a test reads; the roles a local role file may name (merge.py LOCAL_MERGE_ROLES), the lane role is a cloud role only
+ROLE_WITH_STEP = "lane"  # the role whose call also names a step (--step), proved by a cs-step tag of the own record
 ROLE_TAG_PREFIX = BUILD_TAG
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
@@ -1485,21 +1485,21 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
             if "--role" in segment:
                 return "merge role in a deep wrapper"
             continue
-        tier = role_call_of(segment)
-        if tier is None:
+        role = role_call_of(segment)
+        if role is None:
             continue
         try:  # cost: one transcript read, only on a role-flag call
             from override import remote_session_id
             own_id = remote_session_id()
             if own_id and transcript:
                 tags = _own_get_session_tags(transcript, own_id)
-                if tier in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + tier in tags:
+                if role in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + role in tags:  # glossary-ok: ROLE_TIERS is the existing name
                     step = role_step_of(segment)
-                    if tier != ROLE_STEP_TIER or (step and STEP_TAG + step in tags):  # a lane's step must be a cs-step tag of its own record, exactly
+                    if role != ROLE_WITH_STEP or (step and STEP_TAG + step in tags):  # a lane's step must be a cs-step tag of its own record, exactly
                         continue
         except Exception:
             pass
-        return "merge role " + tier
+        return "merge role " + role
     return ""
 
 
@@ -1808,7 +1808,7 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int, local_se
 LANE_READY_REASON = (
     "merge-role-proof: this session's own record is a lane's, and the batch runner marks a pull request ready, not a lane. "
     "Leave the draft as it is. The batch runner finds it (list_sessions, tag cs-build:batch-runner, same cs-repo). "
-    "(decision session-tiers, a session's tier decides which merge acts it may run)"
+    "(decision session-tiers, a session's role decides which merge acts it may run)"  # glossary-ok: session-tiers is the decision's file name
 )
 
 
@@ -1830,15 +1830,30 @@ def lane_ready_hit(stripped: str, transcript: str) -> str:
                 called = True   # an unreadable merge-tool segment fails closed, as the other clauses do
         if not called:
             continue
-        try:
-            from override import remote_session_id
-            own_id = remote_session_id()
-            tags = _own_get_session_tags(transcript, own_id) if own_id and transcript else None
-        except Exception:
-            tags = None
-        if tags is not None and ROLE_TAG_PREFIX + ROLE_STEP_TIER in tags:
+        if _own_record_is_lane(transcript):
             return "merge --ready from a lane"
     return ""
+
+
+def _own_record_is_lane(transcript: str) -> bool:
+    """True when the own newest get_session record in `transcript` carries cs-build:lane. No id, no transcript, no record and a failed read are False:
+    the callers refuse only a session that proves it is a lane, and the repo proof judges the rest."""
+    try:
+        from override import remote_session_id
+        own_id = remote_session_id()
+        tags = _own_get_session_tags(transcript, own_id) if own_id and transcript else None
+    except Exception:
+        return False
+    return tags is not None and LANE_TAG in tags
+
+
+def lane_mcp_ready_hit(tool: str, tool_input, transcript: str) -> str:
+    """Return a label when a cloud session whose own record is a lane's marks a pull request ready through the MCP update tool (draft false), else ''.
+    Only a draft of exactly False counts: a title edit, no draft field and draft true mark nothing ready. The refusal is LANE_READY_REASON, as for
+    lane_ready_hit. Cost: none for another tool; one transcript read for a draft-false update."""
+    if tool != READY_PAGE_MCP_TOOL or not is_cloud() or not isinstance(tool_input, dict) or tool_input.get("draft") is not False:
+        return ""
+    return "update_pull_request draft false from a lane" if _own_record_is_lane(transcript) else ""
 
 
 # ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)

@@ -157,7 +157,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        record (read from the transcript) does not show in its cs-build tags; for the lane
                        tier, also a `--step` that is no cs-step tag of that record. Read inside wrappers
                        (`bash -c`, `$(...)`) too. Also a cloud `merge <pr> --ready` from a session whose own
-                       record carries cs-build:lane: the batch runner marks a pull request ready.
+                       record carries cs-build:lane, or an MCP update_pull_request with draft false from
+                       one: the batch runner marks a pull request ready.
   merge-confirm-repo   deny. In a cloud session, a merge-tool call with --confirm whose checkout (the -C or
                        --repo-dir value as the merge tool's own parser reads it, else the `cd X &&` directory, else
                        the working directory) has a repo (`git_reads.github_repo`) that no cs-repo tag of the
@@ -627,7 +628,7 @@ while True:
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, LOCAL_REPO_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON, LANE_READY_REASON, SELF_ROLE_CHILD_REASON, SELF_ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, red_run_reason, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
-            records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, self_role_child_hit, self_role_hit,
+            records_page_hit, repo_proof_hit, role_proof_hit, lane_ready_hit, lane_mcp_ready_hit, self_role_child_hit, self_role_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_roster_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
@@ -7174,6 +7175,10 @@ def judge(payload) -> None:
 
     # The MCP update tool marks a pull request ready with draft false (rule records-page-ready).
     if tool == "mcp__github__update_pull_request":
+        # A lane's own record never marks a pull request ready (rule merge-role-proof, as for `merge --ready`): judged before the page read.
+        matched = lane_mcp_ready_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+        if matched:
+            refuse(tool, "deny", "merge-role-proof", LANE_READY_REASON, matched)
         refuse_ready_page(tool, tool_input, "", cwd)
 
     # The MCP create tool carries its own `draft` field.
