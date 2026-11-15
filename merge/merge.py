@@ -3533,7 +3533,7 @@ def _shas(read):
     return lines
 
 def revert_proven(root, host, base):
-    """True when a red base is lifted by a revert already merged with its tree proven (owner ruling own-823-b-revert-merge-lifts-red, decision no-merge-onto-red-main).
+    """True when a red base is lifted by a revert already merged with its tree proven (ruling own-823-b-revert-merge-lifts-red, decision no-merge-onto-red-main).
     Merges resume when the revert merges, with its run still going (ruling own-745-b-resume-at-revert), and stay resumed while unrelated commits land above it.
     Read from the facts base_state left on the host (`base_facts`), never from its prose. All must hold:
     - exactly one red run, no cancelled run, no re-run in flight and no other red read beside it, and exactly one breaking merge B, named by its full sha;
