@@ -1,0 +1,14 @@
+{
+ "id": "consultant-go-reads-rulings",
+ "title": "A send_message that says \"go\" or \"start\" on a combine, merge or ready act is checked against the filed rulings before the send",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Incident (consultant 20:09 CST Nov 14; triage read no message; n=1): at 20:06 CST the consultant sent the coordinator a \"go\" to hand-build one docs-only combine of #3396, #3431, #3428, #3391 and #3430. Ruling own-826-a-now-build-b says \"no hand-built combines\" while the combine train is built and measured. The coordinator caught it and held the combine; no act ran. Harm stopped: a session acting on a go the owner ruled out. Mistake class: a go on an act that a filed ruling forbids. Guard (the consultant's want): a send_message from the consultant or the coordinator that says \"go\" or \"start\" on a combine, merge or ready act is checked against origin/roadmap rulings by the same past-ruling guard that checks owner questions. First act of a lane: find where step past-ruling-on-send (the send-time judge, which today checks a question sent to the page writer) reads rulings, and whether it can read an act-word message; extend that home before building a second (rule building-one-home-per-capability; kin: relay-ruling-matches-question, which checks a relayed rule). Red then green: a send_message saying go on a combine against own-826-a is flagged before the send; a go on an act no ruling forbids passes. Rule: building-mistake-names-its-guard.",
+ "source": "consultant 20:09 CST Nov 14",
+ "note": "Filed 20:07 CST Nov 14 by triage. Tracker: the coordinator. Queued, not started. Kin: past-ruling-on-send, relay-ruling-matches-question. Overlap read: past-ruling-on-send covers a question to the page writer only, so this is a new case on the same home.",
+ "updatedAt": "2026-11-14T20:07:00-06:00"
+}
