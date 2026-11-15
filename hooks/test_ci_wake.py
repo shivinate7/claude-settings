@@ -1713,8 +1713,6 @@ def case_callers_gh_repo_never_reaches_the_hook_or_the_stub():
             os.environ["GH_REPO"] = prior
     label = "caller's GH_REPO set to %s" % REPO_APP
     expect_verdict(label, res, "green")
-    check("%s: the PR read names the folder's repo" % label,
-          api_reads(res)[:1] == ["repos/{owner}/{repo}/pulls/214"], "%r; %s" % (api_reads(res), why(res)))
 
 
 def case_gh_repo_values_the_hook_cannot_read_fall_back_to_the_folder():

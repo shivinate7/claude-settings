@@ -222,15 +222,17 @@ class Base(unittest.TestCase):
 class ControlTests(Base):
     """Green on the old code. They prove the fixture, the stub and the homes the other cases rely on."""
 
-    def test_labelled_file_has_the_six_labels_distinct_texts_and_readable_revs(self):
+    def test_labelled_file_has_the_six_labels_distinct_texts_and_well_formed_revs(self):
         rows = labelled_rows()
         self.assertEqual(sorted({r["label"] for r in rows}), sorted(LABELS), "the labels in the file are not the six the score maps")
         self.assertEqual(len({" ".join(r["text"].split()) for r in rows}), len(rows),
                          "two rows share a text once whitespace is collapsed, so a text cannot key a model answer")
+        bad = [r["file"] + ":" + r["line"] for r in rows if r.get("rev") and not re.fullmatch(r"[0-9a-f]{40}", r["rev"])]
+        self.assertEqual(bad, [], "a labelled row's rev is not a 40-hex commit id")
         repo, rows_at_fixture = labelled_fixture()
-        unreadable = [r["file"] + ":" + r["line"] for r in rows_at_fixture
-                      if r.get("rev") and " ".join((fixture_text_at(repo, r) or "").split()) != " ".join(r["text"].split())]
-        self.assertEqual(unreadable, [], "a labelled row's text is not at its line in the fixture tree built from the file")
+        unreadable = [r["file"] + ":" + r["line"] for r in rows_at_fixture if r.get("rev") and
+                      " ".join((fixture_text_at(repo, r) or "").split()) != " ".join(r["text"].split())]
+        self.assertEqual(unreadable, [], "the fixture tree does not hold a row's text at its line, so a judge call cannot read it")
 
     def test_labelled_file_has_its_pinned_row_count(self):
         self.assertEqual(len(labelled_rows()), 38, "the labelled file's row count moved: pin it here if the change is on purpose")
