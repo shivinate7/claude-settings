@@ -14405,6 +14405,75 @@ class StandingMergeRole(CloudSession):
         self.scripted_records(record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
         self.assert_standing_refused()
 
+    # ---- the size bound: a rule-text pull request is small. merge.STANDING_MAX_LINES (additions plus deletions) and
+    # merge.STANDING_MAX_FILES are read by name, so the cases follow the bound the merge module names. A docs-only pull
+    # request is not bounded.
+    RULE_PATHS = ("CLAUDE.md", "agents/a.md", "agents/b.md", "skills/b/SKILL.md", "skills/c/SKILL.md")
+    DOC_PATHS = ("docs/a.md", "docs/b.md", "docs/c.md", "docs/d.md", "docs/e.md")
+
+    def bound(self, name):
+        """The size bound `name` of the merge module, read by name. A missing name fails the case with that name."""
+        value = getattr(merge, name, None)
+        if value is None:
+            self.fail(f"merge.{name} is not defined")
+        return value
+
+    def spread(self, paths, total):
+        """[(path, status, additions)] for `paths`, the additions summing to `total`: the first file takes what the others leave."""
+        rest = [1] * (len(paths) - 1)
+        return [(paths[0], "modified", total - sum(rest))] + [(p, "modified", 1) for p in paths[1:]]
+
+    def commit_files(self, paths):
+        """Commit one text file per path to origin/feat, so each case's merge is a real one."""
+        self.commit_feat({p: f"{p} text\n" for p in paths})
+
+    def assert_names_no_role(self, err):
+        """The refusal names no valid role: a lane learns no tier that passes from it."""
+        for named in ("batch-runner", "coordinator", "standing"):
+            self.assertNotIn(named, err.lower(), f"the refusal names {named}")
+
+    def test_a_rule_text_pr_at_exactly_the_size_bound_merges_under_standing(self):
+        lines, files = self.bound("STANDING_MAX_LINES"), self.bound("STANDING_MAX_FILES")
+        paths = self.RULE_PATHS[:files]
+        self.commit_files(paths)
+        self.own_pr(self.spread(paths, lines))
+        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",)))
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    def test_a_rule_text_pr_one_line_over_the_line_bound_is_refused_under_standing(self):
+        # a valid Sonnet record is present, so only the line bound refuses this pull request
+        lines, files = self.bound("STANDING_MAX_LINES"), self.bound("STANDING_MAX_FILES")
+        paths = self.RULE_PATHS[:files]
+        self.commit_files(paths)
+        self.own_pr(self.spread(paths, lines + 1))
+        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",)))
+        err = self.assert_standing_refused()
+        self.assertIn(merge.ROLE_CITE, err, "the size refusal does not print the cite")
+        self.assert_names_no_role(err)
+
+    def test_a_rule_text_pr_one_file_over_the_file_bound_is_refused_under_standing(self):
+        # a valid Sonnet record is present, so only the file bound refuses this pull request
+        files = self.bound("STANDING_MAX_FILES")
+        paths = self.RULE_PATHS[:files + 1]
+        self.commit_files(paths)
+        self.own_pr([(p, "modified", 1) for p in paths])
+        self.scripted_records(record_text(head=self.head(), rounds=("Round 1: reviewer, sonnet, PASS",)))
+        err = self.assert_standing_refused()
+        self.assertIn(merge.ROLE_CITE, err, "the size refusal does not print the cite")
+        self.assert_names_no_role(err)
+
+    def test_a_docs_only_pr_over_both_bounds_still_merges_under_standing(self):
+        # a docs-only pull request is not bounded: no record is needed, and it merges over both bounds
+        lines, files = self.bound("STANDING_MAX_LINES"), self.bound("STANDING_MAX_FILES")
+        paths = self.DOC_PATHS[:files + 1]
+        self.commit_files(paths)
+        self.own_pr(self.spread(paths, lines + 1))
+        rc, out, err = self.standing_confirm()
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
     # ---- regression: the batch runner and the local path say what they do today
     def test_a_batch_runner_merges_a_code_pr_that_names_no_session(self):
         # the standing gate never judges the batch runner: a code change with no session link merges as it does today
