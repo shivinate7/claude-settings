@@ -2104,11 +2104,29 @@ class CodeCheckFromCopiedInstall(Job):
             f.write("@%s/CLAUDE.md\n" % claude_md_checkout)
         return os.path.join(cfg, "bin", "ci-job"), cfg
 
+    def claude_settings_origin(self):
+        """A claude-settings clone whose main holds the code-check action and the files its harness reads, with its origin a
+        bare copy of it. A pin of `main` resolves in that origin, so a run makes no network call. -> the clone's path."""
+        home = tempfile.mkdtemp(prefix="claude-settings-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, home, True)
+        source, bare = os.path.join(home, "source"), os.path.join(home, "origin.git")
+        subprocess.run(["git", "init", "-q", "-b", "main", source], check=True, env=ENV)
+        shutil.copytree(os.path.join(CHECKOUT, "actions", "code-check"), os.path.join(source, "actions", "code-check"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        for folder in ("hooks", "lint"):  # as a copied install holds them: the comment check imports modules of both
+            shutil.copytree(os.path.join(CHECKOUT, folder), os.path.join(source, folder),
+                            ignore=shutil.ignore_patterns("__pycache__"))
+        git_in(source, "add", "-A")
+        git_in(source, "commit", "-qm", "code-check")
+        subprocess.run(["git", "clone", "-q", "--bare", source, bare], check=True, env=ENV)
+        git_in(source, "remote", "add", "origin", bare)
+        return source
+
     def test_the_code_check_step_reaches_code_check_py(self):
         if not pipx_runs_pinned_ruff():
             self.skipTest("pipx cannot run code_check's pinned ruff here: no pipx, or offline with no cached copy")
         self.lane({"a.py": 'print("fine")\n'})
-        ci_job, cfg = self.install(CHECKOUT)
+        ci_job, cfg = self.install(self.claude_settings_origin())  # the pointer checkout whose origin answers `main`
         rc, lines, out = self.run_job(self.CODE, args=self.LINT, script=ci_job, env={"CLAUDE_CONFIG_DIR": cfg})
         with open(self.log, encoding="utf-8") as f:
             log = f.read()
@@ -2122,7 +2140,7 @@ class CodeCheckFromCopiedInstall(Job):
         ci_job, cfg = self.install(empty)
         rc, lines, out = self.run_job(self.CODE, args=self.LINT, script=ci_job, env={"CLAUDE_CONFIG_DIR": cfg})
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
-        self.assertIn("code_check.py", lines[0], out)
+        self.assertIn("pin main of code-check: no claude-settings clone beside ci-job or at the pointer checkout", lines[0], out)
 
     def test_an_in_repo_run_with_no_code_check_fails_and_never_borrows_a_pointer_copy(self):
         tar = self.root + ".tar"
@@ -2187,7 +2205,7 @@ class ZizmorBranches(Job):
         env = {**self.pipx_env(), "CLAUDE_CONFIG_DIR": cfg}
         rc, lines, out = self.run_job(self.REMOTE, args=self.LINT, script=ci_job, env=env)
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
-        self.assertIn("no run.sh: looked for", lines[0], out)
+        self.assertIn("pin main of zizmor: no claude-settings clone beside ci-job or at the pointer checkout", lines[0], out)
 
 
 PROBE = '''import os, sys
