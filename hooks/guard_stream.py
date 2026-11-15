@@ -290,8 +290,82 @@ CHECK_TAIL_REASON = (
     "until the check exits and the verdict can be lost "
     "(decision background-check-through-verdict). "
     "Remedy: run the check through verdict, as `verdict <cmd>` with nothing after it. It keeps the "
-    "full log and prints the verdict itself."
+    "full log and prints the verdict itself. "
+    "Start a lane lint in the background. Give it a time limit above its bound, "
+    "LINT_SECONDS plus PUSHED_HEAD_WAIT_MINUTES times 60, times 1000 ms (rule check-timeout gives the figure). "
+    "A shorter limit ends it before the verdict."
 )
+
+
+# A BACKGROUND LANE LINT'S TIME LIMIT (rule check-timeout). `merge --lane-lint` waits for its pushed head. Then it
+# runs one ci-job under the merge tool's lint bound. A call whose `timeout` is shorter ends before the verdict.
+# The bound is read from the merge tool, never copied. The tool caps a foreground limit below the bound,
+# so a foreground lane lint is refused at any limit. A call with no `timeout` gets the tool's default,
+# which is under the bound too. An unloadable merge tool gives an unknown bound: nothing is refused.
+BACKGROUND_DEFAULT_TIMEOUT_MS = 1800000
+
+
+def check_timeout_bound_ms():
+    """The least limit in ms a lane lint can finish under, or None."""
+    import guard_merge  # Lazy: only a lane lint pays to load the merge tool.
+    tool = guard_merge.merge_module()
+    if tool is None:
+        return None
+    try:
+        return (tool.LINT_SECONDS + tool.PUSHED_HEAD_WAIT_MINUTES * 60) * 1000
+    except (AttributeError, TypeError):
+        return None
+
+
+def check_timeout_hit(stripped: str, background: bool, timeout_ms=None) -> str:
+    """The matched text when a call runs `merge --lane-lint` with too little time, else ''.
+    The foreground has too little at any limit. The background has too little under the bound.
+    `timeout_ms` is the `timeout` of the call. None means the default."""
+    hit = ""
+    for segment in split_segments(stripped):
+        word = check_stage(segment, False)  # False: ci-job is no lane lint
+        tokens = segment_tokens(segment) if word else None
+        if word and tokens and "--lane-lint" in tokens:
+            hit = word + " --lane-lint"
+            break
+    if not hit:
+        return ""
+    bound = check_timeout_bound_ms()
+    if bound is None:
+        return ""
+    if not background:
+        return hit
+    if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, (int, float)):
+        timeout_ms = BACKGROUND_DEFAULT_TIMEOUT_MS
+    return hit if timeout_ms < bound else ""
+
+
+CHECK_TIMEOUT_TEMPLATE = (
+    "a lane lint with a time limit shorter than its own bound ends before it prints a verdict "
+    "(decision background-check-through-verdict). "
+    "A run in the foreground is capped below that bound. "
+    "Remedy: start it in the background, as `verdict <cmd>`, with a time limit of %s. "
+    "That is LINT_SECONDS plus PUSHED_HEAD_WAIT_MINUTES times 60, times 1000. "
+    "Read the verdict when the run ends."
+)
+
+
+def check_timeout_limit_text() -> str:
+    """The limit the refusal names, read from the merge tool when it loads."""
+    bound = check_timeout_bound_ms()
+    return "at least %d ms" % bound if bound is not None else "above the bound"
+
+
+def _check_timeout_reason() -> str:
+    """The text of CHECK_TIMEOUT_REASON, with the bound read from the merge tool."""
+    return CHECK_TIMEOUT_TEMPLATE % check_timeout_limit_text()
+
+
+def __getattr__(name):
+    """CHECK_TIMEOUT_REASON, built on first read: it holds the bound, and reading the bound loads the merge tool."""
+    if name == "CHECK_TIMEOUT_REASON":
+        return _check_timeout_reason()
+    raise AttributeError(name)
 
 
 # A PIPE OUT OF `verdict`. A pipeline's exit is its last stage's, so `verdict CMD | tail` returns

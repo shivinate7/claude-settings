@@ -389,6 +389,13 @@ add("test-author: Edit of hooks/guard_core.py is refused", "deny", rule=TA, tool
 add("builder-test: Edit of hooks/mutate_guard.py is refused", "deny", rule=BT, tool="Edit",
     file_path="hooks/mutate_guard.py", carries=("test-author", "Report"),
     agent_id="bld1", agent_type="builder", cwd=GITMAIN)
+# A test-support helper shared by tests lives in the testing/ folder (coordinator ruling, 04:21 CST). testing/ is a
+# test folder: a builder may not write it, and a test-author writes it.
+for _tool in ("Edit", "Write"):
+    add("builder-test: %s of testing/cost_probe.py is refused" % _tool, "deny", rule=BT, tool=_tool,
+        file_path="testing/cost_probe.py", carries=("test-author", "Report"), **B)
+    add("test-author: %s of testing/cost_probe.py is allowed (control)" % _tool, "allow", tool=_tool,
+        file_path="testing/cost_probe.py", **A)
 # The near misses stay a builder's product code: a later mutate_*.py is not a mutation test. A listed
 # name in another case is the same file on Windows, so it is refused for a builder too.
 add("builder-test: Edit of hooks/mutate_x.py is allowed", "allow", tool="Edit",
@@ -715,6 +722,15 @@ add("builder-test: a multi-line python run with a backslash test path, deleted f
 add("builder-test: a node run with a backslash test path, deleted from checks.yml is refused",
     "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_NODE, new_string=LINT,
     carries=("test-author", "Report"), **B)
+
+# bash takes no value after -k or -p, so the test path after either flag is the script: a builder that drops
+# that run drops its test.
+R3_BASH_K = "      - name: Unit\n        run: bash -k tests/test_a.sh\n"
+R3_BASH_P = "      - name: Unit\n        run: bash -p tests/test_a.sh\n"
+add("builder-test: a bash -k test run deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + R3_BASH_K, new_string=LINT, carries=("test-author", "Report"), **B)
+add("builder-test: a bash -p test run deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + R3_BASH_P, new_string=LINT, carries=("test-author", "Report"), **B)
 
 # ---- test-path shapes: one table on the builder's early warning. Each row is one path, judged by
 # a Write, for one role (the builder). A test shape is refused, a near miss is allowed. Shapes, with
