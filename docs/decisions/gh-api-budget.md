@@ -21,7 +21,7 @@ Incident: at 12:05 CST on Nov 15, 2026 the REST core budget of the shared token 
 
 ## Reader
 
-`merge --audit-prs`: one bulk list of the open pull requests and one repo-wide `issues/comments` read. It prints one line for each pull request: number, branch, head, draft or ready, mergeable state, the newest review record's last round and verdict, and the lane-lint state. A record with a fix check and no round line shows the fix check's verdict. `-C <checkout>` names the checkout to audit; any other flag or a pull request number is refused. The pull request list does not carry the mergeable state, so it prints UNKNOWN. This is accepted: a read for each pull request is the cost the audit avoids. The last lines give the calls for each route. It writes no file.
+`merge --audit-prs`: one bulk list of the open pull requests and one repo-wide `issues/comments` read. It prints one line for each pull request: number, branch, head, draft or ready, mergeable state, the newest review record's last round and verdict, and the lane-lint state. A record with a fix check and no round line shows the fix check's verdict, and one with neither shows `no round`. `-C <checkout>` names the checkout to audit; any other flag or a pull request number is refused. The pull request list does not carry the mergeable state, so it prints UNKNOWN. This is accepted: a read for each pull request is the cost the audit avoids. The last lines give the calls for each route. It writes no file.
 
 ## Cost
 
