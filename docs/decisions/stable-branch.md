@@ -4,7 +4,7 @@
 
 Owner approved the design with the refuter's changes, 2026-11-12 09:48 CST, relayed by the coordinator at 09:50 CST. Under R42 part 2, sessions and installers run from a branch named `stable` on origin. A workflow run moves it after a green push run of checks on main. The move is fast-forward only.
 
-State: live on origin. Measured 2026-11-15 01:14 CST: `stable` is at the stable head, commit 20963a214992 (committed 2026-11-14 23:49 CST). That commit is an ancestor of origin/main, which is 211 commits ahead, so `stable` lags main. What keeps it: `.github/workflows/stable.yml` on main, the stable mover, merged in pull request 2793. It runs when the checks workflow completes, and fast-forwards `stable` to the head of a successful push run on main only. A red, cancelled or pull request run leaves `stable` where it is. Its history: `git log -- .github/workflows/stable.yml`.
+State: `stable` exists on origin (read 2026-11-15 01:14 CST), and it lags origin/main. To check, compare `git ls-remote origin refs/heads/stable` with `git rev-parse origin/main`. At 01:14 CST it was 211 commits behind. What keeps it: `.github/workflows/stable.yml` on main, the stable mover, merged in pull request 2793. It runs when the checks workflow completes. It fast-forwards `stable` to the head of a successful push run on main only. A red, cancelled or pull request run leaves `stable` where it is. Its history: `git log -- .github/workflows/stable.yml`.
 
 - Trigger: `workflow_run` on the checks workflow's completion, for a push run on main that ends in success.
 - Move: fast-forward `stable` to that run's head sha. A move that is not a fast-forward is refused. The job never force-pushes.
