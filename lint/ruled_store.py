@@ -27,12 +27,12 @@ An entry whose store file was added or changed in a commit on STORE_REF made at 
 supersedes when the kind is "ruling": the first token of the ref is the exact `id` of an entry in the store whose `at` is
 strictly earlier than its own (check_store). A file last changed before CUTOFF_AT is not checked. `check` reads that
 scope with one `git log --diff-merges=first-parent` over the store folder, filtered by commit date here: a merge counts
-only what it adds to the store ref's main line. A pure rename (same text, new name) is not a change; a rename with edits is. A failed log, or a shallow repo (its log ends early), reads unknown,
+only what it adds to the store ref's main line. A pure rename (same text, new name) is not a change to an entry whose file was already old; a rename with edits is. A failed log, or a shallow repo (its log ends early), reads unknown,
 like an unreadable store; `check` then names the cause in its unknown line.
 
 Cost: this module keeps no process and no timer and writes no file. ruled_entries starts two read-only git processes
 (one ls-tree, one cat-file --batch). open_entries starts one more cat-file --batch, and only when an open entry names
-`lands_in`. check_store adds, only when the store has entries, one rev-parse (the shallow test) and one git log (it detects renames, in the same process), and,
+`lands_in`. check_store adds, only when the store has entries, one rev-parse (the shallow test) and one git log (oldest first, renames detected, same process), and,
 only when an open entry names a `step`, one more cat-file --batch; its listing, when it fails, costs one more
 rev-parse, to tell a missing ref from a lost commit or tree. A missing ref, a missing folder or a failed git start
 gives [], never an error.
@@ -379,40 +379,47 @@ def _steps_of(entry):
     return [s for s in raw if isinstance(s, str) and STEP_SLUG.match(s)]
 
 
-def _changed_paths(tokens):
-    """The paths a commit's `--name-status -z` tokens put in scope, as str. The tokens run status, path; a rename or
-    copy (R or C) carries the old path, then the new one. A deleted file, and the new path of a pure rename or copy
-    (score 100), read as nothing: no entry text changed. Any other status counts its path."""
+def _apply_commit(recent, tokens):
+    """Update `recent`, the set of paths in scope, with one commit's `--name-status -z` tokens. The tokens run status,
+    path; a rename or copy (R or C) carries the old path, then the new one. A deleted file leaves the set. A pure
+    rename or copy (score 100) carries scope from the old path to the new one, and adds the new path only when the old
+    path is in the set. A rename with edits adds the new path. A rename and a delete drop the old path. Any other status
+    adds its path."""
     # git ends the format line of a commit that has names with a newline, which the first token carries.
     tokens = [t for t in tokens if t]
     if tokens:
         tokens[0] = tokens[0].removeprefix(b"\n")
-    paths = []
+    before = set(recent)
+    drop, add = set(), set()
     i = 0
     while i < len(tokens):
-        status = tokens[i]
-        if status[:1] in (b"R", b"C"):
+        kind = tokens[i][:1]
+        if kind in (b"R", b"C"):
             if i + 2 >= len(tokens):
                 break
-            if status[1:] != b"100":
-                paths.append(tokens[i + 2])
+            old, new = (t.decode("utf-8", "replace") for t in tokens[i + 1:i + 3])
+            if kind == b"R":
+                drop.add(old)
+            if tokens[i][1:] != b"100" or old in before:
+                add.add(new)
             i += 3
         else:
             if i + 1 >= len(tokens):
                 break
-            if status[:1] != b"D":
-                paths.append(tokens[i + 1])
+            path = tokens[i + 1].decode("utf-8", "replace")
+            (drop if kind == b"D" else add).add(path)
             i += 2
-    return [p.decode("utf-8", "replace") for p in paths]
+    recent.difference_update(drop)
+    recent.update(add)
 
 
 def _recent_files(repo_dir):
     """(paths, cause): the set of store paths added or changed in a commit on STORE_REF made at or after CUTOFF_AT, and
     "". paths is None, and cause names why, when that cannot be read: a shallow repo (its log ends early), git that
     cannot start, or a log that exits nonzero.
-    One git log walks the whole history, with renames detected: a pure rename is no change, a rename with edits is.
-    A merge is diffed against its first parent only, so it counts as what it adds
-    to the store ref's main line; against the other parent it would also list every file the main line changed, and
+    One git log walks the whole history oldest first, with renames detected: a pure rename moves an entry's scope to its
+    new path and adds nothing for a file that was already old; a rename with edits is a change.
+    A merge is diffed against its first parent only, so it counts as what it adds to the store ref's main line; against the other parent it would also list every file the main line changed, and
     flag an old entry. A side-branch commit is still walked and counts on its own date. The commits are filtered by
     committer date here, never by --since: git stops a --since walk at the first older commit, which hides a file
     changed on a branch whose commits are dated before the cutoff but merged after it. --diff-merges needs git 2.31;
@@ -425,7 +432,7 @@ def _recent_files(repo_dir):
     if out.strip() != b"false":
         return None, CAUSE_SHALLOW
     code, out = _git(repo_dir, ["log", "--diff-merges=first-parent", "--find-renames", "--name-status", "-z",
-                                "--format=%x01%ct", STORE_REF, "--", STORE_DIR])
+                                "--reverse", "--format=%x01%ct", STORE_REF, "--", STORE_DIR])
     if code is None:
         return None, CAUSE_NO_GIT
     if code != 0:
@@ -435,7 +442,7 @@ def _recent_files(repo_dir):
     for record in out.split(b"\1")[1:]:
         stamp, *tokens = record.split(b"\0")
         if int(stamp) >= cutoff:
-            recent.update(_changed_paths(tokens))
+            _apply_commit(recent, tokens)
     return recent, ""
 
 
