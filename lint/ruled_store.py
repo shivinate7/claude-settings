@@ -4,6 +4,9 @@
     python3 lint/ruled_store.py --session-line REPO   the lines the session-start hook prints, or nothing
     python3 lint/ruled_store.py list REPO             every open entry in full
     python3 lint/ruled_store.py check REPO            exit 1 on a store problem (check_store)
+    python3 lint/ruled_store.py decisions REPO [--changed BASE] [--report]
+                                                      exit 1 on a decision record that cites a ruling and not the later
+                                                      ruling that overtakes it (check_decisions)
 
 The store is the folder roadmap/rulings on origin/roadmap of REPO, one JSON file per ruling. An entry holds `id`,
 `at` (ISO 8601 with a zone), `ruling`, `source`, `status` ("open" or "closed"), `supersedes` (a list of
@@ -21,6 +24,11 @@ that rule, or None. An entry governs only when its status is "open", check_entry
 unchecked. guard_ruling_line(entry) words the note a guard prints when it lets the ruled act through. False makes
 every entry text only. A guard rule id is the first token of the ref, with a trailing ":" cut, in kebab-case
 (guard_rule_id); a ref with no such token names no rule.
+
+check_decisions reads each decision record of the checkout (layout.path kind decisions). A ruling Y overtakes an older ruling X when Y's
+`supersedes` holds a "ruling" ref that names X's id, or (fallback, prose) when one sentence of Y's `ruling` names X's id
+beside an overtaking verb (OVERTAKE). A record that cites X by id and never cites Y by id is stale on that question.
+A cite inside an HTML comment is no cite. Only an id of two or more words joined by "-" counts (ELIGIBLE_ID).
 
 Cost: this module keeps no process and no timer and writes no file. ruled_entries starts two read-only git processes
 (one ls-tree, one cat-file --batch). open_entries starts one more cat-file --batch, and only when an open entry
@@ -48,6 +56,12 @@ except ImportError:
     sys.path.append(os.path.join(HERE, "..", "hooks"))
     import _nowindow  # noqa: E402
 
+try:
+    import layout  # the one home of where a repo keeps its decisions (lint/layout.py)
+except ImportError:
+    sys.path.insert(0, HERE)
+    import layout  # noqa: E402
+
 ENTRIES_LIFT_GUARDS = True  # an open entry governs the guard rules it names
 STORE_REF = "origin/roadmap"
 MAIN_REF = "origin/main"
@@ -61,6 +75,10 @@ SESSION_ENTRIES = 5  # entry lines after the header; with the header and the com
 RULING_CUT = 100
 REF_CUT = 80
 GIT_TIMEOUT = 30
+ELIGIBLE_ID = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)+$")  # r10 and ow-style one-token ids are too common as plain words
+OVERTAKE = re.compile(r"\b(extends?|extended|overrides?|overrode|supersedes?|superseded|replaces?|widens?|amends?|"
+                      r"overtakes?|instead of|exception to)\b", re.I)
+HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
 # A git start must read REPO, never an outer repo that a hook or CI step points at through these.
 STRIPPED = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_NAMESPACE")
 _FAR_PAST = datetime.min.replace(tzinfo=timezone.utc)
@@ -379,6 +397,90 @@ def check_store(repo_dir):
     return problems
 
 
+def _cites(text, rid):
+    return re.search(r"(?<![\w-])" + re.escape(rid) + r"(?![\w-])", text) is not None
+
+
+def overtaking_pairs(entries):
+    """[(older, newer)] of entries where `newer` overtakes `older`: both ids are ELIGIBLE_ID, `older` is dated before
+    `newer`, `newer` is open or closed, and `newer` names `older` in a "ruling" supersedes ref (read first) or, as the
+    fallback, in one sentence of its `ruling` beside an OVERTAKE verb."""
+    by_id = {e["id"]: e for e in entries if isinstance(e.get("id"), str) and ELIGIBLE_ID.match(e["id"])}
+    pairs = []
+    for newer in by_id.values():
+        if newer.get("status") not in STATUSES:
+            continue
+        refs = [str(i.get("ref", "")) for i in _supersedes(newer) if i.get("kind") == "ruling"]
+        sentences = re.split(r"(?<=[.!?])\s+", str(newer.get("ruling", "")))
+        for older in by_id.values():
+            if older is newer or entry_instant(older) >= entry_instant(newer):
+                continue
+            oid = older["id"]
+            if any(_cites(r, oid) for r in refs) or any(_cites(s, oid) and OVERTAKE.search(s) for s in sentences):
+                pairs.append((older, newer))
+    return pairs
+
+
+def _record_lines(text):
+    """The record's lines with each HTML comment blanked, line count kept, so a hidden cite counts as none."""
+    return HTML_COMMENT.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text).split("\n")
+
+
+def check_decisions(repo_dir, only=None):
+    """(problems, state): one line per record in docs/decisions of the checkout that cites an older ruling's id and not
+    the id of the later ruling that overtakes it, as `path:line: ...`, line of the record's first cite of the older id.
+    `only` limits the records to those relative paths. state is the store's (read_store); a store that is not "ok"
+    gives no problem, so the caller prints unknown."""
+    entries, state = read_store(repo_dir)
+    if state != "ok":
+        return [], state
+    pairs = overtaking_pairs(entries)
+    where = layout.path(repo_dir, "decisions")
+    folder = os.path.join(repo_dir, *where.split("/"))
+    try:
+        names = sorted(n for n in os.listdir(folder) if n.endswith(".md"))
+    except OSError:
+        return [], "unreadable"
+    problems = []
+    for name in names:
+        rel = "%s/%s" % (where, name)
+        if only is not None and rel not in only:
+            continue
+        try:
+            with open(os.path.join(folder, name), encoding="utf-8-sig") as f:
+                lines = _record_lines(f.read().replace("\r\n", "\n"))
+        except OSError:
+            continue
+        body = "\n".join(lines)
+        for older, newer in pairs:
+            if _cites(body, older["id"]) and not _cites(body, newer["id"]):
+                first = next(n for n, line in enumerate(lines, 1) if _cites(line, older["id"]))
+                problems.append("%s:%d: cites ruling %s (%s) and not %s (%s), which overtakes it; name %s and rewrite "
+                                "what it overtakes" % (rel, first, older["id"], older.get("at", "?")[:16], newer["id"],
+                                                       newer.get("at", "?")[:16], newer["id"]))
+    return problems, state
+
+
+def _decisions(repo_dir, rest):
+    only = None
+    if "--changed" in rest:
+        at = rest.index("--changed")
+        if at + 1 >= len(rest):
+            return 2
+        code, out = _git(repo_dir, ["diff", "--name-only", rest[at + 1] + "...HEAD", "--", layout.path(repo_dir, "decisions")])
+        if code != 0:
+            print("ruled-store: unknown, cannot diff against %s" % rest[at + 1])
+            return 0
+        only = set(out.decode("utf-8", "replace").split())
+    problems, state = check_decisions(repo_dir, only)
+    if state != "ok":
+        print("ruled-store: unknown, the rulings store is %s; no record was checked" % state)
+        return 0
+    for problem in problems:
+        print(problem)
+    return 1 if problems and "--report" not in rest else 0
+
+
 def _check(repo_dir):
     problems = check_store(repo_dir)
     for problem in problems:
@@ -392,6 +494,8 @@ def main(argv):
             for line in session_lines(argv[1]):
                 print(line)
             return 0
+        if argv and argv[0] == "decisions" and len(argv) >= 2 and not argv[1].startswith("--"):
+            return _decisions(argv[1], argv[2:])
         if len(argv) in (1, 2) and argv[0] in ("list", "check"):
             repo = argv[1] if len(argv) == 2 else "."
             return _list(repo) if argv[0] == "list" else _check(repo)

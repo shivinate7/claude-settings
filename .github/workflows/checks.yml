@@ -522,6 +522,21 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: python3 lint/check_ruling_kind.py --base "origin/$BASE_REF"
 
+      # A record that cites a ruling and not the later ruling that overtakes it (decision ruled-store-one-home). A pull request is
+      # refused only for a record it touches; a push to main only reports, so a new ruling on the roadmap branch never turns main red.
+      # No scope flag: records are .md files. A roadmap branch that cannot be fetched prints unknown, never clean.
+      - name: Records name the ruling that overtakes them
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin roadmap:refs/remotes/origin/roadmap || echo "ruled-store: unknown, roadmap not fetched"
+          if [ "$EVENT" = "pull_request" ]; then
+            python3 lint/ruled_store.py decisions . --changed "origin/$BASE_REF"
+          else
+            python3 lint/ruled_store.py decisions . --report
+          fi
+
       # Rule and record move together (decision child-cites-not-copies). The action's aligned step diffs origin/<base>...HEAD and reads the PR
       # body from the event file, and only when a gap needs it. No scope flag on purpose: decisions are .md files, so a docs-only pull request must run it. The `checks` job is read
       # by all-jobs-passed. The action reads the full-depth checkout above.
