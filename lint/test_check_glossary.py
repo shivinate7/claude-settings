@@ -29,7 +29,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
-MODULE =os.environ.get("GLOSSARY_UNDER_TEST") or os.path.join(HERE, "check_glossary.py")
+MODULE = os.environ.get("GLOSSARY_UNDER_TEST") or os.path.join(HERE, "check_glossary.py")
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 
@@ -1296,6 +1296,24 @@ class InstalledRootTests(Fixture):
         self.assertEqual(code, 1, "the check passed in a repo with no glossary\n" + out)
         self.assertTrue(any(form in out for form in self.spellings(os.path.join(repo_b, "GLOSSARY.md"))),
                         "the FAIL line does not name repo B's GLOSSARY.md\n" + out)
+
+    def test_repo_copy_with_its_glossary_deleted_is_not_replaced_by_the_cwd_repo(self):
+        """A repo copy run in place, its GLOSSARY.md deleted, run from repo B that has one: the FAIL names the copy's
+        own GLOSSARY.md, never B's."""
+        repo_c = self.sibling_repo()
+        script_c = os.path.join(repo_c, "lint", "check_glossary.py")
+        self.assertTrue(os.path.exists(os.path.join(repo_c, ".git")), "scope: repo C has no .git entry")
+        self.assertTrue(os.path.isfile(script_c), "scope: repo C has no lint/check_glossary.py in place")
+        self.assertTrue(os.path.isfile(os.path.join(self.tree, "GLOSSARY.md")), "scope: repo B has no GLOSSARY.md")
+        code, out = self.run_check("docs/notes.md", script=script_c, cwd=self.tree)
+        self.assertEqual(code, 0, "control: the copy with its glossary must pass from repo B\n" + out)
+        os.remove(os.path.join(repo_c, "GLOSSARY.md"))
+        self.assertFalse(os.path.exists(os.path.join(repo_c, "GLOSSARY.md")), "scope: repo C still has a GLOSSARY.md")
+        code, out = self.run_check("docs/notes.md", script=script_c, cwd=self.tree)
+        self.assertNotIn("Traceback", out, "the repo copy did not start\n" + out)
+        self.assertEqual(code, 1, "the check passed with the copy's glossary gone, reading repo B's\n" + out)
+        self.assertTrue(any(form in out for form in self.spellings(os.path.join(repo_c, "GLOSSARY.md"))),
+                        "the FAIL line does not name the copy's GLOSSARY.md\n" + out)
 
 
 class RepoGlossaryTests(unittest.TestCase):
