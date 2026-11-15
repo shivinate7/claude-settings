@@ -308,6 +308,17 @@ def name_match(text, path):
 
 # The interpreters a run line may start with. The command a test runs with is this word (`node --test` for node's runner).
 INTERPRETERS = ("sh", "bash", "node", "python", "python3", "powershell", "pwsh")
+# The directories an interpreter may be named from by absolute path (`/bin/bash`). Only these exact forms read as the
+# bare interpreter; any other absolute path (`/tmp/bash`) may be a different program, so it is not read.
+INTERPRETER_DIRS = ("/bin", "/usr/bin", "/usr/local/bin")
+
+
+def interpreter_word(word):
+    """The bare interpreter `word` names, as `bash` or as `<dir>/bash` with a dir of INTERPRETER_DIRS; None otherwise."""
+    directory, _, name = word.rpartition("/")
+    if name in INTERPRETERS and (not directory and "/" not in word or directory in INTERPRETER_DIRS):
+        return name
+    return None
 
 
 def chain_before(prefix):
@@ -341,10 +352,11 @@ def line_command(start, text, match, join):
     if chain:
         fail(f"{CI_PATH} line {start + first} names a test after a chain ({chain!r}), so its command cannot be read from "
              f"the line's first word: {' '.join(words)!r}")
-    if not words or words[0] not in INTERPRETERS:
+    interpreter = interpreter_word(words[0]) if words else None
+    if interpreter is None:
         fail(f"{CI_PATH} line {start + first} names a test after {words[0] if words else 'nothing'!r}, not an interpreter "
              f"({', '.join(INTERPRETERS)}), so its command cannot be read: {' '.join(words)!r}")
-    return "node --test" if words[0] == "node" and words[1:2] == ["--test"] else words[0]
+    return "node --test" if interpreter == "node" and words[1:2] == ["--test"] else interpreter
 
 
 def script_globs(text):
