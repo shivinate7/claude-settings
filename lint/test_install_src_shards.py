@@ -22,6 +22,7 @@ Run with:  python3 lint/test_install_src_shards.py -v
 """
 import os
 import re
+import shutil
 import subprocess
 import sys
 import unittest
@@ -31,6 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
 from test_windows_split import paren_prefix, unwrap  # noqa: E402  the one home of the scope prefix reader (G)
+import _test_temp  # noqa: E402  the one home of the test temp folder (test-temp-standard)
 
 REPO = os.path.abspath(os.path.join(HERE, ".."))
 SUITE = os.path.join(REPO, "hooks", "test_install_src.sh")
@@ -82,15 +84,15 @@ def defined_functions():
         return set(re.findall(r"^(?:function\s+)?([A-Za-z_]\w*)\s*\(\s*\)", f.read(), re.M))
 
 
-def list_cases(shard=None):
+def list_cases(shard=None, suite=SUITE):
     """The suite run with --list, under INSTALL_SRC_SHARD=shard when given. -> (exit code, case names, stdout, stderr).
 
-    Names are the identifier lines of stdout. The summary line the old code prints is not one.
+    Names are the identifier lines of stdout. The summary line the old code prints is not one. `suite` is the script run.
     """
     env = {k: v for k, v in os.environ.items() if k not in STRIPPED_ENV}
     if shard is not None:
         env[SHARD_ENV] = shard
-    p = subprocess.run(["sh", SUITE, "--list"], cwd=REPO, env=env, stdin=subprocess.DEVNULL,
+    p = subprocess.run(["sh", suite, "--list"], cwd=REPO, env=env, stdin=subprocess.DEVNULL,
                        capture_output=True, text=True)
     names = [ln.strip() for ln in p.stdout.splitlines() if NAME.fullmatch(ln.strip())]
     return p.returncode, names, p.stdout, p.stderr
@@ -270,6 +272,30 @@ class ShellMacosRunsTheShardsByMatrix(unittest.TestCase):
         prefixes = {paren_prefix(unwrap(c)) or unwrap(c) for c in conds.values()}
         self.assertEqual(sorted(prefixes), [SCOPE_ORIG],
                          "the shell-macos steps' scope prefixes are not the one scope condition")
+
+
+class ListCountsOnlyExecutedCalls(unittest.TestCase):
+    # Two `run` words that are no call: one in a heredoc, one in a `: '...'` block (a quoted no-op).
+    GHOSTS = "\n: <<'GHOST_HEREDOC'\nrun ghost_heredoc\nGHOST_HEREDOC\n: '\nrun ghost_quoted\n'\n"
+
+    def test_a_run_word_in_a_heredoc_or_quoted_block_is_not_listed(self):
+        # Red on 7c0ddeb8: --list read every `run X` text line, so both ghosts were listed (176 names, not 174).
+        # The oracle is the real suite's --list, which names the calls it makes and no others.
+        with open(SUITE, encoding="utf-8") as f:
+            text = f.read()
+        self.assertEqual(text.count("\nset -u\n"), 1, "the fixture: the suite has one `set -u` line to insert after")
+        folder = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, folder, True)
+        copy = os.path.join(folder, "test_install_src_ghosts.sh")
+        with open(copy, "w", encoding="utf-8") as f:
+            f.write(text.replace("\nset -u\n", "\nset -u\n" + self.GHOSTS, 1))
+        code, real, _, err = list_cases()
+        self.assertEqual(code, 0, f"the real suite's --list exited {code}: {err.strip()[-200:]}")
+        code, copied, _, err = list_cases(suite=copy)
+        self.assertEqual(code, 0, f"the copy's --list exited {code}: {err.strip()[-200:]}")
+        self.assertEqual([n for n in copied if "ghost" in n], [],
+                         "--list names a `run` word that is no call the suite makes")
+        self.assertEqual(copied, real, "the copy's --list differs from the real suite's, with no ghost name in it")
 
 
 if __name__ == "__main__":
