@@ -244,8 +244,8 @@ FAIL_OPEN_LINK = "Feedback guard: page link not checked (%s)."
 # the page id is another id, and layout.artifact_id compares it.
 ARTIFACT_URL = re.compile(r"https?://(?:www\.)?claude\.ai/(?:code/)?artifact/[A-Za-z0-9_-]+")
 LINK_REASON = (
-    "Page link not printed: this turn wrote to the waiting page, and the last reply names no link to it. End the"
-    " last reply with the page link as one line, %s, then stop (waiting-page skill, section \"Print the page"
+    "Page link not printed: this turn wrote to the page, and the last reply names no link to it. End the"  # glossary-ok: the skill's own name, below
+    " last reply with the page link as one line, %s, then stop (waiting-page skill, section \"Print the page"  # glossary-ok: the skill's own name
     " link\").")
 LINK_CITE = " (roadmap step surface-page-link-in-chat)"
 LINK_FORM = "https://claude.ai/artifact/%s"  # the form the reason names, with the page id from layout
@@ -1428,15 +1428,35 @@ def _turn_text(rec):
     return text or ""
 
 
+def _is_notice(rec):
+    """True for a message record whose text starts with a machine tag (MACHINE_TAGS): a system reminder, a task
+    notification, a hand-back or a framed peer message."""
+    return ((_transcript.owner_text(rec) is not None or _transcript.is_incoming(rec))
+            and _turn_text(rec).strip().startswith(tuple(MACHINE_TAGS)))
+
+
 def _turn_records(records):
-    """The records after the last message that starts a turn: an owner or peer message with text. A machine
-    notice (MACHINE_TAGS) and a tool result start none."""
+    """(turn, notices): the records after the last message that starts a turn, and the indexes in `turn` of the
+    notices after it. A turn starts at a message with text that is no notice (_is_notice): an owner message, a
+    queued owner message or an unframed peer message. A notice and a tool result start none."""
     start = None
     for i, rec in enumerate(records):
-        if _transcript.owner_text(rec) is not None or _transcript.is_incoming(rec):
-            if not _turn_text(rec).strip().startswith(tuple(MACHINE_TAGS)):
-                start = i
-    return [] if start is None else records[start + 1:]
+        if (_transcript.owner_text(rec) is not None or _transcript.is_incoming(rec)) and not _is_notice(rec):
+            start = i
+    if start is None:
+        return [], []
+    turn = records[start + 1:]
+    return turn, [i for i, rec in enumerate(turn) if _is_notice(rec)]
+
+
+def _on_page(layout, root, url):
+    """True when `url` names the repo's page, by layout's one test."""
+    return layout.is_waiting_page_url(root, url)  # glossary-ok: layout's function name, a code name the glossary keeps
+
+
+def _page_url(layout, root):
+    """The repo's page URL, read through layout."""
+    return layout.waiting_page(root)  # glossary-ok: layout's function name, a code name the glossary keeps
 
 
 def _last_text(records):
@@ -1459,7 +1479,8 @@ def page_link_check(cwd, transcript_path, session_id, last_message=None):
     collection to the repo's waiting page, and the last reply names no claude.ai artifact URL (either form) whose
     id is the page's id, compared whole by layout.artifact_id. The last reply is `last_message`, the hook's own
     field, else the last assistant text of the turn. A repo with no waiting page, a session that is not the
-    writer and a transcript that cannot be read pass with no note. `note` is the systemMessage text only after a
+    writer and a transcript that cannot be read pass with no note. A write to meta alone owes no link, and a write
+    is covered by a reply after it that names the link when a notice (a wake) comes after that reply. `note` is the systemMessage text only after a
     page write was found and a read of the repo or the layout failed: never a block. Cost: the transcript read
     at each Stop (shared with export_check's); a writer's page write adds one is_waiting_page_url read per distinct url."""
     try:
@@ -1467,8 +1488,10 @@ def page_link_check(cwd, transcript_path, session_id, last_message=None):
         import layout
     except (OSError, TypeError, ValueError, ImportError):
         return None, None
-    turn = _turn_records(records)
-    writes, _, results = _scan_transcript(turn, layout.WAITING_COLLECTIONS)
+    turn, notices = _turn_records(records)
+    # meta (a stamp such as `woke`) is no item, so it owes no link; export_check still counts it
+    owing = tuple(c for c in layout.WAITING_COLLECTIONS if c != "meta")
+    writes, _, results = _scan_transcript(turn, owing)
     writes = [w for w in writes if w[1] in results and not results[w[1]][0]]
     if not writes:
         return None, None
@@ -1478,11 +1501,23 @@ def page_link_check(cwd, transcript_path, session_id, last_message=None):
         root = Homes(cwd)._cwd_root()
         if root is None:
             return None, None
-        if not any(layout.is_waiting_page_url(root, url) for url in {w[2] for w in writes}):
+        writes = [w for w in writes if _on_page(layout, root, w[2])]
+        if not writes:
             return None, None
-        page_id = layout.artifact_id(layout.waiting_page(root))
+        page_id = layout.artifact_id(_page_url(layout, root))
+
+        def names_page(text):
+            return any(_on_page(layout, root, m.group(0)) for m in ARTIFACT_URL.finditer(text))
+
+        # A write is covered when a reply after it names the link and a notice came after that reply: the owner
+        # got the link, and a later wake brings no new write.
+        at = {u.get("id"): i for i, rec in enumerate(turn) for u in _transcript.tool_uses(rec)}
+        linked = [i for i, rec in enumerate(turn) if names_page(_last_text([rec]))]
+        sealed = max(notices, default=-1)
+        if all(any(at.get(w[1], len(turn)) < i < sealed for i in linked) for w in writes):
+            return None, None
         reply = last_message if isinstance(last_message, str) and last_message else _last_text(turn)
-        if any(layout.is_waiting_page_url(root, m.group(0)) for m in ARTIFACT_URL.finditer(reply)):
+        if names_page(reply):
             return None, None
     except layout.LayoutError as e:
         return None, FAIL_OPEN_LINK % (" ".join(str(e).split()) or type(e).__name__)
