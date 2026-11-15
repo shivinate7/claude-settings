@@ -1,13 +1,13 @@
 {
   "id": "guard-text-lags-round1-branch",
   "title": "hooks/guard.py line 4363 still says 'after review round 2 failed' and lags the round-1 branch",
-  "status": "todo",
+  "status": "doing",
   "repo": "shivinate7/claude-settings",
-  "phase": "next",
+  "phase": "now",
   "owner": "coordinator",
   "blockedBy": [],
-  "why": "Coordinator 02:20 CST Nov 15 (relayed; pick is the coordinator's, undoable, not the owner's): hooks/guard.py:4363 still says 'after review round 2 failed' and lags the round-1 branch that the consultant's pick own-round1-branch-a writes into the rules (round 1 FAIL and every fix verifier FAIL opens round 3, as the merge tool and pr-review-record line 58 do). Guard or check change: yes, so it gets the normal review rounds. It starts after #3480 merges (GitHub 02:20 CST: #3480 open draft, head c1c6eaf2daec), because it cites that text. Triage read neither the guard nor the line; the line number is the coordinator's.",
+  "why": "Coordinator 02:20 CST Nov 15 (relayed; pick is the coordinator's, undoable, not the owner's): hooks/guard.py:4363 still says 'after review round 2 failed' and lags the round-1 branch that the consultant's pick own-round1-branch-a writes into the rules (round 1 FAIL and every fix verifier FAIL opens round 3, as the merge tool and pr-review-record line 58 do). Guard or check change: yes, so it gets the normal review rounds. It starts after #3480 merges (GitHub 02:20 CST: #3480 open draft, head c1c6eaf2daec), because it cites that text. Triage read neither the guard nor the line; the line number is the coordinator's.\n\n03:34 CST Nov 15 (coordinator, relayed; triage read no code): #3480 merged at 03:32:55 CST (GitHub read by triage 03:34 CST), so the start condition is met. The coordinator started lane guard-round-text-aligned: hooks/guard.py wording at line 4379 (the step said 4363; the line moved) follows the round-1 branch, plus a guard row. The coordinator's name guard-round-text-aligned is an alias of this step, not a second step. Lane session id not relayed; not filed.",
   "source": "coordinator 02:20 CST Nov 15; consultant pick own-round1-branch-a (02:04 CST Nov 15)",
   "note": "Starts after #3480 merges. The coordinator names the lane. Guard or check: yes.",
-  "updatedAt": "2026-11-15T02:20:00-06:00"
+  "updatedAt": "2026-11-15T03:34:00-06:00"
 }
