@@ -6,4 +6,4 @@
 
 **Decision.** `start-session-not-pretooluse` (start_session is not gated at PreToolUse). `machine-load-brake` (the machine-load brake).
 
-**Retire.** A lane start on a full machine is stopped some way that adds no PreToolUse hook on `start_session`: for example the coordinator's own Agent or Task call carries the check, or the audit stops a session started at full. The owner picks the route. Closed when a case in `hooks/test_guard.py` shows that start refused or stopped on a full reading, red on today's code.
+**Retire.** Something stops a lane start on a full machine, and it adds no PreToolUse hook on `start_session`. One route: the coordinator's own Agent or Task call carries the check. Another: the audit stops a session started at full. The owner picks the route. Closed when a case in `hooks/test_guard.py` shows that start refused or stopped on a full reading. The case is red on today's code.

@@ -26,7 +26,11 @@ Read in `hooks/guard.py`: `judge` refuses before the call. `start_session` was n
 
 `SESSION_TOOL`, `START_TOOLS` and the `start_session` branch of `floor_hit` stay in `hooks/guard.py`. The audit calls `floor_hit`, and the guard's cases call `judge` on a `start_session` payload. No PreToolUse call reaches them.
 
-Why: a hook on a tool the owner must answer a card for makes every start an interruption. The audit runs the same two checks after the call. Unknown, until the owner's Bypass test settles each: whether a PostToolUse hook on `start_session` raises the card (the owner's test had no hook on the tool, and the code reading names PreToolUse only); whether the start result carries a `session_` id; whether the desktop app delivers PostToolUse `additionalContext` for this tool; and whether `interrupt_session` and `archive_session` (claude-code-remote tools) reach a desktop-made session. An agent caller cannot call them (decision `agent-no-remote-tools`).
+Why: a hook on a tool the owner must answer a card for makes every start an interruption. The audit runs the same two checks after the call. Four facts are unknown until the owner's Bypass test settles each.
+- Whether a PostToolUse hook on `start_session` raises the card. The owner's test had no hook on the tool, and the code reading names PreToolUse only.
+- Whether the start result carries a `session_` id.
+- Whether the desktop app delivers PostToolUse `additionalContext` for this tool.
+- Whether `interrupt_session` and `archive_session` (claude-code-remote tools) reach a desktop-made session. An agent caller cannot call them (decision `agent-no-remote-tools`).
 
 Cost, per `outcomes-mechanize-rules`: process starts, one per `start_session` call, pinned by `hooks/test_guard.py` (family `start-session-audit` wants exactly one PostToolUse command on that tool). None on any other call: the PostToolUse matcher names only that tool, which no test checks. Files written, none. It reads the handoff flag file (one existence check, and the handoff file only when the flag exists) and imports the guard module once per start. No timer and no watcher. `lint/test_settings_matcher.py` and the `start-session-audit` family pin the wiring and the verdicts.
 
