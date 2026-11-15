@@ -207,8 +207,11 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 17. **Slice tests on a slow platform.** On PRs, run a platform-specific test slice. Run the full suite
     on main and nightly, except on macOS (R61): every macOS run takes the slice, and a push to main
     starts no macOS job (a job-level `github.event_name != 'push'`, since a step-level skip still starts
-    the runner). The nightly skips when main's head has a green push run and the newest completed
-    nightly is green (the `nightly-skip` job), and `scope` waits on that job, so nothing is cancelled.
+    the runner). Slow legs run daily (owner item 880, 11:53 CST Nov 15). A push runs the Linux fast jobs
+    only. The Windows, mutation and macOS jobs run in the one daily scheduled run, a pull request and a
+    manual run. The daily skips when the newest completed daily is green and every push run since it was
+    proven by `push-skip`, the newest at this head (the `nightly-skip` job). `scope` waits on that job,
+    so nothing is cancelled.
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If the saving is
     under 20%, stop.
 19. **Run one scope job first.** Make it a cheap Linux job named `scope`. Every other job needs it.
@@ -217,7 +220,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     minutes (step 13), macOS most. Decision `same-check-kinds` (every repo runs the same check kinds)
     and decision `main-branch-protection` (the required checks on main) hold the rule. Unless
     `scope-skips` names it, the rollup fails a skipped job.
-    Apart from those three, a job-level `if:` holds only the draft guard. A job that runs only off pull
+    Apart from those three and the push-off jobs (the Windows and mutation jobs, whose job-level `if:` is
+    `github.event_name != 'push'` alone, with the draft guard on a shard), a job-level `if:` holds only the draft guard. A job that runs only off pull
     requests, such as a push-only job, also skips at its CI steps. A job-level trigger guard would
     skip a needed job on every PR, and the rollup would fail on it. Each scoped CI step's `if:` names
     its scope flag and `|| github.event_name != 'pull_request'`, so push, nightly and dispatch runs
