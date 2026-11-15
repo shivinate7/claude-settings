@@ -53,6 +53,8 @@ CANNOT_FORMS = CANT_FORMS + ("can not",) + COULD_NOT_FORMS + ("no way to", "no w
                 "don't have access to", "do not have access to", "doesn't have access to", "does not have access to",
                 "lack permission to", "lacks permission to", "blocked from", "forbidden from",
                 "have no access to", "has no access to", "have no access", "has no access", "no access to",
+                "don't have access", "do not have access", "doesn't have access", "does not have access",
+                "lack access", "lacks access", "have no permission to", "has no permission to", "no permission to",
                 "unable") + tuple(
     "%s %s" % (be, able)
     for be in _BE_NT_FORMS for able in ("able to", "allowed to", "permitted to", "going to be able to")) + tuple(
@@ -177,7 +179,7 @@ _NEGATOR_RE = re.compile(r"\b(?:%s)\b|n['’]t\b" % "|".join(w for w in NEGATORS
 # The writer: the one home of its lead-ins and subject words. A joiner, because or a subordinator may open the clause before
 # its subject. I and we are the writer wherever they sit just before a phrase; the cloud and this session too, unless a
 # preposition (PREPOSITIONS) sits just before them: "The builder in this session is unable to push." is the builder's line.
-_WRITER = r"(?:I|we)"
+_WRITER = r"(?:I|we)(?:\s+(?:myself|ourselves))?"
 _PLACE = r"(?:the\s+cloud(?:\s+session)?|this\s+session)"
 _LEAD = "|".join(JOINERS + REASON_LINKS + SUBORDINATORS)
 _LEAD_RE = re.compile(r"^\W*(?:(?:%s)\b\W*)?" % _LEAD, re.I)

@@ -134,7 +134,7 @@ that says refused or asks, a dated `(measured ...)`, or a tool the classifier re
 (a backtick span, an MCP tool name, a word such as returned or refused, an HTTP 4xx, a non-zero exit). A try is a call
 whose result has an error flag or an exit code above zero (an HTTP 4xx or 5xx counts only in an error result, or in an
 agent's relayed text); a later success of the same act, program, verb and target cancels it, and a --dry-run call is no
-try. A local merge is no try of pr-merge. A notice is no try. Not read: an act outside the table, a
+try. A local merge is no try of pr-merge. A notice is no try. An act outside the table is the probe check's (below). Not read: a
 subject that is not the writer's own, a question, a Why yours line (the hand-off guard's), a line or sentence that starts
 with Unvetted:, quoted or coded text, a conditional, a dependency (until, before) and a sentence that names a rule. One
 block, then the rewrite runs unchecked. A check that cannot run prints an UNKNOWN note to stderr and allows.
@@ -144,10 +144,10 @@ on a claim with a slug in parentheses, one read of the rule files per run; no fi
 Probe check (decision cant-claim-needs-probe, rule output-never-hand-off-doable-step): a prose sentence that says this session
 cannot do an act outside the table (the cannot-claim check's phrases, which also hold "have no access", "no access to" and
 "unable") passes only when the turn after the last incoming message holds a main-session tool call (a peer's ack of a send of
-the turn starts no turn), or the sentence is in the past tense (could not), names its check (a backtick span, a tool name, an
-exit code, an HTTP status), says `unchecked` as a whole word or carries a route or measured cite. A table act
+the turn starts no turn; only the parent, by the id in the lane record, acks a send to @parent), or the sentence is in the past tense (could not) with no hand-off to the owner, names its check (a backtick span, a tool name, an
+exit code, an HTTP status; a bare word such as failed names none), says `unchecked` as a whole word or carries a route or measured cite. A table act
 keeps the cannot-claim verdict, and the one block joins any other reason. Not read, for this form only: a blockquote with no
-report label (an agent's report or a pasted refusal) and a Why yours line. The remedy names no act. Cost: the cannot-claim
+report label (an agent's report or a pasted refusal), a row that another writer's label opens ("Agent report:") and a Why yours line. One refusal line per sentence: a sentence that holds a table claim is listed under that reason alone. The remedy names no act. Cost: the cannot-claim
 check's regex and the turn's records already in hand; no file, no process, no timer, no log.
 
 Review-record check (incident: on Nov 7, 3 of 67 open PRs had a review record): in a lane (own get_session record tagged cs-build:lane, or with a parent), a reply line outside fences
@@ -1954,7 +1954,7 @@ _PR = r"(?:PRs?|pull[- ]requests?)"
 _PREPOSITION = "(?:%s)" % "|".join(_clause.PREPOSITIONS)  # the prepositions have one home, lint/_clause.py
 CANNOT_PR_RE = re.compile(r"\b" + _PR + r"\b", re.I)
 # Act -> the words that name it, read from the verb the phrase governs: each pattern is anchored at the start of the
-# window, so a later noun ("the merge commit") names no act. A claim of an act outside this table is no claim.
+# window, so a later noun ("the merge commit") names no act. A claim of an act outside this table is the probe form's (PROBE_ACT).
 CANNOT_ACTS = (
     ("pr-open", re.compile(r"^(?:open(?:ing)?|creat(?:e|ing)|mak(?:e|ing)|rais(?:e|ing)|fil(?:e|ing)|submit(?:ting)?)\b(?:\s+(?!(?:%s)(?![\w-]))\S+){0,4}?\s+%s\b" % (_PREPOSITION, _PR), re.I)),
     ("pr-merge", re.compile(r"^(?:be\s+)?merg(?:e|ed|ing)\b", re.I)),
@@ -2053,6 +2053,15 @@ CANNOT_NO_PROBE = (
     "this turn holds no tool call. Remedy: run one probe of the act, then say what it returned; or end the line with "
     "`(route <id>)` for a route row that says refused or asks, or with `(measured <date>, <check and result>)`; or say "
     "`unchecked` on the line. Lines:")
+# The windows of a claim that names no act: a remark (agree, comment on, say) or a find of nothing (see any, find no).
+PROBE_PLAIN_RE = re.compile(
+    r"(?:agree|disagree|comment|speak|say|tell|argue|complain|blame|thank|apologi[sz]e|stress|emphasi[sz]e|overstate|"
+    r"overemphasi[sz]e|recall|remember|imagine|think of)\b|(?:see|find|spot|notice|identify)\s+(?:any|anything|no|nothing|"
+    r"another|a\s+(?:problem|bug|issue))\b", re.I)
+# A past claim ("could not") that hands the act to the owner is a hand-off, not a report of a failed try.
+PROBE_HAND_OFF_RE = re.compile(
+    r"\byou(?:['’]ll|['’]d| will| would| need| must| should| have to| can| could| may)\b|\bfor you to\b|\bover to you\b"
+    r"|\bhand(?:ing)?\s+(?:it\s+)?(?:off|over)\b|\bplease\s+(?:run|do|import|check|try)\b", re.I)
 UNCHECKED_RE = re.compile(r"(?<![\w-])unchecked(?![\w-])", re.I)
 CANNOT_NO_TRY = (
     CANNOT_HEAD + "this turn shows no failed try of it. A notice is no try. Remedy: run the act on one route; if it "
@@ -2112,7 +2121,7 @@ def _claim(body, mask, hit, floor, scan):
     condition it do not condition this one. The phrase's clause starts after the last separator (a comma, a dash, but, a
     stop) before it and ends at the first stop after it (a comma does not end it). Not a claim: a conditional or a negator
     just before the phrase, a subject that is not the writer's own (_clause.own_subject), a verb of telling or waiting
-    after it, a dependency (until, before, without your) in its clause, a verb that names no table act, a blocker of that
+    after it, a dependency (until, before, without your) in its clause, a remark or a find of nothing (PROBE_PLAIN_RE), a blocker of that
     act (_blocker_res) in its own clause (a comma and, but or or starts another) or in the part after the next semicolon
     or joined to the clause (_joined_blocker), a sentence that names a rule, or a real rule or decision id in parentheses
     in its clause (_names_rule_id, read last, so only a line that is otherwise a claim pays its file read). A blocker is a
@@ -2144,6 +2153,8 @@ def _claim(body, mask, hit, floor, scan):
         return None
     window = _clause.first_words(after)
     act = _window_act(window, before + " " + after) or PROBE_ACT  # no table act: the probe form reads it
+    if not act and PROBE_PLAIN_RE.match(window):
+        return None  # "can't agree more", "can't see any issues": a remark or a finding, not an act on a thing
     state_re, reason_re = _blocker_res(act)[:2]
     clause_left = max((c.start + len(c.join) for c in conjs if c.lead_at >= left and c.start + len(c.join) <= hit.start()),
                       default=left)
@@ -2243,10 +2254,17 @@ def _strip_emphasis(text):
     return "".join(out), keep
 
 
+# A row that another writer's label opens ("Agent report:", "Builder note:", "Report from the lane:"): its claim is that writer's.
+OTHER_WRITER_ROW_RE = re.compile(
+    r"^\W*(?:(?:agent|subagent|builder|reviewer|designer|refuter|explore|lane|peer|worker)\b[^:\n]{0,30}"
+    r"|report\s+(?:from|of)\b[^:\n]{0,40}):", re.I)
+
+
 def _read_quote(text_rows):
     """[(body, probe_ok)] for the (body, quoted) rows of `text_rows` (_prose_rows): probe_ok is False for a blockquote that
-    holds no report label (LABEL_ORDER). A quote with a label is the writer's own report. Any other quote is an agent's
-    report or a pasted refusal, which states another party's claim."""
+    holds no report label (LABEL_ORDER), and, in a quote that holds one, for each row another writer's label opens
+    (OTHER_WRITER_ROW_RE). A quote with a label is the writer's own report. Any other quote is an agent's report or a pasted
+    refusal, which states another party's claim."""
     rows = list(text_rows)
     ok, i = [True] * len(rows), 0
     while i < len(rows):
@@ -2255,7 +2273,7 @@ def _read_quote(text_rows):
             j += 1
         if j > i:
             report = any(_report_label_end(body) for body, _ in rows[i:j])
-            ok[i:j] = [report] * (j - i)
+            ok[i:j] = [report and not OTHER_WRITER_ROW_RE.match(body) for body, _ in rows[i:j]]
         i = max(j, i + 1)
     return [(body, flag) for (body, _), flag in zip(rows, ok)]
 
@@ -2615,9 +2633,11 @@ def cannot_problem(records, text, refused=()):
     if not claims:
         return ""
     table = [claim for claim in claims if claim[1]]
+    on_table = {claim[0] for claim in table}  # a sentence that holds a table claim is listed under that reason alone
     probes = [] if _main_tool_calls(records) else list(dict.fromkeys(
-        claim[0] for claim in claims if not claim[1] and not claim[3] and not UNCHECKED_RE.search(claim[0])
-        and not _names_check(claim[0], claim[6]) and not _cited(claim[0], refused, PROBE_ACT)))
+        claim[0] for claim in claims if not claim[1] and claim[0] not in on_table
+        and (not claim[3] or PROBE_HAND_OFF_RE.search(claim[0])) and not UNCHECKED_RE.search(claim[0])
+        and not _names_probe_check(claim[0], claim[6]) and not _cited(claim[0], refused, PROBE_ACT)))
     no_try, no_check = [], []
     if table and guard is None:
         _load_guard()
@@ -2641,6 +2661,33 @@ def cannot_problem(records, text, refused=()):
     return " ".join(head + "".join("\n- " + line for line in lines)
                     for head, lines in ((CANNOT_NO_TRY, no_try), (CANNOT_NO_CHECK, no_check), (CANNOT_NO_PROBE, probes))
                     if lines)
+
+
+def _names_probe_check(sentence, tail):
+    """True when the sentence of a probe claim names its check by a backtick span, a tool name, an exit code or an HTTP
+    status (CANNOT_CHECK_RE less its bare check words). A bare word ("I tried and it failed") names no call, and the turn
+    holds none."""
+    text = _strip_emphasis(sentence)[0]
+    return any(not CANNOT_CHECK_WORD_RE.fullmatch(m.group()) for m in CANNOT_CHECK_RE.finditer(text))
+
+
+def _turn_acks(records, hook):
+    """The ack map of last_incoming_index for the cannot-claim turn: each peer sender acks a send to its own session id.
+    Only the parent, whose id this session's lane record names (_own_lane_read), also acks a send to @parent. A send to
+    @parent that another peer answers is no ack, so that peer's message starts a turn. The lane record is read only when
+    the transcript holds a peer message and a send to a parent target."""
+    senders = {sender for sender in map(peer_sender, records) if sender}
+    acks = {sender: {sender} for sender in senders}
+    if not senders or not any(send_targets(use) & PARENT_TARGETS for rec in records if not rec.get("isSidechain")
+                              for use in tool_uses(rec)):
+        return acks
+    _hooks_on_path()
+    from override import remote_session_id
+    own_id = remote_session_id()
+    parent = _own_lane_read(hook.get("transcript_path"), own_id)[1] if own_id else None
+    if parent in senders:
+        acks[parent] = {parent} | PARENT_TARGETS
+    return acks
 
 
 def _main_tool_calls(records):
@@ -3303,7 +3350,7 @@ def main():
         try:
             # A try backs a claim only in this turn: after the last message, a peer's included. A peer's reply to a send of
             # this turn is an ack and starts no turn, as in the question check.
-            acks = {sender: {sender} | PARENT_TARGETS for sender in map(peer_sender, records) if sender}
+            acks = _turn_acks(records, hook)
             idx = last_incoming_index(records, acks)
             ack_turn = records if idx is None else records[idx + 1:]
             cannot = cannot_problem(ack_turn, text, cannot_refused)

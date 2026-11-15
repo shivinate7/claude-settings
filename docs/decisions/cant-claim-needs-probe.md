@@ -15,9 +15,9 @@ The check is a predicate beside `cannot_problem` in `lint/report_guard.py`. It b
 - names an act outside the table, so `cannot_problem` skips it, and
 - sits in a turn with zero tool calls.
 
-The turn is the records after the last message. A peer's ack is read as the cannot-claim call site reads it (`last_incoming_index`, `lint/report_guard.py`).
+The turn is the records after the last message. A peer's ack of a send of the turn starts no turn. Each peer acks a send to its own session id. Only the parent, by the id in the lane record, also acks a send to `@parent` (`_turn_acks`, `lint/report_guard.py`).
 
-Status: not built. Lane `cant-claim-needs-probe` builds the predicate and its cases in `lint/test_report_guard_cannot.py`. CI already runs that file.
+Status: built in `cannot_problem` (`lint/report_guard.py`). Its cases are in `lint/test_report_guard_cannot.py`, which CI runs.
 
 ## Incident
 
@@ -27,7 +27,7 @@ Status: not built. Lane `cant-claim-needs-probe` builds the predicate and its ca
 
 ## Forms added
 
-"have no access", "no access to" and bare "unable" join `CANNOT_FORMS` (`lint/_clause.py`). `cannot_problem` reads that list, so the old check needs a case for each form.
+"have no access", "no access to", "don't have access", "lack access", "no permission to" and bare "unable" join `CANNOT_FORMS` (`lint/_clause.py`). `cannot_problem` reads that list, so the old check needs a case for each form.
 
 The hand-off guard does not read `CANNOT_FORMS`. Its `CAPABILITY_RE` reads `CANT_FORMS`, `COULD_NOT_FORMS` and its own word list (`_CAPABILITY_CORE`, `lint/report_guard.py`). A new form reaches the hand-off guard only through those lists.
 
@@ -38,7 +38,10 @@ The hand-off guard does not read `CANNOT_FORMS`. Its `CAPABILITY_RE` reads `CANT
 - Text in quotes or code spans. `_mask` reads it as blank.
 - A subject that is not the writer: it, the guard, the lane, a builder, the session, a draft PR. "this session" is the writer.
 - A question. A sentence that ends in `?`.
-- A line quoted with `>`, such as an agent's report. This skip is new for this predicate. Today's line reader, `_prose_lines`, strips the `>` and reads the body. So the old check counts such lines, as part (vi) says under "What it cannot see". If the skip lands in the shared reader, that note goes stale and needs a rewrite.
+- A past claim (could not, couldn't) that hands no step to the owner. A past claim with a hand-off ("so you'll need to run it") is read.
+- A claim with no act: a remark or a find of nothing ("can't agree more", "can't see any issues", "can't comment on pricing"; `PROBE_PLAIN_RE`).
+- A sentence that names its check by a backtick span, a tool name, an exit code or an HTTP status. A bare word ("I tried and it failed") names none.
+- A line quoted with `>`, such as an agent's report, in a quote with no report label, and a row of a labelled quote that another writer's label opens ("Agent report:"). This skip is new for this predicate. Today's line reader, `_prose_lines`, strips the `>` and reads the body. So the old check counts such lines, as part (vi) says under "What it cannot see". If the skip lands in the shared reader, that note goes stale and needs a rewrite.
 - A pasted guard refusal, when quoted or in a code span. The builder tests an unquoted paste. If none of the skips holds, it adds one.
 - Reused skips, as the old check has them:
   - A conditional or a negator before the phrase (`_clause.conditional`, `_clause.negated_near`).
@@ -50,7 +53,7 @@ The hand-off guard does not read `CANNOT_FORMS`. Its `CAPABILITY_RE` reads `CANT
 
 ## Refuse once
 
-One refusal per Stop. It lists each sentence the predicate holds and joins any other reason. A table-act sentence in a turn with no tool call is `cannot_problem`'s. The predicate skips it, so the two reasons join into one refusal.
+One refusal per Stop. It lists each sentence the predicate holds and joins any other reason. A sentence that holds a table claim is `cannot_problem`'s alone, and is listed once, under that reason.
 
 The remedy names no act. Rule `git-remedy-never-names-target` (a refusal's remedy never names the forbidden target) applies: "run one probe, or say `unchecked`."
 
@@ -62,21 +65,21 @@ If the transcript reader does not load, the check prints UNKNOWN to stderr and d
 
 A regex over the reply, and one pass over the turn's records already in hand. It starts no process, writes no file, and starts no timer or log. It reads the turn only for a reply sentence that holds a cannot-phrase.
 
-Rule `outcomes-mechanize-rules` (each check states its cost and a test proves it) applies. The lane's test will prove zero process starts and zero file writes. That test is not built yet, so the cost is stated, not proven.
+Rule `outcomes-mechanize-rules` (each check states its cost and a test proves it) applies. No test proves zero process starts and zero file writes, so the cost is stated, not proven.
 
 ## What it cannot see
 
-- A turn with any tool call passes, even one unrelated file read. The gate counts calls, not probes.
-- A probe in an earlier turn does not count. The gate reads this turn only.
+- A turn with any tool call passes, even one unrelated file read. The check counts calls, not probes.
+- A probe in an earlier turn does not count. The check reads this turn only.
 - A claim whose subject is another party: "the builder cannot import it."
 - A claim outside the phrase list, such as "only the owner can" or "it is impossible."
 - A hand-off with no cannot-phrase, such as "import it yourself" or "you need to import it." Nothing blocks these. The Stop reply judge (`hooks/reply_judge.py`, a model that never blocks) judges reports with an Input Needed label for their checks.
 
 ## Measure
 
-Decision `claims-carry-backing`, part (vi), has a ruling from 2026-11-07 23:50 CST: "only a table act is a claim." Its measure, 12 of 12 phrase hits false on 400 main commit messages, covers commit messages only. Commit messages have no turns, and that check had no zero-tool-call gate. So the measure does not cover this check.
+Decision `claims-carry-backing`, part (vi), has a ruling from 2026-11-07 23:50 CST: "only a table act is a claim." Its measure, 12 of 12 phrase hits false on 400 main commit messages, covers commit messages only. Commit messages have no turns, and that check had no zero-tool-call condition. So the measure does not cover this check.
 
-The false-alarm rate on real replies is unmeasured. The predicate is not built, so it cannot run on any reply. The transcripts in `~/.claude/projects` come from one session tree: three files, the session and two of its subagents. No labelled set of real replies exists. A rate needs one.
+The false-alarm rate on real replies is unmeasured. The predicate has run on no real reply. The transcripts in `~/.claude/projects` come from one session tree: three files, the session and two of its subagents. No labelled set of real replies exists. A rate needs one.
 
 Decision `guard-that-cries-wolf-is-spent` (a guard that goes red when nothing is wrong is spent) sets the bar: a check that fires on right replies teaches the reader to scroll past it. Rule `verification-trust-guard-after-red` (trust a guard once it goes red on the defect it guards) sets the test: the lane's first red case is the incident reply, a turn with no tool call that says "I cannot import it myself."
 
