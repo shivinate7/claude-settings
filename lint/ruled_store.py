@@ -4,9 +4,9 @@
     python3 lint/ruled_store.py --session-line REPO   the lines the session-start hook prints, or nothing
     python3 lint/ruled_store.py list REPO             every open entry in full
     python3 lint/ruled_store.py check REPO            exit 1 on a store problem (check_store)
-    python3 lint/ruled_store.py decisions REPO [--changed BASE] [--report]
-                                                      exit 1 on a decision record that cites a ruling and not the later
-                                                      ruling that overtakes it (check_decisions)
+    python3 lint/ruled_store.py records REPO [--changed BASE] [--report]
+                                                      exit 1 on a Markdown file that cites a ruling and not the later
+                                                      ruling that overtakes it (check_records)
 
 The store is the folder roadmap/rulings on origin/roadmap of REPO, one JSON file per ruling. An entry holds `id`,
 `at` (ISO 8601 with a zone), `ruling`, `source`, `status` ("open" or "closed"), `supersedes` (a list of
@@ -25,9 +25,9 @@ unchecked. guard_ruling_line(entry) words the note a guard prints when it lets t
 every entry text only. A guard rule id is the first token of the ref, with a trailing ":" cut, in kebab-case
 (guard_rule_id); a ref with no such token names no rule.
 
-check_decisions reads each decision record of the checkout (layout.path kind decisions). A ruling Y overtakes an older ruling X when Y's
+check_records reads each tracked Markdown file of the checkout. A ruling Y overtakes an older ruling X when Y's
 `supersedes` holds a "ruling" ref that names X's id, or (fallback, prose) when one sentence of Y's `ruling` names X's id
-beside an overtaking verb (OVERTAKE). A record that cites X by id and never cites Y by id is stale on that question.
+beside an overtaking verb (OVERTAKE). A file that cites X by id and never cites Y by id is stale on that question.
 A cite inside an HTML comment is no cite. Only an id of two or more words joined by "-" counts (ELIGIBLE_ID).
 
 Cost: this module keeps no process and no timer and writes no file. ruled_entries starts two read-only git processes
@@ -55,12 +55,6 @@ try:
 except ImportError:
     sys.path.append(os.path.join(HERE, "..", "hooks"))
     import _nowindow  # noqa: E402
-
-try:
-    import layout  # the one home of where a repo keeps its decisions (lint/layout.py)
-except ImportError:
-    sys.path.insert(0, HERE)
-    import layout  # noqa: E402
 
 ENTRIES_LIFT_GUARDS = True  # an open entry governs the guard rules it names
 STORE_REF = "origin/roadmap"
@@ -426,28 +420,24 @@ def _record_lines(text):
     return HTML_COMMENT.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text).split("\n")
 
 
-def check_decisions(repo_dir, only=None):
-    """(problems, state): one line per record in docs/decisions of the checkout that cites an older ruling's id and not
-    the id of the later ruling that overtakes it, as `path:line: ...`, line of the record's first cite of the older id.
-    `only` limits the records to those relative paths. state is the store's (read_store); a store that is not "ok"
-    gives no problem, so the caller prints unknown."""
+def check_records(repo_dir, only=None):
+    """(problems, state): one line per tracked Markdown file of the checkout that cites an older ruling's id and not
+    the id of the later ruling that overtakes it, as `path:line: ...`, line of the file's first cite of the older id.
+    `only` limits the files to those paths. state is the store's (read_store), or "unreadable" when git cannot list
+    the files; a state that is not "ok" gives no problem, so the caller prints unknown."""
     entries, state = read_store(repo_dir)
     if state != "ok":
         return [], state
     pairs = overtaking_pairs(entries)
-    where = layout.path(repo_dir, "decisions")
-    folder = os.path.join(repo_dir, *where.split("/"))
-    try:
-        names = sorted(n for n in os.listdir(folder) if n.endswith(".md"))
-    except OSError:
+    code, listing = _git(repo_dir, ["ls-files", "-z", "--", "*.md"])
+    if code != 0:
         return [], "unreadable"
     problems = []
-    for name in names:
-        rel = "%s/%s" % (where, name)
+    for rel in sorted(n for n in listing.decode("utf-8", "replace").split("\0") if n):
         if only is not None and rel not in only:
             continue
         try:
-            with open(os.path.join(folder, name), encoding="utf-8-sig") as f:
+            with open(os.path.join(repo_dir, *rel.split("/")), encoding="utf-8-sig") as f:
                 lines = _record_lines(f.read().replace("\r\n", "\n"))
         except OSError:
             continue
@@ -461,18 +451,18 @@ def check_decisions(repo_dir, only=None):
     return problems, state
 
 
-def _decisions(repo_dir, rest):
+def _records(repo_dir, rest):
     only = None
     if "--changed" in rest:
         at = rest.index("--changed")
         if at + 1 >= len(rest):
             return 2
-        code, out = _git(repo_dir, ["diff", "--name-only", rest[at + 1] + "...HEAD", "--", layout.path(repo_dir, "decisions")])
+        code, out = _git(repo_dir, ["diff", "--name-only", rest[at + 1] + "...HEAD", "--", "*.md"])
         if code != 0:
             print("ruled-store: unknown, cannot diff against %s" % rest[at + 1])
             return 0
         only = set(out.decode("utf-8", "replace").split())
-    problems, state = check_decisions(repo_dir, only)
+    problems, state = check_records(repo_dir, only)
     if state != "ok":
         print("ruled-store: unknown, the rulings store is %s; no record was checked" % state)
         return 0
@@ -494,8 +484,8 @@ def main(argv):
             for line in session_lines(argv[1]):
                 print(line)
             return 0
-        if argv and argv[0] == "decisions" and len(argv) >= 2 and not argv[1].startswith("--"):
-            return _decisions(argv[1], argv[2:])
+        if argv and argv[0] == "records" and len(argv) >= 2 and not argv[1].startswith("--"):
+            return _records(argv[1], argv[2:])
         if len(argv) in (1, 2) and argv[0] in ("list", "check"):
             repo = argv[1] if len(argv) == 2 else "."
             return _list(repo) if argv[0] == "list" else _check(repo)

@@ -714,66 +714,77 @@ RECORD_AFTER = RECORD_BEFORE.replace(
     "2026-11-14 00:19 CST, extends that exception.\n\n").replace("every repo except degen and home", "every repo the two rulings do not name")
 
 
-class DecisionCiteTests(RepoCase):
+class RecordCiteTests(RepoCase):
     def repo_with(self, record, newer=None, older=None):
         repo = self.make_repo("r", store=fixture.ruling_files({
             OLD_ID: older or fixture.entry(OLD_ID, at=OVERTAKEN_AT),
             NEW_ID: newer or fixture.entry(NEW_ID, at=OVERTAKING_AT, ruling=OVERTAKING_TEXT, supersedes=None,
                                            supersedes_none="x")}))
-        self.folder = os.path.join(repo, *ruled_store.layout.path(repo, "decisions").split("/"))
+        self.folder = os.path.join(repo, "docs", "decisions")
         os.makedirs(self.folder)
         with open(os.path.join(self.folder, "all-repos-switch-together.md"), "w", encoding="utf-8") as f:
             f.write(record)
+        fixture.git(repo, "add", "-A")
         return repo
 
     def test_red_on_the_record_before_the_fix_and_names_file_and_line(self):
-        problems, state = ruled_store.check_decisions(self.repo_with(RECORD_BEFORE))
+        problems, state = ruled_store.check_records(self.repo_with(RECORD_BEFORE))
         self.assertEqual(state, "ok")
         self.assertEqual(len(problems), 1, problems)
-        self.assertRegex(problems[0], r"^[\w/-]+/all-repos-switch-together\.md:7: ", problems[0])
+        self.assertTrue(problems[0].startswith("docs/decisions/all-repos-switch-together.md:7: "), problems[0])
+
+    def test_a_skill_file_outside_the_decisions_folder_is_read_too(self):
+        repo = self.repo_with(RECORD_AFTER)
+        os.makedirs(os.path.join(repo, "skills", "x"))
+        with open(os.path.join(repo, "skills", "x", "SKILL.md"), "w", encoding="utf-8") as f:
+            f.write("Per-lane flow (ruling own-degen-home-switch-now).\n")
+        fixture.git(repo, "add", "-A")
+        problems = ruled_store.check_records(repo)[0]
+        self.assertEqual(len(problems), 1, problems)
+        self.assertTrue(problems[0].startswith("skills/x/SKILL.md:1: "), problems[0])
         self.assertIn(NEW_ID, problems[0])
 
     def test_green_on_the_record_after_the_fix(self):
-        self.assertEqual(ruled_store.check_decisions(self.repo_with(RECORD_AFTER))[0], [])
+        self.assertEqual(ruled_store.check_records(self.repo_with(RECORD_AFTER))[0], [])
 
     def test_a_cite_inside_an_html_comment_is_no_cite(self):
         hidden = RECORD_BEFORE + "<!-- see own-820-c-five-repos -->\n"
-        self.assertEqual(len(ruled_store.check_decisions(self.repo_with(hidden))[0]), 1)
+        self.assertEqual(len(ruled_store.check_records(self.repo_with(hidden))[0]), 1)
 
     def test_a_ruling_that_only_mentions_the_older_one_without_a_verb_overtakes_nothing(self):
         plain = fixture.entry(NEW_ID, at=OVERTAKING_AT, supersedes=None, supersedes_none="x",
                               ruling="Owner: degen keeps its CI as ruled in own-degen-home-switch-now. Nothing else changes.")
-        self.assertEqual(ruled_store.check_decisions(self.repo_with(RECORD_BEFORE, newer=plain))[0], [])
+        self.assertEqual(ruled_store.check_records(self.repo_with(RECORD_BEFORE, newer=plain))[0], [])
 
     def test_a_structured_ruling_ref_overtakes_with_no_verb_in_the_text(self):
         structured = fixture.entry(NEW_ID, at=OVERTAKING_AT, ruling="Owner: five repos too.",
                                    supersedes=[{"kind": "ruling", "ref": OLD_ID + " (degen and home only)"}])
-        self.assertEqual(len(ruled_store.check_decisions(self.repo_with(RECORD_BEFORE, newer=structured))[0]), 1)
+        self.assertEqual(len(ruled_store.check_records(self.repo_with(RECORD_BEFORE, newer=structured))[0]), 1)
 
     def test_an_older_ruling_never_overtakes_a_newer_one(self):
         older_text = fixture.entry(OLD_ID, at=OVERTAKEN_AT, ruling="Owner: extend ruling own-820-c-five-repos.")
         newer = fixture.entry(NEW_ID, at=OVERTAKING_AT, ruling="Owner: five repos.")
-        self.assertEqual(ruled_store.check_decisions(self.repo_with(RECORD_BEFORE, newer=newer, older=older_text))[0], [])
+        self.assertEqual(ruled_store.check_records(self.repo_with(RECORD_BEFORE, newer=newer, older=older_text))[0], [])
 
     def test_a_short_id_is_never_matched(self):
         repo = self.make_repo("s", store=fixture.ruling_files({
             "r1": fixture.entry("r1", at=OVERTAKEN_AT),
             "r2": fixture.entry("r2", at=OVERTAKING_AT, ruling="Owner: extends r1.")}))
-        folder = os.path.join(repo, *ruled_store.layout.path(repo, "decisions").split("/"))
-        os.makedirs(folder)
-        with open(os.path.join(folder, "a.md"), "w", encoding="utf-8") as f:
+        os.makedirs(os.path.join(repo, "docs"))
+        with open(os.path.join(repo, "docs", "a.md"), "w", encoding="utf-8") as f:
             f.write("Ruling r1 says so.\n")
-        self.assertEqual(ruled_store.check_decisions(repo)[0], [])
+        fixture.git(repo, "add", "-A")
+        self.assertEqual(ruled_store.check_records(repo)[0], [])
 
     def test_an_unreadable_store_is_unknown_never_clean(self):
         repo = self.make_repo("none")
-        proc = subprocess.run([sys.executable, MODULE, "decisions", repo], capture_output=True, text=True, timeout=60)
+        proc = subprocess.run([sys.executable, MODULE, "records", repo], capture_output=True, text=True, timeout=60)
         self.assertEqual(proc.returncode, 0)
         self.assertIn("unknown", proc.stdout)
 
     def test_cli_exit_codes_and_the_changed_and_report_modes(self):
         repo = self.repo_with(RECORD_BEFORE)
-        run = lambda *a: subprocess.run([sys.executable, MODULE, "decisions", repo, *a], capture_output=True, text=True,
+        run = lambda *a: subprocess.run([sys.executable, MODULE, "records", repo, *a], capture_output=True, text=True,
                                         timeout=60)
         self.assertEqual(run().returncode, 1)
         self.assertEqual(run("--report").returncode, 0)

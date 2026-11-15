@@ -6,7 +6,9 @@ description: >
   against the caller's checkout. Step 2 runs `compliance_probes.py aligned` on a pull_request run.
   BASE_SHA is the PR base branch, so the diff runs from the merge base. The probe reads the checked-out
   commit as the head, so the diff's line numbers match the files on disk, and reads the PR body from the
-  event file. Exit 1 is a gap, with the file, the line and the record named; exit 2
+  event file. Step 3 runs `ruled_store.py records` on a pull_request run: a Markdown file the PR touches that
+  cites an older ruling's id and not the later ruling that overtakes it is a gap (decision ruled-store-one-home);
+  a roadmap branch that cannot be fetched prints unknown and passes. Exit 1 is a gap, with the file, the line and the record named; exit 2
   is unknown (a record, a rule file or the diff cannot be read) and is red too. The caller needs
   actions/checkout before this step, so GITHUB_WORKSPACE holds its repo, with `fetch-depth: 0` so the PR
   base is there to diff. Decision: child-cites-not-copies.
@@ -22,3 +24,11 @@ runs:
       env:
         BASE_SHA: origin/${{ github.base_ref }}
       run: python3 "${{ github.action_path }}/../../lint/compliance_probes.py" aligned "$GITHUB_WORKSPACE"
+    - name: Check that a file naming a ruling also names the later ruling that overtakes it
+      if: github.event_name == 'pull_request'
+      shell: bash
+      env:
+        BASE_SHA: origin/${{ github.base_ref }}
+      run: |
+        git -C "$GITHUB_WORKSPACE" fetch --no-tags origin roadmap:refs/remotes/origin/roadmap || echo "ruled-store: unknown, roadmap not fetched"
+        python3 "${{ github.action_path }}/../../lint/ruled_store.py" records "$GITHUB_WORKSPACE" --changed "$BASE_SHA"
