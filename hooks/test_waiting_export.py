@@ -272,16 +272,19 @@ def run_dir(label):
     return path
 
 
-def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SESSION, extra_env=None):
+def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SESSION, extra_env=None,
+             transcript_path=None):
     """One Stop of the guard in `cwd`, with the transcript `records`. `writer` is the session the transcript
-    names as the page writer (None: unknown). `extra_env` adds variables for this run. No inbox file is written."""
+    names as the page writer (None: unknown). `extra_env` adds variables for this run. `transcript_path` names a
+    file the guard reads instead of one written from `records`: a missing path is the unreadable state.
+    No inbox file is written."""
     folder = run_dir(label)
     records = with_writer(records, writer)
     cfg, home = os.path.join(folder, "cfg"), os.path.join(folder, "home")
     os.makedirs(cfg)
     os.makedirs(home)
     payload = {"hook_event_name": "Stop", "session_id": SESSION, "stop_hook_active": stop_active,
-               "cwd": cwd, "transcript_path": transcript(folder, records)}
+               "cwd": cwd, "transcript_path": transcript(folder, records) if transcript_path is None else transcript_path}
     if not os.path.exists(PROBE_PATH):
         write_file(PROBE_PATH, PROBE_SOURCE)
     env = dict(os.environ)
