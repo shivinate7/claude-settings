@@ -51,12 +51,19 @@ and landedPulls and one more git log of main, and repeats the landed rows' git m
 
 The upkeep list also holds two rows for the stale-ready report (step triage-stale-ready-report): "ready todo
 steps" (each todo step whose note holds the sentence "Ready.", not gated on live phases) and "draft PRs over
-STALE_DRAFT_HOURS h with no live lane" (each draft pull row whose optional createdAt, GitHub's created_at, is
-that far before the live file's readAt, when no live session step equals the pull's branch or its `lane/<id>` form). A draft row with no
-usable createdAt reads "unknown (#N has no createdAt)". A pull names a step when its branch equals the step id or
+STALE_DRAFT_HOURS h with no live lane" (each open draft pull whose GitHub updated_at is that far before this build
+run). That row reads GitHub's REST open-PR list itself (open_pulls_rest: draft, updated_at, head ref; token from
+GH_TOKEN, else GITHUB_TOKEN), not the live file's pulls. The list is read a page of 100 at a time, so the cost is
+N // 100 + 1 REST calls per build run for N open pulls (floor, not ceil: a full page is followed by the page that ends
+the read), at most 20; it writes no file, starts no timer and keeps no log. Sessions, `held` and `reviewLog` still come
+from a fresh live file (a pull's marks are matched by number): a draft is skipped when a live session step equals its
+branch or its `lane/<id>` form, or its live row has `held` or `reviewLog` true. When the sessions cannot be read the row is one
+`unknown (sessions not read: <why>; REST read: N stale-looking drafts: #a, #b)`. The row reads one `unknown (<why>)`
+entry when the REST read cannot finish whole: no token or GitHub name, an HTTP error (403 and 429 name the rate
+limit), a rate-limit count of 0 before the last page, a reply that is not a JSON list, a row of the wrong shape, or
+more than 20 pages. A pull names a step when its branch equals the step id or
 its title holds the id as a whole token (names_step), used by the pair line below. The stale-draft row's lane check is
-unlaned's: the branch, bare or as lane/<id>, equals a live session step. A draft row whose optional `held` or
-`reviewLog` is true is skipped: triage sets `held` from the batch runner's hand-in or hold list and `reviewLog`
+unlaned's: the branch, bare or as lane/<id>, equals a live session step. Triage sets `held` from the batch runner's hand-in or hold list and `reviewLog`
 from the pull's posted review log. A present key must be a JSON bool (`null` and text are not); absent means false. A
 pull row with a non-bool value is skipped, so the stale-draft, pair, unlaned and lanes-to-archive rows read unknown.
 
@@ -134,9 +141,9 @@ a missing or wrongly cased phase prints `ready not started: unknown (<id> has no
 the steps and the live file this script already reads.
 Unmeasured limits: age counts from the step's updatedAt, so a weekend or a note edit moves it; a landed doing step
 goes red, but a landed todo step is excluded.
-The red line and the two stale-ready rows add no process, file, timer or log: they read the live file this
-script already reads. The publisher adds one field (createdAt) per pull row, from the GitHub list call it
-already makes.
+The red line and the ready row add no process, file, timer or log: they read the live file this script already
+reads. The publisher adds one field (createdAt) per pull row, from the GitHub list call it already makes; only the
+joint line (stale_draft_pull) reads it now.
 """
 import argparse
 import datetime
@@ -145,7 +152,9 @@ import os
 import pathlib
 import re
 import sys
+import urllib.error
 import urllib.parse
+import urllib.request
 
 NOTE_WORDS = 250
 STALE_DAYS = 5
@@ -1224,25 +1233,103 @@ def live_lane_holds(work, branch, skip=None):
                                 for k in ids)
 
 
-def stale_drafts(work):
-    """Entries for each draft pull older than STALE_DRAFT_HOURS at the live read with no live lane (an ended lane holds
-    none), or one unknown entry."""
+REST_PAGE_SIZE = 100
+REST_PAGE_CAP = 20
+
+
+def rest_get(url, token):
+    """(parsed JSON body, response headers) for one GitHub REST GET. Raises urllib.error.HTTPError on a non-2xx reply and
+    ValueError on a body that is not JSON. The one place that touches the network, so a test replaces it."""
+    request = urllib.request.Request(url, headers={
+        "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "roadmap-build"})
+    with urllib.request.urlopen(request, timeout=30) as reply:
+        return json.loads(reply.read().decode("utf-8")), reply.headers
+
+
+def pull_shape_why(row):
+    """Why a pulls-list row is unusable, or None. A row that is not shaped as the build reads it is never skipped."""
+    if not isinstance(row, dict):
+        return "a row is not an object"
+    head = row.get("head")
+    if type(row.get("number")) is not int:
+        return "a row has no integer number"
+    if not isinstance(row.get("draft"), bool):
+        return "#%d has no boolean draft" % row["number"]
+    if not isinstance(head, dict) or not isinstance(head.get("ref"), str):
+        return "#%d has no head.ref" % row["number"]
+    if zoned_time(row.get("updated_at")) is None:
+        return "#%d has no usable updated_at" % row["number"]
+    return None
+
+
+def open_pulls_rest(slug):
+    """([{number, title, branch, draft, updated_at}], None) for every open pull of `slug`, or (None, why).
+
+    Reads GitHub's pulls list a page at a time (a manual page loop: the list is complete or the read is unknown, never a
+    partial list). A full page is followed by one more, so N open pulls cost N // 100 + 1 calls, at most REST_PAGE_CAP.
+    """
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if not slug:
+        return None, "unknown (the repo's GitHub name could not be read)"
+    if not token:
+        return None, "unknown (no GH_TOKEN or GITHUB_TOKEN to read the open pulls)"
+    rows = []
+    for page in range(1, REST_PAGE_CAP + 1):
+        url = "https://api.github.com/repos/%s/pulls?state=open&per_page=%d&page=%d" % (
+            urllib.parse.quote(slug, safe="/"), REST_PAGE_SIZE, page)
+        try:
+            body, headers = rest_get(url, token)
+        except urllib.error.HTTPError as err:
+            if err.code in (403, 429):
+                return None, "unknown (GitHub refused the read, HTTP %d: rate limit or no access)" % err.code
+            return None, "unknown (the open pulls read failed: HTTP %d)" % err.code
+        except ValueError:
+            return None, "unknown (the open pulls reply was not JSON)"
+        except OSError as err:
+            return None, "unknown (the open pulls read failed: %s)" % (err,)
+        if not isinstance(body, list):
+            return None, "unknown (the open pulls reply was not a list)"
+        for row in body:
+            bad = pull_shape_why(row)
+            if bad:
+                return None, "unknown (open pulls read: %s)" % bad
+            rows.append({"number": row["number"], "title": row.get("title") if isinstance(row.get("title"), str) else "",
+                         "branch": row["head"]["ref"], "draft": row["draft"], "updated_at": zoned_time(row["updated_at"])})
+        if len(body) < REST_PAGE_SIZE:
+            return rows, None
+        left = headers.get("X-RateLimit-Remaining") if headers is not None else None
+        if left is not None and str(left).strip() == "0":
+            return None, "unknown (GitHub rate limit reached before the last page of open pulls)"
+    return None, "unknown (more than %d open pulls: the read stopped at %d pages)" % (
+        REST_PAGE_CAP * REST_PAGE_SIZE, REST_PAGE_CAP)
+
+
+def stale_drafts(work, rest=None, now=None):
+    """Entries for each draft pull whose updated_at is over STALE_DRAFT_HOURS before `now` with no live lane (an ended
+    lane holds none), or one unknown entry. `rest` is open_pulls_rest's (rows, why); the live file gives only the
+    sessions and the held and reviewLog marks, so a live file that cannot be read makes the row one unknown entry that
+    still names the stale-looking drafts, never a clear row or a close list."""
+    rows, rest_why = rest if rest else (None, "unknown (the open pulls were not read)")
+    if rest_why:
+        return [rest_why]
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    old = [p for p in rows if p["draft"] and (now - p["updated_at"]).total_seconds() > STALE_DRAFT_HOURS * 3600]
     why = live_why(work)
     if why:
-        return [why]
-    read = datetime.datetime.fromisoformat(work["read"].replace("Z", "+00:00"))
+        names = ", ".join("#%d" % p["number"] for p in old)
+        inner = why[len("unknown ("):-1] if why.startswith("unknown (") and why.endswith(")") else why
+        return ["unknown (sessions not read: %s; REST read: %d stale-looking drafts%s)" % (inner, len(old), ": " + names if old else "")]
+    marks = {p["number"]: p for p in work["pulls"]}
     out = []
-    for p in work["pulls"]:
-        if p.get("draft") is not True or live_lane_holds(work, p.get("branch")):
+    for p in old:
+        if live_lane_holds(work, p["branch"]):
             continue
         # A pull the batch runner holds or whose review log is posted waits on a named owner, not forgotten.
-        if p.get("held") is True or p.get("reviewLog") is True:
+        mark = marks.get(p["number"], {})
+        if mark.get("held") is True or mark.get("reviewLog") is True:
             continue
-        at = created_at(p)
-        if at is None:
-            out.append("unknown (#%d has no createdAt)" % p["number"])
-        elif (read - at).total_seconds() > STALE_DRAFT_HOURS * 3600:
-            out.append("#%d (%s)" % (p["number"], p.get("branch") or p["title"]))
+        out.append("#%d (%s)" % (p["number"], p["branch"] or p["title"]))
     return out
 
 
@@ -1837,7 +1924,7 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
             ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
             ("in progress with no live lane or open PR", unlaned(open_, marks, work)),
             ("ready todo steps", ready),
-            ("draft PRs over %d h with no live lane" % STALE_DRAFT_HOURS, stale_drafts(work)),
+            ("draft PRs over %d h with no live lane" % STALE_DRAFT_HOURS, stale_drafts(work, open_pulls_rest(slug), now)),
             ("dated claims to re-check before a lane starts", dated_claims(open_, now.date())),
             ("page rulings not on their step", unfiled(steps, work)),
             (IDLE_LANES_LINE, idle_lanes(work or {"read": "unknown (no --live file)"}, steps, marks, slug, repo, main_branch, unread)
