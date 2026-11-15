@@ -129,7 +129,7 @@ Lane 1 needs no answer. A lane that waits on a question says so in its report.
 
 ## 6. Owner questions
 
-**Status: Q1a to Q5 decided, Q6 open, Q7 decided.** Q1a, Q1b, Q3 and the daily-timer half of Q4 decide on Cockpit item 180, pick a (2026-11-06 12:19 CST). Q2 decides on item 248, pick b (same time). The SessionEnd half of Q4 and Q5 decide on rulings `watchers-sessionend-250a` and `watchers-log-reader-249b`, whose answer times are not on record. Ruled: the stall watcher and `ci_wake` may stay long-lived, as named exceptions (ruling `stall-watch-exceptions-180a`). Root CLAUDE.md wording is pending (step `claude-md-timer-exceptions`). Q7 (repo reaper) is decided by an earlier ruling, and the reaper is removed.
+**Status: Q1a to Q5 decided, Q6 open, Q7 decided.** Q1a, Q1b, Q3 and the daily-timer half of Q4 decide on Cockpit item 180, pick a (2026-11-06 12:19 CST). Q2 decides on item 248, pick b (same time). The SessionEnd half of Q4 and Q5 decide on rulings `watchers-sessionend-250a` and `watchers-log-reader-249b`, whose answer times are not on record. Ruling `own-828-a-sessionend-this-repo-only` (owner, page item 828 a, 2026-11-14 19:57:58 CST) confirms `watchers-sessionend-250a` for the SessionEnd half. Ruled: the stall watcher and `ci_wake` may stay long-lived, as named exceptions (ruling `stall-watch-exceptions-180a`). Root CLAUDE.md wording is pending (step `claude-md-timer-exceptions`). Q7 (repo reaper) is decided by an earlier ruling, and the reaper is removed.
 
 **Q1a. Stall watcher. Decided:** keep it as a named exception, with its cost stated and pinned by `hooks/test_stall_watch.py` (class `CostTests`). Its lifetime is ruled (rule 1; `stall-watch-exceptions-180a`).
 
@@ -139,7 +139,7 @@ Lane 1 needs no answer. A lane that waits on a question says so in its report.
 
 **Q3. `ci_wake`. Decided:** a named exception, with its cost stated (Cockpit item 180, pick a). Its lifetime is ruled (rule 1; `stall-watch-exceptions-180a`). Home: decision `ci-wait-reads-run-status`.
 
-**Q4. SessionEnd scope and the daily timer. Decided.** The daily timer is a named exception, with its cost stated (Cockpit item 180, pick a). The SessionEnd half is ruling `watchers-sessionend-250a`: one repository at SessionEnd, machine-wide only in the daily job (Cockpit item 250, pick a). The answer time is not on record. Home: decision `the-janitor-is-one-machine-wide-sweep`. Lane 5 carries the change. The record says the hook sweeps one repository, and the code also scans every process and lists simulators.
+**Q4. SessionEnd scope and the daily timer. Decided.** The daily timer is a named exception, with its cost stated (Cockpit item 180, pick a). The SessionEnd half is ruling `watchers-sessionend-250a`, confirmed by ruling `own-828-a-sessionend-this-repo-only` (owner, page item 828 a, 2026-11-14 19:57:58 CST): one repository at SessionEnd, machine-wide only in the daily job. The 250a answer time is not on record. Home: decision `the-janitor-is-one-machine-wide-sweep`. Lane 5, branch `sessionend-this-repo-only`, carries the change. The record says the hook sweeps one repository, and the code also scans every process and lists simulators.
 
 **Q5. Logs with no reader. Decided** by ruling `watchers-log-reader-249b` (Cockpit item 249, pick b: "Name a reader for each"). The answer time is not on record. Each log gets a named reader in its record, and none is deleted. `hooks/daily_note.py` reads the agent-end payload log and the launchd error log. Keep `guard.log`, with a rotating cap.
 
