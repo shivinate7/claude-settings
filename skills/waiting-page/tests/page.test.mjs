@@ -2710,6 +2710,72 @@ test("unfold in the Answered section shows what the fold holds, and a card with 
   assert.equal(await page.locator(`#tier-answered #item-${bare.id} button.unfold`).count(), 0, "a card with nothing to hide has an unfold control");
 });
 
+// ---------------------------------------------------------------- reopen: an answer the writer left behind
+// The writer reopens an item by moving its `added` past the owner's answer, and may leave answers/<id> in place (SKILL.md, the
+// reword and overturn steps). A record older than the item's `added` is no answer to it: the card is open and answerable, with no
+// Answered pill, no sent chip and no Undo. A live snapshot that moves `added` past a sunk card's answer opens that card without a reload.
+// The names start "reopen:", so `--test-name-pattern reopen:` runs this block.
+// The sent chip's class on a card, or null when the page draws no chip for the item.
+const sentChip = (page, it) => page.evaluate((id) => { const c = document.getElementById("c-" + id); return c ? c.classList.contains("sent") : null; }, it.id);
+
+// Control: a record at or after the item's added is the owner's answer, so the card sinks to the Answered section.
+test("reopen: an answers record newer than its item's added still answers the card, which sinks to the Answered section", async (t) => {
+  const it = mk("reopen-kept", 1, { added: at(5) }), other = mk("reopen-kept-o", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other], answers: answerOf(it) }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section, though its answer is newer than its added`);
+  assert.equal(await sentChip(page, it), true, `No. ${it.n}'s chip does not show as sent`);
+});
+
+// A record older than the item's added is no answer: the card is open, and the owner can answer it again.
+test("reopen: an answers record older than its item's added is no answer, so the card is open and answerable", async (t) => {
+  const it = mk("reopen-stale", 1, { added: NEW_ADDED }), other = mk("reopen-stale-o", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other], answers: answerOf(it) }); if (!page) return;
+  assert.notEqual(await sectionOf(page, it), "tier-answered", `No. ${it.n} is in the Answered section, though its answer is older than its added`);
+  assert.notEqual(await sentChip(page, it), true, `No. ${it.n}'s chip shows as sent`);
+  assert.equal(await card(page, it).locator(".ans").count(), 0, `No. ${it.n} shows an answered pill`);
+  await choose(page, it, "b");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", `No. ${it.n} cannot be answered again`);
+});
+
+// A live snapshot that moves a sunk card's added past its answer: the card leaves the Answered section at once, with no reload.
+test("reopen: a live snapshot that moves an answered item's added past its answer opens the card without a reload", async (t) => {
+  const it = mk("reopen-live", 1, { added: at(5) }), other = mk("reopen-live-o", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other], answers: answerOf(it, "a", { note: "Kept it." }) }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `precondition: No. ${it.n} is not in the Answered section at load`);
+  await page.evaluate((x) => window.__putItem(x), { ...it, added: NEW_ADDED });
+  assert.notEqual(await sectionOf(page, it), "tier-answered", `No. ${it.n} stayed in the Answered section after its added moved past its answer`);
+  assert.notEqual(await sentChip(page, it), true, `No. ${it.n}'s chip still shows as sent`);
+  assert.equal(await card(page, it).locator(".ans").count(), 0, `No. ${it.n} still shows an answered pill`);
+  await choose(page, it, "b");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", `No. ${it.n} cannot be answered after the reopen`);
+});
+
+// A reopen that lands while the Undo panel is open: the panel offers no Undo for the reopened item, and the card leaves the Answered section.
+test("reopen: a reopen that lands while the Undo panel is open removes its Undo and moves the card out of the Answered section", async (t) => {
+  const it = mk("reopen-undo", 1, { added: at(5) }), other = mk("reopen-undo-o", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other], clock: LOAD_AT }); if (!page) return;
+  await choose(page, it, "a");
+  await send(page);
+  await waitAnswered(page, [it.id]);
+  await page.locator("#undoBtn").waitFor();
+  await page.evaluate((x) => window.__putItem(x), { ...it, added: "2026-11-06T18:30:00Z" });
+  assert.equal(await page.locator("#undoBtn").isVisible(), false, `the Undo panel still offers Undo for No. ${it.n}, which its writer reopened`);
+  assert.notEqual(await sectionOf(page, it), "tier-answered", `No. ${it.n} stayed in the Answered section after its reopen`);
+});
+
+// A closed item the writer reopens by status, with its kept answer left in place: it draws as an open card, not as an answered one.
+test("reopen: an item reopened by status, whose kept answer is older than its new added, draws as an open card", async (t) => {
+  const it = mk("reopen-status", 1, { added: at(5), status: "closed", closed: at(6) }), other = mk("reopen-status-o", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [other, it], answers: answerOf(it) }); if (!page) return;
+  assert.equal(await card(page, it).count(), 0, `precondition: closed No. ${it.n} draws as a card at load`);
+  const reopened = { ...it, status: "open", added: NEW_ADDED };
+  delete reopened.closed;
+  await page.evaluate((x) => window.__putItem(x), reopened);
+  assert.equal(await card(page, it).count(), 1, `reopened No. ${it.n} does not draw as an open card`);
+  assert.notEqual(await sectionOf(page, it), "tier-answered", `reopened No. ${it.n} is in the Answered section`);
+  assert.equal(await card(page, it).locator(".ans").count(), 0, `reopened No. ${it.n} shows an answered pill`);
+});
+
 // ---------------------------------------------------------------- answered sink: fold lock, rail chip, freeze gate, group title
 
 test("Answered section: a sunk card whose saved answer has a restored draft keeps its fold unlocked, and the press opens it", async (t) => {
