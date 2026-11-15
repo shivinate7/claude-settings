@@ -4431,13 +4431,12 @@ class GhHalf(Env):
         self.merge_reply_is_retried_then_stops(RATE_API_SECONDARY_403, rate=True)
 
     def spare_is_the_take(self):
-        """The lock's spare is its take expiry, LOCK_TTL_SECONDS, as the rate-wait cases are sized. confirm's two check extensions (UNDO_CHECK_LOCK_SECONDS
-        and debt_check_lock_seconds()) would lift the expiry to about 3900 s from the take, past the end of the 900 s rung, so no rung would need an
-        extension. They are 0 here; their real values are pinned by the event-order cases (confirm_extends_the_lock_for_*_before_each_*_check)."""
-        for name, value in (("UNDO_CHECK_LOCK_SECONDS", 0), ("debt_check_lock_seconds", lambda: 0)):
-            patch = unittest.mock.patch.object(merge, name, value)
-            patch.start()
-            self.addCleanup(patch.stop)
+        """The lock's spare is its take expiry, LOCK_TTL_SECONDS, as the rate-wait cases are sized. confirm's undo-check extension (UNDO_CHECK_LOCK_SECONDS)
+        would lift the expiry to about 3900 s from the take, past the end of the 900 s rung, so no rung would need an extension. It is 0 here; its real
+        value is pinned by test_confirm_extends_the_lock_for_3600_s_before_each_undo_check. confirm runs no debt-check extension (ruling R2)."""
+        patch = unittest.mock.patch.object(merge, "UNDO_CHECK_LOCK_SECONDS", 0)
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def test_a_rate_wait_past_the_lock_spare_extends_the_lock_and_the_merge_goes_on(self):
         # the take holds the lock LOCK_TTL_SECONDS (1200 s) at any deadline: the 60 s and 300 s waits fit its spare, and the 900 s wait, which starts
@@ -6568,8 +6567,8 @@ class DebtRetire(Env):
         self.assertEqual(rc, 0, "scope: preview did not reach its verdict: " + out)
         self.assertEqual(len(calls), 1, "preview did not call the Retire check once with unknown CI")
 
-    # The lock outlasts the long checks (debt_check runs each Retire test up to 1800 s; undo_check has no bound). Each check call is preceded by
-    # its own extend_for, so the lock is never left to the take's fixed expiry under a check.
+    # The lock outlasts the long check that confirm runs, undo_check, which has no bound. Each check call is preceded by its own extend_for, so the
+    # lock is never left to the take's fixed expiry under a check. confirm runs no debt check (ruling R2, owner 14:07 CST Nov 10).
 
     LOCK_REFUSAL = "the fake lock refuses the extension"
 
@@ -6617,27 +6616,33 @@ class DebtRetire(Env):
         self.spy_checks(events)
         return self.run_merge("7", "--confirm", lock=self.recording_lock(events))
 
-    def assert_claimed_and_checked_twice(self, events, out):
-        """Scope before subject (P7): the claim was pushed and merged, and each check ran twice, before the claim and inside prove."""
+    def assert_claimed_and_undo_checked_twice(self, events, out):
+        """Scope before subject (P7): the claim was pushed and merged, and the undo check ran twice, before the claim and inside prove. confirm of a
+        ready PR runs no debt check (ruling R2, owner 14:07 CST Nov 10), so the debt check count is 0."""
         self.assertEqual(self.claims(), 1, out)
         self.assertTrue(getattr(self.host, "merged", False), out)
-        self.assertGreaterEqual(events.count(("check", "debt")), 2, "the debt check ran fewer than twice, so the case misses the call inside prove")
+        self.assertEqual(events.count(("check", "debt")), 0, f"confirm ran a debt check, which ruling R2 removed from confirm (run order: {events})")
         self.assertGreaterEqual(events.count(("check", "undo")), 2, "the undo check ran fewer than twice, so the case misses the call inside prove")
 
-    def test_confirm_extends_the_lock_for_1800_s_before_each_debt_check(self):
+    def test_confirm_of_a_ready_pr_runs_no_debt_check_and_extends_no_lock_for_one(self):
+        """Ruling R2 (owner, 14:07 CST Nov 10): the Retire run moved into CI, so confirm runs no debt check and extends the lock for none. The
+        debt-check length is patched to a value no undo extension uses, so an extension that carries it is a debt check's."""
+        sentinel = 7777
+        patch = unittest.mock.patch.object(merge, "debt_check_lock_seconds", lambda: sentinel, create=True)  # create: the name may go once no caller remains
+        patch.start()
+        self.addCleanup(patch.stop)
         events = []
         rc, out = self.confirm_closed_debt_under_spies(events)
         self.assertEqual(rc, 0, out)
-        self.assert_claimed_and_checked_twice(events, out)
-        lacking = unextended_checks(events, "debt", 1800)
-        self.assertEqual(lacking, [], f"a debt check at event {lacking} ran with no lock extension of 1800 s or more before it, since the check before it "
-                                      f"(run order: {events}). debt_check runs a Retire test for up to 1800 s, and the lock can expire under it")
+        self.assert_claimed_and_undo_checked_twice(events, out)
+        self.assertNotIn(sentinel, [wait for what, wait in events if what == "extend"],
+                         f"confirm extended the lock by {sentinel} s, the debt-check length, before a check (run order: {events})")
 
     def test_confirm_extends_the_lock_for_3600_s_before_each_undo_check(self):
         events = []
         rc, out = self.confirm_closed_debt_under_spies(events)
         self.assertEqual(rc, 0, out)
-        self.assert_claimed_and_checked_twice(events, out)
+        self.assert_claimed_and_undo_checked_twice(events, out)
         lacking = unextended_checks(events, "undo", 3600)
         self.assertEqual(lacking, [], f"an undo check at event {lacking} ran with no lock extension of 3600 s or more before it, since the check before it "
                                       f"(run order: {events}). undo_check has no time bound, and the lock can expire under it")
@@ -6650,7 +6655,7 @@ class DebtRetire(Env):
         self.assertNotIn("AttributeError", out, "a lock with no extend_for crashed confirm")
         self.assertTrue(getattr(self.host, "merged", False), out)
 
-    def test_confirm_stops_before_the_undo_and_debt_checks_when_the_lock_cannot_be_extended(self):
+    def test_confirm_stops_before_the_undo_check_when_the_lock_cannot_be_extended(self):
         """confirm extends the lock before the undo check, its first call under the lock. The extension is refused: no check runs, no claim is pushed, nothing merges."""
         self.pr_on_debt(0)
         events = []
