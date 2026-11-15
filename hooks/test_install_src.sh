@@ -847,8 +847,9 @@ case10() {
 # SCRIPT_DIR/settings.json directly, the same detection case3 exercises, with no git
 # requirement on the files under hooks/.
 run_local_install() {
-  # $1 = checkout dir, $2 = HOME, $3 = CLAUDE_CONFIG_DIR
-  ( cd "$1" && env -i PATH="$PATH" HOME="$2" CLAUDE_CONFIG_DIR="$3" bash ./install.sh 2>&1 )
+  # $1 = checkout dir, $2 = HOME, $3 = CLAUDE_CONFIG_DIR, $4... = NAME=VALUE pairs for install.sh's environment
+  rli_co=$1; rli_home=$2; rli_cfg=$3; shift 3
+  ( cd "$rli_co" && env -i PATH="$PATH" HOME="$rli_home" CLAUDE_CONFIG_DIR="$rli_cfg" "$@" bash ./install.sh 2>&1 )
 }
 
 prune_case1() {
@@ -6406,6 +6407,204 @@ SH
   ok "$name"
 }
 
+# ---- stale_stamp: the attempt stamp a cloud run writes when CS_STALE_TIP is set (hooks/stale_install.py reads it) ----
+# With CS_STALE_TIP set to a 40-hex commit, a cloud run writes $CLAUDE_DIR/.claude-settings-install-attempt.json at its
+# start, as {"tip": CS_STALE_TIP, "epoch": <clock>}. A record that names that same commit removes it. The cases keep the
+# stamp when the record names another tip (stale_stamp2), when the landing fails (3), and when the run aborts before it
+# lands (7). They pin that no stamp is written when the spec says so (stale_stamp4, 5, 6).
+# stale_stamp1 is red on the old code only through the stamp an earlier run left behind.
+STALE_STAMP_EPOCH=1700000000
+STALE_FAKE_TIP=0123456789abcdef0123456789abcdef01234567
+
+# stale_stamp_file HOME: the attempt stamp in HOME's config dir.
+stale_stamp_file() { printf '%s\n' "$1/.claude-cfg/.claude-settings-install-attempt.json"; }
+
+# make_date_stub DIR: a date that answers `date +%s` with STALE_STAMP_EPOCH and runs the real date for every other call.
+# It is the injected clock: the epoch is an exact value, and no assert reads the machine's clock (P5). install.sh reaches
+# it through PATH, as it reaches every date call.
+make_date_stub() {
+  mkdir -p "$1"; sd_real=$(command -v date)
+  cat > "$1/date" <<SH
+#!/bin/sh
+if [ "\$*" = "+%s" ]; then echo $STALE_STAMP_EPOCH; exit 0; fi
+exec "$sd_real" "\$@"
+SH
+  chmod +x "$1/date"
+}
+
+# stamp_problem FILE TIP: prints the first way the attempt stamp FILE misses the spec, and prints nothing when it matches.
+# The spec: FILE exists, its keys are exactly epoch and tip, tip is TIP as a string, and epoch is the injected clock as a
+# JSON integer (a string "1700000000" would not match).
+stamp_problem() {
+  if [ ! -f "$1" ]; then printf 'no attempt stamp at %s\n' "$1"; return; fi
+  python3 -I -c 'import json, sys
+path, tip, epoch = sys.argv[1], sys.argv[2], int(sys.argv[3])
+try:
+    d = json.load(open(path, encoding="utf-8"))
+except ValueError:
+    print("the attempt stamp is not JSON")
+    sys.exit(0)
+if not isinstance(d, dict) or sorted(d) != ["epoch", "tip"]:
+    print("the attempt stamp keys are not exactly epoch and tip")
+elif d["tip"] != tip:
+    print("the attempt stamp tip is [%s], want [%s]" % (d["tip"], tip))
+elif type(d["epoch"]) is not int or d["epoch"] != epoch:
+    print("the attempt stamp epoch is [%s], want the injected clock %d" % (d["epoch"], epoch))' "$1" "$2" "$STALE_STAMP_EPOCH"
+}
+
+# stale_stamp1: the run finds a stamp from an earlier attempt, at another tip. A run whose record names CS_STALE_TIP must
+# take that stamp away. The old code never does, so the leftover survives and this case is red there.
+stale_stamp1() {
+  name="stale_stamp1: a cloud run whose record names CS_STALE_TIP removes the attempt stamp an earlier run left behind"
+  fx="$work/ss1-fx"; h="$work/ss1-home"; scratch="$work/ss1-scratch"; bin="$work/ss1-bin"
+  mkdir -p "$h/.claude-cfg" "$scratch"
+  make_github_fixture "$fx"; tip=$(fixture_sha "$fx")
+  printf '{"tip": "%s", "epoch": 1600000000}\n' "$STALE_FAKE_TIP" > "$(stale_stamp_file "$h")"
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball; make_date_stub "$bin"
+  cloud_install "$h" "$scratch" "$bin" main "CS_STALE_TIP=$tip"
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "scope: install.sh exited $rc: $(install_problems)"
+  elif [ "$(record_field "$h/.claude-cfg/.claude-settings-install.json" sha)" != "$tip" ]; then
+    bad "$name" "scope: the record does not name the fixture tip $tip"
+  elif [ -e "$(stale_stamp_file "$h")" ]; then
+    bad "$name" "the attempt stamp an earlier run left survived a run whose record names CS_STALE_TIP"
+  else
+    ok "$name"
+  fi
+}
+
+# stale_stamp2: the record names a newer tip than CS_STALE_TIP. The stamp stays, at CS_STALE_TIP, so the next turn sees
+# that the attempt at that tip did not land there.
+stale_stamp2() {
+  name="stale_stamp2: a cloud run whose record names a newer tip keeps the stamp, at CS_STALE_TIP, with an integer epoch"
+  fx="$work/ss2-fx"; h="$work/ss2-home"; scratch="$work/ss2-scratch"; bin="$work/ss2-bin"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"; old=$(fixture_sha "$fx")
+  advance_github_fixture "$fx" second; want=$(fixture_sha "$fx")
+  if [ "$old" = "$want" ]; then bad "$name" "FIXTURE main did not move, so the record and CS_STALE_TIP cannot differ"; return; fi
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball; make_date_stub "$bin"
+  cloud_install "$h" "$scratch" "$bin" main "CS_STALE_TIP=$old"
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "scope: install.sh exited $rc: $(install_problems)"
+  elif [ "$(record_field "$h/.claude-cfg/.claude-settings-install.json" sha)" != "$want" ]; then
+    bad "$name" "scope: the record does not name the new tip $want"
+  else
+    p=$(stamp_problem "$(stale_stamp_file "$h")" "$old")
+    if [ -n "$p" ]; then bad "$name" "$p"; else ok "$name"; fi
+  fi
+}
+
+# stale_stamp3: the landing fails, so the run exits 1 and writes no record. The stamp stays: the attempt at CS_STALE_TIP
+# did not land. The failure is caseR4's: the owner's folder sits where agents/builder.md lands.
+stale_stamp3() {
+  name="stale_stamp3: a cloud run whose landing fails keeps the attempt stamp at CS_STALE_TIP"
+  fx="$work/ss3-fx"; h="$work/ss3-home"; scratch="$work/ss3-scratch"; bin="$work/ss3-bin"
+  mkdir -p "$h/.claude-cfg/agents/builder.md" "$scratch"
+  printf 'my notes\n' > "$h/.claude-cfg/agents/builder.md/notes.txt"
+  make_github_fixture "$fx"; tip=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball; make_date_stub "$bin"
+  cloud_install "$h" "$scratch" "$bin" main "CS_STALE_TIP=$tip"
+  if [ "$rc" -ne 1 ]; then
+    bad "$name" "scope: install.sh exited $rc, want 1 for a failed landing: $(install_problems)"
+  elif ! printf '%s\n' "$out" | grep -q 'a folder of yours sits where the file agents/builder.md lands'; then
+    bad "$name" "scope: the owner's folder did not block agents/builder.md: $(install_problems)"
+  else
+    p=$(stamp_problem "$(stale_stamp_file "$h")" "$tip")
+    if [ -n "$p" ]; then bad "$name" "$p"; else ok "$name"; fi
+  fi
+}
+
+# stale_stamp4 (green control): with CS_STALE_TIP unset, the run writes no stamp. env -i in cloud_install strips any
+# CS_STALE_TIP from the runner, so install.sh sees it unset.
+stale_stamp4() {
+  name="stale_stamp4 (green control): a cloud run with CS_STALE_TIP unset writes no attempt stamp"
+  fx="$work/ss4-fx"; h="$work/ss4-home"; scratch="$work/ss4-scratch"; bin="$work/ss4-bin"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin" main
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "scope: install.sh exited $rc: $(install_problems)"
+  elif [ ! -f "$h/.claude-cfg/.claude-settings-install.json" ]; then
+    bad "$name" "scope: no install record was written"
+  elif [ -e "$(stale_stamp_file "$h")" ]; then
+    bad "$name" "an attempt stamp was written with CS_STALE_TIP unset"
+  else
+    ok "$name"
+  fi
+}
+
+# stale_stamp5 (green control): a value that is not 40 hex digits (empty, short, 41 digits, or 40 characters with one
+# non-hex) writes no stamp, and the run still exits 0 and writes its record.
+stale_stamp5() {
+  name="stale_stamp5 (green control): a CS_STALE_TIP that is not 40 hex digits writes no attempt stamp, and the run succeeds"
+  fx="$work/ss5-fx"; bin="$work/ss5-bin"
+  make_github_fixture "$fx"
+  make_curl_stub "$bin" fail-tarball
+  i=0
+  for v in '' abc1234 0123456789abcdef0123456789abcdef012345678 0123456789abcdef0123456789abcdef0123456g; do
+    i=$((i + 1)); h="$work/ss5-home-$i"; scratch="$work/ss5-scratch-$i"
+    mkdir -p "$h" "$scratch"
+    write_redirect "$h" "$fx/bare.git"
+    cloud_install "$h" "$scratch" "$bin" main "CS_STALE_TIP=$v"
+    if [ "$rc" -ne 0 ]; then
+      bad "$name" "CS_STALE_TIP=[$v] made install.sh exit $rc: $(install_problems)"; return
+    elif [ ! -f "$h/.claude-cfg/.claude-settings-install.json" ]; then
+      bad "$name" "CS_STALE_TIP=[$v] made install.sh write no install record"; return
+    elif [ -e "$(stale_stamp_file "$h")" ]; then
+      bad "$name" "CS_STALE_TIP=[$v] is not 40 hex digits, yet an attempt stamp was written"; return
+    fi
+  done
+  ok "$name"
+}
+
+# stale_stamp6 (green control): a local run writes no stamp, even with CS_STALE_TIP set to a valid commit.
+stale_stamp6() {
+  name="stale_stamp6 (green control): a local run with CS_STALE_TIP set writes no attempt stamp"
+  co="$work/ss6-checkout"; h="$work/ss6-home"; cfg="$h/.claude-cfg"
+  mkdir -p "$h"
+  retired_checkout "$co" stale6
+  tip=$(git -C "$co" rev-parse HEAD)
+  out=$(run_local_install "$co" "$h" "$cfg" "CS_STALE_TIP=$tip"); rc=$?
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "scope: the local install exited $rc: $(install_problems)"
+  elif [ ! -e "$cfg/CLAUDE.md" ] && [ ! -L "$cfg/CLAUDE.md" ]; then
+    bad "$name" "scope: the local install did not land $cfg/CLAUDE.md"
+  elif [ -e "$(stale_stamp_file "$h")" ]; then
+    bad "$name" "a local install with CS_STALE_TIP set wrote an attempt stamp"
+  else
+    ok "$name"
+  fi
+}
+
+# stale_stamp7: git refuses the clone and the fetch. The tarball fallback fails too, so the run aborts at its "missing,
+# aborting" line before it lands anything. The stamp is written at the start of the run, so it stays at CS_STALE_TIP.
+# A stamp written only after the landing would be missing here. The abort exits 0, so this case does not read the exit code.
+stale_stamp7() {
+  name="stale_stamp7: a cloud run that fails before it lands keeps the attempt stamp, so the stamp is written at the run's start"
+  fx="$work/ss7-fx"; h="$work/ss7-home"; scratch="$work/ss7-scratch"; bin="$work/ss7-bin"; gitlog="$work/ss7-git.log"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"; tip=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball; make_date_stub "$bin"
+  git_shim "$bin" "$gitlog" 'case " $* " in *" clone "*|*" fetch "*) exit 1 ;; esac'
+  cloud_install "$h" "$scratch" "$bin" main "CS_STALE_TIP=$tip"
+  if ! grep -q -E '(^| )(clone|fetch)( |$)' "$gitlog" 2>/dev/null; then
+    bad "$name" "scope: git was never asked to clone or fetch, so the run did not reach its fetch"
+  elif ! printf '%s\n' "$out" | grep -q 'aborting'; then
+    bad "$name" "scope: the run did not abort at its missing-source check (exit $rc): $(install_problems)"
+  elif [ -f "$h/.claude-cfg/.claude-settings-install.json" ]; then
+    bad "$name" "scope: an install record was written although the fetch was refused"
+  else
+    p=$(stamp_problem "$(stale_stamp_file "$h")" "$tip")
+    if [ -n "$p" ]; then bad "$name" "$p"; else ok "$name"; fi
+  fi
+}
+
 # The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
 # session_start.sh cases) gets the same redirect as every other case.
 default_home "$work/runner-home"; HOME="$work/runner-home"; export HOME
@@ -6604,6 +6803,13 @@ run mergepin5
 run cloud_stale1
 run cloud_stale2
 run cloud_stale3
+run stale_stamp1
+run stale_stamp2
+run stale_stamp3
+run stale_stamp4
+run stale_stamp5
+run stale_stamp6
+run stale_stamp7
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
