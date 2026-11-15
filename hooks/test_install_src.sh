@@ -5375,20 +5375,27 @@ caseR4() {
   r345_check "$name" "$h/.claude-cfg/.claude-settings-install.json" || return
   ok "$name"
 }
-# caseR5: the skills copy fails after rm -rf, with no root trick. The config folder's path is made long (16 components of
-# 200 bytes), so a copy under it runs past PATH_MAX (4096 bytes) while the clone's copy stays short. The first install copies
-# r5-deep whole and writes its record. The fixture then adds a file four folders deep in r5-deep, past the limit under the
-# config folder. The second install's tree hash matches the copy it recorded, so it removes the copy (rm -rf) and the copy
-# fails. The first run's record is removed, so the second run's record is the only one that can exist.
+# caseR5: the skills copy fails after rm -rf, with no root trick. The config folder's path is made long, 250 bytes short of
+# the machine's PATH_MAX (getconf: 4096 on Linux, 1024 on macOS), so a copy of a file four folders deep runs past PATH_MAX
+# while the clone's copy stays short. The first install copies r5-deep whole and writes its record. The fixture then adds a
+# file four folders deep in r5-deep, past the limit under the config folder. The second install's tree hash matches the copy
+# it recorded, so it removes the copy (rm -rf) and the copy fails. The first run's record is removed, so the second run's
+# record is the only one that can exist.
 caseR5() {
   name="caseR5: a cloud install whose skills copy fails after rm -rf writes no install record and does not exit 0 quietly"
   fx="$work/r5-fx"; h="$work/r5-home"; scratch="$work/r5-scratch"; bin="$work/r5-bin"
   mkdir -p "$h" "$scratch"
-  r5_cfg="$h"
-  for i in $(seq 1 16); do r5_cfg="$r5_cfg/$(printf 'd%0199d' "$i")"; done
+  r5_max=$(getconf PATH_MAX / 2>/dev/null); case "$r5_max" in ''|*[!0-9]*) r5_max=4096 ;; esac
+  r5_target=$((r5_max - 250))
+  r5_cfg="$h"; r5_i=0
+  while [ $((${#r5_cfg} + 201)) -le "$r5_target" ]; do
+    r5_i=$((r5_i + 1)); r5_cfg="$r5_cfg/$(printf 'd%0199d' "$r5_i")"
+  done
+  r5_rem=$((r5_target - ${#r5_cfg} - 1))
+  [ "$r5_rem" -ge 1 ] && r5_cfg="$r5_cfg/$(printf 'e%0*d' "$r5_rem" 0 | cut -c1-"$r5_rem")"
   mkdir -p "$r5_cfg"
   r5_rec="$r5_cfg/.claude-settings-install.json"
-  r5_k=$(printf 'k%0199d' 0)
+  r5_k=$(printf 'k%0119d' 0)
   make_github_fixture "$fx"
   mkdir -p "$fx/src/skills/r5-deep"
   printf 'a skill with one file\n' > "$fx/src/skills/r5-deep/SKILL.md"
@@ -5410,7 +5417,7 @@ caseR5() {
   git -C "$fx/src" push -q "$fx/bare.git" HEAD:refs/heads/main
   r5_dest="$r5_cfg/skills/r5-deep/$r5_k/$r5_k/$r5_k/$r5_k/deep.md"
   r5_src="$h/claude-settings/skills/r5-deep/$r5_k/$r5_k/$r5_k/$r5_k/deep.md"
-  if [ "${#r5_dest}" -le 4095 ] || [ "${#r5_src}" -ge 4096 ]; then
+  if [ "${#r5_dest}" -lt "$r5_max" ] || [ "${#r5_src}" -ge "$r5_max" ]; then
     bad "$name" "scope: the seed does not put the copy past PATH_MAX (copy path ${#r5_dest} bytes, clone path ${#r5_src} bytes)"
     return
   fi
