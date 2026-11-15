@@ -2072,6 +2072,26 @@ class PickGuardTests(unittest.TestCase):
         repo = self.two_link_repo()
         self.assertIsNotNone(self.verdict(self.PICK, [self.page_set(self.OTHER)], repo=repo))
 
+    def test_pk_red_page_write_on_another_host_blocks(self):
+        # Catches: a URL on another host passing as the waiting page, because the write is matched on its artifact id alone.
+        out = self.verdict(self.PICK, [self.page_set("https://evil.example/artifact/waitpage1")])
+        self.assertIsNotNone(out, "an items write to a URL on another host, naming the waiting page's id, was accepted")
+
+    def test_pk_red_page_write_with_an_extra_path_segment_blocks(self):
+        # Catches: a claude.ai URL with a segment before the id passing as the waiting page, because only the last segment is compared.
+        out = self.verdict(self.PICK, [self.page_set("https://claude.ai/artifact/OTHER/waitpage1")])
+        self.assertIsNotNone(out, "an items write to a claude.ai URL with an extra path segment was accepted as the waiting page")
+
+    def test_pk_green_page_write_to_the_code_form_of_the_page_passes(self):
+        # Control: the /code/ form of the page's own link is the same page.
+        out = self.verdict(self.PICK, [self.page_set("https://claude.ai/code/artifact/waitpage1")])
+        self.assertIsNone(out, "an items write to the /code/ form of the waiting page was refused: %r" % out)
+
+    def test_pk_green_page_write_with_a_trailing_slash_passes(self):
+        # Control: a trailing slash on the page's own link is the same page.
+        out = self.verdict(self.PICK, [self.page_set("https://claude.ai/artifact/waitpage1/")])
+        self.assertIsNone(out, "an items write to the waiting page's link with a trailing slash was refused: %r" % out)
+
     def test_pk_red_agent_calls_do_not_count(self):
         # An agent's box and write do not count. With no link in the reply, the pick still blocks
         # (decisions-reach-a-clickable-pick).
