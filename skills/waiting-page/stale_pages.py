@@ -67,11 +67,12 @@ Session-start mode, run by hooks/session_start.sh in a repo whose extras name a 
     python3 ~/.claude/skills/waiting-page/stale_pages.py --session-line <repo toplevel> [--main-checkout <dir>]
 
 Two stamps hold main's page.html blob sha at the last publish: the page-built stamp roadmap/data/meta/page-built.json on
-origin/roadmap of the repo (JSON {"blob", "at"}; triage writes it at each republish), and the local stamp an allowed publish
-wrote (<git common dir>/waiting-page-built). It prints nothing when either stamp equals main's blob sha, the behind line when
-at least one stamp exists and none equals it, and the line `waiting page may be behind: no stamp ...` when neither exists
-(an unparseable page-built stamp counts as missing; this line is printed before main is read). A repo with no page in its
-extras, or a stamp with main unreadable, prints nothing. It always exits 0. One python process and at most two read-only git
+origin/roadmap of the repo (JSON {"blob", "at"}; triage writes it at each republish; the format is at RECORD_PATH below), and
+the local stamp an allowed publish wrote (<git common dir>/waiting-page-built). It prints nothing when either stamp equals
+main's blob sha, and the behind line when at least one stamp exists and none equals it. A missing or unreadable page-built
+stamp (no branch, no file, no parse, no 40-hex blob) leaves the local stamp alone: behind when it differs from main's blob,
+silent when equal. With no stamp at all, or a stamp with main unreadable, or a repo with no page in its extras, it prints
+nothing. It always exits 0. One python process and at most two read-only git
 processes: `git show` of the record in the repo, and the read of main's page.html in the claude-settings clone (two repos, so
 one process cannot read both).
 
@@ -422,8 +423,12 @@ def read_published(root):
         return None
 
 
-# The page-built stamp: triage writes it on the record branch at each republish of the live page, so a fresh
-# cloud container (no local stamp) still has one. JSON {"blob": <main's page.html blob sha>, "at": <ISO UTC>}.
+# The page-built stamp: triage writes it on the record branch at each republish of the live page, after the publish
+# succeeds, so a fresh cloud container (no local stamp) can read it. JSON {"blob": ..., "at": ...}.
+#   blob: the 40-hex git blob sha of skills/waiting-page/page.html at origin/main at the republish (what read_origin_main
+#         returns as its sha; `git rev-parse origin/main:skills/waiting-page/page.html`). Written only from a real
+#         republish: a stamp for a build that did not happen would hide a stale page.
+#   at:   the republish time, ISO 8601 with the US Central offset, e.g. 2026-11-15T01:23:00-06:00. Informational: no reader reads it.
 RECORD_REF = "origin/roadmap"
 RECORD_PATH = "roadmap/data/meta/page-built.json"
 
@@ -444,18 +449,17 @@ def read_record_stamp(root):
 
 
 def session_line(root, main_checkout=None):
-    """One line about the repo's page, or "". A repo with no page in its extras gives "".
-    Either stamp (the page-built stamp on origin/roadmap, the local stamp) equal to main's blob gives "". Otherwise: the behind
-    line when at least one stamp exists, the no-stamp line when neither does (decision page-stale-publish). With stamps but
-    main unreadable, "": an unread main is never reported as behind."""
+    """One line about the repo's page, or "". A repo with no page in its extras gives "". No stamp gives "": an unread state is
+    never reported as behind. Either stamp (the page-built stamp on origin/roadmap, the local stamp) equal to main's blob gives
+    "". Otherwise the behind line. A missing or unreadable page-built stamp leaves the local stamp alone (decision
+    page-stale-publish). With stamps but main unreadable, "" too."""
     import layout
     url = layout.waiting_page(root)
     if url == "unknown":
         return ""
     stamps = [x for x in (read_record_stamp(root), read_stamp(root)) if x]
     if not stamps:
-        return ("waiting page may be behind: no stamp for %s (no %s on %s, no local stamp). Compare the live page with main's "
-                "page.html (skill waiting-page, \"Keep the page on main's code\")." % (url, RECORD_PATH, RECORD_REF))
+        return ""
     blob = main_blob(main_checkout)
     if not blob or blob in stamps:
         return ""

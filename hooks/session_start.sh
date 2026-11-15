@@ -512,11 +512,11 @@ if [ -n "$wl_out" ]; then
 fi
 
 # Rule page-stale: a repo whose extras name a waiting page prints one line when the page was last published
-# from a version other than main's page.html, or has no stamp. Two stamps hold main's blob sha at the publish: the
+# from a version other than main's page.html. Two stamps hold main's blob sha at the publish: the
 # page-built stamp roadmap/data/meta/page-built.json on origin/roadmap, and the local one an allowed publish wrote
 # (<git common dir>/waiting-page-built). skills/waiting-page/stale_pages.py --session-line compares them with origin/main
 # of the claude-settings clone ($d): nothing when either equals main's blob, the behind line when one exists and none
-# does, the no-stamp line when neither exists (main unreadable with a stamp is silent). The grep is only a cheap filter on the extras file that
+# does, nothing when neither exists or main is unreadable. The grep is only a cheap filter on the extras file that
 # lint/layout.json names; layout.waiting_page, inside the python start, decides. Cost: in a repo with a page, one
 # python start and at most two read-only git processes; in any other repo, one grep. No fetch, no file written, no timer.
 wp_extras="$toplevel/.claude/layout-extras.json"
