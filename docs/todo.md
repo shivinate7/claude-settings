@@ -20,3 +20,4 @@ Tasks a session caught and did not do. One line each.
 - The lane-undo check reads two shapes of undo (owner, 2026-11-02 14:19 CST; it grants the 11:26 CST narrowing).
 - Build the child-repo lanes from the term recheck and the merge-line pointers. A coordinator may run them in any child repo with no per-repo grant. An exception a child wants needs the owner's grant (owner, 2026-11-02 15:43 CST).
 - Let a solo session merge. The merge tool's cloud confirm needs the batch-runner role today (owner, 2026-11-02 14:02 CST).
+- fb-0114-1: Keep decision records and the rule sentences that cite them aligned (owner words 2026-11-15 00:49 CST, relayed 01:14 CST). Lane rules-decisions-aligned builds the `aligned` check beside `restates` in lint/compliance_probes.py; its draft PR closes this line.
