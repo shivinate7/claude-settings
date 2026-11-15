@@ -62,10 +62,11 @@ Interface the hook must match:
 - A relative file_path on an items set or update with no `data`: the file is read against the payload's `cwd`, as
   question_form._write_data reads it, so that write is judged like inline data (the section "a relative file_path").
 - The Departs-line ruling (rule past-ruling, decision question-form): a question whose Departs from line shares three
-  or more content words with an open ruling (the ruled store, or a step ruling), and whose Based on (ruling) lines do not
-  cite that ruling's id, is refused before any model call, with the id named. An Unvetted: line, a decision or debt
-  line, a closed ruling, and a question with one option never refuse. The cases are case_departs_ruling_*; the rule's
-  matching cases are in hooks/test_question_form.py, which reuses this file's fixtures.
+  or more content words with an open ruling (the ruled store, or a step ruling), and at least half of its words that are
+  not generic, and whose Based on (ruling) lines do not cite that ruling's id, is refused before any model call, with up
+  to three uncited ids named. An Unvetted: line, a decision or debt line, a closed ruling, and a question with one option
+  never refuse. The judge's item 8 tells it to compare the Departs from line with each listed ruling first. The cases are
+  case_departs_*; the rule's matching cases are in hooks/test_question_form.py, which reuses this file's fixtures.
 """
 import atexit
 import json
@@ -1730,8 +1731,8 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
 # ------------------------------------------------------------------ a question that departs from a ruling (past-ruling)
 #
 # Rule past-ruling on the Departs from line (decision question-form): a question whose Departs from line shares three
-# or more content words with an open ruling, and whose Based on (ruling) lines do not cite that ruling's id, is refused
-# before any model call. The incident: the #3418 question said main refuses a closed item, while the open rulings
+# or more content words with an open ruling, and at least half of its non-generic words, and whose Based on (ruling)
+# lines do not cite that ruling's id, is refused before any model call. The incident: the #3418 question said main refuses a closed item, while the open rulings
 # own-748-b-rule-4 and own-753-a-relayed-grant-entry already let a routed closed item count. Both are the store's entries
 # as filed (roadmap/rulings on origin/roadmap), so the child hook reads them through the ruled store. The Departs line
 # names the routed topic: the literal wording shares only two content words with each ruling, below the three.
@@ -1852,6 +1853,23 @@ def case_departs_ruling_one_option_and_empty_repo_are_not_refused():
           r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, detail(r))
 
 
+def case_departs_first_instruction_reaches_the_judge():
+    # The incident rulings share too few words with this line for the code to match them, so the judge reads the Departs
+    # from line against each listed ruling itself. The line matches no ruling, so the judge is called, and its prompt holds
+    # the instruction in item 8's text or the list after the reply line.
+    box = good_box(goal=INCIDENT_GOAL, problem=INCIDENT_PROBLEM, based=INCIDENT_BASED, options=INCIDENT_OPTIONS)
+    r = run_hook(question_input(box=box, cwd=INCIDENT_REPO), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if len(r.calls) == 1 else ""
+    check("departs first: the judge is called once, with both incident rulings in its candidate list",
+          len(r.calls) == 1 and all("ruled:%s:" % rid in prompt for rid in INCIDENT_RULINGS), detail(r))
+    tail = prompt[prompt.find("Past rulings"):] if "Past rulings" in prompt else ""
+    sentences = re.split(r"(?<=[.!?])\s+|\n+", tail)
+    said = any("Departs from" in s and re.search(r"\bfirst\b", s, re.I) and re.search(r"ruling", s, re.I)
+               for s in sentences)
+    check("departs first: the past-ruling text tells the judge to compare the Departs from line with each ruling first",
+          said, tail[:200])
+
+
 # The cost of one fire of the judged tools: a question, a page write, an Agent spawn, and the two Opus reads.
 # A judged question or page write makes one model call, and its one child is the roadmap read, `git`. A tool
 # this hook does not judge, or a read of the page, starts nothing. The opus pair (opus_ask, then opus_scope, which
@@ -1963,7 +1981,8 @@ def main():
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
                  case_page_absolute_file_path_is_judged, case_departs_ruling_refused_before_the_model,
                  case_departs_ruling_refused_on_the_page, case_departs_ruling_no_departs_line_is_unaffected,
-                 case_departs_ruling_one_option_and_empty_repo_are_not_refused):
+                 case_departs_ruling_one_option_and_empty_repo_are_not_refused,
+                 case_departs_first_instruction_reaches_the_judge):
         try:
             case()
         except Exception as exc:

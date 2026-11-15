@@ -53,10 +53,11 @@ Interface the module must match (the lane's form contract):
 - The Departs-line ruling (rule past-ruling): question_form.past_rulings takes an optional `focus` (the Departs from
   line's text), and ranks the ruled-store and step rulings by focus overlap first, so a ruling on the Departs topic is
   kept under the caps (RULED_TOP 8, STEP_TOP 30). hooks/call_judge.py refuses a question whose Departs from line shares
-  three or more content words with a ruling (ids `ruled:<id>`, and step rulings `<step>:`; never a decision or debt
-  index line), unless its Based on (ruling) lines cite that id, before any model call. The cases here run the hook
-  (call_judge.main) through tcj.run_hook, so a red is the check's gap: a direct call to a name that does not exist yet
-  would fail by crash, which is not a red. The cases are case_departs_ruling_*, with fixtures in test_call_judge.py.
+  three or more content words with a ruling, and at least half of its words that are not generic (ids `ruled:<id>`, and
+  step rulings `<step>:`; never a decision or debt index line), unless its Based on (ruling) lines cite that id, before any
+  model call. One refusal names up to three uncited ids. The cases here run the hook (call_judge.main) through
+  tcj.run_hook, so a red is the check's gap: a direct call to a name that does not exist yet would fail by crash, which is
+  not a red. The cases are case_departs_*, with fixtures in test_call_judge.py.
 
 Every case runs on the surfaces the contract names. A page write is judged twice, by question_form.item_hit
 and by guard.data_tool_hit, so a guard that does not delegate shows red. The same form lines are judged on
@@ -2950,6 +2951,121 @@ def case_departs_ruling_metadata_words_never_count():
           r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, tcj.detail(r))
 
 
+# ------------------------------------------------------------------ the bar's generic verbs, and every uncited hit
+#
+# The bar (decision question-form): a hit needs three shared words, and at least half of the Departs from line's words that
+# are not generic. Generic verbs (refuses, allows, lets, reads, ...) never count as shared, so a line whose only shared
+# words are such verbs is no topic match. A refusal names every uncited hit, up to three, so each costs one resubmit at
+# most. The judge's own reading of the Departs from line is case_departs_first_instruction_reaches_the_judge.
+#
+# UNRELATED_RULINGS are open rulings on other topics. Each line of UNRELATED_LINES shares three words with its target,
+# the generic verb among them. The decoys share only `main`, which every Departs line holds, so they are candidates for
+# every line too, and must not hit.
+UNRELATED_RULINGS = (
+    ("ruled-stamp-refusal", "Owner, 2026-11-10: a closed pull request the stamp refuses stays refused until its item is reopened."),
+    ("ruled-lane-cap-reads", "Owner, 2026-11-12: the lane cap check reads the stamp table instead of the body of each note."),
+    ("ruled-cloud-opens", "Owner, 2026-11-08: the cloud session opens a lane on its own and marks the run done."),
+    ("ruled-merge-gate-lets", "Owner, 2026-11-09: the merge gate lets the tool confirm each step through the queue."),
+    ("ruled-decoy-header", "Owner, 2026-11-01: main keeps the page header as written."),
+    ("ruled-decoy-footer", "Owner, 2026-11-02: main keeps the footer links in the page sidebar."),
+    ("ruled-decoy-notes", "Owner, 2026-11-03: main keeps the release notes in the docs folder."),
+    ("ruled-decoy-badge", "Owner, 2026-11-04: main keeps the badge colour in each page header."),
+)
+# (label, the Departs from text, the ruling the old bar refused it on). The form refuses a line with no dash before this
+# check runs, so the merge-gate line carries one.
+UNRELATED_LINES = (
+    ("merge tool reads the review record", "main — the merge tool reads the review record from the PR comment instead of the body",
+     "ruled-lane-cap-reads"),
+    ("lane opens its own draft PR", "main — a lane opens its own draft pull request and never marks it ready",
+     "ruled-cloud-opens"),
+    ("lets --confirm through", "main — which lets --confirm through with no --head", "ruled-merge-gate-lets"),
+    ("refuses a closed item, allows it", "main refuses a closed item — #3418 allows it", "ruled-stamp-refusal"),
+)
+# Four open on-topic rulings for the incident line: each shares closed, routed and item with it, and none cites another.
+GRANT_RULINGS = (
+    ("ruled-grant-count-one", "Owner, 2026-11-13: a closed routed item counts toward the grant route."),
+    ("ruled-grant-count-two", "Owner, 2026-11-13: a routed closed item keeps its grant route."),
+    ("ruled-grant-count-three", "Owner, 2026-11-13: the closed item on the routed grant stays counted."),
+    ("ruled-grant-count-four", "Owner, 2026-11-13: a routed item that is closed still counts toward the grant."),
+)
+
+
+def store_repo(name, rulings):
+    """A repo whose ruled store holds `rulings` (id, ruling text) as open entries, in the order given."""
+    entries = {rid: fixture.entry(rid, at="2026-11-13T18:%02d:00-06:00" % (20 + n), ruling=text,
+                                  supersedes=tcj.SUPERSEDES)
+               for n, (rid, text) in enumerate(rulings)}
+    repo = tcj.make_repo(name)
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files(entries), tcj.ROOT)
+    return repo
+
+
+def case_departs_generic_verbs_pass_unrelated_rulings():
+    # Each line makes one model call and no deny. Scope first: the store is full, and the line's own target is a candidate.
+    import question_form  # the one form check (hooks/question_form.py)
+    repo = store_repo("departs-unrelated-lines", UNRELATED_RULINGS)
+    for label, departs, target in UNRELATED_LINES:
+        box = tcj.good_box(departs="Departs from: " + departs)
+        check("departs unrelated %s: the box passes chat_hit" % label, question_form.chat_hit(box) == ("", ""),
+              str(question_form.chat_hit(box)))
+        listed = tcj.ruled_candidates(box, repo)
+        check("departs unrelated %s: %s is a candidate, so the check has its ruling to match" % (label, target),
+              any(c.startswith("ruled:%s:" % target) for c in listed), str(listed)[:200])
+        check("departs unrelated %s: the decoys are candidates too, so they are judged as well" % label,
+              all(any(c.startswith("ruled:%s:" % rid) for c in listed) for rid, _text in UNRELATED_RULINGS
+                  if rid.startswith("ruled-decoy-")), str(listed)[:200])
+        r = tcj.run_hook(tcj.question_input(box=box, cwd=repo), answer=tcj.ALLOW)
+        check("departs unrelated %s: its shared words are generic or off topic, so one model call and no deny" % label,
+              r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, tcj.detail(r))
+
+
+def case_departs_on_topic_ruling_still_refuses_alone():
+    rid, _text = GRANT_RULINGS[0]
+    repo = store_repo("departs-one-on-topic", GRANT_RULINGS[:1])
+    box = tcj.incident_box()
+    listed = tcj.ruled_candidates(box, repo)
+    check("departs one on topic: the ruling is a candidate, as ruled:%s:" % rid,
+          any(c.startswith("ruled:%s:" % rid) for c in listed), str(listed)[:200])
+    r = tcj.run_hook(tcj.question_input(box=box, cwd=repo), answer=tcj.ALLOW)
+    check("departs one on topic: the one uncited on-topic ruling refuses the question as past-ruling",
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling"), tcj.detail(r))
+    check("departs one on topic: the reason names %s" % rid, rid in r.reason(), r.reason()[:200])
+    check("departs one on topic: the refusal makes no model call", r.calls == [], tcj.detail(r))
+
+
+def case_departs_refusal_names_both_uncited_rulings():
+    # Two uncited on-topic rulings (the incident store): one refusal names both ids, so one resubmit cites both.
+    box = tcj.incident_box()
+    listed = tcj.ruled_candidates(box, tcj.INCIDENT_REPO)
+    check("departs both: both incident rulings are candidates, as ruled:<id>:",
+          all(any(c.startswith("ruled:%s:" % rid) for c in listed) for rid in tcj.INCIDENT_RULINGS), str(listed)[:200])
+    r = tcj.run_hook(tcj.question_input(box=box, cwd=tcj.INCIDENT_REPO), answer=tcj.ALLOW)
+    check("departs both: the refusal is denied as past-ruling",
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling"), tcj.detail(r))
+    named = [rid for rid in tcj.INCIDENT_RULINGS if rid in r.reason()]
+    check("departs both: the one refusal names both uncited rulings, %s and %s" % tuple(tcj.INCIDENT_RULINGS),
+          len(named) == 2, r.reason()[:300])
+    check("departs both: the refusal tells the owner to cite each under Based on (ruling):",
+          "Based on (ruling):" in r.reason(), r.reason()[:300])
+    check("departs both: one refusal line in guard.log", r.log.count("\tdeny\tpast-ruling\t") == 1, tcj.detail(r))
+
+
+def case_departs_refusal_names_three_of_four_uncited():
+    # Four uncited on-topic rulings: the one refusal names the cap of three, not one and not all four.
+    rids = [rid for rid, _text in GRANT_RULINGS]
+    repo = store_repo("departs-four-uncited", GRANT_RULINGS)
+    box = tcj.incident_box()
+    listed = tcj.ruled_candidates(box, repo)
+    check("departs four: all four uncited rulings are candidates",
+          all(any(c.startswith("ruled:%s:" % rid) for c in listed) for rid in rids), str(listed)[:200])
+    r = tcj.run_hook(tcj.question_input(box=box, cwd=repo), answer=tcj.ALLOW)
+    check("departs four: the refusal is denied as past-ruling",
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling"), tcj.detail(r))
+    named = [rid for rid in rids if rid in r.reason()]
+    check("departs four: the one refusal names exactly three of the four uncited rulings (the cap)", len(named) == 3,
+          "named %d: %s" % (len(named), r.reason()[:300]))
+
+
 def main():
     for case in (case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
                  case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
@@ -3005,7 +3121,9 @@ def main():
                  case_departs_ruling_ranks_the_topic_first,
                  case_departs_generic_words_pass, case_departs_cite_of_a_decision_stem_does_not_clear_a_step_ruling,
                  case_departs_cite_bare_and_ruled_ids_clear_a_step_ruling,
-                 case_departs_cite_bold_and_bulleted_clear_a_step_ruling, case_departs_ruling_metadata_words_never_count):
+                 case_departs_cite_bold_and_bulleted_clear_a_step_ruling, case_departs_ruling_metadata_words_never_count,
+                 case_departs_generic_verbs_pass_unrelated_rulings, case_departs_on_topic_ruling_still_refuses_alone,
+                 case_departs_refusal_names_both_uncited_rulings, case_departs_refusal_names_three_of_four_uncited):
         try:
             case()
         except Exception as exc:
