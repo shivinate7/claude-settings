@@ -1,4 +1,6 @@
-"""The one reader of a session's own get_session and create_session records in its transcript.
+"""The one reader of a session's own get_session and create_session records in its transcript, and of the session
+roster: the Standing sessions rows of the repo's roadmap record, and the session ids a transcript's list_sessions,
+get_session and create_session results show (decision brief-ids-in-roster).
 
 hooks/guard_merge.py (merge role, trust card, archive proofs) and lint/report_guard.py (lane or
 owner-facing pick guard) both read it. It is its own small module so the Stop hook can import it
@@ -9,6 +11,7 @@ caller, through agent_transcript_path.
 import json
 import os
 import re
+import sys
 
 # A get_session result for another session arrives as its untrusted text: an opening tag with a nonce, a preamble,
 # the record, then a closing tag. Only a closing tag with the opening nonce ends the wrapper.
@@ -158,3 +161,155 @@ def _scan(transcript, own_id, created):
                     except (ValueError, KeyError, TypeError):
                         continue
     return newest, tagged_after, parent, newest_ccr
+
+
+# ---- The session roster (decision brief-ids-in-roster). The roadmap record's Standing sessions section holds one bullet
+# per standing session. The ids a transcript shows from the sessions tools are the second source: a lane has no row, but
+# the session that started or listed it saw its id.
+ROSTER_REF = "refs/remotes/origin/roadmap"  # the record branch as the checkout last fetched it; never fetched here
+ROSTER_PATH = "CLAUDE.md"
+_ROSTER_HEADING = re.compile(r"##\s+Standing sessions\b")
+_ROSTER_END = re.compile(r"#{1,2}\s")  # the next section; a ### line inside the roster stays inside it
+_ROSTER_ID = re.compile(r"(?<![A-Za-z0-9_])session_[0-9][A-Za-z0-9]*")
+_ROSTER_ROLE = re.compile(r"[^:(]+")
+_ROSTER_TITLE = re.compile(r'"([^"]+)"')
+
+
+def roster_record(where):
+    """The text of CLAUDE.md on the roadmap ref of the checkout `where`, else None (no ref, no file, no git, no
+    folder). One local git read, never a fetch."""
+    if not isinstance(where, str) or not where or not os.path.isdir(where):
+        return None
+    from git_reads import _git
+    shown = _git(where, "cat-file", "blob", ROSTER_REF + ":" + ROSTER_PATH)
+    return shown.stdout if shown is not None and shown.returncode == 0 else None
+
+
+def roster_rows(text):
+    """[(role, title, id)] for each bullet of the Standing sessions section of `text` that holds a session id, in
+    order. A bullet may wrap onto indented lines. The id is the first one in the bullet; a bullet with none, such as the
+    template's `<session id>` placeholder, is no row. The title is "" when the bullet quotes none."""
+    bullets, current, inside = [], None, False
+    for line in text.splitlines():
+        if _ROSTER_HEADING.match(line):
+            inside = True
+            continue
+        if not inside:
+            continue
+        if _ROSTER_END.match(line):
+            break
+        if line.startswith("- "):
+            if current is not None:
+                bullets.append(current)
+            current = line[2:].strip()
+        elif current is not None and line[:1] in (" ", "\t") and line.strip():
+            current += " " + line.strip()
+        elif current is not None:
+            bullets.append(current)
+            current = None
+    if current is not None:
+        bullets.append(current)
+    rows = []
+    for bullet in bullets:
+        found = _ROSTER_ID.search(bullet)
+        if not found:
+            continue
+        role = _ROSTER_ROLE.match(bullet)
+        title = _ROSTER_TITLE.search(bullet)
+        rows.append((role.group(0).strip() if role else "", title.group(1) if title else "", found.group(0)))
+    return rows
+
+
+def _listed_rows(parsed):
+    """[(id, tags)] from one parsed get_session or list_sessions result: a record with an id, or a list of them under
+    `ccr.data`, `data` or `sessions`, or a bare list. A row with no string id or no list of tags is skipped."""
+    if isinstance(parsed, dict):
+        inner = parsed.get("ccr") if isinstance(parsed.get("ccr"), dict) else parsed
+        if "id" in inner:
+            rows = [inner]
+        else:
+            rows = next((inner[k] for k in ("data", "sessions") if isinstance(inner.get(k), list)), [])
+    else:
+        rows = parsed if isinstance(parsed, list) else []
+    return [(row["id"], [str(t) for t in row["tags"]]) for row in rows
+            if isinstance(row, dict) and isinstance(row.get("id"), str) and isinstance(row.get("tags"), list)]
+
+
+def _sessions_seen(transcript):
+    """The pass behind sessions_seen. Raises OSError when the transcript cannot be read."""
+    kinds, seen = {}, []
+    with open(transcript, encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                content = json.loads(line)["message"]["content"]
+            except (ValueError, KeyError, TypeError):
+                continue
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                name = str(block.get("name", ""))
+                if block.get("type") == "tool_use":
+                    for kind in ("list_sessions", "get_session", "create_session"):
+                        if name.endswith(kind):
+                            given = block.get("input", {}).get("tags") if isinstance(block.get("input"), dict) else None
+                            kinds[block.get("id")] = (kind, given)
+                elif block.get("type") == "tool_result" and block.get("tool_use_id") in kinds:
+                    kind, given = kinds[block.get("tool_use_id")]
+                    body = block.get("content")
+                    if isinstance(body, list):
+                        body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
+                    if not isinstance(body, str):
+                        continue
+                    if kind == "create_session":
+                        created = _created_session_id(body)
+                        if created and isinstance(given, list):
+                            seen.append((created, [str(t) for t in given]))
+                        continue
+                    try:
+                        seen += _listed_rows(_record_json(body))
+                    except (ValueError, KeyError, TypeError):
+                        continue
+    return seen
+
+
+def sessions_seen(transcript):
+    """[(id, tags)] for each session the transcript's get_session, list_sessions and create_session results show, each
+    sighting its own entry. A create_session result names the id and the call's input names the tags. A line or result
+    that does not parse is skipped. The ids are data. Never raises, because the guard's checks must not crash on any
+    input: a transcript it cannot read (no path, a missing file, a folder) is None, which is not the same as an empty list."""
+    if not isinstance(transcript, (str, os.PathLike)):
+        return None
+    try:
+        return _sessions_seen(transcript)
+    except (OSError, TypeError, ValueError, RecursionError):
+        return None
+
+
+def roster_session_lines(where):
+    """The lines SessionStart prints for the roster of the checkout `where`, a list of strings. Rows come from
+    roster_rows; the source and the status words say the roster is the record's, not live."""
+    from git_reads import github_repo
+    text = roster_record(where)
+    rows = roster_rows(text) if text is not None else []
+    if not rows:
+        return ["roster: no roster record with standing session rows on the roadmap ref (read from CLAUDE.md, "
+                "Standing sessions); ask the coordinator or run list_sessions for the ids, and never type an id by hand."]
+    repo = github_repo(where) or "unknown repo"
+    lines = ["standing sessions of %s, from the Standing sessions section of CLAUDE.md on the roadmap ref:" % repo]
+    for role, title, sid in rows:
+        lines.append("  %s%s, %s, repo %s" % (role, ' "%s"' % title if title else "", sid, repo))
+    lines.append("Status is from the record, not live: run list_sessions for live status (tag cs-repo:%s). A brief names "
+                 "a role or a slug, never an id typed by hand; send_message takes the id from a row above or from "
+                 "your own list_sessions read." % repo)
+    return lines
+
+
+if __name__ == "__main__":
+    # `own_session.py roster-lines <checkout>`: the SessionStart roster block. Silent on any failure.
+    if len(sys.argv) == 3 and sys.argv[1] == "roster-lines":
+        try:
+            print("\n".join(roster_session_lines(sys.argv[2])))
+        except Exception:
+            pass
