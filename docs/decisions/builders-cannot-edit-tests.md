@@ -59,6 +59,18 @@ The payload must carry an `agent_id`. The main session, reviewers, Explore, and 
 - Write a file in no repository, such as a probe in the session scratchpad, from a call that runs in a repository. A path with no enclosing checkout is no test of the repo. A test path in any repository stays refused, also one in a different repository. A call that runs in no repository still judges the path by its shape.
 - Write a document in a `spec` folder, such as `docs/spec/api.md`. `spec` is a test folder for code and fixtures only. A `.md`, `.mdx`, `.markdown`, `.txt`, `.rst` or `.adoc` file there is a document. `spec/foo_spec.rb` and `src/x.spec.ts` stay refused.
 
+## Where a test-support helper lives
+
+A test-support helper lives in the top-level `testing/` folder, such as `testing/tracked_tree.py` and `testing/shallow_clone.py`. A test-author writes it. A helper that is private to one test stays inside that test file.
+
+- A builder is refused in `testing/`: `TEST_DIRS` in `hooks/guard.py` holds `"testing"`. Run on `testing/cost_probe.py`, the guard's builder test-path check and `author_path_ok` both return True.
+- `testing/` is not a landed folder (`landed-dirs.txt` does not list it), so `check_landed_dirs` never reads it (`lint/test_check_landed_dirs.py`, the unlanded-subfolder case). Tests already import from it: `lint/test_check_landed_dirs.py` puts `testing/` on `sys.path` and imports `tracked_tree`.
+- A subfolder of a landed folder, such as `hooks/test_support/`, fails `check_landed_dirs`.
+- A helper named `test_<name>.py` needs a run step in `checks.yml` (`CiCoverage` and `TEST_FILE` in `lint/test_windows_split.py`) and runs as a script (`TEST_PATTERNS` in `.github/scripts/touched-tests.py`).
+- A helper a builder may write would let builder code decide what tests import. That works against "a green run must mean the code is right".
+- `testing/` is not installed: it is not a landed folder, so `~/.claude` has no `testing/` and product code cannot import from it.
+- Hooks tests already import from `testing/` this way: `hooks/test_session_start.py` line 28 inserts `os.path.join(HERE, "..", "testing")`, and `hooks/test_mail.py` line 102 inserts `os.path.join(REPO, "testing")`.
+
 ## The shell check
 
 The shell check does not replace the act. The act stays a test path in the builder's change. The shell check flags common mistake forms first. The diff log at commit, push and stop catches every other form. Recovery stays allowed: `git checkout -- <test>` and `git restore` are not read as writes.

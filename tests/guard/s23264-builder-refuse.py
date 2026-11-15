@@ -1,7 +1,10 @@
 # section 23264
 FAMILY = "builder-refuse"
 TEST_A = "tests/test_a.py"
-# The test-author's five cases, added to main's test file on the lane branch.
+# The test-author's five cases, added to main's test file on the lane branch. The message carries a
+# Red-run line (rule red-run, decision red-run-trailer-on-test-commits), or the push guard refuses the fixture.
+FIXTURE_TRAILER = "Red-run: none: fixture"
+FIXTURE_MESSAGE = "test-author cases\n\n" + FIXTURE_TRAILER
 LANE_FUNCS = ["def test_lane_%d():\n    assert %d\n\n" % (n, n) for n in range(1, 6)]
 LANE_TEXT = BASE_FILES[TEST_A] + "".join(LANE_FUNCS)
 # What a builder leaves after it removes four of the five: it differs from main AND from the lane tip.
@@ -30,7 +33,7 @@ def _test_author_lane(w, rel=TEST_A, text=LANE_TEXT, more=()):
     for other, other_text in more:
         write(os.path.join(main, other), other_text)
     _must(main, "add", "-A")
-    _must(main, *IDENT, "commit", "-q", "-m", "test-author cases")
+    _must(main, *IDENT, "commit", "-q", "-m", FIXTURE_MESSAGE)
     _must(main, "checkout", "-q", "main")
 
 
@@ -169,7 +172,7 @@ def _f1_pull(w):
     _must(main, "checkout", "-q", "-b", "lane", "origin/feat")
     write(os.path.join(main, TEST_A), LANE_TEXT)
     _must(main, "add", "-A")
-    _must(main, *IDENT, "commit", "-q", "-m", "test-author cases")
+    _must(main, *IDENT, "commit", "-q", "-m", FIXTURE_MESSAGE)
     _must(main, "push", "-q", "origin", "lane:refs/heads/feat")
     _must(main, "checkout", "-q", "main")
     _must(w, "pull", "-q", "--ff-only", "origin", "feat")
@@ -1034,7 +1037,7 @@ def _author_test_commit(w):
     """Cut at main. The test-author edits its test file and commits: an ordinary commit, no merge."""
     write(os.path.join(w, TEST_A), BASE_FILES[TEST_A] + "def test_author_ordinary():\n    assert 6\n\n")
     _must(w, "add", "-A")
-    _must(w, *IDENT, "commit", "-q", "-m", "test-author case")
+    _must(w, *IDENT, "commit", "-q", "-m", "test-author case\n\n" + FIXTURE_TRAILER)
 
 
 def _author_merge_test_edit(w):
