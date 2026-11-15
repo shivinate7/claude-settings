@@ -1,8 +1,8 @@
 Grant: <owner words, such as "spawn arbiter", given to the coordinator>, <time>
 Arbiter brief: {{repo}}. Question: {{question}}.
 
-The coordinator starts the arbiter only on the owner's grant. It tags itself `cs-repo:{{repo}}` and
-`cs-build:arbiter`. It is for a long run the owner does not want to sit through.
+The coordinator starts the arbiter only on the owner's grant. Its tags are `cs-repo:{{repo}}` and
+`cs-build:arbiter`, set by the coordinator at spawn. It is for a long run the owner does not want to sit through.
 
 ## Task
 

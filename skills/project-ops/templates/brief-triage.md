@@ -2,7 +2,7 @@ Grant: <owner words that set up the standing build, as the coordinator relays th
 Triage brief: {{repo}}. Record branch: {{record_branch}}.
 
 The coordinator starts triage first, with the batch runner, as a trio, before any lane. Its start message names
-the repo and the record branch. Triage tags itself `cs-repo:{{repo}}` and `cs-build:triage`. The coordinator and
+the repo and the record branch. Its tags are `cs-repo:{{repo}}` and `cs-build:triage`, set by the coordinator at spawn. The coordinator and
 triage setup is the grant for making the page. No separate grant is needed.
 
 ## Task

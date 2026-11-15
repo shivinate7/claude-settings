@@ -1,8 +1,8 @@
 Grant: <the coordinator's standing merge grant, as the owner gave it>, <time>
 Batch runner brief: {{repo}}. Checkout roots: {{roots}}.
 
-The coordinator starts the batch runner with triage, as a trio, before any lane. It tags itself `cs-repo:{{repo}}`
-and `cs-build:batch-runner`. It holds no grant of its own. It runs merges under the coordinator's grant.
+The coordinator starts the batch runner with triage, as a trio, before any lane. Its tags are `cs-repo:{{repo}}`
+and `cs-build:batch-runner`, set by the coordinator at spawn. It holds no grant of its own. It runs merges under the coordinator's grant.
 
 ## Task
 
