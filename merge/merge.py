@@ -5485,6 +5485,9 @@ def replaced_names(info, n):
 STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a coordinator or triage merges its own small edit, and only that
 MERGE_ROLES = {"batch-runner", STANDING_ROLE}  # the tiers that may run `merge <pr> --confirm` in a cloud session; the standing one only past standing_refusal
 
+STANDING_MAX_LINES = 40  # reading cost, unmeasured; the owner may change it
+STANDING_MAX_FILES = 3  # reading cost, unmeasured; the owner may change it
+
 def role_path():
     return pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")) / "state" / "merge-role.json"
 
@@ -5570,7 +5573,10 @@ def standing_refusal(h, n, info, head):
     not_green = head_not_green(h.head_state(n, info["head"]))
     if not_green:
         return f"the head's own checks are not green: {not_green}."
-    if kind_misfits("docs-only", files):  # rule text, not a doc: one sonnet reviewer record on the live head
+    if kind_misfits("docs-only", files):  # rule text, not a doc: small, and one sonnet reviewer record on the live head
+        # additions only: pr_files carries no deletions, and adding a host read or changing its triples is out of scope here; a rename's old path counts as a file
+        if sum(a for _, _, a in files) > STANDING_MAX_LINES or len(files) > STANDING_MAX_FILES:
+            return "this pull request changes rule text and is too large for this session to merge."
         bodies = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(n, [])
         rec = next((r for r in map(parse_review, reversed(bodies)) if r and r["n"] == n), None)
         reviewers = [m for _, role, m, _ in (rec["rounds"] if rec else []) if role == REVIEW_ROLES[0]]
