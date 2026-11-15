@@ -1,0 +1,16 @@
+{
+ "id": "own-ids-by-harness-roster",
+ "at": "2026-11-15T13:30:00-06:00",
+ "title": "Sessions get both a role or slug and the right ids: briefs hand-type no id, the harness supplies the ids",
+ "ruling": "Owner chat, verbatim 13:30 CST Nov 15, relayed by the consultant (RELAYED, not typed to triage; note the owner says \"lean\", so this is a lean, not a firm pick): \"yeah i lean towards wanting both as both is kinda vlaid\". Context: forwarded feedback from the mailaudit cloud coordinator. (1) guard cant-claim-needs-probe. (2) At lane start the harness gives the new session a roster (role, repo tag, id, status from list_sessions); roles and slugs stay in briefs; ids reach sessions by the harness, never hand-typed; send_message refuses an id not in list_sessions for the repo tag and prints the roster. (3) guard brief-checks-answered-claims-match-page; plus the earlier lane-creation suggestions (step lane-start-one-pass). Consultant's reading, NOT the owner's words: this widens own-819-b-slug-or-role: briefs still carry no hand-typed id; every session also gets the right ids, put there by the harness. Steps: session-roster-at-start, cant-claim-needs-probe, answered-claims-match-page.",
+ "quote": "yeah i lean towards wanting both as both is kinda vlaid",
+ "source": "Owner chat 13:30 CST Nov 15 (verbatim as relayed; the word is \"lean\"), relayed by the consultant, relayed by the coordinator; the widening reading is the consultant's",
+ "status": "open",
+ "step": "session-roster-at-start",
+ "supersedes": [
+  {
+   "kind": "ruling",
+   "ref": "own-819-b-slug-or-role: a brief names a slug or role only, never a session id (widened, not undone: briefs still carry no hand-typed id; the harness adds the ids; consultant's reading)"
+  }
+ ]
+}

@@ -1,0 +1,14 @@
+{
+ "id": "session-roster-at-start",
+ "title": "At lane start the harness gives the new session a roster; send_message refuses an id not in list_sessions",
+ "priority": "now",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T13:34:00-06:00",
+ "why": "[13:31 CST Nov 15, triage] At lane start the harness gives the new session a roster (role, repo tag, id, status from list_sessions); roles and slugs stay in briefs; ids reach sessions by the harness, never hand-typed; send_message refuses an id not in list_sessions for the repo tag and prints the roster. Ruling own-ids-by-harness-roster (a lean). Guard or check: yes (unverified). (source: coordinator 13:31 CST, relayed by triage; lane started by the consultant 13:30 CST; not owner-typed, undoable) New step.",
+ "source": "coordinator 13:31 CST, relayed by triage; lane started by the consultant 13:30 CST; not owner-typed",
+ "note": "Doing. At lane start the harness gives the new session a roster (role, repo tag, id, status from list_sessions); roles and slugs stay in briefs; ids reach sessions by the harness, never hand-typed; send_message refuses an id not in list_sessions for the repo tag and prints the roster. Ruling own-ids-by-harness-roster (a lean). Guard or check: yes (unverified)."
+}
