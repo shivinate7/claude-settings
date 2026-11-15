@@ -74,6 +74,7 @@ OWNER_STAKES = ("goal", "money", "risk", "rule", "cannot undo")
 _STAKES = "|".join(re.escape(s) for s in OWNER_STAKES)
 GOAL_LINE = re.compile(r"^[ \t]*Goal:[ \t]*\S", re.I | re.M)
 PROBLEM_LABEL = re.compile(r"^[ \t]*Problem\b", re.I | re.M)
+PROBLEM_STAKE_OPEN = re.compile(r"^[ \t]*Problem[ \t]*\(", re.I | re.M)
 PROBLEM_LINE = re.compile(r"^[ \t]*Problem[ \t]*\((?:%s)\):[ \t]*\S" % _STAKES, re.I | re.M)
 # A Based on line starts `Based on (` or `Based on:`; prose that starts "Based on the log" is not one.
 BASED_LABEL = re.compile(r"^[ \t]*Based on[ \t]*[(:]", re.I | re.M)
@@ -108,8 +109,7 @@ FORM_REASON = ("A question to the owner states the form, in this order: a line \
                "premise>\" where kind is one of %s. Each option states its gain and its loss."
                % (", ".join(OWNER_STAKES), ", ".join(PREMISE_KINDS)))
 PAGE_FORM_REASON = FORM_REASON + (" On the waiting page the lines go in `context`, and each option has a "
-                                  "non-empty `gain` and `lose`. If no stake fits, do not ask: take your own "
-                                  "pick and say it in the reply.")
+                                  "non-empty `gain` and `lose`.")
 CHAT_FORM_REASON = FORM_REASON + (" In the question box the lines go in the question text, and each "
                                   "option's description holds \"Gain: <text>\" and \"Lose: <text>\".")
 STAKE_REASON = ("A decision is the owner's only when he can judge it. Write the Problem line as "
@@ -961,6 +961,9 @@ def form_str_replace_hit(entry):
         return FORM_RULE, "context edit that removes the Problem line"
     if PROBLEM_LABEL.search(old) and not PROBLEM_LABEL.search(new):
         return FORM_RULE, "context edit that removes the Problem line"
+    # A bare Problem line may become another bare line, but not one that names a stake the set lacks.
+    if PROBLEM_LABEL.search(old) and PROBLEM_STAKE_OPEN.search(new) and not PROBLEM_LINE.search(new):
+        return STAKE_RULE, "context edit that leaves a Problem line with no stake, or one outside the set"
     if BASED_LABEL.search(old) and not BASED_LABEL.search(new):
         return FORM_RULE, "context edit that removes the Based on line"
     hit = placeholder_form_hit(new)

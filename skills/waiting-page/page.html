@@ -1571,6 +1571,8 @@ function ruledOf(it) {
 }
 // Saved answers from before the page stopped preselecting carry this as their note. It is no note of the owner's, so no receipt shows it.
 const LEGACY_NOTE = "accepted pick";
+// A saved note as the owner's own: the old placeholder reads as no note. The Copy line and Change take their saved note through it.
+const ownNote = (n) => n === LEGACY_NOTE ? "" : n;
 // noNote: the owner's note is held by the fold of a card in the Answered section, so the answer line shows without it.
 function receipt(it, noNote) {
   const sv = savedOf(it) || lastOf(it), rc = savedOf(it) ? rcOf(it) : {};
@@ -1587,7 +1589,7 @@ function receipt(it, noNote) {
   return h("div", { class: "receipt" },
     h("div", { class: "line" }, glyph("done"), h("b", {}, picks ? what : what + "."),
       rc.read && !rc.filed ? h("span", { class: "read" }, "Read by " + it.owner + " " + fmt(rc.read, false)) : null,
-      h("button", { class: "btn quiet changebtn", type: "button", onclick: () => { state.changing[it.id] = true; edited(); setDraft(it, sv.act === "park" ? { act: "park", note: sv.note || "" } : { choice: Array.isArray(sv.choice) ? sv.choice.slice() : sv.choice, note: sv.note || "", done: !!sv.done }); repaint(it); } }, "Change")),
+      h("button", { class: "btn quiet changebtn", type: "button", onclick: () => { state.changing[it.id] = true; edited(); setDraft(it, sv.act === "park" ? { act: "park", note: ownNote(sv.note) || "" } : { choice: Array.isArray(sv.choice) ? sv.choice.slice() : sv.choice, note: ownNote(sv.note) || "", done: !!sv.done }); repaint(it); } }, "Change")),
     picks,
     !noNote && sv.note && sv.note !== LEGACY_NOTE ? h("p", { class: "rnote" }, "Note: " + sv.note) : null);
 }
@@ -2424,12 +2426,12 @@ function answerLine() {
   answerable().sort((a, b) => a.n - b.n).forEach((it) => {
     if (blocked(it)) return;
     const a = savedOf(it), d = eff(it) || {};
-    const choice = d.choice || (a && a.choice), note = d.note != null ? d.note : (a && a.note);
+    const choice = d.choice || (a && a.choice), note = d.note != null ? d.note : ownNote(a && a.note);
     if (state.draft[it.id] ? d.act === "park" : !!(a && a.act === "park")) parts.push(it.n + " park" + (note ? " (" + note + ")" : ""));
     else if ((it.kind === "decision" || isRuling(it)) && choice) parts.push(it.n + " " + choiceText(choice) + (note ? " (" + note + ")" : ""));
     else if (it.kind === "task") {
       const live = !!state.draft[it.id] && draftReady(it); // only a draft that would send replaces the saved answer
-      const done = live ? !!d.done : !!(a && a.done), tnote = live ? d.note : (a && a.note);
+      const done = live ? !!d.done : !!(a && a.done), tnote = live ? d.note : ownNote(a && a.note);
       if (done) parts.push(it.n + " done" + (tnote ? " (" + tnote + ")" : ""));
       else if ((tnote || "").trim()) parts.push(it.n + " note, not done (" + tnote + ")");
     }
