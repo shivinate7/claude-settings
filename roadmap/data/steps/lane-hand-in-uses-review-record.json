@@ -1,14 +1,14 @@
 {
- "id": "lane-hand-in-uses-review-record",
- "title": "Lane hand-in text says: post the review record with merge --review-record, never by hand",
- "status": "todo",
- "repo": "shivinate7/claude-settings",
- "phase": "next",
- "lane": "",
- "owner": "triage",
- "blockedBy": [],
- "why": "Incident (coordinator 11:53 CST Nov 13, runner 10 11:48 CST): #3142's hand-written record used model names claude-... and did not parse; #2870 and others also read \"no record\".",
- "source": "coordinator 11:53 CST Nov 13",
- "note": "Add the sentence to the shared brief template (skills/project-ops brief) and the lane hand-in text. The coordinator's own brief tail now says it.",
- "updatedAt": "2026-11-13T11:56:51-06:00"
+  "id": "lane-hand-in-uses-review-record",
+  "title": "Lane hand-in text says: post the review record with merge --review-record, never by hand",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "",
+  "owner": "triage",
+  "blockedBy": [],
+  "why": "Incident (coordinator 11:53 CST Nov 13, runner 10 11:48 CST): #3142's hand-written record used model names claude-... and did not parse; #2870 and others also read \"no record\".\n\n02:06 CST Nov 15 NOTE (runner 10's finding at 02:04, relayed by the coordinator; a note, not a debt; triage read no code): usage text for lanes: `merge --review-record` only prints the record (no --confirm flag); post the printed lines as a PR comment with the GitHub tool (done: PR #3455 comment 6891441431). `--fix-check` needs a full 40-hex head. A line in the merge tool's usage text or the lane brief template would stop lanes typing --confirm; queued as a note.",
+  "source": "coordinator 11:53 CST Nov 13",
+  "note": "Add the sentence to the shared brief template (skills/project-ops brief) and the lane hand-in text. The coordinator's own brief tail now says it.",
+  "updatedAt": "2026-11-15T02:06:00-06:00"
 }
