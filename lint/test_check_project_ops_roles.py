@@ -10,21 +10,26 @@ Interface the check must meet (the builder builds to it):
   the record in the folder layout.path(ROOT, "decisions") gives (lint/layout.py), and the templates folder
   skills/project-ops/templates/ with its operating-model.md.
 - Roles: the sentence that starts `The session roles are the same on local and cloud:` in the record, read
-  outside fenced blocks and multi-line HTML comments, up to its closing period. Drop any parenthetical. Split on
-  commas and a final `and`. "batch runner" is one role. A role the sentence does not name needs no role text and
-  no template. A missing sentence, or one that gives no roles, exits 2 and names the record.
+  outside fenced blocks and multi-line HTML comments, up to its closing period. The anchor may wrap at any line
+  break or bullet indent between its words. Drop any parenthetical first: a period inside one does not end the
+  sentence. Split on commas and a final `and`. "batch runner" is one role, and a hyphen stands for a space, so
+  "batch-runner" is the same role. A list with commas and no final `and` ends at a stray period: it exits 2 and
+  names the record, and never drops roles silently. A role the sentence does not name needs no role text and no
+  template. A missing sentence, or one that gives no roles, exits 2 and names the record.
 - Role text: a line that starts `- **<Role>.**` in operating-model.md, outside fenced blocks and multi-line HTML
-  comments. The role's first letter is capitalised in the text; match case-insensitively. A role named in prose
-  is not role text.
+  comments. The marker needs words after it: a bare `- **Arbiter.**` is no role text. The role's first letter is
+  capitalised in the text; match case-insensitively, and a hyphen matches a space in either direction. A role named
+  in prose is not role text.
 - Brief template: lane -> templates/brief.md; every other role -> templates/brief-<role, spaces as hyphens>.md
-  (e.g. brief-batch-runner.md). It must exist and be non-empty. A template for a role the sentence does not name
-  is fine.
+  (e.g. brief-batch-runner.md). It must exist and hold text: whitespace alone is empty. A template for a role the
+  sentence does not name is fine.
 - Exit 0 and print nothing when clean. Exit 1, one line per problem, naming the role and the missing thing:
   "role `consultant`: no role text", "role `arbiter`: no brief template templates/brief-arbiter.md".
 - Exit 2, naming the path, on unreadable input: the record, operating-model.md, or the templates folder. A missing
   brief template exits 1. A missing folder exits 2, as a missing skills/ folder does in
   lint/check_skill_model_rows.py.
-- Fences and comments: lint/check_skill_model_rows.py live_lines is the one home for them.
+- Fences and comments: lint/check_skill_model_rows.py live_lines is the one home for them. A fence left open before
+  a role line exits 1, and the output names the fence and its line.
 
 PROJECT_OPS_ROLES_CHECK is a red-run seam: it names a stand-in to run in place of the real check. The red run on the
 base uses a stand-in that enforces nothing, so each case fails on its own assert ("expected exit N, got 0"), not on a
@@ -212,6 +217,32 @@ class RoleText(Fixture):
         self.check(files, 1, ["role `arbiter`: no brief template templates/brief-arbiter.md"],
                    "a code-span comment marker or an apostrophe in prose must not hide the role line after it")
 
+    def test_a_bare_role_marker_is_not_role_text(self):
+        # Control: a marker with words after it is role text, so the tree passes.
+        # Red: a marker with nothing after it is no role text, so arbiter fails alone. The current pattern matches the
+        # bare marker and exits 0.
+        others = [r for r in ROLES if r != "arbiter"]
+        files = clean()
+        files[MODEL] = model_text(others, after="- **Arbiter.** Holds the ruling.\n")
+        self.check(files, 0, [], "control: role text after the marker must count")
+        for tail in ("", "   "):
+            with self.subTest(tail=tail):
+                files[MODEL] = model_text(others, after="- **Arbiter.**%s\n" % tail)
+                self.check(files, 1, ["role `arbiter`: no role text"],
+                           "a bare role marker must not count as role text")
+
+    def test_an_unclosed_fence_before_a_role_line_is_named(self):
+        # Control: a fence that closes before the role lines hides nothing, so the tree passes.
+        # Red: the fence opened on line 3 never closes, so the role lines after it are hidden. The output must name
+        # the fence, not only "no role text".
+        files = clean()
+        files[MODEL] = model_text(ROLES, before="```text\ncode\n```\n")
+        self.check(files, 0, [], "control: a closed fence must hide nothing")
+        files[MODEL] = model_text(ROLES, before="```text\n")
+        out = self.check(files, 1, None, "an unclosed fence hides the role lines after it, so the run must exit 1")
+        self.assertTrue(any("unclosed fence" in line and "line 3" in line for line in out),
+                        "the output must name the unclosed fence on line 3: %r" % out)
+
 
 class Templates(Fixture):
     """Brief templates: lane has brief.md, every other role brief-<role>.md, each non-empty."""
@@ -243,6 +274,26 @@ class Templates(Fixture):
                 self.assertEqual(len(out), 1, "an empty template must give one problem line: %r" % out)
                 self.assertIn("`%s`" % role, out[0])
                 self.assertIn("templates/%s" % brief_name(role), out[0])
+
+    def test_a_one_word_template_is_not_empty(self):
+        # Control: a template with one word has text, so it passes.
+        files = clean()
+        files[brief_path("triage")] = "Triage"
+        self.check(files, 0, [], "a one-word template is fine")
+
+    def test_a_blank_template_is_empty(self):
+        # Red: a template of spaces, newlines or tabs has no text, so it fails as empty. The current check reads the
+        # file size only, so it exits 0.
+        for role in ("triage", "lane"):
+            for blank in ("   ", "\n\n", " \t\r\n"):
+                with self.subTest(role=role, blank=repr(blank)):
+                    files = clean()
+                    files[brief_path(role)] = blank
+                    out = self.check(files, 1, None, "a blank brief template must fail as empty")
+                    self.assertEqual(len(out), 1, "a blank template must give one problem line: %r" % out)
+                    self.assertIn("`%s`" % role, out[0])
+                    self.assertIn("templates/%s" % brief_name(role), out[0])
+                    self.assertIn("empty", out[0])
 
     def test_a_template_for_a_role_the_sentence_does_not_name_is_fine(self):
         # Control: an unlisted builder template changes nothing. Red partner: it does not hide a missing triage template.
@@ -351,6 +402,70 @@ class Record(Fixture):
         del files[brief_path("lane")]
         self.check(files, 1, ["role `lane`: no brief template templates/brief.md"],
                    "a named role with no template must still fail")
+
+
+    def test_a_period_inside_a_parenthetical_does_not_end_the_sentence(self):
+        # Control: a parenthetical with no period passes. Red: the period in "2.1" must not end the sentence, so the
+        # list is read whole. Mid-list, the role after the parenthetical must stay its own role.
+        tail = "coordinator, triage, batch runner, lane, arbiter and consultant "
+        with self.subTest(case="control: no period in the parenthetical"):
+            files = clean()
+            files[RECORD] = record_text(SENTENCE_START + tail + "(see section 2).")
+            self.check(files, 0, [], "control: a parenthetical with no period must pass")
+        with self.subTest(case="a period in the parenthetical"):
+            files = clean()
+            files[RECORD] = record_text(SENTENCE_START + tail + "(see section 2.1).")
+            self.check(files, 0, [], "a period inside a parenthetical must not end the sentence")
+        with self.subTest(case="a period in a mid-list parenthetical"):
+            files = clean()
+            files[RECORD] = record_text(SENTENCE_START + "coordinator, lane (see section 2.1) and consultant.")
+            del files[brief_path("consultant")]
+            self.check(files, 1, ["role `consultant`: no brief template templates/brief-consultant.md"],
+                       "a period inside a mid-list parenthetical must keep consultant as its own role")
+
+    def test_a_stray_period_in_the_role_list_exits_2(self):
+        # Control: prose after the list's closing period, as the record has it, is not read as roles.
+        # Red: "lane. Arbiter and consultant." ends a list that has commas and no final "and". The check must exit 2
+        # and name the record, never drop roles silently.
+        files = clean()
+        files[RECORD] = record_text(SENTENCE + " Solo, one lane and lane session collapse into one role, lane.")
+        self.check(files, 0, [], "control: prose after the closing period must not be read as roles")
+        files[RECORD] = record_text(SENTENCE_START + "coordinator, triage, batch runner, lane. Arbiter and consultant.")
+        out = self.check(files, 2, None, "a stray period that cuts the role list must fail closed")
+        self.assertIn(RECORD_NAME, "\n".join(out), "the exit 2 output must name the record: %r" % out)
+
+    def test_a_hard_wrapped_anchor_is_found(self):
+        # Control: the anchor on one line passes. Red: a line break between words of the anchor, plain or at a
+        # bullet's continuation indent, must still find the sentence.
+        files = clean()
+        self.check(files, 0, [], "control: the anchor on one line must pass")
+        body = "coordinator, triage, batch runner, lane, arbiter and consultant (see the consultant sub-bullet below)."
+        wraps = (
+            ("plain wrap", "The session roles are the same on\nlocal and cloud: "),
+            ("bullet continuation", "The session roles are the same on\n  local and cloud: "),
+        )
+        for label, anchor in wraps:
+            with self.subTest(wrap=label):
+                files[RECORD] = record_text(anchor + body)
+                self.check(files, 0, [], "a hard-wrapped anchor (%s) must still be found" % label)
+
+    def test_a_hyphen_in_the_sentence_names_the_spaced_role(self):
+        # Control: "batch runner" in the sentence passes. Red: "batch-runner" must match the same text, "Batch runner",
+        # and the same template, brief-batch-runner.md.
+        files = clean()
+        self.check(files, 0, [], "control: the spaced name must pass")
+        files[RECORD] = record_text(SENTENCE_START + "coordinator, triage, batch-runner, lane, arbiter and consultant "
+                                    "(see the consultant sub-bullet below).")
+        self.check(files, 0, [], "a hyphen in the sentence must match role text Batch runner and brief-batch-runner.md")
+
+    def test_a_space_in_the_sentence_names_the_hyphenated_role_text(self):
+        # Control: "Batch runner" role text passes. Red: "batch runner" in the sentence must match hyphenated role
+        # text, "- **Batch-runner.**".
+        files = clean()
+        self.check(files, 0, [], "control: spaced role text must pass")
+        files[MODEL] = model_text([r for r in ROLES if r != "batch runner"],
+                                  after="- **Batch-runner.** The batch runner session works its one line.\n")
+        self.check(files, 0, [], "a space in the sentence must match hyphenated role text")
 
 
 class CiWiring(unittest.TestCase):
