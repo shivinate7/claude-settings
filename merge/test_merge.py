@@ -16969,12 +16969,12 @@ class ReviewedList(ReviewEnv):
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: round 1 is FAIL, and the fix check passed")
 
     def test_a_fix_record_takes_the_net_value_of_the_round_it_inherits(self):
-        # a held record must stay held when its fix record types another Net value, and a guard or check change must
-        # not close below the final round on a fix check (decision hold-unsafe-after-round-3)
+        # a held record must stay held when its fix record types another Net value, and a guard or check change
+        # closes on a passing fix check after a FAIL round (decision hold-unsafe-after-round-3 for the hold)
         fix = (fix_verifier_line(head=REVIEW_OLD_HEAD),)
         for label, earlier_kw, later_kw, want in (
                 ("held stays held", dict(net="negative"), dict(net="positive"), r"held: net value is negative"),
-                ("guard yes owes the final round", dict(guard="yes"), dict(guard="yes", net="positive"), r"open: a guard or check change owes the final round")):
+                ("guard yes owes the final round", dict(guard="yes"), dict(guard="yes", net="positive"), r"done: round 1 is FAIL, and the fix check passed")):  # a passing fix verifier ends review after a FAIL round, guard yes too (decision pr-review-record, done rules)
             with self.subTest(label=label):
                 earlier = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",), **earlier_kw))
                 later = review_comment(2, 7, record_text(rounds=(), fix=fix, **later_kw))
