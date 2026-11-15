@@ -1,0 +1,13 @@
+{
+ "id": "own-820-c-record-home",
+ "title": "Where does ruling own-820-c-five-repos have a record home?",
+ "status": "open",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "11:15 CST Nov 15 (lane ios-adblock-merge-text-820c's question, relayed by the coordinator 11:11 CST; not read by triage): the lane asks where ruling own-820-c-five-repos (owner 00:19 CST Nov 14, item 820 c) has a record home. Triage found no step that already asks this. Triage did not read the claude-settings records to check where it lives; unmeasured.",
+ "source": "Lane ios-adblock-merge-text-820c via the coordinator, 11:11 CST Nov 15 (relayed)",
+ "note": "Low, a note, no lane. Open question from the ios-adblock cleanup lane (held under own-mechanical-before-cleanup). Filed by triage 11:15 CST Nov 15.",
+ "updatedAt": "2026-11-15T11:14:00-06:00"
+}

@@ -4,9 +4,9 @@
  "phase": "now",
  "status": "doing",
  "repo": "shivinate7/claude-settings",
- "why": "Coordinator 11:10 CST Nov 15 (relayed; not read by triage): lane session_013NEJKyk1LM2FRmVruNdc58 rolls the check #3492 added (decision records and rule sentences aligned) out to the child repos through the shared CI. Step 1 is a read of how child repos receive shared checks. Started by the coordinator under its application of ruling own-mechanical-before-cleanup; the child-repo CLAUDE.md cleanup (step child-repos-decision-claude-md-gap) is held until the check lands. Guard or check: yes.",
+ "why": "Coordinator 11:10 CST Nov 15 (relayed; not read by triage): lane session_013NEJKyk1LM2FRmVruNdc58 rolls the check #3492 added (decision records and rule sentences aligned) out to the child repos through the shared CI. Step 1 is a read of how child repos receive shared checks. Started by the coordinator under its application of ruling own-mechanical-before-cleanup; the child-repo CLAUDE.md cleanup (step child-repos-decision-claude-md-gap) is held until the check lands. Guard or check: yes.\n\n11:15 CST Nov 15 SCOPE CHANGE (owner 11:10 CST via the consultant's message stamped 11:12 CST; stamps out of order, both recorded; relayed, not read by triage): build no per-repo check. Every new check ships inside the shared action actions/claude-md-cites (decision child-cites-not-copies, 2026-11-02); a child gets it by bumping its pin. This lane is redirected to read whether #3492's check is in the action and what a child must do (bump the pin, or more). Record on ruling own-mechanical-before-cleanup: nothing further.",
  "source": "coordinator 11:10 CST Nov 15, relayed by triage (not read by triage)",
  "note": "Doing. Lane session_013NEJKyk1LM2FRmVruNdc58 started by the coordinator under its application of own-mechanical-before-cleanup (11:07 CST ruling; the coordinator's pick, undoable, not owner-typed). Its cleanup is held until the check lands. Guard or check: yes. Relayed 11:10 CST Nov 15; not read by triage.",
  "lane": "session_013NEJKyk1LM2FRmVruNdc58",
- "updatedAt": "2026-11-15T11:12:00-06:00"
+ "updatedAt": "2026-11-15T11:14:00-06:00"
 }

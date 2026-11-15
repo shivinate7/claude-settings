@@ -1,0 +1,13 @@
+{
+ "id": "stable-refresh-mid-session",
+ "title": "Refresh while a session runs: the owner says it should be fixed",
+ "status": "open",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "11:15 CST Nov 15 (owner's verbatim words, 11:11 CST Nov 15, via the consultant): \"\u201crefresh while a session runs is not built\u201d that should be fixed\". The consultant asks it be filed as an ask for lane stable-refresh-mid-session, which goes to the coordinator first (sent; the coordinator decides on the lane). Source of the quoted phrase: source not found by triage (grepped roadmap and main). Cause and size: unmeasured.",
+ "source": "Owner via the consultant, 11:11 CST Nov 15 (relayed; not read by triage)",
+ "note": "Open, no lane yet. Coordinator decides whether to start lane stable-refresh-mid-session. Filed by triage 11:15 CST Nov 15; no cause or size claimed.",
+ "updatedAt": "2026-11-15T11:14:00-06:00"
+}
