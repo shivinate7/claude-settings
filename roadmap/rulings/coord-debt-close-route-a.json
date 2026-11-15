@@ -1,0 +1,10 @@
+{
+ "id": "coord-debt-close-route-a",
+ "at": "2026-11-14T21:23:00-06:00",
+ "title": "Coordinator's pick, not the owner's: debt close reads the ready PR's CI result (route A).",
+ "ruling": "Coordinator 21:20 CST Nov 14 (data; triage read neither #3251 nor any code), its own pick, undoable, under the owner's 15:06 CST Nov 14 chat question (verbatim on step debt-close-reads-ci; not a filed ruling), his 20:17 goal (own-goal-max-efficiency-accurate-fast) and his 20:18 words (own-goal-dont-wait-on-me). Route A, the lane's read 21:20 CST: rebuild on top of #3251 once it merges; `--ready` defers the debt close for a draft (\"deferred to confirm: no run exists yet\"); the ready PR's CI step judges every close; `confirm` refuses a missing, running, red, wrong-head or unreadable result. It changes #3251's own commit 7cd0adf3 and its test for drafts (re-pointed red then green, not deleted). Design point kept: a close that cannot read CI stays refused. The coordinator reads it as not a pass on weaker evidence at the merge, so it asks no owner question; that reading is the coordinator's and unverified by triage. This is the coordinator's pick, not the owner's, and covers the act it names (route A), never a variant.",
+ "quote": "",
+ "source": "coordinator 21:20 CST Nov 14 (from the lane's 21:20 read)",
+ "status": "open",
+ "step": "debt-close-reads-ci"
+}
