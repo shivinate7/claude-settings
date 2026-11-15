@@ -2082,12 +2082,16 @@ def case_pick_message_cannot_close_its_fence():
 
 
 def case_pick_statement_words_are_checked():
-    # held, picked, picks and holds state a pick too: an uncited one is denied in code, with no model call.
+    # held, picked, picks and holds state a pick too, and so do holding, picking and hold up: an uncited one is denied in
+    # code, with no model call. The holding and hold up texts carry no plan cite, so only the word decides them.
     for label, message in (
         ("held", "The mailbox default was held."),
         ("picked", "The owner picked the second option."),
         ("picks", "The coordinator picks route B."),
         ("holds", "The lane holds the mailbox default."),
+        ("holding", "Holding PR 12 until the mailbox rule settles."),
+        ("picking", "Picking route B for the lane."),
+        ("hold up", "Hold up the mailbox merge until the mailbox rule is settled."),
     ):
         r = pick_run(message)
         check("pick words, uncited %s: denied in code" % label,
@@ -2103,6 +2107,14 @@ def case_pick_held_cited_reaches_the_judge():
     check("pick, was held + plan R49: the prompt carries the cited plan text", R49_MARK in pick_prompt(r), detail(r))
     check("pick, was held + plan R49: the judge's refusal denies the pick with its reason",
           (r.deny() or {}).get("permissionDecision") == "deny" and reason in r.reason(), detail(r))
+    # Holding and hold up state a pick too. A plan R-number is a cite, so each text gets one judge call with R49's text.
+    for label, message in (
+        ("Holding", "Holding PR 12 until R49 settles."),
+        ("hold up", "Hold up the mailbox merge until R49 is settled."),
+    ):
+        r = pick_run(message)
+        check("pick, %s + plan R49: one judge call" % label, len(r.calls) == 1, detail(r))
+        check("pick, %s + plan R49: the prompt carries the cited plan text" % label, R49_MARK in pick_prompt(r), detail(r))
 
 
 def case_pick_chatter_passes_untouched():
@@ -2115,6 +2127,8 @@ def case_pick_chatter_passes_untouched():
         ("Pick up", "Pick up the thread when CI ends."),
         ("on hold", "the PR is on hold until CI ends"),
         ("hyphen ids", "Still open: hold-unsafe-after-round-3 and pick-cites-ruling-before-send."),
+        ("hold the call", "We will hold the call at 3pm."),  # a meeting hold, not a pick: must pass
+        ("held on", "The test held on the old code."),  # guard: a fix that lets `hold up` through must still pass `held on`
     ):
         r = pick_run(message)
         check("pick chatter, %s: passes untouched, with no model call and no refusal" % label,
