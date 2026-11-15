@@ -4542,7 +4542,7 @@ KEYS_EARLIER = "> **Input Needed** Keep the apps?\n> a) keep\n> b) remove"
 # A report that asks nothing: its Input Needed item says none, with a reason or a note. Its Done line cites the ruled
 # apps question, so a judge that reads the whole report finds a ruling to refuse with.
 NONE_TAILS = ("None — nothing waits on the owner.", "None (the apps ruling already covers it).",
-              "None: the apps ruling is in place.")
+              "None: the apps ruling is in place.", "None (the apps ruling covers it).", "None — nothing waits.")
 STATUS_NONE = "> **Done** OTHER kept the apps ruling as it is.\n> **Input Needed** %s\n> **Next** wait for the merge"
 
 
@@ -4718,14 +4718,33 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
                 self.assertEqual(self.model_calls(), [], "the past-ruling judge read a report with no question: %r" % tail)
                 self.assertNotIn("past-ruling", self.reason(out), out)
 
-    def test_a_quoted_question_in_a_status_line_sends_no_question_to_the_judge(self):
-        # Catches: a "?" inside double quotes read as a question asked now. The question check (asks_a_question) blanks
-        # quoted text, and the relay's prose check (prose_questions) must agree with it.
+    def test_a_none_led_note_that_offers_a_pick_sends_the_question_to_the_judge(self):
+        # Catches: a none-led Input Needed note that offers a pick, read as empty because it opens with "None". The
+        # relay then sends the owner a pick that no past-ruling check saw. A note that offers a pick is an ask
+        # (offers_a_pick in lint/report_guard.py), so hooks/reply_judge.py has_input_needed must hold it.
+        reply = ("> **Done** OTHER kept the apps ruling as it is.\n"
+                 "> **Input Needed** None, but pick A or B for the apps label.\n> **Next** wait")
+        out, _ = self.stop(self.decided, reply, answer=REFUSE_APPS)
+        self.assertEqual(len(self.model_calls()), 1, "a none-led pick did not reach the past-ruling judge")
+        self.assertIn("past-ruling", self.reason(out), out)
+
+    def test_a_none_led_note_that_asks_keep_or_drop_still_reaches_the_judge(self):
+        # Guard rail, green on the old code: a none-led note that asks a question, by a "?" outside quotes, is still an
+        # item, so the judge reads it.
+        reply = ("> **Done** OTHER kept the apps ruling as it is.\n"
+                 "> **Input Needed** None, but keep A or drop it?\n> **Next** wait")
+        out, _ = self.stop(self.decided, reply, answer=REFUSE_APPS)
+        self.assertEqual(len(self.model_calls()), 1, "a none-led question did not reach the past-ruling judge")
+        self.assertIn("past-ruling", self.reason(out), out)
+
+    def test_a_question_only_inside_quotes_in_a_status_line_still_reaches_the_judge(self):
+        # Guard rail: a prose line whose only "?" sits inside double quotes still counts as a question. prose_questions
+        # reads it so, and the judge reads the line, so a quoted question is never let through unchecked.
         reply = ('> **Done** OTHER the refusal said "keep the apps?" and the check passed.\n'
                  "> **Input Needed** None.\n> **Next** wait")
         out, _ = self.stop(self.decided, reply, answer=REFUSE_APPS)
-        self.assertEqual(self.model_calls(), [], "the past-ruling judge read a quoted question as asked")
-        self.assertNotIn("past-ruling", self.reason(out), out)
+        self.assertEqual(len(self.model_calls()), 1, "a quoted question in a prose line did not reach the judge")
+        self.assertIn("past-ruling", self.reason(out), out)
 
     def test_a_question_mark_in_a_status_line_still_reaches_the_judge(self):
         # Guard rail, green on the old code: a report that asks by a "?" in a Next line still gets the check, after a
