@@ -1324,6 +1324,10 @@ def pathspec_from_file_flag(arg: str) -> bool:
 # spaced form are read, because git takes either. This one stays a raw-text regex: it is outside
 # this fix's scope (the recorded debt named only `_run_dir`'s `cd`/`git -C` reading).
 GIT_WORK_TREE_RE = re.compile(r"--work-tree(?:=|\s+)(['\"]?)([^'\";&|\s]+)\1")
+# A git-dir entry that shows a replay in progress: its staged change is git's copy plus what the agent
+# resolved. A MERGE_MSG without MERGE_HEAD is a `cherry-pick -n` or `revert -n`. The one home: the builder-diff
+# read (hooks/guard.py) and the red-run commit read (hooks/guard_merge.py) both ask it.
+REPLAY_MARKS = ("CHERRY_PICK_HEAD", "REVERT_HEAD", "SQUASH_MSG", "MERGE_MSG", "rebase-merge", "rebase-apply")
 
 
 CD_WORDS = ("cd", "chdir", "pushd", "set-location", "push-location")

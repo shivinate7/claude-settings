@@ -15,11 +15,11 @@ from datetime import datetime, timedelta, timezone
 
 from guard_core import (
     SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    command_indexes, dir_before_segment, heredoc_heads, inline_script, inner_commands, own_heredoc_bodies, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    REPLAY_MARKS, command_indexes, dir_before_segment, heredoc_heads, inline_script, inner_commands, own_heredoc_bodies, resolve_command, resolve_default_base, segment_tokens, split_segments,
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -758,6 +758,11 @@ RED_RUN_PUSHED_FIX = (
     "These commits were pushed before, and the branch has been rewritten since, so a reword would rewrite "
     "pushed history. This needs the owner: ask the owner to reword them."
 )
+# A lone commit that has not landed: nothing is pushed or amended yet, so the fix is the same commit with the trailer.
+RED_RUN_COMMIT_REASON = (
+    "Rule (Git, red-run; decision red-run-trailer-on-test-commits): this commit adds lines to {paths} and its -m "
+    "message holds no valid Red-run trailer. Remedy: {form} Re-run the commit with the trailer in -m."
+)
 RED_RUN_SHOWN = 3   # flagged commits a red-run refusal lists, the rest counted
 OCTOPUS_PUSH_REASON = (
     "Rule (Git, octopus-push; decision octopus-push-refused): this push would send {sha}, a merge commit of more than two parents. "
@@ -935,9 +940,10 @@ def _red_run_found(where, source, base, memo, is_test_rel, virtual):
     return found, last
 
 
-def red_run_reason(matched):
+def red_run_reason(matched, commit=False):
     """`(reason, shown)` for a red-run hit `(found, tip, rewritten)`: the refusal text, and the first flagged commit
-    for the log. `tip` is the pushed source's own short sha, or `new` for a commit of the same call. The remedy is
+    for the log. A lone commit's hit (`commit`) prints the first line of `REMEDY` and RED_RUN_COMMIT_REASON's
+    re-run with the trailer in `-m`, and no amend: the commit has not landed. `tip` is the pushed source's own short sha, or `new` for a commit of the same call. The remedy is
     the first two lines of check_red_run's own (`REMEDY`); the third names a branch switch, which a refusal never
     names. A flagged commit that is not the tip (a commit under a merge at the tip included) prints the trailer line
     of `REMEDY` and RED_RUN_BELOW_FIX in place of the amend, which reaches only the tip. A rewritten branch
@@ -955,6 +961,8 @@ def red_run_reason(matched):
     more = " and %d more" % (len(found) - RED_RUN_SHOWN) if len(found) > RED_RUN_SHOWN else ""
     lines = [line.removeprefix("check_red_run: ")[:1].upper() + line.removeprefix("check_red_run: ")[1:]
              for line in check_red_run.REMEDY[:2]]
+    if commit and found:
+        return RED_RUN_COMMIT_REASON.format(paths=cap_safe(found[0][2], 300), form=lines[0]), cap_safe(rows[0], 120)
     below = any(row[0] not in (tip, "new") for row in found)
     fix = RED_RUN_PUSHED_FIX if rewritten else " ".join(lines[:1] + [RED_RUN_BELOW_FIX] if below else lines)
     return RED_RUN_PUSH_REASON.format(flagged=cap_safe("; ".join(rows), 600) + more, fix=fix), cap_safe(rows[0], 120)
@@ -1149,19 +1157,27 @@ def _commit_paragraphs(args):
     return paragraphs
 
 
+def _commit_message(args, bodies=()):
+    """`(readable, message)` of a `git commit` call. A message the guard cannot read (`_commit_paragraphs` gives None)
+    is `(False, None)`; an `--amend` with no `-m` keeps the commit's own message, `(True, None)`. `bodies` are the
+    heredoc bodies of the commit's own segment: an `-m` that holds a `$(cat <<'EOF' ...)` takes its message from
+    them, so they join the paragraphs. The guard's strip leaves them out of the segment text."""
+    paragraphs = _commit_paragraphs(args)
+    if paragraphs is None:
+        return False, None
+    if bodies and any("<<" in paragraph for paragraph in paragraphs):
+        paragraphs = paragraphs + list(bodies)
+    return True, "\n\n".join(paragraphs) if paragraphs else None
+
+
 def _note_commit(virtual, args, paths, bodies=()):
     """Records a `git commit` of this call in `virtual`, for the red-run read of a push after it: a new commit adds
     a (message, test paths) to `pending`, and an `--amend` rewrites the newest pending commit, else the tip, where
-    a message of its own replaces the old one. A message the guard cannot read makes the push a no-hit.
-    `bodies` are the heredoc bodies of the commit's own segment: an `-m` that holds a `$(cat <<'EOF' ...)` takes
-    its message from them, so they join the paragraphs. The guard's strip leaves them out of the segment text."""
-    paragraphs = _commit_paragraphs(args)
-    if paragraphs is None:
+    a message of its own replaces the old one. A message the guard cannot read makes the push a no-hit."""
+    readable, message = _commit_message(args, bodies)
+    if not readable:
         virtual["unreadable"] = True
         return
-    if bodies and any("<<" in paragraph for paragraph in paragraphs):
-        paragraphs = paragraphs + list(bodies)
-    message = "\n\n".join(paragraphs) if paragraphs else None
     if "--amend" not in args:
         virtual["pending"].append((message, paths))
         return
@@ -1171,6 +1187,39 @@ def _note_commit(virtual, args, paths, bodies=()):
     else:
         old_message, old_paths = virtual["tip"] or (None, [])
         virtual["tip"] = (old_message if message is None else message, list(dict.fromkeys(old_paths + paths)))
+
+
+def _replaying(top):
+    """True when a merge or another replay is in progress at TOP: MERGE_HEAD or a `REPLAY_MARKS` entry sits in its git
+    dir, which is `.git`, or the folder a `.git` file names. Read from files alone: no git is spawned. Its commit
+    holds lines that other commits already carry, so it is not judged."""
+    git_dir = os.path.join(top, ".git")
+    try:
+        if not os.path.isdir(git_dir):
+            with open(git_dir, encoding="utf-8") as handle:
+                first = handle.readline(4096).strip()
+            if not first.startswith("gitdir:"):
+                return False
+            git_dir = os.path.join(top, first[len("gitdir:"):].strip())
+    except (OSError, UnicodeDecodeError):
+        return False
+    return any(os.path.exists(os.path.join(git_dir, mark)) for mark in ("MERGE_HEAD", *REPLAY_MARKS))
+
+
+def _commit_red_run(args, bodies, check_red_run, top, read_adds):
+    """`([row], "new", False)` for a lone `git commit` (no push after it in the call) that adds lines to a test path
+    and whose own `-m` message holds no valid Red-run trailer, else None. `read_adds()` gives the test paths the
+    commit stages (`_commit_test_adds`): the one git read, made only when the message could be a gap. No hit for a
+    message the guard cannot read (`_commit_message`; an `-m` with a `$` or a backtick but no heredoc body is a
+    substitution it cannot read), an `--amend` with no `-m`, a merge or another replay in progress, a revert's own
+    message, and a commit with no test line added."""
+    readable, message = _commit_message(args, bodies)
+    if not readable or message is None or (not bodies and set(message) & set("$`")):
+        return None
+    if check_red_run.has_trailer(message) or _replaying(top):
+        return None
+    row = check_red_run.pending_gap(message, read_adds())
+    return ([row], "new", False) if row else None
 
 
 def _chain_safe(segment):
@@ -1221,7 +1270,8 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
     in one file, else `('', '')`. The kind is `commit`, `push`, or `chain` (a push after a commit the
     guard could not judge; the file is then `git push`). A push that carries no marker but sends a test
     commit with no valid Red-run trailer returns `('red-run', (found, last, rewritten))` (`_red_run_found`); a caller that
-    passes no `is_test_rel` reads no red-run hit. Each segment is judged from its own command word. `raw` is the
+    passes no `is_test_rel` reads no red-run hit. A lone commit (no push after it in the call) that adds test lines with no
+    valid trailer in its `-m` returns `('red-run-commit', (found, 'new', False))` (`_commit_red_run`). Each segment is judged from its own command word. `raw` is the
     command before the heredoc strip: a commit's `-m "$(cat <<'EOF' ...)"` message is read from it."""
     pending = []                        # earlier adds no commit has taken: (where, None) stages whole, (where, specs) names paths
     repos = {}                          # where -> (top, has_head), one `git rev-parse` each until the next commit
@@ -1283,11 +1333,16 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
                 adds.append((add_where, add_repo[0], add_paths))
         repos.clear()   # a commit moves HEAD: the next segment reads afresh
         all_flag, specs = _commit_shape(call[1]) if call[0] == "commit" else (False, [])
+        red_hit = None
         if not has_head:   # no HEAD: `git diff` would read an empty tree
             continue
         if call[0] == "commit" and number < last_push and is_test_rel is not None and _red_run_present():
             bodies = own_heredoc_bodies(segment, raw, before) if raw and "<<" in segment else ()
             _note_commit(virtual, call[1], _commit_test_adds(where, top, all_flag, specs, wholes, adds, is_test_rel), bodies)
+        elif call[0] == "commit" and is_test_rel is not None and _red_run_present():
+            bodies = own_heredoc_bodies(segment, raw, before) if raw and "<<" in segment else ()
+            red_hit = _commit_red_run(call[1], bodies, _red_run_module(), top,
+                                      lambda: _commit_test_adds(where, top, all_flag, specs, wholes, adds, is_test_rel))
         if specs:
             found = _marker_findings(where, top, ["HEAD", "--", *specs], None)
         else:
@@ -1306,10 +1361,11 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
                     found.update(_marker_findings(add_where, top, ["HEAD", "--", *add_paths], None))
                 found.update(_untracked_findings(add_where, top, add_paths))
         name = _triplet_file(found)
-        if readable:
-            if name:
-                return "commit", name
-        else:
+        if readable and name:
+            return "commit", name
+        if red_hit:   # read from the index at hook time, whatever command runs before the commit: a miss costs a later push refusal
+            return "red-run-commit", red_hit
+        if not readable:
             blind_commit = True
             blind_triplet = blind_triplet or bool(name)
     return "", ""
@@ -1924,6 +1980,13 @@ def _head_landed(module, repo: str, row) -> bool:
     return _compare_status(module, module.Host(repo=repo), base, sha) in _CONTAINED
 
 
+def open_pull_rows(module, repo: str):
+    """The open pull request rows of `repo`, every page, through the merge tool's page reader `module`. The one home of
+    this read: rules lane-closes-after-records and lane-step-dup call it. A failed read raises. The caller holds the
+    one shared deadline over the read (a nested shared_deadline would reset it)."""
+    return module.Host(repo=repo).pages("pulls", fields={"state": "open"})
+
+
 def _branch_repos(ccr, tag_repos):
     """The repos a lane's branches may live in: its cs-repo tags, the github repos of
     session_context.sources[].git_repository.url, and each current_branches key that names owner/repo, in first-seen
@@ -2129,7 +2192,7 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
         open_rows = {}
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             for repo in repos:
-                rows = open_rows[repo] = module.Host(repo=repo).pages("pulls", fields={"state": "open"})
+                rows = open_rows[repo] = open_pull_rows(module, repo)
                 for row in rows:
                     ref = str(row["head"]["ref"])
                     slug = next((s for s in slugs if ref in lane_head_refs(s)), None)
@@ -2264,6 +2327,157 @@ def brief_hit(tool: str, tool_input, transcript: str):
     if tagged_after:  # a set_session_tags call on the target followed its record, so the topic or steps may have changed
         return "lane brief to a target whose record is stale", BRIEF_STALE_REASON
     return topic_hit(first, tags)
+
+
+# ---- one lane per step (rule lane-step-dup)
+STEP_DUP_TAIL = " (decision session-tiers, a step has one lane)"  # glossary-ok: session-tiers is the decision's file name
+STEP_DUP_REASON = (
+    "session %s is live and carries cs-step:%s in the same repo, so this would start a second lane on one step. "
+    "Send the work to that session with send_message instead." + STEP_DUP_TAIL
+)
+STEP_DUP_UNKNOWN_REASON = (
+    "this session's transcript does not prove that no other live session carries cs-step:%s in this repo: it holds "
+    "no whole list_sessions read (a read with no cursor, then reads that each pass the last session id of the page "
+    "before as after_id, the last with has_more false, none with tags or mine), the brief's target has no current "
+    "record, or the subject has no cs-repo tag. Run list_sessions in its own turn that way, run get_session on the "
+    "target alone, check that the target or the new lane carries a cs-repo tag, then retry." + STEP_DUP_TAIL
+)
+
+
+STEP_PR_REASON = (
+    "open pull request #%(pr)s of this repo has the head of step %(step)s, so a lane already holds the step. Send the work to "
+    "that lane, or say in the brief that it `continues #%(pr)s` or `replaces #%(pr)s`, then retry." + STEP_DUP_TAIL
+)
+STEP_PR_READ_REASON = (
+    "the open pull requests of this repo, or the subject's record, could not be read, so the guard cannot tell whether "
+    "a lane pull request holds cs-step:%s. Retry once gh answers and the target has a current record." + STEP_DUP_TAIL
+)
+_STEP_CONTINUES = re.compile(r"\b(?:continues|replaces)\s+#(\d+)", re.IGNORECASE)  # a brief that names the pull request it takes over
+
+
+def _tag_values(tags, prefix: str):
+    """The lower-cased, non-empty values of the tags that start with `prefix`, stripped."""
+    return [v.lower() for v in (str(t)[len(prefix):].strip() for t in tags if str(t).startswith(prefix)) if v]
+
+
+def _step_call(tool: str, tool_input):
+    """(steps, target) of a lane brief (a send_message whose first non-blank line after any Grant line is `Lane brief:
+    <step>. Topic: <topic>.`) or of a create_session tagged cs-step:<step>, else None. Steps are lower case; `target`
+    is the brief's session id, None for a create."""
+    if not isinstance(tool_input, dict):
+        return None
+    if tool == BRIEF_TOOL:
+        message = tool_input.get("message")
+        lines = [line.strip() for line in message.splitlines() if line.strip()] if isinstance(message, str) else []
+        if lines and lines[0].startswith(LANE_GRANT_MARKER):
+            lines = lines[1:]
+        found = _BRIEF_LINE.match(lines[0]) if lines and _BRIEF_MARKER_LINE.match(lines[0]) else None
+        return ([found.group("step").lower()], tool_input.get("session_id")) if found else None
+    if tool == CREATE_SESSION_TOOL:
+        tags = tool_input.get("tags")
+        steps = _tag_values(tags, ARCHIVE_STEP_PREFIX) if isinstance(tags, list) else []
+        return (steps, None) if steps else None
+    return None
+
+
+def _step_subject(tool_input, transcript: str, target):
+    """(tags, mine) of the subject of a step call: the create's own tags, or the target's newest record in the
+    transcript, and the steps that subject carries. Raises ValueError when a brief's target has no current record."""
+    if target is None:
+        return tool_input["tags"], []
+    tags, tagged_after = _own_session_read(transcript, target, created=True) \
+        if transcript and isinstance(target, str) and target else (None, False)
+    if tags is None or tagged_after:
+        raise ValueError("no current record of the target")
+    return tags, _tag_values(tags, ARCHIVE_STEP_PREFIX)
+
+
+def step_dup_hit(tool: str, tool_input, transcript: str):
+    """Return (matched, reason) when this call would put a second live session on a step, else None. The call is a lane
+    brief or a create_session tagged cs-step:<step> (_step_call). It is refused when another live session, not the
+    brief's target, carries that step and shares a cs-repo tag with the subject (_step_subject); the reason names that
+    session. A brief to a target that carries the step itself starts no new lane, so it passes before any list read.
+    Steps and tags match without case. A session is live unless its newest row in the transcript's list_sessions reads
+    is archived (own_session.list_sessions_read). A session an earlier create_session of this transcript started and no
+    archive_session names is live too, when no list row shows it (own_session.created_sessions). A carrier on any page, whole read or not, is refused. With no
+    carrier found, no whole list read, a brief whose target has no current record, or a subject with no cs-repo tag is
+    refused too: unknown is never an allow, and the guard-wide crash path fails open, so any error here is a refusal.
+    Known limit: only this transcript is read, so a session another transcript started after its newest list read is not seen.
+    Cost: one transcript read per brief or create with a step, plus one for the target's record; no file written, no
+    process, no extra tool call."""
+    call = _step_call(tool, tool_input)
+    if call is None:
+        return None
+    steps, target = call
+    try:
+        subject, mine = _step_subject(tool_input, transcript, target)
+        steps = [s for s in steps if s not in mine]
+        if not steps:
+            return None
+        repos = set(_tag_values(subject, ARCHIVE_REPO_PREFIX))
+        if not repos:
+            raise ValueError("no cs-repo tag")
+        rows, whole = own_session.list_sessions_read(transcript)
+        live = [(sid, tags) for sid, (tags, archived) in rows.items() if not archived]
+        # A session a create_session of this transcript started is no row unless a later read showed it; a row,
+        # archived or not, is newer than the create and decides.
+        live += [(sid, tags) for sid, tags in own_session.created_sessions(transcript).items() if sid not in rows]
+        for sid, tags in live:
+            if sid == target:
+                continue
+            for step in steps:
+                if step in _tag_values(tags, ARCHIVE_STEP_PREFIX) and repos & set(_tag_values(tags, ARCHIVE_REPO_PREFIX)):
+                    return "lane step " + step + " carried by " + sid, STEP_DUP_REASON % (sid, step)
+        if not whole:
+            raise ValueError("no whole list read")
+    except (Exception, SystemExit):
+        return "lane step with no proof", STEP_DUP_UNKNOWN_REASON % steps[0]
+    return None
+
+
+def step_pr_hit(tool: str, tool_input, transcript: str):
+    """Return (matched, reason) when this call would start a second lane on a step an open lane pull request holds, else
+    None (rule lane-step-dup, part two). The call is a step call (_step_call). An open pull request in a cs-repo of the
+    subject whose head is lane_head_refs(step) refuses it, and the reason names the pull request. The brief's own text
+    (the message of a brief, the prompt of a create) lifts it when it says `continues #N` or `replaces #N` and N is
+    such an open pull request, whichever the list reads first; any other N lifts nothing. A brief to a target that carries the step passes too. The
+    read is open_pull_rows, the one reader lane-closes-after-records uses. A failed read, a repo tag that is no
+    owner/name, or a brief target with no current record is a refusal: the guard-wide crash path fails open.
+    Cost: one paged gh read per cs-repo tag, for each step call."""
+    call = _step_call(tool, tool_input)
+    if call is None:
+        return None
+    steps, target = call
+    text = tool_input.get("message" if tool == BRIEF_TOOL else "prompt")
+    taken = set(_STEP_CONTINUES.findall(text)) if isinstance(text, str) else set()
+    try:
+        subject, mine = _step_subject(tool_input, transcript, target)
+        steps = [s for s in steps if s not in mine]
+        if not steps:
+            return None
+        module = merge_module()
+        if module is None:
+            raise RuntimeError("the merge tool could not be loaded")
+        first = None
+        for repo in dict.fromkeys(_tag_values(subject, ARCHIVE_REPO_PREFIX)):
+            if not _REPO_NAME.fullmatch(repo):
+                raise ValueError("not an owner/name repo tag")
+            with module.shared_deadline(MERGE_READ_TIMEOUT):
+                pulls = open_pull_rows(module, repo)
+            for row in pulls:
+                ref = str(row["head"]["ref"]).lower()
+                for step in steps:
+                    if ref in lane_head_refs(step):
+                        if str(row.get("number")) in taken:
+                            return None
+                        first = first or (row, step)
+        if first:
+            row, step = first
+            return ("lane step " + step + " has open pull request " + str(row.get("number", "?")),
+                    STEP_PR_REASON % {"pr": row.get("number", "?"), "step": step})
+    except (Exception, SystemExit):
+        return "lane step with an unreadable pull request list", STEP_PR_READ_REASON % steps[0]
+    return None
 
 
 # ---- A lane brief names a slug or a role, never a session id (rule brief-ids-in-roster)
