@@ -2984,9 +2984,8 @@ def item_for(out, where):
     return next((line for line in out.splitlines()[1:] if pattern.search(line)), None)
 
 
-class Restates(unittest.TestCase):
-    """A unit that copies a run of record text is refused. A unit with under 12 shared words passes, a record citation
-    included."""
+class RestatesSteps:
+    """The steps the restates cases share: a child whose file holds units, and the two verdicts a case checks."""
 
     def child(self, *units, rel="CLAUDE.md"):
         """A child whose `rel` holds `units`, a blank line between each: each one is a unit of its own."""
@@ -3008,6 +3007,11 @@ class Restates(unittest.TestCase):
         self.assertEqual(head(out), "restates: in shape - %d file(s) read" % files,
                          "the unit was refused, or the file was not read: %s%s" % (out, err))
         self.assertEqual(code, 0, "the verdict is in shape but the exit is not 0: %s%s" % (out, err))
+
+
+class Restates(RestatesSteps, unittest.TestCase):
+    """A unit that copies a run of record text is refused. A unit with under 12 shared words passes, a record citation
+    included."""
 
     def test_a_copied_record_line_is_refused(self):
         self.assert_refused(self.child("- " + grant_line()), "CLAUDE.md:1")
@@ -3153,6 +3157,54 @@ class Restates(unittest.TestCase):
         repo = self.agents_symlink_child("- Own rule for this repo.", "- " + grant_line())
         self.assert_refused(repo, "CLAUDE.md:3")
         self.assertNotIn("AGENTS.md", repo.run("restates")[1], "the item names the symlink AGENTS.md, not CLAUDE.md")
+
+
+class RestatesRuleFiles(RestatesSteps, unittest.TestCase):
+    """The restates group reads every rule file a child keeps: docs/rules, each rule file of the shared list, and the
+    .claude rule files. A rule file it cannot read makes the group unknown, never clear."""
+
+    def write_unreadable(self, repo, rel):
+        """`rel`, tracked, with bytes that are not UTF-8 text: a file the probe cannot read."""
+        full = os.path.join(repo.root, *rel.split("/"))
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "wb") as handle:
+            handle.write(b"\xff\xfe not UTF-8 text\n")
+        return repo.git("add", "-f", rel)
+
+    def test_a_clean_docs_rules_file_is_read_and_passes(self):
+        self.assert_passes(self.child("- Repo note: this repo keeps its own lane labels.", rel="docs/rules/merge.md"))
+
+    def test_a_copy_in_a_docs_rules_file_is_refused(self):
+        self.assert_refused(self.child("- " + grant_line(), rel="docs/rules/merge.md"), "docs/rules/merge.md:1")
+
+    def test_a_copy_in_a_nested_docs_rules_file_is_refused(self):
+        rel = "docs/rules/lanes/merge.md"
+        self.assert_refused(self.child("- " + grant_line(), rel=rel), rel + ":1")
+
+    def test_a_copy_in_each_shared_rule_file_is_refused(self):
+        others = [rel.replace(os.sep, "/") for rel in rule_audit.RULE_FILES if rel != "CLAUDE.md"]
+        self.assertTrue(others, "the shared rule list names no file but CLAUDE.md")
+        for rel in others:
+            with self.subTest(rel=rel):
+                self.assert_refused(self.child("- " + grant_line(), rel=rel), rel + ":1")
+
+    def test_a_copy_in_a_claude_rules_file_is_refused(self):  # green control: the old code already reads .claude/**/*.md
+        rel = kind_path("rules") + "/merge.md"
+        self.assert_refused(self.child("- " + grant_line(), rel=rel), rel + ":1")
+
+    def test_an_unreadable_docs_rules_file_is_unknown(self):
+        repo = self.write_unreadable(Repo(self), "docs/rules/bad.md")
+        code, out, err = repo.probe("restates")
+        self.assertIn("docs/rules/bad.md", out, "the group did not reach docs/rules/bad.md: %s%s" % (out, err))
+        self.assertEqual(code, 2, "an unreadable docs/rules file did not make the group unknown: %s%s" % (out, err))
+        self.assertTrue(head(out).startswith("restates: unknown"), out)
+
+    def test_an_unreadable_claude_rules_file_is_unknown(self):  # green control: the old code already reads .claude/**/*.md
+        rel = kind_path("rules") + "/bad.md"
+        repo = self.write_unreadable(Repo(self), rel)
+        code, out, err = repo.probe("restates")
+        self.assertIn(rel, out, "the group did not reach %s: %s%s" % (rel, out, err))
+        self.assertEqual(code, 2, "an unreadable .claude rule file did not make the group unknown: %s%s" % (out, err))
 
 
 class RestatesFixtures(unittest.TestCase):
