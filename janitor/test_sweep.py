@@ -10126,6 +10126,34 @@ class OwnAgentLockTests(unittest.TestCase):
         self.assertEqual(decision["action"], "keep")
         self.assertTrue(decision["reason"].startswith("locked:"), "kept for another reason: %s" % decision["reason"])
 
+    def test_a_live_lock_holder_reused_as_our_parent_pid_keeps(self):
+        # The child starts after this process, so it cannot be an ancestor. A pid that a later
+        # process reuses as this process's parent must not read as the calling session's own.
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+
+        def reap_child():
+            child.kill()
+            child.wait(timeout=10)
+
+        self.addCleanup(reap_child)
+        require(child.poll() is None, "the child exited before the lock")
+        require(child.pid not in (os.getpid(), os.getppid()), "the child is an ancestor")
+        mine, theirs = guard._process_start_ms(os.getpid()), guard._process_start_ms(child.pid)
+        require(isinstance(mine, int) and isinstance(theirs, int), "could not read a start time")
+        require(theirs >= mine, "the child started before this process, so it could be an ancestor")
+        root, path = self.own_lock_tree("recycled", child.pid)
+        entry = self.entry_for(root, path)
+        real = sweep._parent_pid
+        parents = {os.getpid(): child.pid, child.pid: 1}
+        with mock.patch.object(sweep, "_parent_pid",
+                               side_effect=lambda pid: parents[pid] if pid in parents else real(pid)) as read:
+            decision = sweep.decide_worktree(root, entry)
+        self.assertIn(mock.call(os.getpid()), read.call_args_list, "the parent read never reached this process")
+        self.assertEqual(decision["action"], "keep", "reaped a live non-ancestor: %s" % decision["reason"])
+        self.assertTrue(decision["reason"].startswith("locked:"), "kept for another reason: %s" % decision["reason"])
+
     def test_an_unreadable_ancestor_read_keeps_the_own_lock(self):
         # Red on the positive arm today (kept as "locked: ..."). The negative arm keeps today, but the
         # read itself does not exist yet: `sweep._parent_pid` is the name the new walk must use.
