@@ -2776,6 +2776,62 @@ test("reopen: an item reopened by status, whose kept answer is older than its ne
   assert.equal(await card(page, it).locator(".ans").count(), 0, `reopened No. ${it.n} shows an answered pill`);
 });
 
+// The page replaces state.answers only in its answers listener, so a new object means that snapshot has run. Withdraw and Undo edit
+// the same object in place, so the record's key alone proves nothing.
+const markAnswers = (page) => page.evaluate(() => { window.__ansBefore = state.answers; });
+const waitForAnswersSnapshot = (page) => page.waitForFunction(() => state.answers !== window.__ansBefore);
+
+// The owner's Withdraw deletes the record. The answers snapshot that follows must not read that deletion as a reopen: the card stays
+// in the Answered section, and the Undo panel stays.
+test("reopen: a Withdraw keeps the answered card in the Answered section through the answers snapshot that follows, and its Undo panel stays", async (t) => {
+  const page = await open(t, { answers: SAVED_A, clock: LOAD_AT }); if (!page) return;
+  assert.equal(await sectionOf(page, DECISION), "tier-answered", `precondition: No. ${DECISION.n} is not in the Answered section at load`);
+  await card(page, DECISION).getByRole("button", { name: "Change" }).click();
+  assert.equal(await sectionOf(page, DECISION), "tier-answered", `No. ${DECISION.n} left the Answered section on Change`);
+  await choose(page, DECISION, "a");
+  assert.equal(await page.locator("#send").textContent(), "Withdraw answer", `Send does not withdraw No. ${DECISION.n}'s answer`);
+  await markAnswers(page);
+  await send(page);
+  await page.locator("#sent .stamp").waitFor();
+  await waitForAnswersSnapshot(page);
+  assert.equal(await sectionOf(page, DECISION), "tier-answered", `No. ${DECISION.n} left the Answered section after its Withdraw's answers snapshot`);
+  assert.equal(await page.locator("#undoBtn").count(), 1, `the Undo panel for No. ${DECISION.n}'s Withdraw closed on the answers snapshot`);
+});
+
+// Undo of that Withdraw puts the answer back: the card is in the Answered section and drawn as answered, with no reload.
+test("reopen: Undo of a Withdraw puts the card back in the Answered section, drawn as answered, with no reload", async (t) => {
+  const page = await open(t, { answers: SAVED_A, clock: LOAD_AT }); if (!page) return;
+  await card(page, DECISION).getByRole("button", { name: "Change" }).click();
+  await choose(page, DECISION, "a");
+  await markAnswers(page);
+  await send(page);
+  await page.locator("#sent .stamp").waitFor();
+  await waitForAnswersSnapshot(page);
+  assert.equal(await page.locator("#undoBtn").count(), 1, `the Undo panel is missing after No. ${DECISION.n}'s Withdraw`);
+  await markAnswers(page);
+  await page.click("#undoBtn");
+  await waitForAnswersSnapshot(page);
+  assert.deepEqual((await answers(page))[DECISION.id], SAVED_A[DECISION.id], `Undo did not put No. ${DECISION.n}'s answer back in the store`);
+  assert.equal(await sectionOf(page, DECISION), "tier-answered", `No. ${DECISION.n} is not in the Answered section after Undo of its Withdraw`);
+  assert.equal(await card(page, DECISION).evaluate((c) => c.classList.contains("answered")), true, `No. ${DECISION.n} is not drawn as answered after Undo`);
+  assert.equal(await card(page, DECISION).locator(".ans").count(), 1, `No. ${DECISION.n} has no answered pill after Undo`);
+});
+
+// Control, green on the old code: a writer's delete of the record, then a move of added past the owner's answer, opens the card.
+// The delete comes first, so a fix that keeps the card sunk on the delete must still release it when added moves.
+test("reopen: a record the writer deletes, then an added moved past the owner's answer, opens the card without a reload", async (t) => {
+  const it = mk("reopen-deleted", 1, { added: at(5) }), other = mk("reopen-deleted-o", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other], answers: answerOf(it, "a", { note: "Kept it." }), clock: LOAD_AT }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `precondition: No. ${it.n} is not in the Answered section at load`);
+  await markAnswers(page);
+  await page.evaluate((id) => state.db.collection("answers").doc(id).delete(), it.id);
+  await waitForAnswersSnapshot(page);
+  assert.equal(await page.evaluate((id) => id in state.answers, it.id), false, `the writer's delete of No. ${it.n}'s record did not reach the page`);
+  await page.evaluate((x) => window.__putItem(x), { ...it, added: NEW_ADDED });
+  assert.equal(await card(page, it).count(), 1, `No. ${it.n} is not drawn after its added moved past its answer`);
+  assert.notEqual(await sectionOf(page, it), "tier-answered", `No. ${it.n} stayed in the Answered section after its added moved past its answer`);
+});
+
 // ---------------------------------------------------------------- answered sink: fold lock, rail chip, freeze gate, group title
 
 test("Answered section: a sunk card whose saved answer has a restored draft keeps its fold unlocked, and the press opens it", async (t) => {

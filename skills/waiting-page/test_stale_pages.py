@@ -1246,12 +1246,14 @@ class Stale(unittest.TestCase):
     # an open item whose kept answer is older than its `added` is named, with the remedy to delete it. A record at or after `added`
     # is awaiting filing, so it is not named (the open-item cases above). The line starts "is open", not "is closed".
 
-    def assert_open_stale_named_in_both_shapes(self, extra_items, extra_answers, item_id, n, case):
+    def assert_open_stale_named_in_both_shapes(self, extra_items, extra_answers, item_id, n, case, contains=None):
         for as_folder in (False, True):
             with self.subTest("folder of <id>.json files" if as_folder else "list file", case=case):
                 r = self.paired_run(extra_items, extra_answers, as_folder)
                 self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
-                self.assert_kept_line(r, n, item_id, want="kept-answer: item %d (%s) is open" % (n, item_id))
+                line = self.assert_kept_line(r, n, item_id, want="kept-answer: item %d (%s) is open" % (n, item_id))
+                if contains is not None:
+                    self.assertIn(contains, line, "the open-item line for item %d does not say %r:\n%s" % (n, contains, line))
 
     def test_reopened_open_item_whose_kept_answer_is_a_day_older_than_its_added_is_named_as_stale(self):
         item = decision_item(360, "reopened-stale", status="open", added="2026-11-08T09:00:00Z")
@@ -1273,6 +1275,11 @@ class Stale(unittest.TestCase):
         item = decision_item(363, "reopened-fraction", status="open", added="2026-11-07T19:41:50Z")
         self.assert_not_named_in_both_shapes([item], [("reopened-fraction", answer_for("reopened-fraction", 363))],
                                              "reopened-fraction", "an open item whose kept answer is 35 ms after a whole-second added")
+
+    def test_reopened_open_item_line_tells_the_writer_to_re_read_the_answer_before_it_deletes_it(self):
+        item = decision_item(371, "reopened-reread", status="open", added="2026-11-08T09:00:00Z")
+        self.assert_open_stale_named_in_both_shapes([item], [("reopened-reread", answer_for("reopened-reread", 371))],
+                                                    "reopened-reread", 371, "an open item whose kept answer is older than its added", contains="re-read")
 
     def test_a_routed_closed_item_with_a_kept_answer_is_not_named(self):
         # Closing at routing (SKILL.md, "Route and close", the busy-lane path): the item closes with its home and keeps `lane`,
@@ -1407,6 +1414,10 @@ class Stale(unittest.TestCase):
                                  % (len(got), r.stdout + r.stderr))
                 for line, prefix in zip(got, want):
                     self.assertTrue(line.startswith(prefix), "a kept-answer line is not the one for its item, in item order:\n" + line)
+                open_lines = [line for line in got if " is open and " in line]
+                self.assertEqual(len(open_lines), 40, "want 40 open-item lines, got %d:\n%s" % (len(open_lines), r.stdout))
+                for line in open_lines:
+                    self.assertIn("re-read", line, "an open-item line does not tell the writer to re-read its answer:\n" + line)
                 self.assert_page_word(r, "current", 0)
 
     def test_full_size_routed_items_are_not_named_and_closed_items_without_a_lane_still_are(self):
