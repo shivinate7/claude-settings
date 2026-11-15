@@ -250,6 +250,7 @@ STAMP_CITE = "(decision one-shared-record-stamp, the claim runs only on the defa
 RECORDS_CITE = "(decision records-index-at-merge, only the merge tool rebuilds the records page, before the branch goes ready)"
 UNDO_CITE = "(decision silent-undo-check-design, a branch that silently undoes earlier work does not merge)"
 DEBT_CITE = "(decision debt-close-runs-retire, a debt closes only when its Retire check passes on the head)"
+CI_RUN_NAME = "checks"  # the `name:` of lint/check_debt_retire.py CI_WORKFLOW: the run whose steps judge a debt close
 RED_CITE = "(rule git-red-main-reverts, a red main takes only the revert of the blamed commit)"
 CANCELLED_NO_RED = "was cancelled with no red job"  # base_state words an unknown cancelled run with it; red_base reads it back to give the cancelled run its own headline
 RERUN_REMEDY = "gh run rerun"  # base_state names it for a cancelled run on the base's head; red_base reads it back to name the remedy in its way out
@@ -555,12 +556,18 @@ def load_debt_retire():
 def debt_check(wt, base_ref, host, info):
     """The debt-close lint (lint/check_debt_retire.py): each debt the branch closes has its Retire check run on the head.
     A finding, red or unknown or prose, refuses. No reason flag lifts it. A cited run is judged against the PR head, never the worktree
-    HEAD: the claim commit goes on top of the PR head, and a run on the head is still the run of this PR."""
+    HEAD: the claim commit goes on top of the PR head, and a run on the head is still the run of this PR.
+    A suite that a CI step of the head runs is judged from the PR head's checks run (Host.ci_steps), once, never run here. A draft has no such run yet:
+    its close is deferred to the confirm of the ready PR, and prints one line a debt."""
     debt = load_debt_retire()
+    deferred = []
     try:
-        found = debt.check(wt, base_ref, info["head"], pr_body=info.get("body", ""), run_state=lambda url: host.cited_run(url), isolate=True)
+        found = debt.check(wt, base_ref, info["head"], pr_body=info.get("body", ""), run_state=lambda url: host.cited_run(url), isolate=True,
+                           ci_steps=lambda sha: host.ci_steps(sha), draft=bool(info.get("draft")), deferred=deferred)
     except debt.Unknown as e:
         raise Unread(f"the debt-close check could not read the history: {e}\n{DEBT_CITE}")
+    for slug in deferred:
+        say(f"merge: debt {slug}: deferred to confirm: no run exists yet")
     if found:
         text = "the branch closes a debt without proof that its Retire check holds:\n  " + "\n  ".join(f"{f.slug} [{f.kind}]: {f.text}" for f in found) + f"\n{DEBT_CITE}"
         if all(f.kind == "unknown" for f in found):  # each is a check that could not run: no finding is proven
@@ -1244,6 +1251,21 @@ class Host:
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
+    def ci_steps(self, sha):
+        """-> [{job, name, conclusion, status, run_sha}], one row per step of the PR's checks run on `sha`, for the debt-close lint (CiJudge): the newest pull_request run
+        of the workflow CI_RUN_NAME on `sha` that did not end skipped (a draft's run skips every job, so it is no run of the ready PR), and one paged read of that run's jobs.
+        A job that lists no steps, as a skipped one, is one row with name None. No such run is an empty list. A failed read is a Stop, never an empty list."""
+        runs = [r for r in self.runs(sha, "event,headSha") if r.get("name") == CI_RUN_NAME and r.get("event") == "pull_request" and r.get("headSha") == sha and r.get("conclusion") != "skipped"]
+        if not runs:
+            return []
+        run = max(runs, key=lambda r: r["databaseId"])
+        rows = []
+        for job in self.pages(f"actions/runs/{run['databaseId']}/jobs", "jobs"):
+            base = {"job": job["name"], "run_sha": job.get("head_sha") or run["headSha"]}
+            steps = job.get("steps") or []
+            rows += [dict(base, name=s["name"], conclusion=s.get("conclusion"), status=s.get("status")) for s in steps] or [dict(base, name=None, conclusion=job.get("conclusion"), status=job.get("status"))]
+        return rows
+
     def issue_comments(self, since):
         """-> (records, lints): one list read of the repo's issue comments updated since `since`. The number comes from the comment's issue_url.
         records is {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: a body counts only when the review record
@@ -1523,9 +1545,9 @@ class Host:
         held = [x for x in pending if x in names or (x in runs and x not in dropped)]
         return held, [x for x in pending if x not in held]
 
-    def runs(self, sha):
-        """The workflow runs of `sha`, less the ignored ones."""
-        c, out = self.gh(["run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name,workflowDatabaseId,databaseId"], self.cwd)
+    def runs(self, sha, extra=""):
+        """The workflow runs of `sha`, less the ignored ones. `extra`: more gh --json fields, comma-joined, that a caller reads beside the usual ones."""
+        c, out = self.gh(["run", "list", *self._repo_args(), "--commit", sha, "--limit", "100", "--json", "status,conclusion,name,workflowDatabaseId,databaseId" + ("," + extra if extra else "")], self.cwd)
         try:
             runs = json.loads(out)
         except ValueError:
