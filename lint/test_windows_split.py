@@ -100,7 +100,7 @@ LINUX_SUITES = {
     "python3 hooks/test_prose_judge.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_sendmessage_state.py": (None, None),
     "python3 hooks/test_refusal_note.py": (NO_MD_SCOPE_CONDITION, None),
-    "python3 hooks/test_call_judge.py": (NO_MD_SCOPE_CONDITION, None),
+    "python3 hooks/test_call_judge.py": (None, None),
     "python3 hooks/test_question_form.py": (None, None),
     "python3 hooks/test_rm_prompt_answer.py": (NO_MD_SCOPE_CONDITION, None),
     "python3 hooks/test_agent_brief.py": (None, None),
