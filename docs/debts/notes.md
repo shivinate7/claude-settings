@@ -2286,3 +2286,5 @@
 - aligned-rerun-reads-newer-main: the action diffs the event's `base.sha` to the merge commit, so a re-run after main moved reads main's newer record changes as this PR's. A new push gives a fresh base. Unprobed. Decision: child-cites-not-copies.
 - aligned-pin-bump-needs-full-depth: a child that bumps the `claude-md-cites` pin without `fetch-depth: 0` gets exit 2 with no remedy line, red on every PR. Fail-closed as intended; the message could name the fix. Decision: child-cites-not-copies.
 - aligned-same-line-same-number: sentences on one physical line all report the same `file:line`, and two cites of one record print twice. Decision: child-cites-not-copies.
+- aligned-deleted-sentence-demands-nothing: a PR that deletes a citing sentence demands nothing of its record. Decision: child-cites-not-copies.
+- aligned-equal-text-reads-unchanged: a sentence whose new text equals another base sentence counts as unchanged. Decision: child-cites-not-copies.

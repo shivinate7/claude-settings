@@ -1615,8 +1615,8 @@ def probe_aligned(root):
             elif moved and slug not in changed:
                 hits.append("  %s: %s:%d changed and cites the record, the record did not change" % (slug, rel, first))
     if hits:
-        hits.append("  fix: change the sentence or the record, or add one PR body line per record: "
-                    "`Rules checked: <record> \u2014 no change`")
+        hits.append("  fix: change the sentence or the record, or add one PR body line per record, "
+                    "`Rules checked: <record> \u2014 no change`, then push a commit")
         return finish("aligned", hits, "out - %d line(s) to read in %d file(s)" % (len(hits) - 1, files), 1)
     return finish("aligned", hits, "in shape - %d rule file(s) read, %d record(s) changed" % (files, len(changed)), 0)
 
