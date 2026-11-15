@@ -310,7 +310,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .receipt.last .lhead { margin: 0; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
 .receipt.last .line { grid-template-columns: minmax(0, 1fr); min-height: 0; }
 .receipt.last .line b { grid-column: 1; color: var(--ink); font-weight: 600; }
-.thread .reply { font-size: 15px; min-width: 0; overflow-wrap: anywhere; }
+.thread .reply { font-size: 15px; }
 .card.answered { border-left: 6px solid var(--good); }
 .ans { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; line-height: 20px; }
 .ans::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
@@ -851,7 +851,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .prail .nm .newmark, .fold .newmark { min-height: 0; }
 .prail .nmr { display: inline-flex; align-items: center; gap: 6px; }
 .askc .thread .lhead { margin: 0; font-size: 14px; color: var(--muted); }
-.askc .thread .reply { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.askc .thread .reply { margin: 0; white-space: pre-line; overflow-wrap: anywhere; min-width: 0; }
 .askc .thread .filed { margin: 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
 /* A folded answer is one button: the whole row unfolds it. */
 .askc.folded { padding: 0; }
@@ -943,7 +943,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .askc.rline.ropen .thread { display: grid; gap: 6px; padding: 10px 12px; border-radius: 8px; background: var(--ground); min-width: 0; }
 .askc .thread .filed a { color: var(--acc); }
 /* An item line sits in the Answered section's list, beside the cards that still wait to be filed. */
-.tier.sunk .rlist > .askc { scroll-margin-top: 64px; }
+.tier.sunk .rlist .askc { scroll-margin-top: 64px; }
 .rlist > .older { margin-top: 2px; }
 .asklist.dlist.items { margin: 0; }
 .allread { margin: 0; font-size: 15px; color: var(--ink); }
@@ -1326,7 +1326,22 @@ function headsOn(k, plan) {
 }
 // The line under a tier head that names its key. It says "This repo first" only when the tier holds this repo and another.
 const TIER_KEY = { holds: "Most stopped work first, then triage's order, then newest.", due: "Triage's order first, then nearest deadline, then newest.", calm: "Triage's order first, then decisions, then newest." };
-const tierKey = (k, plan) => (plan.length > 1 && plan.some((g) => g.key === "") ? "This repo first. " : "") + TIER_KEY[k];
+// "This repo first. " heads a line only when the list holds this repo and another.
+const repoFirst = (plan) => (plan.length > 1 && plan.some((g) => g.key === "") ? "This repo first. " : "");
+const tierKey = (k, plan) => repoFirst(plan) + TIER_KEY[k];
+// One sub-group per repo: this repo first, then each other repo at its first item's place by cmp, A to Z on a tie. A group never splits. A tier and the Answered section both split this way.
+function repoPlan(list, cmp) {
+  const items = list.sort(cmp), taken = new Set(), repos = new Map();
+  items.forEach((it) => {
+    if (taken.has(it.id)) return;
+    const m = it.group ? items.filter((x) => x.group === it.group) : [it], r = groupRepo(it);
+    m.forEach((x) => taken.add(x.id));
+    if (!repos.has(r)) repos.set(r, []);
+    repos.get(r).push(...m);
+  });
+  return [...repos.entries()].map(([key, grp]) => ({ key, items: grp }))
+    .sort((a, b) => (b.key === "") - (a.key === "") || cmp(a.items[0], b.items[0]) || a.key.localeCompare(b.key));
+}
 function sorted() {
   freezeKeys();
   const by = { holds: [], due: [], calm: [], answered: [], repos: {} };
@@ -1352,18 +1367,8 @@ function sorted() {
     due: part((a, b) => byRank(a, b) || dl(a) - dl(b) || byAge(a, b)),
     calm: part((a, b) => byRank(a, b) || (a.kind === b.kind ? byAge(a, b) : a.kind === "decision" ? -1 : 1)),
   };
-  // One sub-group per repo: this repo first, then each other repo at its first item's place by the tier's key, A to Z on a tie. A group never splits.
   Object.keys(keys).forEach((k) => {
-    const items = by[k].sort(keys[k]), taken = new Set(), repos = new Map();
-    items.forEach((it) => {
-      if (taken.has(it.id)) return;
-      const m = it.group ? items.filter((x) => x.group === it.group) : [it], r = groupRepo(it);
-      m.forEach((x) => taken.add(x.id));
-      if (!repos.has(r)) repos.set(r, []);
-      repos.get(r).push(...m);
-    });
-    by.repos[k] = [...repos.entries()].map(([key, list]) => ({ key, items: list }))
-      .sort((a, b) => (b.key === "") - (a.key === "") || keys[k](a.items[0], b.items[0]) || a.key.localeCompare(b.key));
+    by.repos[k] = repoPlan(by[k], keys[k]);
     by[k] = by.repos[k].flatMap((g) => g.items);
   });
   return by;
@@ -2231,18 +2236,29 @@ function readItemsEls(read) {
 }
 // The Answered section's order, newest answer first; a closed line with no answer sits at its close time. The rail's Answered row reads the same order.
 const answeredAt = (it) => (it.status === "closed" ? Date.parse((lastOf(it) || {}).at) || closedAt(it) || 0 : Math.max(...mates(it).map((x) => Date.parse(sentOf(x).at) || 0)));
-const answeredOrder = (list) => list.slice().sort((a, b) => answeredAt(b) - answeredAt(a) || a.n - b.n);
+const byAnswered = (a, b) => answeredAt(b) - answeredAt(a) || a.n - b.n;
+const answeredOrder = (list) => list.slice().sort(byAnswered);
+// The Answered section and its rail row split by repo the way a tier does, newest answer first inside each.
+const answeredPlan = (list) => repoPlan(list.slice(), byAnswered);
 // The items answered before this visit, and under SENT_MOVE "sink" those sent on it (isSunk), newest first. Open on load, each card folded.
 // lines: the closed items that stay as one line, and read: the lines behind Show N read items.
 function answeredEl(items, place, lines, read) {
   const on = state.answeredOpen, all = [...items, ...lines], at = answeredAt;
   const stamps = all.map(at).filter((t) => t > 0), body = [], done = new Set();
-  answeredOrder(all).forEach((it) => { if (it.status === "closed") body.push(lineEl(it, false)); else if (!done.has(it.id)) place(items, it, done, body); });
+  const plan = answeredPlan(all), heads = headsOn("answered", plan);
+  plan.forEach((g) => {
+    const part = [];
+    g.items.forEach((it) => { if (it.status === "closed") part.push(lineEl(it, false)); else if (!done.has(it.id)) place(items, it, done, part); });
+    if (!heads) { body.push(...part); return; }
+    const sub = subEl("answered", g, g.items.filter((i) => !itemDropped(i)).length);
+    reconcile(sub.el, [sub.head, ...part]);
+    body.push(sub.el);
+  });
   if (!all.length && read.length) body.push(h("p", { class: "allread" }, "All read."));
   body.push(...readItemsEls(read));
   return sectionEl("answered", { cls: "sunk", glyph: "done", name: "Answered", count: all.filter((it) => !itemDropped(it)).length, open: on, listId: "ab", btnId: "b-answered", body,
     toggle: () => { state.answeredOpen = !state.answeredOpen; render(); },
-    sub: (SENT_MOVE === "sink" ? "Your sent answers, newest first." : "Sent before this visit, newest first.") + (on ? " A line you mark read stays as Marked read until the next load." : stamps.length ? " Newest " + fmt(new Date(Math.max(...stamps)).toISOString()) + "." : "") });
+    sub: repoFirst(plan) + (SENT_MOVE === "sink" ? "Your sent answers, newest first." : "Sent before this visit, newest first.") + (on ? " A line you mark read stays as Marked read until the next load." : stamps.length ? " Newest " + fmt(new Date(Math.max(...stamps)).toISOString()) + "." : "") });
 }
 // The closed lines that show in the Answered section: not read at load. The rail's Answered row reads the same list, so its count is the section's.
 const shownLines = () => state.lines.filter((it) => !itemAway(it));
@@ -2386,8 +2402,8 @@ function renderRail() {
     kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-" + T.k, "aria-label": open + " open, " + T.name, onclick: (e) => { e.preventDefault(); jump("tier-" + T.k); } }, glyph(T.k), T.name, h("span", { class: "ct" }, String(open))), row));
   });
   // The Answered row: the section's chips. Its count is the section's size, and a press opens a folded section before it jumps.
-  const ans = answeredOrder([...by.answered, ...shownLines()]).filter((it) => !itemDropped(it));
-  if (ans.length) kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-answered", "aria-label": ans.length + " answered", onclick: (e) => { e.preventDefault(); state.answeredOpen = true; render(); jump("tier-answered"); } }, glyph("done"), "Answered", h("span", { class: "ct" }, String(ans.length))), chipRow(ans)));
+  const ans = answeredOrder([...by.answered, ...shownLines()]).filter((it) => !itemDropped(it)), ansPlan = answeredPlan(ans);
+  if (ans.length) kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-answered", "aria-label": ans.length + " answered", onclick: (e) => { e.preventDefault(); state.answeredOpen = true; render(); jump("tier-answered"); } }, glyph("done"), "Answered", h("span", { class: "ct" }, String(ans.length))), headsOn("answered", ansPlan) ? repoRuns(ansPlan) : chipRow(ans)));
   // One row for the rulings: no chips, so a ruling never counts as open or sent.
   if (state.rulings.length) kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-ruled", "aria-label": state.rulings.length + (state.rulings.length === 1 ? " ruling" : " rulings") + ", Arbiter rulings", onclick: (e) => { e.preventDefault(); state.rulingsOpen = true; render(); jump("tier-ruled"); } }, glyph("ruled"), "Arbiter rulings", h("span", { class: "ct" }, String(state.rulings.length)))));
   kids.push(askRailRow());
