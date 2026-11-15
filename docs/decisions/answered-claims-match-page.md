@@ -34,10 +34,16 @@ owner never gave. Risk kind: incident.
 - Not judged:
   - A sentence that ends in `?`. Closing `*`, `_`, `)`, quotes or spaces after the mark do not change this.
   - Text in a fenced block, and text in an inline code span, except a span that holds only an item number.
-  - The word as a list name: after `the`, `a`, `all`, `each`, `every` or `any` ("from the answered list"), or
-    before `list`, `tab`, `section`, `column`, `queue` and like names.
-  - The word as a condition: after `until`, `unless`, `if`, `once`, `when`, `before`, `pending`, `awaiting` and
-    like words in the same clause ("wait until item 874 is answered").
+  - The word as a list name: after `the`, `a`, `each`, `every` or `any` ("from the answered list"), or before
+    `list`, `tab`, `section`, `column`, `queue` and like names. After `all`, only before a noun such as `items`
+    ("all answered items"). "Items 874 and 875 are all answered" is a claim.
+  - The word as a condition: after `until`, `unless`, `if`, `when`, `pending`, `awaiting`, `wait for` and like
+    words in the same clause ("wait until item 874 is answered").
+  - The word after `once`, `before` or `after` in the same clause, when its verb is not past ("after item 874
+    is answered"). A past verb (`was`, `were`, `had`, `got`) makes it a claim: "I merged once item 874 was
+    answered".
+  - The word as a need: after `needs to be`, `must be`, `should be`, `has to be` and like words ("item 874
+    needs to be answered").
   - A correction that ends by taking the claim back ("... was answered, and it is not").
   - A claim that cites the owner and a time in parentheses, such as "(owner, 2026-11-15 13:30 CST)". Only
     `owner` counts. "(coordinator, ...)" does not.
@@ -89,10 +95,15 @@ owner never gave. Risk kind: incident.
 - The owner citation is read as words. The check does not look the cited answer up on the page.
 - The refs are read without a fetch. A record branch that origin has moved since the last fetch is stale until
   the next fetch.
-- The check is inert in a repo with no page export: no record branch holds the page data, so every claim passes
-  with one stderr line. `claude-settings` is such a repo today.
+- The check is inert where no record branch ref holds the page data, so every claim passes with one stderr line.
+  In `claude-settings`, `origin/roadmap` holds the data under `waiting`, so the check is inert only in a clone
+  that has not fetched that ref.
 - A condition word or a list name near the claim word exempts it, so "when item 874 was answered, we moved on"
-  passes.
+  passes. Only `once`, `before` and `after` read the verb's tense.
+- A simple past with no helper verb reads as a condition after `once`, `before` or `after`: "I merged once the
+  owner approved item 874" passes.
+- A future or a hope is read as a claim: "item 874 will be answered tomorrow" is refused.
+- The noun list after `all` and the need words are fixed lists. A word outside them is read as a claim.
 - A claim split over two sentences passes. The item in one sentence and the claim word in the next do not match.
 - The check reads words, not meaning. A claim worded another way, such as "owner said yes", "accepted" or
   "signed off", is not judged.

@@ -11,9 +11,10 @@ Judged text: `message` of the claude-code-remote send_message and of SendMessage
 A claim is one sentence that holds an item reference (`item <n>`, `items <n> and <m>`, `item #<n>`, `page:<n>`),
 the whole word answered, approved or ruled, and no negator before that word in its clause (lint/report_guard.py
 ANSWERED_NEGATOR_RE). A sentence is the prose of one paragraph: its lines are joined. These are not claims: a
-sentence that ends in `?`, the word used as a list name ("the answered list") or as a condition ("until item 5 is
-answered"), a sentence that takes the claim back at its end ("..., and it is not"), and a claim that cites the
-owner and a time in parentheses ("(owner, 2026-11-15 13:30 CST)"). Fenced blocks are skipped. An inline code span
+sentence that ends in `?`, the word used as a list name ("the answered list", "all answered items"), as a
+condition ("until item 5 is answered", "after item 5 is answered") or as a need ("needs to be answered"), a
+sentence that takes the claim back at its end ("..., and it is not"), and a claim that cites the owner and a time
+in parentheses ("(owner, 2026-11-15 13:30 CST)"). Fenced blocks are skipped. An inline code span
 is skipped, except one that holds only an item number. A claim by an item id slug alone is not judged.
 
 The page's data is read from git, never from the live page. The folder and the record branch come from
@@ -48,9 +49,20 @@ ITEM_REF = re.compile(r"(?<!\w)items?\s+%s(?:%s%s)*(?!\w)|(?<!\w)page:%s(?!\w)" 
 # The owner's citation that the remedy asks for: "(owner, 2026-11-15 13:30 CST)". Only "owner" counts, and a time.
 OWNER_CITE = re.compile(r"\(\s*owner\s*,[^()]*?\b\d{1,2}:\d{2}\b[^()]*\)", re.I)
 # "answered" as a name or a condition, not as a claim.
-LIST_NAME_BEFORE = re.compile(r"\b(?:the|an?|all|each|every|any|these|those|its|their)\s+$", re.I)
+LIST_NAME_BEFORE = re.compile(r"\b(?:the|an?|each|every|any|these|those|its|their)\s+$", re.I)
 LIST_NAME_AFTER = re.compile(r"^\s+(?:list|lists|tab|tabs|section|column|queue|bucket|group|folder|set|pile|view|state|status|count)\b", re.I)
-CONDITION_BEFORE = re.compile(r"\b(?:until|till|unless|if|whether|once|when|whenever|before|pending|awaiting|waiting\s+(?:for|on)|as\s+soon\s+as)\b", re.I)
+# "all" names a list only before a noun ("all answered items"). "are all answered" is a claim.
+ALL_BEFORE = re.compile(r"\ball\s+$", re.I)
+NOUN_AFTER = re.compile(r"^\s+(?:items?|questions?|asks?|ones|cards?|entries|rows)\b", re.I)
+CONDITION_BEFORE = re.compile(r"\b(?:until|till|unless|if|whether|when|whenever|pending|awaiting"
+                              r"|wait(?:s|ing)?\s+(?:for|on)|as\s+soon\s+as)\b", re.I)
+# These set a condition only on an answer still to come. With a past verb they report an answer that came.
+TENSED_CONDITION_BEFORE = re.compile(r"\b(?:once|before|after)\b", re.I)
+ADVERB = r"(?:already|now|just|all|fully|both|also|finally|then)\s+"
+PAST_VERB_BEFORE = re.compile(r"\b(?:was|were|had|got)\s+(?:been\s+)?(?:%s)*$" % ADVERB, re.I)
+# A need for an answer, not a claim of one: "needs to be answered", "must be approved".
+NEED_BEFORE = re.compile(r"\b(?:needs?|must|should|has\s+to|have\s+to|ought\s+to)\s+(?:to\s+)?be\s+(?:%s)*$" % ADVERB,
+                         re.I)
 # A correction: the sentence ends by saying the answer is not there ("... was answered, and it is not.").
 TAKEN_BACK = re.compile(r"\b(?:it|this|that)(?:['\u2019]s\s+not|\s+(?:(?:is|was|has|had|does|did)\s+)?(?:not|never)"
                         r"|\s+(?:is|was|has|had|does|did)n['\u2019]t)(?:\s+(?:yet|been|actually|really))*[\s.!*_)\"']*$", re.I)
@@ -119,16 +131,20 @@ def _paragraphs(report_guard, text):
 
 def _claims_word(report_guard, sentence):
     """One bool per claim word: True when the word is a claim. It is not when a negator sits in its clause before
-    it, when it names a list or follows a condition word, when the sentence takes it back at its end, or when the
-    sentence cites the owner and a time."""
+    it, when it names a list, when it follows a condition word, when it names a need ("needs to be answered"), when
+    the sentence takes it back at its end, or when the sentence cites the owner and a time. "once", "before" and
+    "after" make a condition only when the verb is not past: "I merged once item 5 was answered" is a claim."""
     owner_cited = bool(OWNER_CITE.search(sentence))
     taken_back = bool(TAKEN_BACK.search(sentence))
     for match in CLAIM_WORD.finditer(sentence):
-        before = sentence[:match.start()]
+        before, after = sentence[:match.start()], sentence[match.end():]
         clause = report_guard.ANSWERED_CLAUSE_BREAK_RE.split(before)[-1]
+        list_name = (LIST_NAME_BEFORE.search(before) or LIST_NAME_AFTER.match(after)
+                     or (ALL_BEFORE.search(before) and NOUN_AFTER.match(after)))
+        condition = CONDITION_BEFORE.search(clause) or (TENSED_CONDITION_BEFORE.search(clause)
+                                                        and not PAST_VERB_BEFORE.search(clause))
         yield not (owner_cited or taken_back or report_guard.ANSWERED_NEGATOR_RE.search(clause)
-                   or LIST_NAME_BEFORE.search(before) or LIST_NAME_AFTER.match(sentence[match.end():])
-                   or CONDITION_BEFORE.search(clause))
+                   or list_name or condition or NEED_BEFORE.search(clause))
 
 
 def read_page(root):
