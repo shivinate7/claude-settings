@@ -356,6 +356,8 @@ PROBLEM_LINE = "Problem (risk): the change touches the guard, so it needs your w
 BASED_LINES = ("Based on (read): the diff changes one rule",)
 # The line a question to the owner carries (rule question-departs): what is on main, and what changes.
 DEPARTS_LINE = "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the lint job"
+# The line a waiting-page decision carries after Departs from: what is stopped until his answer, and who acts next.
+WAITING_LINE = "Waiting on: the change waits until your answer; the session acts next."
 
 
 def good_options():
@@ -424,8 +426,9 @@ def good_page_item(mark=PAGE_MARK, **over):
     """A waiting-page decision that passes the form. `mark` rides in option a's gain, so a case finds the item
     in the prompt. `over` replaces fields, for a case that changes one. Its options carry ids and `shown` (see
     with_frozen_fields), so a case that replaces `options` gets a matching `shown` too."""
-    context = "\n".join((GOAL_LINE, PROBLEM_LINE, *BASED_LINES, DEPARTS_LINE))
+    context = "\n".join((GOAL_LINE, PROBLEM_LINE, *BASED_LINES, DEPARTS_LINE, WAITING_LINE))
     item = {"kind": "decision", "title": "Ship the change today?", "status": "open", "context": context,
+            "recommended": "a", "why": "A ships the change today, and nothing else waits on it.",
             "options": [{"key": "a", "label": "Ship it", "gain": "The change lands today. " + mark,
                          "lose": "Nobody reads it first."},
                         {"key": "b", "label": "Hold it", "gain": "A reviewer reads it first.",
@@ -960,7 +963,7 @@ def relative_item_repo():
 
 def apps_item():
     """A waiting-page decision on the apps question: it passes item_hit, and its text lists the APPS record."""
-    context = "\n".join((APPS_GOAL, APPS_PROBLEM, APPS_BASED[0], DEPARTS_LINE))
+    context = "\n".join((APPS_GOAL, APPS_PROBLEM, APPS_BASED[0], DEPARTS_LINE, WAITING_LINE))
     options = [
         {"key": "a", "label": "Keep the apps", "gain": "Calls into the repo stay straightforward. " + PAGE_MARK,
          "lose": "An unused app keeps its access."},
@@ -1475,7 +1478,7 @@ CI_CHAT_OPTIONS = [
      "description": "Gain: the milestone run stops ending at its cap. Lose: each run takes longer."},
     {"label": "Keep the cap",
      "description": "Gain: nothing changes on main. Lose: the milestone run may end at its cap again."}]
-CI_PAGE_CONTEXT = "\n".join((CI_GOAL, CI_PROBLEM, CI_BASED[0], DEPARTS_LINE))
+CI_PAGE_CONTEXT = "\n".join((CI_GOAL, CI_PROBLEM, CI_BASED[0], DEPARTS_LINE, WAITING_LINE))
 CI_PAGE_OPTIONS = [
     {"key": "a", "label": "Raise the cap", "gain": "The milestone run stops ending at its cap.",
      "lose": "Each run takes longer and uses more minutes."},

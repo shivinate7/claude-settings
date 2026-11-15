@@ -140,8 +140,13 @@ def parts(**over):
     return found
 
 
-def form_text(goal=GOAL, problem=PROBLEM, based=BASED, departs=DEPARTS):
-    return "\n".join(line for line in (goal, problem, *based, departs) if line)
+# The Waiting on line (tcj.WAITING_LINE, one home). A build without it gets a sentinel line, so each case that
+# needs it goes red by its own name instead of raising (the WIDE pattern below).
+WAITING = getattr(tcj, "WAITING_LINE", None) or "<WAITING_LINE missing from hooks/test_call_judge.py>"
+
+
+def form_text(goal=GOAL, problem=PROBLEM, based=BASED, departs=DEPARTS, waiting=WAITING):
+    return "\n".join(line for line in (goal, problem, *based, departs, waiting) if line)
 
 
 def page_item(tail="", options=None, lines=None, **over):
@@ -792,7 +797,8 @@ LINE_VARIANTS = [
 
 def case_line_order_and_prose():
     for name, lines, want in LINE_VARIANTS:
-        page(name, "set", entry_of(page_item(lines=lines)), want)
+        # The Waiting on line goes last on the page; the chat box carries no such line, so it gets none.
+        page(name, "set", entry_of(page_item(lines=lines + [WAITING])), want)
         box = tcj.good_box()
         box["questions"][0]["question"] = "\n".join(lines)
         chat(name, box, want)
@@ -1547,7 +1553,7 @@ def case_departs_line_forms_pass():
         dp_chat("a line form %r passes" % body, body, None)
         dp_page("a page line form %r passes" % body, body, None)
     # CRLF line endings: the same form lines, joined with CR LF. The line's \r is no part of either side.
-    crlf = "\r\n".join(line for line in (GOAL, PROBLEM, *BASED, DEPARTS) if line)
+    crlf = "\r\n".join(line for line in (GOAL, PROBLEM, *BASED, DEPARTS, WAITING) if line)
     box = chat_box()
     box["questions"][0]["question"] = crlf
     chat("a question with CRLF line endings and a valid Departs from line passes", box, None)
@@ -2260,6 +2266,7 @@ def ma144(repo=OTHER_REPO, checked=None, **over):
     """The incident item, judged on `repo` (None leaves the field out). `checked` sets checked_with (None leaves it
     out, "" sets it empty). `over` sets or replaces any other field."""
     item = copy.deepcopy(MA144)
+    item["context"] = item["context"] + "\n" + WAITING  # the incident item predates the Waiting on line
     if repo is not None:
         item["repo"] = repo
     if checked is not None:
