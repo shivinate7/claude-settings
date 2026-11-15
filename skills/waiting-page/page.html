@@ -4112,12 +4112,13 @@ const CLS = Object.fromEntries(GRADES.map(([g, c]) => [g, c])), WORD = Object.fr
 const KIND = { hook: "Hooks", check: "Checks", skill: "Skills", janitor: "Janitor scripts", merge: "Merge scripts" };
 const base = (p) => String(p).replace(/\/$/, "").split("/").pop();
 
-/* The four marks. Healthy: a filled ring with a check. Has issues: a ring half filled. Broken: a filled octagon with a cross.
-   Not measured: a dashed ring, the page's unknown shape. */
+/* The four marks. Healthy: a filled ring with a check. Has issues: a bare exclamation mark, the one mark not drawn on a circle
+   or a polygon, so no Questions or Ask mark looks like it; its amber (--due) is not what sets it apart. Broken: a filled octagon
+   with a cross. Not measured: a dashed ring, the page's unknown shape. */
 function mark(c) {
   const a = ` class="gr ${c}" viewBox="0 0 16 16" aria-hidden="true" focusable="false"`;
   if (c === "ok") return `<svg${a}><circle cx="8" cy="8" r="7.5" fill="currentColor"/><path class="cut" d="M4.6 8.3l2.2 2.2 4.6-4.8" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-  if (c === "iss") return `<svg${a}><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 1.4a6.6 6.6 0 0 0 0 13.2z" fill="currentColor"/></svg>`;
+  if (c === "iss") return `<svg${a}><path d="M5.4 2.8a2.6 2.6 0 0 1 5.2 0L9.4 9.4a1.4 1.4 0 0 1-2.8 0z" fill="currentColor"/><circle cx="8" cy="14" r="1.8" fill="currentColor"/></svg>`;
   if (c === "bad") return `<svg${a}><path d="M5.2 0.6h5.6l4.6 4.6v5.6l-4.6 4.6H5.2L0.6 10.8V5.2z" fill="currentColor"/><path class="cut" d="M5.4 5.4l5.2 5.2M10.6 5.4l-5.2 5.2" stroke-width="2" stroke-linecap="round"/></svg>`;
   return `<svg${a}><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="2.6 2.1"/></svg>`;
 }
