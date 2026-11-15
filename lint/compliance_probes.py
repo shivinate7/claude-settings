@@ -84,8 +84,9 @@ restates: a unit of the child's rule Markdown that copies the text of a claude-s
   remedy; it never prints record text. An unreadable records folder or no record makes the group unknown. A
   claude-settings checkout is n/a.
 aligned: a record and the rule sentences that cite it change together in a pull request (decision
-  child-cites-not-copies). Env: BASE_SHA and HEAD_SHA, the PR's commits, and PR_BODY, its description. It
-  reads one `git diff --unified=0 BASE_SHA...HEAD_SHA` and the files on disk: the files of restates, and the
+  child-cites-not-copies). Env: BASE_SHA, the PR's base; HEAD_SHA, its head, which is `HEAD` when unset; and
+  PR_BODY, its description, which is the `pull_request.body` of the JSON file GITHUB_EVENT_PATH names when
+  unset. It reads one `git diff --unified=0 BASE_SHA...HEAD_SHA` and the files on disk: the files of restates, and the
   records of the child's own decisions folder (layout.candidates). A unit is one sentence: from the end of the
   previous `<!-- rule:X -->` anchor, or the paragraph's start, to its own anchor. A sentence cites a record by its
   slug alone in a code span, or by the anchor its Home line names, at base or at head (a deleted record is still
@@ -94,9 +95,10 @@ aligned: a record and the rule sentences that cite it change together in a pull 
   line, or a move with the text kept, is no change. When a record file changes, each citing sentence needs a change of its own; when
   a citing sentence changes, its record needs to be in the diff. A PR body line `Rules checked: <record> — no
   change` clears one record. An item names the record, the file and the sentence's first line. A missing
-  BASE_SHA or HEAD_SHA, or a diff, folder or file that cannot be read, makes the group unknown. The walk skips
-  vendor and tool folders (ALIGNED_SKIP). A missing PR_BODY is an empty body. It makes no other git call and
-  writes no file.
+  BASE_SHA, or a diff, folder or file that cannot be read, makes the group unknown. The body is read only when
+  a gap is found. A gap with no body to read (no PR_BODY, no readable event file with a pull request) makes the
+  group unknown, never a refusal or a clear. A body that is present and empty clears nothing. The walk skips
+  vendor and tool folders (ALIGNED_SKIP). It makes no other git call and writes no file.
 hooks: the clone's settings.json `.hooks` against the live settings.json `.hooks`, with `SessionStart`
   dropped on both sides, since a cloud install rewrites it. The live file is the one install.sh writes:
   `$CLAUDE_CONFIG_DIR/settings.json` when that variable is set and not empty, else `~/.claude/settings.json`.
@@ -1579,11 +1581,27 @@ def cited_records(unit, records):
     return cited
 
 
+def pr_body():
+    """The pull request description: env PR_BODY when it is set, else `pull_request.body` of the JSON file that
+    GITHUB_EVENT_PATH names, where a null body is empty. None when neither is there to read."""
+    if "PR_BODY" in os.environ:
+        return os.environ["PR_BODY"]
+    path = os.environ.get("GITHUB_EVENT_PATH", "").strip()
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            pull = json.load(handle)["pull_request"]
+        body = pull["body"] if "body" in pull else None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return body if isinstance(body, str) else ("" if body is None else None)
+
+
 def probe_aligned(root):
-    base, head = os.environ.get("BASE_SHA", "").strip(), os.environ.get("HEAD_SHA", "").strip()
-    if not base or not head:
-        raise CannotRun("BASE_SHA and HEAD_SHA, the two commits of the pull request, are not both set")
-    checked = {m.group(1) for m in map(RULES_CHECKED.match, (l.strip() for l in os.environ.get("PR_BODY", "").splitlines())) if m}
+    base, head = os.environ.get("BASE_SHA", "").strip(), os.environ.get("HEAD_SHA", "").strip() or "HEAD"
+    if not base:
+        raise CannotRun("BASE_SHA, the base commit of the pull request, is not set")
     changes, hunks = diff_changes(root, base, head)
     wheres, records = decision_records(root)
     if not changes:
@@ -1608,12 +1626,19 @@ def probe_aligned(root):
                 was[rel] = old_sentences(base_lines(text, hunks.get(rel, [])), rel)
             moved = flat(unit) not in was[rel]
         for slug in sorted(cited_records(unit, records)):
-            if slug in checked:
-                continue
             if slug in changed and not moved:
-                hits.append("  %s: %s:%d cites the record, the record changed and this sentence did not" % (slug, rel, first))
+                hits.append((slug, "  %s: %s:%d cites the record, the record changed and this sentence did not" % (slug, rel, first)))
             elif moved and slug not in changed:
-                hits.append("  %s: %s:%d changed and cites the record, the record did not change" % (slug, rel, first))
+                hits.append((slug, "  %s: %s:%d changed and cites the record, the record did not change" % (slug, rel, first)))
+    if hits:
+        body = pr_body()
+        if body is None:
+            raise CannotRun("%d gap(s) found and the pull request body cannot be read here: set PR_BODY to it, "
+                            "or run in a pull_request workflow, so a `Rules checked:` line can be read" % len(hits))
+        checked = {m.group(1) for m in map(RULES_CHECKED.match, (l.strip() for l in body.splitlines())) if m}
+        hits = [line for slug, line in hits if slug not in checked]
+    else:
+        hits = []
     if hits:
         hits.append("  fix: change the sentence or the record, or add one PR body line per record, "
                     "`Rules checked: <record> \u2014 no change`, then push a commit")
