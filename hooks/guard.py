@@ -155,10 +155,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
                        record (read from the transcript) does not show in its cs-build tags; for the lane
-                       tier, also a `--step` that is no cs-step tag of that record. Read inside wrappers
+                       tier, also a `--step` that is no cs-step tag of that record, or a record with no cs-repo
+                       tag for shivinate7/claude-settings. Read inside wrappers
                        (`bash -c`, `$(...)`) too. Also a cloud `merge <pr> --ready` from a session whose own
-                       record carries cs-build:lane, or an MCP update_pull_request with draft false from
-                       one: the batch runner marks a pull request ready.
+                       record carries cs-build:lane and that cs-repo tag, or an MCP update_pull_request with draft false from
+                       one: the batch runner marks a pull request ready. A lane of another repo is not judged.
   merge-confirm-repo   deny. In a cloud session, a merge-tool call with --confirm whose checkout (the -C or
                        --repo-dir value as the merge tool's own parser reads it, else the `cd X &&` directory, else
                        the working directory) has a repo (`git_reads.github_repo`) that no cs-repo tag of the

@@ -19,7 +19,7 @@ from guard_core import (
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, STEP_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, STEP_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags, repo_tag_names  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -1375,6 +1375,7 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
 ROLE_TIERS = ("batch-runner", "lane")  # glossary-ok: ROLE_TIERS is the existing name; merge.py MERGE_ROLES names the same roles
 LOCAL_ROLE_TIERS = ("batch-runner",)  # glossary-ok: the name a test reads; the roles a local role file may name (merge.py LOCAL_MERGE_ROLES), the lane role is a cloud role only
 ROLE_WITH_STEP = "lane"  # the role whose call also names a step (--step), proved by a cs-step tag of the own record
+LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose lanes hold the lane merge role; agrees with merge.py LANE_MERGE_REPO, which this module cannot import
 ROLE_TAG_PREFIX = BUILD_TAG
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
@@ -1472,6 +1473,11 @@ def _nested_segments(text: str, depth: int = 0):
                     yield from _nested_segments(script, depth + 1)
 
 
+def _tags_name_lane_merge_repo(tags) -> bool:
+    """True when a cs-repo tag of the own record names LANE_MERGE_REPO: the only repo whose lanes hold the lane merge role. Own tags only, no REST read."""
+    return any(repo_tag_names(tag, LANE_MERGE_REPO) for tag in tags)
+
+
 def role_proof_hit(stripped: str, transcript: str) -> str:
     """Return the matched call when a segment runs the merge tool with a role the own record does not
     prove, else ''. Fails closed inside the clause: any error in the reads is a refusal, because the
@@ -1495,7 +1501,8 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
                 tags = _own_get_session_tags(transcript, own_id)
                 if role in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + role in tags:  # glossary-ok: ROLE_TIERS is the existing name
                     step = role_step_of(segment)
-                    if role != ROLE_WITH_STEP or (step and STEP_TAG + step in tags):  # a lane's step must be a cs-step tag of its own record, exactly
+                    # a lane's step must be a cs-step tag of its own record, exactly, and its record must name the lane-merge repo
+                    if role != ROLE_WITH_STEP or (step and STEP_TAG + step in tags and _tags_name_lane_merge_repo(tags)):
                         continue
         except Exception:
             pass
@@ -1806,15 +1813,16 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int, local_se
 
 
 LANE_READY_REASON = (
-    "merge-role-proof: this session's own record is a lane's, and the batch runner marks a pull request ready, not a lane. "
+    "merge-role-proof: this session's own record is a claude-settings lane's, and the batch runner marks a pull request ready, not a lane. "
     "Leave the draft as it is. The batch runner finds it (list_sessions, tag cs-build:batch-runner, same cs-repo). "
     "(decision session-tiers, a session's role decides which merge acts it may run)"  # glossary-ok: session-tiers is the decision's file name
 )
 
 
 def lane_ready_hit(stripped: str, transcript: str) -> str:
-    """Return a label when a cloud session whose own newest get_session record carries cs-build:lane runs the merge tool's ready mark, else ''.
-    A batch runner, a session with another or no cs-build tag, and a session with no readable record are not judged here: the repo proof
+    """Return a label when a cloud session whose own newest get_session record carries cs-build:lane and a cs-repo tag naming LANE_MERGE_REPO runs the
+    merge tool's ready mark, else ''. A batch runner, a lane of another repo or with no cs-repo tag, a session with another or no cs-build tag, and a
+    session with no readable record are not judged here: the repo proof
     (repo_proof_hit) still judges each. A script a wrapper hands on is read as a top-level call is (_nested_segments); one nested deeper
     than MERGE_NEST_DEPTH that holds the flag counts as a call. Cost: one parse per merge-tool segment, and one transcript read when a ready flag is found."""
     if not is_cloud() or "--ready" not in stripped:   # the cheap filter: a call with no ready flag reads no transcript
@@ -1836,19 +1844,19 @@ def lane_ready_hit(stripped: str, transcript: str) -> str:
 
 
 def _own_record_is_lane(transcript: str) -> bool:
-    """True when the own newest get_session record in `transcript` carries cs-build:lane. No id, no transcript, no record and a failed read are False:
-    the callers refuse only a session that proves it is a lane, and the repo proof judges the rest."""
+    """True when the own newest get_session record in `transcript` carries cs-build:lane and a cs-repo tag naming LANE_MERGE_REPO. No id, no transcript,
+    no record and a failed read are False: the callers refuse only a session that proves it is a claude-settings lane, and the repo proof judges the rest."""
     try:
         from override import remote_session_id
         own_id = remote_session_id()
         tags = _own_get_session_tags(transcript, own_id) if own_id and transcript else None
     except Exception:
         return False
-    return tags is not None and LANE_TAG in tags
+    return tags is not None and LANE_TAG in tags and _tags_name_lane_merge_repo(tags)
 
 
 def lane_mcp_ready_hit(tool: str, tool_input, transcript: str) -> str:
-    """Return a label when a cloud session whose own record is a lane's marks a pull request ready through the MCP update tool (draft false), else ''.
+    """Return a label when a cloud session whose own record is a claude-settings lane's (_own_record_is_lane) marks a pull request ready through the MCP update tool (draft false), else ''.
     Only a draft of exactly False counts: a title edit, no draft field and draft true mark nothing ready. The refusal is LANE_READY_REASON, as for
     lane_ready_hit. Cost: none for another tool; one transcript read for a draft-false update."""
     if tool != READY_PAGE_MCP_TOOL or not is_cloud() or not isinstance(tool_input, dict) or tool_input.get("draft") is not False:
