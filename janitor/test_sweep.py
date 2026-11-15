@@ -1294,6 +1294,31 @@ class StaleAgentLockTests(unittest.TestCase):
         self.assertTrue(guard.worktree_locked(self.root, self.wt["dead"]))
 
 
+class LiveFormLockOffLinuxTests(unittest.TestCase):
+    """Off Linux the live-form lock's start ticks cannot be read (`_ticks_lock_stale`), so a dead
+    host is unproven and its tree is kept, finish proof or not. This runs on every platform: it sets
+    the platform name, so Windows and macOS test the keep path they take."""
+
+    LOCK = "claude agent agent-offlinux (pid %d start 12345)"
+
+    @classmethod
+    def setUpClass(cls):
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        cls.dead_pid = gone.pid
+
+    def test_a_dead_host_live_lock_is_unproven_and_never_frees_its_tree(self):
+        lock = self.LOCK % self.dead_pid
+        for platform in ("win32", "darwin"):
+            with mock.patch.object(sys, "platform", platform):
+                with self.subTest(platform=platform, call="stale_agent_lock_verdict"):
+                    self.assertIsNone(sweep.stale_agent_lock_verdict(lock))
+                for finished in (False, True):
+                    with self.subTest(platform=platform, call="finish_gated_lock_verdict", finished=finished):
+                        self.assertIsNot(sweep.finish_gated_lock_verdict(lock, finished), True,
+                                         "a dead-host live lock freed its tree off Linux")
+
+
 class ListenerDecisionTests(unittest.TestCase):
     """`sweep.find_swept_listeners` / `sweep.decide_listener`. Every listener here is a REAL
     process this suite starts itself (`spawn_plain_listener` / `spawn_orphaned_listener`),
@@ -1741,7 +1766,8 @@ class LooseProcessTests(unittest.TestCase):
 # ----------------------------------------- the SessionEnd run's reads (janitor/sweep.py)
 #
 # The SessionEnd run (`--session-end`, `args.session_end`) reads no loose processes, reads the machine's
-# pid list once, and stops every proven dead-rooted orphan, in any repository, as the scheduled job does.
+# pid list once, and stops the proven dead-rooted orphans rooted in its own repository only.
+# The scheduled job stops them in any repository.
 # The branch and worktree tiers stay one repository's. Every machine read below is answered from a
 # fixture table by `fake_process_table`, so a case decides the rule and not this machine's processes.
 # Each missing script path is real, under real folders, so `sweep._project_ancestor` decides exactly as
@@ -1873,28 +1899,29 @@ class SessionEndScopeTests(unittest.TestCase):
         self.assertIn(SCOPE_PIDS["primary"], seen["signals"],
                       "the orphan under this repository's primary checkout was not signalled")
 
-    def test_the_session_end_run_signals_a_proven_orphan_in_another_repository(self):
-        """The dead-rooted stop is as wide at SessionEnd as the scheduled job's: a proven orphan
-        whose script sat under another repository is signalled by either run."""
+    def test_the_session_end_run_leaves_a_proven_orphan_in_another_repository_alone(self):
+        """The SessionEnd run stops dead-rooted
+        servers rooted in its own repository only. A proven orphan whose script sat under another
+        repository waits for the daily job, which signals it (test_the_daily_run_still_signals_another_repos_orphan)."""
         seen = sweep_over_fixture(self.fx, session_end=True,
                                   before=lambda: sweep.find_dead_rooted())
         self.assertIn(SCOPE_PIDS["other"], pids_of(seen["before"]),
                       "precondition: the machine-wide read did not see the other repository's "
                       "orphan, so this case proves nothing")
-        self.assertIn(SCOPE_PIDS["other"], seen["signals"],
-                      "the session-end run left a proven orphan in another repository alone, "
-                      "where the scheduled job signals it")
+        self.assertNotIn(SCOPE_PIDS["other"], seen["signals"],
+                         "the session-end run stopped a proven orphan rooted in another repository")
 
-    def test_the_session_end_run_signals_an_orphan_whose_project_ancestor_is_its_parent(self):
-        """A missing script under a folder that carries `.claude` has that parent as its project
-        ancestor. The scheduled job signals it, so the session-end run does too."""
+    def test_the_session_end_run_leaves_a_parent_ancestor_orphan_alone(self):
+        """A missing script under a folder that carries `.claude` has that folder as its project
+        ancestor. That folder holds this repository but is not inside it, so the session-end run
+        leaves the orphan to the daily job."""
         seen = sweep_over_fixture(self.fx, session_end=True,
                                   before=lambda: sweep.find_dead_rooted())
         self.assertIn(SCOPE_PIDS["ancestor"], pids_of(seen["before"]),
                       "precondition: the machine-wide read did not see the parent-ancestor orphan")
-        self.assertIn(SCOPE_PIDS["ancestor"], seen["signals"],
-                      "the session-end run left a parent-ancestor orphan alone, where the "
-                      "scheduled job signals it")
+        self.assertNotIn(SCOPE_PIDS["ancestor"], seen["signals"],
+                         "the session-end run stopped a dead-rooted server rooted in a folder "
+                         "above this repository")
 
     def test_the_session_end_run_scans_no_loose_processes(self):
         seen = sweep_over_fixture(self.fx, session_end=True)
@@ -1914,7 +1941,8 @@ class SessionEndScopeTests(unittest.TestCase):
         self.assertEqual(seen["temp"], 1, "the session-end run did not run the temp-folder tier")
 
     def test_the_daily_run_still_signals_another_repos_orphan(self):
-        """Control: the daily run is machine-wide, and the session-end run must match it."""
+        """The daily job's pin for a proven orphan in another repository. The daily job is
+        machine-wide; the session-end run is not (decision `the-janitor-is-one-machine-wide-sweep`)."""
         seen = sweep_over_fixture(self.fx, session_end=False)
         self.assertIn(SCOPE_PIDS["other"], seen["signals"])
 

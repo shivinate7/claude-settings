@@ -37,6 +37,8 @@ import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (on
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import test_refusal_note as hook_base  # noqa: E402  the route-rows seam name and fixture (one home, hooks/test_refusal_note.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 # The correction step's words (decision guard-remedy-not-to-owner, shared tails). A refusal holds none of them; the
@@ -896,19 +898,31 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
 
-    def stop(self, records, reply, agent_model="sonnet"):
-        """Run the Stop hook over the turn's records, with the reply as its last text. Return its verdict or None."""
+    def stop(self, records, reply, agent_model="sonnet", agents_dir=None):
+        """Run the Stop hook over the turn's records, with the reply as its last text. Return its verdict or None.
+        `agents_dir` is a fixture agents folder for the guard's file pins; unset, the guard reads the repository's."""
         records = records + [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
                              assistant_text(reply)]
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
         env = dict(os.environ)
         env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)  # an unset spawn reads the agent file's pin, not this
+        env.pop("REPORT_GUARD_AGENTS_DIR", None)  # the repository's agents folder, unless a case names a fixture one
         if agent_model:
             env["CLAUDE_CODE_SUBAGENT_MODEL"] = agent_model
+        if agents_dir:
+            env["REPORT_GUARD_AGENTS_DIR"] = agents_dir
         run = run_guard(REPORT_GUARD, hook, env=env)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def unpinned_agents(self):
+        """A fixture agents folder whose builder has no model pin: a spawn with no model and no pin resolves to ''."""
+        folder = os.path.join(self.tmp.name, "fixture-agents")
+        os.makedirs(folder)
+        with open(os.path.join(folder, "builder.md"), "w", encoding="utf-8") as handle:
+            handle.write("---\nname: builder\n---\nbody\n")
+        return folder
 
     def verdict(self, reply, spawns, denied=(), running=(), agent_model="sonnet"):
         records = [human("do the task")]
@@ -989,9 +1003,9 @@ class DoneNamesModelsTests(unittest.TestCase):
     RUNNING_NEXT = "> **Next** reviewer round 1 running; Unstarted: none"
 
     @staticmethod
-    def file_pin(role):
-        """The model: key of agents/<role>.md's frontmatter, read from the file the way the guard reads it."""
-        with open(os.path.join(HERE, "..", "agents", role + ".md"), encoding="utf-8") as f:
+    def file_pin(role, folder=os.path.join(HERE, "..", "agents")):
+        """The model: key of <folder>/<role>.md's frontmatter, read from the file the way the guard reads it."""
+        with open(os.path.join(folder, role + ".md"), encoding="utf-8") as f:
             front = f.read().split("---")[1].splitlines()
         for line in front:
             key, _, value = line.partition(":")
@@ -1155,20 +1169,26 @@ class DoneNamesModelsTests(unittest.TestCase):
     def test_dm_red_earlier_unresolved_spawn_hides_window_mismatch_blocks(self):
         # An earlier builder with no resolvable model is '' in the transcript's map. That must not switch off
         # the builder check for the window's builder, which ran opus.
-        self.assertEqual(self.file_pin("builder"), "", "agents/builder.md pins a model, so no spawn is unresolved")
+        # Re-pointed, the coordinator's ruling of 20:38 CST Nov 9 (step builder-model-pin): a builder with no pin is
+        # ruled out in the repository, so this case reads an unpinned fixture folder through REPORT_GUARD_AGENTS_DIR.
+        folder = self.unpinned_agents()
+        self.assertEqual(self.file_pin("builder", folder), "", "fixture error: the builder fixture pins a model")
         records = self.turn_records(earlier=[self.BUILDER_NO_MODEL], window=[self.BUILDER_OPUS])
         out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none",
-                        agent_model=None)
+                        agent_model=None, agents_dir=folder)
         self.assertIsNotNone(out, "Done named builder sonnet against a window builder that ran opus, and passed")
         self.assertIn("'builder sonnet' matches no builder spawn, which ran opus", out["reason"])
 
     def test_dm_red_earlier_unresolved_spawn_hides_window_wrong_model_blocks(self):
         # The mirror: the window's builder ran sonnet, and Done names opus. The earlier unresolved spawn must
         # not let that wrong name pass.
-        self.assertEqual(self.file_pin("builder"), "", "agents/builder.md pins a model, so no spawn is unresolved")
+        # Re-pointed, the coordinator's ruling of 20:38 CST Nov 9 (step builder-model-pin): a builder with no pin is
+        # ruled out in the repository, so this case reads an unpinned fixture folder through REPORT_GUARD_AGENTS_DIR.
+        folder = self.unpinned_agents()
+        self.assertEqual(self.file_pin("builder", folder), "", "fixture error: the builder fixture pins a model")
         records = self.turn_records(earlier=[self.BUILDER_NO_MODEL], window=[self.BUILDER_SONNET])
         out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none",
-                        agent_model=None)
+                        agent_model=None, agents_dir=folder)
         self.assertIsNotNone(out, "Done named builder opus against a window builder that ran sonnet, and passed")
         self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
 
@@ -1488,6 +1508,15 @@ class CompactionCarryTests(unittest.TestCase):
         for name in names:
             self.assertIn(name, out["reason"])
 
+    def assertOnlyMissing(self, out, name):
+        """A block whose reason says the line `name` has not landed, and names no other carry line."""
+        self.assertBlocksNaming(out)
+        self.assertIn("no %s line has landed since" % name, out["reason"],
+                      "the refusal does not say %r is missing" % name)
+        for other in ("Recovered", "Handoff gave"):
+            if other != name:
+                self.assertNotIn("%s line" % other, out["reason"], "the refusal names %r, which is not missing" % other)
+
     def test_cc_red_landed_turn_after_compaction_without_line_blocks(self):
         # Catches: a landed turn after a compaction passes with no Recovered line.
         self.assertBlocksForRecovered(self.stop(self.compacted_turn(REPORT_NO_LINE)))
@@ -1498,6 +1527,8 @@ class CompactionCarryTests(unittest.TestCase):
             "Recovered: none\n\n" + REPORT_NO_LINE,
             # Catches: a word that ends in "recovered:" is read as the line.
             "> **Done** BUILT abc123\n> **Deviations** Unrecovered: P3 ruling\n> **Next** ship it",
+            # Catches: a Done-item line above the report blockquote counts, when only the blockquote may hold it.
+            "- OTHER: Recovered: x (git)\n\n" + REPORT_NO_LINE,
         ]
         for reply in rows:
             with self.subTest(reply=reply):
@@ -1651,16 +1682,22 @@ class CompactionCarryTests(unittest.TestCase):
 
     def test_cc_red_handoff_gave_missing_blocks(self):
         # Catches: a Recovered line with no Handoff gave line passes.
-        self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Recovered: none"))), "Handoff gave")
+        out = self.stop(self.compacted_turn(report_lines("Recovered: none")))
+        self.assertBlocksNaming(out, "Handoff gave")
+        self.assertOnlyMissing(out, "Handoff gave")
 
     def test_cc_red_recovered_missing_with_handoff_present_blocks(self):
         # Catches: a Handoff gave line with no Recovered line passes.
-        self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Handoff gave: none"))))
+        out = self.stop(self.compacted_turn(report_lines("Handoff gave: none")))
+        self.assertBlocksNaming(out)
+        self.assertOnlyMissing(out, "Recovered")
 
     def test_cc_red_handoff_line_outside_the_blockquote_blocks(self):
-        # Catches: a Handoff gave line above the report blockquote counts for the current reply.
-        reply = "Handoff gave: none\n\n" + report_lines("Recovered: none")
-        self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), "Handoff gave")
+        # Catches: a Handoff gave line above the report blockquote counts for the current reply, plain or as a Done item.
+        for above in ("Handoff gave: none", "- OTHER: Handoff gave: none"):
+            with self.subTest(above=above):
+                reply = above + "\n\n" + report_lines("Recovered: none")
+                self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), "Handoff gave")
 
     def test_cc_green_both_lines_with_sources_pass(self):
         rows = [
@@ -1820,6 +1857,51 @@ class CompactionCarryTests(unittest.TestCase):
         out = self.stop(self.compacted_turn(reply))
         self.assertBlocksNaming(out)
         self.assertIn("Recovered line", out["reason"])
+
+    def test_cc_red_both_lines_missing_join_with_and(self):
+        # Catches: the refusal joins the two missing lines with "or", which reads as either one being enough.
+        out = self.stop(self.compacted_turn(REPORT_NO_LINE))
+        self.assertBlocksNaming(out, "no Recovered line and no Handoff gave line has landed since")
+
+    def test_cc_green_other_done_item_lines_count(self):
+        # Catches: a Done item tagged OTHER, "- OTHER: Recovered:" or "- OTHER: Handoff gave:", is not read as its line.
+        reply = "> **Done** BUILT abc123\n> - OTHER: Recovered: x (git)\n> - OTHER: Handoff gave: x\n> **Next** ship it"
+        out = self.stop(self.compacted_turn(reply))
+        self.assertIsNone(out, "a Done item tagged OTHER does not count: %r" % (out,))
+
+    def test_cc_green_built_and_recorded_done_item_lines_count(self):
+        # Catches: a Done item tagged BUILT or RECORDED, "- BUILT: Recovered:" or "- RECORDED: Handoff gave:", is not read as its line.
+        reply = ("> **Done** BUILT abc123\n> - BUILT: Recovered: x from PR #978 (git)\n"
+                 "> - RECORDED: Handoff gave: x from PR #978\n> **Next** ship it")
+        out = self.stop(self.compacted_turn(reply))
+        self.assertIsNone(out, "a Done item tagged BUILT or RECORDED does not count: %r" % (out,))
+
+    def test_cc_red_tags_outside_the_done_kinds_do_not_count(self):
+        # Catches: a bullet tagged NOTE or DONE, which is no Done kind, is read as its carry line.
+        rows = [
+            (report_lines("Recovered: x (git)", "NOTE: Handoff gave: x"), "Handoff gave"),
+            (report_lines("DONE: Recovered: x (git)", "Handoff gave: x"), "Recovered"),
+        ]
+        for reply, name in rows:
+            with self.subTest(reply=reply):
+                self.assertOnlyMissing(self.stop(self.compacted_turn(reply)), name)
+
+    def test_cc_red_fenced_carry_lines_above_the_report_do_not_count(self):
+        # Catches: "Recovered:" and "Handoff gave:" inside a code fence above the report count as carry lines.
+        reply = "```\nRecovered: x (git)\nHandoff gave: x\n```\n\n" + REPORT_NO_LINE
+        self.assertBlocksForRecovered(self.stop(self.compacted_turn(reply)))
+
+    def test_cc_red_mid_item_recovered_text_is_not_a_carry_line(self):
+        # Catches: a backticked or mid-sentence "recovered:" after a Done-item tag is read as the Recovered line.
+        for item in ("- OTHER: built the `Recovered:` check", "- OTHER: the janitor recovered: 3 files from git"):
+            with self.subTest(item=item):
+                reply = "> **Done** BUILT abc123\n> **Deviations**\n> %s\n> Handoff gave: none\n> **Next** ship it" % item
+                self.assertOnlyMissing(self.stop(self.compacted_turn(reply)), "Recovered")
+
+    def test_cc_red_other_tag_with_no_bullet_is_not_a_carry_line(self):
+        # Catches: an OTHER tag at line start, with no bullet, is read as a Done item's Handoff gave line.
+        reply = "> **Done** BUILT abc123\n> **Deviations**\n> Recovered: x (git)\n> OTHER: Handoff gave: x\n> **Next** ship it"
+        self.assertOnlyMissing(self.stop(self.compacted_turn(reply)), "Handoff gave")
 
 
 class CompactionCarryCostTests(unittest.TestCase):
@@ -2807,6 +2889,25 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
             with self.subTest(body=body[0]):
                 out = self.lane(peer_msg("pick?"), assistant_text(self.reply(body)))
                 self.assert_blocked(out, "Lane pick guard", "its parent")
+
+    def test_ln_red_consultant_with_parent_is_owner_facing(self):
+        # Catches: a session tagged cs-build:consultant that has a parent id read as a lane, so its question
+        # to the owner is refused for not going to a parent.
+        record = self.lane_record(tags=("cs-build:consultant",))
+        bare = self.make_repo("bare-consultant", page=False)
+        out = self.stop([*record, human("decide"), *self.box(), assistant_text(self.reply(self.PICK))],
+                        env_id=self.LANE_ENV, repo=bare)
+        self.assertIsNone(out)
+        out = self.stop([*record, human("decide"), assistant_text(self.reply(self.QUESTION))], env_id=self.LANE_ENV)
+        self.assert_blocked(out, "Pick guard")
+        self.assertNotIn("Lane pick guard", out.get("reason", ""))
+
+    def test_ln_red_lane_and_consultant_tags_together_stay_a_lane(self):
+        # Catches: the consultant exemption widened past its bug, so a record with the lane tag too passes
+        # a question that main refuses.
+        record = self.lane_record(tags=("cs-build:lane", "cs-build:consultant"))
+        out = self.stop([*record, peer_msg("pick?"), assistant_text(self.reply(self.PROMISE))], env_id=self.LANE_ENV)
+        self.assert_blocked(out, "Lane pick guard", "its parent")
 
     def test_ln_red_box_or_items_write_blocks(self):
         # Catches: a lane's box or items write read as its send. Neither passes a lane.
@@ -5953,6 +6054,66 @@ class MistakeNamesGuardTests(unittest.TestCase):
     # A ref after a mid-line label counts, with a ref before the label on the same line.
     def test_mg_green_guard_label_after_comma_ref_before_and_after_passes(self):
         self.assert_allowed(mg_report("none", done="> **Done** BUILT #1183, guard: step:x-y"))
+
+
+# The cost of one Stop (the past-ruling check, which reads the ruled store and the roadmap through git and makes one model
+# call). A reply that relays questions makes one past-ruling model call for all of them, and two git processes: the
+# ruled-store ls-tree and the roadmap cat-file. A reply with no question starts nothing. A refusal adds no file under
+# the config dir.
+
+TWO_QUESTIONS = RELAY + "\n\n" + "Should the caps stay at 2x?"  # two different questions, not one repeated
+
+
+class CostTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.decided = tcj.make_repo("cost-decided", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+        cls.ci = tcj.CI_REPO  # a roadmap ref, so the two git processes are the ruled-store ls-tree and the roadmap cat-file
+
+    def stop(self, repo, reply, answers, earlier=()):
+        """One Stop after the owner's message: the `earlier` replies, then `reply`, the one the hook reads."""
+        folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        texts = list(earlier) + [reply]
+        path = write_transcript([human("decide")] + [assistant_text(text) for text in texts], folder)
+        hook = json.dumps({"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
+                           "cwd": repo})
+        return cost_probe.run_hook(REPORT_GUARD, hook, folder, answers)
+
+    def test_a_reply_with_no_question_starts_nothing(self):
+        run = self.stop(self.ci, DONE_ONLY, [[{"ok": True}, None]])
+        self.assertEqual((run["models"], run["children"], run["files"]), ([], [], []))
+
+    def test_a_reply_with_one_question_costs_one_model_call_and_two_git_reads(self):
+        run = self.stop(self.ci, RELAY, [[{"ok": True}, None]])
+        self.assertEqual(len(run["models"]), 1, "one question, one past-ruling call; got %r" % run["models"])
+        self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
+                         "two children, the ruled-store ls-tree and the roadmap cat-file; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "an allow writes no file")
+
+    def test_two_relayed_questions_cost_one_model_call_and_two_git_reads(self):
+        run = self.stop(self.ci, TWO_QUESTIONS, [[{"ok": True}, None]])
+        self.assertEqual(len(run["models"]), 1, "both questions share one past-ruling call; got %r" % run["models"])
+        self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
+                         "two children, the ruled-store ls-tree and the roadmap cat-file; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "an allow writes no file")
+
+    def test_a_refused_relayed_question_blocks_once_and_writes_no_file(self):
+        run = self.stop(self.decided, RELAY, [[json.loads(REFUSE_APPS), None]])
+        self.assertEqual(len(run["models"]), 1)
+        self.assertEqual(json.loads(run["out"]).get("decision"), "block", "the ruling blocks the Stop once")
+        self.assertEqual(run["files"], [], "a past-ruling block writes no file under the config dir")
+
+    def test_a_question_in_an_earlier_reply_costs_one_model_call_and_two_git_reads(self):
+        run = self.stop(self.ci, DONE_ONLY, [[{"ok": True}, None]], earlier=[RELAY])
+        self.assertEqual(len(run["models"]), 1,
+                         "the question in an earlier reply is judged once; got %r" % run["models"])
+        self.assertEqual(cost_probe.names(run["children"]), ["git", "git"],
+                         "two children, the ruled-store ls-tree and the roadmap cat-file; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "an allow writes no file")
+
+    def test_replies_with_no_question_since_the_owner_message_start_nothing(self):
+        run = self.stop(self.ci, DONE_ONLY, [[{"ok": True}, None]], earlier=[DONE_ONLY])
+        self.assertEqual((run["models"], run["children"], run["files"]), ([], [], []))
 
 
 if __name__ == "__main__":
