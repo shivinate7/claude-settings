@@ -14911,6 +14911,48 @@ class ReviewEnv(Env):
             sha, *parents, tree = line.split()
             fx.parents[sha], fx.trees[sha] = parents, tree
 
+    def git_merged(self, a, b):
+        """-> (rc, tree) of git's own merge of a and b in the checkout, as merge-tree --write-tree answers it: the first word is the tree."""
+        r = subprocess.run(["git", "merge-tree", "--write-tree", a, b], cwd=self.co, capture_output=True, text=True)
+        words = r.stdout.split()
+        return r.returncode, (words[0] if words else None)
+
+    def main_tip(self):
+        """The tip of main as the product code reads it: origin/main in the host checkout (refs/remotes/origin/<base>)."""
+        return sh(self.co, "git", "rev-parse", "origin/main")
+
+    def merge_carry_fixture(self):
+        """Real commits in the checkout, at small size, for the merge-tree carry. `H` is the record's head: it adds a.txt to the seed. `M` is main's
+        tip: it adds b.txt to the seed, and is pushed to origin main and fetched, so refs/remotes/origin/main reads M (the ref the merge reads main's
+        tip from). `L` is the live head, a re-cut off M whose tree is git's clean merge of H and M (the shape of #3429 and #3435, at small size). `L2`
+        is L plus one file. `Hc` changes b.txt, so git's merge of Hc and M conflicts, and `Lc` holds that conflicted tree. `H_eq` is off the seed and
+        holds H's tree. Each premise is read from git's own answers and asserted here, so a red case never rests on a wrong fixture."""
+        def tree(c):
+            return sh(self.co, "git", "rev-parse", f"{c}^{{tree}}")
+
+        seed = sh(self.co, "git", "rev-parse", "origin/main")
+        H = self.git_commit(seed, {"a.txt": "record head\n"})
+        M = self.git_commit(seed, {"b.txt": "main moved\n"})
+        Hc = self.git_commit(seed, {"b.txt": "record changes b\n"})
+        sh(self.co, "git", "push", "-q", "origin", f"{M}:refs/heads/main")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(self.main_tip(), M, "fixture: origin/main is not the main tip M")
+        rc, merged = self.git_merged(H, M)
+        self.assertEqual(rc, 0, "fixture: git's merge of the record's Head and main is not clean")
+        L = self.git_commit(M, {"a.txt": "record head\n"})
+        self.assertEqual(tree(L), merged, "fixture: the tree of L is not git's merge of H and M")
+        self.assertNotEqual(tree(L), tree(H), "fixture: L holds H's own tree, so the carry is an equal-tree one")
+        L2 = self.git_commit(M, {"a.txt": "record head\n", "x.txt": "extra\n"})
+        self.assertEqual(sh(self.co, "git", "diff-tree", "-r", "--name-only", merged, tree(L2)), "x.txt", "fixture: L2 is not git's merge plus x.txt")
+        rc, conflicted = self.git_merged(Hc, M)
+        self.assertEqual(rc, 1, "fixture: git's merge of Hc and main does not conflict")
+        Lc = self.git_commit(M, {}, tree=conflicted)
+        H_eq = self.git_commit(seed, {"a.txt": "record head\n"})
+        self.assertEqual(tree(H_eq), tree(H), "fixture: H_eq does not hold H's tree")
+        fx = types.SimpleNamespace(parents={}, trees={}, H=H, M=M, Hc=Hc, L=L, L2=L2, Lc=Lc, H_eq=H_eq, merged=merged)
+        self.facts(fx, [seed, H, M, Hc, L, L2, Lc, H_eq])
+        return fx
+
     def fork_merge(self, fx):
         """-> the sha of a merge of main into a commit off the reviewed head, which only this checkout holds: it is never pushed, so origin lacks it
         and a main-only clone cannot read it. The merge's tree is git's clean merge of its parents. Its parents and trees go into fx."""
@@ -16902,6 +16944,18 @@ class ReleaseCheck(ReviewEnv):
                                          per_issue={REPLACES_SOURCE: [source]})
         return rc, lines, err
 
+    def replacement_release_real(self, fx, source=None):
+        """`--release-check 7` where #7 is a replacement of #6 (its body names `Replaces #6`), at the feature head, and #6's record and lint sit at
+        `source` (fx.H unless named). The parents and trees of the feature head come from git (facts); the rest of `fx` goes to the host, so the carry
+        reads real trees and merge-tree reads real objects. -> (rc, lines, err) of the run."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        feat, source = self.head("feat"), fx.H if source is None else source
+        self.facts(fx, [feat])
+        record = review_comment(1, REPLACES_SOURCE, record_text(n=REPLACES_SOURCE, head=source, rounds=REVIEW_PASS))
+        rc, lines, err, _ = self.release([7], lint=["--lint", f"7@{source}:PASS"], comments=[], bodies={7: REPLACES_BODY},
+                                         commits=fx.parents, trees=fx.trees, per_issue={REPLACES_SOURCE: [record]})
+        return rc, lines, err
+
     def test_replacement_release_a_same_tree_source_record_and_lint_carry_to_the_release_check(self):
         rc, lines, err = self.replacement_release(lambda tree: tree)
         line = self.line_of(lines, 7)
@@ -16910,9 +16964,31 @@ class ReleaseCheck(ReviewEnv):
         self.assertEqual((rc, line), (0, "#7 PASS"), err)
 
     def test_replacement_release_b_a_different_tree_source_is_not_carried_to_the_release_check(self):  # control: green on the old code
-        rc, lines, err = self.replacement_release(lambda tree: OTHER_TREE)
+        fx = self.merge_carry_fixture()
+        feat = self.head("feat")
+        self.facts(fx, [feat])
+        rc_m, merged = self.git_merged(fx.H, self.main_tip())
+        self.assertEqual(rc_m, 0, "fixture: git's merge of the source's head and main is not clean")
+        self.assertNotEqual(fx.trees[feat], fx.trees[fx.H], "fixture: the feature head holds the source's own tree")
+        self.assertNotEqual(fx.trees[feat], merged, "fixture: the feature head holds git's merge of the source and main, so it would carry")
+        rc, lines, err = self.replacement_release_real(fx)
         self.assertEqual(rc, 1, err)
         self.assertIn("no review record", self.line_of(lines, 7), "a source whose tree differs carried its record to #7")
+
+    def test_replacement_release_c_a_source_head_the_checkout_lacks_reads_unknown_never_none_or_done(self):  # pin: green on the builder tip
+        fx = self.merge_carry_fixture()
+        feat = self.head("feat")
+        self.facts(fx, [feat])
+        missing = "5e" * 20  # a head no clone holds, so the one fetch cannot bring it
+        fx.parents[missing], fx.trees[missing] = [], fx.trees[fx.H]
+        self.assertFalse(self.has_commit(self.co, missing), "fixture: the checkout holds the source head that the case says it lacks")
+        self.assertNotEqual(fx.trees[missing], fx.trees[feat], "fixture: the missing source's tree is the feature head's, so the trees do not differ")
+        rc, lines, err = self.replacement_release_real(fx, source=missing)
+        self.assertEqual(rc, 1, err)
+        line = self.line_of(lines, 7)
+        self.assertTrue(line.startswith("#7 FAIL: "), "the release check did not refuse #7 on a source head it cannot read: " + line)
+        self.assertIn("carries by tree is unknown", line, "a source head the checkout lacks did not read unknown: " + line)
+        self.assertNotIn("no review record", line, "a source head the checkout lacks read none, which is a refusal that claims no record: " + line)
 
     def test_round3_2_a_carried_record_that_is_held_failed_or_open_refuses_the_release_check(self):
         # A carry changes the head test only, so the source's verdict is the release check's reason: held, a failed fix check, or open.
@@ -18139,48 +18215,6 @@ class ReplacementCarry(ReviewEnv):
         # The Carries alias of the Replaces line names the same source, so a replacement that uses it carries too.
         self.reviewed_line(self.carry_host(per_issue=self.source_issue(self.source_record(), self.source_lint()), body="Carries #6\n"),
                            REVIEW_HEAD, "done", "a Carries #6 line did not name its source")
-
-    def git_merged(self, a, b):
-        """-> (rc, tree) of git's own merge of a and b in the checkout, as merge-tree --write-tree answers it: the first word is the tree."""
-        r = subprocess.run(["git", "merge-tree", "--write-tree", a, b], cwd=self.co, capture_output=True, text=True)
-        words = r.stdout.split()
-        return r.returncode, (words[0] if words else None)
-
-    def main_tip(self):
-        """The tip of main as the product code reads it: origin/main in the host checkout (refs/remotes/origin/<base>)."""
-        return sh(self.co, "git", "rev-parse", "origin/main")
-
-    def merge_carry_fixture(self):
-        """Real commits in the checkout, at small size, for the merge-tree carry. `H` is the record's head: it adds a.txt to the seed. `M` is main's
-        tip: it adds b.txt to the seed, and is pushed to origin main and fetched, so refs/remotes/origin/main reads M (the ref the merge reads main's
-        tip from). `L` is the live head, a re-cut off M whose tree is git's clean merge of H and M (the shape of #3429 and #3435, at small size). `L2`
-        is L plus one file. `Hc` changes b.txt, so git's merge of Hc and M conflicts, and `Lc` holds that conflicted tree. `H_eq` is off the seed and
-        holds H's tree. Each premise is read from git's own answers and asserted here, so a red case never rests on a wrong fixture."""
-        def tree(c):
-            return sh(self.co, "git", "rev-parse", f"{c}^{{tree}}")
-
-        seed = sh(self.co, "git", "rev-parse", "origin/main")
-        H = self.git_commit(seed, {"a.txt": "record head\n"})
-        M = self.git_commit(seed, {"b.txt": "main moved\n"})
-        Hc = self.git_commit(seed, {"b.txt": "record changes b\n"})
-        sh(self.co, "git", "push", "-q", "origin", f"{M}:refs/heads/main")
-        sh(self.co, "git", "fetch", "-q", "origin")
-        self.assertEqual(self.main_tip(), M, "fixture: origin/main is not the main tip M")
-        rc, merged = self.git_merged(H, M)
-        self.assertEqual(rc, 0, "fixture: git's merge of the record's Head and main is not clean")
-        L = self.git_commit(M, {"a.txt": "record head\n"})
-        self.assertEqual(tree(L), merged, "fixture: the tree of L is not git's merge of H and M")
-        self.assertNotEqual(tree(L), tree(H), "fixture: L holds H's own tree, so the carry is an equal-tree one")
-        L2 = self.git_commit(M, {"a.txt": "record head\n", "x.txt": "extra\n"})
-        self.assertEqual(sh(self.co, "git", "diff-tree", "-r", "--name-only", merged, tree(L2)), "x.txt", "fixture: L2 is not git's merge plus x.txt")
-        rc, conflicted = self.git_merged(Hc, M)
-        self.assertEqual(rc, 1, "fixture: git's merge of Hc and main does not conflict")
-        Lc = self.git_commit(M, {}, tree=conflicted)
-        H_eq = self.git_commit(seed, {"a.txt": "record head\n"})
-        self.assertEqual(tree(H_eq), tree(H), "fixture: H_eq does not hold H's tree")
-        fx = types.SimpleNamespace(parents={}, trees={}, H=H, M=M, Hc=Hc, L=L, L2=L2, Lc=Lc, H_eq=H_eq, merged=merged)
-        self.facts(fx, [seed, H, M, Hc, L, L2, Lc, H_eq])
-        return fx
 
     def merge_carry_host(self, fx, live, *source_comments, **kw):
         """Pull request 7 at `live`, a replacement whose body says `Replaces #6`, with the commits and trees of `fx`, and #6's own comment list as
