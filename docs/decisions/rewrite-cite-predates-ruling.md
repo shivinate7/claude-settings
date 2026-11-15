@@ -19,7 +19,7 @@ Named incident F119, landed 2026-11-01. Sessions said decision `ci-job-caps` was
 - Fails open: no record file, no ruling stamp, git missing or failing. Each passes.
 - Shallow-clone limit: a shallow clone cuts history, so the record's last commit can read later than it is. The check then misses a stale rewrite. It never refuses a fresh one.
 
-Cost: one regex read of the reply. Only on a reply that matches it: a file check per cited id, and one `git log -1 --branches --remotes HEAD` per distinct id with a record file, at most 5 per reply. The same id in many sentences runs one git process. A reply that cites no id with a record file runs no git. No file is written, and no timer or log is kept. `RewriteStampTests` in `lint/test_report_guard.py` proves the git count with `GIT_TRACE`.
+Cost: one regex read of the reply (unmeasured). Only on a reply that matches it: a file check per cited id, and one `git log -1 --branches --remotes HEAD` per distinct id with a record file, at most 5 per reply. The same id in many sentences runs one git process (unmeasured). A reply that cites no id with a record file runs no git. No file is written, and no timer or log is kept. `RewriteStampTests` in `lint/test_report_guard.py` proves the git count with `GIT_TRACE`.
 
 Kind: process
 Home: lint/report_guard.py

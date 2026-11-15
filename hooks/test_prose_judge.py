@@ -44,15 +44,21 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
+import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO_ROOT, "settings.json")
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "lint"))
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import _test_ruling_kind_fixture as fx  # noqa: E402  the fixture record text (lint/_test_ruling_kind_fixture.py)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 
 try:
     import prose_judge as pj
@@ -487,6 +493,58 @@ def case_g_one_kind_line_record_is_not_refused_for_a_kind_count():
     check("g: Write of the one-Kind record: an ok verdict allows it (control)", code == 0 and out == "", (code, out))
 
 
+# The cost of one fire (the model-call judges row). A decisions path costs one model call and nothing else on an
+# allow. Any other path or tool starts nothing. A refusal adds the guard log line and whatever guard_core starts,
+# which the case reads from the run.
+
+class CostTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.folder = _test_temp.run_folder()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.folder, ignore_errors=True)
+
+    def fire(self, payload, answers=None):
+        folder = tempfile.mkdtemp(dir=self.folder)
+        return cost_probe.run_hook(os.path.join(HERE, "prose_judge.py"), json.dumps(payload), folder, answers)
+
+    def test_a_path_outside_decisions_starts_nothing(self):
+        run = self.fire(edit("README.md"))
+        self.assertEqual((run["code"], run["models"], run["children"], run["files"], run["out"]), (0, [], [], [], ""))
+
+    def test_a_tool_other_than_edit_or_write_starts_nothing(self):
+        run = self.fire({"hook_event_name": "PreToolUse", "tool_name": "Bash",
+                         "tool_input": {"command": "ls docs/decisions"}})
+        self.assertEqual((run["code"], run["models"], run["children"], run["files"], run["out"]), (0, [], [], [], ""))
+
+    def test_an_allowed_decision_edit_costs_one_model_call_and_nothing_else(self):
+        run = self.fire(edit("docs/decisions/x.md"), [[{"ok": True}, None]])
+        self.assertEqual(len(run["models"]), 1, "one decisions edit makes one model call, got %r" % run["models"])
+        self.assertEqual(run["models"][0]["timeout"], pj.MODEL_TIMEOUT)
+        self.assertEqual((run["children"], run["files"], run["out"]), ([], [], ""),
+                         "an allow starts no child and writes no file")
+
+    def test_an_allowed_decision_write_costs_one_model_call_and_nothing_else(self):
+        run = self.fire(write("docs/decisions/x.md"), [[{"ok": True}, None]])
+        self.assertEqual(len(run["models"]), 1, "one decisions write makes one model call, got %r" % run["models"])
+        self.assertEqual((run["children"], run["files"]), ([], []))
+
+    def test_a_refusal_adds_the_guard_log_line_and_no_other_file(self):
+        reason = "speak-rewrite-superseded-in-place: rewrite the ruling in place."
+        run = self.fire(edit("docs/decisions/x.md"), [[{"ok": False, "reason": reason}, None]])
+        self.assertEqual(len(run["models"]), 1)
+        self.assertEqual(run["children"], [], "a refusal starts no child; got %r" % run["children"])
+        self.assertEqual(run["files"], ["guard.log"], "a refusal writes the guard log only; got %r" % run["files"])
+        self.assertIn("permissionDecision", run["out"], "a refusal denies")
+
+    def test_the_one_call_fits_the_settings_row_timeout(self):
+        row = cost_probe.settings_timeout("prose_judge.py", "PreToolUse")
+        self.assertIsNotNone(row, "settings.json has a PreToolUse row for prose_judge.py")
+        self.assertLess(pj.MODEL_TIMEOUT, row, "the model call's timeout must end before the row's hook timeout")
+
+
 def main():
     for case in (case_a_other_paths_make_no_model_call, case_a_prose_named_in_a_ts_body_is_not_judged,
                  case_b_md_edit_calls_model_once_with_rule_and_change,
@@ -503,6 +561,8 @@ def main():
             case()
         except Exception as exc:
             check(case.__name__, False, "raised %s: %s" % (type(exc).__name__, exc))
+    if not cost_probe.run_class(CostTests):
+        FAILED.append("CostTests")
     print("%s: %d failed" % ("FAIL" if FAILED else "OK", len(FAILED)))
     return 1 if FAILED else 0
 

@@ -137,6 +137,9 @@ class T(unittest.TestCase):
         """Run hooks/local_time.py as Claude Code runs it: the payload on stdin, the real clock."""
         env = {k: v for k, v in os.environ.items() if k != "LOCAL_TIME_NOW"}
         env["CLAUDE_CONFIG_DIR"] = CONFIG_DIR
+        # settings.json env sets MAILBOX_REPO; the hook would run a live ls-remote and fill ~/.claude/mail.git.
+        env.pop("MAILBOX_REPO", None)
+        env.pop("MAILBOX_CACHE", None)
         payload = json.dumps({"hook_event_name": event, "prompt": "check", "cwd": ROOT_DIR})
         args = [sys.executable, HOOK] + ([flag] if flag else [])
         return subprocess.run(args, input=payload, capture_output=True, text=True, env=env, timeout=30)

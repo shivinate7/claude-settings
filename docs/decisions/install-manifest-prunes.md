@@ -13,7 +13,7 @@ Coordinator brief, lane install-drops-retired-files (2026-11-01): each install r
 
 Why: copy mode (cloud, and Windows with no link rights) left every removed file in place, and a link into a folder git no longer tracks was landed again. Incident: the owner's PC kept `skills/tile-windows` and `hooks/config_report.py` (owner's local audit, 2026-11-01).
 
-Cost: per install, one `git ls-files` start per landed folder and one manifest file written, read once at the next install. No new long-lived process, no timer. A removal that fails keeps its manifest line, so the next install retries it.
+Cost: per install, one `git ls-files` start per landed folder and one manifest file written, read once at the next install (unmeasured). No new long-lived process, no timer. A removal that fails keeps its manifest line, so the next install retries it.
 
 Kind: build
 Home: install.sh

@@ -1,0 +1,34 @@
+name: Push skip
+description: >
+  Decides whether a push to main can skip its checks, and writes the answer to the `skip` output.
+  It says skip=true only when the push commit's tree equals the head tree of a pull request the commit
+  belongs to (a batch-* integration pull request, or a merged lone-lane pull request), and that pull request's
+  run passed: all-jobs-passed and every suite job succeeded. A suite step skipped by scope (a narrowed run) is no gap. A direct push,
+  an admin merge with no green run, a tree mismatch, a red, draft, cancelled or in-progress run, a run of another
+  head or workflow, a schedule or workflow_dispatch run, and any read error give skip=false. The step always
+  exits 0, so the calling job is a visible success. The suite jobs are the jobs all-jobs-passed needs in
+  the calling workflow (read from the calling checkout), so the caller job needs a checkout. The caller passes
+  the context in the calling step's env: GH_TOKEN, REPO, HEAD_SHA, PUSH_TREE and EVENT (checks.yml shows the
+  form, and skills/ci-hygiene/snippets.md section 20 gives the child-repo copy). The caller job needs
+  `permissions: {contents: read, pull-requests: read, checks: read, actions: read}`. The step needs python3 and
+  runs push-skip.py from the action path, which loads lint/all_jobs_passed_rules.py and .github/scripts/nightly-skip.py
+  from the same checkout of this repo, so a pin by SHA carries its own readers. Cost per push: a handful of reads
+  (the pull request list, then per head its commit and its runs); no file written, no process kept.
+inputs:
+  workflow:
+    description: "The calling workflow's path, such as .github/workflows/checks.yml (the default)."
+    required: false
+    default: .github/workflows/checks.yml
+outputs:
+  skip:
+    description: "'true' when the push can skip, else 'false'."
+    value: ${{ steps.decide.outputs.skip }}
+runs:
+  using: composite
+  steps:
+    - name: Decide whether the push can skip
+      id: decide
+      shell: bash
+      env:
+        WORKFLOW: ${{ inputs.workflow }}
+      run: python3 "${{ github.action_path }}/push-skip.py"
