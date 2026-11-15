@@ -1187,15 +1187,23 @@ class ClaudeMdFlag(Env):
         self.assert_flagged(rc, out, "CLAUDE.md", ".claude/CLAUDE.md", "output-styles/a.md")
 
     def pr_renames(self, moves):
-        """Main holds each old path first. The PR merges main, then renames each (old, new). Same text, so git sees a rename."""
+        """Main holds each old path first. The PR merges main, then renames each (old, new), or deletes old when new is None. Same text, so git sees a rename."""
         for old, _ in moves:
             self.on_main(old, "".join(f"rule line {i}\n" for i in range(8)))
         o = self.other
         sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
         sh(o, "git", "merge", "-q", "-m", "sync main", "origin/main")
         for old, new in moves:
-            sh(o, "git", "mv", old, new)
-        sh(o, "git", "commit", "-qm", "pr: move"); sh(o, "git", "push", "-q", "origin", "feat")
+            if new is None:
+                sh(o, "git", "rm", "-q", old)
+            else:
+                sh(o, "git", "mv", old, new)
+        drops = [f"Drops-lines: {old} -- the test removes it" for old, new in moves if new is None]
+        if drops:  # a removal of work main holds names its reason in the last paragraph (decision silent-undo-check-design)
+            sh(o, "git", "commit", "-qm", "pr: delete", "-m", "\n".join(drops))
+        else:
+            sh(o, "git", "commit", "-qm", "pr: move")
+        sh(o, "git", "push", "-q", "origin", "feat")
 
     def test_a_rename_out_of_output_styles_flags_the_old_path(self):  # F1: --name-only names the new path only
         self.pr_renames([("output-styles/x.md", "docs/x.md")])
@@ -1336,6 +1344,18 @@ class ClaudeMdFlag(Env):
         self.assert_flagged(rc, out, "CLAUDE.md")  # the control: the same diff was read, and its rule file is flagged
         self.assertEqual(self.page_flags(out), [], "a near-miss path printed a republish line\n" + out)
         self.assertEqual(self.page_unknowns(out), [], "a near-miss path printed an UNKNOWN line for page.html\n" + out)
+
+    def test_a_pr_that_renames_the_waiting_page_away_still_prints_the_republish_line(self):
+        self.pr_renames([(self.PAGE_PATH, "docs/old-page.md")])  # --no-renames lists the old path as a removal, so the line still prints
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out)  # the merge landed; neither path is a rule file
+        self.assertEqual(self.page_flags(out), [self.PAGE_LINE], "a rename away from page.html printed no republish line\n" + out)
+
+    def test_a_pr_that_deletes_the_waiting_page_still_prints_the_republish_line(self):
+        self.pr_renames([(self.PAGE_PATH, None)])
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out)  # the merge landed; no rule file moved
+        self.assertEqual(self.page_flags(out), [self.PAGE_LINE], "a deletion of page.html printed no republish line\n" + out)
 
 class Race(Env):
     def test_two_runs_one_lock(self):
