@@ -47,7 +47,7 @@
 # in CI. The action prints one line: FAIL when a step fails (a probe's exit 1 and exit 2 both read FAIL, since CI is red on both), else
 # unknown when a step is unknown, else PASS. A step whose env needs the PR body (github.event.pull_request.body) is unknown, since this
 # runner has no PR body: an action with such a step reads unknown after its other steps ran, and a FAIL of those still wins. The real
-# actions/claude-md-cites of PR #3492 (rules and records move together) reads unknown for another reason: its second step's run: holds
+# two-step actions/claude-md-cites reads unknown for another reason: its second step's run: holds
 # `HEAD_SHA="$(git ...)"` and `export HEAD_SHA`, which are not lint commands, so the read refuses the whole action, names that first line,
 # and runs none of its steps. Cost: one bin/verdict and one shell per step, in order on the main thread, never in the worker pool; one
 # `git rev-parse` of the base per run with a base.
