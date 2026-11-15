@@ -80,7 +80,7 @@
                           row); each stopped read's why line goes to stderr. --out writes the file only when every read held, else exit 1.
                           State f: a branch on origin ahead of the base that no PR of any state names or holds, with no `archive/NAME` copy, and not
                           `archive/`, `batch-`, or the base, whose newest commit is 6 h old or more: `lost-work branch NAME (f)`.
-                          Same reader as the rows above; one more git fetch of the branches, no gh call.
+                          Same reader as the rows above; the ledger reuses the run's one fetch and adds three git reads per row, no gh call.
   merge --reviewed --root DIR [--root DIR ...]
                           the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, then that repo's lines.
                           Each lane merges on its own, so a block names no batch to open or build. The base is the root's
@@ -5385,7 +5385,7 @@ def lost_work_rows(h, pulls, facts, live, found=None):
                         row("e", f"head ref {ref} names step {sid}, doing, and its lane {owner or '(none)'} is gone")
             if session is not None and lane is None and not any(key == "e" for key, _text in rows):  # silence would read as a healthy lane
                 unread(f"the footer names {session}, which the live file's lanes do not list, so what its lane is doing is unread")
-            elif session is None and state is None:  # no footer and no log: nothing names a lane to read, and silence would read as a healthy one
+            elif session is None and state in (None, "stale"):  # no footer and no log (or a stale one): nothing names a lane to read, and silence would read as a healthy one
                 unread("the pull request body has no session footer and no review log, so its lane is unread")
         out += [text for _key, text in sorted(rows)]
         unknown = unknown or any(key == "unknown" for key, _text in rows)

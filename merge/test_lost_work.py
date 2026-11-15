@@ -185,6 +185,17 @@ class LostWorkFixture(unittest.TestCase):
         roadmap.git(self.repo, "push", "-q", "origin", "%s:refs/heads/%s" % (sha, name))
         self.branches.append({"name": name})
 
+    def move_head(self, n):
+        """Push a newer commit as pull request n's head, as a push by its lane does. A review log posted before it names the old head, so it reads
+        as stale."""
+        old = self.heads[n]
+        sha = self.commit_on(old, None, "newer")
+        roadmap.git(self.repo, "push", "-q", "origin", "%s:refs/pull/%d/head" % (sha, n))
+        self.heads[n] = sha
+        pull = next(p for p in self.pulls if p["number"] == n)
+        pull["head"] = {**pull["head"], "sha": sha}
+        self.checks[sha] = self.checks[old]
+
     def pr(self, n, parent=None, head_ref=None, session="session_a", log=None, at=60, files=None, lint=True):
         """Open pull request n on main. `log` is "done", "open" or "bad", a review log posted `at` minutes before now (a done log comes with a
         lane-lint PASS at its head unless `lint` is False, and a bad one does not parse), or None for no review log. `session` is the lane session
@@ -365,13 +376,7 @@ class LostWorkRows(LostWorkFixture):
         self.lane("session_b")
         self.thread(7, minutes=781)
         # The head of #7 moves: its open log names the old head, so the log is stale and counts as no log (state c's rule).
-        old = self.heads[7]
-        sha = self.commit_on(old, None, "newer")
-        roadmap.git(self.repo, "push", "-q", "origin", "%s:refs/pull/7/head" % sha)
-        self.heads[7] = sha
-        pull = next(p for p in self.pulls if p["number"] == 7)
-        pull["head"] = {**pull["head"], "sha": sha}
-        self.checks[sha] = self.checks[old]
+        self.move_head(7)
         self.publish()
         lines = self.block(self.host())
         self.assertEqual(rows_for(lines, 8), [("b", "session_b")], "control: no state-b row for #8, whose open review log is past six hours at its head: %r" % lines)
@@ -431,13 +436,7 @@ class LostWorkRows(LostWorkFixture):
         control = [state for state, _owner in rows_for(self.block(self.host()), 7)]
         self.assertNotIn("c", control, "control: #7 with a current done review log gets a state-c row: %r" % control)
         # The pull request head moves: the done log names the old head, so it is stale and counts as no log.
-        old = self.heads[7]
-        sha = self.commit_on(old, None, "newer")
-        roadmap.git(self.repo, "push", "-q", "origin", "%s:refs/pull/7/head" % sha)
-        self.heads[7] = sha
-        pull = next(p for p in self.pulls if p["number"] == 7)
-        pull["head"] = {**pull["head"], "sha": sha}
-        self.checks[sha] = self.checks[old]
+        self.move_head(7)
         rows = [state for state, _owner in rows_for(self.block(self.host()), 7)]
         self.assertIn("c", rows, "no state-c row for #7, whose done review log names an older head, so it counts as no log: %r" % rows)
 
@@ -554,6 +553,25 @@ class LostWorkRows(LostWorkFixture):
         lines = self.block(self.host())
         rows = rows_for(lines, 7)
         self.assertEqual([state for state, _why in rows], ["unknown"], "no unknown row for #7, a PR with no footer and no review log: %r" % lines)
+        self.assertTrue(rows[0][1].endswith("; owner coordinator"), "the unknown row for #7 is not owned by the coordinator: %r" % rows)
+
+    def test_a_stale_review_log_with_no_footer_lists_an_unknown_row(self):
+        # The controls first: a footer names an idle lane, so the stale log reads as state c, and a done log that is not stale with no footer lists
+        # no unknown row. The subject is the stale log with no footer: no lane can be read, so it is unknown, not silence.
+        self.pr(8, log="done", at=60, session="session_b")
+        self.pr(9, log="done", at=60, session=None)
+        self.lane("session_b", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
+        self.thread(8, minutes=781)
+        self.pr(7, log="done", at=60, session=None)
+        self.thread(7, minutes=781)
+        self.move_head(7)
+        self.move_head(8)
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(rows_for(lines, 8), [("c", owner_of("c"))], "control: no state-c row for #8, a stale done log whose footer lane is idle 781 min: %r" % lines)
+        self.assertEqual(rows_for(lines, 9), [], "a row for #9, a done log that is not stale, with no footer: %r" % lines)
+        rows = rows_for(lines, 7)
+        self.assertEqual([state for state, _why in rows], ["unknown"], "no unknown row for #7, a stale done log with no footer: %r" % lines)
         self.assertTrue(rows[0][1].endswith("; owner coordinator"), "the unknown row for #7 is not owned by the coordinator: %r" % rows)
 
     def test_an_unknown_lane_row_carries_the_read_cite(self):
