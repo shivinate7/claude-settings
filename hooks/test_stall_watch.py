@@ -838,7 +838,7 @@ def nested_pipeline_line_lists_every_member_and_inner_shell():
 @posix_case
 def sequence_never_starts_its_next_command_after_the_stop():
     """18. a; b: after the line is stopped, b never starts"""
-    return shape_problems([("a; b", "sleep 30.@MARK@; touch @NEVER@")])
+    return shape_problems([("a; b", shlex.quote(PY) + " -c 'import time; time.sleep(30)' @MARK@; touch @NEVER@")])
 
 
 @posix_case
