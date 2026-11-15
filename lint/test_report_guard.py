@@ -1845,20 +1845,20 @@ class CompactionCarryTests(unittest.TestCase):
         out = self.stop(self.compacted_turn(REPORT_NO_LINE))
         self.assertBlocksNaming(out, "no Recovered line and no Handoff gave line has landed since")
 
-    def test_cc_red_other_done_item_lines_count(self):
+    def test_cc_green_other_done_item_lines_count(self):
         # Catches: a Done item tagged OTHER, "- OTHER: Recovered:" or "- OTHER: Handoff gave:", is not read as its line.
         reply = "> **Done** BUILT abc123\n> - OTHER: Recovered: x (git)\n> - OTHER: Handoff gave: x\n> **Next** ship it"
         out = self.stop(self.compacted_turn(reply))
         self.assertIsNone(out, "a Done item tagged OTHER does not count: %r" % (out,))
 
-    def test_cc_red_built_and_recorded_done_item_lines_count(self):
+    def test_cc_green_built_and_recorded_done_item_lines_count(self):
         # Catches: a Done item tagged BUILT or RECORDED, "- BUILT: Recovered:" or "- RECORDED: Handoff gave:", is not read as its line.
         reply = ("> **Done** BUILT abc123\n> - BUILT: Recovered: x from PR #978 (git)\n"
                  "> - RECORDED: Handoff gave: x from PR #978\n> **Next** ship it")
         out = self.stop(self.compacted_turn(reply))
         self.assertIsNone(out, "a Done item tagged BUILT or RECORDED does not count: %r" % (out,))
 
-    def test_cc_green_tags_outside_the_done_kinds_do_not_count(self):
+    def test_cc_red_tags_outside_the_done_kinds_do_not_count(self):
         # Catches: a bullet tagged NOTE or DONE, which is no Done kind, is read as its carry line.
         rows = [
             (report_lines("Recovered: x (git)", "NOTE: Handoff gave: x"), "Handoff gave"),
@@ -1868,19 +1868,19 @@ class CompactionCarryTests(unittest.TestCase):
             with self.subTest(reply=reply):
                 self.assertOnlyMissing(self.stop(self.compacted_turn(reply)), name)
 
-    def test_cc_green_fenced_carry_lines_above_the_report_do_not_count(self):
+    def test_cc_red_fenced_carry_lines_above_the_report_do_not_count(self):
         # Catches: "Recovered:" and "Handoff gave:" inside a code fence above the report count as carry lines.
         reply = "```\nRecovered: x (git)\nHandoff gave: x\n```\n\n" + REPORT_NO_LINE
         self.assertBlocksForRecovered(self.stop(self.compacted_turn(reply)))
 
-    def test_cc_green_mid_item_recovered_text_is_not_a_carry_line(self):
+    def test_cc_red_mid_item_recovered_text_is_not_a_carry_line(self):
         # Catches: a backticked or mid-sentence "recovered:" after a Done-item tag is read as the Recovered line.
         for item in ("- OTHER: built the `Recovered:` check", "- OTHER: the janitor recovered: 3 files from git"):
             with self.subTest(item=item):
                 reply = "> **Done** BUILT abc123\n> **Deviations**\n> %s\n> Handoff gave: none\n> **Next** ship it" % item
                 self.assertOnlyMissing(self.stop(self.compacted_turn(reply)), "Recovered")
 
-    def test_cc_green_other_tag_with_no_bullet_is_not_a_carry_line(self):
+    def test_cc_red_other_tag_with_no_bullet_is_not_a_carry_line(self):
         # Catches: an OTHER tag at line start, with no bullet, is read as a Done item's Handoff gave line.
         reply = "> **Done** BUILT abc123\n> **Deviations**\n> Recovered: x (git)\n> OTHER: Handoff gave: x\n> **Next** ship it"
         self.assertOnlyMissing(self.stop(self.compacted_turn(reply)), "Handoff gave")
