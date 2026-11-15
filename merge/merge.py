@@ -41,7 +41,8 @@
                           Any commit with one parent ends the walk as stale. `merge --reviewed` proves it
                           (live_review_state). A read or a merge-tree that cannot run, such as a commit the checkout lacks after one fetch, keeps
                           the record stale and the line says unknown; the fix verifier then refuses. Any other difference keeps today's rules.
-                          A replacement PR with no log of its own starts the fix check from its source's newest log when the trees match (see --reviewed).
+                          A replacement PR with no log of its own starts the fix check from its source's newest log when the trees match, or the live tree is
+                          a clean merge of main into the Head (see --reviewed).
                           The refusal of a restarting record offers, in order, carry by tree (this head holds the tree the earlier record reviewed: a new PR
                           whose body says `Replaces #N`), a fix verifier on the delta (the trees differ and no fix check failed), then a new branch as the last resort.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
@@ -54,7 +55,7 @@
                           it reads at its own Head: held stays held and a failed fix check stays open; its why says `carried from #M by tree`. #M may be
                           closed. The record's carry (carry_source) is read the same way by `--reviewed`, `--release-check` and the fix check of `--review-record`.
                           Cost: for a PR that names a source and has no record or lint of its own, one paged read of issue M's comments (once a run)
-                          and two commit reads; when the trees differ, also one `git fetch origin <main>` a run (at most one), then two git rev-parse
+                          and two commit reads; when the trees differ, also one `git fetch origin <main>` a run (at most one), then four git rev-parse
                           starts and one git merge-tree start per read, plus at most one fetch of all branch heads a run when a commit is missing.
                           A read that cannot run reads unknown, never done.
   merge --reviewed --root DIR [--root DIR ...]
@@ -4740,8 +4741,10 @@ def same_tree(h, a, b):
 CARRY_BY_TREE, CARRY_BY_MERGE = "tree", "merge"  # how a record carried (carries_by_tree)
 
 def fetch_main_once(h, root, main):
-    """Bring refs/remotes/origin/<main> to the remote's current tip with one `git fetch origin <main>` a run, its (code, output) kept on h.main_fetch. A failed
-    fetch raises Stop, on this call and on every later one of the run, so a stale local ref is never read as main's tip. Cost: one fetch a run."""
+    """Bring refs/remotes/origin/<main> to the remote's current tip with one `git fetch origin <main>` a run, its (code, output) kept on h.main_fetch. A fetch
+    that exits non-zero raises Stop on this call and on every later call of the run, with no new fetch. A fetch that raises TimeoutExpired or OSError
+    passes that error to the caller and leaves h.main_fetch None, so the next call fetches again. Either way a stale local ref is never read as main's tip.
+    Cost: one fetch a run, or one more after each fetch that raised."""
     if getattr(h, "main_fetch", None) is None:
         h.main_fetch = git(root, "fetch", "-q", "origin", f"+refs/heads/{main}:refs/remotes/origin/{main}")
     code, out = h.main_fetch
@@ -4756,7 +4759,7 @@ def carries_by_tree(h, rec_head, live, main):
     carries nothing. A merge git cannot read (a commit the checkout lacks after merge_state's one fetch, a git without merge-tree --write-tree), a failed
     fetch of main, no `main` and a commit read that names no tree raise Stop, so the caller reads unknown, never None.
     The one home of the carry; the lane lint stays equal-tree (lint_carried). Cost: two commit reads; when the trees differ also fetch_main_once's one
-    fetch a run, then merge_state's reads: two git rev-parse starts and one git merge-tree start per read, plus its one fetch_branch_heads a run when a
+    fetch a run, then merge_state's reads: four git rev-parse starts and one git merge-tree start per read, plus its one fetch_branch_heads a run when a
     commit is missing."""
     live_tree = tree_of(h, live)
     if tree_of(h, rec_head) == live_tree:
@@ -5165,8 +5168,9 @@ def release_check(root, h, numbers, lints, root_why=None, cfgrel=None):
     A claim commit on the reviewed or linted head carries the record and the lint to the live head (claim_only, with the stamp config `cfgrel`,
     DEFAULT_CONFIG when None, as main calls it), as `--reviewed` reads them.
     Cost: one `pulls/N` read per number and one list read of the repo's comments since the oldest of them (every page), one fetch per distinct
-    base, one merge-tree per open number (it writes tree objects, never a ref), and a fetch of a pull request head the clone lacks; no new
-    process kept, file or timer."""
+    base, one merge-tree per open number (it writes tree objects, never a ref), and a fetch of a pull request head the clone lacks. A number
+    that reads a record from its source (carries_by_tree) and whose tree differs from the source Head's adds one fetch of main a run, and
+    four git rev-parse starts and one git merge-tree start per carry read. No new process kept, file or timer."""
     numbers = list(dict.fromkeys(numbers))  # a number given twice gets one line, at its first position
     infos, own, fetched, cfgrel = {}, {}, {}, cfgrel or DEFAULT_CONFIG
     for n in numbers if root_why is None else ():
