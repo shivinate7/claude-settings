@@ -49,6 +49,8 @@ Lane ruling, 2026-11-07 23:22 CST, process-only (review round 1, item 11): the r
 
 Lane ruling, 2026-11-07 23:50 CST, lane session, process-only: only a table act is a claim. Measured on 400 recent main commit messages: a check of other acts flagged 12 of 12 phrase hits, and none was a hand-off claim (decision `guard-that-cries-wolf-is-spent`).
 
+Cross-reference, 2026-11-15 13:38 CST: that measure covers commit messages, which have no turns or zero-tool-call gate, so it does not cover the check in decision `cant-claim-needs-probe` (a cannot-claim with no probe).
+
 Coordinator, 2026-11-07 14:36 CST, process-only: the waiting page judges a task's "Why yours" line by guard rule `task-why-cited`. It accepts a route-row cite and a dated measured cite only, and reads no refusals file, so a backtick tool-name cite does not pass there.
 
 ## Incident
