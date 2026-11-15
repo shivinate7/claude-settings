@@ -19,7 +19,7 @@ from guard_core import (
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags, repo_tag_names  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_BRIEF_MARKER, LANE_GRANT_MARKER, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags, repo_tag_names  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -1903,7 +1903,7 @@ def trust_card_hit(tool: str, transcript: str) -> str:
 # ---- archive_session: a lane closes only after its records pull request has left the open list
 ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
 ARCHIVE_LANE_TAG = LANE_TAG
-ARCHIVE_STEP_PREFIX, ARCHIVE_REPO_PREFIX = "cs-step:", "cs-repo:"
+ARCHIVE_STEP_PREFIX, ARCHIVE_REPO_PREFIX = STEP_TAG, REPO_TAG
 ARCHIVE_NO_RECORD_REASON = (
     "this session's or this agent's transcript holds no get_session record of the target, so the guard cannot tell whether "
     "the target is a lane with records still to land. Run get_session on the target alone, in its own turn, "
@@ -1917,9 +1917,11 @@ ARCHIVE_TAGS_REASON = (
     "the target's record is a lane with no cs-step tag or no cs-repo tag, so the guard cannot find its "
     "records pull request. Fix the lane's tags, run get_session on the target alone, then retry. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
+# A template: %s is the lane's cs-repo repos, comma-separated.
 ARCHIVE_READ_REASON = (
-    "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "
-    "records have landed. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "the open pull requests of the lane's repo (%s) could not be read, so the guard cannot tell whether its "  # glossary-ok: session-tiers is the decision's file name
+    "records have landed. If the repo is not attached to this session, attach it read-only with `add_repo` "
+    "(access read), then retry; if gh itself failed, retry when it answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_NO_PR_REASON = (
     "a branch of the lane is ahead of its repo's default branch and has no pull request that covers it, so closing "
@@ -1927,9 +1929,11 @@ ARCHIVE_NO_PR_REASON = (
     "push an archive copy of it under archive/, then retry. "
     "(decision session-tiers, a lane closes only after its records pull request has landed)"
 )
+# A template, as ARCHIVE_READ_REASON.
 ARCHIVE_BRANCH_READ_REASON = (
-    "the lane's branches or their pull requests could not be read, so the guard cannot tell whether any work of "
-    "the lane is stranded. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "the lane's branches or their pull requests (repo %s) could not be read, so the guard cannot tell whether any work of "  # glossary-ok: session-tiers is the decision's file name
+    "the lane is stranded. If a repo of the lane is not attached to this session, attach it read-only with `add_repo` "
+    "(access read), then retry; if gh itself failed, retry when it answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_STRANDED_MATCH = "archive of a lane with a branch that has no pull request"
 _REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
@@ -2204,8 +2208,8 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
             stranded = _stranded_branch(module, lanes, repos, slugs, open_rows)
     except (Exception, SystemExit):
         if reading_branches:
-            return "archive with an unreadable branch read", ARCHIVE_BRANCH_READ_REASON
-        return "archive with an unreadable pull request list", ARCHIVE_READ_REASON
+            return "archive with an unreadable branch read", ARCHIVE_BRANCH_READ_REASON % ", ".join(repos)
+        return "archive with an unreadable pull request list", ARCHIVE_READ_REASON % ", ".join(repos)
     if stranded:
         return ARCHIVE_STRANDED_MATCH, ARCHIVE_NO_PR_REASON
     return None
@@ -2213,7 +2217,8 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
 
 # ---- send_message: a lane brief goes to a lane of its own topic (rule lane-one-topic)
 BRIEF_TOOL = "mcp__claude-code-remote__send_message"
-LANE_BRIEF_MARKER = "Lane brief:"  # the first non-blank line of a brief (after its Grant line, if any) starts `Lane brief: <step>. Topic: <topic>.`
+# The first non-blank line of a brief (after its Grant line, if any) starts `Lane brief: <step>. Topic: <topic>.`
+# (LANE_BRIEF_MARKER, shared_names).
 TOPIC_TAG_PREFIX = TOPIC_TAG
 _MARKDOWN_LEAD = r"[#*_>\s]*"  # a brief may open with markdown: a heading, bold, a quote
 _BRIEF_MARKER_LINE = re.compile(_MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER), re.IGNORECASE)

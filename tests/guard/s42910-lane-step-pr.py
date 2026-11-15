@@ -50,13 +50,14 @@ def build_archopen_two():
 lazy_fixture([ARCHOPEN_TWO_5, ARCHOPEN_TWO_7], build_archopen_two)
 
 
-def steppr_create(name, expected, env_path, prompt=LANE_PROMPT, tags=STEPPR_TAGS, carries=()):
+def steppr_create(name, expected, env_path, prompt=LANE_PROMPT, tags=STEPPR_TAGS, carries=(), effort=LANE_EFFORT_FIELD):
     """A create_session the pull request rule judges, over a whole read with no live session on the step. The call is a
-    lane start that passes the lane rules, so only this rule decides it. An allow must print nothing."""
+    lane start that passes the lane rules, so only this rule decides it (`effort` is the field a case breaks, or none).
+    An allow must print nothing."""
     add("lane-step-dup: " + name, expected, rule=None if expected == "allow" else STEPPR_RULE, tool=CREATE_SESSION,
         cwd=NOGIT, transcript=role_path("stepdup-create-empty"), env=ROLE_ENV, silent=expected == "allow",
         carries=carries, env_path=env_path, title="Lane dup-step: do the step", tags=list(tags), prompt=prompt,
-        effort=LANE_EFFORT_FIELD, model="sonnet", source_url=LANE_SOURCE_URL)
+        effort=effort, model="sonnet", source_url=LANE_SOURCE_URL)
 
 
 def steppr_send(name, expected, env_path, message, carries=()):
