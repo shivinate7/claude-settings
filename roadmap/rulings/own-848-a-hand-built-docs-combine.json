@@ -1,0 +1,10 @@
+{
+ "id": "own-848-a-hand-built-docs-combine",
+ "at": "2026-11-14T20:15:00-06:00",
+ "title": "One docs-only combine of five waiting PRs may be hand-built and timed from ready to merge",
+ "ruling": "Owner 20:15 CST Nov 14, in chat, picked a on page item 848 (pick-hand-built-docs-combine), relayed by the consultant at 20:16 CST: \"i enver ruled against by hand PRs like that i thought but anyways A\". Covers the act option a names: lane g1 hand-builds one combined PR of #3396, #3431, #3428, #3391 and #3430 (all docs-only; the tool's dry fold read them clean) and the combine is timed from the ready mark to the merge, as the first measured number for the train. No variant: not another set of PRs, not a standing licence for hand-built combines. The owner also said he never ruled against hand-built PRs like that; see the rewrite of own-826-a-now-build-b. Home: step combine-train-tool.",
+ "quote": "i enver ruled against by hand PRs like that i thought but anyways A",
+ "source": "Owner chat 20:15 CST Nov 14, relayed by the consultant 20:16 CST Nov 14 (triage did not read the chat); filed by triage",
+ "status": "open",
+ "step": "combine-train-tool"
+}
