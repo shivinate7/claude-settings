@@ -285,6 +285,7 @@ class WaitingPage(Tree):
         self.assertEqual(tuple(export_page.APPEND_ONLY), tuple(self.layout.WAITING_COLLECTIONS),
                          "export_page.APPEND_ONLY is not WAITING_COLLECTIONS: an emptied collection could delete files")
 
+    def test_key_set_returns_the_url(self):
 
         self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": self.URL}))
         self.assertEqual(self.layout.waiting_page(self.tree), self.URL)

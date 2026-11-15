@@ -72,8 +72,8 @@ Contract the page cases assume (the builder builds to it):
   The picture checks of one run share one time budget. Items not checked when it runs out print
     `checks unknown: time budget spent, <k> item(s) not checked`; --check exits 3; export keeps its copy and its exit code.
   Receipts, the sixth waiting collection: `receipts/<doc_id>.json` (a doc id may hold a dot, `park.colour-pick`) exports,
-    is scanned, rebuilds and merges as the other five do, and the live page wins a merge. An export is append-safe for
-    receipts: a receipt the copy holds and the fetch no longer lists stays. An emptied receipts fetch is unknown unless
+    is scanned, rebuilds and merges as the other five do, and the live page wins a merge. An export is append-only, as
+    for every waiting collection: a receipt the copy holds and the fetch no longer lists stays. An emptied receipts fetch is unknown unless
     `--allow-empty receipts` names it. A fetch with no receipts folder, or no marker in it, is unknown.
 """
 import collections
@@ -1212,7 +1212,7 @@ class Mirror(Base):
 
 class Receipts(Base):
     """The sixth waiting collection. `receipts/<doc_id>.json` is written by the owning session, never by the page. An export
-    writes, scans and mirrors it like the other five, except that it is append-safe: a receipt the copy holds and the fetch
+    writes, scans and copies it like the other five, and like them never deletes: a receipt the copy holds and the fetch
     no longer lists stays, since the owner keeps archived receipts through a later page cleanup. The pins at the end hold
     the export's list equal to the registry's."""
 
@@ -1308,9 +1308,25 @@ class Receipts(Base):
         except export_page.Stop as stop:
             self.fail("export(design=False) stopped: %s" % stop)
 
+    def test_a_collection_outside_the_six_still_mirror_deletes(self):
+        """Control for append-only: only the six waiting collections keep their docs. Another role's own collection
+        mirrors the fetch, so the delete branch is still proved to run."""
+        out = self.out()
+        self.export_in_process_with(("steps",), self.fetch(folders={"steps": {"a": item(1), "b": item(2)}}), out)
+        self.assertTrue(os.path.isfile(os.path.join(out, "steps", "b.json")), "scope: steps/b.json did not land")
+        self.export_in_process_with(("steps",), self.fetch(folders={"steps": {"a": item(1)}}), out)
+        self.assertFalse(os.path.exists(os.path.join(out, "steps", "b.json")),
+                         "a collection outside the six kept a doc the fetch no longer lists")
+
+    def export_in_process_with(self, collections, fetched, out):
+        try:
+            return export_page.export(fetched, out, None, (), collections=collections, design=False)
+        except export_page.Stop as stop:
+            self.fail("export stopped: %s" % stop)
+
     def test_a_receipt_the_fetch_lacks_stays_when_the_export_runs_without_its_design_block(self):
         """Append-only follows the collection name, not the design flag: export(design=False) with receipts among its
-        collections keeps an archived receipt. Items still mirror-delete, the control."""
+        collections keeps an archived receipt. Items stay too."""
         out = self.out()
         self.export_in_process(self.fetch(folders={"items": {"item-001": item(1), "item-gone": item(9)},
                                                    "receipts": {"item-001": receipt(1), "item-002": receipt(2)}}), out)

@@ -48,7 +48,8 @@ not count),
 `PWD=<path>`, a no-reply address and an ssh remote of a public git host.
 A personal fact in plain words passes too. A postal address (street, PO box, "City, ST ZIP") is a shape.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
-longer fetched stays in its collection folder: the export adds and updates, and a truncated fetch deletes nothing.
+longer fetched stays in a waiting collection folder: the export adds and updates, and a truncated fetch deletes nothing
+there. A collection outside the six, from another role's registry entry, still mirror-deletes.
 
 Check, before a republish, writes nothing:
 
