@@ -681,7 +681,7 @@ class SetWaitingPage(Tree):
 
     def test_no_key_writes_it_and_returns_true(self):
         self.put(EXTRAS, json.dumps({"kinds": {}, "visibility": "public"}))
-        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL, "current"))
         found = json.loads(self.read_bytes())
         self.assertEqual(found["waiting-page"], self.URL)
         self.assertEqual(found["visibility"], "public")
@@ -689,7 +689,7 @@ class SetWaitingPage(Tree):
 
     def test_missing_extras_file_is_created_with_the_key(self):
         self.assertFalse(os.path.exists(self.extras))
-        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL, "current"))
         found = json.loads(self.read_bytes())
         self.assertLessEqual(set(found), {"kinds", "waiting-page"}, found)  # no other key is written
         self.assertEqual(found["waiting-page"], self.URL)
@@ -697,27 +697,27 @@ class SetWaitingPage(Tree):
         self.assertFalse(self.layout.rolled_out(self.tree))
 
     def test_second_call_writes_nothing(self):
-        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL, "current"))
         before = self.read_bytes()
-        self.assertFalse(self.layout.set_waiting_page(self.tree, self.OTHER))
+        self.assertFalse(self.layout.set_waiting_page(self.tree, self.OTHER, "current"))
         self.assertEqual(self.read_bytes(), before)
         self.assertEqual(self.layout.waiting_page(self.tree), self.URL)
 
     def test_key_already_set_returns_false_and_file_is_byte_identical(self):
         self.put(EXTRAS, '{"kinds": {}, "waiting-page": "%s"}\n' % self.URL)  # hand-formatted, never re-dumped
         before = self.read_bytes()
-        self.assertFalse(self.layout.set_waiting_page(self.tree, self.OTHER))
+        self.assertFalse(self.layout.set_waiting_page(self.tree, self.OTHER, "current"))
         self.assertEqual(self.read_bytes(), before)
 
     def test_rolled_out_mark_is_kept(self):
         self.put(EXTRAS, json.dumps({"kinds": {}, "rolled-out": True}))
-        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL, "current"))
         self.assertIs(json.loads(self.read_bytes())["rolled-out"], True)
         self.assertTrue(self.layout.rolled_out(self.tree))
 
     def test_a_repo_with_no_mark_is_not_marked_rolled_out(self):
         self.put(EXTRAS, json.dumps({"kinds": {}}))
-        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL, "current"))
         self.assertNotIn("rolled-out", json.loads(self.read_bytes()))
         self.assertFalse(self.layout.rolled_out(self.tree))
 
@@ -727,7 +727,7 @@ class SetWaitingPage(Tree):
                 if os.path.exists(self.extras):
                     os.remove(self.extras)
                 with self.assertRaises(self.layout.LayoutError):
-                    self.layout.set_waiting_page(self.tree, bad)
+                    self.layout.set_waiting_page(self.tree, bad, "current")
                 self.assertFalse(os.path.exists(self.extras))
 
     def test_a_real_artifact_link_in_either_form_is_accepted(self):
@@ -735,22 +735,36 @@ class SetWaitingPage(Tree):
             with self.subTest(url=url):
                 if os.path.exists(self.extras):
                     os.remove(self.extras)
-                self.assertTrue(self.layout.set_waiting_page(self.tree, url))
+                self.assertTrue(self.layout.set_waiting_page(self.tree, url, "current"))
                 self.assertEqual(self.layout.waiting_page(self.tree), url)
 
     def test_a_null_key_counts_as_unset_and_is_written(self):
         self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": None, "visibility": "public"}))
-        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL, "current"))
         found = json.loads(self.read_bytes())
         self.assertEqual(found["waiting-page"], self.URL)
         self.assertEqual(found["visibility"], "public")
         self.assertEqual(self.layout.waiting_page(self.tree), self.URL)
 
-    def cli(self, url=None, root=None, cwd=None):
-        """The CLI, `set-waiting-page <root> <url>`, run from `cwd`. The default cwd is a subfolder of the
+    def cli(self, url=None, root=None, cwd=None, account="current"):
+        """The CLI, `set-waiting-page <root> <url> <label>`, run from `cwd`. The default cwd is a subfolder of the
         tree, so a run that writes into its working folder shows up there as a stray file."""
-        return run([os.path.join(LINT, "layout.py"), "set-waiting-page", root or self.tree, url or self.URL],
+        return run([os.path.join(LINT, "layout.py"), "set-waiting-page", root or self.tree, url or self.URL, account],
                    cwd or self.sub)
+
+    def test_set_waiting_page_has_no_default_account_label(self):
+        """The account label is a required argument: a call with no label is a TypeError, and writes nothing."""
+        with self.assertRaises(TypeError, msg="set_waiting_page(root, url) took no account label: the call did not raise TypeError"):
+            self.layout.set_waiting_page(self.tree, self.URL)
+        self.assertFalse(os.path.exists(self.extras), "set_waiting_page wrote the extras file with no account label")
+
+    def test_cli_with_no_label_exits_non_zero_with_a_usage_line_naming_the_label(self):
+        """`set-waiting-page <root> <url>` with no label is refused: non-zero, a usage line that names the label, and no file."""
+        code, out = run([os.path.join(LINT, "layout.py"), "set-waiting-page", self.tree, self.URL], self.sub)
+        self.assertNotEqual(code, 0, "the CLI exits 0 with no account label: %s" % out)
+        self.assertIn("usage", out.lower(), "the refusal of a CLI call with no label prints no usage line: %s" % out)
+        self.assertIn("label", out, "the usage line does not name the label: %s" % out)
+        self.assertFalse(os.path.exists(self.extras), "the CLI wrote the extras file with no account label")
 
     def test_cli_writes_the_key_and_exits_0(self):
         code, out = self.cli()
@@ -764,7 +778,7 @@ class SetWaitingPage(Tree):
         self.assertFalse(os.path.exists(os.path.join(self.sub, ".claude")), "the subfolder got a .claude folder")
 
     def test_the_old_form_with_no_root_is_refused_and_writes_nowhere(self):
-        code, out = run([os.path.join(LINT, "layout.py"), "set-waiting-page", self.URL], self.sub)
+        code, out = run([os.path.join(LINT, "layout.py"), "set-waiting-page", self.URL, "current"], self.sub)
         self.assertNotEqual(code, 0, out)
         self.assertFalse(os.path.exists(os.path.join(self.sub, ".claude")), "the old form wrote into the working folder")
         self.assertFalse(os.path.exists(self.extras))
@@ -906,7 +920,7 @@ class Registry(Tree):
 
     def test_set_waiting_page_writes_the_old_key_and_keeps_the_registry(self):
         self.registry([self.queue_entry()])
-        self.assertTrue(self.call(self.layout.set_waiting_page, self.tree, self.OLD), "set_waiting_page did not write the key")
+        self.assertTrue(self.call(self.layout.set_waiting_page, self.tree, self.OLD, "current"), "set_waiting_page did not write the key")
         with open(os.path.join(self.tree, *EXTRAS.split("/")), encoding="utf-8") as handle:
             data = json.load(handle)
         self.assertEqual(data.get("waiting-page"), self.OLD, "set_waiting_page did not write the old key")
@@ -956,6 +970,17 @@ class Registry(Tree):
         for url in ("https://example.com/x", "https://claude.ai/artifact/", "claude.ai/artifact/page01", ""):
             with self.subTest(url=url):
                 self.assertLinksRefused(self.page_entry(links=[{"account": "work", "url": url}]), "a link url %r" % url)
+
+    def test_a_link_url_with_text_after_its_id_is_refused_and_named(self):
+        """A link is the claude.ai artifact link of one id, the same rule as set_waiting_page's ARTIFACT_URL fullmatch: no
+        path after the id, no space, no `@`. The control reads the /code/artifact/ form, which stays accepted."""
+        self.registry([self.page_entry(links=[{"account": "work", "url": "https://claude.ai/code/artifact/abc123"}])])
+        self.assertEqual([e["id"] for e in self.read_registry("the /code/artifact/ form of a link")], ["page01"],
+                         "the /code/artifact/ form of a link was refused")
+        for url in ("https://claude.ai/artifact/AbC123/extra", "https://claude.ai/artifact/abc def", "https://claude.ai/artifact/abc@x"):
+            with self.subTest(url=url):
+                self.assertLinksRefused(self.page_entry(links=[{"account": "work", "url": url}]),
+                                        "a link url %r with text after its id" % url)
 
     def test_a_link_account_that_is_an_email_or_empty_is_refused_and_named(self):
         for account in ("someone@example.com", ""):
@@ -1149,9 +1174,9 @@ class Registry(Tree):
         self.assertNotIn("url", stored, "set_waiting_page wrote an entry-level url")
         self.assertNotIn("account", stored, "set_waiting_page wrote an entry-level account")
 
-    def test_set_waiting_page_without_an_account_names_the_current_account(self):
+    def test_set_waiting_page_with_the_current_label_writes_the_current_account(self):
         self.registry([self.page_entry(links=[])])
-        self.assertTrue(self.call(self.layout.set_waiting_page, self.tree, self.OTHER), "the link was not written")
+        self.assertTrue(self.call(self.layout.set_waiting_page, self.tree, self.OTHER, "current"), "the link was not written")
         self.assertEqual(self.stored("page01")["links"], [{"account": "current", "url": self.OTHER}],
                          "with no account the link was not written as the current account")
 
