@@ -1,6 +1,6 @@
 # Waiting page, steps tier-items-sorted and answered-sections-by-repo: design notes
 
-Mockup: `docs/design/tier-sort.html`. Screen: `skills/waiting-page/page.html` (main 87daa5b50).
+Mockup: `docs/design/section-sort.html`. Screen: `skills/waiting-page/page.html` (main 87daa5b50).
 Deep links: `#s=page|single-repo|groups|no-repo|last-sent|empty|key-stops|key-rank|key-oldest|order-pin|order-free|order-az|seen-once|rail-plain`,
 `&w=all|390|800|1280`, `&t=light|dark`, `&lab=off`, `&hide=<state>,...`.
 Sizes: phone 390, mid 800 and wide 1280, light and dark. `layout.py devices` prints `unknown` for this repo,
@@ -149,7 +149,7 @@ Picture ids: `#repos-pin`, `#repos-free`, `#repos-az`. Each draws one Blocking t
 - `label_once.py` on each state's rendered page at 390: hits are today's "Asked before" (the later dividers'
   screen-reader words) and repo names as data (header, rail run and sub-heads; up to 5 times for this repo
   on `#s=page`). No label of this design repeats.
-- impeccable critique, single context (no sub-agent tool). Detector: no finding in the mockup's markup; on
+- impeccable critique, single context (no agent tool). Detector: no finding in the mockup's markup; on
   the rendered page it flags the side-tab card edge, a flat type scale and stripes, all from today's page.html
   CSS, outside this step. Fixed: the rail tiles collided on a first letter, so the rail now shows the name.
   Open: `stops` and `holds` can disagree (point 1, a loss of the pick).
