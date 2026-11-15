@@ -2,10 +2,12 @@
 """At a startup, flags the session in its context when its model is below the floor or the machine is full. Prints nothing otherwise.
 
 A SessionStart hook for source `startup` only (decisions agent-model-cap and machine-load-brake). It never stops a
-session: its one line is SessionStart additionalContext, with no `continue` and no `stopReason`, because the session
-that frees the disk must not be braked. The text names the model or the readings and the decision, and tells the
-session what to do. A session with a parent_session_id (a lane, read with get_session and no session_id) does no work
-and tells its parent it started in that state. A session with no parent (the owner's own) goes on.
+session: its one line is SessionStart additionalContext, with no `continue` and no `stopReason`. A session start
+cannot be refused here (the app card, anthropics/claude-code#103832), and the started session cannot tell a lane from
+an owner session, so the hook flags it and addresses a session that has a parent_session_id. The text names the model
+or the readings and the decision, and tells the session what to do. A session with a parent_session_id (a lane, read
+with get_session and no session_id) does no work and tells its parent it started in that state. A session with no
+parent (the owner's own) goes on.
 
 The model is checked first (guard.floor_hit, the one home of the floor), so a run prints one flag at most. Then, in a
 local session, it reads the load once (guard.read_load) and asks guard.load_full for the readings over the full line.
