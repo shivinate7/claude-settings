@@ -1291,7 +1291,7 @@ const WRAP_LINE = { what: "the Lands in line", items: [WRAP_DEST], box: ".dest" 
 const WRAP_REPLY_CASE = { what: "the thread reply in an answered line", items: [DECISION, WRAP_REPLY], open: WRAP_REPLY, box: "#tier-answered .thread .reply" };
 const WRAP_TRADE = { what: "the option's trade-off text", items: [WRAP_TR], box: ".opt .tr div > span:not(.s)" };
 // The filed line of an opened answer reads "The record stays in <home>.", so a 90-character home is the unbroken word in .askc .thread .filed.
-// Measured on 34312da1a with that home: the page is 717 px wide at 360, 390 and 430 px with .hometag shown, and the viewport width with it
+// Measured on the build with that home: the page is 717 px wide at 360, 390 and 430 px with .hometag shown, and the viewport width with it
 // hidden. The tag's nowrap text (666 px) gives the tag a 684 px box, so its row .ahead is 684 px wide and runs past its line. .hometag's
 // overflow hidden does not stop this: the tag's box is still 684 px, and .ahead takes that width. The tag's width is another lane's
 // (page-home-tag-cut-off), so this measure hides it and reads only the filed line.

@@ -464,7 +464,7 @@ test("control: once the repo meta answers, the rail is shown and draws a chip pe
 
 // ---------------------------------------------------------------- Send while the list is held, and a long repo name
 
-// The page never preselects an answer (ruling page-never-preselects, docs/decisions/page-never-preselects.md, owner 2026-11-13 13:04 CST),
+// The page never preselects an answer (ruling page-never-preselects, docs/decisions/page-never-preselects.md),
 // so Send stays off until the owner ticks an answer.
 test("while the repo meta is held the list is not drawn, so Send stays off; once the cards draw it stays off until an answer is ticked, then turns on", async (t) => {
   const s1 = mk("held-stand-one", 1), s2 = mk("held-stand-two", 2, { repo: "owner/other-repo" });
