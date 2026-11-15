@@ -16135,7 +16135,7 @@ class ReviewNoRestart(ReviewEnv):
         fix_verifier = record_text(head=self.FIX_HEAD, rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="PASS"),))
         rc, out, err = self.run_args(*self.review_argv("3:reviewer:sonnet:PASS"), host=self.chain_host(round_one, fix_verifier))
         self.assert_refused_with_no_record(rc, out, err)
-        self.assertIn("needs a failed round 2, or a failed fix check", err, "the refusal does not name the failed round 2 or fix check it needs")
+        self.assertIn("needs a failed round 2, or a failed fix verifier", err, "the refusal does not name the failed round 2 or fix check it needs")
 
     def test_a_third_round_after_an_earlier_third_round_is_refused_as_a_second_round_three(self):
         # Control: a third round after an earlier chain of a failed first and second round is accepted, so the refusal below comes from the
