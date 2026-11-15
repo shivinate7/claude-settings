@@ -668,6 +668,98 @@ LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: deleting a Checked never premis
                                              allowed=hcs_write(HCS_NEVER_DROP_P1, transcript=hcs_tx("none"),
                                                                session=HCS_SID_NEVER)))))
 
+# --- A stamp value whose first word is `never`: `Checked never yet.`, `Checked never, unverified.`, `Checked never (not
+# re-measured).`, and the same in capitals. The rule reads the first word of the value, so each is refused as `Checked
+# never` is, read-backed or not. A dated value that holds `never` later, a statement or a Source that holds it, and a
+# ruling premise restamped to it are not never stamps.
+HCS_SID_NEVERYET = "4b8e1d62-0000-4000-8000-00000000c0a4"   # a handoff whose disk text holds `Checked never yet.` on P1
+HCS_NEVERYET = hs_handoff(HCS_CFG, HCS_SID_NEVERYET)
+HCS_T_NEVER_YET = hcs_p1_text("Checked never yet.")
+HCS_T_NEVER_COMMA = hcs_p1_text("Checked never, unverified.")
+HCS_T_NEVER_PAREN = hcs_p1_text("Checked never (not re-measured).")
+HCS_T_NEVER_UPPER = hcs_p1_text("Checked NEVER yet.")
+HCS_T_NEVER_LATER = hcs_p1_text("Checked 2026-11-09 (never failed).")
+HCS_T_P1_NEVER_STATEMENT = hcs_text(new=("P1",), reword=("P1", "The guard never judges each handoff write"))
+HCS_P1_NEVER_SOURCE = ("P1", "read", "The guard judges each handoff write", "never-changed notes, hooks/precompact_handoff.py:279")
+HCS_T_P1_NEVER_SOURCE = hs_text(premises=[hcs_stamped(HCS_P1_NEVER_SOURCE, "Checked %s." % HCS_NEW)]
+                                + [hcs_line(row, HCS_OLD) for row in HCS_ROWS[1:]])   # HCS_ROWS[0] is P1
+
+
+def _build_hcs_neveryet():
+    write(HCS_NEVERYET, HCS_T_NEVER_YET)
+
+
+lazy_fixture([HCS_NEVERYET], _build_hcs_neveryet)
+
+
+def hcs_neveryet_scope():
+    """The never-yet handoff on disk holds P1 at Checked never yet. and every other premise at the old stamp, the text the
+    unchanged write and the deletion twin start from. Those cases branch on it, so it is asserted first (P7)."""
+    materialize(HCS_NEVERYET)
+    with open(HCS_NEVERYET, "r", encoding="utf-8") as handle:
+        disk = handle.read()
+    if disk != HCS_T_NEVER_YET:
+        return False, "the never-yet handoff on disk is not the handoff with P1 at Checked never yet"
+    return True, "the never-yet handoff on disk holds P1 at Checked never yet"
+
+
+# Refused with evidence too: the read backs P1's token, and the rule still refuses a stamp whose first word is never. Each
+# remedy is the one `Checked never` gets: check the premise, or delete its line.
+add("handoff-checked-stamp: a restamp to Checked never yet, read-backed, is refused, naming P1, and its remedy names no never stamp",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("ev_p1"),
+    carries=("P1", "check the premise", "delete its line"), lacks=("P2", "P3", "P4", "P5", "P7", "P9", "Checked never"),
+    file_path=HCS_HANDOFF, content=HCS_T_NEVER_YET)
+add("handoff-checked-stamp: a restamp to Checked never, then a comma and a word, read-backed, is refused, naming P1",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("ev_p1"),
+    carries=("P1", "check the premise", "delete its line"), lacks=("P2", "P3", "P4", "P5", "P7", "P9", "Checked never"),
+    file_path=HCS_HANDOFF, content=HCS_T_NEVER_COMMA)
+add("handoff-checked-stamp: a restamp to Checked never, then a parenthesis, read-backed, is refused, naming P1",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("ev_p1"),
+    carries=("P1", "check the premise", "delete its line"), lacks=("P2", "P3", "P4", "P5", "P7", "P9", "Checked never"),
+    file_path=HCS_HANDOFF, content=HCS_T_NEVER_PAREN)
+add("handoff-checked-stamp: a restamp to Checked NEVER yet, in capitals, read-backed, is refused, naming P1",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("ev_p1"),
+    carries=("P1", "check the premise", "delete its line"), lacks=("P2", "P3", "P4", "P5", "P7", "P9", "Checked never"),
+    file_path=HCS_HANDOFF, content=HCS_T_NEVER_UPPER)
+add("handoff-checked-stamp: a handoff already holding Checked never yet on P1, rewritten unchanged with evidence, is refused, "
+    "naming P1 and not P6",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID_NEVERYET, config=HCS_CFG, transcript=hcs_tx("ev_p1"),
+    carries=("P1", "check the premise", "delete its line"), lacks=("P2", "P3", "P4", "P5", "P6", "P7", "P9", "Checked never"),
+    file_path=HCS_NEVERYET, content=HCS_T_NEVER_YET)
+
+# Controls, each a twin that passes on the code as it stands: a value that holds never after its date, a statement or a
+# Source that holds never, and a ruling premise restamped to a stamp whose first word is never.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a dated stamp that holds never after its date is judged by its date: "
+                         "refused with no evidence, passed by a read of its token",
+                         hcs_twin("a dated stamp holding never later",
+                                  refused=hcs_write(HCS_T_NEVER_LATER, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_NEVER_LATER, transcript=hcs_tx("ev_p1")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a statement that holds never is judged by its date: refused with no evidence, "
+                         "passed by a read of its token",
+                         hcs_twin("a statement holding never",
+                                  refused=hcs_write(HCS_T_P1_NEVER_STATEMENT, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_P1_NEVER_STATEMENT, transcript=hcs_tx("ev_p1")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a Source that holds never is judged by its date: refused with no evidence, "
+                         "passed by a read of its token",
+                         hcs_twin("a Source holding never",
+                                  refused=hcs_write(HCS_T_P1_NEVER_SOURCE, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_P1_NEVER_SOURCE, transcript=hcs_tx("ev_p1")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a ruling premise restamped to Checked never yet passes silently with no evidence",
+                         hcs_twin("a ruling premise, Checked never yet",
+                                  refused=NO_EVIDENCE,
+                                  allowed=hcs_write(hcs_text(new=("P6",), value="never yet"), transcript=hcs_tx("none")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: scope: the never-yet handoff on disk holds P1 at Checked never yet",
+                         hcs_neveryet_scope))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: deleting a Checked never yet premise line passes silently; a rewrite that keeps "
+                         "it, read-backed, is refused",
+                         hcs_scoped(hcs_neveryet_scope,
+                                    hcs_twin("deleting a never-yet line",
+                                             refused=hcs_write(HCS_T_NEVER_YET, transcript=hcs_tx("ev_p1"),
+                                                               session=HCS_SID_NEVERYET),
+                                             allowed=hcs_write(hcs_text(drop=("P1",)), transcript=hcs_tx("none"),
+                                                               session=HCS_SID_NEVERYET)))))
+
+
 # Case 2: a Source's token backed only by a Write or Edit of another file, or by a non-read Bash call, backs nothing. The
 # controls: a Read, a Grep, a Glob and a Bash read of the token each back it.
 LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a Write of another file that names a token-bearing Source backs no restamp; "

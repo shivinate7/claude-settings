@@ -1087,7 +1087,7 @@ def case_handoffs_dir_keeps_other_sessions():
 
 # --------------------------------------------------------------------------- premises
 # Spec to build: a handoff holds a `## Working premises` section, one line per premise:
-#   - P<n> [<kind>] <statement> Source: <where>. Checked <date or never>.
+#   - P<n> [<kind>] <statement> Source: <where>. Checked <date>.
 # The kinds are ruling, measured, read, notes and assumed. After a compaction the reorient
 # message lists every premise id except a `ruling`. After /clear or a fork it lists every id.
 
