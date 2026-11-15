@@ -23504,7 +23504,7 @@ class AuditPrs(Env):
         self.assertEqual(rc, 0, f"the empty audit did not run: {text[-200:]}")
         self.assertEqual(sorted(routes), ["issues/comments", "pulls"], f"the empty audit made other calls: {routes}")
 
-    def test_a_newest_record_with_a_fix_check_and_no_round_lines_is_listed_and_does_not_crash(self):
+    def test_a_newest_record_with_a_fix_verifier_and_no_round_lines_is_listed_and_does_not_crash(self):
         """A record whose only line before Net value is a Fix check parses with no rounds. The audit's round summary then read the last round of
         that empty list (merge.py audit_prs), and IndexError ended the run before it printed its line."""
         head = sha_of(1)
