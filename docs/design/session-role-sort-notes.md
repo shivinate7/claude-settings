@@ -7,7 +7,7 @@ Sizes: phone 390, mid 800 and wide 1280, light and dark. `layout.py devices` pri
 so the sizes come from the brief. Mid 800 is drawn because page.html has a breakpoint at 960.
 The mockup draws with page.html's own `<style>` (lines 8 to 953). Each new rule reads a page token; it adds no colour.
 Every order on the mockup comes from one sort function in its script (the pick below), not from hand placing.
-Options are named by name, never by a letter: the waiting page stamps its own letters.
+Options are named by name, never by a letter: the page stamps its own letters.
 
 Owner's outcome (2026-11-12 11:19 CST): the tiers are long and unsorted. He must find the item that matters
 most first: what stops the most work, then the newest.
@@ -149,7 +149,7 @@ Picture ids: `#repos-pin`, `#repos-free`, `#repos-az`. Each draws one Blocking t
 - `label_once.py` on each state's rendered page at 390: hits are today's "Asked before" (the later dividers'
   screen-reader words) and repo names as data (header, rail run and sub-heads; up to 5 times for this repo
   on `#s=page`). No label of this design repeats.
-- impeccable critique, single context (no sub-agent tool). Detector: no finding in the mockup's markup; on
+- impeccable critique, single context (no agent tool). Detector: no finding in the mockup's markup; on
   the rendered page it flags the side-tab card edge, a flat type scale and stripes, all from today's page.html
   CSS, outside this step. Fixed: the rail tiles collided on a first letter, so the rail now shows the name.
   Open: `stops` and `holds` can disagree (point 1, a loss of the pick).
