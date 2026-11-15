@@ -46,6 +46,7 @@ HIP_GH_CLEAN_UNREAD = os.path.join(HIP_ROOT, "gh-clean-unread")  # live M, the r
 HIP_GH_MALFORMED = os.path.join(HIP_ROOT, "gh-malformed")        # live C, a valid record for A, then a malformed newest record
 HIP_GH_FEATURE = os.path.join(HIP_ROOT, "gh-feature")            # live B, on a branch named feature, the record for A: stale
 HIP_GH_FORK = os.path.join(HIP_ROOT, "gh-fork")                  # live B on feat, the head repo a fork, the record for A: stale
+HIP_GH_BROKEN = os.path.join(HIP_ROOT, "gh-broken")              # every pull request read answers no JSON: no lookup can run
 HIP_STALE_CARRIES = ("record",)     # a stale refusal names the review record, the thing to post
 HIP_UNKNOWN_CARRIES = ("unknown",)  # an unread refusal says the read is unknown
 HIP_UNKNOWN_LACKS = ("no record", "missing")  # ...and never reads as a record that is absent
@@ -171,6 +172,7 @@ def _hip_build():
     make_fake_gh(HIP_GH_FEATURE, "main", head_sha=b, head_ref="feature", comments=[_hip_record(1, a, REVIEW_PASS_ONE)], commits=commits)
     make_fake_gh(HIP_GH_FORK, "main", head_sha=b, head_ref="feat", head_repo="fork/x", comments=[_hip_record(1, a, REVIEW_PASS_ONE)],
                  commits=commits)
+    make_fake_gh(HIP_GH_BROKEN, "main", head_sha=b, head_ref="feat", broken=True, commits=commits)
 
 
 lazy_fixture(HIP_FOLDERS, _hip_build)
@@ -260,3 +262,28 @@ hip_push("handed-in-push: the same branch pushed to origin is still refused over
 # is allowed.
 hip_push("handed-in-push: a push to feat is allowed when only a fork's pull request holds a stale record under that head name",
          "allow", HIP_CLONE_B, HIP_GH_FORK)
+
+# A folder the guard cannot resolve is refused unknown, never judged as a push outside any pull request. The directory is named
+# by a shell variable in each form (`git -C`, and a leading `cd`), so no folder is read.
+hip_run("handed-in-push: a git -C into a directory held in a shell variable is refused unknown, over a stale record",
+        'git -C "$WT" push origin HEAD:feat', "deny", HIP_CLONE_B, HIP_GH_STALE,
+        carries=HIP_UNKNOWN_CARRIES, lacks=HIP_UNKNOWN_LACKS)
+hip_run("handed-in-push: a cd into a directory held in a shell variable, then a push, is refused unknown, over a stale record",
+        'cd "$WT" && git push origin HEAD:feat', "deny", HIP_CLONE_B, HIP_GH_STALE,
+        carries=HIP_UNKNOWN_CARRIES, lacks=HIP_UNKNOWN_LACKS)
+
+# A redirection or a pipe after a push names no destination: its words are a file, not a branch. Only the remote and the refspec
+# words are the destination, so a push over the live record passes whatever file takes its output.
+hip_run("handed-in-push: a push over the live record with its output redirected to a file is allowed",
+        'git push origin feat > "$LOG" 2>&1', "allow", HIP_CLONE_B, HIP_GH_LIVE)
+hip_run("handed-in-push: a push over the live record piped through tee to a file is allowed",
+        'git push origin feat 2>&1 | tee "$LOG"', "allow", HIP_CLONE_B, HIP_GH_LIVE)
+
+# A pull request lookup that cannot run names no pull request, so no record is stale and the push is allowed. A pull request that is
+# found, with its comments unread, is still refused unknown (the comment-read case above).
+hip_push("handed-in-push: a push to a new branch while the pull request lookup cannot run is allowed, no record being stale",
+         "allow", HIP_CLONE_B, HIP_GH_BROKEN, dest="topic-new")
+
+# A deletion and a push to feat in one call: the deletion moves no head, the push to feat does, so the stale record refuses the call.
+hip_run("handed-in-push: a push that deletes old and sends HEAD to feat is refused over a stale record",
+        "git push origin :old HEAD:feat", "deny", HIP_CLONE_B, HIP_GH_STALE, carries=HIP_STALE_CARRIES)
