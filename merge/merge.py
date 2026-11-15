@@ -33,8 +33,8 @@
                           unless HEAD is the Head of the newest earlier record on the PR, read from the PR's issue comments since the PR opened, and that record
                           has no Fix check line or a PASS one (owner item 741); after a PASS one, when SHA is a merge commit (a fix after a merge of main), that record reads done and SHA's first
                           parent is HEAD and its second parent is on the base, with no edit beyond git's own merge (a merge that conflicts may edit its conflicted paths only).
-                          A PR with no record at all takes any HEAD that SHA holds (a PR opened after the review: HEAD may predate the PR; the record still owes its round).
-                          `merge --reviewed` reads a Fix check PASS that has no round line beside it with the round of the earlier record on the same PR whose Head is the Fix check's HEAD.
+                          A PR with no record at all takes any HEAD that SHA holds (a PR opened after the review: HEAD may predate the PR).
+                          `merge --reviewed` reads a Fix check that has no round line beside it with the round of the earlier record on the same PR whose Head is the Fix check's HEAD.
                           The fix check's MODEL must be sonnet (exit 2 otherwise), and a reviewer's later rounds must equal their round row's model.
                           The first round takes its row's model (the `1 guard` row with --guard yes, else the `1 other` row), or `unknown`; a first-round model
                           below its row prints with a stderr flag and is not refused.

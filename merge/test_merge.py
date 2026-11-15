@@ -15695,7 +15695,7 @@ class ReviewFixBase(ReviewEnv):
 
     def test_a_base_that_predates_the_pull_request_is_taken_when_the_head_holds_it(self):
         # incident #2904: the PR opened after the fixes, so no record on it names the verified head. With no earlier record at all, a base that
-        # the new head holds is the head the fix diff starts from; the record still owes its round, so it reads open until a round is written.
+        # the new head holds is the head the fix diff starts from; the record reads as any bare fix verifier does (owner item 858 a).
         host = self.record_host(compares={(REVIEW_OLD_HEAD, REVIEW_HEAD): "ahead"})
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host)
         self.assertEqual(rc, 0, "a base the head holds, with no earlier record, was refused:\n" + out + err)
@@ -16187,6 +16187,18 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
                          commits=fx.parents, trees=fx.trees, compares=fx.on_main)
         rc, out, err = self.run_args("7", "--review-record", "--head", fx.conflicted, *REVIEW_FLAGS, "--fix-check", f"{fx.fixed}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS", host=host)
         self.assertEqual(rc, 0, "a fix after a merge of main, whose prior takes its round from an earlier log, was refused:\n" + out + err)
+
+    def test_a_hold_the_prior_inherits_from_an_earlier_log_refuses_a_fix_after_a_merge_of_main(self):
+        # pins the newest_of read in --fix-check: the earlier fix record has no round or net value of its own, so only the inherited read sees the
+        # earlier log's negative net value and refuses (a bare fix PASS alone reads done, owner item 858 a)
+        fx = self.real_commits()
+        older = record_text(head=fx.pre, rounds=("Round 1: reviewer, sonnet, FAIL",), net="negative")
+        newer = record_text(head=fx.fixed, rounds=(), fix=(fix_verifier_line(head=fx.pre),))
+        host = PullsHost([batch_pull(7, fx.conflicted)], {}, comments=[review_comment(1, 7, older), review_comment(2, 7, newer)],
+                         commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+        rc, out, err = self.run_args("7", "--review-record", "--head", fx.conflicted, *REVIEW_FLAGS, "--fix-check", f"{fx.fixed}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS", host=host)
+        self.assertEqual(rc, 2, "a fix after a merge of main was accepted over a hold that the prior inherits from an earlier log:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
 
     def test_an_opus_pass_prior_refuses_the_fix_verifier(self):
         fx = self.real_commits()
@@ -16974,7 +16986,7 @@ class ReviewedList(ReviewEnv):
         fix = (fix_verifier_line(head=REVIEW_OLD_HEAD),)
         for label, earlier_kw, later_kw, want in (
                 ("held stays held", dict(net="negative"), dict(net="positive"), r"held: net value is negative"),
-                ("guard yes owes the final round", dict(guard="yes"), dict(guard="yes", net="positive"), r"done: round 1 is FAIL, and the fix check passed")):  # a passing fix verifier ends review after a FAIL round, guard yes too (decision pr-review-record, done rules)
+                ("guard yes closes on the fix check", dict(guard="yes"), dict(guard="yes", net="positive"), r"done: round 1 is FAIL, and the fix check passed")):  # a passing fix verifier ends review after a FAIL round, guard yes too (decision pr-review-record, done rules)
             with self.subTest(label=label):
                 earlier = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",), **earlier_kw))
                 later = review_comment(2, 7, record_text(rounds=(), fix=fix, **later_kw))
