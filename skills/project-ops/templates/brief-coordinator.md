@@ -19,7 +19,7 @@ Limits:
 - It may talk to another coordinator to share a scarce machine, such as an iPhone simulator under load.
 - It archives each other finished session it started at its next wake, once it has read the report (ruling R46:
   archive after the report).
-- It compacts in place. It rotates only when it goes stale or breaks, and it has no successor.
+- It compacts in place. It rotates a standing session only when that session goes stale or breaks. It does not rotate itself and has no successor.
 
 ## Files
 

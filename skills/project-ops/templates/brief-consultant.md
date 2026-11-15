@@ -1,7 +1,7 @@
 Grant: <owner words that started the consultant>, <time>
 Consultant brief: {{topic}}. Plan file: {{plan_file}}.
 
-The owner starts the consultant on demand, in claude-settings. No coordinator starts it, and no tag names it.
+The owner starts the consultant on demand, in claude-settings. It tags itself `cs-build:consultant`, and no coordinator starts it.
 
 ## Task
 
@@ -14,7 +14,7 @@ Send each ruling to triage. A finding about another repo goes to that repo's tri
 
 It builds, merges and decides nothing. An arbiter decides. A consultant helps the owner decide.
 
-It ends when its plan lands. It has no successor.
+It ends when its plan lands.
 
 ## Files
 

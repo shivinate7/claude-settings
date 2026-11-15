@@ -40,7 +40,7 @@ class RoleListError(Exception):
 
 
 def roles_of(record):
-    """The roles the sentence names, in order, with hyphens read as spaces. [] when the sentence is missing or
+    """The roles the sentence names, in order, lowercased, with hyphens read as spaces. [] when the sentence is missing or
     names none. Raises RoleListError when the list has commas and no final "and"."""
     found = SENTENCE.search("\n".join(live_lines(record)))
     if not found:
@@ -48,7 +48,7 @@ def roles_of(record):
     body = PARENTHETICAL.sub("", found.group(1))
     if "," in body and not re.search(r"\band\b", body):
         raise RoleListError("the role list has commas and no final and, so a stray period may end it early")
-    parts = (" ".join(part.replace("-", " ").split()) for part in SPLIT.split(body))
+    parts = (" ".join(part.lower().replace("-", " ").split()) for part in SPLIT.split(body))
     return [part for part in parts if part]
 
 
