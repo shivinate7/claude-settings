@@ -1,0 +1,16 @@
+{
+ "id": "merge-role-proof-follows-b",
+ "title": "Guard merge-role-proof lets a standing session merge its own docs-only or rule-text PR",
+ "status": "doing",
+ "lane": "session_013NEJL2NPAD2v6x5CWD4mUb",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "coordinator",
+ "blockedBy": [
+  "tiny-fixes-b"
+ ],
+ "why": "Coordinator's pick 00:58 CST Nov 15 (undoable, not the owner's), agreed by the consultant's ruling (a) 00:59 CST: guard merge-role-proof (and ruling fb-1541-1, not on roadmap) say only the batch runner merges; ruling own-tiny-fixes-b (owner \"so B\", 00:50 CST) lets a standing session merge its own docs-only or rule-text PR through the merge tool. Owner's 20:18 CST Nov 14 words: a guard that goes against his ruling is stale. Until this lands, runner 10 merges those PRs (#3465 included, no wait).",
+ "source": "Coordinator message 00:58 CST Nov 15; consultant 00:59 CST Nov 15.",
+ "note": "Ask: change the guard so only the ruled act passes (a standing session merging its own docs-only or small rule-text PR through the merge tool on green); every other refusal stays; normal review rounds; red first. Lane merge-role-proof-follows-b, session_013NEJL2NPAD2v6x5CWD4mUb, get_session-checked 01:01 CST (connected, parent the coordinator; its tag still carries the long slug merge-role-proof-follows-tiny-fixes-b). Coordinator named the step slug merge-role-proof-follows-b (27 characters; the long form is over the 32-character slug rule). Cites own-tiny-fixes-b and the consultant's (a). Filed 01:00 CST by triage; no owner item.",
+ "updatedAt": "2026-11-15T01:00:00-06:00"
+}
