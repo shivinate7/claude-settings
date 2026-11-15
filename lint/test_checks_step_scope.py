@@ -160,6 +160,7 @@ MUST_STAY_UNSCOPED = [
     'Settings matcher fixture suite',
     'Route judge measure fixture suite',
     'Question form fixture suite',
+    'Question form pick-letter suite',  # reads docs/decisions/option-keys-are-letters.md at run time (hooks/test_question_form_pick_letter.py)
     'Agent brief fixture suite',
     'Blind brief fixture suite',
     'SendMessage state fixture suite',
@@ -244,6 +245,7 @@ MAIN_STEPS = [
     'Question form option-key gap suite',
     'Question form option-label suite',
     'Question form letters-frozen suite',
+    'Question form pick-letter suite',
     'Remove-prompt answer fixture suite',
     'Agent brief fixture suite',
     'Blind brief fixture suite',
