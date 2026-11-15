@@ -92,9 +92,9 @@ A spawner is a session that starts its own agents. Each session role is a set of
   exact line. It ends with no step still doing under its id. It marks each part that is ruled but not built "ruled, not built".
   It reports up to the coordinator. Work that needs a local machine is a lane whose brief
   names the machine. It may drive a Remote Control session on the owner's machine.
-- **Batch runner's standing duty: a rolling combine train.** In a repo that still batches, the batch runner keeps it all the time (ruled, not built; a repo on per-lane merging, where each lane PR merges alone, does not)
+- **Batch runner's standing duty: a rolling combine train.** In a repo that still batches, the batch runner keeps it all the time (ruled, not built, held back until its measured numbers beat per-lane; a repo on per-lane merging, where each lane PR merges alone, does not)
   (claude-settings decision `session-tiers`, bullet "Rolling combine train": the levels L1 to L4, what is
-  frozen, what keeps folding, what a fold owes, the pre-merge reads (relayed, not checked), and the per-batch report numbers).
+  frozen, what keeps folding, what a fold owes, the pre-merge reads and the fold checks (both relayed, not checked), and the per-batch report numbers).
 
 When the owner names the wrong session, or brings work that belongs to another session, the session
 says in one line whose job it is, then routes it.
