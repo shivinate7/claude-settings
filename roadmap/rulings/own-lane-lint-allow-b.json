@@ -1,0 +1,11 @@
+{
+ "id": "own-lane-lint-allow-b",
+ "at": "2026-11-15T11:30:50-06:00",
+ "title": "Amend the settings.json autoMode.allow entry \"Merge Tool Read Checks\" now, without the refusal words.",
+ "ruling": "Owner, page item 863 (pick-lane-lint-allow-entry), option b, \"Amend settings.json autoMode.allow entry 'Merge Tool Read Checks' now, without the refusal words\", saved on the page at 11:30 CST Nov 15 (2026-11-15T17:30:50Z), typed on the page, no note. The option carried widens: true (\"a repo changes to fit a shared tool, never the tool to fit a repo\"); the owner chose the widening option knowingly (as in own-839-a-review-record-allow-entry). Purpose: let a lane run `merge --lane-lint` in the background (step lane-lint-background-refused). ACT COVERED: amending that one entry, \"Merge Tool Read Checks\" in settings.json autoMode.allow, now, without waiting for the lane's refusal words. The amendment is the coordinator's to start (item owner), not started at filing. Covers that entry and that act only (rule outcomes-grant-covers-named-act): no other entry, no other command or form, no other classifier refusal (owner item 862 stays separate). Cause of the refusal stays unmeasured; the entry may not stop it. Reopens if the owner says otherwise.",
+ "quote": "b",
+ "source": "waiting/answers/pick-lane-lint-allow-entry.json (2026-11-15T17:30:50Z, choice b, optionId widen-now), read by triage's helper; owner typed on the page.",
+ "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: items 839 a (own-839-a-review-record-allow-entry) and 618 b each covered their own act, and the grep of rulings for 'Merge Tool Read Checks' and lane-lint found no ruling on amending this entry",
+ "step": "lane-lint-background-refused"
+}

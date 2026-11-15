@@ -1,0 +1,11 @@
+{
+ "id": "own-3476-successor-a",
+ "at": "2026-11-15T11:30:50-06:00",
+ "title": "PR 3476 stays held; a new round-1 lane keeps only the Departs-first sentence in PAST_RULING_ITEM.",
+ "ruling": "Owner, page item 869 (pick-held-3476-successor), option a, \"Start a new round-1 lane that keeps only the Departs-first sentence (recommended by the coordinator)\", saved on the page at 11:30 CST Nov 15 (2026-11-15T17:30:50Z), typed on the page, no note. ACT COVERED: starting one new change at round 1 that deletes departs_ruling_hits, departs_ruling_refusal, their tests and the focus ranking, and keeps one sentence in PAST_RULING_ITEM, as the successor of held PR 3476 (step question-checks-rulings-first). PR 3476 stays held (decision hold-unsafe-after-round-3) and is closed later; the successor is a new round-1 lane, not a fourth round on 3476. The lane start is the coordinator's act (item owner), not started at filing. Covers that act only: no other held change, no other successor, no merge of 3476. Reopens if the owner says otherwise.",
+ "quote": "a",
+ "source": "waiting/answers/pick-held-3476-successor.json (2026-11-15T17:30:50Z, choice a, optionId start-successor-lane), read by triage's helper; owner typed on the page.",
+ "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: no ruling answers whether a held change may get a successor (grep of roadmap/rulings for 3476 found only unrelated mentions); decision hold-unsafe-after-round-3 stays in force for PR 3476 and every other PR",
+ "step": "question-checks-rulings-first"
+}
