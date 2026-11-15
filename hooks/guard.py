@@ -152,7 +152,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
-                       record (read from the transcript) does not show in its cs-build tags.
+                       record (read from the transcript) does not show in its cs-build tags. The standing tier
+                       needs the own newest record to show a coordinator or triage tag, with no set_session_tags after it.
   merge-confirm-repo   deny. In a cloud session, a merge-tool call with --confirm whose checkout (the -C or
                        --repo-dir value as the merge tool's own parser reads it, else the `cd X &&` directory, else
                        the working directory) has a repo (`git_reads.github_repo`) that no cs-repo tag of the

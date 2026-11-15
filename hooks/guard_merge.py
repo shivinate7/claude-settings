@@ -1315,7 +1315,9 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None):
 
 
 # ---- merge --role: the tier is read from this session's own get_session record
-ROLE_TIERS = ("batch-runner",)
+ROLE_TIERS = ("batch-runner", "standing")
+STANDING_TIER = "standing"  # ruling own-tiny-fixes-b: a standing session, not a batch runner, merges its own small edit
+STANDING_ROLES = ("coordinator", "triage")  # the cs-build tags that prove the standing tier (decision session-tiers)
 ROLE_TAG_PREFIX = BUILD_TAG
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
@@ -1388,6 +1390,11 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
             from override import remote_session_id
             own_id = remote_session_id()
             if own_id and transcript:
+                if tier == STANDING_TIER:  # a tag set after the record may have changed the role, so that record proves nothing
+                    tags, tagged_after = _own_session_read(transcript, own_id)
+                    if tags is not None and not tagged_after and any(ROLE_TAG_PREFIX + r in tags for r in STANDING_ROLES):
+                        continue
+                    return "merge role " + tier
                 tags = _own_get_session_tags(transcript, own_id)
                 if tier in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + tier in tags:
                     continue
