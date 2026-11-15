@@ -16,6 +16,8 @@ Interface the check must meet (the builder builds to it):
   "batch-runner" is the same role. A list with commas and no final `and` ends at a stray period: it exits 2 and
   names the record, and never drops roles silently. A role the sentence does not name needs no role text and no
   template. A missing sentence, or one that gives no roles, exits 2 and names the record.
+- Case: a capitalised role in the sentence reads as its lowercase name. `Lane` is the role `lane`, so its template is
+  brief.md, and a problem line names `lane`.
 - Role text: a line that starts `- **<Role>.**` in operating-model.md, outside fenced blocks and multi-line HTML
   comments. The marker needs words after it: a bare `- **Arbiter.**` is no role text. The role's first letter is
   capitalised in the text; match case-insensitively, and a hyphen matches a space in either direction. A role named
@@ -466,6 +468,41 @@ class Record(Fixture):
         files[MODEL] = model_text([r for r in ROLES if r != "batch runner"],
                                   after="- **Batch-runner.** The batch runner session works its one line.\n")
         self.check(files, 0, [], "a space in the sentence must match hyphenated role text")
+
+
+def sentence_with_capital(role):
+    """The session-roles sentence with `role` capitalised, as a reader writes the list at its start."""
+    names = [r.capitalize() if r == role else r for r in ROLES]
+    return SENTENCE_START + ", ".join(names[:-1]) + " and %s (see the consultant sub-bullet below)." % names[-1]
+
+
+class SentenceCase(Fixture):
+    """A capitalised role in the sentence reads as its lowercase name: its template and its problem line use that name."""
+
+    def test_a_capitalised_role_resolves_to_its_lowercase_template(self):
+        # Control: the lowercase sentence passes on the full tree, so a failure below comes from the capital alone.
+        # `Lane` is the role `lane`, and its template is brief.md, not brief-Lane.md.
+        self.check(clean(), 0, [], "control: the lowercase sentence must pass on the full tree")
+        for role in ROLES:
+            with self.subTest(role=role):
+                files = clean()
+                files[RECORD] = record_text(sentence_with_capital(role))
+                self.check(files, 0, [], "a capitalised %s must resolve to templates/%s, so the tree passes"
+                           % (role, brief_name(role)))
+
+    def test_a_missing_template_for_a_capitalised_role_is_named_in_lowercase(self):
+        # Control: with the lowercase sentence, the problem line names the role and its template in lowercase.
+        # The capitalised sentence must print the same line. Otherwise the reader is pointed at a file name that
+        # the templates folder does not use.
+        for role in ROLES:
+            expected = ["role `%s`: no brief template templates/%s" % (role, brief_name(role))]
+            files = clean()
+            del files[brief_path(role)]
+            with self.subTest(role=role, sentence="lowercase"):
+                self.check(files, 1, expected, "control: the lowercase sentence must name the missing template in lowercase")
+            files[RECORD] = record_text(sentence_with_capital(role))
+            with self.subTest(role=role, sentence="capitalised"):
+                self.check(files, 1, expected, "the problem line for a capitalised %s must name it in lowercase" % role)
 
 
 class CiWiring(unittest.TestCase):
