@@ -358,6 +358,21 @@ take_install_lock() {
 }
 take_install_lock
 
+# Cloud, started by hooks/stale_install.py (CS_STALE_TIP, a 40-hex origin tip): note the attempt before landing, so
+# a run that fails or times out leaves the stamp that holds the hook off for a while. record_install clears it.
+# A failed write is a WARN, never a failed install.
+ATTEMPT_STAMP="$CLAUDE_DIR/.claude-settings-install-attempt.json"
+write_attempt_stamp() {
+  case "${CS_STALE_TIP:-}" in *[!0-9a-f]*|"") return 0 ;; esac
+  [ "${#CS_STALE_TIP}" = 40 ] || return 0
+  if printf '{"tip": "%s", "epoch": %s}\n' "$CS_STALE_TIP" "$(date +%s)" > "$ATTEMPT_STAMP.cs-new" \
+     && mv -f "$ATTEMPT_STAMP.cs-new" "$ATTEMPT_STAMP"; then :; else
+    rm -f "$ATTEMPT_STAMP.cs-new"
+    log "WARN: could not write the attempt stamp $ATTEMPT_STAMP"
+  fi
+}
+[ "$CLOUD" = 1 ] && write_attempt_stamp
+
 # Local install from a clone that has a branch named main: the links point at the pinned
 # checkout <clone>-live, a worktree on a detached HEAD at origin's stable commit (local main when the clone
 # holds no origin/stable), never at the clone, whose branch changes. Made here when missing; only merge/install_from_main.sh moves it. Cloud
@@ -1249,7 +1264,7 @@ record_install() {
   if printf '{"ref": "%s", "sha": "%s", "source": "%s", "installer": "%s"}\n' \
        "$(ri_esc "$REF")" "$ri_sha" "$(ri_esc "$SRC")" "$(ri_esc "$SRC/install.sh")" > "$ri_file.cs-new" \
      && mv -f "$ri_file.cs-new" "$ri_file"; then
-    :
+    if [ "$ri_sha" = "${CS_STALE_TIP:-}" ]; then rm -f "$ATTEMPT_STAMP"; fi
   else
     rm -f "$ri_file.cs-new"
     log "WARN: could not write the install record $ri_file"

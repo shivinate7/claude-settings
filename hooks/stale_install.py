@@ -19,24 +19,37 @@ The ref comes only from the record: the installer gets it as CLAUDE_SETTINGS_REF
 hook's environment. The hook names no branch of its own. The installer also gets a CS_HOOK_INPUT whose source no
 SessionStart entry fires on, so install.sh runs no startup entry for a reinstall in a running session.
 
+The attempt stamp. The installer also gets CS_STALE_TIP=<tip>, replacing any inherited value. With it, install.sh
+writes <config dir>/.claude-settings-install-attempt.json ({"tip", "epoch"}) when its run starts, and removes it
+when its record lands at that tip. A failed, timed-out or short run leaves it. Before a reinstall this hook reads it.
+A stamp for the same tip, younger than the backoff (900 s; CLAUDE_SETTINGS_REINSTALL_BACKOFF replaces it, positive
+number only), prints "reinstall skipped (install started at <tip7> not finished, retry in N s)" and runs no installer.
+An absent, unreadable, garbled, other-tip or aged stamp lets the reinstall run.
+
 Cost: one python process start per turn. At most one `git ls-remote` per turn (a network read, bounded by
 CLAUDE_SETTINGS_FETCH_TIMEOUT seconds, default 10), none outside a cloud session. The origin URL is read from the
 source clone's .git/config, with no git call. A reinstall adds one installer run and, to find the restart line,
-a few local git reads in the source clone. No timer, no long-lived process, no file written here (the installer
-writes the record).
+a few local git reads in the source clone. One read of the stamp file per turn that finds the tip moved. No timer,
+no long-lived process, no file written here (the installer writes the record and the stamp).
 """
 import json
+import math
 import os
 import re
 import signal
 import subprocess
 import sys
+import time
 try:
     import _nowindow  # the one home of a no-window child start; a flat hooks/ file
 except ImportError:  # the helper lands a moment after the hook in an install; a hook never dies for it
     _nowindow = subprocess
 
 RECORD_NAME = ".claude-settings-install.json"
+# The attempt stamp install.sh writes at the start of a run that CS_STALE_TIP names. This hook only reads it.
+STAMP_NAME = ".claude-settings-install-attempt.json"
+# Seconds a stamp for the current tip holds the reinstall off. CLAUDE_SETTINGS_REINSTALL_BACKOFF replaces it.
+BACKOFF = 900
 SHORT = 7
 # Seconds for the one network read. CLAUDE_SETTINGS_FETCH_TIMEOUT replaces it.
 FETCH_TIMEOUT = 10
@@ -120,6 +133,31 @@ def install_timeout():
     return value if value > 0 else INSTALL_TIMEOUT
 
 
+def backoff():
+    try:
+        value = float(os.environ.get("CLAUDE_SETTINGS_REINSTALL_BACKOFF", ""))
+    except ValueError:
+        return BACKOFF
+    return value if value > 0 and math.isfinite(value) else BACKOFF
+
+
+def skip_line(tip):
+    """The skip line when the stamp names this tip and is younger than the backoff, else None. An absent, unreadable,
+    garbled, other-tip or aged stamp is None: the reinstall runs."""
+    try:
+        with open(os.path.join(config_dir(), STAMP_NAME), encoding="utf-8") as handle:
+            stamp = json.load(handle)
+        epoch = stamp["epoch"]
+        if stamp["tip"] != tip or isinstance(epoch, bool) or not isinstance(epoch, (int, float)):
+            return None
+        left = math.ceil(epoch + backoff() - time.time())
+    except (OSError, ValueError, KeyError, TypeError, OverflowError):
+        return None
+    if left <= 0:
+        return None
+    return PREFIX + "reinstall skipped (install started at %s not finished, retry in %d s)" % (tip[:SHORT], left)
+
+
 def remote_tip(url, ref):
     """(sha, None), or (None, reason). One git ls-remote of the recorded ref."""
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
@@ -188,11 +226,11 @@ def stop_group(proc):
     proc.wait()
 
 
-def reinstall(record):
+def reinstall(record, tip):
     """Runs the recorded installer once. Returns None on success, else the failure text. The installer runs in its
     own session so a stop reaches its children. Its output goes nowhere: the hook prints its own lines."""
     limit = install_timeout()
-    env = dict(os.environ, CLAUDE_SETTINGS_REF=record["ref"], CS_HOOK_INPUT=INSTALL_HOOK_INPUT)
+    env = dict(os.environ, CLAUDE_SETTINGS_REF=record["ref"], CS_HOOK_INPUT=INSTALL_HOOK_INPUT, CS_STALE_TIP=tip)
     try:
         proc = _nowindow.Popen(["bash", record["installer"], "--cloud"], stdin=subprocess.DEVNULL,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
@@ -222,7 +260,10 @@ def check():
         return [unknown(reason)]
     if tip == record["sha"]:
         return []
-    failure = reinstall(record)
+    skip = skip_line(tip)
+    if skip:
+        return [skip]
+    failure = reinstall(record, tip)
     if failure:
         return [PREFIX + failure]
     now, _ = load_record()
