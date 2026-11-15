@@ -478,13 +478,13 @@ class CiWiring(unittest.TestCase):
         return found[0]
 
     def test_checks_job_runs_the_check(self):
-        # Red on main: no step runs the check, so the checks job runs nothing that reads the roles.
+        # Pins one checks-job step that runs the check. An if: condition could skip it and read as passing.
         step = self.step(CHECK_STEP)
         self.assertEqual(step.get("run"), "python3 lint/check_project_ops_roles.py")
         self.assertNotIn("if", step, "an if: condition lets a skipped check read as passing")
 
     def test_checks_job_runs_the_fixture_suite(self):
-        # Red on main: no step runs this suite.
+        # Pins one checks-job step that runs this suite. An if: condition could skip it and read as passing.
         step = self.step(FIXTURE_STEP)
         self.assertEqual(step.get("run"), "python3 lint/test_check_project_ops_roles.py")
         self.assertNotIn("if", step, "an if: condition lets a skipped suite read as passing")
@@ -492,8 +492,8 @@ class CiWiring(unittest.TestCase):
 
 class RealRepo(Fixture):
     def test_real_repo_has_text_and_a_template_for_each_role_and_passes_the_check(self):
-        # Red on main: arbiter and consultant have no role text. coordinator, triage, batch runner, arbiter and
-        # consultant have no brief template. Each named cause is its own subtest. The check runs last.
+        # Pins that each role the session roles sentence names has role text and a brief template. A gap is its own
+        # subtest, so it names its role and cause. The check runs last.
         record = read_live(os.path.join(ROOT, *layout.path(ROOT, "decisions").split("/"), RECORD_NAME))
         roles = session_roles(record)
         self.assertTrue(roles, "the session roles sentence names no roles in %s" % RECORD_NAME)
