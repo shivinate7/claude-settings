@@ -61,6 +61,11 @@ Interface the hook must match:
   line, `past-ruling search unknown:`, and never says clear.
 - A relative file_path on an items set or update with no `data`: the file is read against the payload's `cwd`, as
   question_form._write_data reads it, so that write is judged like inline data (the section "a relative file_path").
+- The Departs-line ruling (rule past-ruling, decision question-form): a question whose Departs from line shares three
+  or more content words with an open ruling (the ruled store, or a step ruling), and whose Based on (ruling) lines do not
+  cite that ruling's id, is refused before any model call, with the id named. An Unvetted: line, a decision or debt
+  line, a closed ruling, and a question with one option never refuse. The cases are case_departs_ruling_*; the rule's
+  matching cases are in hooks/test_question_form.py, which reuses this file's fixtures.
 """
 import atexit
 import json
@@ -83,6 +88,7 @@ sys.path.insert(0, os.path.join(REPO, "lint"))
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
+import test_ruled_store as fixture  # noqa: E402  the one home of a ruled-store fixture (lint/test_ruled_store.py)
 ROOT = _test_temp.run_folder()
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)
 STUB_DIR = os.path.join(ROOT, "stub")
@@ -1721,6 +1727,131 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
           "Unvetted:" in r.reason(), detail(r))
 
 
+# ------------------------------------------------------------------ a question that departs from a ruling (past-ruling)
+#
+# Rule past-ruling on the Departs from line (decision question-form): a question whose Departs from line shares three
+# or more content words with an open ruling, and whose Based on (ruling) lines do not cite that ruling's id, is refused
+# before any model call. The incident: the #3418 question said main refuses a closed item, while the open rulings
+# own-748-b-rule-4 and own-753-a-relayed-grant-entry already let a routed closed item count. Both are the store's entries
+# as filed (roadmap/rulings on origin/roadmap), so the child hook reads them through the ruled store. The Departs line
+# names the routed topic: the literal wording shares only two content words with each ruling, below the three.
+INCIDENT_748, INCIDENT_753 = "own-748-b-rule-4", "own-753-a-relayed-grant-entry"
+INCIDENT_RULINGS = {
+    INCIDENT_748: ("2026-11-13T13:20:00-06:00",
+                   "Owner 13:20 CST Nov 13, page item 748 b (against the triage pick a): the lane lands page_grant rule 4 "
+                   "as in closed PR #1383, so a closed routed answer keeps a counted grant route. This widens a shared "
+                   "tool; he chose it knowing the label."),
+    INCIDENT_753: ("2026-11-13T18:24:00-06:00",
+                   "Owner 18:24 CST Nov 13, page item 753 a (re-picked after the item was reopened with relabelled "
+                   "options): edit the settings.json autoMode.allow entry holding the closed-item clause (\"Relayed Grant\", "
+                   "line 56) and its pinned test hooks/test_auto_mode_allow.py so a routed closed item counts, as in "
+                   "ruling own-748-b-rule-4."),
+}
+# No topic words in the supersedes refs: a candidate line carries them after its ruling, and the check reads the ruling only.
+SUPERSEDES = [{"kind": "main-sentence", "ref": "apps-keep-sentence"}]
+INCIDENT_REPO = make_repo("incident")
+fixture.point_ref(INCIDENT_REPO, fixture.STORE_REF, fixture.ruling_files(
+    {rid: fixture.entry(rid, at=at, ruling=text, supersedes=SUPERSEDES) for rid, (at, text) in INCIDENT_RULINGS.items()}),
+    ROOT)
+INCIDENT_GOAL = "Goal: decide whether a routed closed item counts toward the grant"
+INCIDENT_PROBLEM = "Problem (rule): main refuses a closed item, so the grant check needs your word"
+INCIDENT_BASED = ("Based on (read): the grant check refuses a closed item on main",)
+INCIDENT_DEPARTS = "Departs from: main refuses a closed routed item — #3418 lets a routed closed item count"
+INCIDENT_OPTIONS = [
+    {"label": "Count a routed closed item (Recommended)",
+     "description": "Gain: the grant route stays counted. Lose: a closed item keeps its route."},
+    {"label": "Keep the refusal",
+     "description": "Gain: nothing changes on main. Lose: a routed closed item stays refused."}]
+INCIDENT_PAGE_CONTEXT = "\n".join((INCIDENT_GOAL, INCIDENT_PROBLEM, *INCIDENT_BASED, INCIDENT_DEPARTS))
+INCIDENT_PAGE_OPTIONS = [
+    {"key": "a", "label": "Count a routed closed item", "gain": "The grant route stays counted.",
+     "lose": "A closed item keeps its route."},
+    {"key": "b", "label": "Keep the refusal", "gain": "Nothing changes on main.", "lose": "A routed closed item stays refused."}]
+INCIDENT_TASK_STEP = "Decide whether a routed closed item counts toward the grant route, then say so in chat."
+
+
+def incident_box(departs=INCIDENT_DEPARTS, based=INCIDENT_BASED, options=None):
+    """The incident question. The form passes, so the Departs from line is what the ruling check reads."""
+    return good_box(goal=INCIDENT_GOAL, problem=INCIDENT_PROBLEM, based=based, options=options or INCIDENT_OPTIONS,
+                    departs=departs)
+
+
+def incident_page_item():
+    return good_page_item(title="Count a routed closed item in the grant?", context=INCIDENT_PAGE_CONTEXT,
+                          options=INCIDENT_PAGE_OPTIONS)
+
+
+def ruled_candidates(box, repo):
+    """The candidate lines past_rulings gives a question, read in this process with the claude-settings pointer patched
+    to `repo`. The child hook reads the same repo with no pointer, since its fresh config folder has none."""
+    import question_form  # the one form check (hooks/question_form.py)
+    text = " ".join(words for _, words in question_form.chat_units(box))
+    with mock.patch("guard_pointer.pointer_checkout", return_value=repo):
+        candidates, _unknown = question_form.past_rulings(text, repo)
+    return candidates
+
+
+def ruled_refusal(r, label):
+    """One refusal by the ruling check, in five checks: the deny, its rule, one guard.log line, the id named, no model call."""
+    check("departs ruling %s: the question is denied" % label, (r.deny() or {}).get("permissionDecision") == "deny",
+          detail(r))
+    check("departs ruling %s: the deny is the past-ruling rule" % label, r.reason().startswith("past-ruling"),
+          r.reason()[:160])
+    check("departs ruling %s: one guard.log deny line, for past-ruling" % label,
+          r.log.count("\tdeny\tpast-ruling\t") == 1, detail(r))
+    check("departs ruling %s: the reason names a ruling id" % label, any(rid in r.reason() for rid in INCIDENT_RULINGS),
+          r.reason()[:200])
+    check("departs ruling %s: the refusal makes no model call" % label, r.calls == [], detail(r))
+
+
+def case_departs_ruling_refused_before_the_model():
+    import question_form  # the one form check (hooks/question_form.py)
+    box = incident_box()
+    check("departs ruling fixture: the box passes chat_hit, so the ruling check is what refuses it",
+          question_form.chat_hit(box) == ("", ""), question_form.chat_hit(box))
+    listed = ruled_candidates(box, INCIDENT_REPO)
+    found = {rid for rid in INCIDENT_RULINGS if any(c.startswith("ruled:%s:" % rid) for c in listed)}
+    check("departs ruling fixture: both incident rulings are candidates, as ruled:<id>", found == set(INCIDENT_RULINGS),
+          str(listed)[:200])
+    ruled_refusal(run_hook(question_input(box=box, cwd=INCIDENT_REPO), answer=ALLOW), "chat box")
+
+
+def case_departs_ruling_refused_on_the_page():
+    import question_form  # the one form check (hooks/question_form.py)
+    item = incident_page_item()
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "c3418", "data": item})
+    check("departs ruling page fixture: the item passes item_hit, so the ruling check is what refuses it", got == ("", ""),
+          got)
+    ruled_refusal(run_hook(page_input("set", item, doc_id="c3418", cwd=INCIDENT_REPO), answer=ALLOW), "page item")
+
+
+def case_departs_ruling_no_departs_line_is_unaffected():
+    import question_form  # the one form check (hooks/question_form.py)
+    box = incident_box(departs=None)
+    check("departs ruling, no line: the box is refused by the form's question-departs rule",
+          question_form.chat_hit(box)[0] == "question-departs", str(question_form.chat_hit(box)))
+    r = run_hook(question_input(box=box, cwd=INCIDENT_REPO), answer=ALLOW)
+    check("departs ruling, no line: the refusal is question-departs, with no model call and no past-ruling deny",
+          "\tdeny\tquestion-departs\t" in r.log and r.calls == [] and "\tdeny\tpast-ruling\t" not in r.log, detail(r))
+    task = good_task_item(step=INCIDENT_TASK_STEP)
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "t3418", "data": task})
+    check("departs ruling, task: the task passes item_hit, so the model judges it", got == ("", ""), got)
+    r = run_hook(page_input("set", task, doc_id="t3418", cwd=INCIDENT_REPO), answer=ALLOW)
+    check("departs ruling, task: a task has no Departs from line, so it reaches the model once and is not refused",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, detail(r))
+
+
+def case_departs_ruling_one_option_and_empty_repo_are_not_refused():
+    one = incident_box()
+    one["questions"][0]["options"] = [INCIDENT_OPTIONS[0]]
+    r = run_hook(question_input(box=one, cwd=INCIDENT_REPO), answer=ALLOW)
+    check("departs ruling, one option: a one-option question is not checked, one model call, no deny",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, detail(r))
+    r = run_hook(question_input(box=incident_box(), cwd=BARE_REPO), answer=ALLOW)
+    check("departs ruling, empty repo: no store, steps or records, so the model judges it once and nothing is refused",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, detail(r))
+
+
 # The cost of one fire of the judged tools: a question, a page write, an Agent spawn, and the two Opus reads.
 # A judged question or page write makes one model call, and its one child is the roadmap read, `git`. A tool
 # this hook does not judge, or a read of the page, starts nothing. The opus pair (opus_ask, then opus_scope, which
@@ -1830,7 +1961,9 @@ def main():
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
-                 case_page_absolute_file_path_is_judged):
+                 case_page_absolute_file_path_is_judged, case_departs_ruling_refused_before_the_model,
+                 case_departs_ruling_refused_on_the_page, case_departs_ruling_no_departs_line_is_unaffected,
+                 case_departs_ruling_one_option_and_empty_repo_are_not_refused):
         try:
             case()
         except Exception as exc:

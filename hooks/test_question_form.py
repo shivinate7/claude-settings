@@ -50,6 +50,13 @@ Interface the module must match (the lane's form contract):
   and None (no cwd, or no origin) skips only the compare.
 - hooks/call_judge.py refuses an AskUserQuestion that fails chat_hit before any model call, with the rule
   chat_hit names; the model sees only a box that passes.
+- The Departs-line ruling (rule past-ruling): question_form.past_rulings takes an optional `focus` (the Departs from
+  line's text), and ranks the ruled-store and step rulings by focus overlap first, so a ruling on the Departs topic is
+  kept under the caps (RULED_TOP 8, STEP_TOP 30). hooks/call_judge.py refuses a question whose Departs from line shares
+  three or more content words with a ruling (ids `ruled:<id>`, and step rulings `<step>:`; never a decision or debt
+  index line), unless its Based on (ruling) lines cite that id, before any model call. The cases here run the hook
+  (call_judge.main) through tcj.run_hook, so a red is the check's gap: a direct call to a name that does not exist yet
+  would fail by crash, which is not a red. The cases are case_departs_ruling_*, with fixtures in test_call_judge.py.
 
 Every case runs on the surfaces the contract names. A page write is judged twice, by question_form.item_hit
 and by guard.data_tool_hit, so a guard that does not delegate shows red. The same form lines are judged on
@@ -2662,6 +2669,162 @@ def case_judged_mixed_writes_all_returned():
           "doc ids %r: the relative write p4 is read against the process cwd and dropped" % (ids,))
 
 
+# ------------------------------------------------------------------ the Departs-line ruling check: the rule's terms
+#
+# The fixtures are test_call_judge's (INCIDENT_*, incident_box, ruled_candidates). Each case runs the hook, so the refusal
+# and the candidates it reads are the real path. A case that expects a refusal checks its precondition first (the form
+# passes, and the candidates it expects are there), so a red shows the ruling check's gap and never the form's.
+# RANK_DECOYS fill the cap (RULED_TOP of them). Each shares five or more words with the whole question and none with the
+# Departs from line, so without focus the topic ruling, which shares three words with the whole question, falls outside.
+RANK_DECOYS = ["ruled-ledger-%02d" % n for n in range(1, 9)]
+RANK_TOPIC = "ruled-routed-item-counts"
+RANK_GOAL = "Goal: decide the wording of each stamp ledger entry"
+RANK_PROBLEM = "Problem (rule): the ledger keeps each stamp entry on file, so the wording needs your word"
+RANK_BASED = ("Based on (read): the ledger lists each stamp entry with its wording",)
+RANK_OPTIONS = [
+    {"label": "Keep the ledger wording (Recommended)",
+     "description": "Gain: each stamp entry stays on file. Lose: the ledger does not change."},
+    {"label": "Change the ledger wording",
+     "description": "Gain: entries read the same way. Lose: old entries need a rewrite."}]
+
+
+def case_departs_ruling_cite_passes():
+    # Based on (ruling) citing both ids lifts the check for both, with the bare id or the ruled: prefix.
+    import question_form  # the one form check (hooks/question_form.py)
+    for label, cite in (("bare ids", "%s and %s" % (tcj.INCIDENT_748, tcj.INCIDENT_753)),
+                        ("ruled: ids", "ruled:%s and ruled:%s" % (tcj.INCIDENT_748, tcj.INCIDENT_753))):
+        box = tcj.incident_box(based=("Based on (ruling): %s both count a routed closed item" % cite,))
+        check("departs ruling cite (%s): the box passes chat_hit" % label, question_form.chat_hit(box) == ("", ""),
+              question_form.chat_hit(box))
+        r = tcj.run_hook(tcj.question_input(box=box, cwd=tcj.INCIDENT_REPO), answer=tcj.ALLOW)
+        check("departs ruling cite (%s): both rulings cited, one model call, no deny" % label,
+              r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, tcj.detail(r))
+
+
+def case_departs_ruling_cite_of_one_leaves_the_other():
+    # Citing only own-748 leaves own-753 uncited: the question is still refused, and the reason names own-753.
+    import question_form  # the one form check (hooks/question_form.py)
+    box = tcj.incident_box(based=("Based on (ruling): %s counts a routed closed answer" % tcj.INCIDENT_748,))
+    check("departs ruling, one cited: the box passes chat_hit", question_form.chat_hit(box) == ("", ""),
+          question_form.chat_hit(box))
+    r = tcj.run_hook(tcj.question_input(box=box, cwd=tcj.INCIDENT_REPO), answer=tcj.ALLOW)
+    check("departs ruling, one cited: the uncited ruling still refuses the question, as past-ruling",
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling"), tcj.detail(r))
+    check("departs ruling, one cited: the reason names the uncited id %s" % tcj.INCIDENT_753,
+          tcj.INCIDENT_753 in r.reason(), r.reason()[:200])
+    check("departs ruling, one cited: the refusal makes no model call", r.calls == [], tcj.detail(r))
+
+
+def case_departs_ruling_no_overlap_passes():
+    # The goal and problem name the topic, so both rulings are candidates. The default Departs from line shares no word.
+    import question_form  # the one form check (hooks/question_form.py)
+    box = tcj.good_box(goal=tcj.INCIDENT_GOAL, problem=tcj.INCIDENT_PROBLEM, based=tcj.INCIDENT_BASED,
+                       options=tcj.INCIDENT_OPTIONS)
+    check("departs ruling no overlap: the box passes chat_hit", question_form.chat_hit(box) == ("", ""),
+          question_form.chat_hit(box))
+    listed = tcj.ruled_candidates(box, tcj.INCIDENT_REPO)
+    check("departs ruling no overlap: both rulings are candidates, through the goal and problem words",
+          all(any(c.startswith("ruled:%s:" % rid) for c in listed) for rid in tcj.INCIDENT_RULINGS), str(listed)[:200])
+    r = tcj.run_hook(tcj.question_input(box=box, cwd=tcj.INCIDENT_REPO), answer=tcj.ALLOW)
+    check("departs ruling no overlap: the Departs from line shares no word with a ruling, one model call, no deny",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, tcj.detail(r))
+
+
+def case_departs_ruling_unvetted_line_passes():
+    # The question refused by case_departs_ruling_refused_before_the_model, with an Unvetted: line, is not refused here.
+    box = tcj.incident_box()
+    box["questions"][0]["question"] += "\n" + tcj.UNVETTED_LINE
+    r = tcj.run_hook(tcj.question_input(box=box, cwd=tcj.INCIDENT_REPO), answer=tcj.ALLOW)
+    check("departs ruling Unvetted: a question with the Unvetted line passes the ruling check, one model call, no deny",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, tcj.detail(r))
+
+
+def case_departs_ruling_index_lines_never_trigger():
+    # A decision and a debt that share the topic words reach the candidates, and neither is a ruling the check reads.
+    repo = tcj.make_repo("departs-index",
+                         decisions={"routed-closed-counts": "Owner: a routed closed item counts toward the grant route."},
+                         debts={"closed-item-refused": "a closed item was refused on main though its route is granted."})
+    box = tcj.incident_box()
+    listed = tcj.ruled_candidates(box, repo)
+    check("departs ruling index: the decision and the debt both reach the candidates",
+          any("routed-closed-counts" in c for c in listed) and any("closed-item-refused" in c for c in listed),
+          str(listed)[:200])
+    r = tcj.run_hook(tcj.question_input(box=box, cwd=repo), answer=tcj.ALLOW)
+    check("departs ruling index: a decision or debt line never refuses, one model call, no deny",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, tcj.detail(r))
+
+
+def case_departs_ruling_two_shared_words_pass():
+    # "closed" and "routed" are the only words this line shares with each ruling: two is below the three the rule needs.
+    import question_form  # the one form check (hooks/question_form.py)
+    box = tcj.incident_box(departs="Departs from: main refuses a closed order — a routed order waits")
+    check("departs ruling two words: the box passes chat_hit", question_form.chat_hit(box) == ("", ""),
+          question_form.chat_hit(box))
+    r = tcj.run_hook(tcj.question_input(box=box, cwd=tcj.INCIDENT_REPO), answer=tcj.ALLOW)
+    check("departs ruling two words: two shared words is no hit, one model call, no deny",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, tcj.detail(r))
+
+
+def case_departs_ruling_closed_entry_never_triggers():
+    # A closed ruling is no candidate, so no Departs from line can match it.
+    closed_id = "ruled-routed-shut"
+    repo = tcj.make_repo("departs-closed")
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files({
+        closed_id: fixture.entry(closed_id, at="2026-11-13T18:24:00-06:00",
+                                 ruling="Owner, 2026-11-13: a closed routed item counts toward the grant route.",
+                                 status="closed", supersedes=tcj.SUPERSEDES)}), tcj.ROOT)
+    box = tcj.incident_box()
+    listed = tcj.ruled_candidates(box, repo)
+    check("departs ruling closed: the closed entry is no candidate, so the check has nothing to match",
+          not any(closed_id in c for c in listed), str(listed)[:200])
+    r = tcj.run_hook(tcj.question_input(box=box, cwd=repo), answer=tcj.ALLOW)
+    check("departs ruling closed: a line that matches only a closed ruling is not refused, one model call, no deny",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, tcj.detail(r))
+
+
+def case_departs_ruling_step_ruling_hits():
+    # A roadmap step ruling is a candidate too, and the refusal names its step id.
+    step_id = "step-routed-count"
+    repo = tcj.make_repo("departs-steps",
+                         steps={step_id: "Ruling (owner, Nov 13): a routed closed item counts toward the grant route."})
+    box = tcj.incident_box()
+    listed = tcj.ruled_candidates(box, repo)
+    check("departs ruling step: the step ruling is a candidate, as step-routed-count:",
+          any(c.startswith(step_id + ":") for c in listed), str(listed)[:200])
+    r = tcj.run_hook(tcj.question_input(box=box, cwd=repo), answer=tcj.ALLOW)
+    check("departs ruling step: the question is denied as past-ruling",
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling"), tcj.detail(r))
+    check("departs ruling step: the reason names the step id", step_id in r.reason(), r.reason()[:200])
+    check("departs ruling step: the refusal makes no model call", r.calls == [], tcj.detail(r))
+
+
+def case_departs_ruling_ranks_the_topic_first():
+    # The cap is full with the eight decoys. The topic ruling is outside it on the whole question, so only the focus
+    # ranking (the Departs from line's words first) can keep it. Scope first: the cut is checked before the refusal.
+    import question_form  # the one form check (hooks/question_form.py)
+    entries = {rid: fixture.entry(rid, at="2026-11-%02dT09:00:00-06:00" % n,
+                                  ruling="Owner: each stamp ledger entry keeps its wording on file, as round %02d." % n,
+                                  supersedes=tcj.SUPERSEDES)
+               for n, rid in enumerate(RANK_DECOYS, 1)}
+    entries[RANK_TOPIC] = fixture.entry(RANK_TOPIC, at="2026-11-13T18:24:00-06:00",
+                                        ruling="Owner, 2026-11-13: a closed routed item counts toward the grant route.",
+                                        supersedes=tcj.SUPERSEDES)
+    repo = tcj.make_repo("departs-ranking")
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files(entries), tcj.ROOT)
+    box = tcj.good_box(goal=RANK_GOAL, problem=RANK_PROBLEM, based=RANK_BASED, options=RANK_OPTIONS,
+                       departs=tcj.INCIDENT_DEPARTS)
+    check("departs ruling ranking: the box passes chat_hit", question_form.chat_hit(box) == ("", ""),
+          question_form.chat_hit(box))
+    listed = [c[len("ruled:"):].split(":", 1)[0] for c in tcj.ruled_candidates(box, repo) if c.startswith("ruled:")]
+    check("departs ruling ranking: without focus the cap keeps the eight decoys and cuts the topic ruling (scope first)",
+          sorted(listed) == sorted(RANK_DECOYS), str(listed)[:300])
+    r = tcj.run_hook(tcj.question_input(box=box, cwd=repo), answer=tcj.ALLOW)
+    check("departs ruling ranking: the topic ruling, cut from the whole-question list, still refuses the question",
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling"), tcj.detail(r))
+    check("departs ruling ranking: the reason names the topic ruling", RANK_TOPIC in r.reason(), r.reason()[:200])
+    check("departs ruling ranking: the refusal makes no model call", r.calls == [], tcj.detail(r))
+
+
 def main():
     for case in (case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
                  case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
@@ -2709,7 +2872,12 @@ def main():
                  case_cross_repo_writer_guard_path, case_cross_repo_writer_page_item_hit,
                  case_cross_repo_writer_call_judge, case_cross_repo_update_checked_with_needs_repo,
                  case_judged_relative_file_path_read_at_cwd, case_judged_absolute_and_empty_are_unchanged,
-                 case_judged_mixed_writes_all_returned):
+                 case_judged_mixed_writes_all_returned,
+                 case_departs_ruling_cite_passes, case_departs_ruling_cite_of_one_leaves_the_other,
+                 case_departs_ruling_no_overlap_passes, case_departs_ruling_unvetted_line_passes,
+                 case_departs_ruling_index_lines_never_trigger, case_departs_ruling_two_shared_words_pass,
+                 case_departs_ruling_closed_entry_never_triggers, case_departs_ruling_step_ruling_hits,
+                 case_departs_ruling_ranks_the_topic_first):
         try:
             case()
         except Exception as exc:
