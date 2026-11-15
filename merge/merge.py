@@ -69,6 +69,10 @@
                           default branch, and its config is read from it. A root whose read fails, or whose folder is
                           missing or unreadable, prints `repo DIR: unknown (REASON)`; the other roots print in full, and the run exits 1.
                           Cost: the gh calls of one --reviewed per root; no new process, file or timer.
+  merge --audit-prs       one line per open PR: number, branch, head, draft or ready, mergeable state (UNKNOWN: the list does not carry it), the newest
+                          review record's last round and verdict, and the lane-lint state at that head. Then the gh calls of each route. It stops, with
+                          the remaining count, the limit and the reset time, when the GitHub API budget is under a tenth (decision gh-api-budget).
+                          Cost: one call per 100 open PRs and one per page of repo comments; no per-PR call, no file, no new process or timer.
   merge --touches [--run RUN_ID|URL] [--case TEXT ...] [--file PATH ...]
                           one line per open PR that touches a named file (a changed file of that path) or holds a named case in a `+` line of its
                           patch: `#N HEADREF SHA9 draft|ready: file PATH; case TEXT`. With --run, the run's failing log lines name the cases
@@ -299,6 +303,7 @@ def run_id(run):
 UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not run is reported as unknown, never as clear)"
 # The two role cites name no tier: a lane must not learn which tier may claim a merge.
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
+BUDGET_CITE = "(decision gh-api-budget, a bulk read stops below a tenth of the GitHub API budget)"
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
 # The paths a review record's `--guard no` refuses: the rule dirs, then the tool and the hooks, as folder prefixes. GUARD_FILES match a whole path.
 # It reads RULE_DIRS, never a copy.
@@ -419,6 +424,25 @@ def split_headers(out):
         return {}, out
     pairs = (line.partition(":") for line in m.group(0).splitlines()[1:])
     return {k.strip().lower(): v.strip() for k, sep, v in pairs if sep}, out[m.end():]
+
+_ROUTE_REPO = re.compile(r"^repos/(?:\{owner\}/\{repo\}|[^/]+/[^/]+)/?")
+_ROUTE_SHA = re.compile(r"\b[0-9a-f]{40}\b")
+_ROUTE_NUM = re.compile(r"(?<![\w{])\d+(?![\w}])")
+
+def route_template(path):
+    """-> the route of a `gh api` path without its repo, a number as {n} and a full sha as {sha}: the key the per-route call counts use (`pulls/7/files` -> `pulls/{n}/files`)."""
+    rel = _ROUTE_REPO.sub("", path)
+    return _ROUTE_NUM.sub("{n}", _ROUTE_SHA.sub("{sha}", rel)) or "(repo)"
+
+@contextlib.contextmanager
+def bulk_reads(h):
+    """Every GET host `h` makes inside the block is a bulk read: refused when the budget is under a tenth (Host.refuse_bulk), and sent fresh. For a list read of the whole repo."""
+    before = h.bulk_mode
+    h.bulk_mode = True
+    try:
+        yield h
+    finally:
+        h.bulk_mode = before
 
 def has_next_link(link):
     """True when a `Link` header value has an entry whose rel is next. Only the relation counts: the entry's URL is never read."""
@@ -1099,6 +1123,9 @@ class Host:
         self.warned = set()  # (check name, link) already warned about, so a poll loop prints each line once
         self.heads_fetch = None  # (code, output) of this run's one fetch_branch_heads, made by merge_state only when a commit is missing; None before it
         self.main_fetch = None  # (code, output) of this run's one fetch of main (fetch_main_once), made by the first carry that needs main's tip; None before it
+        self.budget = {}  # remaining, limit, reset (epoch seconds) from the newest reply that carried X-Ratelimit headers; a missing or unreadable one is None
+        self.memo = {}  # (route, query, flags) -> the reply of this run's GET, kept until any write (api)
+        self.route_counts = {}  # (method, route template) -> gh calls made, retries included (route_template)
 
     commit_message = None  # set by confirm just before the merge: one line per reason flag that lifted a check. None leaves GitHub's default message
     branch = "<branch>"  # the head branch of the last pr() read: the remedy of a "no check ran" red names it
@@ -1115,42 +1142,98 @@ class Host:
             raw[:] = [out]
             return c, out
         c, out, self.net_retries = retry_net(call, self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`", self.now, self.before_wait, net_method(args), idempotent, landed)
+        self.count_call(args, 1 + self.net_retries)
+        if "-i" in args:
+            self.note_budget(split_headers(raw[0])[0])  # the reply's own header block: no call is made to read the budget
         if is_net(c, out):
             raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
         return c, raw[0] if "-i" in args else out
 
+    def count_call(self, args, calls):
+        """Add `calls` to the count of the route `args` names: the audit's reader (`merge --audit-prs`) prints the counts. A `gh api` call counts under its method and route
+        template, any other gh call under its first two words."""
+        key = (net_method(args), route_template(args[1])) if args[:1] == ["api"] and len(args) > 1 else ("gh", " ".join(args[:2]))
+        self.route_counts[key] = self.route_counts.get(key, 0) + calls
+
+    def note_budget(self, headers):
+        """Keep the budget a reply's headers name. A reply with no header block (a transport error) leaves the last one in place; a header that is missing
+        or not a number is None, so refuse_bulk never reads it."""
+        if headers:
+            self.budget = {k: _seconds(headers.get("x-ratelimit-" + k)) for k in ("remaining", "limit", "reset")}
+
+    use_memo = True  # confirm turns it off: a merge under the lock reads every state fresh, and a rate wait or a rival can change it between two reads
+    bulk_mode = False  # bulk_reads sets it: every GET of the block is a bulk read
+
+    def refuse_bulk(self, rel):
+        """Stop a bulk read when the newest reply left under a tenth of the limit. A budget not read (no header, not a number) never refuses. The reset prints as Central time.
+        Merge-path reads and writes never call this."""
+        left, limit, reset = (self.budget.get(k) for k in ("remaining", "limit", "reset"))
+        if left is None or not limit or limit <= 0 or left * 10 >= limit:
+            return
+        when = "unknown"
+        if reset is not None:
+            try:
+                import local_time  # hooks/local_time.py, the one home of the Central clock; on sys.path from the top of this file
+                when = local_time.central_hhmm(datetime.datetime.fromtimestamp(reset, datetime.timezone.utc)) or when
+            except (ImportError, OverflowError, OSError, ValueError):
+                pass
+        raise Stop(f"the GitHub API budget is {left} of {limit} calls left, under a tenth, so this bulk read of {rel} is not sent. The budget resets at {when}. "
+                   f"Run it again then. {BUDGET_CITE}")
+
     def _repo_args(self):
         return ["-R", self.repo] if self.repo else []
 
-    def api(self, rel, *extra, method="GET", fields=None, body=None, idempotent=False, landed=None):
+    def api(self, rel, *extra, method="GET", fields=None, body=None, idempotent=False, landed=None, bulk=False, memo=True):
         """-> (code, output) of one REST call, through Host.gh so its retries hold. The repo is Host.repo, else the repo of the working directory.
         `fields` go out as -f fields: a GET must say -X GET, or gh sends them as a POST body. A query value never goes in the route, because the
         Windows .cmd shim of gh lets cmd.exe split an argument at '&'.
         `body` (a dict) goes out as JSON through `--input <tempfile>`, for a value that can hold a newline: the same shim cuts an argument there.
-        The file is in the system temp dir, never the repo, and is removed after the call, also when it raises."""
+        The file is in the system temp dir, never the repo, and is removed after the call, also when it raises.
+        Every call goes out with `-i`, so its reply's budget headers are recorded (Host.budget); the output has no header block unless the caller passes `-i` itself.
+        A GET is kept for the run, keyed on its route and query, and a repeat is no call: `memo=False` always reads (a poll that waits for a change). Any other method
+        clears the memo. A bulk read (`bulk`, or inside bulk_reads) is refused below a tenth of the budget (refuse_bulk); it is always sent and never kept, so it
+        reads fresh. A write is never refused."""
         route = f"repos/{self.repo}" if self.repo else "repos/{owner}/{repo}"
+        wants_headers = "-i" in extra
+        extra = extra if wants_headers else (*extra, "-i")
         args = ["api", f"{route}/{rel}" if rel else route, "-X", method]
         for key, value in (fields or {}).items():
             args += ["-f", f"{key}={value}"]
+        keep = method == "GET" and body is None
+        key = (rel, tuple((k, str(v)) for k, v in (fields or {}).items()), extra)
+        bulk = bulk or self.bulk_mode
+        memo = memo and self.use_memo
+        if keep and memo and not bulk and key in self.memo:
+            c, out = self.memo[key]
+            return c, out if wants_headers else split_headers(out)[1]
+        if keep and bulk:
+            self.refuse_bulk(rel or "(repo)")
+        opts = {k: v for k, v in (("idempotent", idempotent), ("landed", landed)) if v}
         if body is None:
-            return self.gh([*args, *extra], self.cwd, **{k: v for k, v in (("idempotent", idempotent), ("landed", landed)) if v})
-        fd, tmp = tempfile.mkstemp(prefix="merge-body-", suffix=".json")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(body, f)
-            return self.gh([*args, "--input", tmp, *extra], self.cwd, **{k: v for k, v in (("idempotent", idempotent), ("landed", landed)) if v})
-        finally:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp)
+            c, out = self.gh([*args, *extra], self.cwd, **opts)
+        else:
+            fd, tmp = tempfile.mkstemp(prefix="merge-body-", suffix=".json")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(body, f)
+                c, out = self.gh([*args, "--input", tmp, *extra], self.cwd, **opts)
+            finally:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp)
+        if not keep:
+            self.memo.clear()
+        elif memo and not bulk and not c:
+            self.memo[key] = (c, out)
+        return c, out if wants_headers else split_headers(out)[1]
 
-    def pages(self, rel, key=None, fields=None):
+    def pages(self, rel, key=None, fields=None, bulk=False, memo=True):
         """-> every item of a list read, all pages. `key` names the field that holds the page in an object reply (check_runs, statuses); None is an array reply.
         Each page is asked for by number (`page=n`) with -i, and the read goes on to page n+1 only while its `Link` header has rel="next". The last page has none,
-        so a read costs one call per page. gh's own paging and the Link URL are not used: that URL is a numeric `repositories/<id>/...` route, which the cloud agent proxy refuses with 403.
+        so a read costs one call per page, each page asked for once a run (api's memo; `memo=False` reads again). `bulk` refuses a page when the budget is under a tenth (api). gh's own paging and the Link URL are not used: that URL is a numeric `repositories/<id>/...` route, which the cloud agent proxy refuses with 403.
         A failed read is a Stop: never an empty list, which would read as no checks or no pull requests. More than PAGE_CEILING pages is a Stop too."""
         items = []
         for n in range(1, PAGE_CEILING + 1):
-            c, out = self.api(rel, "-i", fields={**(fields or {}), "per_page": 100, "page": n})
+            c, out = self.api(rel, "-i", fields={**(fields or {}), "per_page": 100, "page": n}, bulk=bulk, memo=memo)
             headers, out = split_headers(out)
             try:
                 if c:
@@ -1235,7 +1318,7 @@ class Host:
 
     def read_pr(self, n):
         """-> the pr() fields of pull request n, one read, with no change to this Host. A failed read is a Stop."""
-        c, out = self.api(f"pulls/{self.pr_number(n)}")
+        c, out = self.api(f"pulls/{self.pr_number(n)}", memo=False)  # a poll waits for the head to move after a push, so it never reads the memo
         if c:
             raise Stop("reading the pull request failed " + READ_CITE + ": " + out)
         return self.info(json.loads(out))
@@ -1395,11 +1478,17 @@ class Host:
         """-> the required check names of the base: its ruleset's first (ruleset_names), else its classic branch protection's. None when neither names any
         (the classic read is an HTTP 404 that is not a network error). Through api, so the guard's -R repo and its cwd name the repo. Any other failed read
         raises Stop."""
+        key = ("protection_names", self.base)
+        if self.use_memo and key in self.memo:  # one read of the names a run, a 404 included: the base's protection does not change inside a run, and any write clears it
+            held = self.memo[key]
+            return list(held) if held else held
         names = self.ruleset_names()
         if names:
+            self.memo[key] = names
             return names
         c, out = self.api(f"branches/{self.base}/protection/required_status_checks", "--jq", ".contexts")
         if c and not is_net(c, out) and re.search(r"\bHTTP 404\b", out):
+            self.memo[key] = None
             return None
         try:
             names = json.loads(out) if not c else None
@@ -1407,6 +1496,7 @@ class Host:
                 raise ValueError
         except ValueError:
             raise Stop(f"cannot read the required checks of {self.base} {PIN_CITE}. Set merge.requiredChecks to a list of check names.\n{out}")
+        self.memo[key] = names
         return names
 
     def required_names(self):
@@ -1905,7 +1995,7 @@ class Host:
         if state_now in ("BLOCKED", "BEHIND"):
             return None, f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base {GRANT_CITE}. gh's merge refuses it the same way, so no merge call was sent."
         def merged_at_sha():  # a lost reply may still have merged: True when the PR reads merged at this run's head, False when it reads open, None when unread or merged elsewhere
-            c4, v = self.api(f"pulls/{n}")
+            c4, v = self.api(f"pulls/{n}", memo=False)
             try:
                 d = json.loads(v) if not c4 else None
                 if d["merged"]:
@@ -1919,7 +2009,7 @@ class Host:
         except NetStop as e:
             lost, c, out = True, 1, str(e)
         try:
-            c2, view = self.api(f"pulls/{n}")
+            c2, view = self.api(f"pulls/{n}", memo=False)
             d = json.loads(view) if not c2 else None
             state, head, oid = "MERGED" if d["merged"] else d["state"].upper(), d["head"]["sha"], d["merged"] and d["merge_commit_sha"]
             if state == "MERGED" and not oid:
@@ -4272,6 +4362,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     lifts = {}  # each reason flag that lifts a check in this run, for the merge commit message
     with timed_phase("lock"):
         token = lock.acquire(base, LOCK_TTL_SECONDS)
+    host.use_memo = False  # a merge under the lock reads each state fresh (Host.use_memo)
     host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant), so the fixed TTL need not cover it
     tmp = wt = claim_sha = None
     judge = None  # the prose judge's plan, built under the lock and run after it is released
@@ -5092,18 +5183,20 @@ def own_records(n, bodies):
 
 def reviewed_read(h, cfgrel=None):
     """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
-    repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
-    the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request.
+    repo's comments since the oldest one) and, for each ready pull request that has a record, two `gh` calls: the check runs and the commit statuses of its head,
+    read once (the lint step's rollup read and the CI state share them), and the ruleset and the branch protection once a run (decision pr-review-record, the cost;
+    decision gh-api-budget). The two list reads are bulk reads: each stops when the budget is under a tenth. The comment list pages every comment of the repo since the oldest open pull request.
     The same list holds the lane-lint comments: a done record counts as done only with a lane-lint PASS at the live head (lint_state), else its line
     names `merge --lane-lint <n>`; no extra call. A ready pull request with no such PASS adds one rollup_green read (the check runs and the commit
-    statuses, two more `gh` calls): a green all-jobs-passed on the live head reads `lint skipped`, as the join (lint_check) does, and the state stays done. Each record's clean-merge walk judges against the host's base at entry, the repo's default branch, never the pull
+    statuses, the same two calls head_state reuses): a green all-jobs-passed on the live head reads `lint skipped`, as the join (lint_check) does, and the state stays done. Each record's clean-merge walk judges against the host's base at entry, the repo's default branch, never the pull
     request's own base. A claim commit on the reviewed head carries both the record and the lint (claim_only, with the stamp config `cfgrel`), as
     the join reads it; that reads git in the host's checkout, and fetches a pull request head it lacks."""
     main, cfgrel, root = h.base, cfgrel or DEFAULT_CONFIG, h.cwd or "."
-    pulls = h.pages("pulls", fields={"state": "open"})
-    if not pulls:
-        return ["no open pull requests."]
-    rows, lints, _pointers = h.issue_comments(min(d["created_at"] for d in pulls))
+    with bulk_reads(h):
+        pulls = h.pages("pulls", fields={"state": "open"})
+        if not pulls:
+            return ["no open pull requests."]
+        rows, lints, _pointers = h.issue_comments(min(d["created_at"] for d in pulls))
     records = {n: [r[0] for r in rs] for n, rs in rows.items()}  # reviewed_read needs the bodies only
     lines, bare = [], []
     for d in sorted(pulls, key=lambda d: d["number"]):
@@ -5129,6 +5222,33 @@ def reviewed_read(h, cfgrel=None):
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
         lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
     return lines + ([f"no record: {', '.join(bare)}"] if bare else [])
+
+def audit_prs(h):
+    """-> (lines, counts) of `merge --audit-prs`: one line per open pull request, then the gh calls of each route. Two bulk reads and no per-PR call: the open pull
+    list (one call per 100) and the repo's comments since the oldest open pull request (issue_comments). A line holds the number, branch, head, draft or ready,
+    the mergeable state (UNKNOWN: the list does not carry it, and a read for each pull request is the cost this audit avoids), the newest review record's
+    last round and verdict, and the lane-lint state at that head. Writes nothing, no file and no temp file. A bulk read under a tenth of the budget is a Stop."""
+    with bulk_reads(h):
+        pulls = h.pages("pulls", fields={"state": "open"})
+        made = [d["created_at"] for d in pulls if d.get("created_at")]
+        since = min(made) if made else datetime.datetime.fromtimestamp(h.now(), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if not pulls else "1970-01-01T00:00:00Z"  # no open pull request: nothing to match, so the read is of the newest comments only
+        records, lints, _pointers = h.issue_comments(since)
+    lines = []
+    for d in sorted(pulls, key=lambda d: d["number"]):
+        n, sha = d["number"], d["head"]["sha"]
+        rows = records.get(n)
+        rec = parse_review(rows[-1][0]) if rows else None
+        rec = rec if rec and rec["n"] == n else None
+        if not rows:
+            review = "none"
+        elif not rec:
+            review = "unreadable"
+        else:
+            i, role, _model, verdict = rec["rounds"][-1]
+            review = f"round {i} {verdict} ({role})" + ("" if rec["head"] == sha else ", at an older head")
+        lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {'draft' if d.get('draft') else 'ready'} {(d.get('mergeable_state') or 'unknown').upper()} "
+                     f"review: {review}; lint: {lint_state(lints.get(n, []), sha)}")
+    return lines or ["no open pull requests."], [f"{method} {route}: {count}" for (method, route), count in sorted(h.route_counts.items())]
 
 def reviewed_lines(h, cfgrel=None):
     """-> the lines of `merge --reviewed` (see reviewed_read, which holds the gh cost of one repo). `--root` runs this once per root, so the
@@ -5726,6 +5846,7 @@ def build_parser():
     p.add_argument("--idle-lanes", action="store_true", help="list the lanes to archive from the roadmap's live file; takes no lock, merges and posts nothing")
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
+    p.add_argument("--audit-prs", action="store_true", help="one line per open pull request (head, draft, review verdict, lint state) from two bulk reads, then the gh calls of each route; takes no lock, writes nothing")
     p.add_argument("--root", action="append", default=[], metavar="DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; repeat it for each repo")
     p.add_argument("--release-check", nargs="+", action="extend", type=pr_arg, metavar="N", help="one line per pull request: PASS, or FAIL and the reasons (open, review record done at the live head and unedited, lint verdict, clean merge, stack); a missing line is a FAIL; takes no lock, merges nothing")
     p.add_argument("--lint", action="append", type=lint_arg, default=[], metavar="N@SHA:VERDICT", help="with --release-check: the lint verdict of pull request N on head SHA (full lowercase 40-hex; PASS, FAIL or UNKNOWN-AT-CAP); a SHA that is not the live head FAILs, and a number with none FAILs")
@@ -5793,7 +5914,9 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--lint-unknown-ok goes with --lane-lint")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
-    if a.idle_lanes or a.touches or a.release_check:
+    if a.audit_prs and any(v != p.get_default(k) for k, v in vars(a).items() if k != "audit_prs"):
+        p.error("--audit-prs stands alone")
+    if a.idle_lanes or a.touches or a.release_check or a.audit_prs:
         pass  # stands alone: checked above
     elif a.fast_checks:  # the read-only pre-ready run: no lock, no push, no ready mark
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record or a.lane_lint or a.ready:
@@ -5862,6 +5985,10 @@ def main(argv, host=None, lock=None, hosts=None):
             if unknown:
                 print("merge: " + " ".join(unknown.split()), file=sys.stderr)
                 return 1
+            return 0
+        if a.audit_prs:  # before the role check and any lock: it reads, merges and posts nothing
+            lines, counts = audit_prs(host or Host(cwd=a.repo_dir))
+            say(*lines, "gh calls by route:", *(f"  {c}" for c in counts))
             return 0
         if a.idle_lanes:
             return idle_lanes(a.live, a.repo_dir)  # before the role check and any lock: it reads, merges and posts nothing
