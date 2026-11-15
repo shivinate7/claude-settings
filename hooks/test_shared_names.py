@@ -581,6 +581,9 @@ def case_guard_merge_reads_the_shared_merge_roles():
 
 
 ROLE_SESSION = "cse_role_reader_check"  # a made-up environment session id (the form hooks/override.py reads)
+LOCAL_SESSION = "local-role-check-session"  # a made-up local session id, in the shape hooks/guard_shared_tree.py matches
+# main's merge/merge.py before the lane's move, pinned by sha (hooks/test_mutate_replay.py reads a pinned sha the same way)
+MAIN_MERGE_SHA = "ae13fcab37986a851433b73cb4aeb4dff7cf38f6"
 
 
 def _role_config(label, text):
@@ -597,13 +600,15 @@ def _role_file(session, role):
     return json.dumps({"session": session, "role": role})
 
 
-def _role_read(cfg, session, reader):
-    """`reader()` with CLAUDE_CONFIG_DIR set to `cfg` (None: unset) and the session id set to `session` (None: unset).
-    The environment is restored after."""
-    keys = ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_REMOTE_SESSION_ID")
-    saved = {key: os.environ.get(key) for key in keys}
+def _role_read(cfg, session, reader, local=None, remote=None):
+    """`reader()` with every environment key the role readers read set as given, None meaning unset: CLAUDE_CONFIG_DIR = `cfg`,
+    CLAUDE_CODE_REMOTE_SESSION_ID = `session` (the cloud id), CLAUDE_CODE_SESSION_ID = `local` (the local id), CLAUDE_CODE_REMOTE
+    = `remote`, and CS_SESSION_ROLE unset. This session's own values never reach a case. The environment is restored after."""
+    values = (("CLAUDE_CONFIG_DIR", cfg), ("CLAUDE_CODE_REMOTE_SESSION_ID", session), ("CLAUDE_CODE_SESSION_ID", local),
+              ("CLAUDE_CODE_REMOTE", remote), ("CS_SESSION_ROLE", None))
+    saved = {key: os.environ.get(key) for key, _ in values}
     try:
-        for key, value in (("CLAUDE_CONFIG_DIR", cfg), ("CLAUDE_CODE_REMOTE_SESSION_ID", session)):
+        for key, value in values:
             if value is None:
                 os.environ.pop(key, None)
             else:
@@ -684,6 +689,224 @@ def case_role_path_is_state_merge_role_under_the_config_folder():
     return ok, "role_path with a config folder = %r (want %r); with none = %r (want %r)" % (got, want, unset, default)
 
 
+def _main_read_merge_role():
+    """main's read_merge_role, with main's MERGE_ROLES and role_path, compiled from MAIN_MERGE_SHA's merge/merge.py. Only those
+    three top-level definitions run, so the module's own imports never run. Returns (function, None), or (None, cause) when git
+    cannot read the commit."""
+    import pathlib
+    shown = subprocess.run(["git", "show", MAIN_MERGE_SHA + ":merge/merge.py"], cwd=os.path.join(HERE, ".."),
+                           capture_output=True, check=False)
+    if shown.returncode != 0:
+        return None, "git show could not read merge/merge.py at %s: %s" % (
+            MAIN_MERGE_SHA[:7], shown.stderr.decode("utf-8", "replace").strip())
+    wanted = {"MERGE_ROLES", "role_path", "read_merge_role"}
+    picked = []
+    for node in ast.parse(shown.stdout.decode("utf-8")).body:
+        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id in wanted for target in node.targets):
+            picked.append(node)
+        elif isinstance(node, ast.FunctionDef) and node.name in wanted:
+            picked.append(node)
+    namespace = {"os": os, "json": json, "pathlib": pathlib}
+    exec(compile(ast.Module(body=picked, type_ignores=[]), "merge/merge.py@" + MAIN_MERGE_SHA[:7], "exec"), namespace)
+    return namespace["read_merge_role"], None
+
+
+def _launcher_path(cfg):
+    """The launcher's role file for LOCAL_SESSION under config folder `cfg`, at the path hooks/session_role.py reads, with its
+    folder made."""
+    session_role = importlib.import_module("session_role")
+
+    def make_folder():
+        folder = session_role.roles_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        return str(folder / (LOCAL_SESSION + ".json"))
+
+    return _role_read(cfg, None, make_folder)
+
+
+def _launcher_config(label, role):
+    """This run's config folder with the launcher's role file for LOCAL_SESSION, written for `role` by hooks/session_role.write,
+    the one home of that format. With `role` None the folder holds no such file."""
+    cfg = os.path.join(RUN, "role-config", label)
+    os.makedirs(cfg, exist_ok=True)
+    if role is not None:
+        session_role = importlib.import_module("session_role")
+        if not _role_read(cfg, None, lambda: session_role.write(LOCAL_SESSION, "", role)):
+            raise AssertionError("session_role.write did not record %s for the fixture" % role)
+    return cfg
+
+
+def _launcher_held(cfg):
+    """What hooks/session_role.py reads for LOCAL_SESSION under `cfg`: (the role file exists, the role or None)."""
+    session_role = importlib.import_module("session_role")
+    return _role_read(cfg, None, lambda: (session_role.own_file_exists(LOCAL_SESSION), session_role.own_role(LOCAL_SESSION)),
+                      local=LOCAL_SESSION)
+
+
+def _local_reads(cfg, main_read, remote=None):
+    """(main's read, shared_names' read) of the local role for LOCAL_SESSION under `cfg`, with no cloud id."""
+    old = _role_read(cfg, None, main_read, local=LOCAL_SESSION, remote=remote)
+    new = _role_read(cfg, None, _shared().read_merge_role, local=LOCAL_SESSION, remote=remote)
+    return old, new
+
+
+def _launcher_scope_problem():
+    """Scope before subject: with no cloud id, shared_names.read_merge_role must read a valid batch-runner launcher file. Each
+    local case below ends in an equality, and a reader with no local branch returns None on both sides there too, so each case
+    checks this first. Returns the cause when it fails, else None."""
+    cfg = _launcher_config("scope-batch-runner", "batch-runner")
+    got = _role_read(cfg, None, _shared().read_merge_role, local=LOCAL_SESSION)
+    if got != "batch-runner":
+        return ("shared_names.read_merge_role does not read the launcher file: it gives %r for a batch-runner launcher, "
+                "want 'batch-runner'" % (got,))
+    return None
+
+
+def case_local_launcher_names_a_merge_role_and_both_sides_read_it_alike():
+    """With no cloud id, a launcher file naming each MERGE_ROLES role reads as that role on main and on shared_names."""
+    shared = _shared()
+    main_read, cause = _main_read_merge_role()
+    if main_read is None:
+        return False, cause
+    problems = []
+    for role in sorted(shared.MERGE_ROLES):
+        old, new = _local_reads(_launcher_config("local-merge-" + role, role), main_read)
+        if old != role:  # scope before subject: main must read the fixture as the role, or the next line proves nothing
+            return False, "scope: main reads %r for a launcher naming %s, want %s" % (old, role, role)
+        if new != role:
+            problems.append("shared_names reads %r for a launcher naming %s, main reads %r" % (new, role, old))
+    return not problems, "; ".join(problems) or "a launcher naming each merge role reads as that role on both sides"
+
+
+def case_local_launcher_naming_a_non_merge_role_reads_no_role_on_both_sides():
+    """With no cloud id, a launcher file naming a role outside MERGE_ROLES (the coordinator, the triage) reads as no role on both sides."""
+    shared = _shared()
+    session_role = importlib.import_module("session_role")
+    main_read, cause = _main_read_merge_role()
+    if main_read is None:
+        return False, cause
+    scope = _launcher_scope_problem()
+    if scope:
+        return False, scope
+    for role in sorted(set(session_role.SESSION_ROLES) - set(shared.MERGE_ROLES)):
+        cfg = _launcher_config("local-other-" + role, role)
+        exists, held = _launcher_held(cfg)
+        if not exists or held != role:
+            return False, "scope: session_role reads %r from the %s launcher fixture, want %r" % (held, role, role)
+        old, new = _local_reads(cfg, main_read)
+        if old is not None:
+            return False, "main reads %r for a launcher naming %s, want None" % (old, role)
+        if new != old:
+            return False, "shared_names reads %r for a launcher naming %s, main reads %r" % (new, role, old)
+    return True, "a launcher naming a non-merge role reads as no role on both sides"
+
+
+def case_local_launcher_missing_reads_no_role_on_both_sides():
+    """With no cloud id and no launcher file, both sides read no role."""
+    main_read, cause = _main_read_merge_role()
+    if main_read is None:
+        return False, cause
+    scope = _launcher_scope_problem()
+    if scope:
+        return False, scope
+    cfg = _launcher_config("local-missing", None)
+    exists, held = _launcher_held(cfg)
+    if exists:
+        return False, "scope: session_role finds a launcher file in the missing-file fixture, which reads as %r" % (held,)
+    old, new = _local_reads(cfg, main_read)
+    if old is not None:
+        return False, "main reads %r with no launcher file, want None" % (old,)
+    if new != old:
+        return False, "shared_names reads %r with no launcher file, main reads %r" % (new, old)
+    return True, "with no launcher file both sides read no role"
+
+
+def case_local_launcher_unreadable_reads_no_role_on_both_sides():
+    """With no cloud id, a launcher file that is a directory, bytes that are not UTF-8, or empty reads as no role on both sides.
+    The fixture is a directory or bad bytes, not a chmod: the suite runs as root, which reads a 000 file."""
+    main_read, cause = _main_read_merge_role()
+    if main_read is None:
+        return False, cause
+    scope = _launcher_scope_problem()
+    if scope:
+        return False, scope
+    for label, body in (("directory", None), ("not-utf8", b"\xff\xfe{\x00"), ("empty", b"")):
+        cfg = _launcher_config("local-unreadable-" + label, None)
+        path = _launcher_path(cfg)
+        if body is None:
+            os.makedirs(path, exist_ok=True)
+        else:
+            with open(path, "wb") as handle:
+                handle.write(body)
+        exists, held = _launcher_held(cfg)
+        if not exists or held is not None:
+            return False, "scope: session_role reads %r from the %s launcher fixture, want a file present with no role" % (held, label)
+        old, new = _local_reads(cfg, main_read)
+        if old is not None:
+            return False, "main reads %r from the %s launcher fixture, want None" % (old, label)
+        if new != old:
+            return False, "shared_names reads %r from the %s launcher fixture, main reads %r" % (new, label, old)
+    return True, "a directory, bytes that are not UTF-8 and an empty launcher file all read as no role on both sides"
+
+
+def case_cloud_id_reads_the_recorded_role_file_on_both_sides():
+    """With a cloud id, the session's recorded role file decides, the same on main and on shared_names: batch-runner, coordinator, or no file."""
+    main_read, cause = _main_read_merge_role()
+    if main_read is None:
+        return False, cause
+    problems = []
+    for label, text, want in (("batch-runner", _role_file(ROLE_SESSION, "batch-runner"), "batch-runner"),
+                              ("coordinator", _role_file(ROLE_SESSION, "coordinator"), None),
+                              ("no-file", None, None)):
+        cfg = _role_config("cloud-" + label, text)
+        old = _role_read(cfg, ROLE_SESSION, main_read, remote="true")
+        if old != want:
+            return False, "scope: main reads %r for the %s recorded role, want %r" % (old, label, want)
+        new = _role_read(cfg, ROLE_SESSION, _shared().read_merge_role, remote="true")
+        if new != old:
+            problems.append("shared_names reads %r with a cloud id and the %s recorded role, main reads %r" % (new, label, old))
+    return not problems, "; ".join(problems) or "the recorded role file decides the same way on both sides"
+
+
+def case_cloud_id_ignores_a_local_launcher_file_on_both_sides():
+    """With a cloud id, a local launcher file naming batch-runner is not read: the recorded role file (the coordinator) decides,
+    so both sides read no role. A build that reads the launcher file first would read batch-runner here."""
+    main_read, cause = _main_read_merge_role()
+    if main_read is None:
+        return False, cause
+    cfg = _launcher_config("cloud-over-local", "batch-runner")
+    _role_config("cloud-over-local", _role_file(ROLE_SESSION, "coordinator"))
+    _, held = _launcher_held(cfg)
+    if held != "batch-runner":
+        return False, "scope: session_role reads %r from the launcher fixture, want 'batch-runner'" % (held,)
+    old = _role_read(cfg, ROLE_SESSION, main_read, local=LOCAL_SESSION, remote="true")
+    if old is not None:
+        return False, "main reads %r with a cloud id and a coordinator recorded role, want None" % (old,)
+    new = _role_read(cfg, ROLE_SESSION, _shared().read_merge_role, local=LOCAL_SESSION, remote="true")
+    return new == old, "with a cloud id: shared_names reads %r, main reads %r, want None on both" % (new, old)
+
+
+def case_cloud_session_with_no_cloud_id_reads_no_local_role_on_both_sides():
+    """CLAUDE_CODE_REMOTE=true with no cloud id: a cloud session with no id has no role, even with a batch-runner launcher file.
+    main returns None before it reads that file, and shared_names must do the same."""
+    main_read, cause = _main_read_merge_role()
+    if main_read is None:
+        return False, cause
+    scope = _launcher_scope_problem()
+    if scope:
+        return False, scope
+    cfg = _launcher_config("remote-no-id", "batch-runner")
+    _, held = _launcher_held(cfg)
+    if held != "batch-runner":
+        return False, "scope: session_role reads %r from the launcher fixture, want 'batch-runner'" % (held,)
+    old, new = _local_reads(cfg, main_read, remote="true")
+    if old is not None:
+        return False, "main reads %r with CLAUDE_CODE_REMOTE=true and no cloud id, want None" % (old,)
+    if new != old:
+        return False, "shared_names reads %r with CLAUDE_CODE_REMOTE=true and no cloud id, main reads %r" % (new, old)
+    return True, "a cloud session with no id reads no role on both sides"
+
+
 CASES = [
     ("(a) shared_names.py exists", case_module_exists),
     ("(a) shared_names.py imports only the standard library", case_stdlib_only),
@@ -739,6 +962,20 @@ CASES = [
      case_read_recorded_role_returns_the_coordinator_role_of_its_own_record),
     ("(r9) role_path is state/merge-role.json under the config folder, and under ~/.claude when none is set",
      case_role_path_is_state_merge_role_under_the_config_folder),
+    ("(r10) with no cloud id, a launcher file naming each merge role reads as main reads it",
+     case_local_launcher_names_a_merge_role_and_both_sides_read_it_alike),
+    ("(r11) with no cloud id, a launcher file naming a non-merge role reads as no role on both sides",
+     case_local_launcher_naming_a_non_merge_role_reads_no_role_on_both_sides),
+    ("(r12) with no cloud id, a missing launcher file reads as no role on both sides",
+     case_local_launcher_missing_reads_no_role_on_both_sides),
+    ("(r13) with no cloud id, a launcher file that is a directory, not UTF-8 or empty reads as no role on both sides",
+     case_local_launcher_unreadable_reads_no_role_on_both_sides),
+    ("(r14) with a cloud id, the recorded role file decides the same way on main and on shared_names",
+     case_cloud_id_reads_the_recorded_role_file_on_both_sides),
+    ("(r15) with a cloud id, a local launcher file naming batch-runner is not read on either side",
+     case_cloud_id_ignores_a_local_launcher_file_on_both_sides),
+    ("(r16) with CLAUDE_CODE_REMOTE=true and no cloud id, a batch-runner launcher file reads as no role on both sides",
+     case_cloud_session_with_no_cloud_id_reads_no_local_role_on_both_sides),
 ]
 
 
