@@ -55,14 +55,194 @@ fi
 shard_has() { [ $(( ($1 - 1) % SHARD_K )) -eq $(( SHARD_I - 1 )) ]; }
 # True when case $1 passes the name filter in ONLY.
 name_wanted() { [ "$ONLY" = "  " ] || case "$ONLY" in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
-if [ "$LIST_ONLY" = 1 ]; then
-  pos=0
-  for name in $(sed -n 's/^run \([^ ]*\)$/\1/p' "$0"); do
-    pos=$((pos + 1))
-    if shard_has "$pos" && name_wanted "$name"; then printf '%s\n' "$name"; fi
-  done
-  exit 0
-fi
+# POS counts every run call, so a shard holds the same cases whatever the name filter says. In list mode run()
+# prints each name it selects and runs nothing, so --list names exactly the calls run_cases makes.
+POS=0
+run() {
+  POS=$((POS + 1))
+  shard_has "$POS" && name_wanted "$1" || return 0
+  if [ "$LIST_ONLY" = 1 ]; then printf '%s\n' "$1"; return 0; fi
+  "$1"
+}
+# The run list, in run order: the one place the suite names its cases. --list calls it here, before any
+# setup; the end of the file calls it to run them.
+run_cases() {
+run case1
+run case2
+run case3
+run case_origins
+run case7
+run case8
+run pointer_case1
+run pointer_case2
+run pointer_case3
+run pointer_case4
+run pointer_case5
+run pointer_case6
+run case4
+run case5
+run case6
+run case9
+run case10
+run prune_case1
+run prune_case2
+run prune_case3
+run prune_case4
+run prune_case5
+run prune_case6
+run retired_case1
+run retired_case2
+run retired_case3
+run retired_case4
+run retired_case5
+run retired_case6
+run retired_case7
+run retired_case7b
+run retired_case8
+run retired_case9
+run retired_case10
+run retired_case11
+run retired_case12
+run retired_case13
+run retired_case14
+run retired_case15
+run retired_case16
+run retired_case17
+run skills_case1
+run skills_case2
+run cloud_settings1
+run cloud_startup1
+run cloud_startup2
+run cloud_startup3
+run cloud_startup4
+run cloud_startup5
+run cloud_startup_local1
+run cloud_startup6
+run cloud_startup7
+run cloud_startup8
+run cloud_startup9
+run cloud_startup10
+run skills_bak1
+run skills_bak2
+run skills_bak3
+run skills_bak4
+run skills_bak5
+run skills_bak6
+run copymode_case1
+run backup_case1
+run backup_case2
+run settings_repeat_case1
+run settings_repeat_case2
+run settings_repeat_case3
+run settings_repeat_case4
+run orig_case1
+run orig_case2
+run bakname_case1
+run bakfail_case1
+run legacy_case1
+run orig_case3
+run bin_case1
+run bin_case2
+run path_case1
+run path_case2
+run path_case3
+run path_case4_cloud
+run path_case5_top
+run caseF1
+run caseF2
+run caseF3
+run caseF4
+run caseF5
+run caseF6
+run caseF7
+run caseF8
+run caseF9
+run caseF10
+run caseG1
+run caseG2
+run caseG3
+run caseG4
+run caseG5
+run caseG6
+run caseG7
+run refuse_wt1
+run refuse_wt2
+run keep_wt1
+run keep_plain1
+run pinned_wt1
+run pinoff1
+run pinoff2
+run pinoff3
+run swap1sh
+run lock1sh
+run putfile_nogap1
+run putfile_prose1
+run installlog1
+run logoffset1
+run pinlive1
+run pinlive2
+run guardset1
+run guardset2
+run guardset3
+run guardset4
+run win_sh1
+run win_sh2
+run win_sh3
+run caseK1
+run caseK2
+run caseK3
+run caseK4
+run caseK5
+run caseK6
+run caseK7
+run caseK8
+run caseK9
+run caseK10
+run caseK11
+run caseK12
+run caseK13
+run caseK14
+run caseK15
+run caseP1
+run caseP2
+run caseP3
+run caseP4
+run caseP5
+run caseL1
+run caseL2
+run caseL3
+run caseL4
+run caseM1
+run caseM2
+run caseM3
+run caseM4
+run caseM5
+run caseM6
+run caseM7
+run caseM8
+run caseM9
+run caseM10
+run caseM11
+run caseM12
+run caseM13
+run caseM14
+run caseM15
+run caseM16
+run caseM17
+run caseM18
+run caseM19
+run pinmove1
+run pinmove2
+run pinmove3
+run pinmove4
+run pinmove5
+run mergepin1
+run mergepin2
+run mergepin3
+run mergepin4
+run mergepin5
+}
+if [ "$LIST_ONLY" = 1 ]; then run_cases; exit 0; fi
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/../lint/_test_git.sh"  # test-run signing opt-out
@@ -5960,186 +6140,8 @@ caseM19() {
 # session_start.sh cases) gets the same redirect as every other case.
 default_home "$work/runner-home"; HOME="$work/runner-home"; export HOME
 
-# Case filter and shard, both read at the top (ONLY, SHARD_I, SHARD_K). `sh hooks/test_install_src.sh caseF4 caseF6`
-# runs only those cases; no arguments runs every case. lint/check_unknown_reads_contract.py uses the names.
-# POS counts every run call, so a shard holds the same cases whatever the name filter says.
-POS=0
-run() { POS=$((POS + 1)); shard_has "$POS" && name_wanted "$1" || return 0; "$1"; }
-
-run case1
-run case2
-run case3
-run case_origins
-run case7
-run case8
-run pointer_case1
-run pointer_case2
-run pointer_case3
-run pointer_case4
-run pointer_case5
-run pointer_case6
-run case4
-run case5
-run case6
-run case9
-run case10
-run prune_case1
-run prune_case2
-run prune_case3
-run prune_case4
-run prune_case5
-run prune_case6
-run retired_case1
-run retired_case2
-run retired_case3
-run retired_case4
-run retired_case5
-run retired_case6
-run retired_case7
-run retired_case7b
-run retired_case8
-run retired_case9
-run retired_case10
-run retired_case11
-run retired_case12
-run retired_case13
-run retired_case14
-run retired_case15
-run retired_case16
-run retired_case17
-run skills_case1
-run skills_case2
-run cloud_settings1
-run cloud_startup1
-run cloud_startup2
-run cloud_startup3
-run cloud_startup4
-run cloud_startup5
-run cloud_startup_local1
-run cloud_startup6
-run cloud_startup7
-run cloud_startup8
-run cloud_startup9
-run cloud_startup10
-run skills_bak1
-run skills_bak2
-run skills_bak3
-run skills_bak4
-run skills_bak5
-run skills_bak6
-run copymode_case1
-run backup_case1
-run backup_case2
-run settings_repeat_case1
-run settings_repeat_case2
-run settings_repeat_case3
-run settings_repeat_case4
-run orig_case1
-run orig_case2
-run bakname_case1
-run bakfail_case1
-run legacy_case1
-run orig_case3
-run bin_case1
-run bin_case2
-run path_case1
-run path_case2
-run path_case3
-run path_case4_cloud
-run path_case5_top
-run caseF1
-run caseF2
-run caseF3
-run caseF4
-run caseF5
-run caseF6
-run caseF7
-run caseF8
-run caseF9
-run caseF10
-run caseG1
-run caseG2
-run caseG3
-run caseG4
-run caseG5
-run caseG6
-run caseG7
-run refuse_wt1
-run refuse_wt2
-run keep_wt1
-run keep_plain1
-run pinned_wt1
-run pinoff1
-run pinoff2
-run pinoff3
-run swap1sh
-run lock1sh
-run putfile_nogap1
-run putfile_prose1
-run installlog1
-run logoffset1
-run pinlive1
-run pinlive2
-run guardset1
-run guardset2
-run guardset3
-run guardset4
-run win_sh1
-run win_sh2
-run win_sh3
-run caseK1
-run caseK2
-run caseK3
-run caseK4
-run caseK5
-run caseK6
-run caseK7
-run caseK8
-run caseK9
-run caseK10
-run caseK11
-run caseK12
-run caseK13
-run caseK14
-run caseK15
-run caseP1
-run caseP2
-run caseP3
-run caseP4
-run caseP5
-run caseL1
-run caseL2
-run caseL3
-run caseL4
-run caseM1
-run caseM2
-run caseM3
-run caseM4
-run caseM5
-run caseM6
-run caseM7
-run caseM8
-run caseM9
-run caseM10
-run caseM11
-run caseM12
-run caseM13
-run caseM14
-run caseM15
-run caseM16
-run caseM17
-run caseM18
-run caseM19
-run pinmove1
-run pinmove2
-run pinmove3
-run pinmove4
-run pinmove5
-run mergepin1
-run mergepin2
-run mergepin3
-run mergepin4
-run mergepin5
+# The cases, through run(): the shard and the name filter apply to each.
+run_cases
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]

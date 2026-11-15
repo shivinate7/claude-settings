@@ -74,9 +74,11 @@ OTHER_STEPS = [
 
 
 def run_names():
-    """The `run X` lines of the suite, in file order. A repeated name stays repeated."""
+    """The case names in run_cases, the suite's one run list, in file order. A repeated name stays repeated. A `run` word
+    elsewhere (a heredoc, a quoted block) is text: the suite never calls it, so it names no case."""
     with open(SUITE, encoding="utf-8") as f:
-        return re.findall(r"^run (\S+)$", f.read(), re.M)
+        m = re.search(r"^run_cases\(\) \{\n(.*?)^\}\n", f.read(), re.M | re.S)
+    return re.findall(r"^run (\S+)$", m.group(1), re.M) if m else []
 
 
 def defined_functions():
@@ -126,7 +128,7 @@ class ShardListsEveryCaseOnce(unittest.TestCase):
     def test_every_run_line_names_one_defined_function(self):
         # Control, green on the old code: the run list and the functions it names agree.
         runs = run_names()
-        self.assertTrue(runs, "the suite has no `run X` line")
+        self.assertTrue(runs, "the suite's run_cases lists no case")
         self.assertEqual(sorted(set(runs) - defined_functions()), [], "a run line names no defined function")
 
     def test_a_run_line_repeats_only_as_a_named_exception(self):
