@@ -12,6 +12,7 @@
     python3 lint/compliance_probes.py restates <child root>
     python3 lint/compliance_probes.py aligned <child root>
     python3 lint/compliance_probes.py hooks <child root>
+    python3 lint/compliance_probes.py facts <child root>
     python3 lint/compliance_probes.py scorecard <child root> < group-lines
 
 Each group reads only: tracked files (`git ls-files`), and the files it names. One line per item,
@@ -110,6 +111,16 @@ hooks: the clone's settings.json `.hooks` against the live settings.json `.hooks
   the verdict is `  trusts: clone (<root>/settings.json); live (<live>) is the copy checked`, where <live> is
   `~/.claude/settings.json` or `<dir>/settings.json`, the file read: the clone is the trusted side, since
   install.sh writes the live file from it.
+facts: a decision record's `Facts:` line against live values. The line sits directly under the record's `State:`
+  line. Its claims, split by `;`, take two forms only: `pr <N> open|merged` and `ref <name> present|absent`. A
+  record with no `Facts:` line is never read, and the group never reads `State:` prose. A claim that is false, a
+  form the group does not read (a count, a typo), a second `Facts:` line, or a `Facts:` line with no `State:`
+  line directly above it is one item, `  <claim>: <file>:<line> <live value>`. A pull request closed without a
+  merge reads as `closed`, so a claim of open or merged is a gap. Live values come from one function: the
+  GitHub REST API, with GITHUB_TOKEN or GH_TOKEN, for the repo in FACTS_REPO, else GITHUB_REPOSITORY. Env
+  FACTS_FIXTURE names a JSON file of "pr:<N>" and "ref:<name>" keys instead, for tests. No token, no repo, an
+  HTTP or JSON error, a timeout, or a key the fixture lacks makes the group unknown, never in shape. It writes
+  no file and starts no process.
 scorecard: not a probe. It reads the group lines from stdin and rewrites the layout's scorecard kind file in
   the child, in place: one table, columns Group, Score, Gold standard, Gap, Source. It adds the row
   for the STE lint's gap on UI files, a known gap.
@@ -121,6 +132,9 @@ import os
 import re
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -1646,9 +1660,127 @@ def probe_aligned(root):
     return finish("aligned", hits, "in shape - %d rule file(s) read, %d record(s) changed" % (files, len(changed)), 0)
 
 
+FACTS_PR = re.compile(r"pr ([0-9]+) (open|merged)")
+FACTS_REF = re.compile(r"ref ([A-Za-z0-9._/-]+) (present|absent)")
+FACTS_REPO_FORM = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+FACTS_TIMEOUT = 20  # seconds per request: a hung API read must end as unknown, not stall the job
+FACTS_FORMS = "a claim reads `pr <N> open|merged` or `ref <name> present|absent`"
+FACTS_VALUES = {"pr": ("open", "merged", "closed"), "ref": ("present", "absent")}
+
+
+def facts_api(repo, token, path):
+    """(HTTP status, parsed JSON body) of GET /repos/<repo>/<path>. A status other than 200 and 404, a transport error,
+    a timeout or a body that is not JSON is CannotRun: an unread fact is never a pass."""
+    request = urllib.request.Request(
+        "https://api.github.com/repos/%s/%s" % (repo, path),
+        headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
+                 "User-Agent": "compliance-probes-facts", "X-GitHub-Api-Version": "2022-11-28"})
+    try:
+        with urllib.request.urlopen(request, timeout=FACTS_TIMEOUT) as answer:
+            status, body = answer.status, answer.read()
+    except urllib.error.HTTPError as err:
+        if err.code != 404:
+            raise CannotRun("GitHub answered %d for %s" % (err.code, path))
+        return 404, None
+    except (OSError, ValueError) as err:  # URLError, timeouts and a bad status line are all OSError or ValueError
+        raise CannotRun("GitHub cannot be read for %s: %s" % (path, type(err).__name__))
+    try:
+        return status, json.loads(body.decode("utf-8"))
+    except ValueError:
+        raise CannotRun("GitHub sent no JSON for %s" % path)
+
+
+def fact_value(kind, key):
+    """The live value of one fact, the single source for the facts group. `kind` is `pr` (key: the number) or `ref`
+    (key: a branch name). A pr is `open`, `merged` or `closed` (closed without a merge); a ref is `present` or `absent`.
+    With env FACTS_FIXTURE it reads that JSON file's "<kind>:<key>" entry instead of GitHub, so a case never reaches the
+    network. CannotRun when the value cannot be read."""
+    fixture = os.environ.get("FACTS_FIXTURE", "").strip()
+    if fixture:
+        try:
+            with open(fixture, encoding="utf-8") as handle:
+                held = json.load(handle)
+        except (OSError, ValueError) as err:
+            raise CannotRun("the fact file cannot be read: %s" % type(err).__name__)
+        value = held.get("%s:%s" % (kind, key)) if isinstance(held, dict) else None
+        if value not in FACTS_VALUES[kind]:
+            raise CannotRun("the fact file holds no value for %s %s" % (kind, key))
+        return value
+    token = os.environ.get("GITHUB_TOKEN", "").strip() or os.environ.get("GH_TOKEN", "").strip()
+    repo = os.environ.get("FACTS_REPO", "").strip() or os.environ.get("GITHUB_REPOSITORY", "").strip()
+    if not token:
+        raise CannotRun("no GITHUB_TOKEN or GH_TOKEN to read %s %s with" % (kind, key))
+    if not FACTS_REPO_FORM.fullmatch(repo):
+        raise CannotRun("FACTS_REPO or GITHUB_REPOSITORY does not name an owner/repo")
+    if kind == "ref":
+        status, body = facts_api(repo, token, "git/ref/heads/" + urllib.parse.quote(key, safe="/"))
+        if status == 404:
+            return "absent"
+        if not isinstance(body, dict) or "ref" not in body:
+            raise CannotRun("GitHub sent no ref for %s" % key)
+        return "present"
+    status, body = facts_api(repo, token, "pulls/" + key)
+    if status == 404 or not isinstance(body, dict) or body.get("state") not in ("open", "closed") \
+            or not isinstance(body.get("merged"), bool):
+        raise CannotRun("GitHub sent no usable state for pull request %s" % key)
+    return "merged" if body["merged"] else body["state"]
+
+
+def facts_claims(text):
+    """([(line number, claim text or None, why it is a gap or None)], the Facts lines read): one entry per claim of
+    the record's one well-placed Facts line, plus one per Facts line that is misplaced or a second."""
+    lines = text.splitlines()
+    out, seen = [], 0
+    for number, line in enumerate(lines, 1):
+        if not line.startswith("Facts:"):
+            continue
+        seen += 1
+        if seen > 1:
+            out.append((number, line, "a record holds one Facts line"))
+        elif number < 2 or not lines[number - 2].startswith("State:"):
+            out.append((number, line, "the Facts line is not directly under a State line"))
+        else:
+            for claim in line[len("Facts:"):].split(";"):
+                out.append((number, claim.strip(), None))
+    return out, seen
+
+
+def probe_facts(root):
+    wheres, records = decision_records(root)
+    gaps, checked, files, lives = [], 0, 0, {}
+    for slug in sorted(records):
+        for where in wheres:
+            rel = "%s/%s.md" % (where, slug)
+            text = read(root, rel)
+            if text is None:
+                continue
+            claims, seen = facts_claims(text) if "Facts:" in text else ([], 0)
+            files += 1 if seen else 0
+            for number, claim, why in claims:
+                shown = "%s: %s:%d" % (claim, rel, number)
+                if why is not None:
+                    gaps.append("  %s %s" % (shown, why))
+                    continue
+                found = FACTS_PR.fullmatch(claim) or FACTS_REF.fullmatch(claim)
+                if not found:
+                    gaps.append("  %s %s" % (shown, FACTS_FORMS))
+                    continue
+                kind = "pr" if claim.startswith("pr ") else "ref"
+                if (kind, found.group(1)) not in lives:
+                    lives[kind, found.group(1)] = fact_value(kind, found.group(1))
+                live = lives[kind, found.group(1)]
+                checked += 1
+                if live != found.group(2):
+                    gaps.append("  %s %s" % (shown, live if live != "closed" else "closed (closed without a merge)"))
+    if gaps:
+        return finish("facts", gaps, "out - %d claim(s) to fix, %d record(s) with a Facts line" % (len(gaps), files), 1)
+    return finish("facts", gaps, "in shape - %d claim(s) checked in %d record(s)" % (checked, files), 0)
+
+
 GROUPS = {"layout": probe_layout, "design": probe_design, "lanecap": probe_lanecap, "playwright": probe_playwright,
           "ios": probe_ios, "words": probe_words, "supersede": probe_supersede, "slugs": probe_slugs,
-          "restates": probe_restates, "aligned": probe_aligned, "hooks": probe_hooks, "scorecard": scorecard}
+          "restates": probe_restates, "aligned": probe_aligned, "hooks": probe_hooks, "facts": probe_facts,
+          "scorecard": scorecard}
 
 
 def main(argv):
