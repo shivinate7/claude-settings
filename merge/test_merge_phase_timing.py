@@ -3,12 +3,12 @@
 
 Run: python3 merge/test_merge_phase_timing.py
 merge.timed_phase(name) prints `merge: phase <name>: start`, then `merge: phase <name>: done in <N> s` on a normal exit. When the
-block raises, it prints `merge: phase <name>: stopped after <N> s` and re-raises. confirm wraps six phases in this order: lock,
-main-run, debt-check, head-checks, prove, merge-call.
+block raises, it prints `merge: phase <name>: stopped after <N> s` and re-raises. confirm wraps five phases in this order: lock,
+main-run, head-checks, prove, merge-call. No debt-check phase: ruling R2 (owner, 14:07 CST Nov 10) moved the Retire run into CI.
 Cases 1 and 2 drive the helper with a fake clock (merge.time.time), so no case sleeps. Cases 3 and 4 run merge.main through the
 scripted host of merge/test_merge.py: the Env fixture and its model guard come from there, a case extends it, and nothing is copied.
 Importing test_merge runs none of its cases.
-Cost per case: a successful run prints 12 phase lines, starts no thread, and leaves no file in its temp root or in its clone (case 4).
+Cost per case: a successful run prints 10 phase lines, starts no thread, and leaves no file in its temp root or in its clone (case 4).
 Temp files: each case's folder comes from tm.Env, which takes this run's folder (lint/_test_temp.py) and removes it at exit.
 """
 import contextlib, io, os, re, sys, tempfile, threading, unittest, unittest.mock
@@ -18,7 +18,7 @@ sys.path.insert(0, HERE)
 import merge  # noqa: E402
 import test_merge as tm  # noqa: E402  the Env fixture, the scripted host and the fake clock (Clock); importing it runs none of its cases
 
-PHASES = ("lock", "main-run", "debt-check", "head-checks", "prove", "merge-call")  # the six phases confirm wraps, in the order it runs them
+PHASES = ("lock", "main-run", "head-checks", "prove", "merge-call")  # the five phases confirm wraps, in the order it runs them
 PHASE_LINE = re.compile(r"merge: phase ([a-z-]+): (?:(start)|done in (\d+) s|stopped after (\d+) s)")
 
 
@@ -177,10 +177,10 @@ class ConfirmPhases(tm.Env):
         self.assertIn("a check is red: checks: fail", out)
         self.assertFalse(getattr(self.host, "merged", False), out)
         self.assertEqual(phase_pairs(out), [("lock", "start"), ("lock", "done"), ("main-run", "start"), ("main-run", "done"),
-                                            ("debt-check", "start"), ("debt-check", "done"), ("head-checks", "start"), ("head-checks", "stopped")],
+                                            ("head-checks", "start"), ("head-checks", "stopped")],
                          "a refused head's phase lines do not end at head-checks stopped, with no prove or merge-call line")
 
-    def test_a_successful_run_costs_twelve_lines_no_thread_and_no_file(self):
+    def test_a_successful_run_costs_ten_lines_no_thread_and_no_file(self):
         self.leave_no_pending_record()
         tmp_root = os.path.join(self.t, "run-tmp")  # the run's own temp root: the worktree tree is made under it, and removed by the run
         os.makedirs(tmp_root)
@@ -192,8 +192,8 @@ class ConfirmPhases(tm.Env):
         self.assertEqual(new_threads, [], "the run left a thread alive that was not alive before it")
         self.assertEqual(os.listdir(tmp_root), [], "the run left a file in its temp root")
         self.assertEqual(tm.sh(self.co, "git", "status", "--porcelain", "--untracked-files=all"), "", "the run left a file in its clone")
-        self.assertEqual(len([line for line in out.splitlines() if line.startswith("merge: phase ")]), 12,
-                         "a successful run must print 12 phase lines: 6 phases, a start and a done each")
+        self.assertEqual(len([line for line in out.splitlines() if line.startswith("merge: phase ")]), 10,
+                         "a successful run must print 10 phase lines: 5 phases, a start and a done each")
 
 
 if __name__ == "__main__":

@@ -109,6 +109,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (rm-on-a-variable-needs-a-guard)
   rm-after-cd          deny. A recursive delete of a relative target after a cd.
                        (rm-after-cd-names-absolute-path)
+  archive-push-gates-delete  deny. A remote branch delete after an archive push of the same branch, with
+                       anything but `&&` between them. (shared-trees-archive-then-delete)
   ln-over-directory    deny. See the comment at rule 3b in judge_shell.
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
                        the working folder (`$(pwd)` too) or a folder above it, in either shell.
@@ -247,12 +249,14 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        could not judge, when that commit covers a triplet already in the tree or the chain
                        runs merge, pull, rebase, cherry-pick, stash pop or apply, or am.
                        (commit-refuses-conflict-markers)
-  red-run              deny. A `git push` whose range (the one conflict-markers reads, less the commits the
-                       default base holds) has a non-merge commit that adds lines to a test path and has no
+  red-run              deny. A `git commit` with no push after it, or a `git push` whose range (the one
+                       conflict-markers reads, less the commits the default base holds) has a non-merge commit that adds lines to a test path and has no
                        valid `Red-run:` trailer, judged by `judge` in lint/check_red_run.py, the one home. A
                        commit in the same call before the push counts, read from its `-m` text (an `--amend`
                        with none keeps the commit's own); a message the guard cannot read, a failed read and a
-                       default base it cannot read are no hit. The refusal for a flagged tip names only
+                       default base it cannot read are no hit. A lone `git commit` (no push after it in the
+                       call) that stages added lines on a test path is judged too, by its own `-m` text; a
+                       merge or other replay in progress is no hit. The refusal for a flagged tip names only
                        commit and push; for a flagged commit below the tip (under a merge at the tip too) it
                        names commit, rebase and push; for a branch rewritten since its push it names no
                        command. Cost: one `git log` per push, more only when a commit is a gap.
@@ -336,7 +340,9 @@ Other tools, in `judge` order:
                        cannot read is skipped, and an unread brief is judged as an empty brief.
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
-                       deny. A spawn below the model floor, or a third round on the wrong model.
+                       deny. A spawn below the model floor, or a third round on the wrong model. A
+                       start_session call never reaches this hook: settings.json lists it in no PreToolUse
+                       matcher, so hooks/start_session_audit.py checks its floor and handoff after the call.
                        The Workflow scan is static. It reads string-literal `model` and
                        `agentType` keys, and a literal prompt, in each `agent()` call. A template
                        prompt reads its static text only. A step-up call whose prompt or model is
@@ -575,7 +581,7 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, own_heredoc_bodies, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
+            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, REPLAY_MARKS, heredoc_heads, own_heredoc_bodies, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
@@ -609,6 +615,7 @@ while True:
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
             PUSH_AGENT_REASON, PUSH_ALL_AGENT_REASON, PUSH_ALL_REASON, PUSH_REASON, PUSH_STRAY_REASON,
+            ARCHIVE_GUARD_REASON, archive_guard_hits,
             cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_verdict,
             rm_delete_hit, SUBST_OPEN, _in_group,
         )
@@ -2542,9 +2549,6 @@ ENTRY_OWN = re.compile(r"^commit(?: \((?:initial|amend|merge)\))?:")
 ENTRY_REBASE = re.compile(r"^(?:pull --)?rebase\b[^:(]*\(([^)]*)\)")
 ENTRY_RESOLVED = re.compile(r"^(?:commit \(cherry-pick\)|revert)\b")
 REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")
-# A git-dir entry that shows a replay in progress: its staged change is git's copy plus what the agent
-# resolved. A MERGE_MSG without MERGE_HEAD is a `cherry-pick -n` or `revert -n`.
-REPLAY_MARKS = ("CHERRY_PICK_HEAD", "REVERT_HEAD", "SQUASH_MSG", "MERGE_MSG", "rebase-merge", "rebase-apply")
 # How a builder's test path in one change counts: refused, logged, or logged as the upstream side a
 # rebase kept.
 OWN, NOTED, KEPT = "own", "noted", "kept"
@@ -2919,6 +2923,11 @@ def judge_stop(payload) -> None:
 
 
 SPAWN_TOOLS = ("Agent", "Task")
+# The desktop start. No PreToolUse matcher in settings.json lists it: any hook on it makes the desktop app show the
+# "Allow Claude to start the session?" card on every start, even in Bypass (anthropics/claude-code#103832; decision
+# start-session-not-pretooluse). hooks/start_session_audit.py judges it after the call with floor_hit and
+# unread_handoff. The judge() branches below that name it run only if a matcher is added again, and the guard's cases
+# call them directly.
 SESSION_TOOL = "mcp__ccd_session__start_session"
 from shared_names import (  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
     CREATE_SESSION_TOOL, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, is_lane_create_session, lane_tags,  # noqa: F401  REMOTE_SERVER re-exported: lint/check_agent_models.py reads guard.REMOTE_SERVER
@@ -3637,7 +3646,7 @@ def step_up_hit(tool: str, tool_input) -> str:
 def step_up_reason(prompt: str, role, model, rounds=None) -> str:
     """The step-up refusal for a brief whose marker and model disagree, or "". The model each marker needs is its round row
     (role_round_model; `rounds` is role_round_table's read, read here when not given). The second round must name its row's model exactly.
-    A later round or a fix verifier must not name a model below its row; above it passes here, and the Opus ceiling judges Opus."""
+    A later round, a fix verifier or a guard-marked reviewer brief must not name a model below its row; above it passes here, and the Opus ceiling judges Opus."""
     model = str(model or "").strip().lower()
     role = role_key(role)
     if rounds is None:
@@ -3653,6 +3662,10 @@ def step_up_reason(prompt: str, role, model, rounds=None) -> str:
         want = role_round_model(rounds, role, ROLE_ROUND_FIX)
         if want and (not model or (named is not None and named < ROLE_MODEL_RANK.index(want))):
             return "Reviewer fix verifier runs on %s. Spawn it with model %s." % (want.capitalize(), want)
+    if role == "reviewer" and review_guard_marked(prompt):
+        want = role_round_model(rounds, role, "1", "guard")
+        if want and (not model or (named is not None and named < ROLE_MODEL_RANK.index(want))):
+            return "Reviewer round 1 on a guard or check change runs on %s. Spawn it with model %s." % (want.capitalize(), want)
     if role == "builder" and builder_third_round(prompt):
         want = role_round_model(rounds, role, "3")
         if want and (named is None or named < ROLE_MODEL_RANK.index(want)):
@@ -3919,10 +3932,23 @@ def role_round_drift(pointer_root):
             for _, _, _, word, text in role_round_rows(pointer_root) or () if word not in ROLE_MODEL_RANK]
 
 
+def frontmatter_scalar(raw):
+    """A frontmatter value without its quotes or a trailing ` # comment`, "" when nothing is left. A value that is only
+    a comment (`# sonnet`) or an unquoted YAML null (`~`, `null`) holds no value. The one reader of a scalar's text."""
+    raw = str(raw).strip()
+    if raw[:1] in ("'", '"'):
+        close = raw.find(raw[0], 1)
+        return raw[1:close] if close > 0 else raw[1:]
+    value = re.split(r"(?:^|\s)#", raw, maxsplit=1)[0].strip()
+    return "" if value.lower() in ("~", "null") else value
+
+
 def role_model_rank(model):
     """The index in ROLE_MODEL_RANK of the family a model name holds (`claude-opus-5-5`, `Haiku`), the highest family
-    when a name holds more than one, or None when it holds none. The one normaliser of a model name to its family."""
-    return next((rank for rank, word in reversed(list(enumerate(ROLE_MODEL_RANK))) if word in str(model).lower()), None)
+    when a name holds more than one, or None when it holds none. The value is read without a trailing comment
+    (frontmatter_scalar), so a family word in a comment never counts. The one normaliser of a model name to its family."""
+    value = frontmatter_scalar(model).lower()
+    return next((rank for rank, word in reversed(list(enumerate(ROLE_MODEL_RANK))) if word in value), None)
 
 
 def frontmatter_keys(lines):
@@ -3962,7 +3988,7 @@ def role_has_model_pin(pointer_root, role):
     frontmatter, False when none does, None when the folder cannot be read."""
     try:
         for keys in role_agent_keys(pointer_root):
-            if keys.get("name", "").lower() == role.lower() and keys.get("model"):
+            if keys.get("name", "").lower() == role.lower() and frontmatter_scalar(keys.get("model", "")):
                 return True
     except OSError:
         return None
@@ -4172,6 +4198,8 @@ def role_model_one(tool_input):
 # under the smaller of 5% of the disk and 5 GB) refuses every start call. A reading that cannot be read counts as normal. Only an
 # agent's shell or file write also reads load (RUNNING_AGENT_TOOLS, below). A cloud session (CLAUDE_CODE_REMOTE
 # "true") skips the brake and reads nothing, because the brake guards the owner's own machine.
+# SESSION_TOOL stays in the list, but no PreToolUse hook sees a start_session call (see SESSION_TOOL), so the brake does not
+# read the load for it. The audit after the call does not read load either.
 START_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
 LOAD_BUSY_MEMORY = 85.0
 LOAD_FULL_MEMORY = 95.0
@@ -4360,7 +4388,7 @@ OPUS_SPAWN_REASON = (
 ) % EXPLORE_AUDIT_MARKER
 OPUS_BUILDER_REASON = (
     OPUS_SPAWN_REASON + " No `Round 3 of 3` marker was found in the brief's first line or at the start of "
-    "any line. The marker applies only to a builder's third try, after review round 2 failed."
+    "any line. The marker applies only to a builder's third try: after review round 2 failed, or after round 1 failed and every fix verifier failed."
 )
 OPUS_STANDING_ROLES = ("Plan", "designer", "design-reviewer", REFUTER_ROLE)
 
@@ -4822,6 +4850,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         matched = folder and linked_nm_hit(segment, folder)
         if matched:
             refuse(tool, "deny", "linked-node-modules", LINKED_NM_REASON, matched)
+    # 3b2. Before the push asks below, so a pending ask never pre-empts this denial. POSIX only: `&&` is shell syntax.
+    if not POWERSHELL_CALL[0]:
+        hits = archive_guard_hits(nm_segments, ends)
+        if hits:
+            refuse(tool, "deny", "archive-push-gates-delete", ARCHIVE_GUARD_REASON, "; ".join(hits))  # glossary-ok: the pinned rule id, the step slug
 
     # 4. A wide delete refuses, and a force push asks.
     # Split before backslashes turn to slashes, so `it\'s` opens no quote that hides a delete.
@@ -4951,10 +4984,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # another folder) and one `git diff --check`; none for an add alone, or a command with no commit or push.
     # A push of a test commit with no Red-run trailer is refused here too (rule red-run): it shares the push's
     # range, and adds one `git log` per push. A commit in the same call, before the push, is read from its
-    # `-m` text; guard_merge states the cost.
+    # `-m` text; so is a lone commit with no push after it, which adds one `git diff --numstat` only when its
+    # message holds no trailer. guard_merge states the cost.
     kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel, raw)
-    if kind == "red-run":
-        red_reason, red_shown = red_run_reason(matched)
+    if kind in ("red-run", "red-run-commit"):
+        red_reason, red_shown = red_run_reason(matched, kind == "red-run-commit")
         refuse(tool, "deny", "red-run", red_reason, red_shown)
     elif matched:
         markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else
