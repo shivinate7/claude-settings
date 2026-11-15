@@ -1,0 +1,11 @@
+{
+ "id": "own-ready-push-keep-as-is",
+ "at": "2026-11-15T08:39:00-06:00",
+ "title": "The ready push stays as it is: a full main run per merge; one line goes into the decision record",
+ "ruling": "Consultant's pick, not owner-typed, undoable, under the owner's 20:18 CST Nov 14 words (consultant message 08:39 CST Nov 15 by its clock, relayed by the coordinator at 08:39 CST). Step ready-push-merges-main: take option 3, \"keep as is; a full main run per merge\" (the coordinator's wording of option 3; the step file does not list the options, so triage cannot quote them from the record), and yes to the decision-record line. The lane lands that one line as a docs-only PR, then closes. Lane finding behind it (from the lane's session summary, get_session, read by the coordinator at 08:37 CST; not a hand-in message; triage read none of it): the push skip fires only when main is unmoved since the PR's last proven head. COVERED: leaving the merge route and the push-skip rule as they are, and one docs-only PR adding one line to the decision record. NOT COVERED: any change to the push skip, the merge tool or CI scope; any other docs edit. The text of the decision-record line is not on the roadmap (unread by triage). Reopen if the owner says otherwise.",
+ "quote": "take option 3 (keep as is; a full main run per merge) and yes to the decision-record line",
+ "source": "Consultant 08:39 CST Nov 15, relayed by the coordinator (08:39 CST) to triage. Consultant's pick, not owner-typed.",
+ "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: it answers the lane's finding on step ready-push-merges-main once; ruling own-840-a-ready-merges-main-skip-page-commits (the ready push merges main) stays in force",
+ "step": "ready-push-merges-main"
+}
