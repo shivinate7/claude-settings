@@ -4,7 +4,8 @@
     python3 lint/test_stable_workflow.py
 
 The move job's `if:` is the only set of terms that keeps a pull request run from moving stable: it passes only a
-successful push run on main of this repository. The job's `concurrency:` must sit on the job, not on the workflow: a
+successful push or schedule run on main of this repository (owner page item 880, 11:53 CST Nov 15). The mover reads the
+proof that covers the slow legs. The job's `concurrency:` must sit on the job, not on the workflow: a
 workflow-level group lets a skipped pull request run cancel a pending green move.
 
 FileCases reads .github/workflows/stable.yml of this checkout. ScannerCases feeds fixture text to the same readers, so
@@ -22,9 +23,11 @@ from workflow_steps import block_scalar, drop_comment, job_block  # noqa: E402  
 
 WORKFLOW = os.path.join(HERE, "..", ".github", "workflows", "stable.yml")
 JOB = "move"
+EVENT_TERM_PUSH = "github.event.workflow_run.event == 'push'"
+EVENT_TERM_SCHEDULE = "github.event.workflow_run.event == 'schedule'"
 TERMS = (
     "github.event.workflow_run.conclusion == 'success'",
-    "github.event.workflow_run.event == 'push'",
+    EVENT_TERM_PUSH,
     "github.event.workflow_run.head_branch == 'main'",
     "github.event.workflow_run.head_repository.full_name == github.repository",
 )
@@ -84,14 +87,25 @@ class FileCases(unittest.TestCase):
         self.assertIsNotNone(block, "stable.yml has no `%s` job, so there is no move job to check" % JOB)
         return block
 
+    # Re-pointed (owner page item 880, 11:53 CST Nov 15): the daily schedule's green run moves stable as well. The if: names the
+    # two events as one or-clause; the mover reads the push-skip proof for a push run, so a Linux-only push run still moves nothing.
     def test_the_move_job_if_has_each_term(self):
         text = self.workflow_text()
         expr = job_if(self.move_block(text))
         self.assertIsNotNone(expr, "the move job has no if: of its own, so no run is gated")
         clauses = if_clauses(expr)
         for term in TERMS:
+            if term == EVENT_TERM_PUSH:
+                continue
             with self.subTest(term=term):
                 self.assertIn(term, clauses, "the move job's if: has no `%s` clause" % term)
+
+    def test_the_move_job_if_accepts_a_push_run_and_a_schedule_run(self):
+        expr = " ".join(job_if(self.move_block(self.workflow_text())).split())
+        for term in (EVENT_TERM_PUSH, EVENT_TERM_SCHEDULE):
+            with self.subTest(term=term):
+                self.assertIn(term, expr, "the move job's if: has no `%s` term, so a green run of that event never reaches the mover" % term)
+        self.assertIn("||", expr, "the push and schedule terms must be one or-clause, not two that both must hold")
 
     def test_concurrency_is_not_at_workflow_level(self):
         text = self.workflow_text()
