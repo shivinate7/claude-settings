@@ -1586,7 +1586,10 @@ class Host:
         group that is not empty keeps the newest run. A schedule run is judged as it is.
         A red verdict's detail also holds breaking_line's segment for each red run judged (one per file and group), the head group's first: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).
         One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A newest-first walk of the push group's
-        green runs costs one jobs read each, down to the first that is not empty (the newest, when it ran a suite). A failed read is unknown."""
+        green runs costs one jobs read each, down to the first that is not empty (the newest, when it ran a suite). A failed read is unknown.
+        A red verdict also leaves `self.base_facts` for revert_proven, as data the prose cannot carry: `blamed` (the full head shas of the breaking merges), `red` (red runs judged),
+        `others` (red entries without a run, cancelled runs and re-runs in flight beside the red), `head` (the head sha of the newest run read) and `red_heads` (the head sha of each red run judged). Every other verdict leaves it None."""
+        self.base_facts = None  # a red verdict sets it below; any other verdict, and any stop, leaves it None
         try:
             if os.path.dirname(ALARM_EVENTS) not in sys.path:
                 sys.path.insert(0, os.path.dirname(ALARM_EVENTS))
@@ -1681,9 +1684,12 @@ class Host:
             # push run that broke the base. The head group (push, dispatch) goes first, so its breaking merge or re-run leads the detail red_base reads.
             order = sorted(red_runs, key=lambda r: (self.BASE_EVENTS[r["event"]] != self.BASE_EVENTS["push"], age[r["id"]]))
             blame = [s for s in (self.breaking_line(judged, r) for r in order) if s]
+            blamed = [first["head_sha"] for first in (self.breaking_run(judged, r)[0] for r in order) if first and first.get("head_sha") and self.blames(first)]  # full shas, as data: the detail prose holds nine characters
         except (Stop, ValueError, KeyError, TypeError, AttributeError, ImportError) as e:
             return "unknown", " ".join(str(e).split())
         if red:
+            self.base_facts = {"blamed": blamed, "red": len(red_runs), "others": len(red) - len(red_runs) + len(cancelled) + len(unknown), "head": base_head,
+                               "red_heads": [r.get("head_sha") for r in red_runs]}
             return "red", " | ".join(red + blame + cancelled)
         return ("unknown", " | ".join(unknown + cancelled)) if unknown or cancelled else ("green", "")
 
@@ -1695,32 +1701,43 @@ class Host:
         A first red (`run_attempt` 1) is not blamed: its segment names `gh run rerun <id> --failed`, and red_base puts that before the reason flag, because a
         flaky run is the likelier cause. Red again on a re-run (`run_attempt` above 1), the segment names the run's commit and its pull request, read from
         the number in the head commit's first line: `Merge pull request #N` for a merge commit, `(#N)` last for a squash. A schedule run names neither, and its first-red text promises no blame: it tests the head at run time."""
+        first, stop = self.breaking_run(judged, newest_red)
+        if stop or first is None:
+            return stop
+        sha = str(first.get("head_sha"))[:9]
+        if not self.blames(first):
+            if (first.get("run_attempt") or 1) <= 1:
+                return (f"run {first['id']} is the first red run after a green one, at {sha}: `{RERUN_REMEDY} {first['id']} --failed` re-runs its failed jobs, "
+                        + ("and as a schedule run it is never blamed on a commit, even if that re-run is red again" if first["event"] == "schedule"
+                           else "and it is blamed on its pull request only if that re-run is red again"))
+            return (f"run {first['id']} is a schedule run, red again on its re-run: it tested the base's head when it ran, so no commit or pull request is named for it")
+        head = (first.get("head_commit") or {}).get("message") or first.get("display_title") or ""
+        n = pull_number_in_title(head.splitlines()[0] if head else "")
+        return f"{BREAKING_MERGE} commit {sha} (run {first['id']}, red again on its re-run), " + (f"pull request #{n}" if n else "no pull request number in its message")
+
+    def breaking_run(self, judged, newest_red):
+        """-> (run, stop): the first red run with a green parent that breaking_line's walk finds, as the run itself so a caller reads its full sha as data.
+        (None, None) when none is known; (None, text) when a run still going stops the walk."""
         key = (newest_red["path"], self.BASE_EVENTS[newest_red["event"]])
         first = None
         for r in judged[judged.index(newest_red):]:
             if (r["path"], self.BASE_EVENTS[r["event"]]) != key:
                 continue
             if r["status"] != "completed":  # an older run still going (a re-run in flight): the run under it may be red or green, so no run is blamed
-                return f"the run that broke the base is unknown: run {r['id']} (attempt {r.get('run_attempt')}) is still going, so the walk to the first red run after a green one stops there. Run again once it ends"
+                return None, f"the run that broke the base is unknown: run {r['id']} (attempt {r.get('run_attempt')}) is still going, so the walk to the first red run after a green one stops there. Run again once it ends"
             if r["conclusion"] == "success":
                 break
             if r["conclusion"] not in ("skipped", "neutral", "cancelled"):
                 first = r
         else:
-            return None  # no green parent on the page: the breaking run is not known
-        if first is None:
-            return None
-        sha = str(first.get("head_sha"))[:9]
-        if (first.get("run_attempt") or 1) <= 1:
-            return (f"run {first['id']} is the first red run after a green one, at {sha}: `{RERUN_REMEDY} {first['id']} --failed` re-runs its failed jobs, "
-                    + ("and as a schedule run it is never blamed on a commit, even if that re-run is red again" if first["event"] == "schedule"
-                       else "and it is blamed on its pull request only if that re-run is red again"))
-        if first["event"] == "schedule":  # a nightly tests the base's head at run time, not the commit that started it: that commit is no suspect
-            return (f"run {first['id']} is a schedule run, red again on its re-run: it tested the base's head when it ran, so no commit or pull request is named for it")
-        head = (first.get("head_commit") or {}).get("message") or first.get("display_title") or ""
-        line = head.splitlines()[0] if head else ""
-        m = re.match(r"Merge pull request #(\d+)\b", line) or re.search(r"\(#(\d+)\)\s*$", line)
-        return f"{BREAKING_MERGE} commit {sha} (run {first['id']}, red again on its re-run), " + (f"pull request #{m.group(1)}" if m else "no pull request number in its message")
+            return None, None  # no green parent on the page: the breaking run is not known
+        return first, None
+
+    @staticmethod
+    def blames(first):
+        """True when the breaking run `first` names its commit as the breaking merge: red again on a re-run, and not a schedule run (a nightly tests the
+        base's head at run time, not the commit that started it, so that commit is no suspect). The one home of that test: breaking_line and base_state's blamed list both ask it."""
+        return (first.get("run_attempt") or 1) > 1 and first["event"] != "schedule"
 
     @staticmethod
     def settle(red, pending, r_red, r_pending):
@@ -3559,17 +3576,99 @@ def ignore_checks(cfg):
         out[e["name"]] = e["reason"]
     return out
 
+def pull_number_in_title(line):
+    """-> the pull request number in a commit's first line, as a string, or None: `Merge pull request #N` for a merge commit, `(#N)` last for a squash."""
+    m = re.match(r"Merge pull request #(\d+)\b", line) or re.search(r"\(#(\d+)\)\s*$", line)
+    return m.group(1) if m else None
+
+REVERT_WALK_MAX = 200  # commits revert_proven reads from the breaking merge up to the base's head; a longer walk is not proven
+
+def _shas(read):
+    """A git list read (rc, out) -> its 40-hex shas in order, or None when the read failed, any line is not a sha, or it holds more than REVERT_WALK_MAX."""
+    c, out = read
+    lines = out.split()
+    if c or len(lines) > REVERT_WALK_MAX or not all(re.fullmatch(r"[0-9a-f]{40}", x) for x in lines):
+        return None
+    return lines
+
+def revert_proven(root, host, base):
+    """True when a red base is lifted by a revert already merged with its tree proven (ruling own-823-b-revert-merge-lifts-red, decision no-merge-onto-red-main).
+    Merges resume when the revert merges, with its run still going (ruling own-745-b-resume-at-revert), and stay resumed while unrelated commits land above it.
+    Read from the facts base_state left on the host (`base_facts`), never from its prose. All must hold:
+    - exactly one red run, no cancelled run, no re-run in flight and no other red read beside it, and exactly one breaking merge B, named by its full sha;
+    - origin/<base> is the head the runs were read at, and B is its ancestor;
+    - of every commit from B up to the head (any parent, so a revert under a catch-up merge counts; at most REVERT_WALK_MAX), exactly one, R, says `This reverts commit <B>`;
+    - no commit there names R, or the commit that landed R, as reverted (a re-land);
+    - the landing commit is the oldest commit of the head's first-parent line that holds R. Its title names pull request N (`Merge pull request #N`, or `(#N)` for a squash);
+    - the landing commit's tree is the tree of N's head, and that head's checks read green (Host.head_state, the one reader);
+    - the red run sits on B or between B and the landing commit, never on the landing commit or above it (the revert's own run, or a later merge, failed).
+    A first red names no breaking merge, so it never lifts. Any read that fails, or a walk past the cap, is not proven: unknown never reads clear.
+    Skipped runs are no evidence here. Cost accepted by the owner: a revert that does not fix the failure reads clear until the next full run."""
+    facts = getattr(host, "base_facts", None)
+    if not facts or len(facts["blamed"]) != 1 or facts["red"] != 1 or facts["others"]:
+        return False
+    sha = facts["blamed"][0]
+    try:
+        c, head = git(root, "rev-parse", f"origin/{base}")
+        if c or head != facts["head"] or git(root, "merge-base", "--is-ancestor", sha, head)[0]:
+            return False
+        c, out = git(root, "log", "-z", "--format=%H%n%B", f"-n{REVERT_WALK_MAX + 1}", f"{sha}..{head}")
+        said = [e.strip("\n").partition("\n") for e in out.split("\0") if e.strip()]
+        if c or len(said) > REVERT_WALK_MAX or not all(re.fullmatch(r"[0-9a-f]{40}", x) for x, _, _ in said):
+            return False
+
+        def reverting(s):  # the commits whose message says `This reverts commit <s>`; a longer hex (another sha that starts with s) is no match
+            line = re.compile(rf"(?m)^This reverts commit {re.escape(s)}(?![0-9a-f])")
+            return [x for x, _, text in said if line.search(text)]
+        reverts = reverting(sha)
+        if len(reverts) != 1:
+            return False
+        revert = reverts[0]
+        chain = _shas(git(root, "rev-list", "--first-parent", f"-n{REVERT_WALK_MAX + 1}", f"{sha}..{head}"))
+        holds = _shas(git(root, "rev-list", "--ancestry-path", f"-n{REVERT_WALK_MAX + 1}", f"{revert}..{head}"))
+        if chain is None or holds is None:
+            return False
+        landed = next((x for x in reversed(chain) if x == revert or x in holds), None)  # chain is newest first
+        if landed is None or reverting(revert) or reverting(landed):
+            return False
+        above = _shas(git(root, "rev-list", "--ancestry-path", f"-n{REVERT_WALK_MAX + 1}", f"{landed}..{head}"))
+        if above is None:
+            return False
+        below = ({sha} | {x for x, _, _ in said}) - set(above) - {landed}
+        if not all(r in below for r in facts["red_heads"]):
+            return False
+        title = git(root, "log", "-1", "--format=%s", landed)
+        n = pull_number_in_title(title[1])
+        if title[0] or not n:
+            return False
+        kept = {k: getattr(host, k) for k in ("base", "branch") if hasattr(host, k)}
+        try:
+            info = host.pr(int(n))  # a read that also sets host.base and host.branch to that pull request's: put them back
+        finally:
+            for k, v in kept.items():
+                setattr(host, k, v)
+        trees = [git(root, "rev-parse", f"{x}^{{tree}}") for x in (landed, info["head"])]
+        return not any(c for c, _ in trees) and trees[0][1] == trees[1][1] and head_not_green(host.head_state(int(n), sha=info["head"])) is None
+    except (Stop, subprocess.TimeoutExpired, OSError, KeyError, ValueError, IndexError, TypeError):
+        return False
+
 def base_verdict(root, host, base):
-    """host.base_state over the workflow files on origin/<base>. A failed read of them is unknown."""
+    """host.base_state over the workflow files on origin/<base>, with a red lifted to green when revert_proven says the revert of the breaking merge landed on the base with its
+    tree proven and no red run on it or above it. The one place both the preview and red_base read, so they print one verdict. A failed read of the workflow files is unknown."""
     try:
         flows = base_workflows(root, f"origin/{base}")
     except (Stop, subprocess.TimeoutExpired, OSError) as e:
         return "unknown", " ".join(str(e).split())
-    return host.base_state(base, flows)
+    verdict, detail = host.base_state(base, flows)
+    if verdict == "red" and revert_proven(root, host, base):
+        return "green", ""
+    return verdict, detail
 
 def red_base(root, host, base, red_ok=""):
     """The red-main check (decision no-merge-onto-red-main): refuse while the base's latest completed run has a red job, or cannot be read.
-    --base-red-ok "<reason>" is a reason flag, as --undo-check-unknown-ok is, and Claude may type it with a reason: the way out for the batch that carries the fix (a revert PR of the breaking merge among them), or for an unknown read whose cause the reason names. A lift is logged and returns its reason, for record_lift."""
+    --base-red-ok "<reason>" is a reason flag, as --undo-check-unknown-ok is, and Claude may type it with a reason: the way out for the batch that carries the fix (a revert PR of the breaking merge among them), or for an unknown read whose cause the reason names. A lift is logged and returns its reason, for record_lift.
+    Once that revert is merged with its tree proven, base_verdict reads the base green (revert_proven), so no flag is needed after it, for later merges too, until a run on the
+    revert or above it is red; a revert whose tree is not proven leaves the base red until its own run on the base is green."""
     verdict, detail = base_verdict(root, host, base)
     if verdict == "green":
         return
@@ -3586,7 +3685,8 @@ def red_base(root, host, base, red_ok=""):
     carries = f"if this batch carries the fix, or the unknown read has a known cause, run again with the reason flag {RED_FLAG} \"<reason>\"."
     if broke:  # the revert PR is the batch that carries the fix: its own Drops-lines trailer covers each file the silent-undo check names, and the reason flag lifts no silent-undo finding
         way = (f"Open a revert PR for the breaking merge named above (`git revert -m 1 <commit>` for a merge commit) and merge it with the reason flag {RED_FLAG} \"<reason>\". "
-               f"Merges resume once the revert's run on main is green: until then its run is pending and the breaking red stays the newest. "
+               f"Merges resume at once when that revert is on {base} with its tree proven (the revert's PR checks are green and the tree of the merge that landed it is the revert PR's tree), and stay resumed until a run on that merge or above it is red; "
+               f"any other revert waits until its run on main is green (a green run that ran the suite), and until then its run is pending and the breaking red stays the newest. "
                f"The revert PR needs a Drops-lines trailer for each file the silent-undo check names (a revert of a merge that edits and adds files is flagged \"whole file restored\" and \"file deleted\"), "
                f"and so does a re-land that reverts the revert; the reason flag {RED_FLAG} does not lift that check. "
                f"Or, {carries}")
