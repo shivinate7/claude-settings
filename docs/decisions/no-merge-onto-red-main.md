@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner ruling Q4 g (how a revert merges), 2026-11-12 09:46 CST, relayed by the coordinator at 09:50 CST: a revert is an ordinary lane PR, merged with `--base-red-ok`. There is no `merge --revert`.
+Owner ruling Q4 g (how a revert merges), 2026-11-12 09:46 CST, relayed by the coordinator at 09:50 CST, narrowed by ruling `own-791-2-narrow-revert-first` (2026-11-15 00:27 CST, coordinator-relayed): a revert is a lane PR, and only the exact revert of the named breaking merge merges with `--base-red-ok`. There is no `merge --revert`.
 
 Terms:
 
@@ -33,7 +33,7 @@ So the lift holds for later merges that land above the revert.
 
 Without the lift (a revert whose tree is not proven), the red clears when the revert's own push run on main is green and ran the suite. A green run with no suite is no verdict (the empty-run rule above).
 - R3, a re-land (a revert of the revert) names the revert's sha, not the blamed one, so it stays refused. A first red that names no blamed merge gets no lift.
-- R4, a failed or unreadable read is unknown. Unknown refuses. It never clears.
+- R4, a failed or unreadable read is unknown. Unknown refuses. It never clears. The exact-revert check needs git 2.40 or newer (`merge-tree --merge-base`); an older git reads unknown and says so.
 - R5, the preview line and `--confirm` print one verdict. The lift is made in one place, and both read it.
 
 Owner ruling 746 b (`own-746-b-off-blamed-paths`, page item 746, pick b), 2026-11-13 13:20 CST, against the triage recommendation (a): while main is red, a lane that touches none of the blamed paths may merge. Target, not live. The blame step (bisect) that names the blamed paths is not built. The ruling places it in PR #3152, act 3, but the State line above names pull request 2889 for act 3. Unsettled: which PR holds act 3. The merge tool changes in a lane; that change is not built.

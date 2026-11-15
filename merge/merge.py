@@ -3677,13 +3677,15 @@ def exact_revert(root, base, short, head):
     """-> (verdict, why) for `head`, a pull request head, against the breaking merge `short` (the 9-hex sha base_state names): "yes" when its tree is the tree
     `git revert -m 1 <merge>` gives on origin/<base> and is not the base's own tree, so its net diff against the base is that revert and nothing else; "empty" when
     it is the base's own tree (the revert is already in the base, and a no-op lifts nothing); "no" when it is neither; "unknown" when a read
-    failed (git error or timeout). The revert tree is made with merge-tree: the merge as the common ancestor, the base head as ours, the merge's first parent as theirs."""
+    failed (git error, timeout, or a git older than 2.40, which lacks `merge-tree --merge-base`). The revert tree is made with merge-tree: the merge as the common ancestor, the base head as ours, the merge's first parent as theirs."""
     try:
         c, full = git(root, "rev-parse", "--verify", "--quiet", f"{short}^{{commit}}")
         if c or not re.fullmatch(r"[0-9a-f]{40}", full):
             return "unknown", f"{short} does not resolve to one commit in this clone ({full[:120] or 'no output'})"
         c, out = git(root, "merge-tree", "--write-tree", f"--merge-base={full}", f"origin/{base}", f"{full}^1")
         tree = (out.splitlines() or [""])[0]
+        if c and "unknown option" in out:  # merge-tree learned --merge-base in git 2.40; the rest of the tool needs only 2.38
+            return "unknown", "the revert check needs git 2.40 or newer (`git merge-tree --merge-base`), and this git refused the option"
         if c == 1 and "CONFLICT" in out:  # merge-tree exits 1 for an unreadable input too (merge_reason), so only a CONFLICT line says the revert does not apply
             return "no", f"`git revert -m 1 {short}` does not apply cleanly on {base}, so no tree is its revert"
         if c or not re.fullmatch(r"[0-9a-f]{40}", tree):
