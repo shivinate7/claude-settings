@@ -18,7 +18,7 @@ The ruling file's longer text adds the owner's earlier words: a one-time cleanup
 - Where a check has landed, the one-time cleanup may run.
 - Where no check has landed, the session builds the check first. The cleanup waits.
 
-The ruling binds one-time cleanups of stale prose and nothing else.
+The owner wrote "stuff" and "stale prose". This record reads the ruling as binding one-time cleanups of stale prose only. That scope is the lane brief's reading, not the owner's.
 
 ## What counts as "the check landed"
 
@@ -36,14 +36,14 @@ A check on a branch, in a draft, or in a plan has not landed.
 Incidents the ruling answers:
 
 - 2026-11-15 09:01 CST: a switch that every repo must make together drifted, and the repos did not stay aligned. No check read it.
-- Four cleanup lanes were open when the owner ruled: pull request #3504 in claude-settings, and the draft cleanups in mailaudit, banchi and ios-adblock.
+- At least four cleanup lanes were open when the owner ruled: pull request #3504 in claude-settings, and the draft cleanups in mailaudit, banchi and ios-adblock.
 
 ## What it does not cover
 
 - A ruling record, such as ios-adblock pull request #172. A ruling record keeps the owner's words as filed. It is not stale prose.
 - A pull request that applies a ruling filed today to the record that the ruling overtakes. That is the normal rewrite in place (rule `speak-rewrite-superseded-in-place`), not a cleanup.
 
-The consultant ordered both exclusions. They are the consultant's reading, not the owner's. The owner has not ruled on them.
+The lane brief gives both as the consultant's order. The wave plan on the `roadmap` ref sources only the first, as the consultant's 11:15 CST reading. No file sources the second, so it is the brief's reading. Neither is the owner's. The owner has not ruled on them.
 
 ## Consultant's reading
 
