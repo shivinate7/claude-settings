@@ -42,6 +42,9 @@ def decide(case):
     # environment only when the payload carries none. A real session id in the runner's own
     # environment would leak into every case, so it is dropped here and each case names its own.
     env.pop("CLAUDE_CODE_SESSION_ID", None)
+    # The launcher's role variable (rule (c) of the local confirm reads it): a run from a `claude-role` session would otherwise
+    # hand every case the launcher's role. A case that sets it names it through `env`.
+    env.pop("CS_SESSION_ROLE", None)
     # The runner's own lane id (CLAUDE_CODE_REMOTE_SESSION_ID) would bind every case to a lane, so it is
     # dropped here too. A step-grant case sets its own through `env`.
     env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
