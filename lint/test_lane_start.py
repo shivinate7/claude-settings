@@ -47,6 +47,22 @@ LANE_MODEL_VALUE = "sonnet"
 TAG_PREFIXES = ("cs-build:", "cs-repo:", "cs-topic:", "cs-step:")
 LANE_BRIEF_VALUE = "Lane brief:"
 TITLE_FORM = re.compile(r"Lane <(?:branch )?slug>:")
+LIST_TOOL = "mcp__claude-code-remote__list_sessions"
+CARRIER_ID = "session_LANECARRIER01"  # a live lane that carries the step, in the transcript's whole list read
+
+
+def write_list_transcript(path, rows):
+    """A transcript of one whole list_sessions read that shows `rows`, one JSON line per message, as the session writes it.
+    The guard reads it for a live lane that carries the start's step (lane-step-dup)."""
+    body = json.dumps({"ccr": {"data": rows, "has_more": False}})
+    lines = [
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "list1", "name": LIST_TOOL, "input": {}}]}},
+        {"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "list1", "content": [{"type": "text", "text": body}]}]}},
+    ]
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(json.dumps(line) for line in lines) + "\n")
 
 
 def tearDownModule():
@@ -270,6 +286,46 @@ class LaneStartHelper(unittest.TestCase):
     def test_a_brief_that_names_a_bare_session_id_is_refused_under_brief_ids_in_roster(self):
         run = self.run_helper(SLUG, TOPIC, GRANT, self.brief("Report to session_4711 when done.\n"), "--repo", OWNER_REPO)
         self.assert_refused(run, "brief-ids-in-roster")
+
+    def carrier_transcript(self, step, repo=OWNER_REPO):
+        """A transcript whose whole list read shows one live lane, CARRIER_ID, on `step` in `repo`."""
+        row = {"id": CARRIER_ID, "title": "a lane session", "session_status": "SESSION_STATUS_RUNNING",
+               "tags": ["cs-build:lane", "cs-step:" + step, "cs-repo:" + repo]}
+        path = os.path.join(self.work, "carrier-%s.jsonl" % step)
+        write_list_transcript(path, [row])
+        return path
+
+    def test_a_transcript_with_a_live_lane_on_the_step_refuses_the_start_under_lane_step_dup(self):
+        for step in (SLUG, FULL_SLUG):
+            with self.subTest(step=step):
+                transcript = self.carrier_transcript(step)
+                run = self.run_helper(step, TOPIC, GRANT, self.brief("Do the task.\n"), "--repo", OWNER_REPO,
+                                      "--transcript", transcript)
+                self.assert_refused(run, "lane-step-dup")
+                self.assertIn(CARRIER_ID, run.stderr, "the refusal names no live lane that carries the step: %s" % run.stderr)
+
+    def test_a_transcript_whose_live_lane_holds_another_step_or_repo_lets_the_start_print(self):
+        for step, repo in (("other-step", OWNER_REPO), (SLUG, "other/repo")):
+            with self.subTest(step=step, repo=repo):
+                fields = self.start("--repo", OWNER_REPO, "--transcript", self.carrier_transcript(step, repo))
+                self.assertIn("cs-step:" + SLUG, fields["tags"], "the printed start does not carry its own step")
+
+    def test_a_transcript_with_no_whole_list_read_refuses_the_start_as_unknown(self):
+        no_read = os.path.join(self.work, "no-read.jsonl")
+        open(no_read, "w", encoding="utf-8").close()
+        missing = os.path.join(self.work, "no-such-transcript.jsonl")
+        for path in (no_read, missing):
+            with self.subTest(transcript=os.path.basename(path)):
+                run = self.run_helper(SLUG, TOPIC, GRANT, self.brief("Do the task.\n"), "--repo", OWNER_REPO,
+                                      "--transcript", path)
+                self.assert_refused(run, "lane-step-dup")
+                self.assertIn("does not prove", run.stderr, "the refusal does not say the step is unproven: %s" % run.stderr)
+
+    def test_the_repo_defaults_to_the_checkout_when_a_transcript_is_given(self):
+        where = self.checkout()
+        run = self.run_helper(SLUG, TOPIC, GRANT, self.brief("Do the task.\n"), "--transcript",
+                              self.carrier_transcript(SLUG), cwd=where)
+        self.assert_refused(run, "lane-step-dup")
 
     def test_the_helper_source_holds_no_literal_copy_of_a_lane_constant(self):
         self.assertTrue(os.path.isfile(HELPER), "bin/lane-start is missing, so its source cannot be checked")
