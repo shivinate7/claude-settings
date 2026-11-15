@@ -4472,7 +4472,7 @@ class GhHalf(Env):
     def spare_is_the_take(self):
         """The lock's spare is its take expiry, LOCK_TTL_SECONDS, as the rate-wait cases are sized. confirm's undo-check extension (UNDO_CHECK_LOCK_SECONDS)
         would lift the expiry to about 3900 s from the take, past the end of the 900 s rung, so no rung would need an extension. It is 0 here; its real
-        value is pinned by test_confirm_extends_the_lock_for_3600_s_before_each_undo_check. confirm runs no debt-check extension (ruling R2)."""
+        value is pinned by test_confirm_extends_the_lock_for_3600_s_before_each_undo_check. confirm runs no debt-check extension."""
         patch = unittest.mock.patch.object(merge, "UNDO_CHECK_LOCK_SECONDS", 0)
         patch.start()
         self.addCleanup(patch.stop)
@@ -6891,7 +6891,7 @@ class DebtRetire(Env):
         self.assertEqual(len(calls), 1, "preview did not call the Retire check once with unknown CI")
 
     # The lock outlasts the long check that confirm runs, undo_check, which has no bound. Each check call is preceded by its own extend_for, so the
-    # lock is never left to the take's fixed expiry under a check. confirm runs no debt check (ruling R2, owner 14:07 CST Nov 10).
+    # lock is never left to the take's fixed expiry under a check. confirm runs no debt check, because the Retire run runs in CI.
 
     LOCK_REFUSAL = "the fake lock refuses the extension"
 
@@ -6941,14 +6941,14 @@ class DebtRetire(Env):
 
     def assert_claimed_and_undo_checked_twice(self, events, out):
         """Scope before subject (P7): the claim was pushed and merged, and the undo check ran twice, before the claim and inside prove. confirm of a
-        ready PR runs no debt check (ruling R2, owner 14:07 CST Nov 10), so the debt check count is 0."""
+        ready PR runs no debt check (the Retire run runs in CI), so the debt check count is 0."""
         self.assertEqual(self.claims(), 1, out)
         self.assertTrue(getattr(self.host, "merged", False), out)
         self.assertEqual(events.count(("check", "debt")), 0, f"confirm ran a debt check, which ruling R2 removed from confirm (run order: {events})")
         self.assertGreaterEqual(events.count(("check", "undo")), 2, "the undo check ran fewer than twice, so the case misses the call inside prove")
 
     def test_confirm_of_a_ready_pr_runs_no_debt_check_and_extends_no_lock_for_one(self):
-        """Ruling R2 (owner, 14:07 CST Nov 10): the Retire run moved into CI, so confirm runs no debt check and extends the lock for none. The
+        """The Retire run runs in CI, so confirm runs no debt check and extends the lock for none. The
         debt-check length is patched to a value no undo extension uses, so an extension that carries it is a debt check's."""
         sentinel = 7777
         patch = unittest.mock.patch.object(merge, "debt_check_lock_seconds", lambda: sentinel, create=True)  # create: the name may go once no caller remains
@@ -16375,7 +16375,7 @@ class ReviewCleanMainMerge(ReviewEnv):
         self.reviewed_line(self.reviewed_host(fx, fx.octopus), fx.octopus, "stale", "a merge with three parents must not read done")
 
     def test_f_a_lint_pass_on_the_reviewed_head_carries_to_a_clean_merge_of_main(self):
-        # Owner ruling, 2026-11-14 23:04 CST (item 850 a): a lane-lint PASS carries across a clean merge of main that the merge tool proves.
+        # A lane-lint PASS carries across a clean merge of main that the merge tool proves: git's own merge of the two parents, so nothing else changed since the PASS.
         fx = self.real_commits()
         self.assert_clean_merge_done(fx)
         record = review_comment(1, 7, record_text(head=fx.fixed, rounds=REVIEW_PASS))
@@ -16421,7 +16421,7 @@ class ReviewCleanMainMerge(ReviewEnv):
 
 
 class LintCleanMainMergeCarry(ReviewEnv, RecordsEnv):
-    """A lane-lint PASS carries across a clean merge of main (owner ruling, 2026-11-14 23:04 CST, item 850 a). The merge tool proves the merge: two
+    """A lane-lint PASS carries across a clean merge of main. The merge tool proves the merge: two
     parents, the second on the base's main, git's own merge tree of its parents, and nothing else changed since the PASS. The lint carries across clean
     merges of main only: a claim or records-page commit after a clean merge is not carried here. The old direct form, a claim or page straight on the
     PASS, stays. Any other form is not carried, and a read that fails is not carried, never passed. The carry does not depend on the stamp config. Cases call lint_carried with its
@@ -21881,7 +21881,7 @@ class DraftReady(CloudSession):
 
     def test_fast_checks_refuses_a_red_debt_close_even_with_green_head_ci(self):
         """The pre-ready route (--fast-checks: pre_ready_rows, debt_verdict, debt_check) runs the debt-close lint with no CI gate: a host that reads
-        green CI on the head does not lift a close whose Retire check is red. Ruling R2 (owner, 14:07 CST Nov 10) keeps the CI gate for the preview only."""
+        green CI on the head does not lift a close whose Retire check is red. The CI gate applies to the preview only."""
         self.ready_checks_on_main()
         self.debt_close_on_green_head(1)  # the close's own Retire test is red
         with self.ready_check_answers("pass") as ran:
