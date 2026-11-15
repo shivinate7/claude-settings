@@ -1732,12 +1732,12 @@ class CompactionCarryTests(unittest.TestCase):
                 self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), *([name] if name else []))
 
     def test_cc_green_label_first_recovered_items_pass(self):
-        # Catches: a label-first item, "(git) ruling X", is refused as naming no source.
+        # Catches: a label-first item, "(git) ruling X", would be refused as naming no source.
         rows = [
             report_lines("Recovered: (git) ruling X", "Handoff gave: none"),
-            # Catches: a label-first item with a page source is refused as naming no source.
+            # Catches: a label-first item with a page source would be refused as naming no source.
             report_lines("Recovered: (page) fact Y", "Handoff gave: none"),
-            # Catches: a label-first item with a digest source is refused as naming no source.
+            # Catches: a label-first item with a digest source would be refused as naming no source.
             report_lines("Recovered: (digest) fact Z", "Handoff gave: none"),
             # Catches: a ";" split of label-first items leaves a later item with no source.
             report_lines("Recovered: (git) ruling X; (page) fact Y; (digest) fact Z", "Handoff gave: none"),
