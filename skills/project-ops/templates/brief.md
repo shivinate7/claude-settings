@@ -40,7 +40,7 @@ A done check is one the lane can run.
 
 First re-run on main the check behind each dated Finding or Checked claim in the step note; if one fails, stop and report. Report each as "Checked <Mon D> on main <commit>: <result>".
 Before hand-in, run `~/.claude/bin/merge --lane-lint <pr>` (repos with `bin/ci-job`) and report its verdict; a red lane does not hand in. Run `merge --lane-lint` from the main checkout, never from a session or agent isolated in a worktree: Claude Code's worktree check can refuse it there.
-A coordinator-started lane hands in a draft PR to the batch runner. It merges only with a merge role, once the batch runner marks it ready (main grants none yet).
+A coordinator-started lane hands in a draft PR to the batch runner and never merges (decision `session-tiers`, "Who started a session decides its merge path").
 
 ## Report cap
 
