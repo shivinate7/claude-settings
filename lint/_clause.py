@@ -2,7 +2,8 @@
 
 `lint/report_guard.py` imports this module, so the check has one copy of its sentence and clause boundaries and one home
 for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, DETERMINERS, CANT_FORMS, COULD_NOT_FORMS, CANNOT_FORMS, CHECK_WORDS,
-STATE_VERBS, OUTAGE_NOUNS, OUTAGE_VERBS, BACK_PATTERN, STATUS_PATTERN, SPEECH_VERBS, CALL_SUBJECTS) and for the words that
+STATE_VERBS, OUTAGE_NOUNS, OUTAGE_VERBS, BACK_PATTERN, STATUS_PATTERN, STATUS_FORM_PATTERN, SPEECH_VERBS, CALL_SUBJECTS,
+FACT_VERBS, FACT_OPENERS, FIND_VERBS, ACCESS_NOUNS) and for the words that
 name the writer (WRITER_BEFORE_RE, FROM_HERE_RE and the lead-ins and subject words that own_subject reads). The module reads text and
 a mask only: no file, no process. Its cost is one regex pass over a sentence and one over each clause, so the work grows
 in step with the text.
@@ -15,7 +16,7 @@ opens it (and, but, or, so, yet, then, because) is its `join`. `lead` and `term`
 after its start sits, and `sent_end` the nearest of . ; : ! ? (a dot inside a token counts); all are offsets into the
 sentence. A clause's other fields are read from its words alone. The helpers below the clauses (conditional,
 veil, negated_near, own_subject, past, opens_with, opens_with_joiner, strip_adverbs, reasons, reasons_before, is_reason,
-check_word_counts, form_pattern, unopen) read the grammar of the cannot-claim check from the same lexicons.
+check_word_counts, form_pattern, unopen, judged_object) read the grammar of the cannot-claim check from the same lexicons.
 """
 import bisect
 import re
@@ -71,6 +72,36 @@ BACK_FORMS = ("sent", "came", "gave", "given", "comes", "sends", "gives", "come"
 BACK_PATTERN = r"(?:%s)\s+back" % "|".join(BACK_FORMS)
 SIZE_UNITS = ("lines?", "files?", "words?", "chars?", "commits?", "bytes?", "[km]b", "ms")
 STATUS_PATTERN = r"[45]\d\d\b(?![-\w])(?!\s+(?:%s)\b)" % "|".join(SIZE_UNITS)
+# A status named as one: a status word before it (HTTP 500, status 407, returned 403, sent back 403) or after it (500 error,
+# 403 Forbidden). A bare number after a comma ("500 rows") is a count. The probe form reads only this form.
+_STATUS_BEFORE = (r"HTTP(?:/[\d.]+)?", r"status(?:\s+code)?", "code", "error", "returned", "answered", BACK_PATTERN)
+_STATUS_AFTER = ("error", "status", "response", "forbidden", "unauthori[sz]ed", r"not\s+found", r"bad\s+gateway",
+                 r"service\s+unavailable", r"gateway\s+time-?out", r"proxy\s+authentication\s+required")
+STATUS_FORM_PATTERN = r"\b(?:(?:%s)\s+(?:an?\s+)?%s|[45]\d\d\s+(?:%s)\b)" % (
+    "|".join(_STATUS_BEFORE), STATUS_PATTERN, "|".join(_STATUS_AFTER))
+# The probe form's judgement rule (decision cant-claim-needs-probe, judged_object): a claim names no act on a system when
+# its object is a fact, a choice or a size. A pronoun object ("confirm that") carries no kind of its own, so the verbs whose
+# object is only ever a fact or a remark are the one list (FACT_VERBS). Verify, check, test, see and find act on a system,
+# so they are not in it. The nouns of a need that is access keep "without the token" a claim (ACCESS_NOUNS).
+FACT_VERBS = ("agree", "disagree", "comment", "speak", "say", "tell", "argue", "complain", "blame", "thank", "apologise",
+              "apologize", "stress", "emphasise", "emphasize", "overstate", "overemphasise", "overemphasize", "recall",
+              "remember", "imagine", "think", "know", "determine", "confirm", "predict", "explain", "decide", "judge",
+              "guess", "estimate", "promise", "guarantee")
+FACT_OPENERS = ("why", "how", "whether", "if")  # a clause object; what and where may name a thing ("see what's in it")
+FIND_VERBS = ("see", "find", "spot", "notice", "identify")
+ACCESS_NOUNS = _PERMISSION_NOUNS + OUTAGE_NOUNS + (
+    "access", "credential", "credentials", "token", "key", "login", "password", "vpn", "tunnel", "secret", "account",
+    "certificate", "cert", "sign-in", "grant", "approval")
+_WORK_UNITS = tuple(unit for unit in SIZE_UNITS if unit != "ms") + (
+    "steps?", "pass(?:es)?", "go", "PRs?", "edits?", "changes?", "patch(?:es)?", "diffs?")
+_FACT_RE = re.compile(r"^(?:(?:%s)\b|\w+(?:\s+(?:out|up))?\s+(?:%s)\b)" % (
+    "|".join(FACT_VERBS), "|".join(FACT_OPENERS)), re.I)
+_CHOICE_RE = re.compile(r"^\w+\s+between\b", re.I)
+_FIND_NOTHING_RE = re.compile(r"^(?:%s)\s+(?:any|anything|no|nothing|another|a\s+(?:problem|bug|issue))\b" % "|".join(
+    FIND_VERBS), re.I)
+_SIZE_RE = re.compile(r"\bin\s+(?:one|a\s+single|a|an|\d+|two|three|four|five|ten|a\s+few|few|(?:fewer|less)\s+than\s+\w+|"
+                      r"under\s+\w+)\s+(?:%s)\b" % "|".join(_WORK_UNITS), re.I)
+_WITHOUT_RE = re.compile(r"\bwithout\b", re.I)
 WINDOW = 6  # words after a phrase, in its clause, that may name the act
 NEGATOR_GAP = 3  # words before a phrase that a negator may sit in and still negate it
 NEGATOR_GAP_SKIP = ("am",)  # words the gap does not count: "did not say I am not authorized" reaches the first not
@@ -278,6 +309,27 @@ def opens_with_joiner(text):
 def strip_adverbs(text):
     """`text` without the adverbs (ADVERBS) that open it."""
     return _ADV_LEAD_RE.sub("", text)
+
+
+def judged_object(window, clause):
+    """The kind of object that makes a claim a judgement and not an act on a system, else "". `window` is the words after
+    the phrase and `clause` the rest of its clause. A fact: a verb of FACT_VERBS, or a clause that why, how, whether or if
+    opens ("see why it fails"). A choice: a between ("decide between A and B"), or a need the act waits on that names no
+    access noun (ACCESS_NOUNS): "ship this without the migration". A size: a measure of the work, read from the whole
+    clause ("fix this in one line"). A find of nothing ("see any issues") names no object at all."""
+    window = strip_adverbs(window)
+    if _FACT_RE.match(window):
+        return "fact"
+    if _CHOICE_RE.match(window):
+        return "choice"
+    if _FIND_NOTHING_RE.match(window):
+        return "nothing"
+    if _SIZE_RE.search(clause):
+        return "size"
+    need = _WITHOUT_RE.search(clause)
+    if need and not any(word in ACCESS_NOUNS for word in words(clause[need.end():])[:4]):
+        return "choice"
+    return ""
 
 
 def is_reason(text):

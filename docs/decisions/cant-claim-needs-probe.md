@@ -39,8 +39,17 @@ The hand-off guard does not read `CANNOT_FORMS`. Its `CAPABILITY_RE` reads `CANT
 - A subject that is not the writer: it, the guard, the lane, a builder, the session, a draft PR. "this session" is the writer.
 - A question. A sentence that ends in `?`.
 - A past claim (could not, couldn't) that hands no step to the owner. A past claim with a hand-off ("so you'll need to run it") is read.
-- A claim with no act: a remark or a find of nothing ("can't agree more", "can't see any issues", "can't comment on pricing"; `PROBE_PLAIN_RE`).
-- A sentence that names its check by a backtick span, a tool name, an exit code or an HTTP status. A bare word ("I tried and it failed") names none.
+- A judgement, not an access claim: a claim whose object is a fact, a choice or a size, not a system or an act on one (`judged_object`, `lint/_clause.py`).
+  - A fact: a clause that why, how, whether or if opens ("can't see why the test fails", "can't predict how long it will take"). What and where may name a thing ("can't see what is in the bucket"), so they open no fact.
+  - A fact or a remark: a verb whose object is only ever one (`FACT_VERBS`: determine, confirm, predict, explain, decide, agree, comment ...). A pronoun object ("can't confirm that", "can't import that") carries no kind, so this one short list is the rule's only verb list. Verify, check, test, see and find act on a system and are not in it.
+  - A choice: a between ("can't decide between A and B"), or a need the act waits on ("we can't ship this without the migration"). A need that is access ("without the token", "without the VPN"; `ACCESS_NOUNS`) keeps the claim.
+  - A size: a measure of the work in the clause ("can't fix this in one line"). A time ("in time") is no size, so "can't reach it in time" keeps the claim.
+  - A find of nothing ("can't see any issues").
+  - The rule reads the object, not a longer verb list, so a new verb of judgement needs no edit when its object is a why-clause, a between, a need or a size.
+- A sentence that names its check: an exit code, a status form, or a backtick span or tool name beside a result word.
+  - A span or a tool name alone names the object of the act, not its result ("can't import `inbox.mbox`", "can't run `make build`"). It counts only beside a result word (returned, failed, exited ...) in its own clause, with at most three words between. A result word whose subject is the writer names no call ("I ran `make build`").
+  - A status form has a status word before or after the number: "HTTP 500", "status 407", "returned 403", "500 error" (`STATUS_FORM_PATTERN`, `lint/_clause.py`). A bare count after a comma ("500 rows") is no status.
+  - A bare word ("I tried and it failed") names none.
 - A line quoted with `>`, such as an agent's report, in a quote with no report label, and a row of a labelled quote that another writer's label opens ("Agent report:"). This skip is new for this predicate. Today's line reader, `_prose_lines`, strips the `>` and reads the body. So the old check counts such lines, as part (vi) says under "What it cannot see". If the skip lands in the shared reader, that note goes stale and needs a rewrite.
 - A pasted guard refusal, when quoted or in a code span. The builder tests an unquoted paste. If none of the skips holds, it adds one.
 - Reused skips, as the old check has them:

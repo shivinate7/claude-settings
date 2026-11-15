@@ -144,8 +144,11 @@ on a claim with a slug in parentheses, one read of the rule files per run; no fi
 Probe check (decision cant-claim-needs-probe, rule output-never-hand-off-doable-step): a prose sentence that says this session
 cannot do an act outside the table (the cannot-claim check's phrases, which also hold "have no access", "no access to" and
 "unable") passes only when the turn after the last incoming message holds a main-session tool call (a peer's ack of a send of
-the turn starts no turn; only the parent, by the id in the lane record, acks a send to @parent), or the sentence is in the past tense (could not) with no hand-off to the owner, names its check (a backtick span, a tool name, an
-exit code, an HTTP status; a bare word such as failed names none), says `unchecked` as a whole word or carries a route or measured cite. A table act
+the turn starts no turn; only the parent, by the id in the lane record, acks a send to @parent), or the sentence is in the past tense (could not) with no hand-off to the owner, names its check (an
+exit code, a status form such as HTTP 500 or 500 error, or a backtick span or tool name beside a result word; a span alone
+names the object, and a bare word such as failed names none), says `unchecked` as a whole word or carries a route or measured
+cite. A claim whose object is a fact, a choice or a size (_clause.judged_object: "can't see why", "can't fix this in one
+line") is a judgement, not a claim. A table act
 keeps the cannot-claim verdict, and the one block joins any other reason. Not read, for this form only: a blockquote with no
 report label (an agent's report or a pasted refusal), a row that another writer's label opens ("Agent report:") and a Why yours line. One refusal line per sentence: a sentence that holds a table claim is listed under that reason alone. The remedy names no act. Cost: the cannot-claim
 check's regex and the turn's records already in hand; no file, no process, no timer, no log.
@@ -2053,11 +2056,14 @@ CANNOT_NO_PROBE = (
     "this turn holds no tool call. Remedy: run one probe of the act, then say what it returned; or end the line with "
     "`(route <id>)` for a route row that says refused or asks, or with `(measured <date>, <check and result>)`; or say "
     "`unchecked` on the line. Lines:")
-# The windows of a claim that names no act: a remark (agree, comment on, say) or a find of nothing (see any, find no).
-PROBE_PLAIN_RE = re.compile(
-    r"(?:agree|disagree|comment|speak|say|tell|argue|complain|blame|thank|apologi[sz]e|stress|emphasi[sz]e|overstate|"
-    r"overemphasi[sz]e|recall|remember|imagine|think of)\b|(?:see|find|spot|notice|identify)\s+(?:any|anything|no|nothing|"
-    r"another|a\s+(?:problem|bug|issue))\b", re.I)
+# A probe claim names its check by an exit code, a status form (_clause.STATUS_FORM_PATTERN: "HTTP 500", "500 error", not
+# ", 500 rows") or a backtick span or tool name beside a result word. A span alone names the object ("import `inbox.mbox`").
+PROBE_EXIT_RE = re.compile(r"\bexit(?:ed|s)?(?:\s+with)?(?:\s+(?:code|status))?\s+[1-9]\d*\b", re.I)
+PROBE_STATUS_RE = re.compile(_clause.STATUS_FORM_PATTERN, re.I)
+PROBE_NAMED_RE = re.compile(r"`[^`\n]+`|\bmcp__\w+")
+PROBE_RESULT_RE = re.compile(r"\b(?:%s|exited)\b" % "|".join(_clause.CHECK_WORDS), re.I)
+PROBE_BESIDE_WORDS = 3  # words that may sit between a span and its result word, in one clause
+PROBE_GAP_STOP_RE = re.compile(r"[;:.!?—–]")
 # A past claim ("could not") that hands the act to the owner is a hand-off, not a report of a failed try.
 PROBE_HAND_OFF_RE = re.compile(
     r"\byou(?:['’]ll|['’]d| will| would| need| must| should| have to| can| could| may)\b|\bfor you to\b|\bover to you\b"
@@ -2121,7 +2127,8 @@ def _claim(body, mask, hit, floor, scan):
     condition it do not condition this one. The phrase's clause starts after the last separator (a comma, a dash, but, a
     stop) before it and ends at the first stop after it (a comma does not end it). Not a claim: a conditional or a negator
     just before the phrase, a subject that is not the writer's own (_clause.own_subject), a verb of telling or waiting
-    after it, a dependency (until, before, without your) in its clause, a remark or a find of nothing (PROBE_PLAIN_RE), a blocker of that
+    after it, a dependency (until, before, without your) in its clause, a judgement on an act outside the table (its object
+    is a fact, a choice or a size: _clause.judged_object), a blocker of that
     act (_blocker_res) in its own clause (a comma and, but or or starts another) or in the part after the next semicolon
     or joined to the clause (_joined_blocker), a sentence that names a rule, or a real rule or decision id in parentheses
     in its clause (_names_rule_id, read last, so only a line that is otherwise a claim pays its file read). A blocker is a
@@ -2153,8 +2160,8 @@ def _claim(body, mask, hit, floor, scan):
         return None
     window = _clause.first_words(after)
     act = _window_act(window, before + " " + after) or PROBE_ACT  # no table act: the probe form reads it
-    if not act and PROBE_PLAIN_RE.match(window):
-        return None  # "can't agree more", "can't see any issues": a remark or a finding, not an act on a thing
+    if not act and _clause.judged_object(window, after):
+        return None  # "can't agree more", "can't see why", "can't fix this in one line": a judgement, not an act on a system
     state_re, reason_re = _blocker_res(act)[:2]
     clause_left = max((c.start + len(c.join) for c in conjs if c.lead_at >= left and c.start + len(c.join) <= hit.start()),
                       default=left)
@@ -2628,7 +2635,7 @@ def cannot_problem(records, text, refused=()):
     A sentence with no try is listed under the no-try reason, one with a try and no check under the no-check reason. The remedy names no act (git-remedy-never-names-target).
     The probe form (decision cant-claim-needs-probe): a sentence that claims an act outside the table (PROBE_ACT) is listed
     under the probe reason when `records` hold no main-session tool call, unless it reports a failure (a past phrase:
-    could not), names its check (_names_check), says `unchecked` as a whole word or carries a route or measured cite. The one refusal joins whichever reasons apply."""
+    could not), names its check (_names_probe_check), says `unchecked` as a whole word or carries a route or measured cite. The one refusal joins whichever reasons apply."""
     claims = _read_claims(text)
     if not claims:
         return ""
@@ -2637,7 +2644,7 @@ def cannot_problem(records, text, refused=()):
     probes = [] if _main_tool_calls(records) else list(dict.fromkeys(
         claim[0] for claim in claims if not claim[1] and claim[0] not in on_table
         and (not claim[3] or PROBE_HAND_OFF_RE.search(claim[0])) and not UNCHECKED_RE.search(claim[0])
-        and not _names_probe_check(claim[0], claim[6]) and not _cited(claim[0], refused, PROBE_ACT)))
+        and not _names_probe_check(claim[0]) and not _cited(claim[0], refused, PROBE_ACT)))
     no_try, no_check = [], []
     if table and guard is None:
         _load_guard()
@@ -2663,12 +2670,26 @@ def cannot_problem(records, text, refused=()):
                     if lines)
 
 
-def _names_probe_check(sentence, tail):
-    """True when the sentence of a probe claim names its check by a backtick span, a tool name, an exit code or an HTTP
-    status (CANNOT_CHECK_RE less its bare check words). A bare word ("I tried and it failed") names no call, and the turn
-    holds none."""
+def _names_probe_check(sentence):
+    """True when the sentence of a probe claim names its check: an exit code (PROBE_EXIT_RE), a status form
+    (PROBE_STATUS_RE), or a backtick span or tool name (PROBE_NAMED_RE) beside a result word (PROBE_RESULT_RE): in the
+    same clause, with at most PROBE_BESIDE_WORDS words between. A word the claim phrase holds does not count, nor a bare
+    word of the writer (_clause.check_word_counts: "I ran `make build`" names no result). A span alone names the object
+    of the act, and a bare word names no call."""
     text = _strip_emphasis(sentence)[0]
-    return any(not CANNOT_CHECK_WORD_RE.fullmatch(m.group()) for m in CANNOT_CHECK_RE.finditer(text))
+    if PROBE_EXIT_RE.search(text) or PROBE_STATUS_RE.search(text):
+        return True
+    names = [m.span() for m in PROBE_NAMED_RE.finditer(text)]
+    phrases = [hit.span() for hit in CANNOT_RE.finditer(_mask(text))]
+    for word in PROBE_RESULT_RE.finditer(text):
+        at = word.start()
+        if any(a <= at < b for a, b in names + phrases) or not _clause.check_word_counts(text[:at], word.group()):
+            continue
+        for a, b in names:
+            gap = text[b:at] if b <= at else text[word.end():a]
+            if not PROBE_GAP_STOP_RE.search(gap) and len(gap.split()) <= PROBE_BESIDE_WORDS:
+                return True
+    return False
 
 
 def _turn_acks(records, hook):
