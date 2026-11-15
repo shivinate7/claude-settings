@@ -436,8 +436,7 @@ def case_page_reasons_name_no_stands_field():
 
 
 def case_str_replace_bare_problem_lines():
-    # Controls, green now. A bare Problem line is no form line a stood branch may let through. An edit that removes
-    # it, or swaps a stake line for it, stays refused once that branch goes.
+    # A bare Problem line is no form line. An edit that removes it, or swaps a stake line for it, is refused.
     context_replace("that removes a bare Problem line from context is refused, as a stake line is",
                     "Problem: which job runs it.", "", (FORM_RULE, "Problem"))
     context_replace("that swaps a stake Problem line for a bare one is refused as no stake",
@@ -445,15 +444,25 @@ def case_str_replace_bare_problem_lines():
 
 
 def case_str_replace_bare_to_malformed_stake():
-    # A bare Problem line swapped for a line that names a parenthesised stake the set lacks, or names one with no text,
-    # is refused as no stake: PROBLEM_LABEL matches the new line and PROBLEM_LINE does not. A bare line swapped for
-    # another bare line is allowed, as a bare line may be edited (form_str_replace_hit keeps that rule).
+    # A Problem line that is not a labelled stake line is refused as no stake: PROBLEM_LABEL matches the new line and
+    # PROBLEM_LINE does not. That covers a stake outside the set, a stake with no text, and a line with no parenthesised
+    # stake at all. A page item carries no stood pick (owner ruling, 13:04 CST Nov 13), so a bare line swapped for
+    # another bare line is refused too. A bare line swapped for a labelled stake line is allowed.
     context_replace("that swaps a bare Problem line for a stake outside the set is refused as no stake",
                     "Problem: which job runs it.", "Problem (internals): which job runs it.", (STAKE_RULES, "Problem"))
     context_replace("that swaps a bare Problem line for a stake with no text is refused as no stake",
                     "Problem: which job runs it.", "Problem (money):", (STAKE_RULES, "Problem"))
-    context_replace("that swaps a bare Problem line for another bare line is allowed",
-                    "Problem: which job runs it.", "Problem: which job runs it, and why it needs your word.", None)
+    context_replace("that swaps a bare Problem line for another bare line is refused as no stake",
+                    "Problem: which job runs it.", "Problem: which job runs it, and why it needs your word.",
+                    (STAKE_RULES, "Problem"))
+    for shape in ("Problem goal: which job runs it.", "Problem - goal: which job runs it.",
+                  "Problem is which job runs it.", "Problem:"):
+        context_replace("that swaps a bare Problem line for %r is refused as no stake" % shape,
+                        "Problem: which job runs it.", shape, (STAKE_RULES, "Problem"))
+    context_replace("that swaps a bare Problem line for a labelled stake line is allowed",
+                    "Problem: which job runs it.", "Problem (goal): which job runs it.", None)
+    context_replace("that swaps a labelled Problem line for another labelled line is allowed",
+                    "Problem (goal): a", "Problem (goal): b", None)
 
 
 def case_page_form_reason_names_the_pick_on_stake_only():
