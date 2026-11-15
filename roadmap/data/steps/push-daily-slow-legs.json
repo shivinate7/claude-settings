@@ -1,0 +1,16 @@
+{
+ "id": "push-daily-slow-legs",
+ "title": "Lane push-daily-slow-legs: a daily run for the slow Windows legs (#3540)",
+ "priority": "now",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T13:32:00-06:00",
+ "why": "[13:30 CST Nov 15, triage] #3540 is the daily run for the slow Windows legs: lane lint PASS, fix check running. It has an open owner question, \"the daily-schedule Departs line (blocks merge)\". The coordinator asked the lane for the full question form and sends it to triage. The question is UNPOSTED (triage has not put it on the page). (source: coordinator 13:30 CST, relayed by triage; not owner-typed, undoable) New step; none existed.",
+ "source": "coordinator 13:30 CST, relayed by triage; not owner-typed, undoable",
+ "note": "Doing. #3540 is the daily run for the slow Windows legs: lane lint PASS, fix check running. It has an open owner question, \"the daily-schedule Departs line (blocks merge)\". The coordinator asked the lane for the full question form and sends it to triage. The question is UNPOSTED (triage has not put it on the page). Follow-ups: guard-input-scope (stacked on it), red-daily-blames-merges.",
+ "pr": 3540,
+ "lane": "push-daily-slow-legs"
+}

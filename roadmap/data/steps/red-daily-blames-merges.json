@@ -1,0 +1,14 @@
+{
+ "id": "red-daily-blames-merges",
+ "title": "A red daily run blames the merges since its last green head",
+ "priority": "next",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-15T13:32:00-06:00",
+ "why": "[13:31 CST Nov 15, triage] Let a red daily run blame the merges since its last green head. The lane proposed it as a follow-up; triage queued it 13:31 CST, undoable, not started. Guard or check: yes (unverified). (source: coordinator 13:30 CST, relayed by triage; not owner-typed, undoable) New step; none existed.",
+ "source": "coordinator 13:30 CST, relayed by triage; not owner-typed, undoable",
+ "note": "Todo. Let a red daily run blame the merges since its last green head. The lane proposed it as a follow-up; triage queued it 13:31 CST, undoable, not started. Guard or check: yes (unverified)."
+}
