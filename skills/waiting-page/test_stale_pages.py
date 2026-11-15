@@ -2184,15 +2184,18 @@ class UnreadStale(FolderCase):
 
 class SessionLine(unittest.TestCase):
     """`--session-line <root> --main-checkout <dir>` (rule page-stale, decision page-stale-publish). The stamps are the record file
-    roadmap/data/meta/page-built.json on origin/roadmap and the local stamp <git common dir>/waiting-page-built. A repo whose extras
-    name a waiting page prints nothing when either stamp equals main's blob sha, prints the behind line when stamps exist and none
-    equals it, and prints the no-stamp line when neither source holds a stamp. A repo with no waiting page prints nothing.
+    roadmap/data/meta/page-built.json on origin/roadmap and the local stamp <git common dir>/waiting-page-built. While the record
+    file holds a 40-hex blob, either stamp equal to main's blob sha prints nothing, and a stamp that differs from it prints the
+    behind line. While the record file is missing or unreadable, the local stamp alone decides: it prints the behind line when it
+    differs from main's blob, and nothing when it is equal or missing. A repo with no waiting page prints nothing.
     Every run exits 0 and prints no traceback. Each silence case asserts that before it asserts the silence."""
 
     run_script = Stale.run_script  # the one script-run helper of this file: it reads no instance state
     RECORD = "roadmap/data/meta/page-built.json"
     BEHIND = "is behind main's page.html"
-    NO_STAMP = "waiting page may be behind: no stamp"
+    # record texts the reader counts as missing: not JSON, no blob key, and a blob that is not 40-hex
+    UNREADABLE = (("unparseable", "{not json"), ("no-blob-key", json.dumps({"at": "2026-11-15T00:00:00Z"})),
+                  ("short-blob", json.dumps({"blob": "abc123", "at": "2026-11-15T00:00:00Z"})))
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: never the system temp dir
@@ -2276,14 +2279,12 @@ class SessionLine(unittest.TestCase):
         self.assertEqual(len(lines), 1, "want one session line when both stamps differ from main:\n" + r.stdout)
         self.assertIn(self.BEHIND, lines[0], "the line does not say the page is behind main's page.html: " + lines[0])
 
-    def test_3_no_record_and_no_local_stamp_prints_the_no_stamp_line(self):
+    def test_3_no_record_and_no_local_stamp_prints_nothing(self):
         root = self.root()
         self.roadmap(root, None)
         r = self.session_run(root)
         self.assert_clean(r)
-        lines = r.stdout.splitlines()
-        self.assertEqual(len(lines), 1, "want one no-stamp line for a waiting page with no stamp:\n" + r.stdout)
-        self.assertTrue(lines[0].startswith(self.NO_STAMP), "the line does not start with the no-stamp text: " + lines[0])
+        self.assertEqual(r.stdout, "", "a repo with no record and no local stamp printed a line:\n" + r.stdout)
 
     def test_4_no_record_and_a_local_stamp_equal_to_main_prints_nothing(self):
         root = self.root()
@@ -2303,13 +2304,11 @@ class SessionLine(unittest.TestCase):
         self.assertEqual(len(lines), 1, "want one behind line from the local stamp when the record is missing:\n" + r.stdout)
         self.assertIn(self.BEHIND, lines[0], "the fallback line does not say behind: " + lines[0])
 
-    def test_3_no_branch_and_no_local_stamp_prints_the_no_stamp_line(self):  # no roadmap branch at all: a missing ref is missing, not unreadable
+    def test_3_no_branch_and_no_local_stamp_prints_nothing(self):  # no roadmap branch at all: a missing ref is missing, not unreadable
         root = self.root()
         r = self.session_run(root)
         self.assert_clean(r)
-        lines = r.stdout.splitlines()
-        self.assertEqual(len(lines), 1, "want one no-stamp line for a repo with no roadmap branch and no stamp:\n" + r.stdout)
-        self.assertTrue(lines[0].startswith(self.NO_STAMP), "the line does not start with the no-stamp text: " + lines[0])
+        self.assertEqual(r.stdout, "", "a repo with no roadmap branch and no local stamp printed a line:\n" + r.stdout)
 
     def test_4_no_branch_and_a_stale_local_stamp_prints_the_behind_line(self):  # the fallback with no roadmap branch at all
         root = self.root()
@@ -2320,16 +2319,26 @@ class SessionLine(unittest.TestCase):
         self.assertEqual(len(lines), 1, "want one behind line from the local stamp when there is no roadmap branch:\n" + r.stdout)
         self.assertIn(self.BEHIND, lines[0], "the fallback line does not say behind: " + lines[0])
 
-    def test_5_an_unreadable_record_prints_the_no_stamp_line_and_never_crashes(self):
-        for name, text in (("unparseable", "{not json"), ("no-blob-key", json.dumps({"at": "2026-11-15T00:00:00Z"}))):
+    def test_5_an_unreadable_record_with_no_local_stamp_prints_nothing_and_never_crashes(self):
+        for name, text in self.UNREADABLE:
             with self.subTest(record=name):
                 root = self.root(name)
                 self.roadmap(root, text)
                 r = self.session_run(root)
                 self.assert_clean(r)
+                self.assertEqual(r.stdout, "", "a record with no usable blob and no local stamp printed a line:\n" + r.stdout)
+
+    def test_5_an_unreadable_record_with_a_differing_local_stamp_prints_the_behind_line(self):
+        for name, text in self.UNREADABLE:
+            with self.subTest(record=name):
+                root = self.root(name)
+                self.roadmap(root, text)
+                self.local_stamp(root, self.other_blob)
+                r = self.session_run(root)
+                self.assert_clean(r)
                 lines = r.stdout.splitlines()
-                self.assertEqual(len(lines), 1, "want one no-stamp line for a record with no usable blob:\n" + r.stdout)
-                self.assertTrue(lines[0].startswith(self.NO_STAMP), "the line does not start with the no-stamp text: " + lines[0])
+                self.assertEqual(len(lines), 1, "want one behind line from the local stamp when the record has no usable blob:\n" + r.stdout)
+                self.assertIn(self.BEHIND, lines[0], "the fallback line does not say behind: " + lines[0])
 
     def test_6_a_repo_without_the_page_prints_nothing(self):
         root = self.root("nopage", extras=False)

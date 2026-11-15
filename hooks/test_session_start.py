@@ -847,10 +847,11 @@ class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
         self.assert_no_live_pin_line(session_cwd=link)
 
 
-# The waiting page behind main (rule page-stale). Its stamps are the record file on origin/roadmap and the local
-# stamp <git common dir>/waiting-page-built. A repo whose extras name a waiting page prints nothing when either stamp
-# holds main's page.html blob sha, the behind line when stamps exist and none does, and the no-stamp line when neither
-# source holds a stamp. Main is origin/main of the claude-settings clone that the config's CLAUDE.md names, the
+# The waiting page behind main (rule page-stale). A repo whose extras name a waiting page prints one line when a stamp
+# exists and none equals main's page.html blob sha. The stamps are the record file on origin/roadmap and the local stamp
+# <git common dir>/waiting-page-built, which alone counts while the record file is missing or unreadable. A stamp equal
+# to main's blob, or no stamp at all, prints nothing.
+# Main is origin/main of the claude-settings clone that the config's CLAUDE.md names, the
 # checkout the guard's stale_pages reads, not the session's own repo. The page text here is a stand-in: the
 # hook compares blob shas and never reads the text.
 WAITING_URL = "https://claude.ai/artifact/sspage"
@@ -912,11 +913,8 @@ class SessionStartWaitingPageTests(SessionStartAgentWorktreeNoticeTests):
         self.stamp(self.main_sha)
         self.assertEqual(self.waiting_lines(self.run_checked()), [])
 
-    def test_no_stamp_prints_the_no_stamp_line(self):  # coordinator ruling, 00:29 CST Nov 15: no stamp is no longer silence
-        hits = self.waiting_lines(self.run_checked())
-        self.assertEqual(len(hits), 1, "expected one waiting page line for a page with no stamp, got %r" % hits)
-        self.assertTrue(hits[0].startswith("waiting page may be behind: no stamp"),
-                        "the line does not start with the no-stamp text: %r" % hits[0])
+    def test_no_stamp_prints_no_line(self):
+        self.assertEqual(self.waiting_lines(self.run_checked()), [])
 
     def test_main_unreadable_prints_no_line_even_with_a_stale_stamp(self):
         self.stamp(self.older_sha)
