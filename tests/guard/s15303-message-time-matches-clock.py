@@ -245,6 +245,22 @@ mtc_allow("a bracketed header at the clock's own minute, [coordinator 13:22 CST]
 mtc_allow("a stamp in parens at the clock's own minute, Coordinator (13:22 CST): x, is allowed",
           "Coordinator (13:22 CST): x")
 
+# A date-led header is read by its date, never as a label word. The clock is 01:17 CST on 2026-11-15, so a quote that
+# opens with the day before's date is a stamp from yesterday, and passes.
+MTC_DATE_CLOCK = "2026-11-15T01:17:00-06:00"  # 01:17 CST on 2026-11-15, the clock of the two date-led cases below
+# Passes: a quote dated 2026-11-14 at 01:40 CST, the day before. The date is part of the stamp, not a label word.
+mtc_allow("a date-led header dated the day before, 2026-11-14 01:40 CST: go, is allowed: a quote from yesterday",
+          "2026-11-14 01:40 CST: go", clock=MTC_DATE_CLOCK)
+# Passes: a date-led header of the same day, 7 minutes behind the clock. A stamp behind the clock passes.
+mtc_allow("a date-led header of the same day, 2026-11-15 01:10 CST: go, 7 minutes behind is allowed",
+          "2026-11-15 01:10 CST: go", clock=MTC_DATE_CLOCK)
+# Refused: a word before a time is a label, so ETA 13:40 CST is a header 18 minutes ahead.
+mtc_refuse("an ETA header 18 minutes ahead, ETA 13:40 CST, is refused: the reason prints 13:22 CST",
+           "ETA 13:40 CST", carries=("13:22 CST",))
+# Refused: a deadline header 18 minutes ahead, with the same plain-space separator and a colon after the zone.
+mtc_refuse("a Deadline header 18 minutes ahead, Deadline 13:40 CST: merge, is refused: the reason prints 13:22 CST",
+           "Deadline 13:40 CST: merge", carries=("13:22 CST",))
+
 
 # ---- the written values: ArtifactData `added`, a roadmap step's `updatedAt`, a literal `updatedAt` in Bash
 # The same rule on more tools. Only these written values are judged, as ISO-8601 instants with an offset (`Z` or
