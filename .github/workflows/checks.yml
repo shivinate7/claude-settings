@@ -684,6 +684,9 @@ jobs:
         if: ${{ (needs.scope.outputs.code == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_config_watch_fast_exit.py
 
+      - name: Stale install suite
+        run: python3 hooks/test_reinstall_stale.py
+
       - name: Shared names suite
         run: python3 hooks/test_shared_names.py
 
