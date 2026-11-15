@@ -21,4 +21,3 @@ Tasks a session caught and did not do. One line each.
 - Build the child-repo lanes from the term recheck and the merge-line pointers. A coordinator may run them in any child repo with no per-repo grant. An exception a child wants needs the owner's grant (owner, 2026-11-02 15:43 CST).
 - Let a solo session merge. The merge tool's cloud confirm needs the batch-runner role today (owner, 2026-11-02 14:02 CST).
 - fb-0114-1: Keep decision records and the rule sentences that cite them aligned (owner words 2026-11-15 00:49 CST, relayed 01:14 CST). Lane rules-decisions-aligned builds the `aligned` check beside `restates` in lint/compliance_probes.py; its draft PR closes this line.
-- Read every account's link in `live_pages` and `stale_pages.py`. Both read only the first link of a waiting page entry today, so a page in another account is never checked (per-account artifact links, decision `waiting-data-in-repo`; owner ruling 2026-11-15 13:16 CST).
