@@ -2185,11 +2185,12 @@ class ZizmorBranches(Job):
         self.assertIn("no run.sh: looked for", lines[0], out)
 
 
-PROBE = '''import sys
+PROBE = '''import os, sys
 # Stands in for lint/probe.py: it writes the file its second argument names, so a case can see that it ran, then exits
-# with the code its first argument names.
+# with the code its first argument names. The file holds $BASE_SHA, so a case can read the value its step was given.
 rc, marker = sys.argv[1], sys.argv[2]
-open(marker, "w").close()
+with open(marker, "w", encoding="utf-8") as f:
+    f.write(os.environ.get("BASE_SHA", "unset"))
 sys.exit(int(rc))
 '''
 ENV_PR_BODY = "      env:\n        PR_BODY: ${{ github.event.pull_request.body }}\n"  # an env the runner cannot read
@@ -2354,6 +2355,51 @@ class LocalActionUnderLint(Job):
         self.assertEqual((rc, self.verdicts(serial)), (1, ["FAIL", "PASS"]), out)
         rc, parallel, out = self.run_job(*self.BOTH, args=self.LINT, env={"CI_JOB_LINT_WORKERS": "2"})
         self.assertEqual(normal(parallel), normal(serial), "the parallel run printed other lines than the serial one\n" + out)
+
+    def test_a_local_action_with_a_false_outer_if_is_skipped_and_does_not_run(self):
+        outer = step("Probe check", uses="$/actions/probe-check", **{"if": "github.event_name == 'push'"})
+        self.commit_lane(composite_action(probe_step("Probe", 1, "probe.marker")))
+        rc, lines, out = self.run_job(outer, self.PLAIN, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["skipped", "PASS"]), out)
+        self.assertFalse(self.ran("probe.marker"), "the action ran although its outer if is false\n" + out)
+
+    def test_a_local_action_with_an_outer_continue_on_error_reads_unknown_and_does_not_run(self):
+        outer = step("Probe check", uses="$/actions/probe-check", continue_on_error="true")
+        self.commit_lane(composite_action(probe_step("Probe", 1, "probe.marker")))
+        rc, lines, out = self.run_job(outer, self.PLAIN, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown", "PASS"]), out)
+        self.assertIn("continue-on-error", lines[0], out)  # the reason: plan() refuses a step allowed to fail
+        self.assertFalse(self.ran("probe.marker"), "the action ran although its continue-on-error is set\n" + out)
+
+    def test_a_comment_line_between_two_action_steps_does_not_end_the_step_list(self):
+        action = ("name: probe-check\ndescription: a test action\nruns:\n  using: composite\n  steps:\n"
+                  + probe_step("Probe pass", 0, "first.marker")
+                  + "  # a note between the steps, indented two spaces\n"
+                  + probe_step("Probe fail", 1, "second.marker"))
+        self.commit_lane(action)
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL", "PASS"]), out)
+        self.assertTrue(self.ran("second.marker"), "the second step was not read, so it did not run\n" + out)
+
+    def test_a_local_action_step_reads_the_base_sha_from_its_env(self):
+        base_env = "      env:\n        BASE_SHA: ${{ github.event.pull_request.base.sha }}\n"
+        self.commit_lane(composite_action(probe_step("Base probe", 0, "base.marker", extra=base_env)))
+        rc, lines, out = self.run_job(*self.BOTH, args=self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), out)
+        expected = git_in(self.root, "rev-parse", "origin/main")  # the base the lint diffs against
+        with open(os.path.join(self.root, "base.marker"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), expected, "the probe was not given the base sha\n" + out)
+
+    def test_a_local_action_after_a_failed_install_reads_unknown_naming_it_and_does_not_run(self):
+        install = step("Install deps", "npm ci")
+        self.commit_lane(composite_action(probe_step("Probe", 1, "probe.marker")))
+        rc, lines, out = self.run_job(install, self.ACTION, self.PLAIN, args=self.LINT, env=self.stub_path(npm="exit 1"))
+        named = [ln for ln in lines if "Probe check: " in ln]
+        self.assertEqual(len(named), 1, "the action's step did not print one line\n" + out)
+        self.assertTrue(named[0].startswith("unknown"), "the action after a failed install did not read unknown\n" + out)
+        self.assertIn("Install deps", named[0], out)  # the reason: the install step that did not finish
+        self.assertNotIn("FAIL", self.verdicts(lines), out)
+        self.assertFalse(self.ran("probe.marker"), "the action ran after a failed install\n" + out)
 
     # Controls: each reads the same today and after the change. The probe as a plain run: step proves the fixture works.
 
