@@ -100,6 +100,9 @@ LANE_TAG = BUILD_TAG + "lane"
 # A lane that wrote its handoff carries ARCHIVE_READY_TAG plus the handoff's slug; the lanes-to-archive list checks that
 # roadmap/outbox/<slug>-handoff.md is on the record branch before the lane is archived.
 ARCHIVE_READY_TAG = "cs-archive-ready:"
+# The consultant is owner-facing: its questions go to the owner, never to a parent, so it carries no lane duty even
+# when its record names a parent id.
+CONSULTANT_TAG = BUILD_TAG + "consultant"
 # A lane start's title opens with LANE_TITLE_FORM, so the owner's sidebar shows which branch a lane runs (rule
 # lane-title-slug). The check's pattern is cut from the form, so the form the remedy prints and the opening the
 # guard accepts cannot differ: the text round the placeholder is kept literal, and the placeholder reads a branch
