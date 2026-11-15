@@ -5522,7 +5522,7 @@ def main(argv, host=None, lock=None, hosts=None):
             if why:
                 print(f"merge: {why} " + REVIEW_CITE, file=sys.stderr)
                 return 2
-            held = last_design_line(earlier) if a.fix_check and not a.round else None
+            held = last_design_line(earlier) if a.fix_check and a.fix_check[3] == "PASS" and not a.round else None  # a FAIL fix verifier ends no review, so only a PASS one could hide a design reviewer FAIL
             if held and held[1] != "PASS":
                 print(f"merge: a record with no round line cannot clear the design reviewer's {held[1]} in round {held[0]} of an earlier record. Post a full record whose design reviewer PASSes. " + REVIEW_CITE, file=sys.stderr)
                 return 2
