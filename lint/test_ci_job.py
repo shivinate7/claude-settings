@@ -6,7 +6,7 @@ a `uses:` step, an `if:` or env expression the runner cannot read, and a pull-re
 None of them may read PASS. The GithubBaseRef class: the GITHUB_BASE_REF each step gets from --base, unset with none.
 The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
-PinnedHarness: --pinned runs a remote claude-settings harness from the tree at its pinned sha, never the local copy.
+PinnedHarness: --step and --lint run a remote claude-settings harness from the tree at its pin (a sha or a moving ref), never the local copy; a plain run keeps the local copy.
 StepMaps reads a step's with: and env: values: a block scalar as its lines, an inline comment dropped.
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
 SuiteSteps: --lint runs a CI step that runs a hooks/merge/lint suite only when the selector picks it for the diff; a selector
@@ -33,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -40,7 +41,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
 from workflow_steps import run_body, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
 sys.path.append(os.path.join(HERE, "..", "hooks"))  # append: the pin note's names (hooks/pin_note.py)
-from pin_note import ENV as PIN_NOTE_ENV  # noqa: E402  the one home of the pin note's variable (hooks/pin_note.py)
+from pin_note import ENV as PIN_NOTE_ENV, MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's names (hooks/pin_note.py)
 RUN_FOLDER = _test_temp.run_folder()
 CHECKOUT = os.path.abspath(os.path.join(HERE, ".."))
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
@@ -2505,12 +2506,13 @@ def write_lf(path, text):
 
 
 class PinnedHarness(Job):
-    """--pinned: a remote claude-settings uses: pinned to a 40-hex sha runs that action's harness from a tree exported at
-    that sha, never the local copy. The source repo is the pointer checkout: commit A (the lenient rule), commit B (HEAD, the
-    strict rule) and commit N (B with no harness). The copied ci-job's local copy holds the strict rule, as a checkout at HEAD
-    does. Without the flag the local copy runs as before. A branch ref keeps the local copy under the flag too. The zizmor
-    run.sh follows the same pattern: A and B hold one, N holds none. A pinned tree that holds a symlink still exports where
-    os.symlink is refused."""
+    """A remote claude-settings uses: that --step and --lint pin runs its harness from a tree exported at the pin, never the
+    local copy (ruling own-727-a-pin-tree-drop-pinned: no flag). The pin is a 40-hex sha or a moving ref, such as the stable
+    branch CI pins; a moving ref resolves to the commit its origin holds for it. The source repo is the pointer checkout:
+    commit A (the lenient rule), commit B (HEAD, the strict rule) and commit N (B with no harness). The copied ci-job's local
+    copy holds the strict rule, as a checkout at HEAD does. A plain run, with neither --step nor --lint, keeps the local copy.
+    The zizmor run.sh follows the same pattern: A and B hold one, N holds none. A pinned tree that holds a symlink still
+    exports where os.symlink is refused."""
 
     git = LintTools.git  # the throwaway child repo's git, one home (LintTools)
     lane = LintTools.lane
@@ -2557,11 +2559,17 @@ class PinnedHarness(Job):
                 text = f.read()
         return rc, lines, out + text
 
-    def both_runs(self, steps, *args):
-        """The run without --pinned, then the run with it: each (rc, verdict lines, output and log)."""
-        without = self.run_step(steps, *args, log=os.path.join(self.logs, "without.log"))
-        pinned = self.run_step(steps, *args, "--pinned", log=os.path.join(self.logs, "pinned.log"))
-        return without, pinned
+    def publish_stable(self, at):
+        """The stable branch of the claude-settings origin, at commit `at`. The origin is a bare copy of the fixture made now,
+        so it holds every commit made so far; the branch is set in it by update-ref. The fixture's clone fetches it from that
+        origin, as CI reads it. -> at."""
+        home = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, home, True)
+        bare = os.path.join(home, "origin.git")
+        subprocess.run(["git", "clone", "-q", "--bare", self.source, bare], check=True, env=ENV)
+        git_in(bare, "update-ref", "refs/heads/stable", at)
+        git_in(self.source, "remote", "add", "origin", bare)
+        return at
 
     def run_pinned(self, ref, *flags, env=None):
         """One run of the step pinned to `ref` (a sha or a branch name). -> (rc, verdict lines, the output and the log)."""
@@ -2647,24 +2655,24 @@ class PinnedHarness(Job):
             return [ln for ln in f.read().splitlines() if ln.startswith(kind)]
 
     def test_a_pinned_sha_runs_the_harness_at_that_commit(self):
-        rc, lines, text = self.run_pinned(self.pin_a, "--pinned")
-        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the step under --pinned did not PASS\n" + text)
+        rc, lines, text = self.run_pinned(self.pin_a)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the step pinned to a sha did not PASS\n" + text)
         self.assertIn("fixture harness: lenient", text, "the local strict copy ran, not the harness at the pin\n" + text)
 
-    def test_without_the_flag_the_local_copy_runs_as_before(self):  # the control
-        rc, lines, text = self.run_pinned(self.pin_a)
-        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "the local copy did not FAIL without --pinned\n" + text)
-        self.assertIn("fixture harness: strict", text, "the local copy did not run without --pinned\n" + text)
+    def test_a_plain_run_with_a_pin_keeps_the_local_copy(self):  # the control: only --step and --lint run a pin
+        rc, lines, text = self.run_step(self.code_step(self.pin_a), "--base", "origin/main")
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a plain run did not FAIL on the local copy\n" + text)
+        self.assertIn("fixture harness: strict", text, "a plain run did not run the local copy\n" + text)
 
     def test_a_sha_no_clone_holds_reads_unknown_and_the_local_copy_never_runs(self):
-        rc, lines, text = self.run_pinned(UNFETCHABLE, "--pinned")
+        rc, lines, text = self.run_pinned(UNFETCHABLE)
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), "an unfetchable pin did not read unknown\n" + text)
         self.assertIn("pin", lines[0], "the unknown line does not name the pin\n" + text)
         self.assertIn("lane", lines[0], "the unknown line does not give the lane that moves the pin\n" + text)
         self.assertNotIn("fixture harness", text, "the local copy ran for a sha it could not fetch\n" + text)
 
     def test_a_tree_at_the_pin_without_the_harness_reads_unknown(self):
-        rc, lines, text = self.run_pinned(self.pin_n, "--pinned")
+        rc, lines, text = self.run_pinned(self.pin_n)
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), "a pin whose tree lacks the harness did not read unknown\n" + text)
         self.assertIn("code_check.py", lines[0], "the unknown line does not name the harness it could not find\n" + text)
         self.assertNotIn("fixture harness", text, "the local copy ran for a pin whose tree lacks the harness\n" + text)
@@ -2673,7 +2681,7 @@ class PinnedHarness(Job):
         """A pin whose tree holds a symlink exports, and its harness runs, where os.symlink is refused: the harness does not
         need the symlink member."""
         pin = self.symlink_pin()
-        rc, lines, text = self.run_step(self.code_step(pin), *self.LINT, "--pinned", launch=("-c", REFUSE_SYMLINKS))
+        rc, lines, text = self.run_step(self.code_step(pin), *self.LINT, launch=("-c", REFUSE_SYMLINKS))
         self.assertNotIn("git archive of", "\n".join(lines), "the export of a pin with a symlink failed where symlinks are refused\n" + text)
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the pinned code-check did not PASS where symlinks are refused\n" + text)
         self.assertIn("fixture harness: lenient", text, "the harness at the pin did not run where symlinks are refused\n" + text)
@@ -2681,33 +2689,31 @@ class PinnedHarness(Job):
     def test_a_pinned_tree_with_a_symlink_runs_where_symlinks_work(self):
         """Control: the same pin with symlinks allowed passes, so the fixture alone is no failure."""
         pin = self.symlink_pin()
-        rc, lines, text = self.run_pinned(pin, "--pinned")
+        rc, lines, text = self.run_pinned(pin)
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the pinned code-check with a symlink in its tree did not PASS\n" + text)
         self.assertIn("fixture harness: lenient", text, "the harness at the pin did not run with a symlink in its tree\n" + text)
 
-    def test_a_stale_ste_lint_pin_under_the_flag_fails_as_it_does_without_it(self):
+    def test_a_stale_ste_lint_pin_under_step_fails_with_its_drift_line(self):
         pin = self.add_ste_lint()
         self.pin_child("ste-lint", pin)
         ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
-        (rc0, lines0, text0), (rc, lines, text) = self.both_runs(ste, "--step", "STE lint", "--base", "origin/main")
-        drift = [ln for ln in text0.splitlines() if ln.startswith("ste-changed: CI pins ste-lint at %s" % pin[:7])]
-        self.assertEqual(len(drift), 1, "precondition: without the flag no drift line names the stale pin\n" + text0)
-        self.assertEqual((rc0, self.verdicts(lines0)), (1, ["FAIL"]), "precondition: without the flag a stale pin is not FAIL\n" + text0)
-        self.assertIn(drift[0], text.splitlines(), "under --pinned the stale pin's drift line is not the one without the flag\n" + text)
-        self.assertEqual((rc, self.verdicts(lines)), (rc0, ["FAIL"]), "under --pinned a stale ste-lint pin did not FAIL as without the flag\n" + text)
+        rc, lines, text = self.run_step(ste, "--step", "STE lint", "--base", "origin/main")
+        drift = [ln for ln in text.splitlines() if ln.startswith("ste-changed: CI pins ste-lint at %s" % pin[:7])]
+        self.assertEqual(len(drift), 1, "a stale pin printed no drift line under --step\n" + text)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a stale ste-lint pin did not FAIL under --step\n" + text)
 
     def test_a_zizmor_pin_runs_its_own_run_sh_and_not_the_local_copy(self):
-        rc, lines, text = self.run_step(self.zizmor_step(self.pin_a), "--step", ZIZMOR, "--pinned", env=self.pipx_env())
+        rc, lines, text = self.run_step(self.zizmor_step(self.pin_a), "--step", ZIZMOR, env=self.pipx_env())
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the pinned zizmor step did not PASS\n" + text)
         self.assertIn("fixture zizmor: lenient", text, "the local strict run.sh ran, not the one at the pin\n" + text)
 
-    def test_without_the_flag_the_local_zizmor_run_sh_runs(self):  # the control
-        rc, lines, text = self.run_step(self.zizmor_step(self.pin_a), "--step", ZIZMOR, env=self.pipx_env())
-        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "without the flag the local strict run.sh did not FAIL\n" + text)
-        self.assertIn("fixture zizmor: strict", text, "without the flag the local run.sh did not run\n" + text)
+    def test_a_plain_run_of_a_zizmor_pin_keeps_the_local_run_sh(self):  # the control: a plain run runs the local copy
+        rc, lines, text = self.run_step(self.zizmor_step(self.pin_a), env=self.pipx_env())
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a plain run did not FAIL on the local strict run.sh\n" + text)
+        self.assertIn("fixture zizmor: strict", text, "a plain run did not run the local run.sh\n" + text)
 
     def test_a_pinned_tree_with_no_zizmor_run_sh_reads_unknown_and_names_the_file(self):
-        rc, lines, text = self.run_step(self.zizmor_step(self.pin_n), "--step", ZIZMOR, "--pinned", env=self.pipx_env())
+        rc, lines, text = self.run_step(self.zizmor_step(self.pin_n), "--step", ZIZMOR, env=self.pipx_env())
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), "a pin whose tree has no zizmor run.sh did not read unknown\n" + text)
         self.assertIn("actions/zizmor/run.sh", lines[0], "the unknown line does not name the file it could not find\n" + text)
         self.assertNotIn("fixture zizmor", text, "the local copy ran for a pin whose tree has no run.sh\n" + text)
@@ -2727,56 +2733,51 @@ class PinnedHarness(Job):
         git_in(self.source, "remote", "add", "origin", bare)
         held = subprocess.run(["git", "-C", self.source, "cat-file", "-e", sha + "^{commit}"], env=ENV, capture_output=True)
         self.assertNotEqual(held.returncode, 0, "precondition: the clone already holds the sha, so no fetch is tested")
-        rc, lines, text = self.run_pinned(sha, "--pinned")
+        rc, lines, text = self.run_pinned(sha)
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "a sha the clone lacks was not fetched from its origin and run\n" + text)
         self.assertIn("fixture harness: lenient", text, "the harness run was not the one at the fetched sha\n" + text)
 
-    def test_lint_under_the_flag_runs_as_without_it_and_the_pin_does_not_apply(self):
-        (rc0, lines0, text0), (rc, lines, text) = self.both_runs(self.code_step(self.pin_a), "--lint", "--base", "origin/main")
-        self.assertIn("Code check", by_step(lines0), "scope: --lint did not select the code-check step\n" + text0)
-        self.assertEqual(rc, rc0, "under --pinned --lint exits differently from --lint\n" + text)
-        self.assertEqual(by_step(lines), by_step(lines0), "under --pinned --lint reads a step differently from --lint\n" + text)
-        self.assertIn("fixture harness: strict", text, "--lint ran the harness at the pin, not the local copy\n" + text)
+    def test_lint_runs_the_pinned_harness_with_no_flag(self):
+        rc, lines, text = self.run_step(self.code_step(self.pin_a), "--lint", "--base", "origin/main")
+        self.assertIn("Code check", by_step(lines), "scope: --lint did not select the code-check step\n" + text)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "--lint did not PASS the harness at the pin\n" + text)
+        self.assertIn("fixture harness: lenient", text, "--lint ran the local strict copy, not the harness at the pin\n" + text)
 
-    def test_plan_under_the_flag_prints_as_without_it(self):
-        """Control: a pin the clone holds plans the same with or without the flag, so a --plan that fetched would still pass
-        here. The unfetchable-pin case after it is the one that tells them apart."""
-        (rc0, lines0, text0), (rc, lines, text) = self.both_runs(self.code_step(self.pin_a), "--plan", "--step", "Code check", "--base", "origin/main")
-        self.assertEqual(by_step(lines0).get("Code check"), "would run", "scope: the plan does not reach the code-check step\n" + text0)
-        self.assertEqual((rc, lines), (rc0, lines0), "under --pinned --plan prints differently from --plan\n" + text)
+    def test_a_plan_of_a_pinned_step_prints_would_run(self):
+        """Control: a plan of a step whose pin the clone holds lists the step as would run, and fetches nothing."""
+        _, lines, text = self.run_step(self.code_step(self.pin_a), "--plan", "--step", "Code check", "--base", "origin/main")
+        self.assertEqual(by_step(lines).get("Code check"), "would run", "the plan does not list the pinned step as would run\n" + text)
 
     @unittest.skipUnless(os.name == "posix", "the git stub is a shell script")
-    def test_plan_under_the_flag_with_an_unfetchable_pin_says_would_run_and_never_fetches(self):
-        """Control: a plan under --pinned plans the local copy and runs no git fetch or archive, even for a sha no clone
-        holds. A plan that fetched would read unknown here."""
+    def test_a_plan_with_an_unfetchable_pin_never_fetches(self):
+        """Control: a plan runs no git fetch or archive, even for a sha no clone holds. What it prints for that pin is not
+        asserted here; only that the plan reaches the step and fetches nothing."""
         env, calls = self.git_stub(RUN_FOLDER)
-        _, lines, text = self.run_pinned(UNFETCHABLE, "--plan", "--pinned", env=env)
+        _, lines, text = self.run_pinned(UNFETCHABLE, "--plan", env=env)
         self.assertIn("Code check", by_step(lines), "scope: the plan does not reach the code-check step\n" + text)
-        self.assertEqual(by_step(lines)["Code check"], "would run", "under --plan --pinned an unfetchable pin does not plan the local copy\n" + text)
-        self.assertEqual(self.stub_calls(calls), [], "under --plan --pinned git fetched or archived the pin\n" + text)
+        self.assertEqual(self.stub_calls(calls), [], "a plan fetched or archived the unfetchable pin\n" + text)
 
     def assert_local_uses_runs_the_repo_copy(self, uses):
-        """A local uses: runs the repo under test's own code_check.py, with or without the flag, never a pinned tree."""
+        """A local uses: runs the repo under test's own code_check.py under --step, never a pinned tree."""
         self.write_child_code_check()
-        (rc0, lines0, text0), (rc, lines, text) = self.both_runs(step("Code check", uses=uses), *self.LINT)
-        self.assertIn("child harness", text0, "scope: without the flag the local uses did not run the repo's own copy\n" + text0)
-        self.assertEqual((rc, self.verdicts(lines)), (rc0, self.verdicts(lines0)), "under --pinned a local uses: reads differently\n" + text)
-        self.assertNotIn("fixture harness", text, "under --pinned a local uses: ran a harness from a pinned tree or the local copy\n" + text)
+        rc, lines, text = self.run_step(step("Code check", uses=uses), *self.LINT)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the local uses did not PASS on the repo's own code_check.py\n" + text)
+        self.assertIn("child harness", text, "the local uses did not run the repo's own copy\n" + text)
+        self.assertNotIn("fixture harness", text, "a local uses: ran a harness from a pinned tree or the local copy\n" + text)
 
-    def test_a_local_dollar_uses_under_the_flag_runs_the_repos_own_copy(self):
+    def test_a_local_dollar_uses_runs_the_repos_own_copy(self):
         self.assert_local_uses_runs_the_repo_copy("$/actions/code-check")
 
-    def test_a_local_dot_uses_under_the_flag_runs_the_repos_own_copy(self):
+    def test_a_local_dot_uses_runs_the_repos_own_copy(self):
         self.assert_local_uses_runs_the_repo_copy("./actions/code-check")
 
-    def test_a_branch_ref_under_the_flag_keeps_the_local_copy(self):
-        """Control: the run without --pinned is the scope check and must run the local copy. The run with --pinned must
-        read the same, FAIL included, since a branch ref never takes the pinned tree."""
-        (rc0, lines0, text0), (rc, lines, text) = self.both_runs(self.code_step("main"), *self.LINT)
-        self.assertIn("fixture harness: strict", text0, "scope: without the flag the branch ref did not run the local copy\n" + text0)
-        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "under --pinned a branch ref did not FAIL on the local copy\n" + text)
-        self.assertEqual((rc, self.verdicts(lines)), (rc0, self.verdicts(lines0)), "under --pinned a branch ref reads differently\n" + text)
-        self.assertIn("fixture harness: strict", text, "under --pinned a branch ref did not keep the local copy\n" + text)
+    def test_a_branch_ref_runs_the_tree_of_the_commit_it_names(self):
+        """A moving ref, the stable branch CI pins, resolves on origin to the commit it names, and that commit's harness runs:
+        here the lenient commit, where the local copy is strict."""
+        self.publish_stable(self.pin_a)
+        rc, lines, text = self.run_step(self.code_step("stable"), "--lint", "--base", "origin/main")
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "a step pinned to the stable branch did not PASS on the tree it names\n" + text)
+        self.assertIn("fixture harness: lenient", text, "the local strict copy ran, not the tree the stable branch names\n" + text)
 
     @unittest.skipUnless(os.name == "posix", "the git stub is a shell script")
     def test_the_export_is_deleted_after_a_pass_and_after_an_unknown(self):
@@ -2784,11 +2785,11 @@ class PinnedHarness(Job):
         self.addCleanup(shutil.rmtree, tmp, True)
         env, calls = self.git_stub(RUN_FOLDER)
         env["TMPDIR"] = tmp
-        rc, lines, text = self.run_step(self.code_step(self.pin_a), *self.LINT, "--pinned", env=env)
+        rc, lines, text = self.run_step(self.code_step(self.pin_a), *self.LINT, env=env)
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "precondition: the pinned pass did not run\n" + text)
         self.assertEqual(self.stub_calls(calls, "archive"), ["archive 1"], "precondition: the pass did not export into TMPDIR\n" + text)
         self.assertEqual([n for n in os.listdir(tmp) if n.startswith("ci-job-pin-")], [], "an export was left behind after a pass\n" + text)
-        rc, lines, text = self.run_step(self.code_step(self.pin_n), *self.LINT, "--pinned", env=env)
+        rc, lines, text = self.run_step(self.code_step(self.pin_n), *self.LINT, env=env)
         self.assertEqual(self.verdicts(lines), ["unknown"], "precondition: the pin with no harness did not read unknown\n" + text)
         self.assertEqual(self.stub_calls(calls, "archive"), ["archive 1", "archive 1"], "precondition: the unknown did not export into TMPDIR\n" + text)
         self.assertEqual([n for n in os.listdir(tmp) if n.startswith("ci-job-pin-")], [], "an export was left behind after an unknown\n" + text)
@@ -2799,7 +2800,7 @@ class PinnedHarness(Job):
         steps = step("Code check", uses="shivinate7/claude-settings/actions/code-check@%s" % self.pin_a) + \
             step("Code check again", uses="shivinate7/claude-settings/actions/code-check@%s" % self.pin_a)
         rc, lines, text = self.run_step(steps, "--step", "Code check", "--step", "Code check again", "--base", "origin/main",
-                                        "--pinned", env=env)
+                                        env=env)
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), "the two pinned steps did not both PASS\n" + text)
         exports = self.stub_calls(calls, "archive")
         self.assertEqual(len(exports), 1, "two steps at one sha made %d exports, not one\n%s" % (len(exports), text))
