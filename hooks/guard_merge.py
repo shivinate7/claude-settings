@@ -1063,7 +1063,7 @@ def octopus_push_hit(stripped: str, cwd: str, read_verb) -> str:
 HANDED_IN_PUSH_STALE_REASON = (
     "Rule (Git, handed-in-push-needs-record; decision handed-in-push-needs-record): this push goes to the branch of #{n}, whose newest "
     "review log is stale at its live head {head}: {why}. A push moves the head again, so the round that reviewed the live head "
-    "has no review log yet. Remedy: have that round's review log posted for the live head (`merge {n} --review-record --head {head_full} "
+    "has no review log yet. Remedy: have that round's review log posted for the live head (`merge {n} --review-record --head {head_full} "  # glossary-ok: the flag --review-record stays
     "--kind K --guard yes|no --round N:ROLE:MODEL:VERDICT` prints it), then retry the push."
 )
 HANDED_IN_PUSH_UNKNOWN_REASON = (
