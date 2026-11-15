@@ -13,7 +13,7 @@ saves them; an empty collection is an empty folder. A script cannot call that to
 The session touches `.complete` in each collection folder after the last list page, so a fetch that stopped early
 shows: a collection with no marker is unknown. A collection that is empty now while the copy holds docs of it is
 unknown too, unless the session names it with --allow-empty.
-A receipt the copy holds and the fetch no longer lists stays: `receipts` is append-safe, the others mirror-delete.
+A doc the copy holds and the fetch no longer lists stays: all six collections are append-only.
 WAITING_DIR is the `waiting-data` folder of the record branch (`layout.py path <root> waiting-data`). With --page,
 the page's bytes land in `page/page.html`, and its designData block in `page/designData.json`. A file is written
 only when its bytes differ. The script never runs git: the session commits.
@@ -48,7 +48,7 @@ not count),
 `PWD=<path>`, a no-reply address and an ssh remote of a public git host.
 A personal fact in plain words passes too. A postal address (street, PO box, "City, ST ZIP") is a shape.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
-longer fetched is deleted from its collection folder; a truncated fetch deletes docs, and git history keeps them.
+longer fetched stays in its collection folder: the export adds and updates, and a truncated fetch deletes nothing.
 
 Check, before a republish, writes nothing:
 
@@ -126,7 +126,7 @@ import page_check  # noqa: E402  the one home that runs the page's picture check
 # The same six as lint/layout.py WAITING_COLLECTIONS. A copy, because a single export and the rebuild must run with no
 # lint/ beside them: the recovery path may not depend on the repo it recovers (verification-recovery-independent-of-state).
 COLLECTIONS = ("items", "answers", "groups", "asks", "meta", "receipts")
-APPEND_ONLY = ("receipts",)  # the waiting page's own export never deletes a doc of these: the owner keeps archived receipts
+APPEND_ONLY = COLLECTIONS  # the export adds and updates, never deletes a doc: a page cleanup drops archived rows, and the copy is their only home
 COLLECTION_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")  # copy of lint/layout.py COLLECTION, for the same reason
 PAGE_FOLDER, DESIGN_FILE, PAGE_FILE, FILES_FOLDER = "page", "designData.json", "page.html", "files"
 MARKER = ".complete"  # the session touches it in a collection folder after the last list page

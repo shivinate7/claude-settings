@@ -1053,7 +1053,7 @@ class Scan(Base):
 
 
 class Mirror(Base):
-    def test_counts_each_write_and_delete_and_keeps_the_rest(self):
+    def test_counts_each_write_and_keeps_every_doc_no_longer_fetched(self):
         fetched = self.fetch(items={"a": {"id": "a"}, "b": {"id": "b"}, "c": {"id": "c"}},
                              answers={"x": {"id": "x"}}, meta={"page": META})
         out = self.out()
@@ -1064,10 +1064,10 @@ class Mirror(Base):
         write_text(os.path.join(fetched, "items", "d.json"), canonical({"id": "d"}))
         os.remove(os.path.join(fetched, "items", "b.json"))
         r = self.export(fetched, out)
-        self.assertChanged(r, 3)
+        self.assertChanged(r, 2)
         self.assertEqual(r.returncode, 0, shown(r))
         self.assertEqual(os.stat(c_path).st_mtime, SENTINEL, "an unchanged doc was rewritten")
-        self.assertFalse(os.path.exists(os.path.join(out, "items", "b.json")), "a doc no longer fetched was kept")
+        self.assertTrue(os.path.exists(os.path.join(out, "items", "b.json")), "a doc no longer fetched was deleted")
         self.assertEqual(read_text(os.path.join(out, "items", "a.json")), canonical({"id": "a", "title": "new"}))
         self.assertEqual(read_text(os.path.join(out, "items", "d.json")), canonical({"id": "d"}))
 
@@ -1100,6 +1100,25 @@ class Mirror(Base):
         self.assertVerdict(r, "same")
         self.assertEqual(r.returncode, 0, shown(r))
         self.assertEqual(read_text(os.path.join(out, "items", "a.json")), canonical({"id": "a", "n": 2}))
+
+    def test_an_emptied_collection_removes_no_file_in_any_of_the_six(self):
+        """Append-only for every waiting collection: a page cleanup empties the page's rows, and the next export must not
+        erase the archived docs from the copy. --allow-empty only lifts the unknown stop; it deletes nothing."""
+        docs = {"items": {"a": {"id": "a"}}, "answers": {"x": {"id": "x"}}, "groups": {"g": {"id": "g"}},
+                "asks": {"k": {"id": "k"}}, "meta": {"page": META}, "receipts": {"a": receipt(1)}}
+        out = self.out()
+        self.assertEqual(self.export(self.fetch(**docs), out).returncode, 0, "scope: the first export did not run")
+        before = snapshot(out)
+        for name in layout.WAITING_COLLECTIONS:
+            with self.subTest(collection=name):
+                emptied = dict(docs, **{name: {}})
+                r = self.export(self.fetch(**emptied), out, allow_empty=(name,))
+                self.assertEqual(r.returncode, 0, shown(r))
+                self.assertEqual(snapshot(out), before, "an emptied %s removed or changed a file in the copy" % name)
+
+    def test_append_only_is_every_waiting_collection(self):
+        self.assertEqual(tuple(export_page.APPEND_ONLY), tuple(layout.WAITING_COLLECTIONS),
+                         "export_page.APPEND_ONLY is not lint/layout.py WAITING_COLLECTIONS")
 
     def test_an_emptied_collection_is_unknown_unless_the_session_allows_it(self):
         fetched = self.fetch(items={"a": {"id": "a"}, "b": {"id": "b"}, "c": {"id": "c"}})
