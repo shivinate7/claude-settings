@@ -16,7 +16,7 @@ merges origin/<base> into a head that lacks the tip and merges cleanly (`merge_b
 The batch runner readies a PR only with `merge <pr> --ready`, never by a bare MCP or `gh` mark.
 A mark that skips the step leaves the page unrebuilt. `--confirm` then refuses it and costs a second CI run (PR 3255 and PR 3472, 2026-11-15).
 The tool sends no GraphQL, so its own mark is always refused (`Host.ready`). A successful `--ready` exits 0 and prints "stays a draft (".
-So the ready route has three steps, in this order. One: `merge <pr> --ready`, which merges main, rebuilds the page, runs the ready checks and pushes. Two: after the draft run of the pushed head shows, the runner marks the PR ready by its session's route (route pr-ready-mcp-cloud). Three: `merge <pr> --confirm`. The tool's printed hint says the same (skill
+So the ready route has three steps, in this order. One: `merge <pr> --ready`, which does what its help text says (merge main when the head lacks the tip, rebuild the page, run the declared ready checks, push when anything changed). Two: after the draft run of the head shows, the runner marks the PR ready by its session's route (route pr-ready-mcp-cloud). Three: `merge <pr> --confirm`. The tool's printed hint gives steps two and three (skill
 ci-hygiene). So the branch is final at ready, and the ready run is the merge run. The step claims no
 record numbers. It takes no merge lock. A PR that turns draft after the first read is the one case: the step runs
 under the lock that confirm already took, and releases it.

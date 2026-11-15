@@ -161,7 +161,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    Until the cutover, every repo except degen and home batches across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
    notice. Run `merge <pr> --ready` first. When it exits 0 with the line "stays a draft (", in cloud mark ready by MCP `update_pull_request` `draft: false` (route
-   pr-ready-mcp-cloud). Never mark before `--ready` has run. Then run `merge <pr> --confirm`. The tool's printed hint gives the same three steps (decision `records-index-at-merge`). The same CI-wake notice is meant to follow (decision `ci-wait-reads-run-status`; unmeasured in cloud), so
+   pr-ready-mcp-cloud). Never mark before `--ready` has run. After the draft run of the pushed head shows, mark ready, then run `merge <pr> --confirm`. The tool's printed hint gives those last two steps (decision `records-index-at-merge`). The same CI-wake notice is meant to follow (decision `ci-wait-reads-run-status`; unmeasured in cloud), so
    also wait on the PR subscription and a check-in. Never run `gh run watch`. One watch made 131 API calls in one minute (decision
    `ci-wait-reads-run-status`, CI waits read the run status). Never poll with a sleep loop. Repeated
    `gh run view` or `gh pr checks` calls are a poll. To wait for any other condition, use the
