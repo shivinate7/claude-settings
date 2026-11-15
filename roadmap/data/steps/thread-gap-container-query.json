@@ -1,14 +1,14 @@
 {
  "id": "thread-gap-container-query",
  "title": "Ask and item threads space with gap and size with a container query",
- "status": "ready",
+ "status": "todo",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
- "owner": "triage",
- "blockedBy": [],
- "why": "PR #2778 (adds reply-back to page questions) widens the margin rule on `.thread .reply + .myreply` and `.thread .myreply + .lhead` (house rule ux-gap-on-parent wants gap) and adds a 520 px screen-width query for `.card > .fwait .ftext` (rule ux-component-reads-its-box wants a container query).",
- "source": "lane fan-prose-unmapped-2, 09:40 CST Nov 12; coordinator pick 09:37 CST (merge #2778 plus one debt)",
- "note": "Debt, code: skills/waiting-page/page.html. Move ask and item threads to gap and a container query together. Ready, no lane.",
- "updatedAt": "2026-11-12T09:41:00-06:00"
+ "owner": "coordinator",
+ "blockedBy": ["item-reply-back"],
+ "why": "PR #2778 (adds reply-back to page questions) widens the margin rule on `.thread .reply + .myreply` and `.thread .myreply + .lhead` (house rule ux-gap-on-parent wants gap) and adds a 520 px screen-width query for `.card > .fwait .ftext` (rule ux-component-reads-its-box wants a container query). 00:49 CST Nov 15 (coordinator's pick, not the owner's, undoable): #2778 merges as is with this one debt. Design read at 8057392b (one design reviewer, opus; the lane's report in #2778's comment 6890531983, read by triage by GitHub): F1 `ux-gap-on-parent`, page.html:874, margin between children of grid `.thread`; F2 `ux-component-reads-its-box`, page.html:890, `@media (max-width: 520px)` on the shared `.fwait`. Screens 3 (thread with waiting reply) and 4-opened (filed line) FAIL; screens 1, 2, 5 and 4-folded PASS at 1440/820/390, light and dark. Main's ask threads break the same rules; the PR widens them to item cards. Line numbers and verdicts are the reviewer's, not re-read by triage. Likely hit in normal work: a screen spacing and narrow-width fault on the live page (the coordinator's read).",
+ "source": "lane fan-prose-unmapped-2, 09:40 CST Nov 12; coordinator pick 09:37 CST (merge #2778 plus one debt); coordinator pick 00:49 CST Nov 15 (merge as is with one debt)",
+ "note": "Debt, code: skills/waiting-page/page.html. After #2778 merges: move ask and item threads to gap and size by a container query together (F1 and F2). It changes a screen: designer first, builder, then a design reviewer who re-checks screens 3 and 4-opened at every size and theme. The #2778 hand-in lane records the debt in main's debt store (triage does not write it). Blocked by item-reply-back.",
+ "updatedAt": "2026-11-15T00:52:00-06:00"
 }
