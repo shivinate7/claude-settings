@@ -512,7 +512,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `step-shell-programs-partial` | Guard rule `command-in-item` reads a backtick span in a step as a shell line only when its first word is in a fixed program list. | [`docs/debts/step-shell-programs-partial.md`](../docs/debts/step-shell-programs-partial.md) |
 | `sweep-reaps-local-stable` | The sweep reaps a local `stable` on main, because its work is on the base. | [`docs/debts/sweep-reaps-local-stable.md`](../docs/debts/sweep-reaps-local-stable.md) |
 | `two-worktrees-unexpanded-target` | A `cd` or `git -C` target the guard cannot expand, such as `"$(git rev-parse --show-toplevel)"`, `$REPO` or `"$(pwd)"`, names a folder that does not exist. | [`docs/debts/two-worktrees-unexpanded-target.md`](../docs/debts/two-worktrees-unexpanded-target.md) |
-| `unknown-read-lint-flake` | The lint check "Unknown-read contract (guard + session_start)" printed FAIL "wrote to stderr" for members caseF4 and caseF6 in the lane lint of PR 3492 (runner 10's log lint3492b.log, lines 5395 and 5398, 09:29 CST Nov 15), while three lints ran at once on one container. | [`docs/debts/unknown-read-lint-flake.md`](../docs/debts/unknown-read-lint-flake.md) |
 | `unlock-delete-no-check` | After retry-net-method-safe, a 5xx on the lock-release DELETE stops the unlock with a network stop, and the lock stays until it expires. | [`docs/debts/unlock-delete-no-check.md`](../docs/debts/unlock-delete-no-check.md) |
 | `unstarted-guard-held` | No check refuses a coordinator report whose `Unstarted:` line omits a step that is ready and not started (rule `reports-name-unstarted-items`). | [`docs/debts/unstarted-guard-held.md`](../docs/debts/unstarted-guard-held.md) |
 | `upgrade-strips-name-port` | The version 1 to 2 upgrade removes `:N` after a name whose extension is in `codeExtensions`. | [`docs/debts/upgrade-strips-name-port.md`](../docs/debts/upgrade-strips-name-port.md) |
@@ -534,10 +533,13 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `grant-reaches-lanes` | Plan: an owner grant typed in one session reaches the session it names | [`docs/plans/grant-reaches-lanes.md`](../docs/plans/grant-reaches-lanes.md) |
 | `local-session-reach` | Plan: reach between local and cloud sessions | [`docs/plans/local-session-reach.md`](../docs/plans/local-session-reach.md) |
 | `o10-session-questions-page` | Plan: a page per session for questions waiting on the owner | [`docs/plans/o10-session-questions-page.md`](../docs/plans/o10-session-questions-page.md) |
+| `plugin-assess-three` | Plan: three catalog plugins, add or skip | [`docs/plans/plugin-assess-three.md`](../docs/plans/plugin-assess-three.md) |
 | `pointer-system` | Plan: the pointer system | [`docs/plans/pointer-system.md`](../docs/plans/pointer-system.md) |
 | `r42-part2-design` | R42 part 2: per-lane merges, test after merge, stable branch | [`docs/plans/r42-part2-design.md`](../docs/plans/r42-part2-design.md) |
 | `refusal-vs-rule` | Plan: each refusal matches its rule | [`docs/plans/refusal-vs-rule.md`](../docs/plans/refusal-vs-rule.md) |
 | `restart-plan` | Restart plan: how claude-settings lands work after the freeze | [`docs/plans/restart-plan.md`](../docs/plans/restart-plan.md) |
 | `shared-merge-tool` | Plan: the shared merge tool | [`docs/plans/shared-merge-tool.md`](../docs/plans/shared-merge-tool.md) |
+| `stalled-steps` | Plan: stalled steps (lane doing-needs-live-lane) | [`docs/plans/stalled-steps.md`](../docs/plans/stalled-steps.md) |
 | `test-ci-standard` | Plan: how good tests and CI are made, how far the repos are, and how to close the gap | [`docs/plans/test-ci-standard.md`](../docs/plans/test-ci-standard.md) |
 | `time-pinned-tests` | Time-pinned tests: per-repo list | [`docs/plans/time-pinned-tests.md`](../docs/plans/time-pinned-tests.md) |
+| `trial-results` | Trial results: Ambition Lenses, blind grade | [`docs/plans/trial-results.md`](../docs/plans/trial-results.md) |
