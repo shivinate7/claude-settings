@@ -1,0 +1,10 @@
+{
+ "id": "own-mechanical-before-cleanup",
+ "at": "2026-11-15T11:07:00-06:00",
+ "title": "A one-time cleanup waits for its mechanical fix",
+ "ruling": "Owner's words, verbatim, 11:07 CST Nov 15, relayed by the consultant (ruling own-consultant-speaks-for-owner): \"yeah theres a lot of stale prose everywhere and rmeember i need some stuff done one-time if the mechanical fix going forwards has landed, but for stuff that doesnt have mechanical fixes yet it doesnt get its one time bandaids it needs the mechanical fixes first so that way the one time cleanup doesnt result in things immediately going stale again\". Triage's paraphrase: a one-time cleanup runs only where the mechanical fix going forward has already landed. Where no mechanical fix exists yet, the mechanical fix comes first and the cleanup waits, so the cleanup does not go stale again at once. Question this answers: stale prose everywhere (prompting question unknown to triage; the consultant's relay did not name the item).",
+ "quote": "it doesnt get its one time bandaids it needs the mechanical fixes first so that way the one time cleanup doesnt result in things immediately going stale again",
+ "source": "Owner's words, 11:07 CST Nov 15, relayed verbatim by the consultant (speaks for the owner, ruling own-consultant-speaks-for-owner); the plain-words line is triage's paraphrase.",
+ "status": "open",
+ "supersedes_none": "No related ruling asks this question (grep of roadmap/rulings for stale prose, fresh-prose, cleanup, one-time found none on the same question); it is new."
+}
