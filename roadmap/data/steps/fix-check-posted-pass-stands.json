@@ -1,0 +1,14 @@
+{
+ "id": "fix-check-posted-pass-stands",
+ "title": "Decision pr-review-record says a fix check never posted does not count, a posted PASS stands, a posted FAIL still goes to the fresh full review",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "11:48 CST Nov 15 (coordinator 11:44, relayed; not read by triage): the coordinator started lane fix-check-posted-pass-stands (lane id not relayed) from item 866 a (ruling own-3020-fix-pass-stands-a). Docs-only edit of decision pr-review-record near line 133: a FAIL fix check that was never posted does not count; a posted PASS stands; a posted FAIL still goes to the fresh full review. The merge tool needs no change (coordinator's word).\n\nTO DO when the lane merges: update the 'unmeasured' line in ruling own-833-a-done-at-fix-check (its ruling text says the failed-then-fixed case is unmeasured) to say what the merge shows.",
+ "source": "Coordinator 11:47 CST Nov 15 (relayed, not read by triage)",
+ "note": "Doing. Docs-only. Guard or check: no (coordinator's word). To do on merge: update the unmeasured line in ruling own-833-a-done-at-fix-check. Lane id not relayed. Filed 11:48 CST Nov 15.",
+ "updatedAt": "2026-11-15T11:48:00-06:00"
+}

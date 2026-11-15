@@ -1,0 +1,14 @@
+{
+ "id": "combine-train-build",
+ "title": "Extend merge/combine_train.py with a --build step: a local branch that merges each member with plain no-ff merges, re-reading each live head against the reviewed prefix",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "11:48 CST Nov 15 (coordinator 11:47, lane words, relayed; not read by triage): extend merge/combine_train.py with a --build step: a local branch of plain `git merge --no-ff` per member, re-reading each live head against the reviewed prefix. Still no push, no ready mark, no PR. A guard-path change, so it needs a review round. It builds only after --from-rest lands (step combine-train-tool, branch lane/combine-train-rest).",
+ "source": "Coordinator 11:47 CST Nov 15 (relayed, not read by triage)",
+ "note": "Todo. Guard or check: yes (a guard-path change, one review round). Waits on --from-rest (step combine-train-tool). No lane yet. Filed 11:48 CST Nov 15.",
+ "updatedAt": "2026-11-15T11:48:00-06:00"
+}

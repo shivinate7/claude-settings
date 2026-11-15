@@ -338,3 +338,7 @@ Live file 873f59b51 (readAt 09:31:05 CST). Main's build lists 358 drafts over 12
 - Open step: #3065 (local-page-publish-route), #3063 (ci-wait-stop-needs-checkin), #3061 (decision-watch-finds-transcript), #3059 (pointer-checkout-edit), #3058 (child-repo-gap), #3053 (ruled-step-coordinator-queue), #3050 (git-apply-test-path-write).
 - Holds an owner ruling: #3049 (R42 act 4, per-lane merge; plans/owner-rulings-2026-11-12.md).
 - Guard-cull family: #3056 (cull-docs-notes).
+
+## Sighting, close pass ordered 11:52 CST Nov 15 (consultant, relayed)
+
+The consultant ordered the stale-drafts close pass now (ruling p' R45 part 2). The auto-mode classifier refused triage's worker brief at 11:56 CST as relayed (the clock read 11:48 at filing): "[Destructive or Unwanted Actions]", no override line. Possible false alarm; unmeasured. No PR closed. Pending the owner's word.

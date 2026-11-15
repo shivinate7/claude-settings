@@ -6,8 +6,8 @@
  "phase": "now",
  "owner": "coordinator",
  "blockedBy": [],
- "why": "11:33 CST Nov 15 (lane design hand-in, relayed by the coordinator 11:34; lane words, not read by triage): design for session-start-tier-text: one new test class. Debt session-start-handoff-text is already fixed on main; retire it with a Retire-run line. Consultant ordered the coordinator to start this step at 11:31 CST (relayed). Lane id not relayed.",
+ "why": "11:33 CST Nov 15 (lane design hand-in, relayed by the coordinator 11:34; lane words, not read by triage): design for session-start-tier-text: one new test class. Debt session-start-handoff-text is already fixed on main; retire it with a Retire-run line. Consultant ordered the coordinator to start this step at 11:31 CST (relayed). Lane id not relayed.\n\n11:48 CST Nov 15 (coordinator 11:46, relayed; lane's words, not read by triage): PR #3513 head f0593180, draft, unstable (checks not finished). Round 1 haiku FAIL fixed, fix verifier PASS. Debt session-start-handoff-text stays open (coordinator's word; this corrects the 11:33 design line that it was already fixed on main). Its Retire line must name `hands its reviewed branch`. Owed to docs/debts on main; see roadmap/outbox/triage.md.",
  "source": "Consultant order 11:31 CST Nov 15 via the coordinator 11:34 (relayed; not read by triage)",
  "note": "Doing. Guard or check: unknown. Design in: one new test class; debt session-start-handoff-text is already fixed on main and retires with a Retire-run line. Lane id not relayed. Filed 11:39 CST Nov 15.",
- "updatedAt": "2026-11-15T11:39:00-06:00"
+ "updatedAt": "2026-11-15T11:48:00-06:00"
 }

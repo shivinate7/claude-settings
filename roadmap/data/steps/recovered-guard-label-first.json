@@ -7,8 +7,8 @@
  "lane": "",
  "owner": "coordinator",
  "blockedBy": [],
- "why": "11:39 CST Nov 15 (coordinator, relayed, not read by triage): the coordinator started a lane for item 860 b (ruling own-recovered-label-first-b; owner answered 11:34:32 CST). Covers lint/report_guard.py only. Guard or check: yes. Sonnet, round 1. Item-owner lane recovered-guard-remedy was told to check its answer and write a receipt. Lane id not relayed.\n\n11:45 CST Nov 15 (coordinator 11:40 CST, relayed): the item 860 receipt is written, and item 860 closed via this lane (recovered-guard-label-first). Triage read neither the receipt nor the lane's code.",
+ "why": "11:39 CST Nov 15 (coordinator, relayed, not read by triage): the coordinator started a lane for item 860 b (ruling own-recovered-label-first-b; owner answered 11:34:32 CST). Covers lint/report_guard.py only. Guard or check: yes. Sonnet, round 1. Item-owner lane recovered-guard-remedy was told to check its answer and write a receipt. Lane id not relayed.\n\n11:45 CST Nov 15 (coordinator 11:40 CST, relayed): the item 860 receipt is written, and item 860 closed via this lane (recovered-guard-label-first). Triage read neither the receipt nor the lane's code.\n\n11:48 CST Nov 15 (coordinator 11:47, lane words, relayed; triage read no code): lint/report_guard.py already accepts the label-first form on main (the source regex matches a label anywhere in the item). Only the remedy text and decision lines name item-first alone, so the change is text only. Tests red on main (lane's words).",
  "source": "Coordinator 11:39 CST Nov 15 (relayed, not read by triage)",
  "note": "Doing. Guard or check: yes. Lane id not relayed. Filed 11:40 CST Nov 15.",
- "updatedAt": "2026-11-15T11:45:00-06:00"
+ "updatedAt": "2026-11-15T11:48:00-06:00"
 }
