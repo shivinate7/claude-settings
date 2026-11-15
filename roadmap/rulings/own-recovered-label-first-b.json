@@ -1,0 +1,10 @@
+{
+ "id": "own-recovered-label-first-b",
+ "at": "2026-11-15T11:39:00-06:00",
+ "title": "The Recovered guard also accepts the label-first carry form.",
+ "ruling": "Owner, page item 860 (pick-recovered-label-first-form), option b, \"Accept the label-first form too\": the Recovered guard in lint/report_guard.py accepts the label-first carry form as well as the bullet form. The option carried widens: true, and the owner chose it knowingly. No note. ACT COVERED: a follow-up change to the guard after PR 3456 merged (earlier today) that accepts the label-first form. Covers that guard and that act only. Lane starts are the coordinator's; triage started nothing at filing. Item owner: lane recovered-guard-remedy (session_013NEJKzx6PD7bcXBgrwfy8h) via the coordinator. The time in `at` is the filing time: the answer time was not given to triage.",
+ "source": "Owner page answer to item 860 (choice b, widens: true), given to triage in the helper brief 11:36 CST (not read by triage in the answers record).",
+ "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: PR 3456 merged with the lane's recommended no on label-first as a build choice, not an owner ruling; no ruling in roadmap/rulings answers the label-first question",
+ "step": "recovered-guard-remedy"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "own-3020-fix-pass-stands-a",
+ "at": "2026-11-15T11:34:32-06:00",
+ "title": "PR 3020 is handed in on the posted fix-check PASS at head 9f8d1ead; the earlier FAIL is named in the PR and its note.",
+ "ruling": "Owner, page item 866 (pick-3020-unposted-fail-fix), option a, \"The posted fix-check PASS stands (recommended by the lane)\", saved on the page at 11:34 CST Nov 15 (2026-11-15T17:34:32Z), no note. ACT COVERED: PR 3020 (step merge-mail-refreshes-sessions) is handed in on the PASS fix check at head 9f8d1ead. The earlier FAIL is named in the PR and its note and was never posted as a record. The owner did not take option b (the coordinator's recommendation: one fresh full review at head 9f8d1ead). Covers that act only: no other PR, no other unposted result (rule outcomes-grant-covers-named-act). Decision pr-review-record holds the record form. Item owner: lane cloud-hooks-stale-copy (session_013NEJKzpBdiBYXja9cj5CoP) via the coordinator.",
+ "source": "waiting/answers/pick-3020-unposted-fail-fix.json (2026-11-15T17:34:32Z, choice a), read by triage (answers record); owner typed on the page.",
+ "status": "open",
+ "supersedes_none": "supersedes no earlier ruling: no ruling answers whether an unposted FAIL fix check may be set aside for a later posted PASS (grep of roadmap/rulings for 3020 found no ruling on it); decision pr-review-record stays in force",
+ "step": "merge-mail-refreshes-sessions"
+}

@@ -1,0 +1,13 @@
+{
+ "id": "project-ops-role-briefs",
+ "title": "project-ops: consultant role, roster row, five briefs; check first",
+ "status": "open",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "11:31 CST Nov 15 (consultant ordered the coordinator to start; relayed, not read by triage): project-ops gets the consultant role, a roster row and five briefs, with the check first. Kin: steps consultant-role-record and consultant-role-placement. Lane ids not relayed; the coordinator starts it.",
+ "source": "Consultant order 11:31 CST Nov 15, via the coordinator 11:34 (relayed; not read by triage)",
+ "note": "Open. Guard or check: yes (the check first). The coordinator starts the lane. Filed 11:39 CST Nov 15.",
+ "updatedAt": "2026-11-15T11:39:00-06:00"
+}

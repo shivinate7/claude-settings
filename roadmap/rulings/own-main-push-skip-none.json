@@ -1,0 +1,11 @@
+{
+ "id": "own-main-push-skip-none",
+ "at": "2026-11-15T11:36:01-06:00",
+ "title": "Pending ask: the owner picked none of the push-skip options and doubts the merge-needs-current-base ruling.",
+ "ruling": "Owner, page item 878 (main-push-skip-how, posted 11:34 CST by triage from lane push-skip-measure), answered at 11:36 CST Nov 15 (2026-11-15T17:36:01Z): choice \"none of these\". Note, verbatim, typos kept: \"i think merge needs current base may be the wrong itself like that ruling message consultant ask it to review how degens been merging so effectively snd to look through our discussions and then reevaluste this questions options\". TRIAGE'S READING (not the owner's words): no option was picked; the owner doubts the ruling merge-needs-current-base itself; he asks the consultant to review how degen merges and the past discussions, then to redraw the question's options. PENDING-ASK RECORD: status open, it covers no act and grants nothing. Sent to the consultant, the coordinator and lane push-skip-measure (session_013NEJL33vgNtnCai7cpnf2L); item owner: that lane. The consultant redraws the options; a new answer becomes its own ruling.",
+ "quote": "i think merge needs current base may be the wrong itself like that ruling message consultant ask it to review how degens been merging so effectively snd to look through our discussions and then reevaluste this questions options",
+ "source": "Owner page answer to item 878 (2026-11-15T17:36:01Z, choice none of these, with note), read by triage; the reading is triage's.",
+ "status": "open",
+ "supersedes_none": "supersedes nothing: it is a pending ask with no pick; ruling merge-needs-current-base is named as doubted by the owner but not changed, and stays in force until a new ruling replaces it",
+ "step": "push-skip-measure"
+}

@@ -1,0 +1,13 @@
+{
+ "id": "session-start-tier-text",
+ "title": "Rewrite the tier_line text at session_start.sh:38 (debt session-start-handoff-text)",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "11:33 CST Nov 15 (lane design hand-in, relayed by the coordinator 11:34; lane words, not read by triage): design for session-start-tier-text: one new test class. Debt session-start-handoff-text is already fixed on main; retire it with a Retire-run line. Consultant ordered the coordinator to start this step at 11:31 CST (relayed). Lane id not relayed.",
+ "source": "Consultant order 11:31 CST Nov 15 via the coordinator 11:34 (relayed; not read by triage)",
+ "note": "Doing. Guard or check: unknown. Design in: one new test class; debt session-start-handoff-text is already fixed on main and retires with a Retire-run line. Lane id not relayed. Filed 11:39 CST Nov 15.",
+ "updatedAt": "2026-11-15T11:39:00-06:00"
+}

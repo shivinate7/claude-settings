@@ -1,0 +1,13 @@
+{
+ "id": "close-superseded-prs",
+ "title": "Close the superseded PRs the audit lists",
+ "status": "open",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "11:31 CST Nov 15 (consultant ordered the coordinator to start; relayed, not read by triage): close the superseded PRs. The audit's list names 15; the consultant said 16 (count unreconciled). Lane ids not relayed; the coordinator starts it. Triage checked the slug was not already a step.",
+ "source": "Consultant order 11:31 CST Nov 15, via the coordinator 11:34 (relayed; not read by triage)",
+ "note": "Open. Guard or check: unknown. The coordinator starts the lane. The audit's list names 15 PRs, the consultant said 16 (unreconciled). Filed 11:39 CST Nov 15.",
+ "updatedAt": "2026-11-15T11:39:00-06:00"
+}

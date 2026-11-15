@@ -1,0 +1,16 @@
+{
+ "id": "own-consultant-relay-allow-a",
+ "at": "2026-11-15T11:29:00-06:00",
+ "title": "Build the consultant-relay allow rule, scoped to one named PR and the exact act, with the owner's words quoted.",
+ "ruling": "Owner at 11:29 CST Nov 15, via the consultant (relayed by the coordinator at 11:32 CST; not read by triage). The consultant's question was \"Relayed yes for the safety check\"; the owner's words as the consultant relayed them, verbatim: \"a\". Option a: build the consultant-relay allow rule (branch allow-consultant-relayed-yes, runner 12's builder), scoped to one named PR and the exact act, his words quoted. It overturns the page-only part of decision relayed-grant-read-from-page for consultant relays (a relay counts only when the receiver reads the owner's pick from the page). Guard change: it is reviewed. The consultant's caveats: that guard and owner-override already cover this case, and the consultant's box lacked the widening label. Covers that build and that rule only. PR 3510 holds the build.",
+ "quote": "a",
+ "source": "Coordinator message 11:32 CST Nov 15 relaying the consultant (relayed, not read by triage); the owner's typed words were not seen by triage.",
+ "status": "open",
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/relayed-grant-read-from-page.md: the page-only part, a relay counts only when the receiver reads the owner's pick from the page, for consultant relays (named in the consultant's caveats; not re-read by triage at filing)"
+  }
+ ],
+ "step": "allow-consultant-relayed-yes"
+}
