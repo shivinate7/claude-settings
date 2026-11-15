@@ -9,7 +9,9 @@
 # skips them). So a newer green push run clears a red nightly. An R with no red job (no jobs,
 # all passed, cancelled or skipped only) is never cleared this way. A cancelled run never alarms. Cost, only for a failed group that has
 # such an N: one jobs read for R, and for each N one jobs read and, unless N leaves a red job of R unpassed (a certain red), one contents read of N's workflow file at N's head (headSha), each once;
-# a failed read is unknown. The same failed-run rule as Host.base_state. Needs python3 (stdlib only) and
+# a failed read is unknown. An empty green run of the push group (no check ran, no evidence: clear_rule.py) is no verdict; the group's
+# newest run that is not empty is, so an older red run stays red. Cost: one jobs read per green run of the push group, newest first, down to
+# the first that is not empty. The same rules as Host.base_state. Needs python3 (stdlib only) and
 # clear_rule.py beside this file; no checkout. Env: BRANCH, SELF
 # (this workflow's name, left out), GH_TOKEN, GITHUB_REPOSITORY. Exit 0 always: the alarm is the
 # issue, not a red job. Prints "green", "red" or "unknown"; a failed read or write is unknown, never red.
@@ -27,14 +29,6 @@ jq -e 'type == "array"' >/dev/null 2>&1 <<<"$runs" || unknown "gh run list gave 
 wf="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows" --paginate)" || unknown "gh api workflows failed"
 flows="$(jq -e -s 'if length > 0 and all(.[]; (.workflows | type) == "array") then [.[].workflows[]] else empty end' <<<"$wf" 2>/dev/null)" \
   || unknown "gh api workflows gave no list of workflows"
-# Latest completed run per workflow and event group, one JSON array.
-newest="$(jq -c --arg self "${SELF:-}" --slurpfile ev "$here/events.json" --argjson flows "$flows" '
-  ([$flows[] | select(.state != "deleted" and (.path | startswith(".github/workflows/"))) | .id]) as $ids
-  | map(select(.workflowName != $self and (.workflowDatabaseId as $i | $ids | index($i)) and ($ev[0][.event] != null))
-        | . + {group: $ev[0][.event]})
-  | group_by([.workflowDatabaseId, .group])
-  | map(sort_by(.createdAt) | last)' <<<"$runs")" \
-  || unknown "could not read the runs"
 # The jobs of one run, as a JSON array; a failed read returns 1. Each run is read once.
 cache="$(mktemp -d)" || unknown "could not make a temp dir"
 trap 'rm -rf "$cache"' EXIT
@@ -47,6 +41,35 @@ jobs_of() {
   fi
   cat "$cache/$1"
 }
+# The runs of each workflow and event group, newest first: one JSON array of arrays.
+groups="$(jq -c --arg self "${SELF:-}" --slurpfile ev "$here/events.json" --argjson flows "$flows" '
+  ([$flows[] | select(.state != "deleted" and (.path | startswith(".github/workflows/"))) | .id]) as $ids
+  | map(select(.workflowName != $self and (.workflowDatabaseId as $i | $ids | index($i)) and ($ev[0][.event] != null))
+        | . + {group: $ev[0][.event]})
+  | group_by([.workflowDatabaseId, .group])
+  | map(sort_by(.createdAt) | reverse)' <<<"$runs")" \
+  || unknown "could not read the runs"
+# The latest completed run per workflow and event group, one JSON array. An empty run (clear_rule.py, the one home of the rule: a green run of
+# the push group that ran no check and carries no evidence) is no verdict: the group's latest run that is not empty is. A group with
+# none keeps its latest run. One jobs read per green run of the push group, down to the first that is not empty.
+rule_events="$(python3 "$here/clear_rule.py" --rule-events)" || unknown "clear_rule.py failed"
+newest="[]"
+while IFS= read -r g; do
+  [ -n "$g" ] || continue
+  pick="$(jq -c '.[0]' <<<"$g")"
+  while IFS= read -r r; do
+    [ -n "$r" ] || continue
+    if jq -e --argjson ev "$rule_events" '.conclusion == "success" and (.event | IN($ev[]))' >/dev/null <<<"$r"; then
+      id="$(jq -r .databaseId <<<"$r")"
+      jobs_of "$id" >/dev/null || unknown "gh api jobs failed"
+      python3 "$here/clear_rule.py" --empty-run --event "$(jq -r .event <<<"$r")" "$cache/$id"
+      case $? in 0) continue ;; 1) ;; *) unknown "clear_rule.py failed" ;; esac
+    fi
+    pick="$r"
+    break
+  done < <(jq -c '.[]' <<<"$g")
+  newest="$(jq -c --argjson p "$pick" '. + [$p]' <<<"$newest")"
+done < <(jq -c '.[]' <<<"$groups")
 # The workflow file at the head of run $1, in $cache/wf-$1 (one read per run); a failed read returns 1.
 workflow_of() {
   [ -f "$cache/wf-$1" ] && return 0

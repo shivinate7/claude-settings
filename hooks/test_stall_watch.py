@@ -43,6 +43,9 @@ those processes themselves.
 """
 
 import atexit
+import contextlib
+import importlib.util
+import io
 import json
 import os
 import re
@@ -53,12 +56,16 @@ import subprocess
 import sys
 import tempfile
 import time
+import unittest
+from unittest import mock
 
 from case_runner_test import Skip, run_cases
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 MODULE = os.environ.get("STALL_WATCH_MODULE") or os.path.join(HERE, "stall_watch.py")
 PY = sys.executable
 VERDICT = os.path.join(os.path.dirname(HERE), "bin", "verdict")
@@ -911,15 +918,21 @@ def named_log_relative_tee_and_flag_forms_are_read():
     return problems
 
 
+def load_module():
+    """A fresh copy of the module under test, so a case may patch its names and no other case sees the patch."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("stall_watch_under_test", MODULE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def simulated_watch(phase, ps_secs, tick_extra, quiet=2.0, period=1.7, writes=6):
     """Run stall_watch.watch on a fake clock. The job writes a named log every `period` seconds from
     `phase`, then ends 1 s after its last write. Each ps takes `ps_secs`, each sleep overshoots by
     `tick_extra`, as on a loaded runner. Return watch's exit code."""
     import builtins
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("stall_watch_sim", MODULE)
-    sw = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(sw)
+    sw = load_module()
     clock = [0.0]
     stamps = [phase + period * i for i in range(writes)]
     end = stamps[-1] + 1.0
@@ -995,6 +1008,319 @@ def quiet_job_with_no_named_log_stalls():
     """23e. a quiet job whose only redirection is to the null device, with no other log: STALL"""
     rc, text, secs, _cmd = run_rewritten("sleep 30 >%s 2>&1" % os.devnull)
     problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    reap()
+    return problems
+
+
+def grown_problems(rc, text, want):
+    """Checks for a job that writes `want` and names it in its log: the job wrote the file (its scope),
+    no STALL came, and the job exited 0. Return a list of problems."""
+    if not (os.path.isfile(want) and os.path.getsize(want) > 0):
+        return [f"the job wrote nothing to {want}, so it did not run where the case says"]
+    if "STALL:" in text:
+        return [f"a STALL came though {want} grew"]
+    return expect(rc == 0, f"exit {rc}, want 0")
+
+
+def cd_then_grow_job(cwd, log):
+    """`cd` to cwd, then a job that writes `log` as the command spells it. The job runs in a subshell, so
+    its cwd is cwd and the watcher's cwd is not."""
+    return "cd %s && (%s)" % (shlex.quote(cwd), growing_log_job(log, steps=3))
+
+
+@posix_case
+def relative_log_after_cd_is_read_or_refused():
+    """26a. cd X && (job >> rel.log): the watch reads X/rel.log, or the hook refuses and its text names X/rel.log"""
+    X = new_dir()
+    want = os.path.join(X, "rel.log")
+    orig = cd_then_grow_job(X, "rel.log")
+    rc_h, out, err = hook(orig)
+    try:
+        rewritten = isinstance(json.loads(out)["hookSpecificOutput"].get("updatedInput"), dict)
+    except (ValueError, KeyError, TypeError, AttributeError):
+        rewritten = False
+    if not rewritten:  # a refusal: its remedy must name the absolute path the job writes
+        said = out + err
+        return expect(want in said or os.path.realpath(want) in said,
+                      f"the hook gave no rewrite and its text does not name {want} (exit {rc_h}): {said[:160]!r}")
+    rc, text, _secs, _cmd = run_rewritten(orig)
+    reap()
+    return grown_problems(rc, text, want)
+
+
+@posix_case
+def absolute_log_after_cd_is_read():
+    """26b. control: cd X && (job >> X/rel.log) with the absolute path: the watch reads it, no STALL, exit 0"""
+    X = new_dir()
+    want = os.path.join(X, "rel.log")
+    rc, text, _secs, _cmd = run_rewritten(cd_then_grow_job(X, shlex.quote(want)))
+    reap()
+    return grown_problems(rc, text, want)
+
+
+@posix_case
+def cd_inside_quotes_or_comment_is_not_read():
+    """26c. a `cd X` that is only text, in quotes or after #, is no cd: rel.log is read where the job stands, no STALL"""
+    X = new_dir()
+    forms = {
+        "quoted": "echo \"don't cd %s\" >%s; %s" % (X, os.devnull, growing_log_job("rel.log", steps=3)),
+        "comment": "%s # cd %s" % (growing_log_job("rel.log", steps=3), X),
+    }
+    problems = []
+    for name, orig in forms.items():
+        rc, text, _secs, _cmd = run_rewritten(orig)
+        reap()
+        if "STALL:" in text:
+            problems.append(f"{name}: a STALL came though the job's rel.log grew")
+        elif rc != 0:
+            problems.append(f"{name}: exit {rc}, want 0")
+    return problems
+
+
+def busy_child(secs=5):
+    """A Python child that spins one CPU for secs seconds with no output, then prints done."""
+    code = ("import time\nend = time.monotonic() + %d\nwhile time.monotonic() < end:\n    pass\nprint('done')"
+            % secs)
+    return "%s -c %s" % (shlex.quote(PY), shlex.quote(code))
+
+
+def pipe_job(child):
+    """The child's output goes to tail, so nothing reaches the log until the child ends."""
+    return child + " | tail -1"
+
+
+@posix_case
+def busy_child_behind_a_pipe_is_no_stall():
+    """25a. a busy child with no output, behind `| tail -1`, under a 2 s quiet: its CPU time is life, so no STALL, exit 0"""
+    rc, text, _secs, cmd = run_rewritten(pipe_job(busy_child()))
+    reap()
+    if "--also" in cmd:  # scope: a named log would explain the life, so the case would prove nothing
+        return ["the rewrite names a log, so the case cannot tell CPU time from log growth"]
+    if "STALL:" in text:
+        return ["a STALL came for a busy child with no output: its CPU time did not count as life"]
+    return expect(rc == 0, f"exit {rc}, want 0")
+
+
+@posix_case
+def sleeping_child_behind_a_pipe_still_stalls():
+    """25b. control: sleep 30 behind `| tail -1` has no CPU time and no output: STALL, exit 3, the sleep alive"""
+    rc, text, secs, _cmd = run_rewritten(pipe_job("sleep 30"))
+    problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    reap()
+    return problems
+
+
+def merge_shaped_job(children, secs):
+    """A silent parent like merge.py: it prints nothing and runs `children` busy Python children one after another, each `secs` seconds, no pipe."""
+    child = ("import time\nend = time.monotonic() + %s\nwhile time.monotonic() < end:\n    pass" % secs)
+    parent = ("import subprocess, sys\nfor _ in range(%d):\n    subprocess.run([sys.executable, '-c', %r])" % (children, child))
+    return "%s -c %s" % (shlex.quote(PY), shlex.quote(parent))
+
+
+@posix_case
+def batch_138_silent_parent_with_a_busy_child_is_no_stall():
+    """25c. batch 138 shape: a silent parent whose one child burns CPU for 6 s, under a 2 s quiet: no STALL, exit 0"""
+    rc, text, _secs, cmd = run_rewritten(merge_shaped_job(1, 6))
+    reap()
+    if "--also" in cmd:
+        return ["the rewrite names a log, so the case cannot tell CPU time from log growth"]
+    if "STALL:" in text:
+        return ["a STALL came for a silent parent with a CPU-busy child (batch 138)"]
+    return expect(rc == 0, f"exit {rc}, want 0")
+
+
+@posix_case
+def batch_139_build_4_serial_busy_children_are_no_stall():
+    """25d. batch 139 build 4 shape: a silent parent runs five busy children in a row (1.3 s each), under a 2 s quiet: no STALL, exit 0"""
+    rc, text, _secs, cmd = run_rewritten(merge_shaped_job(5, 1.3))
+    reap()
+    if "--also" in cmd:
+        return ["the rewrite names a log, so the case cannot tell CPU time from log growth"]
+    if "STALL:" in text:
+        return ["a STALL came for a serial chain of CPU-busy children (batch 139 build 4)"]
+    return expect(rc == 0, f"exit {rc}, want 0")
+
+
+@posix_case
+def cpu_read_costs_one_ps_per_check():
+    """25e. cost: one job-state check reads CPU time with one ps call, no other process, so a watcher pass costs one ps"""
+    sw = load_module()
+    calls = []
+    real = sw._run
+    sw._run = lambda args, timeout=sw.TOOL_TIMEOUT: calls.append(list(args)) or real(args, timeout)
+    try:
+        sw.job_state(os.getpid())
+    finally:
+        sw._run = real
+    return expect(len(calls) == 1 and calls[0][0] == "ps", f"a job-state check made {len(calls)} reads: {calls}")
+
+
+@posix_case
+def cpu_read_costs_one_proc_read_per_process():
+    """25f. cost: reading a tree of N processes under the job reads /proc/PID/stat N + 1 times (the job and each process under it), starts no process"""
+    sw = load_module()
+    rows = {"1": ["1", "0", "S", "0:00"], "2": ["2", "1", "S", "0:00"], "3": ["3", "2", "S", "0:00"], "4": ["4", "2", "S", "0:00"]}
+    kids = {"1": ["2"], "2": ["3", "4"]}
+    reads = []
+    real = sw.reaped_seconds
+    sw.reaped_seconds = lambda pid: reads.append(str(pid)) or 0.0
+    try:
+        cpu = sw.tree_cpu((rows, kids, ""), 1)
+    finally:
+        sw.reaped_seconds = real
+    return (expect(sorted(reads) == ["1", "2", "3", "4"], f"read {sorted(reads)}, want one read each of 1, 2, 3, 4")
+            + expect(sorted(cpu) == ["1", "2", "3", "4"], f"tree {sorted(cpu)}"))
+
+
+@posix_case
+def a_chain_of_ended_children_advances_the_root_reaped_time():
+    """25g. a process that waited for a child that burned CPU shows more CPU time at its next read, though no child is alive"""
+    sw = load_module()
+    if not os.path.exists("/proc/self/stat"):
+        raise Skip("no /proc")
+    before = sw.reaped_seconds(os.getpid())
+    subprocess.run([PY, "-c", "import time\nend = time.monotonic() + 0.5\nwhile time.monotonic() < end:\n    pass"])
+    return expect(sw.reaped_seconds(os.getpid()) > before, "reaped time did not advance after a busy child ended")
+
+
+def read_with(sw, command):
+    """(paths, unresolved) that the module reads from command. A module with no read_named_logs gives its
+    paths from named_logs and no unresolved path, so a row fails on what it reads, never on a missing name."""
+    if hasattr(sw, "read_named_logs"):
+        return sw.read_named_logs(command)
+    return sw.named_logs(command), []
+
+
+def read_rows_problems(rows):
+    """rows: (command, want paths, want unresolved). Return one problem per row that reads otherwise."""
+    sw = load_module()
+    problems = []
+    for command, want_paths, want_unresolved in rows:
+        got_paths, got_unresolved = read_with(sw, command)
+        if got_paths != want_paths or got_unresolved != want_unresolved:
+            problems.append(f"{command!r}: reads paths {got_paths}, unresolved {got_unresolved}; "
+                            f"want {want_paths}, {want_unresolved}")
+    return problems
+
+
+@case
+def unknown_cd_leaves_the_log_unresolved():
+    """27a. a cd the hook cannot place (after &, ||, then, inside { }, or behind a test) leaves its relative log unresolved"""
+    return read_rows_problems([(c, [], ["log"]) for c in (
+        "[ -d /a ] && cd /b; make > log",
+        "cd /x & make > log",
+        "{ cd /x; make; } > log",
+        "true || cd /x; make > log",
+        "if true; then cd /x; fi; make > log",
+        "cd /x; cd -; make > log",
+        "popd; make > log",
+    )])
+
+
+@case
+def sure_cd_resolves_the_log():
+    """27b. a cd that surely runs in the main shell (cd or pushd, joined by &&) joins the log to its target, a relative target included"""
+    return read_rows_problems([
+        ("cd /x && make > log", ["/x/log"], []),
+        ("pushd /x && make > log", ["/x/log"], []),
+        ("cd a && cd b && make > log", ["a/b/log"], []),
+        ("cd .. && make > log", ["../log"], []),
+        ("cd sub && make > log", ["sub/log"], []),
+    ])
+
+
+@case
+def subshell_and_background_list_leave_the_main_shell_alone():
+    """27f. a cd in ( ) or in a list that ends in & does not move the main shell, so a log after it is read where the shell stands"""
+    problems = read_rows_problems([
+        ("( cd /x ); make > log", ["log"], []),
+        ("cd /x && make & make2 > log2", ["log2"], []),
+    ])
+    # The list before the & runs in a background subshell, so its s.log is /x/s.log (or unresolved, never bare);
+    # the main shell after the & never left the start directory, so r.txt is bare.
+    sw = load_module()
+    paths, unresolved = read_with(sw, "cd /x && ./srv > s.log 2>&1 & sleep 2; curl u > r.txt")
+    if "/x/r.txt" in paths or "r.txt" not in paths:
+        problems.append(f"the log after the & is not bare: paths {paths}, want r.txt")
+    if "s.log" in paths or not ("/x/s.log" in paths or "s.log" in unresolved):
+        problems.append(f"the log of the backgrounded list is neither /x/s.log nor unresolved: paths {paths}, unresolved {unresolved}")
+    return problems
+
+
+@case
+def trailing_comment_on_a_cd_line_keeps_the_newline():
+    """27g. a `# comment` after a cd ends at the newline: the next line's commands are read, and their logs are placed"""
+    return read_rows_problems([
+        ("cd /x\nmake > a &\nmake2 > log2", ["/x/a", "/x/log2"], []),  # control: no comment
+        ("cd /x # go\nmake > a &\nmake2 > log2", ["/x/a", "/x/log2"], []),
+        ("cd /x # go\ncd /y\nmake > a", ["/y/a"], []),
+        ("cd /x # go\ntee t", ["/x/t"], []),
+        ("cd /x # go\nmake --log l", ["/x/l"], []),
+    ])
+
+
+@case
+def cd_before_a_pipe_or_or_never_moves_the_log_into_its_dir():
+    """27h. `cd sub |` and `cd sub ||` at a line end, and `cd sub || make` on one line: the cd does not move the shell
+    that runs make, so the log is never sub/log. It reads as the start dir's log or as unknown, never dropped"""
+    sw = load_module()
+    problems = []
+    for command in ("cd sub |\nmake > log", "cd sub ||\nmake > log", "cd sub || make > log"):
+        paths, unresolved = read_with(sw, command)
+        if "sub/log" in paths:
+            problems.append(f"{command!r}: reads sub/log, though the cd does not move the shell that runs make")
+        elif "log" not in paths and "log" not in unresolved:
+            problems.append(f"{command!r}: the log is dropped: reads paths {paths}, unresolved {unresolved}")
+    return problems
+
+
+@case
+def cd_joined_by_and_or_a_newline_still_moves_the_log():
+    """27i. control: `cd sub &&` at a line end, and `cd sub` then a newline, are sure cds, so the log is sub/log"""
+    return read_rows_problems([
+        ("cd sub &&\nmake > log", ["sub/log"], []),
+        ("cd sub\nmake > log", ["sub/log"], []),
+    ])
+
+
+@case
+def heredoc_cd_is_text():
+    """27c. a cd in a heredoc body is text: the log stays as written and no path is unresolved"""
+    return read_rows_problems([("cat <<'EOF'\ncd /y\nEOF\nmake > log", ["log"], [])])
+
+
+@case
+def cd_home_forms_resolve_against_home():
+    """27d. cd $HOME/p, cd ${HOME} and cd ~/p join the log to the HOME environment variable, which the case sets"""
+    saved = os.environ.get("HOME")
+    os.environ["HOME"] = "/stall-home"
+    try:
+        return read_rows_problems([
+            ("cd $HOME/p && make > log", ["/stall-home/p/log"], []),
+            ("cd ${HOME} && make > log", ["/stall-home/log"], []),
+            ("cd ~/p && make > log", ["/stall-home/p/log"], []),
+        ])
+    finally:
+        if saved is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = saved
+
+
+@posix_case
+def cd_to_an_unknown_dir_reports_the_log_as_unwatched():
+    """27e. cd "$REPO" && sleep 30 > log: the hook passes --unwatched log and no --also, and the STALL report says the log is not watched"""
+    repo = new_dir()
+    orig = 'cd "$REPO" && sleep 30 > log'
+    cmd, _hso = rewrite(orig)
+    if not re.search(r" --unwatched log(?=[ ;]|$)", cmd):
+        return ["the rewrite passes no --unwatched log, so the unknown directory is not reported"]
+    if " --also " in cmd:
+        return ["the rewrite still passes --also for a log whose directory is unknown"]
+    rc, text, secs, _cmd = run_rewritten(orig, env=job_env(REPO=repo))
+    problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    if not any(line.startswith("Named log not watched") and line.endswith(": log") for line in text.splitlines()):
+        problems += ["the STALL report has no 'Named log not watched' line for log"]
     reap()
     return problems
 
@@ -1194,6 +1520,99 @@ def table_parity_and_exit_codes():
     return problems
 
 
+# What one background call costs (decision stall-watch). The hook runs in process, so cost_probe.children() counts
+# each child it starts. The watch's ps reads run on a fake clock.
+
+class CostTests(unittest.TestCase):
+    """What one background call costs (rule outcomes-mechanize-rules)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.folder = os.path.join(SCRATCH, "cost")  # a subfolder of this run's SCRATCH: the run removes SCRATCH, not this
+        os.makedirs(cls.folder, exist_ok=True)
+        spec = importlib.util.spec_from_file_location("stall_watch_cost", MODULE)
+        cls.mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.mod)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.folder, ignore_errors=True)
+
+    def hook_in_process(self, command):
+        """The hook on one background call, in process, with its temp folder of its own.
+        -> (rc, stdout text, child log, files the hook left in its folder)."""
+        folder = tempfile.mkdtemp(dir=self.folder)
+        payload = json.dumps({"session_id": "cost-stall", "hook_event_name": "PreToolUse", "tool_name": "Bash",
+                              "tool_input": {"command": command, "description": "cost", "run_in_background": True}})
+        out = io.StringIO()
+        with cost_probe.children() as log, mock.patch.object(sys, "stdin", io.StringIO(payload)), \
+                mock.patch.object(tempfile, "tempdir", folder), contextlib.redirect_stdout(out):
+            rc = self.mod.hook()
+        return rc, out.getvalue(), log, cost_probe.leftovers(folder)
+
+    def test_a_plain_background_call_starts_no_child_and_the_hook_writes_no_file(self):
+        rc, text, log, left = self.hook_in_process("sleep 1")
+        self.assertEqual(rc, 0)
+        self.assertIn("updatedInput", text, "the call is rewritten")
+        self.assertEqual(log.argvs, [], "a plain command starts no child; got %r" % log.argvs)
+        self.assertEqual(left, [], "the hook writes no file; the job makes its files when it runs; got %r" % left)
+
+    def test_a_command_ending_in_an_odd_backslash_starts_one_sh_probe(self):
+        rc, text, log, left = self.hook_in_process("echo hi\\")
+        self.assertEqual(rc, 0)
+        self.assertEqual(cost_probe.names(log.argvs), ["sh"],
+                         "the one child is the shell probe for a trailing backslash; got %r" % log.argvs)
+        self.assertEqual(left, [])
+
+    def test_the_rewritten_command_carries_one_watch_pid_flag_per_background_call(self):
+        rc, text, log, left = self.hook_in_process("sleep 1")
+        cmd = json.loads(text)["hookSpecificOutput"]["updatedInput"]["command"]
+        self.assertEqual(cmd.count("--watch-pid"), 1,
+                         "one --watch-pid flag per background call; the rewrite carries %d" % cmd.count("--watch-pid"))
+
+    def test_the_watch_reads_ps_at_most_about_once_a_second_on_a_fake_clock(self):
+        clock = cost_probe.FakeClock(start=1000.0, cap=5000)
+        folder = tempfile.mkdtemp(dir=self.folder)
+        log = os.path.join(folder, "job.log")
+        open(log, "w").close()
+        reads = []
+
+        def job_state(pid):
+            reads.append(clock.now)
+            return "S"
+
+        with mock.patch.object(self.mod, "time", clock), mock.patch.object(self.mod, "job_state", job_state), \
+                mock.patch.object(self.mod, "report", lambda *args, **kwargs: None):
+            rc = self.mod.watch(4242, log, 30)
+        span = clock.now - 1000.0
+        self.assertEqual(rc, self.mod.STALL_EXIT, "a silent job stalls at its 30 s quiet time")
+        self.assertLessEqual(len(reads), span + 1,
+                             "ps at most about once a second: %d reads in %.1f s" % (len(reads), span))
+        self.assertGreaterEqual(len(reads), span / 2,
+                                "the watch does check the job: %d reads in %.1f s" % (len(reads), span))
+
+    def test_one_state_read_starts_one_ps_child(self):
+        # Each read of a job's state is one `ps` start, the one child the watch starts per check. The read is real here,
+        # on this process's own pid, so ps answers and the state is not empty.
+        if os.name != "posix":
+            self.skipTest("the watch is posix only")
+        with cost_probe.children() as log:
+            state = self.mod.job_state(os.getpid())
+        self.assertNotEqual(state, "", "ps answers for a live pid")
+        self.assertEqual(cost_probe.names(log.argvs), ["ps"],
+                         "one state read is one ps child; got %r" % log.argvs)
+
+    def test_a_job_makes_two_files_and_neither_is_left_when_it_ends(self):
+        rc, text, secs, cmd = run_rewritten("echo ok")
+        log, beat = job_files(cmd)
+        self.assertEqual((rc, text), (0, "ok\n"), "the job runs and its output is relayed")
+        self.assertEqual((log[-4:], beat[-5:]), (".log", ".beat"), "two files per job: the log and the beat")
+        base = log[:-4]
+        self.assertEqual(beat, base + ".beat", "both files share one name")
+        left = [n for n in os.listdir(os.path.dirname(log)) if n.startswith(os.path.basename(base))]
+        self.assertEqual(left, [], "the job removes its files when it ends; left: %r" % left)
+
+
 # The agent marker. A valid agent_id is 17 lowercase hex. A background agent call's command gets
 # `export CLAUDE_AGENT_ID=<id>` ahead of its wrapper, so every process the job starts holds the tag in
 # its exec-time environment. A foreground call is not rewritten.
@@ -1361,4 +1780,7 @@ def settings_add_no_bash_hook_process():
 
 
 if __name__ == "__main__":
-    sys.exit(run_cases(CASES))
+    code = run_cases(CASES)
+    if not cost_probe.run_class(CostTests):
+        code = 1
+    sys.exit(code)

@@ -84,6 +84,35 @@ Object.assign(PAGES, {
     <script>const v = localStorage.getItem("session"); document.getElementById("seed").textContent = "session=" + (v === null ? "unset" : v);
       document.getElementById("reveal").onclick = () => { document.getElementById("app").innerHTML = "<section id='view'>Account view for " + (v === null ? "nobody" : v) + "</section>"; };</script>`,
 });
+// The touch fixture. The body is red under a coarse pointer and blue otherwise. The hero is one viewport
+// (100vh), so the body shows only in the spacer below it. The bar is fixed to the viewport's foot. The
+// coarse-only element is empty, so it adds no height in either mode.
+Object.assign(PAGES, {
+  "/touch.html": `<!doctype html><style>body{margin:0;background:#00f}@media (pointer:coarse){body{background:#f00}}
+    #hero{height:100vh;background:#0f0}#rest{height:2000px}#bar{position:fixed;bottom:0;left:0;right:0;height:50px;background:#ff0}
+    .touch-only{display:none}@media (pointer:coarse){.touch-only{display:block}}</style>
+    <div id="hero"></div><div id="rest"></div><div id="bar"></div><nav id="phone-nav" class="touch-only"></nav>`,
+  // A 1200 px page with a fixed bar: the bar is at y 850 in the first viewport only.
+  "/tall-bar.html": `<!doctype html><style>body{margin:0;background:#00f}@media (pointer:coarse){body{background:#f00}}
+    #rest{height:1200px}#bar{position:fixed;bottom:0;left:0;right:0;height:50px;background:#ff0}</style><div id="rest"></div><div id="bar"></div>`,
+  // An in-flow sticky element at page y 1500, below the first viewport: it has no top offset to stick to before then.
+  "/sticky.html": `<!doctype html><style>body{margin:0;background:#00f}@media (pointer:coarse){body{background:#f00}}
+    #top{height:1500px}#stk{position:sticky;top:0;height:40px;background:#0f0}#after{height:1000px}</style><div id="top"></div><div id="stk"></div><div id="after"></div>`,
+  // A 20000 px page in bands: red at the top, yellow at 10000, green near the bottom. One colour would be a blank image.
+  "/tall20k.html": `<!doctype html><style>body{margin:0}#rest{height:20000px;background:linear-gradient(#f00 0 100px,#00f 100px 10000px,#ff0 10000px 10100px,#00f 10100px 19900px,#0f0 19900px)}</style><div id="rest"></div>`,
+  // Root scroll snap with three 1000 px sections, each a snap point. 1000 is not a multiple of the 900 px tile,
+  // so a tile that snaps to a section leaves a gap unless the stitch turns snapping off.
+  "/snap.html": `<!doctype html><style>html{scroll-snap-type:y mandatory}body{margin:0}
+    .sec{height:1000px;scroll-snap-align:start}#a{background:#f00}#b{background:#00f}#c{background:#ff0}</style>
+    <div class="sec" id="a"></div><div class="sec" id="b"></div><div class="sec" id="c"></div>`,
+  // A page 1200 px wide at a 390 px viewport: its far-right part is yellow, at x 600 to 1199 of row 100.
+  "/wide.html": `<!doctype html><style>body{margin:0;background:#00f}@media (pointer:coarse){body{background:#f00}}
+    #wide{width:1200px;height:200px;background:linear-gradient(to right,#0f0 0 600px,#ff0 600px 1200px)}</style><div id="wide"></div>`,
+  // The touch fixture with its spacer banded every 100 px in two colours, so each band must sit at its page y.
+  "/touch-banded.html": `<!doctype html><style>body{margin:0;background:#00f}@media (pointer:coarse){body{background:#f00}}
+    #hero{height:100vh;background:#0f0}#rest{height:2000px;background:repeating-linear-gradient(#f00 0 100px,#00f 100px 200px)}
+    #bar{position:fixed;bottom:0;left:0;right:0;height:50px;background:#ff0}</style><div id="hero"></div><div id="rest"></div><div id="bar"></div>`,
+});
 let server, base, tmp, browser, tls;
 
 // test-temp-standard: one run folder per test run, `<pid>-<UUID>`, under one temp root for this repo.
@@ -156,7 +185,9 @@ async function run(cfg, env = {}) {
   return { code, out: text, dir: out, pngs, ms: Date.now() - started };
 }
 
-// Mean luminance (0-255) and the count of distinct colours, read through the browser's canvas.
+// Mean luminance (0-255), the count of distinct colours, the PNG's size, and the colour runs down pixel
+// column 5 ("G@0 Y@850 R@900": each colour and the row it starts at; T for a transparent row), and the runs
+// across row 100 (the x each colour starts at), read through the browser's canvas.
 async function pixels(b, file) {
   const page = await b.newPage();
   try {
@@ -173,7 +204,21 @@ async function pixels(b, file) {
       let sum = 0;
       const seen = new Set();
       for (let i = 0; i < d.length; i += 4) { sum += (d[i] + d[i + 1] + d[i + 2]) / 3; seen.add((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]); }
-      return { mean: sum / (d.length / 4), colours: seen.size, width: img.width };
+      const key = (i) => (d[i + 3] < 255 ? "T" : d[i] > 128 ? (d[i + 1] > 128 ? "Y" : "R") : d[i + 1] > 128 ? "G" : "B");
+      const runs = [];
+      let last = null;
+      for (let y = 0; y < c.height; y++) {
+        const k = key((y * c.width + 5) * 4);
+        if (k !== last) { runs.push(k + "@" + y); last = k; }
+      }
+      // Row 100 across the whole width, left to right: a wide page's far-right colour shows at its own x.
+      const across = [];
+      last = null;
+      for (let x = 0; c.height > 100 && x < c.width; x++) {
+        const k = key((100 * c.width + x) * 4);
+        if (k !== last) { across.push(k + "@" + x); last = k; }
+      }
+      return { mean: sum / (d.length / 4), colours: seen.size, width: img.width, height: img.height, column: runs.join(" "), row: across.join(" ") };
     }, src);
   } finally {
     await page.close();
@@ -460,6 +505,212 @@ test("unknown keys on the config and on a route are not refused", async (t) => {
   const r = await run({ futureKey: 1, routes: [{ path: "/content.html", futureRouteKey: { a: 1 } }], ...ONE });
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /shoot: PASS 1 shots, 0 failed, out=/);
+});
+
+// ---- Touch per size: a width under 1024 is a coarse pointer; 1024 and wider is not ----
+// One shared run (building-one-home-per-capability): each case reads its own shots from it and asserts
+// the scope (exit, then width, then height) before the claim. Colour runs are read down column 5.
+// The full-page layout every touch and fine shot shares: the hero's green to 850, the bar's yellow to 900,
+// then the spacer in the pointer's colour.
+const TOUCH_SHOTS = {
+  routes: [
+    { name: "touch", path: "/touch.html" },
+    { name: "short", path: "/content.html" },
+    // A route with steps or localStorage runs in its own context, and that context must keep touch too.
+    { name: "stepped", path: "/touch.html", steps: [{ wait: "#hero" }] },
+    { name: "seeded", path: "/touch.html", localStorage: { k: "one" } },
+  ],
+  sizes: [390, 1023, 1024, 1440], themes: ["light"],
+};
+let touchShots;
+const shotsForTouch = () => (touchShots ??= run(TOUCH_SHOTS));
+
+test("a width under 1024 is a coarse pointer, 1024 and wider is not", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouch();
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.pngs.filter((f) => f.startsWith("touch-")), ["touch-1023-light.png", "touch-1024-light.png", "touch-1440-light.png", "touch-390-light.png"]);
+  for (const [w, colour] of [[390, "R"], [1023, "R"], [1024, "B"], [1440, "B"]]) {
+    const px = await pixels(b, path.join(r.dir, `touch-${w}-light.png`));
+    assert.equal(px.width, w, "scope: the shot is at this width");
+    assert.equal(px.column, `G@0 Y@850 ${colour}@900`, `${w} px wide: touch should be ${colour === "R" ? "on" : "off"} (the spacer colour)`);
+  }
+});
+
+test("a touch full-page shot keeps touch through the capture: the PNG is the full page, coarse below the first viewport", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouch();
+  assert.equal(r.code, 0, r.out);
+  const px = await pixels(b, path.join(r.dir, "touch-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 2900, "the PNG is not the full page: 900 px of hero and 2000 px of spacer");
+  assert.match(px.column, / R@900$/, `the full-page PNG is not coarse below the first viewport: touch is off in this capture (runs ${px.column})`);
+});
+
+test("a 100vh hero stays one viewport tall in a touch full-page shot", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouch();
+  assert.equal(r.code, 0, r.out);
+  const px = await pixels(b, path.join(r.dir, "touch-390-light.png"));
+  assert.equal(px.height, 2900, "scope: the PNG is the full page");
+  // The spacer colour is the touch claim, pinned by the case above. This case reads the geometry only.
+  assert.match(px.column, /^G@0 Y@850 [RB]@900$/, `the hero is not one viewport tall (900 px): its green runs past the first viewport (runs ${px.column})`);
+});
+
+test("a position:fixed bar shows once in a touch full-page shot, not once per viewport tile", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouch();
+  assert.equal(r.code, 0, r.out);
+  const px = await pixels(b, path.join(r.dir, "touch-390-light.png"));
+  assert.equal(px.height, 2900, "scope: the PNG is the full page");
+  const bars = px.column.split(" ").filter((run) => run.startsWith("Y@")).length;
+  assert.equal(bars, 1, `the fixed bar shows ${bars} times in the full-page PNG, not once (runs ${px.column})`);
+});
+
+test("the .html beside a touch shot is computed with touch: a coarse-only element is not marked hidden", async (t) => {
+  if (!(await chromium(t))) return;
+  const r = await shotsForTouch();
+  assert.equal(r.code, 0, r.out);
+  const page = html(r, "touch-390-light");
+  assert.match(page, /<nav id="phone-nav"/, "scope: the coarse-only element is in the .html");
+  assert.doesNotMatch(page, /<nav id="phone-nav"[^>]*\bhidden\b/, "the .html marks the coarse-only element hidden: the page was computed without touch");
+});
+
+test("control: a 1440 shot has no touch, so the PNG shows the fine-pointer colour and the .html marks the element hidden", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouch();
+  assert.equal(r.code, 0, r.out);
+  const px = await pixels(b, path.join(r.dir, "touch-1440-light.png"));
+  assert.equal(px.width, 1440, "scope: the shot is at 1440");
+  assert.equal(px.column, "G@0 Y@850 B@900", "1440 px: touch is on, so the spacer is not the fine-pointer colour");
+  const page = html(r, "touch-1440-light");
+  assert.match(page, /<nav id="phone-nav"/, "scope: the coarse-only element is in the .html");
+  assert.match(page, /<nav id="phone-nav" class="touch-only" hidden="">/, "1440 px: the coarse-only element should be marked hidden in the .html");
+});
+
+test("a page shorter than one viewport: the full-page PNG is one viewport tall, not shorter", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouch();
+  assert.equal(r.code, 0, r.out);
+  const px = await pixels(b, path.join(r.dir, "short-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 900, "the full-page PNG of a short page is not the viewport height");
+});
+
+// A route with steps or localStorage runs in its own context. Its full-page shot must be coarse too.
+test("a 390 px route with steps is coarse in its full-page shot, as a route without steps is", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouch();
+  assert.equal(r.code, 0, r.out);
+  assert.ok(r.pngs.includes("stepped-390-light.png"), r.out);
+  const px = await pixels(b, path.join(r.dir, "stepped-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 2900, "scope: the PNG is the full page");
+  assert.equal(px.column, "G@0 Y@850 R@900", `the route's own context has no touch: its spacer is not the coarse colour (runs ${px.column})`);
+});
+
+test("a 390 px route with localStorage is coarse in its full-page shot, as a route without it is", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouch();
+  assert.equal(r.code, 0, r.out);
+  assert.ok(r.pngs.includes("seeded-390-light.png"), r.out);
+  const px = await pixels(b, path.join(r.dir, "seeded-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 2900, "scope: the PNG is the full page");
+  assert.equal(px.column, "G@0 Y@850 R@900", `the route's own context has no touch: its spacer is not the coarse colour (runs ${px.column})`);
+});
+
+// ---- Touch stitch: each way a tile can land wrong in a touch full-page shot ----
+// The build stitches a touch full-page shot from viewport tiles, and hides fixed and sticky elements on every
+// tile after the first. Each case reads its own shot from one shared run (building-one-home-per-capability),
+// asserts the scope (width, then height) before the claim, and reads the colour runs down column 5.
+// bandRuns(from, count): alternating 100 px bands of red and blue from page y `from`.
+const bandRuns = (from, count) => Array.from({ length: count }, (_, k) => `${k % 2 ? "B" : "R"}@${from + 100 * k}`).join(" ");
+const STITCH_SHOTS = {
+  routes: [
+    { name: "bar", path: "/tall-bar.html" },
+    { name: "sticky", path: "/sticky.html" },
+    { name: "snap", path: "/snap.html" },
+    { name: "banded", path: "/touch-banded.html" },
+    { name: "wide", path: "/wide.html" },
+  ],
+  sizes: [390], themes: ["light"],
+};
+let stitchShots;
+const shotsForStitch = () => (stitchShots ??= run(STITCH_SHOTS));
+
+test("a fixed bar in a 1200 px touch page shows once, at y 850, in the full-page PNG", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForStitch();
+  assert.ok(r.pngs.includes("bar-390-light.png"), r.out);
+  const px = await pixels(b, path.join(r.dir, "bar-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 1200, "scope: the PNG is the full page");
+  assert.equal(px.column, "R@0 Y@850 R@900", `the fixed bar is not shown once at y 850 (runs ${px.column})`);
+});
+
+test("an in-flow sticky element below the first viewport shows once, at its page y 1500, in the full-page PNG", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForStitch();
+  assert.ok(r.pngs.includes("sticky-390-light.png"), r.out);
+  const px = await pixels(b, path.join(r.dir, "sticky-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 2540, "scope: the PNG is the full page");
+  assert.equal(px.column, "R@0 G@1500 R@1540", `the sticky element is not shown once at page y 1500 (runs ${px.column})`);
+});
+
+test("a 20000 px touch page: the full-page shot passes, the PNG is 20000 px tall, and each band sits at its page y", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await run({ routes: [{ name: "tall", path: "/tall20k.html" }], sizes: [390], themes: ["light"] });
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /shoot: PASS 1 shots, 0 failed/);
+  const px = await pixels(b, path.join(r.dir, "tall-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 20000, "the full-page PNG is not the 20000 px page");
+  assert.equal(px.column, "R@0 B@100 Y@10000 B@10100 G@19900", `a band is at the wrong page y in the 20000 px PNG (runs ${px.column})`);
+});
+
+test("a page wider than 390 px: the touch full-page PNG is the page's full width, with the far-right colour in it", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForStitch();
+  assert.ok(r.pngs.includes("wide-390-light.png"), r.out);
+  const px = await pixels(b, path.join(r.dir, "wide-390-light.png"));
+  assert.equal(px.width, 1200, "the touch full-page PNG is not the page's 1200 px width: the stitch is the viewport's width");
+  assert.equal(px.row, "G@0 Y@600", `the far-right colour is missing from row 100 (runs ${px.row})`);
+});
+
+test("root scroll-snap mandatory, sections at snap points: the full-page PNG has no transparent or seam rows", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForStitch();
+  assert.ok(r.pngs.includes("snap-390-light.png"), r.out);
+  const px = await pixels(b, path.join(r.dir, "snap-390-light.png"));
+  assert.equal(px.height, 3000, "scope: the PNG is the full page");
+  assert.doesNotMatch(px.column, /T@/, `transparent rows: a tile left a gap (runs ${px.column})`);
+  assert.equal(px.column, "R@0 B@1000 Y@2000", `a section is missing or at the wrong y: a tile snapped off its offset (runs ${px.column})`);
+});
+
+test("tile offsets: a touch page banded every 100 px in two colours keeps every band at its page y", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForStitch();
+  assert.ok(r.pngs.includes("banded-390-light.png"), r.out);
+  const px = await pixels(b, path.join(r.dir, "banded-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 2900, "scope: the PNG is the full page");
+  assert.equal(px.column, `G@0 Y@850 ${bandRuns(900, 20)}`, `a band is at the wrong page y: a tile is drawn at the wrong y (runs ${px.column})`);
 });
 
 // A self-signed https fixture. The certificate is built here, into the run folder, and never committed.

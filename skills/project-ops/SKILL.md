@@ -31,7 +31,8 @@ Without a project, each session holds one or more roles, and the owner acts as t
   `waiting-page`, "Make a repo's page".
 - **The outbox.** `roadmap/outbox/`, one file per session, for non-urgent notes to triage. Its
   README gives the format. `templates/operating-model.md` says when to message instead.
-- **Briefs and role handoffs.** `templates/brief.md` and `templates/role-handoff.md`.
+- **Briefs and role handoffs.** `templates/brief.md` and `templates/role-handoff.md`. `scripts/brief_from_step.py <step>`
+  fills the brief from a step file and the rulings that name it.
 
 A role handoff note and a session handoff are two cases of one meaning: notes one holder writes so the next
 reader can continue (GLOSSARY.md, "handoff"). A session handoff is the notes file of one session

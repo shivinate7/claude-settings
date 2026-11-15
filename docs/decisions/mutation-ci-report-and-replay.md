@@ -21,7 +21,7 @@ Evidence, 2026-11-05, main 0497265b, each plant applied by hand in a copy of the
 |---|---|---|---|---|
 | `df25a68d-rlock`: `_LIVE_LOCK` back to `threading.Lock()` | `hooks/test_mutate_replay.py RequestStopTests` | 3 green | 3 red, assertion | 3 red |
 | `df25a68d-pw-timeout`: the timeout and closed-target test dropped from `classify_playwright` | `hooks/test_mutate_replay.py PlaywrightClassifyTests` | green | 3 red, assertion (87-90 s, whole file) | 3 red |
-| `3297d8fa-take-spare`: `+ 10` dropped from the lock take call | `merge/test_merge.py LockProseStatesTheCode` | 1 green | 3 red, assertion | 3 red |
+| `3297d8fa-take-spare`: the lock take call given the fixed TTL plus 600 s | `merge/test_merge.py LockProseStatesTheCode` | 1 green | 3 red, assertion | 3 red |
 
 Every run was the same, and none needed the network. A fixture suite in `hooks/test_mutate_ci.py` proves that a catcher which pins nothing reads MISS. So a known-defect miss names a lost test, not a flake. An UNKNOWN is red under decision `ci-unknown-is-red`. A plant text that a refactor moved is re-pointed in `.github/known-defects.json`, red then green (`outcomes-tests-are-statements`), and the commit carries `Known-defect-changed: <id>`.
 
