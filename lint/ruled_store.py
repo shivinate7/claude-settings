@@ -72,7 +72,6 @@ GIT_TIMEOUT = 30
 ELIGIBLE_ID = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)+$")  # r10 and ow-style one-token ids are too common as plain words
 OVERTAKE = re.compile(r"\b(extends?|extended|overrides?|overrode|supersedes?|superseded|replaces?|widens?|amends?|"
                       r"overtakes?|instead of|exception to)\b", re.I)
-HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
 # A git start must read REPO, never an outer repo that a hook or CI step points at through these.
 STRIPPED = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_NAMESPACE")
 _FAR_PAST = datetime.min.replace(tzinfo=timezone.utc)
@@ -418,7 +417,7 @@ def overtaking_pairs(entries):
 def _record_lines(text):
     """The file's lines with each HTML comment blanked, line count kept, so a hidden cite counts as none. A `<!--` inside a
     fenced block or an inline code span opens no comment, and a comment with no `-->` ends at the end of the file."""
-    out, fence, i, n = [], None, 0, len(text)
+    out, fence = [], None
     for row in text.split("\n"):
         mark = re.match(r" {0,3}(`{3,}|~{3,})", row)
         if mark and (fence is None or mark.group(1)[0] == fence[0] and len(mark.group(1)) >= len(fence)):

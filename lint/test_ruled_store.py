@@ -723,7 +723,7 @@ class RecordCiteTests(RepoCase):
                                            supersedes_none="x")}))
         self.folder = os.path.join(repo, "docs", "decisions")
         os.makedirs(self.folder, exist_ok=True)
-        with open(os.path.join(self.folder, "all-repos-switch-together.md"), "w", encoding="utf-8") as f:
+        with open(os.path.join(self.folder, "stale-sample.md"), "w", encoding="utf-8") as f:
             f.write(record)
         fixture.git(repo, "add", "-A")
         return repo
@@ -732,17 +732,17 @@ class RecordCiteTests(RepoCase):
         problems, state = ruled_store.check_records(self.repo_with(RECORD_BEFORE))
         self.assertEqual(state, "ok")
         self.assertEqual(len(problems), 1, problems)
-        self.assertTrue(problems[0].startswith("docs/decisions/all-repos-switch-together.md:7: "), problems[0])
+        self.assertTrue(problems[0].startswith("docs/decisions/stale-sample.md:7: "), problems[0])
 
     def test_a_skill_file_outside_the_decisions_folder_is_read_too(self):
         repo = self.repo_with(RECORD_AFTER)
         os.makedirs(os.path.join(repo, "skills", "x"))
-        with open(os.path.join(repo, "skills", "x", "SKILL.md"), "w", encoding="utf-8") as f:
+        with open(os.path.join(repo, "skills", "x", "note-sample.md"), "w", encoding="utf-8") as f:
             f.write("Per-lane flow (ruling own-degen-home-switch-now).\n")
         fixture.git(repo, "add", "-A")
         problems = ruled_store.check_records(repo)[0]
         self.assertEqual(len(problems), 1, problems)
-        self.assertTrue(problems[0].startswith("skills/x/SKILL.md:1: "), problems[0])
+        self.assertTrue(problems[0].startswith("skills/x/note-sample.md:1: "), problems[0])
         self.assertIn(NEW_ID, problems[0])
 
     def test_green_on_the_record_after_the_fix(self):
@@ -762,11 +762,11 @@ class RecordCiteTests(RepoCase):
 
     def test_a_file_that_is_not_utf8_prints_its_name_and_never_crashes(self):
         repo = self.repo_with(RECORD_AFTER)
-        with open(os.path.join(self.folder, "bad.md"), "wb") as f:
+        with open(os.path.join(self.folder, "bad-bytes.md"), "wb") as f:
             f.write(b"caf\xe9 own-degen-home-switch-now\n")
         fixture.git(repo, "add", "-A")
         proc = subprocess.run([sys.executable, MODULE, "records", repo], capture_output=True, text=True, timeout=60)
-        self.assertIn("bad.md", proc.stdout)
+        self.assertIn("bad-bytes.md", proc.stdout)
         self.assertEqual(proc.returncode, 0)
 
     def test_a_ruling_that_only_mentions_the_older_one_without_a_verb_overtakes_nothing(self):
@@ -789,7 +789,7 @@ class RecordCiteTests(RepoCase):
             "r1": fixture.entry("r1", at=OVERTAKEN_AT),
             "r2": fixture.entry("r2", at=OVERTAKING_AT, ruling="Owner: extends r1.")}))
         os.makedirs(os.path.join(repo, "docs"))
-        with open(os.path.join(repo, "docs", "a.md"), "w", encoding="utf-8") as f:
+        with open(os.path.join(repo, "docs", "plain-note.md"), "w", encoding="utf-8") as f:
             f.write("Ruling r1 says so.\n")
         fixture.git(repo, "add", "-A")
         self.assertEqual(ruled_store.check_records(repo)[0], [])
@@ -811,7 +811,7 @@ class RecordCiteTests(RepoCase):
         fixture.git(repo, "commit", "-q", "-m", "base")
         fixture.git(repo, "branch", "base")
         self.assertEqual(run("--changed", "base").returncode, 0, "an untouched record blocked a pull request")
-        with open(os.path.join(self.folder, "all-repos-switch-together.md"), "a", encoding="utf-8") as f:
+        with open(os.path.join(self.folder, "stale-sample.md"), "a", encoding="utf-8") as f:
             f.write("An edit.\n")
         fixture.git(repo, "commit", "-qam", "edit")
         self.assertEqual(run("--changed", "base").returncode, 1, "a touched stale record passed")
