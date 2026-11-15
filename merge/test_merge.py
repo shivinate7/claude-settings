@@ -15428,10 +15428,12 @@ class ReviewEnv(Env):
         return fx
 
     def stale_tip_fixture(self, fx):
-        """The remote's main moves to M2 by a push to the bare origin's path, which leaves the checkout's own refs/remotes/origin/main at M, as a host
-        checkout reads it before its next fetch. -> (M2, L): L is a live head, a commit off M2 whose tree is git's clean merge of H and M2."""
+        """The remote's main moves to M2 by a direct update of the bare origin's ref, after M2 reaches the bare on a side ref. No push to main
+        runs from this checkout, so its own refs/remotes/origin/main stays at M, as a host checkout reads it before its next fetch.
+        -> (M2, L): L is a live head, a commit off M2 whose tree is git's clean merge of H and M2."""
         M2 = self.git_commit(fx.M, {"c.txt": "main moved again\n"}, message="fixture: main moved again")
-        sh(self.co, "git", "push", "-q", self.bare, f"{M2}:refs/heads/main")
+        sh(self.co, "git", "push", "-q", self.bare, f"{M2}:refs/heads/fixture-m2")
+        sh(self.co, "git", "--git-dir", self.bare, "update-ref", "refs/heads/main", M2)
         self.assertEqual(sh(self.co, "git", "ls-remote", self.bare, "refs/heads/main").split("\t")[0], M2, "fixture: the remote's main is not M2")
         self.assertEqual(self.main_tip(), fx.M, "fixture: the checkout's origin/main moved, so it is not the stale tip the case needs")
         rc, merged = self.git_merged(fx.H, M2)
