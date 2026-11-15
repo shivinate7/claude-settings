@@ -87,6 +87,21 @@ A letter also names the same option in the chat and on the page. Guard rule `opt
   - Known limit: a cite older than the last 1 MiB of the transcript is not read, and no line is logged.
   - Known limit: the widening guard (`uniform-pick`) still reads `pick` beside `recommended`. Reading `recommended` alone needs an owner ruling.
 
+A pick sentence in an item also names the same option by its letter and its words. Guard rule `pick-letter-matches-label` (`hooks/question_form.py`, function `pick_letter_hit`, run by `item_hit` after `option-letters-frozen`; reason built by `pick_letter_reason`, since `refuse()` prints the reason only) refuses a set or update of an open decision that carries `options`. The refusal holds when an item text field holds a pick sentence whose letter and words name different options. The label decides.
+
+  - A pick sentence is `pick X` or `option X` (X a letter, any case), then an optional colon, dash, opening paren or quote, then words. The words end at the next `.`, `;`, `)`, `?`, `!` or line end. The item text fields are the title, context, why, each option's text fields and each step.
+  - It refuses when the words are the start of the label of exactly one other option, and not the start of the label of X. The words are read as `chat_page_label_hit` reads a chat text: `_fold` (case, spacing, the marks `*`, `_` and `` ` `` dropped) and `_chat_short_form` (the label's start up to a word boundary). A label's own letter tag is dropped first.
+  - It passes when the words fit no label, fit the label of X, or fit two or more other labels. Two labels fit means the pick is not plain: the rule asks and never guesses. It passes a pick word with no words after it, a task, a note, a closed item, a write with no `options` and an empty `options`.
+  - The reason says: a pick sentence names the letter of the option whose words it uses, and the label decides. It carries the matched text, which names the label and its real letter. It names no forbidden target.
+  - A session that meets this refusal writes the letter the label has. When a pick already made names one letter and one plain label that disagree, the session takes the option the label names (rulings `own-label-pick-taken-by-label` and `own-goal-dont-wait-on-me`, owner, 20:18 CST Nov 14; decision `questions-go-to-owner`). It says so in one line under Done. A label that fits two options is asked, never guessed. This changes no owner-typed answer: `page_grant.py` still prints `held:` for an answer whose option moved.
+  - Incident: 2026-11-15 00:22 CST, item 251 of another repo. The why said "pick a" for the bookmark-plus-100-rows option, which was b. The words were the label of b, and the letter was that of a. The label decides.
+  - Cost: no new process. It runs in the guard process that every waiting-page write already starts, reads only the write, and writes no file unless it denies. It adds one regex pass over the item text per write that carries `options`.
+  - Known limit: a prose use of pick or option followed by a letter that is a word, such as "pick a bookmark plus 100 rows a page", reads as a pick sentence. It is refused only when those words are the start of one other label, so the false alarm needs both.
+  - Known limit: the words of a pick end at the first `.`, `;`, `)`, `?` or `!`. A comma does not end them, so "Pick a, bookmark plus 100 rows a page" is not read as a label and passes.
+  - Known limit: a pick that names a letter by another form, such as "choose a" or "go with a", is not read.
+  - Known limit: the rule reads the write only. A pick sentence in the chat is not judged.
+  - Known limit: a pick of a letter that no option has, such as "pick d" with two options, is refused when its words are one label's start.
+
 Incident:
 
 - 2026-11-08, owner ask: the option letters on the waiting page must mean the same as in the chat question, both being static copies. The same ask found that the item field `pick` held the recommended option, not the owner's answer (`choice` in the answers collection). The page now stars and names `recommended` (it reads `pick` on an old item), and a saved answer carries `label` ("A: Red") beside `choice`.

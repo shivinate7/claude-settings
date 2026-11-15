@@ -1041,6 +1041,9 @@ def item_hit(op, entry, cwd="", session_id=None):
     hit = frozen_letters_hit(op, data)
     if hit:
         return FROZEN_RULE, hit
+    hit = pick_letter_hit(data)
+    if hit:
+        return PICK_LETTER_RULE, hit
     hit = rework_off_page_hit(data)
     if hit:
         return "rework-off-page", hit
@@ -1370,6 +1373,60 @@ def frozen_letters_hit(op: str, data) -> str:
     if len(shown) != len(options):
         return "shown holds fewer options than the write carries: extend shown with each appended option"
     return ""
+
+
+# ------------------------------------------------------------------ a pick sentence's letter and words name one option
+#
+# docs/decisions/option-keys-are-letters.md, rule `pick-letter-matches-label`, built against a named incident (incident
+# in the record): a why said "Pick a" in the words of option b. A pick sentence is `pick X` or `option X` (X a letter),
+# then an optional colon, dash, paren or quote, then words. When the words are the start of the label of one other
+# option and not of X's own label, the label decides and the write is refused. Words that fit two other labels are
+# not plain, so the rule passes them: it asks and never guesses.
+PICK_LETTER_RULE = "pick-letter-matches-label"
+PICK_SENTENCE = re.compile(
+    r"\b(?:pick|option)[ \t]+([A-Za-z])\b[*_`]*[ \t]*[:\-\u2014\u2013(\"'\u201c\u2018]*[ \t]*([^.;\n)?!]*)", re.I)
+PICK_LETTER_REASON = ("A pick sentence in an item must name the letter of the option whose words it uses: the label "
+                      "decides. Write the letter that the label has, or reword the sentence so its words are no option's "
+                      "label. (decision option-keys-are-letters, rule pick-letter-matches-label)")
+
+
+def _label_fold(label) -> str:
+    """The folded label without its letter tag: the form chat_page_label_hit compares a chat text with."""
+    tag = LABEL_TAG.match(label)
+    return _fold(label[tag.end():] if tag else label)
+
+
+def pick_letter_hit(data) -> str:
+    """The matched text when an open waiting-page decision that carries `options` holds, in an item text field, a pick
+    sentence whose words are the start of exactly one other option's label and not of its own letter's label (the
+    words are read as _chat_short_form reads a chat text), else "". The text names the label and its real letter.
+    A task, a note, a closed item, a write with no options, and words that fit no label or two labels pass."""
+    if not _open_decision(data) or not isinstance(data.get("options"), list):
+        return ""
+    labels = {}
+    for i, o in enumerate(data["options"]):
+        label = o.get("label") if isinstance(o, dict) else None
+        if isinstance(label, str) and _label_fold(label):
+            labels[_letter_of(i)] = (label, _label_fold(label))
+    for text in _item_text_fields(data):
+        for m in PICK_SENTENCE.finditer(text):
+            letter, words = m.group(1).lower(), _fold(m.group(2))
+            if not words:
+                continue
+            fits = [(k, v[0]) for k, v in labels.items() if _chat_short_form(words, v[1])]
+            if any(k == letter for k, _ in fits) or len(fits) != 1:
+                continue
+            key, label = fits[0]
+            tag = LABEL_TAG.match(label)
+            return "pick %s names the words of option %s, whose label is %r" % (
+                letter, key, (label[tag.end():] if tag else label).strip())
+    return ""
+
+
+def pick_letter_reason(matched) -> str:
+    """The deny reason of rule pick-letter-matches-label: its fixed text and the matched text, which names the label and
+    its real letter. refuse() prints the reason only, so the matched text goes into it here."""
+    return PICK_LETTER_REASON + " " + str(matched)
 
 
 # ------------------------------------------------------------------ the page's option letters mean the chat's
