@@ -4984,7 +4984,7 @@ def rollup_green(h, n, head):
 
 def lint_carried(root, cfgrel, base, n, passed, live, h=None, source_passed=()):
     """True when a lane-lint PASS on one of the heads `passed` holds for the live head `live` of pull request `n`. Three forms carry it. Claim chain: every commit after the
-    PASS is a claim or a records-page commit the generator proves (claim_only, against `base`). Clean merge of main (owner ruling that a lane-lint PASS carries across one):
+    PASS is a claim or a records-page commit the generator proves (claim_only, against `base`). Clean merge of main (a lane-lint PASS carries across one, since a clean merge adds no lane change to lint):
     every commit after the PASS, up to `live`, is a clean merge of main, read by clean_merges_after with `merges_only`, through `h`: two parents, the second on main, and git's
     own merge of the parents as the tree. A claim or a page commit after a merge, a merge with any other change, a conflict-resolved merge, a tree that differs from git's own
     merge and a merge git cannot read are not carried. Main is the repo's default branch (default_branch), never `base`, the pull request's own base: a merge of a stacked pull
