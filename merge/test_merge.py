@@ -16902,7 +16902,7 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
         self.assertNotIn("Traceback", err)
 
-    def test_a_fix_check_chained_from_a_head_that_descends_from_the_reviewed_head_is_accepted(self):
+    def test_a_fix_verifier_chained_from_a_head_that_descends_from_the_reviewed_head_is_accepted(self):
         # The newest earlier record reads done: a sonnet PASS fix check from `pre`, on `fixed`. The head is two plain commits on `fixed`, so it descends
         # from the reviewed head (git merge-base --is-ancestor). The fix check starts at `fixed`, the record's own Head, and the record is accepted. It
         # names the delta fixed..head: the fix check's start and the record's head.
@@ -16918,7 +16918,7 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         self.assertEqual((rec["head"], rec["fix"]), (head, (fx.fixed, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS")),
                          "the printed record does not name the delta fixed..head: its fix check start and its head")
 
-    def test_a_fix_check_started_at_a_plain_commit_above_the_reviewed_head_is_refused(self):
+    def test_a_fix_verifier_started_at_a_plain_commit_above_the_reviewed_head_is_refused(self):
         # The head is one plain commit on `plain`, so it descends from `plain` and from the reviewed head. Control: the fix check started at the
         # reviewed head is accepted. The start must be the newest record's Head, so a start at `plain` is refused, with the start refusal's text.
         fx = self.real_commits()
@@ -16933,7 +16933,7 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
         self.assertNotIn("Traceback", err)
 
-    def test_a_plain_head_off_main_with_a_fix_check_started_at_the_reviewed_head_is_refused(self):
+    def test_a_plain_head_off_main_with_a_fix_verifier_started_at_the_reviewed_head_is_refused(self):
         # Control: a plain commit on the reviewed head, with the fix check started there, is accepted. The refused head is one commit on main, which
         # holds no commit of `fixed`. The start is the record's own Head, so only the ancestry of the head refuses the case.
         fx = self.real_commits()
@@ -16947,7 +16947,7 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
         self.assertNotIn("Traceback", err)
 
-    def test_a_fix_check_from_a_base_that_does_not_descend_from_the_reviewed_head_is_refused(self):
+    def test_a_fix_verifier_from_a_base_that_does_not_descend_from_the_reviewed_head_is_refused(self):
         # Control: the same chain from the newest record's own head is accepted. The refused bases are `main`, which is no descendant of `fixed`, and
         # `pre`, an ancestor of it: a check that read ancestry the wrong way round would take `pre`.
         fx = self.real_commits()
@@ -16964,7 +16964,7 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
                 self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
                 self.assertNotIn("Traceback", err)
 
-    def test_a_fix_check_after_a_failed_fix_check_is_refused_from_the_reviewed_head_and_from_a_descendant(self):
+    def test_a_fix_verifier_after_a_failed_fix_verifier_is_refused_from_the_reviewed_head_and_from_a_descendant(self):
         # Control: after a sonnet PASS fix check, a fix check from the record's own head is accepted. After a FAIL fix check it is refused from that
         # head (the rule the earlier cases keep) and from `plain`, a descendant of it, which the chain rule must not admit.
         fx = self.real_commits()
@@ -16981,7 +16981,7 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
                 self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
                 self.assertNotIn("Traceback", err)
 
-    def test_a_haiku_fix_check_is_refused_from_the_reviewed_head_and_from_a_descendant(self):
+    def test_a_haiku_fix_verifier_is_refused_from_the_reviewed_head_and_from_a_descendant(self):
         # Control: a sonnet fix check from the record's own head is accepted. A haiku fix check is refused at the flag, before any read, from that head
         # and from `plain`, a descendant of it. The refusal names sonnet either way.
         fx = self.real_commits()
@@ -16997,7 +16997,7 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
                 self.assertNotIn(REVIEW_MARKER, out, "a refused haiku fix check still printed a record")
                 self.assertIn("sonnet", err, "the refusal of a haiku fix check does not name sonnet:\n" + err)
 
-    def test_a_record_that_restarts_the_review_with_no_fix_check_is_refused_on_a_descendant_head(self):
+    def test_a_record_that_restarts_the_review_with_no_fix_verifier_is_refused_on_a_descendant_head(self):
         # The restart refusal (same or fewer rounds than an earlier record, and no fix verifier) holds on a head that descends from the reviewed head, as
         # on any other head. The refusal names the restart, so a refusal for another cause cannot pass for it.
         fx = self.real_commits()
