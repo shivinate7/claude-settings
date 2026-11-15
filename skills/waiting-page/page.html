@@ -970,7 +970,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 /* The rail: each repo's run of chips starts with the same tile and the name, and the run wraps as one so a phone row never ends on a lone tile. */
 .rrun { display: inline-flex; flex-wrap: wrap; gap: 6px; max-width: 100%; min-width: 0; }
 @media (min-width: 961px) { .rrun { display: flex; flex-direction: column; gap: 4px; } }
-.rrepo { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; color: var(--muted); font: 600 13px var(--body); }
+.rrepo { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: 32px; color: var(--muted); font: 600 13px var(--body); }
 .rrepo .rmark { width: 20px; height: 20px; font-size: 11px; }
 /* The name shows at every size: two repos may share a first letter, so the tile alone never names a repo. */
 .rrepo .rn { min-width: 0; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

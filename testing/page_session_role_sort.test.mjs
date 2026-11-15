@@ -478,10 +478,11 @@ test("a long repo name in a sub-group head never makes the page scroll sideways"
   const unbroken = "a".repeat(37), hyphenated = "very-long-hyphenated-repository-name-x".slice(0, 38);
   const items = [blk("long-own", 1, { added: at(1) }), blk("long-a", 2, { added: at(2), repo: "owner/" + unbroken }), blk("long-b", 3, { added: at(3), repo: "owner/" + hyphenated })];
   const page = await open(t, { items, meta: META, metaFirst: true }); if (!page) return;
-  for (const [width, theme] of [[320, "light"], [320, "dark"], [390, "light"], [390, "dark"]]) {
+  for (const [width, theme] of [[320, "light"], [320, "dark"], [390, "light"], [390, "dark"], [1280, "light"], [1280, "dark"]]) {
     await page.emulateMedia({ colorScheme: theme });
     await page.setViewportSize({ width, height: 800 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `the page scrolls sideways at ${width} px, ${theme}`);
     assert.equal(await page.evaluate(() => [...document.querySelectorAll(".subhead .nm")].every((n) => n.getBoundingClientRect().right <= innerWidth)), true, `a repo name runs past the screen at ${width} px, ${theme}`);
+    assert.equal(await page.evaluate(() => { const rail = document.querySelector("#rail").getBoundingClientRect(); return [...document.querySelectorAll("#rail .rrepo")].every((r) => r.getBoundingClientRect().right <= rail.right + 1); }), true, `a repo name in the rail runs past the rail at ${width} px, ${theme}`);
   }
 });
