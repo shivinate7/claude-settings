@@ -431,8 +431,16 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         self.init_stub()
         self.mutate_log = os.path.join(self.t, MUTATE_LOG)
 
-    def run_lane(self, *argv, cloud=False):
-        """-> (rc, stdout and stderr together) of merge in the lane checkout. A refused command line fails the case with its reason."""
+    def check_out(self, sha):
+        """Detach the lane checkout at `sha`, a commit origin holds. A lane run reads the checkout's HEAD for the caller-owns check."""
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+        tm.sh(self.co, "git", "checkout", "-q", "--detach", sha)
+
+    def run_lane(self, *argv, cloud=False, at_head=True):
+        """-> (rc, stdout and stderr together) of merge in the lane checkout. A refused command line fails the case with its reason.
+        at_head: the checkout is first detached at the pull request head (origin's feat), the lane's own checkout; False runs from its current HEAD."""
+        if at_head:
+            self.check_out(self.head("feat"))
         rc, out, err = self.run_main(*argv, **({} if cloud else {"CLAUDE_CODE_REMOTE": None}))
         if rc == 2 and "error:" in err:  # argparse refused the command line
             last = err.strip().splitlines()[-1]
@@ -2499,6 +2507,7 @@ class TouchedTests(LaneFixture):
         for path in (self.touched_log, self.log):  # self.log is the lint stub's call log (CiJobStub.init_stub)
             if os.path.exists(path):
                 os.remove(path)
+        self.check_out(self.head("feat"))  # the lane's own checkout, as run_lane makes it
         rc, out, err = self.run_main(*argv, CLAUDE_CODE_REMOTE=None)
         return rc, out + err
 
@@ -5123,7 +5132,6 @@ class MergedLintTree(LaneFixture):
     main did not make, a failed base fetch) are green on the old code as well."""
 
     SHARED = "shared/fixture.txt"  # a file the cases edit on main and on the lane head
-    ORIGIN_REPO = "origin-owner/repo"  # the repository the fixture's origin is, as a pull request's base names it
     FORK_REPO = "fork-owner/repo"  # the repository a pull request's head lives in when it comes from a fork
     commit_on = CrossMeasure.commit_on  # the one home of a pushed commit on a branch: CrossMeasure's
     own_writes = CrossMeasure.own_writes  # the head's pushed commit: CrossMeasure's
@@ -5367,11 +5375,11 @@ class MergedLintTree(LaneFixture):
         self.assertEqual(self.clash(old, tip), "clean", "precondition: the head and origin/main conflict, so the case probes nothing")
         return old, tip
 
-    def lint_once(self, *argv):
+    def lint_once(self, *argv, at_head=True):
         """-> (rc, text, the lint's one run). The lint ran once, as `checks --lint --base origin/main`, detached, and its tree is gone afterwards."""
         if os.path.exists(self.log):
             os.remove(self.log)
-        rc, text = self.run_lane(*argv)
+        rc, text = self.run_lane(*argv, at_head=at_head)
         runs = self.lint_calls()
         self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
         run = runs[0]
@@ -5584,17 +5592,9 @@ class MergedLintTree(LaneFixture):
         self.assertEqual(self.assert_pushed_lint(run["head"], old, "main", tip=tip, text=text), pushed,
                          "the lint's merge commit is not the pushed commit: " + text)
 
-    def script_repos(self, head_repo, base_repo=ORIGIN_REPO):
-        """The head and base repositories a pull request reads as, for the fork check. The fake's pr() carries neither field, so each read
-        of it adds `head_repo` and `base_repo` (full names: owner/name)."""
-        real_pr = self.host.pr
-
-        def pr(n):
-            info = real_pr(n)
-            info["head_repo"], info["base_repo"] = head_repo, base_repo
-            return info
-
-        self.host.pr = pr
+    def checkout_holds(self, sha):
+        """True when the lane checkout's HEAD holds commit `sha`."""
+        return subprocess.run(["git", "-C", self.co, "merge-base", "--is-ancestor", sha, "HEAD"], capture_output=True).returncode == 0
 
     def assert_lints_as_today(self, old, rc, text):
         """A pull request that gets no merge lints as it does without one: rc 0, a PASS line naming its head, origin's branch left at that head,
@@ -5624,14 +5624,13 @@ class MergedLintTree(LaneFixture):
 
     def test_a_fork_pr_behind_main_gets_no_merge_and_no_push(self):
         old, _ = self.behind_main()
-        self.script_repos(self.FORK_REPO)
+        self.host.head_repo = self.FORK_REPO
         self.use_ci_job(PASSING, 0)
         rc, text, _ = self.lint_once("--lane-lint", "7")
         self.assert_lints_as_today(old, rc, text)
 
-    def test_a_same_repo_open_pr_behind_main_still_pushes_its_merge_commit(self):  # the control: the fork gate reads the repositories, not the lane
+    def test_a_same_repo_open_pr_behind_main_still_pushes_its_merge_commit(self):  # the control: the fork check reads the repositories, not the lane
         _, tip = self.behind_main()
-        self.script_repos(self.ORIGIN_REPO)
         old = self.head("feat")
         self.use_ci_job(PASSING, 0)
         rc, text, run = self.lint_once("--lane-lint", "7")
@@ -5641,8 +5640,60 @@ class MergedLintTree(LaneFixture):
         self.assertEqual(self.assert_pushed_lint(run["head"], old, "main", tip=tip, text=text), pushed,
                          "the lint's merge commit is not the pushed commit: " + text)
 
+    def test_a_pr_whose_head_is_not_in_the_checkout_pushes_nothing_and_names_its_head(self):
+        old, tip = self.behind_main()
+        self.check_out(tip)  # origin/main: another lane's history, which the head is not in
+        self.assertFalse(self.checkout_holds(old), "precondition: the checkout holds the head, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, _ = self.lint_once("--lane-lint", "7", at_head=False)
+        self.assertEqual(self.head("feat"), old, "a PR whose head is not in the checkout moved origin's branch: " + text)
+        self.assertEqual(rc, 0, text)
+        lines = pass_lines(text)
+        self.assertEqual(len(lines), 1, text)
+        self.assertIn(old[:9], lines[0], "the PASS line does not name the head: " + text)
+        self.assertEqual(len(self.host.posted), 1, "the PASS posted %d comments, want one: %s" % (len(self.host.posted), text))
+        self.assertIn(f"Head: {old}", self.host.posted[0][1].splitlines(), "the lane-lint comment does not name the head: " + text)
 
-class ReplacedAtHandIn(LaneFixture):
+    def test_a_pr_whose_head_is_the_checkout_head_pushes_its_merge_commit(self):  # the control: the lane's own checkout
+        old, tip = self.behind_main()
+        self.check_out(old)
+        self.assertTrue(self.checkout_holds(old), "precondition: the checkout does not hold the head, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, run = self.lint_once("--lane-lint", "7", at_head=False)
+        self.assertEqual(rc, 0, text)
+        pushed = self.head("feat")
+        self.assertNotEqual(pushed, old, "the lane's own checkout pushed nothing: " + text)
+        self.assertEqual(self.assert_pushed_lint(run["head"], old, "main", tip=tip, text=text), pushed,
+                         "the lint's merge commit is not the pushed commit: " + text)
+
+    def test_a_pr_whose_head_is_below_the_checkout_head_pushes_its_merge_commit(self):  # the control: the checkout holds a commit on top of the head
+        old, tip = self.behind_main()
+        self.check_out(old)
+        tm.sh(self.co, "git", "-c", "user.name=test", "-c", "user.email=test@invalid", "commit", "-q", "--allow-empty", "-m", "a local commit on the head")
+        self.assertTrue(self.checkout_holds(old), "precondition: the checkout does not hold the head, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, run = self.lint_once("--lane-lint", "7", at_head=False)
+        self.assertEqual(rc, 0, text)
+        pushed = self.head("feat")
+        self.assertNotEqual(pushed, old, "a checkout above the head pushed nothing: " + text)
+        self.assertEqual(self.assert_pushed_lint(run["head"], old, "main", tip=tip, text=text), pushed,
+                         "the lint's merge commit is not the pushed commit: " + text)
+
+    def test_an_info_without_the_repository_fields_pushes_nothing(self):
+        old, _ = self.behind_main()
+        real_pr = self.host.pr
+
+        def pr_without_repositories(n):
+            info = real_pr(n)
+            info.pop("head_repo", None)
+            info.pop("base_repo", None)
+            return info
+
+        self.host.pr = pr_without_repositories
+        self.assertNotIn("head_repo", pr_without_repositories(7), "precondition: the info holds head_repo, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assert_lints_as_today(old, rc, text)
     """The lane lint's two replaced-pull-request acts, on the real Host through the gh shim (step close-replaced-at-open; decision session-tiers).
     A hand-in whose body names an open pull request that it replaces is refused, with the plain refusal and no override line. An integration PR's
     freeze block names its lanes: each open lane closes at the hand-in, with a pointer comment to the integration PR, and a dropped lane is reopened
