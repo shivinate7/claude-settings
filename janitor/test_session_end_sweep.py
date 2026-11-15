@@ -755,24 +755,36 @@ class SessionEndStopsOnlyServersInItsRepository(unittest.TestCase):
         """One base folder under ROOT, holding:
           here      this session's repository
           sibling   another repository
+          under     a linked worktree inside `here`, at here/.claude/worktrees/x
+          beside    a linked worktree beside `here`, at base/here-wt. The name shares `here`'s
+                    prefix, so a prefix match with no folder boundary would wrongly stop it
           .claude   so a script missing from `base` itself has `base` as its project ancestor
         Returns the realpath of `here`, and one dead-rooted decision per server, shaped as
-        `sweep.find_dead_rooted` returns them."""
+        `sweep.find_dead_rooted` returns them. Each decision's home is `_project_ancestor` of its
+        missing script, as the real read computes it."""
         base = os.path.realpath(os.path.join(ROOT, name))
         os.makedirs(os.path.join(base, ".claude"))
         here, sibling = os.path.join(base, "here"), os.path.join(base, "sibling")
+        under, beside = os.path.join(here, ".claude", "worktrees", "x"), os.path.join(base, "here-wt")
         make_repo(here)
         make_repo(sibling)
+        for folder in (under, beside):
+            os.makedirs(os.path.join(folder, ".claude"))
 
         def dead(pid, home, missing):
             return {"pid": pid, "command": "sh " + missing, "missing": missing, "home": home,
                     "action": "reap", "reason": "dead-rooted-server"}
+
+        def home_of(folder):
+            return self.sweep._project_ancestor(os.path.join(folder, "tools", "serve.sh"))
 
         return {
             "here": here,
             "in_repo": dead(910101, here, os.path.join(here, "tools", "serve.sh")),
             "sibling": dead(910102, sibling, os.path.join(sibling, "tools", "serve.sh")),
             "ancestor": dead(910103, base, os.path.join(base, "elsewhere", "x.sh")),
+            "under": dead(910104, home_of(under), os.path.join(under, "tools", "serve.sh")),
+            "beside": dead(910105, home_of(beside), os.path.join(beside, "tools", "serve.sh")),
         }
 
     def session_end(self, repo, decisions):
@@ -844,6 +856,19 @@ class SessionEndStopsOnlyServersInItsRepository(unittest.TestCase):
         self.assertEqual(stopped, [],
                          "the session-end sweep stopped dead servers rooted outside this repository: "
                          "%r" % (stopped,))
+        self.assertEqual(kills, [], "a kill bypassed send_signal: %r" % (kills,))
+
+    def test_worktree_under_this_repository_stops_and_sibling_worktree_does_not(self):
+        fx = self.build("scope_worktrees")
+        stopped, roots, raised, kills = self.session_end(fx["here"], [fx["under"], fx["beside"]])
+        self.assertEqual(raised, [], "the sweep child raised, so this run proved nothing: %r" % (raised,))
+        self.assertEqual(roots, [os.path.normcase(fx["here"])],
+                         "the sweep child was not given this repository as its root")
+        self.assertIn(fx["under"]["pid"], stopped,
+                      "a dead server rooted in a linked worktree under this repository was not stopped")
+        self.assertNotIn(fx["beside"]["pid"], stopped,
+                         "the session-end sweep stopped a dead server rooted in a linked worktree "
+                         "beside this repository")
         self.assertEqual(kills, [], "a kill bypassed send_signal: %r" % (kills,))
 
 
