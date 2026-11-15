@@ -14278,6 +14278,7 @@ class LaneOwnMerge(CloudSession):
     def setUp(self):
         super().setUp()
         self.put_role("lane", step="feat")
+        self.host.repo = "shivinate7/claude-settings"  # ruling own-lanes-merge-claude-settings-prs: the lane's pull request is in this repo
 
     def assert_role_file(self, step="feat"):
         """The case probes the lane branch, so the role file it writes is read back first (P7). The file, not the reader, is read."""
@@ -14317,6 +14318,27 @@ class LaneOwnMerge(CloudSession):
         self.assertEqual(self.host.readies, [], "a lane's --ready marked its own draft ready: " + out + err)
         self.assertNotEqual(rc, 0, "a lane's --ready on its own draft exited 0: " + out + err)
         self.assertNotIn("Traceback", err)
+
+    def assert_refused_outside_claude_settings(self, repo):
+        """Ruling own-lanes-merge-claude-settings-prs covers claude-settings only: a lane's own ready pull request in `repo` is refused.
+        The refusal names neither flag nor the other repo."""
+        self.assert_role_file()
+        self.host.repo = repo
+        refs = self.refs()
+        rc, out, err = self.run_main("7", "--confirm", "--head", self.head())
+        self.assertEqual(rc, 1, "a lane merged its own ready pull request in " + repo + ": " + out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "a lane's confirm merged a pull request in " + repo)
+        self.assertEqual(self.refs(), refs, "a lane's refused confirm in " + repo + " pushed")
+        self.assertNotIn("--confirm", err)
+        self.assertNotIn("--ready", err)
+        self.assertNotIn(repo, err)
+        self.assertNotIn("Traceback", err)
+
+    def test_a_lane_is_refused_its_own_ready_pull_request_in_another_repo(self):
+        self.assert_refused_outside_claude_settings("shivinate7/other-repo")
+
+    def test_a_lane_is_refused_its_own_ready_pull_request_in_another_owners_claude_settings(self):
+        self.assert_refused_outside_claude_settings("someone/claude-settings")
 
 
 class LaneRefusals(CloudSession):
