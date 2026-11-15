@@ -1,0 +1,15 @@
+{
+  "id": "answer-reply-wake-close-batch",
+  "title": "The answer-needs-reply wake skips a routed none answer, and --close-batch never closes an open lane item on a plain pick",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "owner": "coordinator",
+  "blockedBy": [
+    "close-writes-receipt-answer-gone"
+  ],
+  "source": "coordinator 00:36 CST Nov 15, from the #3264 lane report (not re-read by the coordinator or triage)",
+  "note": "Fix for two findings from #3264, after it merges. (1) stale_pages.py ~lines 820-830: answer-needs-reply prints every wake for a routed none answer with a clear direction; skip it when routed_answer(item, at). (2) stale_pages.py ~line 952 and SKILL.md ~line 477: an open item with a lane and a plain pick closes through --close-batch and deletes answers/<id>, against decision relayed-grant-read-from-page (fail-safe: no grant counted). Finding (2) is a candidate debt: a hole in a hard rule that Claude could hit when closing items; the #3264 hand-in records it in the repo debt store. Red test first for each.",
+  "why": "Filed 00:38 CST Nov 15 from the coordinator's relay of the lane report; line numbers are the lane's, not read by triage. Blocked by close-writes-receipt-answer-gone (#3264, open draft).",
+  "updatedAt": "2026-11-15T00:38:00-06:00"
+}
