@@ -260,7 +260,7 @@ def audit_isError_silent():
                         response={"isError": True, "result": "no such repo"})
 
 
-def audit_deny_silent():
+def audit_refused_silent():
     return audit_expect("haiku", audit_folder("deny"), None, False, response={"deny": "refused"})
 
 
@@ -286,6 +286,6 @@ for _label, _check in (
         ("fail open: a floor module that cannot import is silent, exit 0", audit_import_failure_silent_exit0),
         ("an errored start (is_error) with haiku prints nothing", audit_is_error_silent),
         ("an errored start (isError) with haiku prints nothing", audit_isError_silent),
-        ("a denied start with haiku prints nothing", audit_deny_silent)):
+        ("a denied start with haiku prints nothing", audit_refused_silent)):
     LOG_CHECKS_EXTRA.append(("start-session: " + _label, _check))
     FIXTURELESS_CHECKS.add(_check)
