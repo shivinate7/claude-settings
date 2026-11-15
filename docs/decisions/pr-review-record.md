@@ -57,7 +57,7 @@ CI: read live by merge --reviewed
 
 ## The done rules
 
-A change is done at the first round, or the first fix verifier, that passes. Source: rule `roles-review-cap-three`; owner item 741, 2026-11-13 13:29 CST; owner, 14:01 CST: "just stopping round 3 if earlier rounds already solved a problem". Guard or check `yes` or `no` makes no difference, and no net value is owed after a pass. Round 3 runs only after a round 2 FAIL, as the builder's third try. Its record may open at round 3 only under three conditions. A round 2 FAIL, or a round 1 FAIL and one or more fix verifiers that all FAIL, stands earlier on the PR. No record since reads done. The PR holds no round 3. `--review-record` refuses it otherwise. A change is done when one of these holds:
+A change is done at the first round, or the first fix verifier, that passes. Source: rule `roles-review-cap-three`; owner item 741, 2026-11-13 13:29 CST; owner, 14:01 CST: "just stopping round 3 if earlier rounds already solved a problem". Guard or check `yes` or `no` makes no difference, and no net value is owed after a pass. Round 3 runs only after a round 2 FAIL, or a round 1 FAIL with one or more fix verifiers that all FAIL, as the builder's third try. Its record may open at round 3 only under three conditions. A round 2 FAIL, or a round 1 FAIL and one or more fix verifiers that all FAIL, stands earlier on the PR. No record since reads done. The PR holds no round 3. `--review-record` refuses it otherwise. A change is done when one of these holds:
 
 - its last round is PASS, or a fix verifier PASSes after that round (a FAIL round too), and the last `design-reviewer` line (across all rounds) is PASS or absent;
 - it holds a Fix check line that PASSes and no Round line, and its review row owes a round;
