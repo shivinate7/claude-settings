@@ -15481,6 +15481,21 @@ class ReviewCleanMainMerge(ReviewEnv):
         self.assertNotIn("unknown", list_line(self, out, 7), "the stale line says unknown: the walk stopped on a read, not on the conflicted merge")
         self.assertIn(top, host.commit_reads, "the walk did not read the empty commit, so the case tests nothing")
 
+    def test_i_a_clean_merge_of_main_after_a_fix_verifier_under_an_earlier_design_fail_does_not_read_done(self):
+        # Catches: the clean-merge re-read of live_review_state reading the newest record alone, so a record with no round line reads done over the
+        # earlier design reviewer FAIL. The record is stale only by the clean merge of main, so that re-read decides. Control: the same chain with the
+        # design reviewer PASS reads done at the clean merge.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        newest = record_text(head=fx.fixed, rounds=(), fix=(fix_verifier_line(head=fx.pre, verdict="PASS"),))
+        self.assertEqual(record_state(self, newest, head=fx.fixed), "done", "scope: the newest record alone must read done at its own head")
+        for design, state in (("PASS", "done"), ("FAIL", "open")):
+            with self.subTest(design=design):
+                earlier = record_text(head=fx.pre, rounds=("Round 1: reviewer, sonnet, PASS", f"Round 1: design-reviewer, opus, {design}"))
+                comments = [review_comment(1, 7, earlier), review_comment(2, 7, newest), lint_of(7, fx.clean)]
+                self.reviewed_line(self.reviewed_host(fx, fx.clean, comments=comments), fx.clean, state,
+                                   f"the newest record must read {state} at the clean merge of main, with the earlier design reviewer {design}")
+
 
 class ReviewUnknownReads(ReviewEnv):
     """A commit the checkout lacks reads unknown, never a conflict. A main-only clone fetches origin's heads once when a parent is missing, so a
@@ -15832,7 +15847,7 @@ class ReviewNoRestart(ReviewEnv):
     needs a new lane (owner, page item 741, 14:01 CST). A record may open at the last round after a failed second round, or after a failed fix
     check with no second round written, and then holds that last round alone. A comment that does not parse, or that names another pull request, is skipped. A refusal exits 2 and prints
     nothing on stdout. A record with no round line is refused after an earlier record whose last design reviewer line is FAIL or PARTIAL, or after
-    records with no design reviewer line that follow it, since it holds no design reviewer line to clear that hold. A FAIL fix check clears no hold,
+    records with no design reviewer line that follow it, since it holds no design reviewer line to clear that hold. A FAIL fix verifier clears no hold,
     so it is accepted beside one. Each accepted case is a control: it prints a record on main and after the change."""
 
     EARLIER_FIX_FROM = "1e" * 20  # the head a fix check's fix diff started from: a fix check line never names its own record's Head
@@ -16172,9 +16187,9 @@ class ReviewNoRestart(ReviewEnv):
                 rc, out, err = self.run_args(*self.design_only_argv(), host=self.chain_host(earlier))
                 self.assert_refused_naming_design(rc, out, err)
 
-    def test_a_fix_check_fail_after_an_earlier_design_line_fail_is_accepted(self):
-        # A FAIL fix check clears no hold, so the design hold refuses only a PASS. It is the record that opens round 3 after failed fix verifiers.
-        # Control: the same record with a PASS fix check is refused by the hold, so the acceptance below comes from the FAIL alone.
+    def test_a_fix_verifier_that_fails_after_an_earlier_design_line_fail_is_accepted(self):
+        # The design hold guards against a PASS that ends the review over a design reviewer FAIL. A FAIL fix verifier ends nothing, so the hold refuses only a PASS.
+        # Control: the same record with a PASS fix verifier is refused by the hold, so the acceptance below comes from the FAIL alone.
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, FAIL"))
         self.assertEqual(record_verdict(self, earlier, head=REVIEW_OLD_HEAD)[0], "open", "scope: the earlier record must read open on its own")
         fix = f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}"
@@ -16946,6 +16961,22 @@ class ReleaseCheck(ReviewEnv):
         self.assert_fails_alone(self.line_of(lines, 8), 8, rf"the record is for head {fx.fixed[:9]}")
         self.assertEqual(self.line_of(lines, 7), "#7 PASS", err)
         self.assertEqual(rc, 1, err)
+
+    def test_check_2_a_fix_verifier_only_record_after_an_earlier_design_fail_fails_the_release_check(self):
+        # Catches: release_check reading the newest record alone, so a record with no round line reads done over the design reviewer FAIL of an
+        # earlier record, which review_state holds open. Control: the same pair with the design reviewer PASS passes, so the FAIL is the one reason.
+        fix = fix_verifier_line(head=REVIEW_OLD_HEAD, verdict="PASS")
+        newest = record_text(head=self.head(), rounds=(), fix=(fix,))
+        self.assertEqual(record_state(self, newest, head=self.head()), "done", "scope: the newest record alone must read done at the live head")
+        for design in ("PASS", "FAIL"):
+            with self.subTest(design=design):
+                earlier = record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, PASS", f"Round 1: design-reviewer, opus, {design}"))
+                rc, lines, err, _ = self.release([7], comments=[review_comment(1, 7, earlier), review_comment(2, 7, newest)])
+                if design == "PASS":
+                    self.assertEqual((rc, lines), (0, ["#7 PASS"]), err)
+                else:
+                    self.assert_fails_alone(self.line_of(lines, 7), 7, r"design reviewer")
+                    self.assertEqual(rc, 1, err)
 
     # Check 3: the newest record is unedited
 
