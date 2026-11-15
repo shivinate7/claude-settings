@@ -1047,6 +1047,27 @@ def _feeds_data(header: str, scripts: bool) -> bool:
     return fed
 
 
+def own_heredoc_bodies(segment: str, raw: str, before: int):
+    """Return the bodies of the heredocs whose headers sit inside this segment, in order. A heredoc
+    of another command (`cat <<A && git commit -F - <<B`) is not the message.
+
+    `before` is the count of headers in the segments ahead of this one. Raw is walked as the
+    shell reads it (_split_heredocs): each header outside quotes and comments takes the next body
+    in turn, and a body line is never read for headers. This segment takes the bodies `before`
+    onward, one per header it holds, so two commits with the same text each take their own body.
+    Raw is walked twice, bash's reading and the contraction reading, as split_segments does, and
+    the bodies of both are judged: a lone `'` can hide a header from one reading, never both.
+    """
+    count = len(heredoc_heads(segment)[0])
+    if not count:
+        return []
+    texts = []
+    for contractions_are_text in (False, True):   # bash's reading, then the contraction reading
+        found = [body for _, body, _ in _split_heredocs(raw, contractions_are_text)[1]]
+        texts.extend(found[before:before + count])
+    return list(dict.fromkeys(texts))   # the readings often agree: judge each body once
+
+
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False, per_body: bool = False) -> str:
     """Drop the body of every heredoc, and keep every header line. `shells_only` keeps a body
     only when a shell reads it, for a rule that judges shell lines. One body that runs keeps every body in

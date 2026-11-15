@@ -76,8 +76,9 @@ kind and incident: decision answered-needs-source. Cost: regex over the reply, n
 
 After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
 may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
-precompact-handoff, item 'Recovered line after compaction'). A label counts only where it starts an item: at line start, after a
-report label, or after "; " or ". ". A compaction is the newest `compact_boundary` system record.
+precompact-handoff, item 'Recovered line after compaction'). A label counts only where it starts an item: at line start (after
+a bullet, and after a Done-item tag BUILT, RECORDED or OTHER that follows the bullet), after a report label, or after "; " or
+". ". A compaction is the newest `compact_boundary` system record.
 Each line is tracked alone: any main-session reply after it that holds the line satisfies that
 demand; the current reply counts by its blockquote. A bare `Recovered:` takes the lines below it as
 its items; with nothing below, it is missing. While the Recovered demand is pending, each item of
@@ -94,7 +95,7 @@ stop_hook_active rewrite too, which never blocks on a refusal (decision refusals
 Cost: one stat per Stop when the session had no refusal.
 
 The triage hold (a roadmap build's `stalled step:` lines): a session whose own newest get_session record carries
-cs-build:triage (hooks/guard_merge.py _own_tier_proved) cannot end a turn while the newest roadmap build output in its
+cs-build:triage (hooks/guard_merge.py _own_role_proved) cannot end a turn while the newest roadmap build output in its
 transcript (the result of a Bash run of build.py) has an entry line, `stalled step: <id> (...)` or
 `stalled step: item <n> (...)`. An unknown line is no entry. The hold also covers a Stop after a refusal
 (stop_hook_active), which it releases only when the report's Input Needed section names every entry's id and item
@@ -154,7 +155,8 @@ checkout the global rules file names (the copied cloud layout); a tool it cannot
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
 blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
 process kept or timer. A stale record adds the clean-merge read (merge/merge.py clean_merges_after): one commit read and one compare per merge
-commit, local git starts, and at most one `git fetch origin`, all inside the review check's REVIEW_CHECK_BUDGET. A stop_hook_active rewrite is not checked.
+commit, local git starts, and at most one `git fetch origin`, all inside the review check's REVIEW_CHECK_BUDGET. A records-page commit in the walk adds one
+temporary worktree, one `git show` and one run of the records generator, once per such commit. A stop_hook_active rewrite is not checked.
 """
 import bisect
 import datetime
@@ -232,7 +234,7 @@ def _hooks_on_path():
 
 
 _hooks_on_path()
-from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with hooks/guard.py
+from shared_names import CONSULTANT_TAG, LANE_TAG  # noqa: E402  the one home of the lane and consultant tags, shared with hooks/guard.py
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -744,7 +746,9 @@ ROLE_MODEL_RE = re.compile(
     r"\b(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(haiku|sonnet|opus|fable)\b",
     re.I)
 ROLE_RE = re.compile(_ROLE, re.I)
-AGENTS_DIR = os.path.join(HERE, "..", "agents")
+# A test hook: REPORT_GUARD_AGENTS_DIR points agent_pin at a fixture folder. Read once at import; unset or empty keeps the
+# repo's agents folder. Cost: one environment read per process start, no process, no file.
+AGENTS_DIR = os.environ.get("REPORT_GUARD_AGENTS_DIR") or os.path.join(HERE, "..", "agents")
 
 
 def model_family(text):
@@ -952,11 +956,15 @@ def asks_a_question(text):
 # compaction-carry: after a compaction the session reports two lines, `Recovered:` (what it got back
 # from git, the page or a digest) and `Handoff gave:` (what the handoff supplied that the summary
 # did not), each until one lands. A label counts only where it starts an item: at line start (after
-# `>`, a bullet, and bold, backtick or quote marks), right after a report label, or after "; " or
-# ". ". So a mid-sentence "recovered:" or a backticked name of the guard is never a carry line.
+# `>`, a bullet, a Done-item tag (BUILT, RECORDED or OTHER) after that bullet, and bold, backtick or
+# quote marks), right after a report label, or after "; " or ". ". So a mid-sentence "recovered:" or a
+# backticked name of the guard is never a carry line, and neither is a bullet tagged with a non-Done word.
 CARRY_MARKS = "*_`\"'“”‘’"
-CARRY_START = (r"(?:^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+)?(?:\*\*(?:%s):?\*\*:?[ \t]*)?|[.;][ \t]+)"
-               r"[%s]*" % ("|".join(re.escape(label) for label in LABEL_ORDER), re.escape(CARRY_MARKS)))
+DONE_TAG = r"(?-i:BUILT|RECORDED|OTHER)"
+CARRY_START = (r"(?:^[ \t]*(?:>[ \t]*)*"
+               r"(?:(?:[-*+]|\d+[.)])[ \t]+(?:\*{0,2}" + DONE_TAG + r"\*{0,2}:?\*{0,2}[ \t]*)?)?"
+               + r"(?:\*\*(?:%s):?\*\*:?[ \t]*)?|[.;][ \t]+)[%s]*"
+               % ("|".join(re.escape(label) for label in LABEL_ORDER), re.escape(CARRY_MARKS)))
 CARRY_LINES = (
     ("Recovered", re.compile(CARRY_START + r"recovered(?:\*\*)?:", re.I | re.M)),
     ("Handoff gave", re.compile(CARRY_START + r"handoff gave(?:\*\*)?:", re.I | re.M)),
@@ -1074,8 +1082,10 @@ def recovered_problem(records, text):
     missing = [name for name in pending if not carry_present(name, block)]
     reasons = []
     if missing:
-        reasons.append("a compaction came before this report and no %s line has landed since" %
-                       " or ".join(missing))
+        reasons.append("a compaction came before this report and no %s line has landed since; the line forms are "
+                       "`Recovered: <item> (git|page|digest)` or `Recovered: none`, and `Handoff gave: <items>` "
+                       "or `Handoff gave: none`; a label counts where it starts an item in the report blockquote, "
+                       "also after a bullet and a Done-item tag" % " line and no ".join(missing))
     bad = unsourced_recovered_item(block) if "Recovered" in pending else ""
     if bad:
         reasons.append("the Recovered item %r names no source (git, page or digest)" % bad)
@@ -1177,10 +1187,13 @@ def mistake_problem(text):
 
 def _own_lane_read(path, own_id):
     """(is_lane, parent id): this session's own get_session record in the transcript. A lane carries the
-    tag cs-build:lane or a parent_session_id. No record reads as owner-facing."""
+    tag cs-build:lane or a parent_session_id. No record reads as owner-facing, and so does the consultant tag
+    even with a parent id, unless the lane tag is there too."""
     import own_session
     tags, _tagged_after, parent = own_session.own_session_read(path, own_id)
-    return tags is not None and (LANE_TAG in tags or bool(parent)), parent
+    if tags is None or (CONSULTANT_TAG in tags and LANE_TAG not in tags):
+        return False, None
+    return LANE_TAG in tags or bool(parent), parent
 
 
 PAGE_WRITER_ROLE = "triage"  # the session role that always writes the waiting page
@@ -1190,7 +1203,7 @@ def _is_page_writer(path):
     """True when this session's own newest get_session record carries cs-build:triage: the triage session is the
     repo's page writer, whatever parent id its record names (guard_merge's one triage reader)."""
     _hooks_on_path()
-    from guard_merge import _own_tier_proved as session_role_proved  # glossary-ok: the name guard_merge exports
+    from guard_merge import _own_role_proved as session_role_proved
     return session_role_proved(path, PAGE_WRITER_ROLE)
 
 
@@ -3095,8 +3108,8 @@ def triage_hold(hook, records, active):
         if not entries:
             return ""
         _hooks_on_path()
-        from guard_merge import _own_tier_proved
-        if not _own_tier_proved(hook.get("transcript_path"), HOLD_TIER):
+        from guard_merge import _own_role_proved
+        if not _own_role_proved(hook.get("transcript_path"), HOLD_TIER):  # glossary-ok: HOLD_TIER is the existing name
             return ""
         if active and _names_every(input_needed_section(last_reply(hook)), entries):
             return ""

@@ -49,6 +49,7 @@ ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_
                            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
 ENV.pop("VERDICT_LOG", None)
 ENV.pop("CI_JOB_LINT_WORKERS", None)
+ENV.pop("CI_JOB_HEAD_SHA", None)  # the lane lint's pushed head: a case sets it, and the unset case needs it absent
 
 
 def workflow(*steps, job="lane", other=None):
@@ -541,6 +542,47 @@ class PinNoteEnv(Job):
         self.assertEqual(seen, "<unset>", "a step that is not ste-lint saw the pin note variable: " + out)
 
 
+class HeadShaCarrier(Job):
+    """ci-job gives a step's ${{ github.event.pull_request.head.sha }} the pushed head in CI_JOB_HEAD_SHA when that is set
+    and not blank (the lane lint's HEAD is a merge commit, so it passes the head in), else HEAD. No step's env carries
+    CI_JOB_HEAD_SHA. ci-job relays no step output, so each step writes the value it sees to seen.txt."""
+
+    SEEN = "printf '%s' \"$HEAD_SHA\" > seen.txt"
+    SEEN_ENV = "printf '%s' \"${CI_JOB_HEAD_SHA-<unset>}\" > seen.txt"
+    HEAD_EXPR = {"HEAD_SHA": "${{ github.event.pull_request.head.sha }}"}
+    PUSHED = "f" * 40  # a pushed head that is not HEAD of the throwaway repo
+
+    def setUp(self):
+        super().setUp()
+        subprocess.run(["git", "-C", self.root, "commit", "-q", "--allow-empty", "-m", "c"], check=True, env=ENV)
+        self.head_sha = subprocess.run(["git", "-C", self.root, "rev-parse", "HEAD"], capture_output=True, text=True,
+                                       check=True, env=ENV).stdout.strip()
+
+    def test_a_step_reading_the_head_sha_sees_the_pushed_head_when_the_env_sets_it(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN, env=self.HEAD_EXPR),
+                                              env={"CI_JOB_HEAD_SHA": self.PUSHED})
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertEqual(seen, self.PUSHED, "a step's head.sha is not CI_JOB_HEAD_SHA: " + out)
+
+    def test_a_blank_or_whitespace_pushed_head_falls_back_to_head(self):
+        for blank in ("", "   ", " \t "):
+            with self.subTest(blank=blank):
+                verdicts, seen, out = self.seen_after(step("seen", self.SEEN, env=self.HEAD_EXPR),
+                                                      env={"CI_JOB_HEAD_SHA": blank})
+                self.assertEqual(verdicts, ["PASS"], out)
+                self.assertEqual(seen, self.head_sha, "a blank CI_JOB_HEAD_SHA did not fall back to HEAD: " + out)
+
+    def test_an_unset_pushed_head_falls_back_to_head(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN, env=self.HEAD_EXPR))
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertEqual(seen, self.head_sha, "an unset CI_JOB_HEAD_SHA did not fall back to HEAD: " + out)
+
+    def test_a_step_env_never_carries_the_pushed_head_sha(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN_ENV), env={"CI_JOB_HEAD_SHA": self.PUSHED})
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertEqual(seen, "<unset>", "a step saw CI_JOB_HEAD_SHA in its env: " + out)
+
+
 def mapped(parent, body):
     """One `      - ` step whose `parent:` block (`with` or `env`) holds `body`, raw, as YAML writes it."""
     return "      - name: s\n        %s:\n%s\n" % (parent, body)
@@ -732,6 +774,47 @@ class RealChecks(unittest.TestCase):
         multi = [ln for ln in lines if "Opt-in CI template fixture suites" in ln]
         self.assertEqual(len(multi), 1, done.stdout)
         self.assertFalse(multi[0].startswith("skipped"), multi[0])
+
+
+class DebtRetireInLint(unittest.TestCase):
+    """The debt Retire step reads the PR body from the event file, which only CI has. A lint run of checks (merge's small-base
+    and lane lint) cannot read that body, so it does not plan the step. A plain plan of checks still plans it."""
+
+    STEP = "Debt retire check"
+
+    def planned(self, *args):
+        done = plan_job("checks", *args, "--base", "HEAD", cwd=os.path.join(HERE, ".."))
+        return done, by_step(done.stdout.splitlines())
+
+    def test_f1a_a_lint_run_of_checks_does_not_plan_the_debt_retire_step(self):
+        done, states = self.planned("--lint", "--plan")
+        self.assertIn(self.STEP, states, "scope: the lint plan names no %r step: %s" % (self.STEP, done.stdout + done.stderr))
+        self.assertIn(states[self.STEP], ("skipped", "not run"),
+                      "a lint run plans the debt Retire step as %r, which needs the PR body that only CI reads" % states[self.STEP])
+
+    def test_f1b_a_plain_plan_of_checks_still_plans_the_debt_retire_step(self):
+        done, states = self.planned("--plan")
+        self.assertIn(self.STEP, states, "scope: the plain plan names no %r step: %s" % (self.STEP, done.stdout + done.stderr))
+        self.assertEqual(states[self.STEP], "would run",
+                         "a plain plan of checks no longer plans the debt Retire step")
+
+
+class TokenValue(unittest.TestCase):
+    """A step env that maps ${{ github.token }} reads as a value: a plan has no runner token, so the value is empty. An unknown
+    there would refuse every lint run of a job whose step maps the token (bin/ci-job's values map, its one home)."""
+
+    def test_f8_a_step_env_of_github_token_is_planned_not_unknown(self):
+        root = tempfile.mkdtemp(prefix="token-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, root, True)
+        subprocess.run(["git", "init", "-q", "-b", "main", root], check=True, env=ENV)
+        path = os.path.join(root, "wf.yml")
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(workflow(step("reads token", "echo ok", env={"GH_TOKEN": "${{ github.token }}"})))
+        done = plan_job("lane", "--plan", "--base", "HEAD", "--workflow", path, cwd=root)
+        states = by_step(done.stdout.splitlines())
+        self.assertIn("reads token", states, "scope: the plan names no 'reads token' step: " + done.stdout + done.stderr)
+        self.assertEqual(states["reads token"], "would run",
+                         "the plan reads the step's ${{ github.token }} env as unknown, not as a value")
 
 
 def launcher(patch):

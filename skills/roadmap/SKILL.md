@@ -286,12 +286,23 @@ After each build the roadmap build script prints the upkeep list for the triage 
     The page writes `open` and `closed` only, so only `closed` releases a lane;
   - no step is still doing under it (its `lane` field names the session, status `doing` or `active`, not landed on main). A lane that passes the other tests reads a hold line instead.
 
+  A lane whose only holders are stale drafts reads `joint (close #<n> ...; archive archive/<branch> ...; archive lane
+  <session id>)`, and the row counts it. A stale draft meets every test in this list. It is over 12 h old at `readAt`,
+  not held, and has no review log. Its `head` is a full 40-hex sha not in the default branch (a draft with none, or a
+  short one, gives no joint line). Its branch is not one that another live lane's row holds. No doing step is named in
+  its branch or title. Any step still doing under the lane holds the joint line, even one a merged pull marks landed.
+  So does an open pull on a `lane/<slug>-*` branch (the archive guard counts it as the lane's own). The lane's session
+  row needs `idle_since` (ISO time with a zone) over 12 h before `readAt`. It also needs `unarchived_epoch` as the JSON
+  int 0 (not false, 0.0 or text). One open pull whose title or branch holds the word
+  `records` stops every joint line. The batch runner pushes each branch to `archive/<branch>`, closes each draft, then
+  archives the lane. The joint pass reads rows already loaded: no process, file or log of its own.
+
   An idle lane not to archive now reads `hold (<reason>; lane <session id>)`. The reason is one of three.
   `no cs-step tag`: the archive guard refuses such a lane. A step id that is off the record branch with no
   `Step:` trailer on main. When the lane also carries another repo's `cs-repo:` tag, that reason ends `; also tagged <those tags>`.
   `step <ids> still doing under this lane`: each step whose `lane` is the session, with status doing or active, not landed on main.
   The last clears when the step's status is set to todo or done. A lane that waits (a step not done, an
-  open pull, an open item) prints no line. The row's count leaves holds out. A live file with no `items` list makes the row unknown. An `items` row with the
+  open pull, an open item) prints no line, except the joint case below. The row's count leaves holds out. A live file with no `items` list makes the row unknown. An `items` row with the
   wrong shape makes the row unknown. Each entry reads `<session id> (<steps>; topic <cs-topic or ->)`,
   sorted. The row reads one `unknown (<why>)` entry, never an empty list, when:
   - `--live` is missing or unreadable;
@@ -307,6 +318,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   a summary line that gives the held count when there are holds. It exits 1, with no summary line, when every entry is unknown;
 - `Step:` trailers that name no step;
 - `open step waits on a closed unmerged PR`: an open step whose title, why or note waits on PR #N. A wait is a phrase in `WAIT_ON_PULL_PHRASES` in `build.py`. The word `PR` may sit before `#N`. A `#N` followed by `closed` or `merged` is history, not a wait. The row lists the step when `landedPulls` has a row for #N with `merged` false. It skips #N when `landedPulls` has a `merged` true row for #N, or when #N is an open pull. It also skips #N when the head of its `merged` false row is on main (`head_on_main`, as for the landed rows). A PR closed before the 14-day `landedPulls` window is not seen. Each entry is `<step id> (#N)`. The row reads `unknown (the live file has no landedPulls list)` when the live file has no `landedPulls` key. A live read that is unknown, such as no `--live` file, makes the row unknown too. An empty `landedPulls` list reads none. The fix is to name the step slug it waits on in the step's `blockedBy` list (owner, 2026-11-10 13:10 CST);
+- `status drift`: a step whose hand status differs from the status the build derives. The build prints one line per step, `status drift: <id> (hand <x>, derived <y>)`, and lists the same entries as `<id> (hand <x>, derived <y>)` in this row. It never changes the exit code. Derived is `done` when a merged proof names the step. A merged proof is a `Step:` trailer on main, or a `landedPulls` row that is merged or whose head is on main. A `done` step is read too. Else derived is `doing` when an open pull's branch is the step id or `lane/<id>`. Else the hand status stands and nothing is flagged. A merged proof beats an open pull. Hand `active` agrees with derived `doing`. Any other difference is flagged: `blocked`, `queued`, `folded`, `todo`, `ready` or `done` against derived `doing`, or any hand status but `done` against derived `done`. No session tag is a source, so a live `cs-step` session derives nothing. The row reads `unknown (<why>)`, as the sibling rows do, when the read is unknown: no `--live` file, a pulls list that is missing, stale or has skipped rows, skipped `landedPulls` rows, or main that cannot be read. A live file with no `landedPulls` list reads unknown only when the build finds no drift. An unknown pulls read derives no `doing`, but a merged proof from main still derives `done`, and its line still prints. Main unreadable prints no line. The row reads `0` only for a known-good read with no drift. Checks: `skills/roadmap/test_derived_status.py` (`DerivedStatus`), through `status_drift` in `build.py`;
 - `done without check`: a `done` step updated on or after the cutoff (`DONE_CHECK_SINCE`, in the build script) that names no Done check. It is also listed when its note, why and ask hold no `Done check green on main:` (any case) with a `#N`, `PR N`, URL or commit hash right after it. Triage's close writes that line, such as `Done check green on main: #1312.` The instruction is in the Triage bullet of the operating model (skill `project-ops`). A `done` step updated before the cutoff is not judged, because the Done check line had not shipped then.
 
 ## Cost
@@ -324,9 +336,10 @@ The `landedPulls` rows cost the publisher one more GitHub list call (closed pull
 one `git merge-base` per closed unmerged PR that an open step waits on, once per build. A closed row no open step
 waits on runs no git for this row. It writes no file. The landed rows add their own `git merge-base` per distinct head of an unmerged
 row whose branch is an open step, and a row with `merged: true` runs no git. They add no file, timer or log.
+The status drift row adds no GitHub read: it reads the live file's pulls and `landedPulls`, and the git log of main with done steps included. That is one more `git log`, plus one more `git merge-base` per distinct head of an unmerged `landedPulls` row on any step, open or done, which repeats the landed rows' own reads. `head_on_main` caches per call, not across the two. It adds no file, timer or log.
 The mockup check runs at most four git processes per build, however many entries and origin refs (the ref listing, the shallow check, one batched type read, and one batched link read when a ref holds a blob at an entry's path). Check: `test_five_entries_over_fifty_origin_refs_start_at_most_four_git_processes` in `skills/roadmap/test_build.py`. It adds no file, timer or log.
 No watcher, no timer, no log.
 
 ## Tests
 
-`python3 skills/roadmap/test_build.py` in the claude-settings checkout.
+`python3 skills/roadmap/test_build.py` and `python3 skills/roadmap/test_derived_status.py` in the claude-settings checkout.

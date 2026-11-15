@@ -60,8 +60,10 @@ Inbox: <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.inbox.md, outside git. Format:
 
 Repeat flag (decision owner-feedback-inbox, "Repeats"): the Stop guard judges each new item with one
   model call per Stop, `decision_watch.invoke_model` (model claude-haiku-5-5, timeout 45 s, effort
-  None). A match appends ` repeats <ref>` to the item's line in the inbox. The block reason names it,
-  or systemMessage does when stop_hook_active. Judged ids are kept in the turn state file under
+  None). A match appends ` repeats <ref>` to the item's line in the inbox. systemMessage names it, one
+  line per mark, and a mark never blocks: it is a note the session merges or drops, so a guess never
+  stops a turn. A candidate on the item's own
+  home is dropped for that item. Judged ids are kept in the turn state file under
   `judged`. Candidates come from the repo of the payload cwd: the step at refs/remotes/origin/roadmap,
   the layout's backlog files in the working tree, and older inboxes whose sidecar `<sid>.inbox.repo`
   names the repo. Capture writes that sidecar once, in a repo. The repeat cases stub the model call
@@ -208,6 +210,7 @@ import shutil
 import subprocess
 import sys
 import time
+import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
@@ -219,6 +222,8 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 # line. These cases check the Central line alone, so no child sees a store.
 for _name in ("MAILBOX_REPO", "MAILBOX_CACHE"):
     os.environ.pop(_name, None)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 LT_PATH =os.environ.get("LOCAL_TIME_UNDER_TEST") or os.path.join(HERE, "local_time.py")
 GUARD_PATH = os.environ.get("FEEDBACK_GUARD_UNDER_TEST") or os.path.join(HERE, "feedback_guard.py")
 PRECOMPACT_PATH = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(
@@ -316,11 +321,8 @@ def run(path, raw, cfg, args=(), extra_env=None):
         env.pop(name, None)
     env.update(CLAUDE_CONFIG_DIR=cfg, HOME=home, USERPROFILE=home)
     env.update(extra_env or {})
-    try:
-        cp = subprocess.run([sys.executable, path, *args], input=raw, capture_output=True,
-                            env=env, cwd=home, timeout=30)
-    except subprocess.TimeoutExpired:
-        return Proc(-1, "", "timed out after 30 s")
+    cp = subprocess.run([sys.executable, path, *args], input=raw, capture_output=True,
+                        env=env, cwd=home)
     return Proc(cp.returncode, cp.stdout.decode("utf-8", "replace"),
                 cp.stderr.decode("utf-8", "replace"))
 
@@ -369,14 +371,16 @@ WIN_CMDLINE_MAX = 32000
 
 def git(where, *args, env=None, stdin=None):
     """Runs git in `where` with the fixture identity. Returns its stdout; raises when git fails, or when
-    the command line is over WIN_CMDLINE_MAX. Long path lists go on stdin, not in args."""
+    the command line is over WIN_CMDLINE_MAX. Long path lists go on stdin, not in args. It has no time
+    limit: a fixed one fails a slow Windows runner (put_ref's hash-object over 250 files), and the CI job cap
+    is the hang guard."""
     argv = ["git", *GIT_ID, "-C", where, *args]
     line = subprocess.list2cmdline(argv)
     if len(line) > WIN_CMDLINE_MAX:
         check("git: %s command line fits the Windows limit" % args[0], False,
               "%d chars, limit %d" % (len(line), WIN_CMDLINE_MAX))
         raise RuntimeError("git %s: command line of %d chars" % (args[0], len(line)))
-    cp = subprocess.run(argv, capture_output=True, timeout=30, env=env, input=stdin)
+    cp = subprocess.run(argv, capture_output=True, env=env, input=stdin)
     if cp.returncode != 0:
         raise RuntimeError("git %s: %s" % (" ".join(args), cp.stderr.decode("utf-8", "replace")))
     return cp.stdout.decode("utf-8", "replace")
@@ -2311,6 +2315,77 @@ def case_grant_act_words_narrowed_passes():
                       homed(new_cfg(), "narrowed", (), text=text))
 
 
+# The grant line: a message's first line that starts `Grant:` and holds a Central time is the owner's record of
+# a grant. Its words are not read for grant words. Every other line is read as before.
+GRANT_LINE_CST = "Grant: merge any PR, owner 19:53 CST Nov 13"
+GRANT_LINE_CDT = "Grant: merge any PR, owner 19:53 CDT Nov 13"
+GRANT_LINE_NO_TIME = "Grant: merge all PRs"
+GRANT_BODY = "Rebase the lane on main, then run the checks."
+CENTRAL_TIME = re.compile(r"\d{1,2}:\d{2} C[SD]T")
+
+
+def block_lines(text):
+    """The lines of one block, read back the way the test reader reads an inbox block."""
+    blocks = read_blocks(render_block(text))
+    return blocks[0]["text"].split("\n") if blocks and blocks[0]["text"] is not None else []
+
+
+def case_grant_line_with_a_central_time_is_not_read_passes():
+    """A first line that starts `Grant:` and holds a Central time is not read for grant words. The first line
+    holds a grant word and an act word. The body holds neither, so each row passes. The lone line is the empty
+    body state. Red now: the first line blocks each row, as it holds a grant word and an act word."""
+    rows = (
+        ("the CST line with a clean body", GRANT_LINE_CST + "\n" + GRANT_BODY, ("- fb-0958-2 [note] -> noted",)),
+        ("the CDT line with a clean body", GRANT_LINE_CDT + "\n" + GRANT_BODY, ("- fb-0958-2 [note] -> noted",)),
+        ("the CST line alone", GRANT_LINE_CST, ()),
+    )
+    for label, text, items in rows:
+        first = text.split("\n")[0]
+        check("grant line, %s: the first line holds a Central time" % label,
+              CENTRAL_TIME.search(first) is not None, first)
+        check("grant line, %s: the Grant line is the block's first line" % label,
+              block_lines(text)[:1] == [first], block_lines(text))
+        expect_silent("grant line: %s passes" % label, homed(new_cfg(), "grant-line-time", items, text=text))
+
+
+def case_grant_line_body_is_still_read_blocks():
+    """The lines after a Grant line are read as before: a body line with a grant word and an act word blocks,
+    with no home. Green control: the message blocks today on its first line, and the fix must still block it on
+    this body line."""
+    text = GRANT_LINE_CST + "\napprove and merge it."
+    p = homed(new_cfg(), "grant-line-body", ("- fb-0958-2 [note] -> noted",), text=text)
+    expect_grant_block("grant line: a body line 'approve and merge it.' still blocks", p, text)
+
+
+def case_grant_line_not_first_still_blocks():
+    """A Grant line that is not the first line is read like any other line, so the message blocks with no home.
+    Green control: the fix must exempt the first line only."""
+    text = GRANT_BODY + "\n" + GRANT_LINE_CST
+    check("grant line not first: the Grant line is the block's second line",
+          block_lines(text)[1:2] == [GRANT_LINE_CST], block_lines(text))
+    p = homed(new_cfg(), "grant-line-second", ("- fb-0958-2 [note] -> noted",), text=text)
+    expect_grant_block("grant line: a Grant line that is not the first line still blocks", p, text)
+
+
+def case_grant_line_without_a_time_still_blocks():
+    """A first line that starts `Grant:` with no Central time is read as before, so the lone line blocks with no
+    home. Green control: the Central time is what exempts the line."""
+    check("grant line without a time: the line holds no Central time",
+          CENTRAL_TIME.search(GRANT_LINE_NO_TIME) is None, GRANT_LINE_NO_TIME)
+    p = homed(new_cfg(), "grant-line-no-time", (), text=GRANT_LINE_NO_TIME)
+    expect_grant_block("grant line: 'Grant: merge all PRs' with no time still blocks", p, GRANT_LINE_NO_TIME)
+
+
+def case_grant_line_fenced_text_is_not_read_passes():
+    """Fenced text after a Grant line is still not read. The first line holds a Central time and no act word, so
+    only the fence holds a grant word and an act word. Green control: it passes today, and the fix must keep the
+    fence unread."""
+    text = ("Grant: coordinator role, owner flywheel (2026-11-11 22:38 CST)\n"
+            "```\napprove and merge it.\n```\n" + GRANT_BODY)
+    p = homed(new_cfg(), "grant-line-fence", ("- fb-0958-2 [note] -> noted",), text=text)
+    expect_silent("grant line: fenced 'approve and merge it.' after a Grant line passes", p)
+
+
 def case_pick_letters_a_to_h_passes():
     """Pick letters are a to h. "1 y, 2 n" is no pick, so it passes with no send. Red now."""
     p = page_run(new_cfg(), "pick-yn", [("1 y, 2 n", ())], [owner_rec("1 y, 2 n"), said_rec("Noted.")],
@@ -3122,9 +3197,23 @@ ANSWER_NONE = json.dumps({"repeats": []})
 # up subprocess.Popen when it runs, so a subclass installed here sees every start. Each git start
 # appends its argv to GIT_START_LOG when that variable is set. Python does the logging, so the count
 # is the same on every OS.
-PROBE_SOURCE = r"""import json, os, runpy, subprocess, sys
+PROBE_SOURCE = r"""import json, os, re, runpy, subprocess, sys
 sys.path.insert(0, sys.argv[1])
 import decision_watch
+
+
+# FG_STUB_PICK is a JSON list of [item id, phrase]. The answer names, for each pair, the first candidate line of
+# the prompt whose text holds the phrase, so a case names a candidate by its words, not by its ref.
+def pick(prompt):
+    part = prompt.split("\nCANDIDATES\n", 1)[1] if "\nCANDIDATES\n" in prompt else ""
+    repeats = []
+    for item_id, phrase in json.loads(os.environ["FG_STUB_PICK"]):
+        for ln in part.split("\n"):
+            m = re.match(r"\[(.+?)\] (.*)$", ln)
+            if m and phrase in m.group(2):
+                repeats.append({"id": item_id, "ref": m.group(1)})
+                break
+    return {"repeats": repeats}
 
 
 def stub(prompt, model=decision_watch.MODEL, timeout=decision_watch.MODEL_TIMEOUT, shape=None,
@@ -3140,6 +3229,8 @@ def stub(prompt, model=decision_watch.MODEL, timeout=decision_watch.MODEL_TIMEOU
             f.write("\n".join(kept))
     if os.environ.get("FG_STUB_ERROR"):
         return None, os.environ["FG_STUB_ERROR"]
+    if os.environ.get("FG_STUB_PICK"):
+        return pick(prompt), None
     return json.loads(os.environ.get("FG_STUB_ANSWER", '{"repeats": []}')), None
 
 
@@ -3207,10 +3298,11 @@ def repeat_answer(*item_ids):
     return json.dumps({"repeats": [{"id": i, "ref": REPEAT_REF} for i in item_ids]})
 
 
-def stop(cfg, sid, cwd, answer=None, error=None, stop_active=False, extra_env=None, drop=None):
+def stop(cfg, sid, cwd, answer=None, error=None, stop_active=False, extra_env=None, drop=None, pick=None):
     """One Stop of the guard, run the way the Stop hook runs it, with the model stubbed by the probe.
     Returns (Proc, calls). Each call is a dict the stub logged: prompt, model, timeout, effort.
-    `drop` = (file, line prefix): the stub removes those lines from the file while the model runs."""
+    `drop` = (file, line prefix): the stub removes those lines from the file while the model runs.
+    `pick` = [[item id, phrase], ...]: the stub names each item the candidate whose text holds the phrase."""
     JUDGE_RUNS[0] += 1
     log = os.path.join(os.path.dirname(cfg), "model-calls-%d.log" % JUDGE_RUNS[0])
     env = dict(extra_env or {}, FG_STUB_LOG=log)
@@ -3220,6 +3312,8 @@ def stop(cfg, sid, cwd, answer=None, error=None, stop_active=False, extra_env=No
         env["FG_STUB_ERROR"] = error
     if drop is not None:
         env["FG_STUB_DROP"] = json.dumps(list(drop))
+    if pick is not None:
+        env["FG_STUB_PICK"] = json.dumps(pick)
     obj = {"hook_event_name": "Stop", "session_id": sid, "stop_hook_active": stop_active, "cwd": cwd}
     p = run(probe_path(), payload(obj), cfg, args=(HERE, GUARD_PATH), extra_env=env)
     return p, [json.loads(ln) for ln in read_or_empty(log).splitlines()]
@@ -3285,6 +3379,12 @@ def written_between(before, after):
     return {rel for rel, state in after.items() if before.get(rel) != state}
 
 
+def bytes_written(before, after):
+    """The relative paths whose bytes are new or different between two snapshots. A rewrite with the same bytes is
+    no change here, unlike written_between, which reads the mtime too."""
+    return {rel for rel, (_, data) in after.items() if before.get(rel, (None, None))[1] != data}
+
+
 def git_counter(cfg):
     """The log that counts git starts in one case's runs. The probe appends one line per start to it,
     for the guard and for the capture hook alike. Returns the env for run()."""
@@ -3310,13 +3410,14 @@ def plain_folder(base):
 
 def in_a_repo(path):
     cp = subprocess.run(["git", "-C", path, "rev-parse", "--is-inside-work-tree"],
-                        capture_output=True, timeout=30)
+                        capture_output=True)
     return cp.returncode == 0
 
 
-def case_repeat_roadmap_step_marks_the_item_and_blocks():
+def case_repeat_roadmap_step_marks_the_item_and_tells_the_owner():
     """The owner says `carousel`; the step says `wheel`. The model names the step for the item. The
-    item line gains the mark, and the block names it. The mark keeps the line well formed."""
+    item line gains the mark, systemMessage names it, and the mark blocks nothing, because a mark is a note
+    the session merges or drops. The mark keeps the line well formed."""
     root = repeat_repo("repeat-roadmap", step=True)
     cfg, sid = new_cfg(), "repeat-roadmap"
     check("roadmap: the message is saved", ran_central(capture(cfg, sid, MSG_ONE, cwd=root)))
@@ -3330,10 +3431,12 @@ def case_repeat_roadmap_step_marks_the_item_and_blocks():
           MSG_ONE.split("\n")[0] in prompt and ITEM_ID in prompt, prompt[-300:])
     check("roadmap: the item line gains the mark", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE + MARKED,
           inbox_line(cfg, sid, ITEM_ID))
+    out = guard_json(p) or {}
+    check("roadmap: the mark blocks nothing", not is_block(out), p.desc())
+    check("roadmap: systemMessage names the item and the ref",
+          "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in str(out.get("systemMessage", "")), p.desc())
     reason = block_reason(p) or ""
-    check("roadmap: the block reason names the item and the ref",
-          "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in reason, p.desc())
-    check("roadmap: no reason calls the item malformed", "malformed" not in reason, reason)
+    check("roadmap: no block reason calls the item malformed", "malformed" not in reason, reason)
 
 
 def case_repeat_stop_hook_active_marks_and_tells_the_owner():
@@ -3524,10 +3627,23 @@ def case_repeat_cost_one_call_one_grep_and_two_files():
           extra <= 1, "judging=%d quiet=%d grep=%d" % (len(lines1), len(lines2), grep_starts(lines1)))
 
 
+def candidates_part(prompt):
+    """The text under the prompt's CANDIDATES heading."""
+    return prompt.split("\nCANDIDATES\n", 1)[1] if "\nCANDIDATES\n" in prompt else ""
+
+
 def candidate_refs(prompt):
     """The ref of each candidate line: the lines under the prompt's CANDIDATES heading."""
-    part = prompt.split("\nCANDIDATES\n", 1)[1] if "\nCANDIDATES\n" in prompt else ""
-    return re.findall(r"^\[([^\]]+)\] ", part, re.M)
+    return re.findall(r"^\[([^\]]+)\] ", candidates_part(prompt), re.M)
+
+
+def candidate_ref_of(prompt, phrase):
+    """The ref of the first candidate line whose text holds `phrase`, or "" when no candidate does."""
+    for ln in candidates_part(prompt).split("\n"):
+        m = re.match(r"\[(.+?)\] (.*)$", ln)
+        if m and phrase in m.group(2):
+            return m.group(1)
+    return ""
 
 
 def cap_counts(prompt):
@@ -3584,27 +3700,36 @@ def case_repeat_cap_keeps_each_source_within_its_share():
         check("cap %d: at most 100 inbox blocks" % steps, counts["inbox"] <= 100, counts)
 
 
-def case_repeat_repeat_only_reason_has_no_page_suffix_and_no_double_period():
-    """A block whose only reason is a repeat flag carries neither the page and standing suffix, nor a
-    double period. A flag beside another reason has no double period either."""
+def case_repeat_mark_never_blocks_and_prints_one_system_line():
+    """A mark never blocks, because it is a note the session merges or drops, not a gate on the turn. A Stop
+    whose only reason is a mark passes: systemMessage holds the one flag line, and the line still gains the
+    mark. A mark beside a burst message
+    that needs items keeps the block for that reason alone: the flag stays out of the block reason, and
+    systemMessage holds it, with no double period in the reason."""
     root = repeat_repo("repeat-reason", step=True)
     cfg, sid = new_cfg(), "repeat-reason"
     capture(cfg, sid, MSG_ONE, cwd=root)
     add_item(cfg, sid)
     p, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
-    reason = block_reason(p) or ""
-    check("reason: the repeat-only Stop blocks", block_reason(p) is not None, p.desc())
-    check("reason: no page and standing suffix on a repeat-only block",
-          "Send each page ruling" not in reason, reason)
-    check("reason: no double period in a repeat-only block", ".." not in reason, reason)
+    out = guard_json(p) or {}
+    check("never blocks: a Stop whose only reason is a mark does not block", not is_block(out), p.desc())
+    msg = str(out.get("systemMessage", ""))
+    check("never blocks: systemMessage holds the flag as one line",
+          "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in msg and "\n" not in msg, p.desc())
+    check("never blocks: the mark still lands on the item line", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE + MARKED,
+          inbox_line(cfg, sid, ITEM_ID))
     cfg2, sid2 = new_cfg(), "repeat-mixed"
     capture(cfg2, sid2, MSG_ONE, cwd=root)
     add_item(cfg2, sid2)
     capture(cfg2, sid2, MSG_TWO, cwd=root)  # a burst message with no item: a reason of its own
     p2, calls2 = stop(cfg2, sid2, root, answer=repeat_answer(ITEM_ID))
     reason2 = block_reason(p2) or ""
-    check("reason: a repeat flag beside another reason is in the block with no double period",
-          "may repeat" in reason2 and ".." not in reason2, reason2)
+    check("never blocks: a burst reason still blocks beside a mark", block_reason(p2) is not None, p2.desc())
+    check("never blocks: the flag stays out of the block reason", "may repeat" not in reason2, reason2)
+    check("never blocks: systemMessage holds the flag beside the block",
+          "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in str((guard_json(p2) or {}).get("systemMessage", "")),
+          p2.desc())
+    check("never blocks: no double period in the block reason", ".." not in reason2, reason2)
 
 
 def case_repeat_second_judging_adds_no_second_mark():
@@ -3625,8 +3750,8 @@ def case_repeat_second_judging_adds_no_second_mark():
 
 
 def case_repeat_unplaced_mark_is_reported_as_not_marked():
-    """The item's line is gone by the time the mark goes on: the block reason names the flag and says
-    it is not marked, and never says it is marked on the item."""
+    """The item's line is gone by the time the mark goes on: systemMessage names the flag and says
+    it is not marked, and never says it is marked on the item. The mark blocks nothing."""
     root = repeat_repo("repeat-unplaced", step=True)
     cfg, sid = new_cfg(), "repeat-unplaced"
     capture(cfg, sid, MSG_ONE, cwd=root)
@@ -3634,11 +3759,12 @@ def case_repeat_unplaced_mark_is_reported_as_not_marked():
     p, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID),
                     drop=(inbox_of(cfg, sid), "- " + ITEM_ID + " "))
     check("unplaced: one model call", len(calls) == 1, p.desc())
-    reason = block_reason(p) or ""
-    check("unplaced: the reason names the flag", "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in reason, p.desc())
-    check("unplaced: the reason says not marked", "not marked" in reason, reason)
-    check("unplaced: the reason never says marked on the item",
-          re.search(r"(?<!not )marked on the item", reason) is None, reason)
+    msg = str((guard_json(p) or {}).get("systemMessage", ""))
+    check("unplaced: systemMessage names the flag", "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in msg, p.desc())
+    check("unplaced: systemMessage says not marked", "not marked" in msg, msg)
+    check("unplaced: systemMessage never says marked on the item",
+          re.search(r"(?<!not )marked on the item", msg) is None, msg)
+    check("unplaced: the mark blocks nothing", not is_block(guard_json(p)), p.desc())
 
 
 def case_repeat_word_repeats_in_an_item_still_gets_the_mark():
@@ -3657,10 +3783,10 @@ def case_repeat_word_repeats_in_an_item_still_gets_the_mark():
           inbox_line(cfg, sid, "fb-1-4") == line4 + MARKED, inbox_line(cfg, sid, "fb-1-4"))
     check("word: a ref-like run mid-line is not a mark, so the line gains one",
           inbox_line(cfg, sid, "fb-1-5") == line5 + MARKED, inbox_line(cfg, sid, "fb-1-5"))
-    reason = block_reason(p) or ""
-    check("word: the reason names both items and says marked",
-          "fb-1-4 may repeat %s" % REPEAT_REF in reason and "fb-1-5 may repeat %s" % REPEAT_REF in reason
-          and "marked on the item" in reason and "not marked" not in reason, reason)
+    msg = str((guard_json(p) or {}).get("systemMessage", ""))
+    check("word: systemMessage names both items and says marked",
+          "fb-1-4 may repeat %s" % REPEAT_REF in msg and "fb-1-5 may repeat %s" % REPEAT_REF in msg
+          and "marked on the item" in msg and "not marked" not in msg, msg)
 
 
 def case_repeat_cap_keeps_the_newest_notes_lines():
@@ -3698,7 +3824,7 @@ def case_repeat_cap_keeps_the_open_roadmap_steps():
 
 def case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit():
     """An answer entry whose id or ref is a list is not a hit. It must not stop the valid hit of the same
-    answer, which still gets its mark and its reason."""
+    answer, which still gets its mark and its systemMessage line."""
     root = repeat_repo("repeat-list", step=True)
     cfg, sid = new_cfg(), "repeat-list"
     capture(cfg, sid, MSG_ONE, cwd=root)
@@ -3711,8 +3837,8 @@ def case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit():
     check("list: one model call", len(calls) == 1, p.desc())
     check("list: the valid hit still marks the line", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE + MARKED,
           inbox_line(cfg, sid, ITEM_ID))
-    reason = block_reason(p) or ""
-    check("list: the block names the valid hit", "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in reason,
+    msg = str((guard_json(p) or {}).get("systemMessage", ""))
+    check("list: systemMessage names the valid hit", "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in msg,
           p.desc())
     check("list: no repeats-not-checked note", "repeats not checked" not in str(guard_json(p) or {}),
           p.desc())
@@ -3778,6 +3904,223 @@ def case_repeat_repo_item_is_never_judged_as_a_repeat():
     check("repo item: the note beside it is in the prompt", "[%s]" % ITEM_ID_2 in prompt, prompt[-300:])
     check("repo item: its line gets no mark", " repeats " not in inbox_line(cfg, sid, REPO_ID),
           inbox_line(cfg, sid, REPO_ID))
+
+
+# The own-home and per-item cases write the inbox with fixed headers, not with capture(): a capture stamps
+# the real clock, and two captures in one minute share an inbox ref, so the refs would not name a message.
+NEW_SID = "c3d4e5f6-0a1b-4c2d"
+EARLY_HEADER = "2026-10-13 10:04 CDT (UTC-05:00)"
+LATE_HEADER = "2026-10-13 10:09 CDT (UTC-05:00)"
+EARLY_REF = "inbox:%s@%s" % (NEW_SID[:8], EARLY_HEADER[:16])  # the candidate ref of the 10:04 message
+MARK_EARLY = " repeats " + EARLY_REF
+
+
+def write_inbox(cfg, sid, rows):
+    """Writes the inbox from (header, text, items) rows, in the format, each header as given."""
+    write_file(inbox_of(cfg, sid), "".join(render_block(text, header=h, items=items) for h, text, items in rows))
+
+
+LATE_REF = "inbox:%s@%s" % (NEW_SID[:8], LATE_HEADER[:16])  # the candidate ref of the 10:09 message
+SAME_MINUTE_REF = EARLY_REF + "#2"  # the second of two messages stamped 10:04: inbox_refs takes `#2`
+AGAIN_ID = "fb-1004-1"
+AGAIN_LINE = "- fb-1004-1 [note] -> noted"
+
+
+def judged_again_with_mark(name, second_header, second_ref, mark):
+    """The shared step of the second-judging marks. The item sits on the first message, with `mark` already on
+    its line. The second message is a plain one stamped `second_header`. The Stop judges the item again, and the
+    model names `second_ref` as its repeat. Returns (cfg, Proc, calls)."""
+    root = repeat_repo(name, step=True)
+    cfg = new_cfg()
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [AGAIN_LINE + mark]), (second_header, MSG_TWO, [])])
+    answer = json.dumps({"repeats": [{"id": AGAIN_ID, "ref": second_ref}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    return cfg, p, calls
+
+
+def case_repeat_same_minute_mark_is_recognised_on_a_second_judging():
+    """A ref of a message stamped in a minute shared with another ends `#<block number>` (inbox_refs). A line
+    already marked with that ref is marked: a Stop that judges the item again must leave the line with its one
+    mark. MARKED must recognise the `#N` suffix: without it, the `#2` mark reads as no mark, and mark_items
+    appends the same ref again. The Stop's flag line names the ref, so the hit is known accepted, not a
+    vacuous pass."""
+    mark = " repeats " + SAME_MINUTE_REF
+    cfg, p, calls = judged_again_with_mark("repeat-same-minute-mark", EARLY_HEADER, SAME_MINUTE_REF, mark)
+    check("same minute mark: the Stop judges the item once", len(calls) == 1, p.desc())
+    check("same minute mark: the Stop flags the item at its ref", "%s may repeat %s" % (AGAIN_ID, SAME_MINUTE_REF) in p.out,
+          p.desc())
+    check("same minute mark: the line keeps its one mark",
+          inbox_line(cfg, NEW_SID, AGAIN_ID) == AGAIN_LINE + mark, inbox_line(cfg, NEW_SID, AGAIN_ID))
+
+
+def case_repeat_unsuffixed_mark_stays_one_mark_on_a_second_judging():
+    """Control for the case above: the same shape with the second message in its own minute, so its ref has no
+    `#`. MARKED matches a time-only ref, and mark_items adds no second mark. It keeps the plain ref working
+    beside the `#N` case, so a fix to the suffix match cannot break the plain one."""
+    mark = " repeats " + LATE_REF
+    cfg, p, calls = judged_again_with_mark("repeat-unsuffixed-mark", LATE_HEADER, LATE_REF, mark)
+    check("unsuffixed mark control: the Stop judges the item once", len(calls) == 1, p.desc())
+    check("unsuffixed mark control: the Stop flags the item at its ref", "%s may repeat %s" % (AGAIN_ID, LATE_REF) in p.out,
+          p.desc())
+    check("unsuffixed mark control: the line keeps its one mark",
+          inbox_line(cfg, NEW_SID, AGAIN_ID) == AGAIN_LINE + mark, inbox_line(cfg, NEW_SID, AGAIN_ID))
+
+
+def case_repeat_own_home_is_never_a_candidate_for_its_item():
+    """R38 (owner 13:03 CST Nov 11): a session's follow-up items match the work it filed from its own earlier
+    items. The step an item names as its home is that item's own home, so the judge drops it for that item:
+    the model's naming of the step marks nothing on it. The other item of the same message has no such home,
+    so it keeps the step as a candidate and gets the mark for a repeat in other words (carousel and wheel)."""
+    root = repeat_repo("repeat-own-home", step=True)
+    cfg = new_cfg()
+    homed_line, other_line = "- fb-1004-1 [task] -> step:wheel-speed", "- fb-1004-2 [note] -> noted"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [homed_line, other_line])])
+    answer = json.dumps({"repeats": [{"id": "fb-1004-1", "ref": REPEAT_REF},
+                                     {"id": "fb-1004-2", "ref": REPEAT_REF}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    check("own home: one model call, for the item that keeps the step", len(calls) == 1, p.desc())
+    check("own home: the item whose home is the step gets no mark",
+          inbox_line(cfg, NEW_SID, "fb-1004-1") == homed_line, inbox_line(cfg, NEW_SID, "fb-1004-1"))
+    check("own home: the other item of the same message gets the mark",
+          inbox_line(cfg, NEW_SID, "fb-1004-2") == other_line + MARKED, inbox_line(cfg, NEW_SID, "fb-1004-2"))
+
+
+def case_repeat_each_item_is_judged_against_the_other_messages():
+    """R38 (owner 13:03 CST Nov 11): one candidate list was given to every item in a Stop, so each message of the
+    Stop hid the others. The item on the later message repeats the earlier one: the earlier message is its
+    candidate, and it is marked. The item on the earlier message is never marked against its own message. One
+    model call covers both items."""
+    root = repeat_repo("repeat-per-item", step=True)
+    cfg = new_cfg()
+    early_line, late_line = "- fb-1004-1 [note] -> noted", "- fb-1009-1 [note] -> noted"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [early_line]), (LATE_HEADER, MSG_TWO, [late_line])])
+    answer = json.dumps({"repeats": [{"id": "fb-1009-1", "ref": EARLY_REF}, {"id": "fb-1004-1", "ref": EARLY_REF}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    check("per item: one model call covers both messages", len(calls) == 1, p.desc())
+    check("per item: the later item is marked against the earlier message",
+          inbox_line(cfg, NEW_SID, "fb-1009-1") == late_line + MARK_EARLY, inbox_line(cfg, NEW_SID, "fb-1009-1"))
+    check("per item: the earlier item is not marked against its own message",
+          inbox_line(cfg, NEW_SID, "fb-1004-1") == early_line, inbox_line(cfg, NEW_SID, "fb-1004-1"))
+
+
+# The backlog cases name candidates by fixed refs: a todo or notes line is `todo:<line>` or `note:<line>`, and a
+# debt is `debt:<slug>`. Each file below puts its one item on line 3.
+EARLY_PHRASE = "the carousel spins too slow"  # the first words of MSG_ONE
+SECOND_DEBT_SLUG = "spin-rate-floor"
+SECOND_DEBT_TEXT = "# Spin rate floor\n\nThe spin rate may not drop below six degrees per frame.\n"
+BACKLOG_TODO = "# Todo\n\n- Wheel speed cap: raise the spin limit\n"
+BACKLOG_NOTES = "# Notes\n\n- keep the wheel speed setting in the reader\n"
+TODO_REF, NOTE_REF, DEBT_REF = "todo:3", "note:3", "debt:" + DEBT_SLUG
+
+
+def backlog_repo(name):
+    """A rolled-out repo whose backlog holds each candidate kind, untracked: the todo file, the notes file and
+    two debts. A case names one of them as its item's home."""
+    root = repeat_repo(name, debt=True)
+    write_file(os.path.join(root, "docs", "todo.md"), BACKLOG_TODO)
+    write_file(os.path.join(root, "docs", "debts", "notes.md"), BACKLOG_NOTES)
+    write_file(os.path.join(root, "docs", "debts", SECOND_DEBT_SLUG + ".md"), SECOND_DEBT_TEXT)
+    return root
+
+
+def case_repeat_same_minute_blocks_keep_their_own_candidates():
+    """R38 (restart plan, owner 13:03 CST Nov 11): two messages stamped in the same minute share the inbox ref
+    inbox:<sid8>@<hh:mm>, so dropping the item's own block also dropped the other message. The later item repeats
+    the earlier message: that message stays its candidate and gets the mark. Control: the earlier item names its
+    own message and gets no mark. Both items name their candidate by its words, so the case holds whatever ref a
+    fix gives each message."""
+    root = repeat_repo("repeat-same-minute", step=True)
+    cfg = new_cfg()
+    early_line, late_line = "- fb-1004-1 [note] -> noted", "- fb-1009-1 [note] -> noted"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [early_line]), (EARLY_HEADER, MSG_TWO, [late_line])])
+    p, calls = stop(cfg, NEW_SID, root, pick=[["fb-1009-1", EARLY_PHRASE], ["fb-1004-1", EARLY_PHRASE]])
+    check("same minute: one model call covers both messages", len(calls) == 1, p.desc())
+    prompt = calls[0]["prompt"] if len(calls) == 1 else ""
+    ref = candidate_ref_of(prompt, EARLY_PHRASE)
+    check("same minute: the earlier message is a candidate for the later item", ref != "", prompt[-300:])
+    check("same minute: the later item is marked against the earlier message",
+          ref != "" and inbox_line(cfg, NEW_SID, "fb-1009-1") == late_line + " repeats " + ref,
+          inbox_line(cfg, NEW_SID, "fb-1009-1"))
+    check("same minute control: the earlier item names its own message and gets no mark",
+          inbox_line(cfg, NEW_SID, "fb-1004-1") == early_line, inbox_line(cfg, NEW_SID, "fb-1004-1"))
+
+
+def case_repeat_todo_home_is_never_a_candidate_for_its_item():
+    """R38 (owner 13:03 CST Nov 11): an item's own home is never a candidate for it. A todo home dropped only its
+    block, so the item was marked against a line of its own file (todo:3). Control: a notes line of another file
+    still marks the item."""
+    root = backlog_repo("repeat-todo-home")
+    cfg = new_cfg()
+    home_line, other_line = "- fb-1101-1 [task] -> docs/todo.md", "- fb-1101-2 [task] -> docs/todo.md"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [home_line, other_line])])
+    answer = json.dumps({"repeats": [{"id": "fb-1101-1", "ref": TODO_REF}, {"id": "fb-1101-2", "ref": NOTE_REF}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    check("todo home: one model call for both items", len(calls) == 1, p.desc())
+    check("todo home: the item homed to docs/todo.md is not marked against its own todo line",
+          inbox_line(cfg, NEW_SID, "fb-1101-1") == home_line, inbox_line(cfg, NEW_SID, "fb-1101-1"))
+    check("todo home control: the item still marks against a notes line of another file",
+          inbox_line(cfg, NEW_SID, "fb-1101-2") == other_line + " repeats " + NOTE_REF,
+          inbox_line(cfg, NEW_SID, "fb-1101-2"))
+
+
+def case_repeat_notes_home_is_never_a_candidate_for_its_item():
+    """R38 (owner 13:03 CST Nov 11): an item's own home is never a candidate for it. The notes file is a home
+    too, so its item is never marked against a notes line (note:3). Control: a todo line of another file still
+    marks the item."""
+    root = backlog_repo("repeat-notes-home")
+    cfg = new_cfg()
+    notes_home = "/".join(("docs", "debts", "notes.md"))
+    home_line, other_line = ("- fb-1102-1 [task] -> " + notes_home,
+                             "- fb-1102-2 [task] -> " + notes_home)
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [home_line, other_line])])
+    answer = json.dumps({"repeats": [{"id": "fb-1102-1", "ref": NOTE_REF}, {"id": "fb-1102-2", "ref": TODO_REF}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    check("notes home: one model call for both items", len(calls) == 1, p.desc())
+    check("notes home: the item homed to the notes file is not marked against its own notes line",
+          inbox_line(cfg, NEW_SID, "fb-1102-1") == home_line, inbox_line(cfg, NEW_SID, "fb-1102-1"))
+    check("notes home control: the item still marks against a todo line of another file",
+          inbox_line(cfg, NEW_SID, "fb-1102-2") == other_line + " repeats " + TODO_REF,
+          inbox_line(cfg, NEW_SID, "fb-1102-2"))
+
+
+def case_repeat_dot_slash_debt_home_is_never_a_candidate_for_its_item():
+    """R38 (owner 13:03 CST Nov 11): an item's debt home is its own home, written `./docs/debts/x.md` or
+    `docs/debts/x.md`. The ./ form kept its debt as a candidate. Controls: the plain form drops the same debt, and
+    a [note] with no debt home still marks against it."""
+    root = backlog_repo("repeat-dot-slash-home")
+    cfg = new_cfg()
+    dot_line = "- fb-1103-1 [task] -> ./docs/debts/wheel-speed-cap.md"
+    plain_line = "- fb-1103-2 [task] -> docs/debts/wheel-speed-cap.md"
+    note_line = "- fb-1103-3 [note] -> noted"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [dot_line, plain_line, note_line])])
+    answer = json.dumps({"repeats": [{"id": i, "ref": DEBT_REF} for i in ("fb-1103-1", "fb-1103-2", "fb-1103-3")]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    check("dot slash home: one model call for the three items", len(calls) == 1, p.desc())
+    check("dot slash home: the ./ form is not marked against its own debt",
+          inbox_line(cfg, NEW_SID, "fb-1103-1") == dot_line, inbox_line(cfg, NEW_SID, "fb-1103-1"))
+    check("dot slash home control: the plain form is not marked against its own debt",
+          inbox_line(cfg, NEW_SID, "fb-1103-2") == plain_line, inbox_line(cfg, NEW_SID, "fb-1103-2"))
+    check("dot slash home control: a note with no debt home still marks against the debt",
+          inbox_line(cfg, NEW_SID, "fb-1103-3") == note_line + " repeats " + DEBT_REF,
+          inbox_line(cfg, NEW_SID, "fb-1103-3"))
+
+
+def case_repeat_debt_home_is_never_a_candidate_for_its_item():
+    """R38 (owner 13:03 CST Nov 11): an item homed to a debt file is never marked against that debt. A different
+    debt stays a candidate for it."""
+    root = backlog_repo("repeat-debt-home")
+    cfg = new_cfg()
+    own_line = "- fb-1104-1 [task] -> docs/debts/wheel-speed-cap.md"
+    other_line = "- fb-1104-2 [task] -> docs/debts/spin-rate-floor.md"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [own_line, other_line])])
+    answer = json.dumps({"repeats": [{"id": "fb-1104-1", "ref": DEBT_REF}, {"id": "fb-1104-2", "ref": DEBT_REF}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    check("debt home: one model call for both items", len(calls) == 1, p.desc())
+    check("debt home: the item homed to a debt is not marked against that debt",
+          inbox_line(cfg, NEW_SID, "fb-1104-1") == own_line, inbox_line(cfg, NEW_SID, "fb-1104-1"))
+    check("debt home control: the item homed to another debt still marks against this debt",
+          inbox_line(cfg, NEW_SID, "fb-1104-2") == other_line + " repeats " + DEBT_REF,
+          inbox_line(cfg, NEW_SID, "fb-1104-2"))
 
 
 def case_one_shot_grant_passes_with_its_home_and_blocks_without_one():
@@ -4288,6 +4631,44 @@ def case_page_form_closed_not_page_form_passes():
         check(name + ": not blocked", p.code == 0 and block_reason(p) is None, p.desc())
 
 
+def case_fixture_git_has_no_wall_clock_bound():
+    """The fixture helpers git(), run() and in_a_repo() carry no wall-clock bound: a slow runner can pass any
+    fixed one, and a fixed timeout then fails a case that is correct. A fake runner records each call's kwargs
+    and raises TimeoutExpired for any call with a timeout, as a slow runner would. Every helper call must reach
+    the fake, and none may time out."""
+    name = "fixture helpers: no wall-clock bound"
+    calls, timed_out = [], []
+    real_run = subprocess.run
+
+    def slow_runner(argv, *args, **kwargs):
+        calls.append(kwargs)
+        if kwargs.get("timeout") is not None:
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return subprocess.CompletedProcess(argv, 0, stdout=b"", stderr=b"")
+
+    script, cfg = os.path.join(ROOT, "trivial.py"), new_cfg()
+    steps = (
+        ("git hash-object", lambda: git(ROOT, "hash-object", "-w", "--stdin-paths", stdin=b"x\n")),
+        ("git status", lambda: git(ROOT, "status")),
+        ("run", lambda: run(script, b"", cfg)),
+        ("in_a_repo", lambda: in_a_repo(ROOT)),
+    )
+    subprocess.run = slow_runner
+    try:
+        for label, step in steps:
+            try:
+                step()
+            except subprocess.TimeoutExpired as exc:
+                timed_out.append("%s after %ss" % (label, exc.timeout))
+    finally:
+        subprocess.run = real_run
+    check(name + ": scope, all 4 helper calls reached the fake runner", len(calls) == 4,
+          "%d calls reached the fake" % len(calls))
+    check(name + ": no call passes a timeout", all(kw.get("timeout") is None for kw in calls),
+          "timeouts passed: %s" % [kw.get("timeout") for kw in calls])
+    check(name + ": no call times out", not timed_out, "; ".join(timed_out))
+
+
 CASES = (
     case_every_owner_message_is_captured,
     case_notices_are_never_captured,
@@ -4409,6 +4790,11 @@ CASES = (
     case_grant_fenced_text_is_not_scanned_passes,
     case_grant_needs_an_act_word_passes,
     case_grant_act_words_narrowed_passes,
+    case_grant_line_with_a_central_time_is_not_read_passes,
+    case_grant_line_body_is_still_read_blocks,
+    case_grant_line_not_first_still_blocks,
+    case_grant_line_without_a_time_still_blocks,
+    case_grant_line_fenced_text_is_not_read_passes,
     case_closed_note_without_a_home_blocks,
     case_closed_note_with_a_home_passes,
     case_task_open_step_home_passes,
@@ -4437,7 +4823,7 @@ CASES = (
     case_page_note_u2028_in_note_saves_verbatim,
     case_page_note_u0085_in_note_saves_verbatim,
     case_page_note_u2028_in_at_saves_once,
-    case_repeat_roadmap_step_marks_the_item_and_blocks,
+    case_repeat_roadmap_step_marks_the_item_and_tells_the_owner,
     case_repeat_stop_hook_active_marks_and_tells_the_owner,
     case_repeat_judged_items_are_not_judged_again,
     case_repeat_removed_mark_is_not_flagged_again,
@@ -4447,15 +4833,25 @@ CASES = (
     case_repeat_backlog_debt_text_is_in_the_prompt,
     case_repeat_cost_one_call_one_grep_and_two_files,
     case_repeat_cap_keeps_each_source_within_its_share,
-    case_repeat_repeat_only_reason_has_no_page_suffix_and_no_double_period,
+    case_repeat_mark_never_blocks_and_prints_one_system_line,
     case_repeat_second_judging_adds_no_second_mark,
     case_repeat_unplaced_mark_is_reported_as_not_marked,
     case_repeat_word_repeats_in_an_item_still_gets_the_mark,
     case_repeat_cap_keeps_the_newest_notes_lines,
     case_repeat_cap_keeps_the_open_roadmap_steps,
+    case_fixture_git_has_no_wall_clock_bound,
     case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit,
     case_repeat_spaced_inbox_mark_is_recognised_on_a_second_judging,
+    case_repeat_same_minute_mark_is_recognised_on_a_second_judging,
+    case_repeat_unsuffixed_mark_stays_one_mark_on_a_second_judging,
     case_repeat_repo_item_is_never_judged_as_a_repeat,
+    case_repeat_own_home_is_never_a_candidate_for_its_item,
+    case_repeat_each_item_is_judged_against_the_other_messages,
+    case_repeat_same_minute_blocks_keep_their_own_candidates,
+    case_repeat_todo_home_is_never_a_candidate_for_its_item,
+    case_repeat_notes_home_is_never_a_candidate_for_its_item,
+    case_repeat_dot_slash_debt_home_is_never_a_candidate_for_its_item,
+    case_repeat_debt_home_is_never_a_candidate_for_its_item,
     case_one_shot_grant_passes_with_its_home_and_blocks_without_one,
     case_guard_ruling_home_is_judged_in_the_repo_the_session_worked_in,
     case_step_path_is_derived_from_override_step_dir,
@@ -4495,10 +4891,88 @@ def run_case(case):
         RED_CASES.append(case.__name__)
 
 
+# The cost of one judging Stop. The case repeat_cost_one_call_one_grep_and_two_files pins its counts. These cases pin
+# what it leaves out: the one git start that is not the grep, and a quiet Stop that starts no git at all.
+
+class CostTests(unittest.TestCase):
+    def judging_stop(self, name, answer=None):
+        """One capture, one new item, then the judging Stop. `answer` is the model's answer, and by default it names
+        the item as a repeat. Returns (exit codes of the capture and the Stop, the Stop's model calls, its git starts,
+        the relative paths whose bytes it changed under the config folder)."""
+        root = repeat_repo(name, step=True, debt=True)
+        cfg, sid = new_cfg(), name
+        env = git_counter(cfg)
+        captured = capture(cfg, sid, MSG_ONE, cwd=root)
+        add_item(cfg, sid, ITEM_LINE)
+        before = snapshot(cfg)
+        start = len(git_lines(env))
+        answer = repeat_answer(ITEM_ID) if answer is None else answer
+        stopped, calls = stop(cfg, sid, root, answer=answer, extra_env=env)
+        changed = bytes_written(before, snapshot(cfg))
+        return (captured.code, stopped.code), calls, git_lines(env, start), changed
+
+    def test_the_judging_stop_starts_one_grep_and_one_other_git_process(self):
+        codes, calls, lines, _ = self.judging_stop("cost-argv")
+        self.assertEqual(codes, (0, 0), "the capture and the judging Stop both exit 0; got %r" % (codes,))
+        self.assertEqual(len(calls), 1, "the judging Stop makes one model call; got %d" % len(calls))
+        self.assertEqual(grep_starts(lines), 1, "the judging Stop starts one git grep; got %r" % lines)
+        others = [ln for ln in lines if "grep" not in ln.split()]
+        self.assertEqual(len(others), 1, "one other git start; got %r" % others)
+        self.assertIn("rev-parse", others[0].split(), "the other start reads the repo root: %r" % others)
+        self.assertIn("--show-toplevel", others[0].split(), "the other start reads the repo root: %r" % others)
+
+    def test_a_judging_stop_writes_the_turn_state_and_the_inbox_and_no_other_file(self):
+        codes, _, _, changed = self.judging_stop("cost-files")
+        self.assertEqual(codes, (0, 0), "the capture and the judging Stop both exit 0; got %r" % (codes,))
+        self.assertEqual(changed, {turns_rel("cost-files"), inbox_rel("cost-files")},
+                         "a judging Stop writes its turn state and the inbox, and no other file; got %r"
+                         % sorted(changed))
+
+    def test_a_judging_stop_with_no_repeat_writes_the_turn_state_and_leaves_the_inbox_bytes(self):
+        codes, calls, _, changed = self.judging_stop("cost-no-repeat", answer=ANSWER_NONE)
+        self.assertEqual(codes, (0, 0), "the capture and the judging Stop both exit 0; got %r" % (codes,))
+        self.assertEqual(len(calls), 1, "the judging Stop makes one model call; got %d" % len(calls))
+        self.assertEqual(changed, {turns_rel("cost-no-repeat")},
+                         "a judging Stop with no repeat writes its turn state and no other file, the inbox's bytes "
+                         "included; got %r" % sorted(changed))
+
+    def test_a_quiet_stop_starts_no_git_process(self):
+        root = repeat_repo("cost-quiet", step=True, debt=True)
+        cfg, sid = new_cfg(), "cost-quiet"
+        env = git_counter(cfg)
+        capture(cfg, sid, MSG_ONE, cwd=root)
+        add_item(cfg, sid, ITEM_LINE)
+        first, first_calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), extra_env=env)
+        self.assertEqual(first.code, 0, "the judging Stop exits 0; got %r" % (first.code,))
+        self.assertEqual(len(first_calls), 1, "the judging Stop makes one model call; got %d" % len(first_calls))
+        start = len(git_lines(env))
+        stopped, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), extra_env=env)
+        self.assertEqual(stopped.code, 0, "a quiet Stop exits 0; got %r" % (stopped.code,))
+        self.assertEqual(calls, [], "a Stop with nothing new makes no model call")
+        self.assertEqual(git_lines(env, start), [], "a Stop with nothing new starts no git process")
+
+    def test_a_quiet_stop_changes_no_byte_under_the_config_folder(self):
+        root = repeat_repo("cost-quiet-bytes", step=True, debt=True)
+        cfg, sid = new_cfg(), "cost-quiet-bytes"
+        capture(cfg, sid, MSG_ONE, cwd=root)
+        add_item(cfg, sid, ITEM_LINE)
+        first, first_calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+        self.assertEqual(first.code, 0, "the judging Stop exits 0; got %r" % (first.code,))
+        self.assertEqual(len(first_calls), 1, "the judging Stop makes one model call; got %d" % len(first_calls))
+        before = snapshot(cfg)
+        stopped, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+        self.assertEqual(stopped.code, 0, "a quiet Stop exits 0; got %r" % (stopped.code,))
+        self.assertEqual(calls, [], "a Stop with nothing new makes no model call")
+        self.assertEqual(bytes_written(before, snapshot(cfg)), set(),
+                         "a quiet Stop changes no byte under the config folder")
+
+
 def main():
     try:
         for case in CASES:
             run_case(case)
+        if not cost_probe.run_class(CostTests):
+            RED_CASES.append("CostTests")
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if RED_CASES:
