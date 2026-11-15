@@ -5694,6 +5694,9 @@ class MergedLintTree(LaneFixture):
         self.use_ci_job(PASSING, 0)
         rc, text = self.run_lane("--lane-lint", "7")
         self.assert_lints_as_today(old, rc, text)
+
+
+class ReplacedAtHandIn(LaneFixture):
     """The lane lint's two replaced-pull-request acts, on the real Host through the gh shim (step close-replaced-at-open; decision session-tiers).
     A hand-in whose body names an open pull request that it replaces is refused, with the plain refusal and no override line. An integration PR's
     freeze block names its lanes: each open lane closes at the hand-in, with a pointer comment to the integration PR, and a dropped lane is reopened
