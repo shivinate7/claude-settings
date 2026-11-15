@@ -962,7 +962,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .top .inrepo { font-weight: 600; color: var(--acc); overflow-wrap: anywhere; }
 /* One sub-group per repo inside a tier: a neutral letter tile, the name, a count and a solid rule, unlike the seen divider's eye and dotted rule. */
 .subgrp { display: grid; gap: 12px; padding-top: 6px; min-width: 0; }
-.subhead { display: flex; align-items: center; gap: 8px; min-height: 28px; margin: 0; font: 700 15px/1.3 var(--body); color: var(--ink); }
+.subhead { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 28px; margin: 0; font: 700 15px/1.3 var(--body); color: var(--ink); }
 .subhead .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .subhead .ct { font: 600 12px var(--mono); color: var(--muted); }
 .subhead .rule { flex: 1 1 0; min-width: 24px; border-top: 1px solid var(--line); }
@@ -2413,7 +2413,7 @@ function renderBar() {
   }
   $("barStatus").replaceChildren(...parts);
   const wd = withdrawn().length;
-  sa.disabled = !state.db || state.sending || !(st.length || wd);
+  sa.disabled = !state.db || state.sending || holdingForMeta() || !(st.length || wd);
   sa.textContent = !st.length && wd ? (wd === 1 ? "Withdraw answer" : "Withdraw " + wd + " answers") : st.length ? "Send " + st.length + (st.length === 1 ? " answer" : " answers") : "Send answers";
   $("copy").hidden = !(state.db === false || state.copyOffer);
 }

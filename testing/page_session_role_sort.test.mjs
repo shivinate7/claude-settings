@@ -461,3 +461,27 @@ test("control: once the repo meta answers, the rail is shown and draws a chip pe
   assert.equal(await page.locator("#rail").evaluate((el) => el.hidden), false, "the rail stays hidden after the repo meta answers");
   assert.equal(await page.locator("#rail .nchip").count(), 12, "the rail does not draw one chip per item");
 });
+
+// ---------------------------------------------------------------- Send while the list is held, and a long repo name
+
+test("while the repo meta is held the list is not drawn, so Send stays off, and it turns on once the cards draw", async (t) => {
+  const s1 = mk("held-stand-one", 1, { stands: true }), s2 = mk("held-stand-two", 2, { stands: true, repo: "owner/other-repo" });
+  const page = await open(t, { items: [s1, s2], meta: META, holdMeta: true }); if (!page) return;
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is live while the owner sees only the loading line");
+  await page.evaluate(() => window.__releaseMeta());
+  await page.waitForFunction("feed.meta === true");
+  await page.waitForSelector(`#item-${s1.id}`);
+  assert.equal(await page.locator("#send").isDisabled(), false, "Send stays off after the cards draw with stood picks");
+});
+
+test("a long repo name in a sub-group head never makes the page scroll sideways", async (t) => {
+  const unbroken = "a".repeat(37), hyphenated = "very-long-hyphenated-repository-name-x".slice(0, 38);
+  const items = [blk("long-own", 1, { added: at(1) }), blk("long-a", 2, { added: at(2), repo: "owner/" + unbroken }), blk("long-b", 3, { added: at(3), repo: "owner/" + hyphenated })];
+  const page = await open(t, { items, meta: META, metaFirst: true }); if (!page) return;
+  for (const [width, theme] of [[320, "light"], [320, "dark"], [390, "light"], [390, "dark"]]) {
+    await page.emulateMedia({ colorScheme: theme });
+    await page.setViewportSize({ width, height: 800 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `the page scrolls sideways at ${width} px, ${theme}`);
+    assert.equal(await page.evaluate(() => [...document.querySelectorAll(".subhead .nm")].every((n) => n.getBoundingClientRect().right <= innerWidth)), true, `a repo name runs past the screen at ${width} px, ${theme}`);
+  }
+});
