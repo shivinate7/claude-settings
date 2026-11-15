@@ -3224,15 +3224,17 @@ class ReadyAndDraftRows(UpkeepFixture):
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]),
                          "a draft the runner's list names (held true) is not listed")
 
-    def test_orphan_draft_and_false_flags_are_still_listed(self):
-        # No mark, or held false, or reviewLog false: each draft is listed.
+    def test_orphan_draft_reads_unknown_and_false_flags_are_still_listed(self):
+        # #1001 has no live pulls row, so its held and reviewLog marks are unread: the row reads it unknown, not listed.
+        # held false and reviewLog false name nothing, so #1002 and #1003 are listed. Three entries: one unknown, two listed.
         self.serve_pulls([self.rest_draft(1001, "orphan-draft", 780), self.rest_draft(1002, "held-false", 780),
                           self.rest_draft(1003, "review-false", 780)])
         self.publish(sessions=[], pulls=[self.mark(1002, held=False), self.mark(1003, reviewLog=False)])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
-        self.assertEqual((count, self.entries(detail)),
-                         (3, ["#1001 (orphan-draft)", "#1002 (held-false)", "#1003 (review-false)"]),
-                         "a draft with no mark, or with held or reviewLog false, is listed")
+        self.assertEqual(count, 3, "the row was %r" % (detail,))
+        self.assertRegex(detail, r"unknown \([^)]*#1001", "the draft with no live row is not read unknown")
+        self.assertIn("#1002 (held-false)", detail)
+        self.assertIn("#1003 (review-false)", detail)
 
     def test_non_bool_held_or_review_log_skips_the_pull_row(self):
         # A JSON string or number is a wrong shape. The live pulls row is skipped, so the live file reads unknown,
