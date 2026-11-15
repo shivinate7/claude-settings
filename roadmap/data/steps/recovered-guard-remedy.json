@@ -1,0 +1,14 @@
+{
+ "id": "recovered-guard-remedy",
+ "title": "The Recovered guard's refusal names each missing carry line and the passing form, and a carry label after a Done tag counts",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "coordinator",
+ "blockedBy": [],
+ "why": "Owner, 23:50 CST Nov 14, verbatim (relayed by the consultant 23:52 CST): \"we need to fix the guard\". Meaning is the consultant's reading, not owner-typed: the Recovered guard (lint/report_guard.py, function recovered_problem) that refused the consultant's reports 4 times after compaction (consultant's count; not read by triage). Ask, from the consultant: (1) the refusal names each missing carry line with \"and\" plus the passing form; (2) a carry label after a Done tag (for example \"- OTHER: Handoff gave:\") counts as a carry line. Ruling home: this step. Lane asked of the coordinator at 23:52 CST Nov 14; not started. Kin: step refusal-names-way-out (the Recovered guard refused the coordinator's report three times on Nov 11 when the line sat after \"OTHER:\"; its refusal never says the line must open its own bullet) and step guard-false-alarm-cull (names the same guard). Not read by triage: recovered_problem's code, the four refused reports. First act of a lane: reproduce each refusal on a fixture, red then green, then change the message and the label match; a change that lets through a report main refuses is a widening and goes to the coordinator first.",
+ "source": "owner 23:50 CST Nov 14 via consultant 23:52 CST (to triage)",
+ "note": "Filed 23:5x CST Nov 14 by triage. Ready, no lane. Tracker: the coordinator (lane asked 23:52 CST). Not built.",
+ "updatedAt": "2026-11-14T23:55:00-06:00"
+}
