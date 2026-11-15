@@ -86,7 +86,8 @@ restates: a unit of the child's rule Markdown that copies the text of a claude-s
 aligned: a record and the rule sentences that cite it change together in a pull request (decision
   child-cites-not-copies). Env: BASE_SHA, the PR's base; HEAD_SHA, its head, which is `HEAD` when unset; and
   PR_BODY, its description, which is the `pull_request.body` of the JSON file GITHUB_EVENT_PATH names when
-  unset. It reads one `git diff --unified=0 BASE_SHA...HEAD_SHA` and the files on disk: the files of restates, and the
+  unset. It reads one `git diff --unified=0 BASE_SHA...HEAD_SHA` and the files on disk: the rule files and the Markdown
+  under the top-level agents/ and skills/ folders, and the
   records of the child's own decisions folder (layout.candidates). A unit is one sentence: from the end of the
   previous `<!-- rule:X -->` anchor, or the paragraph's start, to its own anchor. A sentence cites a record by its
   slug alone in a code span, or by the anchor its Home line names, at base or at head (a deleted record is still
@@ -469,12 +470,13 @@ def span_open(text):
     return bool(opener)
 
 
-def paragraph_rows(text, rel, span_continues=False):
+def paragraph_rows(text, rel, span_continues=False, lenient=False):
     """(first line number, last line number, [(line number, stripped line)]) of each paragraph or list item outside a
     code fence. A blank line, a fence, a list item, a table row or a heading ends one; a table row and a heading are each one of their own.
     With `span_continues`, a line that starts inside an open code span joins the unit instead, so a `#` or `-` at the
     start of a line inside a span is code, never a heading. A fence still open at the end of the file makes the group
-    unknown: the rest of the file would go unread."""
+    unknown: the rest of the file would go unread. With `lenient`, the rest of that file is read as fenced code and is not
+    read, and the group stays known: one broken fence in a skill file would turn every pull request red."""
     found, lines, start, last, fence = [], [], 0, 0, None
 
     def flush():
@@ -507,7 +509,7 @@ def paragraph_rows(text, rel, span_continues=False):
                 start = number
             last = number
             lines.append((number, line.strip()))
-    if fence:
+    if fence and not lenient:
         raise CannotRun("%s:%d: a code fence never closes" % (rel, fence[1]))
     flush()
     return found
@@ -551,17 +553,23 @@ def child_units(root, in_scope=None, listing=None, span_continues=False):
     return [(rel, first, unit) for rel, first, _, unit in units], files
 
 
-def split_sentences(rows):
+def split_sentences(rows, plain=False):
     """(first line, last line, text) of each sentence of a paragraph given as `paragraph_rows` rows. A sentence runs from
     the end of the previous `<!-- rule:X -->` anchor comment, or the paragraph's start, to its own anchor; text after the
     last anchor is a sentence of its own. An anchor inside a code span is code and ends nothing (STRIPPED). A unit with
-    no anchor is one sentence."""
+    no anchor is one sentence. With `plain`, a `.`, `!` or `?` followed by a space also ends a sentence, outside a code
+    span or comment: a skill or agent paragraph holds no anchors, and an edit to one sentence must not read as an edit
+    to its neighbour that cites a record."""
     joined = " ".join(t for _, t in rows)
     starts, at = [], 0
     for _, text in rows:
         starts.append(at)
         at += len(text) + 1
     ends = [m.end() for m in STRIPPED.finditer(joined) if not m.group("tick") and rule_audit.claude_md_anchors(m.group(0))]
+    if plain:
+        covered = [m.span() for m in STRIPPED.finditer(joined)]
+        ends = sorted(set(ends) | {m.end() for m in re.finditer(r"[.!?](?=\s)", joined)
+                                   if not any(a <= m.start() < b for a, b in covered)})
     if not ends or ends[-1] < len(joined):
         ends.append(len(joined))
     found, begin = [], 0
@@ -589,9 +597,10 @@ def child_unit_spans(root, in_scope=None, listing=None, span_continues=False, se
         text = read(root, rel)
         if text is None:
             raise CannotRun("cannot read %s" % rel)
-        for first, last, rows in paragraph_rows(text, rel, span_continues):
+        plain = rel.startswith(AGENT_SKILL_DOCS)
+        for first, last, rows in paragraph_rows(text, rel, span_continues, lenient=plain):
             if sentences:
-                units.extend((rel, a, b, unit) for a, b, unit in split_sentences(rows))
+                units.extend((rel, a, b, unit) for a, b, unit in split_sentences(rows, plain))
             else:
                 units.append((rel, first, last, " ".join(t for _, t in rows)))
     return units, len(seen)
@@ -1533,7 +1542,9 @@ def old_sentences(lines, rel):
     `split_sentences`). A fence line is read as a blank line, so a base fence left open never makes the group unknown;
     the code in a fence then reads as sentences that no rule sentence matches."""
     text = "\n".join("" if FENCE.match(line) else line for line in lines)
-    return {flat(s) for _, _, rows in paragraph_rows(text, rel, span_continues=True) for _, _, s in split_sentences(rows)}
+    plain = rel.startswith(AGENT_SKILL_DOCS)
+    return {flat(s) for _, _, rows in paragraph_rows(text, rel, span_continues=True, lenient=plain)
+            for _, _, s in split_sentences(rows, plain)}
 
 
 def home_anchors(text):
@@ -1646,8 +1657,8 @@ def probe_aligned(root):
     if hits:
         hits.append("  fix: re-read each citing sentence against this change and clean what rotted, in the sentence, "
                     "the record or both. Only when both still hold after that read, add one PR body line per record, "
-                    "`Rules checked: <record> \u2014 no change`, then push a commit. The line says you re-read and "
-                    "cleaned; it is no way to cite and move on")
+                    "`Rules checked: <record> \u2014 no change`, then push a commit. The line is the claim that you re-read "
+                    "the rule against this change and cleaned what rotted")
         return finish("aligned", hits, "out - %d line(s) to read in %d file(s)" % (len(hits) - 1, files), 1)
     return finish("aligned", hits, "in shape - %d rule file(s) read, %d record(s) changed" % (files, len(changed)), 0)
 

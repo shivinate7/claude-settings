@@ -6,4 +6,4 @@
 
 **Decision.** `child-cites-not-copies`.
 
-**Retire.** Not yet built. Owner picks whether `output-styles/` Markdown joins the scope. Write the test first, red on the current code: a record changes, an `output-styles/*.md` sentence that cites it stays, the group names that line. `lint/test_compliance_probes.py`
+**Retire.** Not yet built. Owner picks whether `output-styles/` Markdown joins the scope. Write the test first, red on the current code: a record changes, an `output-styles/*.md` sentence that cites it stays, the group names that line.
