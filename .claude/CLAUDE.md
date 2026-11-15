@@ -26,7 +26,11 @@ output style load in each session on each repo.
   13:19 CST). An owner yes to merge a named pull request, which a coordinator (tag `cs-build:coordinator`)
   relays to its batch runner, is the owner's grant for that merge. The batch runner merges it with the merge tool,
   under every merge check (`settings.json` `autoMode.allow`, entry "Relayed Merge Yes"; decision
-  `auto-mode-owner-acts`). A relayed yes covers no other act and no other session.
+  `auto-mode-owner-acts`). A relayed yes covers no other act and no other session. The owner's
+  consultant (tag `cs-build:consultant`) may also relay a yes to a batch runner, directly or
+  through triage (owner, 2026-11-15 11:18 CST; entry "Consultant Relayed Merge Yes"). The yes binds to
+  the head the pull request had when the owner said yes, or a later head of the same docs-only pull
+  request that a review record names.
 - **Lane draft PR** (owner, 2026-11-12 17:19 CST; until withdrawn). Any lane that a coordinator or another
   lane started may open its own draft PR, and never marks it ready. Only the batch runner marks a
   PR ready. Source: decision `draft-until-reviewed` (every PR opens as a draft).
