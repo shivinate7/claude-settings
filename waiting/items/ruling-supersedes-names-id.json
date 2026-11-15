@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-15T11:50:00-06:00",
+  "context": "Goal: a `ruling`-kind `supersedes` ref names one exact older ruling by id (item 877, option a).\nProblem (rule): to apply the check to new and changed entries only without a backfill, the lane skips entries whose `at` is before the grant instant (2026-11-15 11:33 CST). A changed old entry keeps its old `at`, so it stays unchecked.\nBased on (measured): 273 of 322 flagged store lines predate the field.\nDeparts from: main \u2014 a `ruling` ref is free prose today; this makes its first token an existing store id, and the earlier-`at` target is required.",
+  "holds": "Lane supersedes-names-an-id waits on the build.",
+  "home": "decision ruling-names-overtaken; lane supersedes-names-an-id",
+  "kind": "decision",
+  "n": 881,
+  "options": [
+    {
+      "gain": "No extra process, no backfill.",
+      "how": "The check skips every entry whose `at` is before 2026-11-15 11:33 CST.",
+      "id": "at-cutoff",
+      "key": "a",
+      "label": "Accept the `at` cutoff",
+      "lose": "A changed old entry goes unchecked."
+    },
+    {
+      "gain": "Changed old entries are checked too.",
+      "how": "The check reads the store's git diff and also judges any entry the diff changed, whatever its `at`.",
+      "id": "git-diff-store",
+      "key": "b",
+      "label": "Check changed entries through a git diff of the store",
+      "lose": "Adds a git read per check and more code."
+    }
+  ],
+  "owner": "lane supersedes-names-an-id (session_013NEJL4RGc1wTSm6XH62k2i); sent through its parent",
+  "recommended": "a",
+  "ref": "item 877 (ruling-names-overtaken, option a); lane supersedes-names-an-id",
+  "repo": "shivinate7/claude-settings",
+  "short": "Ruling supersedes: id",
+  "shown": [
+    {
+      "id": "at-cutoff",
+      "key": "a",
+      "label": "Accept the `at` cutoff"
+    },
+    {
+      "id": "git-diff-store",
+      "key": "b",
+      "label": "Check changed entries through a git diff of the store"
+    }
+  ],
+  "status": "open",
+  "title": "A ruling's supersedes names one older ruling by id: how to check old entries",
+  "why": "The lane's recommendation, not the owner's: A needs no extra process and no backfill, and 273 of 322 flagged lines predate the field."
+}

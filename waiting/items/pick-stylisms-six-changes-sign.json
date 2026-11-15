@@ -1,0 +1,54 @@
+{
+  "added": "2026-11-13T22:32:00-06:00",
+  "closed": "2026-11-14T04:36:00Z",
+  "context": "Goal: replies from every session follow only reply-style rules that still help you.\nProblem (rule): you answered item 800 by keeping two rules the table wanted to change or drop: style-offer-screen-takeover and style-press-has-link. You named no objection to the other six changes, but no rule in the style file changes until you sign the table, and silence is not a sign. So this asks once, with the table as it will read.\nThe six changes (the full table is the first link):\n- style-plain-words: cut to one sentence; keep the pointer to the root rule.\n- style-question-form: shrink to a pointer to its decision plus one line of intent; the guard stays.\n- style-question-inside-box: fold its one unique clause (text before the box may not show) into style-question-form; drop the rest.\n- style-hand-off-cleanup: merge into style-hand-off-irreversible.\n- style-hand-off-one-shell: merge into style-hand-off-runs-as-is.\n- style-command-in-item: move to the waiting-page skill; the guard stays.\nWith your two keeps the file goes from 29 to 25 rules. Nothing about what the rules ask of Claude changes, except where a merge shortens the wording.\nBased on (read): the table in PR #3340 (lane evidence, unchecked by triage); your item 800 note.\nDeparts from: main \u2014 main keeps all 29 rules as written; a changes the style file by six edits after your word.\nMeanwhile: the lane edits only the table (two rows to keep); the style file stays as it is.",
+  "home": "step stylisms-rules-table; rulings own-795-a-stylisms-table and own-800-stylisms-two-keeps; PR #3340",
+  "id": "pick-stylisms-six-changes-sign",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-14T04:28:01Z",
+    "note": "a: sign the six changes"
+  },
+  "links": [
+    {
+      "label": "The full table (29 rows), on the PR branch",
+      "url": "https://github.com/shivinate7/claude-settings/blob/15e4ccf41cd1/docs/plans/stylisms-rules-table.md"
+    },
+    {
+      "label": "PR #3340, files changed",
+      "url": "https://github.com/shivinate7/claude-settings/pull/3340/files"
+    }
+  ],
+  "n": 807,
+  "options": [
+    {
+      "gain": "The file shrinks from 29 to 25 rules and says each thing once.",
+      "id": "sign-six",
+      "key": "a",
+      "label": "Sign the six changes; a new lane edits the style file, with a red test first where a check cites a rule (recommended)",
+      "lose": "Six rule texts change; the lane's evidence for each is unchecked."
+    },
+    {
+      "gain": "You keep any rule you want exactly as written.",
+      "id": "sign-some",
+      "key": "b",
+      "label": "Sign some of the six (name the ones to keep in the note box)",
+      "lose": "The file shrinks less."
+    },
+    {
+      "gain": "All 29 rules stay as written.",
+      "id": "none-yet",
+      "key": "c",
+      "label": "Change nothing now",
+      "lose": "The repeated wording stays."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6), after lane stylisms-rules-table (session_013NEJKzpTWWUkv9Q1vxoghv) pointed out that your sign was not given",
+  "ref": "your item 800 note 22:24 CST Nov 13; lane message 22:26 CST",
+  "reply": "Closed 22:36 CST Nov 13: you chose a, sign the six changes. Filed as ruling own-807-a-stylisms-sign. A new lane edits the style file (step stylisms-apply-six-changes), red test first where a check cites a rule; with your two keeps the file goes from 29 to 25 rules. The coordinator assigns the lane.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Sign the six reply-style rule changes?",
+  "status": "closed",
+  "title": "Sign the six remaining changes to the reply-style rules, now that two stay as they are?",
+  "why": "No rule changes until you sign the table; you kept two rows and said nothing about the other six."
+}

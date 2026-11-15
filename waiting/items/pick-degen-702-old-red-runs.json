@@ -1,0 +1,41 @@
+{
+  "added": "2026-11-13T19:38:56-06:00",
+  "closed": "2026-11-13T19:44:30-06:00",
+  "context": "Goal: degen PR #702 merges on a real green run, and the three held degen PRs (#702, #703, #704) follow.\nProblem (rule): the merge tool refused #702 with git-never-merge-failing-ci: \"a check is red: milestone-proof (suite): fail\". It names two OLD runs on the same head (43472967936, the hang on your Mac, and 43401362635), while the newest run 43534814910 (the Mac suite leg you asked to re-run on 770 a) is green on that head, after 34 minutes on the GitHub runner. The merge tool's own text says any red check or run ends the wait (merge.py, wait_checks); I have not read whether a newer green run of the same name clears an older red one. Runner 11's reading: likely a false alarm, unmeasured.\nBased on (read): runner 11's report via the coordinator; I read the tool's wait_checks text in a local checkout that may be behind main.\nDeparts from: main \u2014 the tool counts old red runs; a waits for a fix that reads the newest run per name, b has you merge #702 on GitHub.\nMeanwhile: runner 11 holds #702, #703 and #704 and sends nothing.",
+  "home": "degen PR #702 (head 4a40bb5868b7); ruling own-770-a-degen-702-mac-rerun; step merge-reads-newest-check-run",
+  "id": "pick-degen-702-old-red-runs",
+  "kind": "decision",
+  "lastAnswer": "792: none of these: you merged #702 yourself; the fix should still come, it is a bug.",
+  "n": 792,
+  "options": [
+    {
+      "gain": "The guard stays whole; the fix helps every repo.",
+      "id": "wait-for-fix",
+      "key": "a",
+      "label": "Wait for a merge-tool fix that reads the newest run per check name (recommended)",
+      "lose": "The three degen PRs wait for a tool lane."
+    },
+    {
+      "gain": "#702 lands now; the three PRs follow.",
+      "how": "Open the PR on GitHub and use its merge button once its newest checks read green.",
+      "id": "owner-merges",
+      "key": "b",
+      "label": "You merge #702 yourself on GitHub, on the newest green run",
+      "links": [
+        {
+          "label": "degen PR #702",
+          "url": "https://github.com/shivinate7/degen/pull/702"
+        }
+      ],
+      "lose": "A merge the tool refuses is made around it, by your hand; the old red runs stay on the head."
+    }
+  ],
+  "owner": "runner 11 (session_013NEJKzRugXqBZrZ8xwXmW7), via the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 19:38 CST Nov 13",
+  "reply": "Filed as ruling own-792-fix-still-comes. The fix lane (merge-reads-newest-check-run) is already running, and runner 11 keeps #703 and #704 held until it lands or you say otherwise.",
+  "repo": "shivinate7/claude-settings",
+  "short": "degen 702: merge refused on two old red runs; the newest Mac run is green",
+  "status": "closed",
+  "title": "The merge tool refused degen PR #702 on two old red runs of the same head, though the newest Mac run is green. Wait for a tool fix, or merge it yourself?",
+  "why": "No override lifts this refusal, and merging a PR the tool calls failing is your call."
+}

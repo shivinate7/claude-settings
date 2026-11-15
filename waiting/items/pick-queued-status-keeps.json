@@ -1,9 +1,13 @@
 {
   "added": "2026-11-13T18:21:00Z",
-  "context": "Goal: one name per step status in GLOSSARY.md.\nProblem (rule): your 583 a asked for one name per thing, and my brief said to drop 'queued' as an alias of todo. The lane read the code: the roadmap build accepts 'queued' and treats it differently from todo (ready-not-started reads only todo and ready). Dropping it would make the 3 queued steps on the roadmap branch show as an unknown status and fail the build.\nBased on (read): KNOWN_STATUS, LISTED_STATUS and TODO_STATUS in skills/roadmap/build.py.\nDeparts from: main has no step-status rows in the glossary \u2014 a adds rows and keeps 'queued' as its own status; b retires it.\nMeanwhile: draft PR #3195 waits on the lane lint.",
+  "context": "ANSWER to your question (20:29 CST Nov 14), from this item's earlier reply (13 Nov 13:22 CST) and main's GLOSSARY.md read now: nothing is overruled. 'debt' has a glossary home on main (a known gap, or deferred work). 'deferred' is not a step status: the roadmap build only counts steps waiting on you under that word. Main's glossary has no step-status rows yet; step glossary-step-statuses adds them (blocked, folded; PR #3195 also adds queued). The only open question is queued: keep it as its own status (a) or fold it into todo (b). Until you say, the lane keeps queued.\nGoal: one name per step status in GLOSSARY.md.\nProblem (rule): your 583 a asked for one name per thing, and my brief said to drop 'queued' as an alias of todo. The lane read the code: the roadmap build accepts 'queued' and treats it differently from todo (ready-not-started reads only todo and ready). Dropping it would make the 3 queued steps on the roadmap branch show as an unknown status and fail the build.\nBased on (read): KNOWN_STATUS, LISTED_STATUS and TODO_STATUS in skills/roadmap/build.py.\nDeparts from: main has no step-status rows in the glossary \u2014 a adds rows and keeps 'queued' as its own status; b retires it.\nMeanwhile: draft PR #3195 waits on the lane lint.",
   "home": "step glossary-step-statuses (draft PR #3195)",
   "id": "pick-queued-status-keeps",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T02:29:34Z",
+    "note": "Answered 20:29 CST Nov 14: debt and deferred work already have homes; nothing overruled; the open point is only queued; no pick."
+  },
   "n": 735,
   "options": [
     {

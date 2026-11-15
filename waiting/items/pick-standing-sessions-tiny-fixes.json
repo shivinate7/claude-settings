@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-15T00:49:00-06:00",
+  "closed": "2026-11-15T00:51:13-06:00",
+  "context": "Goal: tiny fixes land fast, without a lane for each one-line edit.\nProblem (rule): standing sessions hand every fix to a lane, and only the batch runner merges. You asked at 00:48 CST whether a standing session may send one agent for a tiny edit and merge it itself, and whether that should hold for every standing session.\nBased on (owner words): your 00:48 CST Nov 15 words, relayed by the consultant: \"frankly consultant if u wanna send subagents for items u know are like miniscule fixes say prose edits u shd be able to just send a subagent to make the edit and get it merged urself no? we can make that part of ur roles (i lowk think this shd be true for any of the standing sessions but lmk what u think)\".\nBased on (ruling): decision docs-only-prs-skip-review (you, 2026-09-26 and 2026-11-04 07:56 CST): a docs-only PR gets no full review, only its CI verdict, and a record that files an owner ruling gets a short round 1. So the review side of option a already holds today; what would change is who merges.\nBased on (ruling): your 2026-11-01 21:34 CST: \"cant you have batch mergers running these so you stay focused on being coordinator? why are you doing all the merges again\" (decision session-tiers: the coordinator never merges; the batch runner runs every merge under the coordinator's standing merge grant). Also rule roles-orchestrator-never-builds and \"Roles are hats\" (you, 2026-11-10 14:33 CST: \"yes hats model works\").\nDeparts from: main: a standing session sends every fix to a lane and the batch runner merges. This lets a standing session send one agent for a tiny edit and merge that PR itself with the merge tool. The coordinator is a standing session, so option a or b would also reverse your 2026-11-01 ruling for the coordinator unless you keep it out.\nMeanwhile: nothing waits. The consultant also asks you in chat; this item closes on your chat answer. Triage did not read the merge tool's grant check, so whether it would accept a standing session's merge call without a change is unread.",
+  "home": "roles; decision session-tiers; step role-sessions-fan-out",
+  "id": "pick-standing-sessions-tiny-fixes",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T06:51:13Z",
+    "choice": "b",
+    "note": "Owner 00:50 CST Nov 15, typed in chat and relayed by the consultant: \"so B\" (after 00:49: \"one reviewer before it merges thats still just another subagent within the same session tho? it doesnt need a spawn\"). Filed as ruling own-tiny-fixes-b."
+  },
+  "n": 861,
+  "options": [
+    {
+      "gain": "One-line fixes land without a lane.",
+      "id": "docs-only-any-standing-session",
+      "key": "a",
+      "label": "Docs-only edits: any standing session sends one agent and merges on green with the merge tool (edits that change no rule meaning, guard, check or code)",
+      "lose": "Rule-text fixes still go to a lane with a reviewer.",
+      "recommended": true
+    },
+    {
+      "gain": "Tonight's round-3 sentences land in one step.",
+      "id": "small-rule-text-with-sonnet-reviewer",
+      "key": "b",
+      "label": "Also small rule-text fixes, with one Sonnet reviewer agent first",
+      "lose": "Rule wording merges without a lane's full review."
+    },
+    {
+      "gain": "Smallest change.",
+      "id": "consultant-only",
+      "key": "c",
+      "label": "Consultant only",
+      "lose": "The other standing sessions keep queuing lanes for one-liners."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ) 00:52 CST Nov 15, relaying your 00:48 CST words; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "consultant message 00:52 CST Nov 15; your words 00:48 CST Nov 15",
+  "repo": "shivinate7/claude-settings",
+  "short": "May a standing session send one agent for a tiny edit and merge it itself?",
+  "status": "closed",
+  "title": "Tiny fixes: may a standing session send one agent and merge a small edit itself? (a) docs-only, any standing session, (b) also small rule text with a Sonnet reviewer, (c) consultant only",
+  "why": "Only you can change who merges; the consultant recommends a. Option a or b also changes your 2026-11-01 ruling that the coordinator never merges, unless you keep the coordinator out."
+}

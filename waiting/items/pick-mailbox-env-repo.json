@@ -1,9 +1,15 @@
 {
   "added": "2026-11-13T19:48:00Z",
+  "closed": "2026-11-13T20:27:30Z",
   "context": "Goal: every cloud session can send and read session mail, so the 20-message mailbox trial can start.\nProblem (risk): in a cloud session `mail` fails with \"mail unknown: auth\" because the message store shivinate7/session-mailbox is not attached. Lane mail-send-cloud-auth measured the fix: attaching it with push access turns the error into a working send, read and take (message bd003f330aa1). Today each session must attach it itself. Making it standing means adding the store to the cloud environment's GitHub repo list, which gives every cloud session in that environment push access to the store. Only you can change that list.\nBased on (measured): lane session_013NEJL3qkyfjjgJa3YS4Dsz, coordinator relayed 13:49 CST Nov 13. Based on (read): docs/decisions/session-messages.md line 64 describes the same failure; triage has not read the mailbox rulings (for example mailbox-store-place).\nDeparts from: main, where no cloud environment lists session-mailbox \u2014 option a adds it to the environment's repo list; option b changes nothing and each standing role attaches the store at its start.\nWhy yours: the environment's repo list is a claude.ai setting under your login (checked: this session has add_repo for its own session only).\nDisclosure: to test the fix, lane mail-send-cloud-auth attached the store in its own session (on the coordinator's 13:48 CST instruction), and the coordinator's session already had it attached. Neither was your word.\nMeanwhile: no standing role attaches the store, because attaching a second repo with push access is your word (runner 10 declined). The 20-message mailbox trial waits on your pick.",
   "home": "step mail-send-cloud-auth; step session-mailbox-followups",
   "id": "pick-mailbox-env-repo",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T20:24:52Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 754,
   "options": [
     {
@@ -21,9 +27,10 @@
   ],
   "owner": "lane mail-send-cloud-auth via coordinator; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "coordinator 13:49 CST Nov 13",
+  "reply": "Filed: ruling own-754-a-mailbox-env-repo (roadmap e5bfe7919). session-mailbox goes on the cloud environment's GitHub repo list. Still open: who edits that list; triage has no way to, so the coordinator is asked.",
   "repo": "shivinate7/claude-settings",
   "short": "Add the mailbox store to the cloud environment's repo list?",
-  "status": "open",
+  "status": "closed",
   "title": "Should the cloud environment's GitHub repo list carry the session mailbox store, so every cloud session can use mail?",
   "why": "It gives every cloud session push access to the store; only you can change the environment's list."
 }

@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-15T01:08:00-06:00",
+  "context": "Goal: PR 2701 (solo-batch-hat) is handed in with a review record the merge tool accepts.\nProblem (rule): the merge tool refuses the lane's true rounds. A fix verifier passed on the change since the earlier head (35df574 to cfa1ec8a). The tool's remedy asks the lane to post the OLD head's rounds (round 1 FAIL, round 2 FAIL, round 3 PASS) plus a fix check on that change. The lane's own rounds at the new heads were round 1 FAIL, round 2 PASS, round 3 PASS. The auto-mode classifier denied printing the old-rounds record, and only you can lift that denial.\nBased on (record): docs/decisions/pr-review-record.md, the restart refusal and the done rules: an earlier record at another head makes a new record restart review unless a fix check on the delta is named.\nBased on (ruling): your 774 b granted one exact record command form for one PR (PR 3264) only, so it does not cover this PR or this form (rule outcomes-grant-covers-named-act). Triage read the ruling files only, not the tool's code or the PR.\nDeparts from: main keeps one round ledger per head; the remedy posts a record that holds the old head's rounds plus a fix check on the change since.\nRelated, not the same: open item 858 asks whether a passing fix verifier ends review when no round is recorded at its head. Its answer may bear on this one.\nThe classifier denial stands until you lift it. To accept option a, you can type: \"yes, the lane solo-batch-hat may print and post the old-head round record for PR 2701 as merge --review-record's remedy says.\"\nMeanwhile: the lane waits; runner 10 runs the lane lint (no verdict tool in that lane).\nCorrection 02:06 CST Nov 15 (runner 10's finding, relayed by the coordinator; triage read no code): merge --review-record only PRINTS the record; it posts nothing and has no --confirm flag. \"Post\" in option a means the lane then posts the printed lines as a PR comment with the GitHub tool. The options and the classifier denial are unchanged.",
+  "holds": "The lane holds PR 2701 (solo-batch-hat) unrecorded until this is answered.",
+  "home": "PR 2701, step merge-role-raw-paths; decision pr-review-record",
+  "id": "pick-post-old-head-rounds-2701",
+  "kind": "decision",
+  "n": 862,
+  "options": [
+    {
+      "gain": "A record the merge tool accepts, so PR 2701 can be handed in.",
+      "how": "The lane prints and posts that record for PR 2701 only.",
+      "id": "post-old-head-record",
+      "key": "a",
+      "label": "Post the old head's rounds plus a fix check on the change since, as the tool's remedy says",
+      "lose": "The ledger mixes two heads: the old head's rounds sit beside the true rounds at the new heads."
+    },
+    {
+      "gain": "No ledger mixing two heads.",
+      "how": "The lane puts the true rounds in its hand-in and posts no record.",
+      "id": "hand-in-true-rounds-as-text",
+      "key": "b",
+      "label": "Post nothing; hand in the true round ledger as text",
+      "lose": "The merge tool counts no record for PR 2701, so the merge refuses it."
+    }
+  ],
+  "owner": "lane solo-batch-hat (session_013NEJKzruqvkmdxZx6AXoH8) 01:05 CST Nov 15, same question sent to the coordinator; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "recommended": "a",
+  "ref": "lane message 01:05 CST Nov 15; related: item 858 (fix verifier, no round recorded)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Post old-head rounds for PR 2701?",
+  "shown": [
+    {
+      "id": "post-old-head-record",
+      "key": "a",
+      "label": "Post the old head's rounds plus a fix check on the change since, as the tool's remedy says"
+    },
+    {
+      "id": "hand-in-true-rounds-as-text",
+      "key": "b",
+      "label": "Post nothing; hand in the true round ledger as text"
+    }
+  ],
+  "status": "open",
+  "title": "PR 2701: post the old head's rounds plus a fix check on the change since, as the merge tool's remedy says? (a) yes, (b) no, hand in the true rounds as text",
+  "why": "The lane recommends a: it is the tool's own printed remedy and it is undoable, but the classifier denial means only your word lets the lane print it."
+}

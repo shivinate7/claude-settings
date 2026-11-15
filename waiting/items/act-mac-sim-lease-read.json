@@ -1,0 +1,43 @@
+{
+  "added": "2026-11-15T05:39:00-06:00",
+  "command": {
+    "mac": "cd ~/claude-settings && for u in $(xcrun simctl list devices booted | grep -Eo '[0-9A-F]{8}-[0-9A-F-]{27}'); do echo \"$u\"; hinge -d \"$u\" get; done; bin/sim-lease status; ls ~/Library/Logs/DiagnosticReports | grep -cE 'SpringBoard|PosterBoard'"
+  },
+  "context": "This item asks you to run one command on your Mac. Nothing waits on it.\nGoal: the sim-lease fix (PR 3482) is checked against a real Mac, and the load-bar gap (gap 4, debt sim-load-bar-lets-crashes) gets real load data (max efficiency, no waste, owner 20:17 CST Nov 14).\nProblem (goal): three paths of PR 3482 need a real Mac and were not run: the text real `hinge get` prints, a reuse followed by `bin/sim-lease status`, and the SpringBoard and PosterBoard crash-report count. A cloud session has no Mac.\nBased on (read): the lane's PR body for 3482, GitHub read by triage 05:38 CST (open, draft, head 0dfed5f2f9ed): 'Mac-only paths (real simulator, xcodebuild, the text the real hinge get prints) are not run here: unknown.' Step sim-lease-mac-read holds the same command (lane's, relayed; neither the coordinator nor triage ran it). Coordinator's hand-in message 05:37 CST, relayed.\nDeparts from: main has no Mac read for sim-lease; this adds one read-only command.\nWhy yours: the command needs your Mac (checked: no online computer folder for this session; a Mac session could also run it).\nMeanwhile: nothing waits on it. Runner 10 merges 3482 after the merge.py PRs; gap 4 stays deferred until the data comes back.",
+  "home": "step sim-lease-mac-read; PR 3482 (step sim-lease-gaps)",
+  "id": "act-mac-sim-lease-read",
+  "kind": "task",
+  "n": 876,
+  "options": [
+    {
+      "gain": "Real hinge output, a reuse then status, and the crash-report count, so gap 4 (debt sim-load-bar-lets-crashes) can be built on data.",
+      "how": "Open Terminal on your Mac, paste the command below, and send the output back in your answer. It only reads: it lists booted phones, prints each one's hinge state, prints the lease status and counts crash reports.",
+      "key": "a",
+      "label": "Run the command on your Mac",
+      "lose": "A minute of your time on the Mac."
+    },
+    {
+      "gain": "Nothing to do now.",
+      "key": "b",
+      "label": "Later",
+      "lose": "Gap 4 stays deferred; the three Mac paths of PR 3482 stay unknown."
+    }
+  ],
+  "owner": "lane sim-lease-gaps (session_013NEJKznM1N14vJ5WzhkgMk) via coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 05:37 CST Nov 15; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator message 05:37 CST Nov 15; PR 3482",
+  "repo": "shivinate7/claude-settings",
+  "short": "Run a read-only sim-lease command on your Mac",
+  "shown": [
+    {
+      "key": "a",
+      "label": "Run the command on your Mac"
+    },
+    {
+      "key": "b",
+      "label": "Later"
+    }
+  ],
+  "status": "open",
+  "title": "Run one read-only command on your Mac so the sim-lease fix and the load bar get real data",
+  "why": "Only your Mac can show what real hinge prints and whether the phones crash. It only reads. Nothing waits on it."
+}

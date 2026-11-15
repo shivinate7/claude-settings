@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-15T17:52:54.418Z",
+  "choice": "b",
+  "item": "ruling-supersedes-names-id",
+  "label": "B: Check changed entries through a git diff of the store",
+  "n": 881,
+  "note": "",
+  "optionId": "git-diff-store"
+}

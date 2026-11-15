@@ -1,0 +1,43 @@
+{
+  "added": "2026-11-13T23:09:00-06:00",
+  "closed": "2026-11-14T05:40:00Z",
+  "context": "Goal: a combined PR of one session's lanes can merge as one PR without the lane check refusing it.\nProblem (rule): the lane check refuses two open PRs of one session that clash, because the cross rule treats each as a lane PR. A combined PR (like #3356 and #3360) has no batch-freeze block in its body and is not on the integration branch name, so the tool does not see it as an integration PR. For an integration PR the same rule gives only a report line, no refusal. Your ruling own-767-a (15:33 CST) said only the wording of the CLAUDE.md rule changes, \"not the tool\".\nWhat protected: two clashing PRs of one lane never join one batch by mistake (decision lanes-run-no-full-ci-job, the cross rule: PRs 1923 and 2112, batch 68).\nWhat protects it now: the cross rule itself in merge/merge.py (cross_measure); it still holds for lane PRs.\nBased on (review): lane merge-tool-audit-fixes' reads of merge/merge.py, via the coordinator 23:07 CST, and its own answer 23:21 CST (below); the coordinator's 23:08 CST recommendation. All unchecked by triage. Your ruling own-767-a, read by triage.\nThe lane's answer on option a (23:21 CST): it works today with no tool change. The combined PR's branch is named batch-<name>, and its body holds a block between batch-freeze begin and end lines with one Batch: <name> line (equal to the branch suffix, 32 characters at most) and at least one Lane: #<PR> <40-character head> line. Any other line in the block makes the PR read as a lane PR again. Effect: the clash becomes a report line, and lane lint skips the draft-run read. Side effect: CI treats a batch-* branch as a batch, so CI jobs change. Not checked by the lane: whether combine-clear1 and combine-g1d bodies hold a block, and which CI jobs a batch-* branch runs.\nDeparts from: main and your ruling own-767-a \u2014 a changes only the combined PRs (a batch-freeze block and the batch-<name> branch), no tool change; b changes nothing and has combined PRs name distinct sessions; c changes the shared tool (a marker line) and the decision lanes-run-no-full-ci-job.\nMeanwhile: runner 10 closes #2857 and combined PRs name distinct sessions (the coordinator's workaround). Nothing waits on you.",
+  "home": "decision lanes-run-no-full-ci-job (the cross rule); ruling own-767-a-combined-pr; merge/merge.py cross_measure, is_integration_pr; step lane-lint-names-clashing-open-pr",
+  "id": "pick-combined-pr-marker",
+  "kind": "decision",
+  "lastAnswer": "811: c, marker line (23:38 CST Nov 13).",
+  "n": 811,
+  "options": [
+    {
+      "gain": "No change to the shared tool; your ruling 767 a stands; a combined PR is not refused for clashing with its own session's PRs.",
+      "id": "repo-side-integration-form",
+      "key": "a",
+      "label": "Combined PRs take a batch-<name> branch and a batch-freeze block in the body, so the existing integration rule turns the clash into a report line (recommended by the coordinator)",
+      "lose": "CI treats a batch-* branch as a batch, so the CI jobs for a combined PR change (the lane has not checked which); the block must be exact or the PR reads as a lane PR again."
+    },
+    {
+      "gain": "Nothing to build; the workaround already runs.",
+      "id": "distinct-sessions",
+      "key": "b",
+      "label": "Keep everything as it is; combined PRs name distinct sessions in their bodies",
+      "lose": "A combined PR must carry a session URL different from its members; one more thing for the runner to get right, and nothing stops a slip."
+    },
+    {
+      "gain": "A combined PR is never refused for clashing with its own session's PRs, with no change to branch names or CI jobs.",
+      "how": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo",
+      "id": "marker-line",
+      "key": "c",
+      "label": "Add a combined-PR marker line the cross rule reads; rewrite lanes-run-no-full-ci-job to match",
+      "lose": "The shared tool changes though your 767 a said it would not; a wrongly marked lane PR would skip the clash check.",
+      "widens": true
+    }
+  ],
+  "owner": "lane merge-tool-audit-fixes (session_013NEJL1k9L6aaoYwt9rkang), via the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 23:07 CST Nov 13",
+  "reply": "Closed on your c. Filed as ruling own-811-c-marker-line: a combined-PR marker line the cross rule reads, and lanes-run-no-full-ci-job rewritten to match, naming your ruling 767 a. Option c widened the shared tool and carried that warning; I took it as chosen knowingly. It grants the marker line only. Lane merge-tool-audit-fixes builds it, red test first.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Combined PRs: change the clash check or use distinct sessions?",
+  "status": "closed",
+  "title": "Should the lane check learn a marker for combined PRs, or should combined PRs just name distinct sessions?",
+  "why": "Your ruling 767 a said the tool does not change; the smallest fix changes it, so only you can allow it."
+}

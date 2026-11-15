@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-13T22:24:00-06:00",
+  "closed": "2026-11-14T04:24:00Z",
+  "context": "Goal: a batch build that is quiet but alive is not reported as failed.\nProblem (rule): your ruling of 2026-10-18 15:15 CDT, recorded in docs/decisions/stall-watch.md lines 23-26, makes the stall watcher print a STALL report and exit 3 after 300 quiet seconds, while the job keeps running; the session gets no exit code, even for a healthy silent job. Runner 10 reports the background task then reads \"failed\" on a build that is fine: twice (batch 138, batch 139's fourth build). Each time it ran pgrep and git ls-remote to learn the build was alive, a false alarm costing a check. Triage read the decision lines and they match runner 10's quote. You asked at 13:53 CST \"is this a fault in our stall watchers?\"\nBased on (read): runner 10's report 22:19 CST (the two incidents; unchecked by triage); decision stall-watch lines 23-26.\nBased on (unmeasured): how often the watcher fires on healthy builds, and how often it catches a real stall. No count exists; the cloud has no guard.log.\nOutcome the old ruling protected: the lines read do not say; unmeasured. Likely a stranded job must not look finished; the owner's 2026-10-31 stranded-job incident is in the same decision.\nDeparts from: main \u2014 the watcher treats every 300 quiet seconds as a stall; a or b changes it after your grant.\nMeanwhile: nothing changes; runner 10 left the 300 s alone and checks by hand.",
+  "home": "docs/decisions/stall-watch.md lines 23-26 (your ruling 2026-10-18 15:15 CDT); step lane-lint-redirect-stall; #3272's partial fix",
+  "id": "pick-stall-watch-live-child",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-14T04:24:00Z",
+    "note": "Withdrawn, not answered: your ruling of 14:09 CST Nov 13 already decides it."
+  },
+  "n": 805,
+  "options": [
+    {
+      "gain": "A quiet build with a live child process stops reading as failed.",
+      "id": "live-child-running",
+      "key": "a",
+      "label": "The watcher treats a quiet job that still has a live child process as running (recommended by runner 10)",
+      "lose": "A hung job whose child process is alive but stuck is no longer reported at 300 s."
+    },
+    {
+      "gain": "Fewer early reports on slow builds; nothing else changes.",
+      "id": "longer-wait",
+      "key": "b",
+      "label": "Raise the quiet limit above 300 s for batch builds only",
+      "lose": "A real stall on a batch build is reported later, and the right number is unmeasured."
+    },
+    {
+      "gain": "No change and no new risk.",
+      "id": "keep",
+      "key": "c",
+      "label": "Keep the watcher as ruled",
+      "lose": "A healthy quiet build keeps reading as failed; runner 10 keeps checking by hand."
+    }
+  ],
+  "owner": "runner 10 (session_013NEJL2f1YCYsvLdpFqtWP3) via the consultant; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "runner 10 22:19 CST Nov 13; your question 13:53 CST",
+  "reply": "Withdrawn 22:24 CST Nov 13, no answer needed. Your ruling own-stall-beat-and-cpu-b (14:09 CST Nov 13) already decides this: the watcher reads the CPU time of the job's process tree; a tree whose CPU advanced in the quiet window is no stall; a quiet tree with no CPU stays a stall. Runner 10 withdrew the question at 22:21 CST: its two false alarms were about 13:50 CST, before the ruling. Triage should have found that ruling before posting; it was on the record branch. What stays open is only whether the ruling is built and live, filed as a check on #3272's partial fix.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Stall watcher: quiet but alive is not failed?",
+  "status": "closed",
+  "title": "Should the stall watcher treat a quiet job that still has a live child process as running, not failed?",
+  "why": "It changes your own 2026-10-18 ruling; only you can change it."
+}

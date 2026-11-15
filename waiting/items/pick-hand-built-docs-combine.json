@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-14T20:08:00-06:00",
+  "closed": "2026-11-14T20:18:00-06:00",
+  "context": "REINSTATED 20:08 CST Nov 14 (coordinator; the question crossed with its own withdrawal, stamped by triage): the dry fold shows the five fold clean; the coordinator starts g1 only on your answer.\nGoal: fewer serial CI runs for the docs-only PRs that wait, without breaking your ruling on combines.\nProblem (rule): your ruling 826 a (02:14 CST Nov 14) says per-lane merge by priority now and \"no hand-built combines\" while the combine train is built and measured. That wording is the consultant's and the coordinator's reading, and the ruling says another reading is possible; your own quote there is \"can't we do a while work on building b\". The consultant told the coordinator at 20:06 CST to have lane g1 hand-build one docs-only combine of #3396, #3431, #3428, #3391 and #3430 as the measurement. merge/combine_train.py (on main, #3392) is a dry run only: no push, no gh pr ready, no PR, and its checks line reads unknown (the coordinator's read, unverified by triage). So the combine still needs a hand build, and the reading \"no hand-built combines\" still stands against option a. Only you can lift your own ruling; your 20:01 words (\"lanes with work ready ie tournament batching\") lean toward batching but do not name this act.\nDry fold (the coordinator's read, unverified by triage): merge/combine_train.py on origin/main 261bdcecad, 20:07 to 20:08 CST: 5 members in, 0 left out, clash rate 0/4, 3 dry rounds 0.52 min, wall 31.6 s, exit 0; fast checks ok (4 checks); lint and CI not run (n/a). Triage's earlier read that #3428, #3430 and #3391 clash in docs/debts/notes.md was WRONG: .gitattributes merges that file by union (decision notes-merge-union). Not measured: ready-mark-to-merge wall for a combine; whether each PR's review record carries to a combined tree.\nCorrection: an earlier triage message told the coordinator no ruling forbids one combined docs-only PR. That was too short. Ruling 826 a has \"no hand-built combines\" (a reading, open); ruling 767 a allows combined PRs.\nBased on (ruling): own-826-a-now-build-b, its sentence \"no hand-built combines\" (a roadmap record; the reading is not yours).\nBased on (ruling): own-767-a-combined-pr: \"A PR merges alone; it may combine several reviewed lanes as one PR when that saves CI\" (#3429 is one, built before 826 a was read as a stop).\nBased on (read): the coordinator's read of merge/combine_train.py on main and the consultant's relay of your 20:01 chat; triage read neither the tool, the train steps (combine-train-tool, fast-checks-before-ready) nor any PR.\nDeparts from: main's practice (runner 10 merges each docs PR alone, each on its own ready run) \u2014 one hand-built combined PR of five docs-only PRs through lane g1, wall time from first ready mark to merge measured against the per-lane runs of the same week.\nMeanwhile: the coordinator holds the combine; g1 builds nothing; runner 10 keeps merging per lane. The coordinator recommends a (named 20:05 CST, before the dry-run fact above; its recommendation is unchanged).",
+  "home": "ruling own-826-a-now-build-b; ruling own-767-a-combined-pr; step combine-train-tool; PRs #3396, #3431, #3428, #3391, #3430",
+  "id": "pick-hand-built-docs-combine",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-14T20:15:00-06:00",
+    "choice": "a",
+    "note": "Owner chat 20:15 CST Nov 14, relayed by the consultant: \"i enver ruled against by hand PRs like that i thought but anyways A\". Ruling own-848-a-hand-built-docs-combine; the gloss on own-826-a was removed."
+  },
+  "n": 848,
+  "options": [
+    {
+      "gain": "One ready run instead of up to five for these PRs, and a first measured number for the train.",
+      "id": "hand-build-one-combine",
+      "key": "a",
+      "label": "Hand-build this one docs-only combine as the measurement",
+      "lose": "It goes against \"no hand-built combines\" as read in your ruling 826 a. Docs-only run time is unmeasured, so the saving may be small.",
+      "recommended": true
+    },
+    {
+      "gain": "Matches the ruling as read, and no new hand work.",
+      "id": "keep-per-lane",
+      "key": "b",
+      "label": "Keep per-lane merges as ruled and build the train first",
+      "lose": "Up to five serial runs for these PRs, and no measured number until the train exists."
+    },
+    {
+      "gain": "No guess about your 20:01 words.",
+      "id": "wait-owner-batching-word",
+      "key": "c",
+      "label": "Wait for your own word on batching in general",
+      "lose": "The docs PRs wait."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 20:05 CST Nov 14; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator message 20:05 CST Nov 14",
+  "repo": "shivinate7/claude-settings",
+  "short": "May one docs-only combine of five waiting PRs be hand-built as the measurement?",
+  "status": "closed",
+  "title": "Your ruling 826 a says no hand-built combines while the train is built. The coordinator wants one hand-built docs-only combine of five PRs as the first measurement. Hand-build it (a), keep per-lane (b), or wait for your word on batching (c)?",
+  "why": "Only you can lift your own ruling. The train tool (#3392) is a dry run and cannot build the combine."
+}

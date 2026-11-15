@@ -1,0 +1,51 @@
+{
+  "added": "2026-11-15T12:12:43-06:00",
+  "closed": "2026-11-15T18:15:41Z",
+  "context": "Goal: land the waiting-page test lane's changes without more than one full CI run per change.\nProblem (rule): the waiting-page lane wants to start a full CI run by hand on every head, but your rule is one full CI run per change.\nBased on (read): the coordinator's audit of ruling page-tests-served-font (roadmap/rulings/page-tests-served-font.json, status open, filed by triage Nov 13 from PR 2347's body). It says \"prove each head with a dispatched checks run\". The words are the coordinator's, relayed by a lane, not a quote from you.\nBased on (ruling): rule roles-each-layer-proves-once in CLAUDE.md: the PR run is the merge check, and a change is proved once per layer. No decision or ruling on the roadmap branch or in docs/decisions answers this for the page lane.\nDeparts from: main (one full CI run per change) \u2014 a lane starts an extra full run by hand on every head.\nMeanwhile: the lane keeps its font tests; nothing else waits on this.",
+  "home": "roadmap/rulings/page-tests-served-font.json",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T18:13:51.706Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 884,
+  "options": [
+    {
+      "gain": "One full run per change, nothing extra queued.",
+      "how": "The lane drops the hand-started run on each head. The PR's own run is its proof.",
+      "id": "pr-run-only",
+      "key": "a",
+      "label": "No: the lane keeps its tests and proves on the PR run only",
+      "lose": "The lane's font test is proven later, at the PR run."
+    },
+    {
+      "gain": "Proof on every head.",
+      "how": "The page lane starts a full run by hand on every head, as ruling page-tests-served-font says.",
+      "id": "page-lane-each-head",
+      "key": "b",
+      "label": "Yes, for the page lane only",
+      "lose": "Extra full runs while the CI budget is tight."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "page-tests-served-font (the ruling that the page lane proves each head with a dispatched checks run)",
+  "replied": "2026-11-15T12:15:41-06:00",
+  "reply": "ruled page-tests-served-font: the page lane proves on the PR run only",
+  "repo": "shivinate7/claude-settings",
+  "short": "Page lane's extra CI run",
+  "shown": [
+    {
+      "id": "pr-run-only",
+      "key": "a",
+      "label": "No: the lane keeps its tests and proves on the PR run only"
+    },
+    {
+      "id": "page-lane-each-head",
+      "key": "b",
+      "label": "Yes, for the page lane only"
+    }
+  ],
+  "status": "closed",
+  "title": "Does the waiting-page lane get an extra full CI run by hand on every head, against your rule of one per change?"
+}

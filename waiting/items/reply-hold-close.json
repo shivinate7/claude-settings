@@ -4,6 +4,7 @@
   "home": "PR #2778; step item-reply-back",
   "id": "reply-hold-close",
   "kind": "decision",
+  "lastAnswer": "c: keep hold plus a Close now button",
   "n": 542,
   "options": [
     {
@@ -40,9 +41,10 @@
   "owner": "coordinator",
   "pick": "c",
   "ref": "PR #2778 (adds reply-back to page questions); design notes docs/design/item-reply-back-notes.md; lane fan-prose-unmapped-2; reworded after your 15:46 CST note",
+  "reply": "Filed on step close-now-button.",
   "repo": "shivinate7/claude-settings",
   "short": "Hold a close while your reply waits",
-  "status": "open",
+  "status": "closed",
   "title": "How should an answered page question close while your reply to Claude waits?",
   "why": "Recommended: c. It keeps your replies safe and gives you the close you asked for."
 }

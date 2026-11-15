@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-13T16:02:24-06:00",
+  "closed": "2026-11-13T18:29:53-06:00",
+  "context": "Goal: degen's Mac suite leg proves PR #702 (batch 24g), so the next degen merge can go.\nProblem (money): the Mac run 43472967936 (self-hosted macbook-pro-2, label degen-mac) did start, but its checkout step hung and the job failed at 18:18 UTC, 10 minutes after it began; the cause is unknown. Another run costs macOS time, and a red leg blocks the next degen merge.\nBased on (read): runner 11's read of the run at 16:00 CST, relayed by the coordinator; job https://github.com/shivinate7/degen/actions/runs/43472967936/job/132049451962. Past rulings: none found on re-running a Mac leg. Triage has not read the run.\nDeparts from: degen as it stands (#702 is red on its Mac leg; #703 and #704 wait behind it) \u2014 option a re-runs that leg once; option b drops #702.\nMeanwhile: runner 11 holds degen. mailaudit #323 merged at 15:58 CST (main bbdf226, runner 11's read).",
+  "home": "repo shivinate7/degen; PR #702; run 43472967936",
+  "id": "pick-degen-702-mac-rerun",
+  "kind": "decision",
+  "lastAnswer": "770 a: re-run the Mac suite leg of #702 once.",
+  "n": 770,
+  "options": [
+    {
+      "gain": "#702 can merge on a real Mac run.",
+      "key": "a",
+      "label": "Re-run the Mac suite leg of #702 once (Recommended)",
+      "lose": "macOS spend, and a second hang costs another 10 minutes."
+    },
+    {
+      "gain": "No macOS spend.",
+      "key": "b",
+      "label": "Drop #702",
+      "lose": "Its change waits, and #703 and #704 stay held behind it."
+    }
+  ],
+  "owner": "runner 11 (session_013NEJKzRugXqBZrZ8xwXmW7), via the coordinator; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 16:01 CST Nov 13",
+  "reply": "Filed as ruling own-770-a-degen-702-mac-rerun and sent to runner 11. Note: run 43472967936 used the self-hosted Mac although degen defaults to the hosted runner; I asked runner 11 to re-run it on the hosted runner, since your Mac is offline.",
+  "repo": "shivinate7/degen",
+  "short": "Re-run degen #702's Mac leg once?",
+  "status": "closed",
+  "title": "Re-run degen PR #702's hung Mac test leg once, or drop the PR?",
+  "why": "The Mac leg hung for 10 minutes with the cause unknown; a re-run costs macOS time and a red leg blocks degen's next merge."
+}

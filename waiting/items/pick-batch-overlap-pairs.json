@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-13T20:14:19Z",
+  "closed": "2026-11-13T20:15:30Z",
+  "context": "Goal: no lane waits on a conflicting neighbour in the batch.\nProblem (rule): batch runner 10's pairwise check found lanes that touch the same files: merge/merge.py (#3231, #3175, #3235, #3049, #3230), hooks/guard.py (#3223, #2691), checks.yml (#3216, #3250), shoot (#3214 against #2716 and #2717). Your standing grant lets the runner merge main into a handed-in branch only. Merging one lane's head into another lane's branch is a different act, so it needs your word.\nBased on (read): runner 10's message 14:13 CST, relayed by the coordinator 14:22 CST; decision standing-merge-grant. Your words 14:13 CST, relayed: \"batch overlaps pre-addressed so no lane waits\". Option a makes the second PR of a pair wait one batch, so it fits those words only in part.\nBased on (ruling): step post-batch-conflict-merge (done): after a batch merges, each lane PR that now conflicts gets one main merge and a hunks-only review. No past ruling found that covers a lane-to-lane merge.\nDeparts from: main \u2014 the runner merges only main into a branch; option b also lets it merge a neighbour lane's head.\nMeanwhile: the coordinator keeps going; no pair rides one batch until you answer.",
+  "home": "decision standing-merge-grant; skill ci-hygiene step 8",
+  "id": "pick-batch-overlap-pairs",
+  "kind": "decision",
+  "n": 760,
+  "options": [
+    {
+      "gain": "No PR depends on another unmerged PR.",
+      "key": "a",
+      "label": "No widening: a conflicting pair goes to different batches, in order (Recommended)",
+      "lose": "The second PR of each pair waits one batch."
+    },
+    {
+      "gain": "Both PRs ride one batch.",
+      "key": "b",
+      "label": "Builders merge one lane's head into the other's branch, under the grant's limits",
+      "lose": "The two PRs become dependent: neither merges without the other. Limits: no push within 2 h, no rebase or force, a behaviour-changing conflict goes to the coordinator, a fix check and fresh record after. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), from batch runner 10; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 14:22 CST Nov 13; owner 14:13 CST in runner 10's chat",
+  "reply": "Withdrawn as moot, 14:25 CST: runner 10 withdrew its ask at 14:14 CST after 105 merge-tree checks over 14 hand-ins found no conflicts. Still unchecked: #3214 against #2716 and #2717, and the 14 against batch 139's lanes. No answer needed.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Batch overlaps: separate batches, or merge lane heads?",
+  "status": "closed",
+  "title": "How should the batch runner handle lanes that overlap: separate batches, or merge one lane's head into another's?",
+  "why": "Option b widens the standing merge grant from main-into-branch to lane-into-lane, which needs your word."
+}

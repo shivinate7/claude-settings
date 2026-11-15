@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-14T23:33:00-06:00",
+  "closed": "2026-11-14T23:43:00-06:00",
+  "context": "Goal: old drafts (Nov 12 to 13) get merged with main and handed in without a repeat review (your 20:17 CST Nov 14 goal: max efficiency, accurate, fastest).\nProblem (rule): two rules clash on one file, docs/records.md (the generated page). n=2 so far (PRs #2852 and #2932); more of the 12 rebase lanes may follow. These drafts carry an old edit to the page from before the merge tool rebuilt the page at merge. A merge of main keeps that edit with no conflict. The records-page guard then refuses any commit whose page is not main's own page; the `--fix-check` rule (pr-review-record) refuses a head that edits any path beyond git's own merge result, and the page is such a path. A conflicted page (like #3435's) is allowed by both. So these two drafts cannot get a fix-check record. Only you can pick which rule gives way.\nBased on (read): lane messages 23:40 and 23:41 CST Nov 14 with the tool's exact refusal words (\"a merge that conflicts may edit its conflicted paths only\"); both earlier logs are round 3 PASS plus a PASS fix check (comments 6860849629 on #2852, 6858733948 on #2932). Peers' reads, relayed by the coordinator at 23:42 CST; triage has not read the comments.\nBased on (ruling): own-840-a-ready-merges-main-skip-page-commits (your 19:56 CST Nov 14 answer a: the review record's walk skips page-only commits). Triage read the ruling, not the walk's code: whether it covers a records-only difference in a merge commit is unknown. No ruling of yours names this case.\nBased on (measured): a fresh review costs about 25 minutes of three reviewer rounds per affected PR (round times 7.1 to 7.9 min, n=3).\nThird path, from the first lane (pick-ack-ruling-2, PR #2932, 23:27 CST): you type `override` in that lane's session for the one commit. This item's earlier form asked only that; it covers one commit, not the class. An override must be typed by you in the lane's session: the page save alone is not that line.\nDeparts from: main - a fix check on a merge head accepts only git's own merge result; (a) makes the check ignore a difference in docs/records.md, (b) keeps the check as it is.\nMeanwhile: the lanes hold. If the consultant answers b, or there is no answer 15 minutes after the page save, the lanes start the fresh reviews (read-only, undoable). Updated 23:42 CST Nov 14 from the coordinator's 23:42 message.",
+  "home": "step records-page-before-ready; decision pr-review-record; ruling own-840-a-ready-merges-main-skip-page-commits",
+  "id": "pick-records-page-clean-merge-tree",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-14T23:43:00-06:00",
+    "choice": "b",
+    "note": "b, the consultant's pick (its reading of your 20:18 words, not typed by you; relayed by the coordinator 23:43 CST): lanes start fresh full reviews now in parallel; one lane also tests whether restoring main's page before the merge lets --fix-check pass. Reopens if you say otherwise."
+  },
+  "n": 851,
+  "options": [
+    {
+      "gain": "No repeat review: about 25 minutes of three reviewer rounds saved per affected PR (round times 7.1 to 7.9 min, n=3).",
+      "id": "fix-check-ignores-records-page",
+      "key": "a",
+      "label": "The fix-check source gate ignores differences in docs/records.md, because the page is regenerated at merge",
+      "lose": "A shared check accepts one more form. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "No tool change; the check stays as it is.",
+      "id": "fresh-full-review",
+      "key": "b",
+      "label": "Each affected lane posts a fresh full review (rounds 1 to 3 again, no Fix check line; allowed after round 3)",
+      "lose": "About 25 minutes per affected PR, sequential reviewer rounds.",
+      "recommended": true
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 23:42 CST Nov 14, from lanes 2852-merge and pick-ack-ruling-2; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane message 23:27 CST Nov 14",
+  "repo": "shivinate7/claude-settings",
+  "short": "Old drafts' records page: ignore it in the fix check, or fresh reviews?",
+  "status": "closed",
+  "title": "Old drafts carry an old docs/records.md edit and cannot get a fix-check record. Make the fix check ignore the page (a), or post a fresh full review per draft (b)?",
+  "why": "Only you can let a shared check accept a form it refuses today; the coordinator recommends b, which changes no tool."
+}

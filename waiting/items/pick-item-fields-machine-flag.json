@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-13T16:28:29-06:00",
+  "closed": "2026-11-13T19:22:30-06:00",
+  "context": "Goal: the page's list of item fields stays honest about what the page draws.\nProblem (rule): your pick on item 766 (b, build the lane-wait field in the same lane) added a machine flag `holdsLane` to the page's itemFields list. Decision item-field-rendered says that list holds only fields the page draws, and `holdsLane` is never drawn. So the decision and the page.html comment disagree with the code, and it is your call which one changes.\nBased on (read): reviewer round 1 on PR #3264 (head 85824b473), via the coordinator 16:27 CST Nov 13; the lane's read of decision item-field-rendered and page.html. Triage has read neither. Past rulings: your 766 b ruling (own-766-b-field-now) says to build the field, not where it is listed.\nDeparts from: decision item-field-rendered (itemFields lists the fields the page draws) \u2014 option a lets itemFields also hold a named machine flag; option b keeps the decision and lists `holdsLane` somewhere else.\nMeanwhile: the lane builds as is and notes the question open in the PR body. After #3264 merges the live page must be republished, or each lane-wait card shows \"carries a field the page does not draw\"; triage does that.",
+  "home": "decision item-field-rendered; PR #3264; step close-writes-receipt-answer-gone; ruling own-766-b-field-now",
+  "id": "pick-item-fields-machine-flag",
+  "kind": "decision",
+  "lastAnswer": "773 a: amend the decision and the page comment.",
+  "n": 773,
+  "options": [
+    {
+      "gain": "The code and the decision agree, and the lane merges as built.",
+      "key": "a",
+      "label": "Amend the decision and the page.html comment so itemFields may hold a named machine flag (Recommended)",
+      "lose": "The block no longer proves that everything listed is drawn."
+    },
+    {
+      "gain": "The decision stands as written.",
+      "key": "b",
+      "label": "Move `holdsLane` into a separate machine-flags list",
+      "lose": "Another list and more code in the express PR."
+    }
+  ],
+  "owner": "lane receipt-close-express (session_013NEJL3o4VZAch2NXdx3diD), via the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 16:27 CST Nov 13",
+  "reply": "Filed as ruling own-773-a-machine-flag-field and sent to lane receipt-close-express.",
+  "repo": "shivinate7/claude-settings",
+  "short": "May itemFields hold a flag the page does not draw?",
+  "status": "closed",
+  "title": "Let the page's itemFields list hold a machine flag that is never drawn, or list it elsewhere?",
+  "why": "The new holdsLane flag breaks the decision that itemFields lists only drawn fields; one of the two has to change."
+}

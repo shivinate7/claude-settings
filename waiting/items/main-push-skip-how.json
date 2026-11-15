@@ -1,0 +1,62 @@
+{
+  "added": "2026-11-15T11:34:00-06:00",
+  "closed": "2026-11-15T17:52:00Z",
+  "context": "This item asks how to stop most main push runs from re-running the whole suite. The lane waits meanwhile.\nPlain words: a push run is the CI run that starts when a commit lands on main. A tree is the exact set of files a commit holds; equal trees mean equal files. A head is the newest commit of a PR branch. The tip is the newest commit on main. A merge ref is GitHub's test merge of a PR into main (refs/pull/N/merge).\nGoal: cut full main runs (30 to 45 min each) after merges, so merges cost less CI and the next merge waits less (CI speed).\nProblem (rule): 9 of the last 10 main push runs ran in full because the merge commit's tree matches no PR head tree. The head lacked main's tip in all 9 (5 to 41 commits behind). The skip gate works as designed. The saving needs a change to a ruling, so it needs your word.\nBased on (ruling): merge-needs-current-base (owner pick A for R42 part 2), read in its record: \"the head must already be green on its own base, and it must merge cleanly with the base tip. The head need not hold the tip.\" This matches the lane's wording, so no correction.\nBased on (ruling): own-840-a-ready-merges-main-skip-page-commits (owner 19:56 CST Nov 14, item 840 a): `merge <pr> --ready` pushes a merge of main into the PR branch; built in #3440 (merged 22:32 CST Nov 14). Your own item 840 measured that this helps at most 6 of 15 merges, because main moves between ready and merge. The consultant's later pick own-ready-push-keep-as-is (08:39 CST Nov 15, not owner-typed) left the tool as it is. Option A below is not covered by your 840 a: A needs the head to hold the tip at the merge, not at ready.\nBased on (measured): the lane's reads, relayed; triage read none of its data and has not checked it. REST reads of main push runs 43716148486 to 43741257797. Only PR 3500 (run 43732993553) had a head equal to main's tip and skipped.\nDeparts from: main lets a green head that merges cleanly with main's tip merge without holding the tip (merge-needs-current-base) \u2014 option A makes the merge tool require the head to hold the tip; B and C change nothing about merging.\nWho recommends what: option B is the lane's recommendation, not yours. Option A goes against your ruling and needs your word. Triage checked first: no ruling answers this question. Step push-skip-reads-why (the coordinator closed its lane because #3502 recorded the 'why' as a decision-record line) added no printed reason line, so B is not a repeat.\nWidens: no option marks widens. A makes the merge tool stricter and B and C accept nothing new from a shared tool.",
+  "holds": "Lane push-skip-measure waits: it builds B only on your word, and A only on your word against a ruling.",
+  "home": "decision push-skip-on-proven-tree; decision merge-needs-current-base (lane push-skip-measure; triage files the step)",
+  "kind": "decision",
+  "n": 878,
+  "options": [
+    {
+      "gain": "The PR run proves the merged tree, so most main pushes skip the full run.",
+      "how": "The merge tool refuses a PR whose head lacks main's tip. The lane merges main into the head first, and the PR run then tests the tree that main will get.",
+      "id": "merge-needs-main-tip",
+      "key": "a",
+      "label": "The merge tool requires the head to hold main's tip",
+      "lose": "One more PR run per lane when main moves (30 to 45 min each), and the ruling merge-needs-current-base changes. Goes against your ruling merge-needs-current-base (owner pick A, R42 part 2)."
+    },
+    {
+      "gain": "No silent skip=false: a reader sees why a main run ran in full.",
+      "how": "On every push run the push-skip step prints one line with the reason it ran in full or skipped. No ruling is touched.",
+      "id": "push-skip-prints-reason",
+      "key": "b",
+      "label": "The push-skip step prints one reason line on every run (the lane's recommendation)",
+      "lose": "Saves no CI minutes."
+    },
+    {
+      "gain": "No ruling change.",
+      "how": "Compare the tree main will get with the tree of the PR run's merge ref, instead of the PR head tree.",
+      "id": "read-merge-ref-tree",
+      "key": "c",
+      "label": "Read the PR run's merge-ref tree",
+      "lose": "Unproven: the lane says the API does not show that tree."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 11:42 CST Nov 15, took over from lane push-skip-measure (it holds no page tool); the consultant redraws the options, triage writes them",
+  "recommended": "b",
+  "ref": "lane push-skip-measure page-item request 11:31 CST Nov 15; ruling merge-needs-current-base (owner pick A, R42 part 2); ruling own-840-a-ready-merges-main-skip-page-commits (owner 19:56 CST Nov 14); decision push-skip-on-proven-tree",
+  "replied": "2026-11-15T17:52:00Z",
+  "reply": "Replaced by item 880 (main-push-what-they-test), redrawn by the consultant. It cites rulings r61 and r62, which cover part of this question. This item is closed unanswered; no ruling was made on it.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Make main pushes skip",
+  "shown": [
+    {
+      "id": "merge-needs-main-tip",
+      "key": "a",
+      "label": "The merge tool requires the head to hold main's tip"
+    },
+    {
+      "id": "push-skip-prints-reason",
+      "key": "b",
+      "label": "The push-skip step prints one reason line on every run (the lane's recommendation)"
+    },
+    {
+      "id": "read-merge-ref-tree",
+      "key": "c",
+      "label": "Read the PR run's merge-ref tree"
+    }
+  ],
+  "status": "closed",
+  "title": "Make main push runs skip: B reason line, A require main's tip, or C",
+  "why": "The lane's recommendation, not the owner's: B costs no ruling and removes the silent skip=false; A saves the minutes but reverses merge-needs-current-base."
+}

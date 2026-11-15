@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-14T15:11:00-06:00",
+  "closed": "2026-11-14T22:31:30Z",
+  "context": "Goal: degen is finished and handed to you, as you asked.\nProblem (goal): you said on item 827 c (15:03 CST Nov 14): \"ideally u finish up on degen fast and hand it off to me (but get it fully done)\". It does not say what \"hand it off\" covers. Degen holds 16 open draft PRs that none of the build's merge sessions was handed, so \"fully done\" is not true yet. Only you can say what handed off means.\nBased on (ruling): own-827-c-owner-merged-degen (your word, filed 15:05 CST), and own-degen-home-switch-now (runner 11 merges degen per lane; your 827 c answer does not withdraw it).\nBased on (read, runner 11's REST read at 15:07 CST, unchecked by triage, which has no read access to degen): 16 open PRs, all drafts: #722, #721, #715, #711, #694, #683, #675, #671, #660, #653, #646, #542, #539, #538, #534, #386; none handed to runner 11; nothing of its is mid-merge; degen main push runs it read are green (974).\nDeparts from: main \u2014 runner 11 merges every handed-in, reviewed degen lane and the other 16 drafts belong to other sessions; option a hands degen to you now and leaves the drafts with their own sessions, option b has runner 11 drive the drafts to merge or close first, option c has you name the drafts that count.\nMeanwhile: runner 11 touches no draft until you answer (the coordinator told it), and nothing else waits on this item.\nOption a is starred at the coordinator's recommendation (15:11 CST Nov 14); it does not widen any guard. How long the 16 drafts take is unmeasured.",
+  "home": "rulings own-827-c-owner-merged-degen and own-degen-home-switch-now; batch runner 11",
+  "id": "pick-degen-handoff-meaning",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-14T22:30:57Z",
+    "choice": "none",
+    "note": "i meant whatever work this account\u2019s coordinator spawned for degen gets landed here dont need to worry abt prs not made here"
+  },
+  "n": 841,
+  "options": [
+    {
+      "gain": "The hand-off happens now, as you asked; nothing waits on other sessions' lanes.",
+      "id": "hand-over-now",
+      "key": "a",
+      "label": "Hand degen over to you now; the 16 open drafts stay with their own sessions",
+      "lose": "The 16 drafts are not finished by this hand-off, so \"fully done\" holds for the build's own work only."
+    },
+    {
+      "gain": "Degen reaches \"fully done\" as you worded it; no draft is left behind.",
+      "id": "runner-drives-drafts",
+      "key": "b",
+      "label": "Runner 11 drives the 16 drafts to merge or close first, then hands degen over",
+      "lose": "Runner 11 takes on other sessions' lanes (16 PRs); how long that takes is unmeasured, and the hand-off waits for it."
+    },
+    {
+      "gain": "Only the drafts you care about hold up the hand-off.",
+      "id": "owner-names-drafts",
+      "key": "c",
+      "label": "You name which of the 16 drafts count as part of done",
+      "lose": "It needs your list; the hand-off waits for it, and the other drafts stay with their own sessions."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 15:09 CST Nov 14, from your word on item 827 c; runner 11's state read; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "recommended": "a",
+  "ref": "coordinator message 15:09 CST Nov 14 (item 6); runner 11 messages 15:07 and 15:08 CST",
+  "repo": "shivinate7/degen",
+  "short": "Do the 16 open degen drafts count as part of done before the hand-off?",
+  "status": "closed",
+  "title": "You said to finish degen fast, fully done, and hand it off to you. Does that include the 16 open drafts (other sessions' lanes)? Hand over now (a), runner 11 drives the drafts to merge or close first (b), or you name which drafts count (c)?",
+  "why": "Your 827 c note names a hand-off but not what it covers. Degen has 16 open draft PRs and none was handed to the merge session, so a wrong guess either leaves work unfinished or has two sessions merging."
+}

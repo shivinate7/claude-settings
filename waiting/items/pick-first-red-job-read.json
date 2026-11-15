@@ -1,9 +1,11 @@
 {
   "added": "2026-11-13T18:02:00Z",
+  "closed": "2026-11-13T18:29:53-06:00",
   "context": "Goal: a session waiting on CI hears about a red job quickly.\nIn plain words: today a waiting session checks CI on a timer. GitHub cannot start anything when one job of a run fails (the lane read the docs), so there are two routes.\nRoute 1 (build now): at each check-in the session asks GitHub for the run's state (`merge --run-state <pr>`) and sees the first red job at once. It still learns only at the check-in, not the second the job fails. No CI file changes.\nRoute 2 (later): add a small extra job per CI job in checks.yml that runs when its job fails and wakes the session. Faster, but it edits checks.yml, which three other lanes edit (conflict risk), costs extra runner minutes (unmeasured), and needs #2980 first.\nProblem (goal): which to build first.\nBased on (ruling): decision ci-wait-reads-run-status; your CI-speed words 11:34 and 11:36 CST Nov 13.\nDeparts from: main \u2014 main has no first-red-job read; a adds route 1 now and route 2 after #2980.",
   "home": "step lane-lint-once-fail-fast",
   "id": "pick-first-red-job-read",
   "kind": "decision",
+  "lastAnswer": "728 b: wait, build only route 2 after #2980.",
   "n": 728,
   "options": [
     {
@@ -25,7 +27,7 @@
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "coordinator 12:02 CST Nov 13, lane read of the Actions docs 11:59 CST",
-  "reply": "The tradeoff, in plain words. Today a waiting session looks at CI only at its timed check-ins. Route 1 (build now): at each check-in it asks GitHub which job is red, so it hears at the next check-in, not the second the job fails, and no CI file changes. Route 2 (later): each CI job gets a small extra job that runs when it fails and wakes the session, so the wake is instant, but it edits checks.yml (three other lanes edit it, so conflicts), costs extra runner minutes (unmeasured), and needs #2980 first. Speed against risk and cost. Triage opinion: a. Route 1 is small, touches no busy file, and does not block route 2: you lose nothing by having it first. The only cost is some work that route 2 may later make less needed.",
+  "reply": "Filed as ruling own-728-b-route-2-only. Nothing is built until #2980 lands; then only route 2.",
   "repo": "shivinate7/claude-settings",
   "short": "Learn of a red CI job: two routes",
   "shown": [
@@ -40,7 +42,7 @@
       "label": "Wait and build only route 2 after #2980"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "How should a waiting session learn that one CI job failed: ask GitHub at each check-in now, or add wake-up jobs to CI later?",
   "why": "The coordinator took this pick; it stands unless you choose b."
 }

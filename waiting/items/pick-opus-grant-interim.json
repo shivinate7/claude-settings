@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-13T18:45:00-06:00",
+  "closed": "2026-11-13T19:22:30-06:00",
+  "context": "Goal: an Opus grant ends in a way that never lingers or cuts off early.\nProblem (rule): Today a plain Opus ask writes a file that ends 2 hours later, for the whole session, including agents it spawns. PR #2928 (passed review) instead ends the grant at your next typed prompt or after 2 hours, for the session's own spawns only; it is narrower. Your 779 answer says build the agent-end read but switch only once it works well. It does not say which end is used meanwhile. Cutting #2928 back to today's 2-hour file drops its next-prompt end and needs a new review round.\nBased on (ruling): own-779-b-agent-end-later (triage's reading of your words, unconfirmed); lane's report 18:33 CST.\nDeparts from: main \u2014 a keeps main's 2-hour file and cuts #2928 back; b merges #2928's narrower end as the interim.\nMeanwhile: the lane changes no code and both PRs wait.",
+  "home": "ruling own-779-b-agent-end-later; step opus-ask-grants-one-spawn; PRs #2850 and #2928",
+  "id": "pick-opus-grant-interim",
+  "kind": "decision",
+  "lastAnswer": "783 b: #2928's end (next typed prompt or 2 hours) until the agent-end read works.",
+  "n": 783,
+  "options": [
+    {
+      "gain": "No change to how grants behave today.",
+      "id": "main-2h",
+      "key": "a",
+      "label": "Keep main's 2-hour file until the agent-end read works",
+      "lose": "#2928 is cut back and needs a new review; a grant still outlasts the agents it was for."
+    },
+    {
+      "gain": "A narrower grant now; #2928 keeps its review.",
+      "id": "narrower-interim",
+      "key": "b",
+      "label": "Use #2928's end (next typed prompt or 2 hours) until the agent-end read works (the lane's reading; triage recommends)",
+      "lose": "Your 761 d wording (ends when the agents end) is still not met until the read lands."
+    }
+  ],
+  "owner": "lane owner-override-one-route (session_013NEJL1ymdMFYoj4wQG9oUR); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane owner-override-one-route, 18:33 CST Nov 13",
+  "reply": "Filed as ruling own-783-b-interim-narrow-end and sent to lane owner-override-one-route.",
+  "repo": "shivinate7/claude-settings",
+  "short": "779 follow-up: how should the Opus grant end until the agent-end read works?",
+  "status": "closed",
+  "title": "Until the agent-end read works, should the Opus grant end as main does today, or at your next typed prompt or 2 hours?",
+  "why": "Your 779 answer says to switch only once the new read works well; it does not say what the grant does until then."
+}

@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-13T18:50:00-06:00",
+  "closed": "2026-11-13T19:22:30-06:00",
+  "context": "Goal: your two conditional picks (700: count role-subject report lines first; 715: replay real runner commands before keeping the guard) get a real number.\nProblem (goal): both counts read files only your computer holds: ~/.claude/projects transcripts. I checked: no computer folder is shared with the cloud (the folder list is empty), so I cannot start a session there. You would share one in the Claude desktop app (Settings, Claude Code, Remote Control).\nBased on (measured): list_computer_folders returned no folders at 18:5x CST Nov 13.\nDeparts from: main \u2014 adds one shared folder from your computer; it changes no rule.\nMeanwhile: the 700 lane builds option a; the 715 guard waits for your 782 answer.",
+  "home": "rulings own-700-a-labels-then-count and own-715-c-guard-replay; steps habit-is-not-a-guard, runner-repos-in-parallel",
+  "id": "pick-share-computer-folder",
+  "kind": "decision",
+  "lastAnswer": "785: none of these, \"just give me the prompt\".",
+  "n": 785,
+  "options": [
+    {
+      "gain": "Both counts get real numbers (20+ reports for 700; a false-refusal rate for 715).",
+      "id": "share",
+      "key": "a",
+      "label": "I will share the folder; then start the sessions",
+      "lose": "A shared folder from your computer, and a session reading your transcripts."
+    },
+    {
+      "gain": "No access to your computer.",
+      "id": "skip",
+      "key": "b",
+      "label": "Not now: skip both measurements",
+      "lose": "700 stays option a with no role-subject rule; 715's guard stays dropped unless you set a size limit (782)."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6), for lanes habit-is-not-a-guard and runner-repos-in-parallel-rest",
+  "ref": "lane reports via the coordinator, 18:32 and 18:35 CST Nov 13",
+  "reply": "The prompt to paste into a Claude Code session on your computer is in the reply on your comment thread, and in chat. No folder sharing needed.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Share a folder from your computer for two measurements?",
+  "status": "closed",
+  "title": "Two measurements need a session on your computer. Share a folder so one can start?",
+  "why": "Only your computer holds the past runner commands and reports; no cloud session can reach it."
+}

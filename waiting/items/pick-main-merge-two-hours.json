@@ -1,0 +1,48 @@
+{
+  "added": "2026-11-13T22:25:00-06:00",
+  "closed": "2026-11-14T05:41:00Z",
+  "context": "Goal: the batch runner keeps handed-in PRs up to date with main, and never clashes with a lane that is still working on the same branch.\nProblem (rule): on 13:12 CST Nov 13 you answered \"a\" to a standing-grant question: the batch runner may add the newest main into a handed-in PR branch (a plain merge, no rebase, no force push). The text drafted from it adds one safety rule: only if no lane has pushed to that branch in the last 2 hours. The coordinator cannot tell whether you saw \"2 hours\" or it was added later. Your last comment says the options did not make sense; this is the question again, in plain words, with new options.\nWhat is at stake: git itself refuses a push that would overwrite a lane's newer work, so nothing is lost either way. The rule only decides how often the runner and a lane collide, and how long a PR waits.\nBased on (read): the grant line in draft PR #3233 (the coordinator read it 22:24 CST), and your \"a\" in ruling runner-merge-main-grant.\nDeparts from: main \u2014 main has no grant for this at all; the draft adds one.\nMeanwhile: nothing changes; the grant waits in the draft.",
+  "home": "ruling runner-merge-main-grant; draft #3233 (.claude/CLAUDE.md Standing grants; docs/decisions/standing-merge-grant.md)",
+  "id": "pick-main-merge-two-hours",
+  "kind": "decision",
+  "lastAnswer": "806: d, handed-in only, no clock (23:40 CST Nov 13).",
+  "n": 806,
+  "options": [
+    {
+      "gain": "No clock and no extra check; it fits how lanes already report to the runner.",
+      "id": "handed-in-only",
+      "key": "d",
+      "label": "No extra rule: the runner touches only a PR a lane has handed in, and a lane that pushes again says so first (my reading of your note)",
+      "lose": "If a lane forgets to say it is pushing again, a collision is possible (git refuses to overwrite, so nothing is lost)."
+    },
+    {
+      "gain": "Simple, and a lane that is actively pushing is never disturbed.",
+      "id": "wait-two-hours",
+      "key": "a",
+      "label": "The runner only touches a branch nobody has pushed to for 2 hours",
+      "lose": "A PR can wait up to 2 hours for the newest main. The number is a guess, and a lane that goes quiet for 2 hours but is still working can still collide."
+    },
+    {
+      "gain": "No waiting; it only skips a branch that really changed. No made-up number.",
+      "id": "check-just-before",
+      "key": "b",
+      "label": "The runner looks at the branch right before it updates it, and skips it if anything new was pushed since it last looked (recommended by the coordinator)",
+      "lose": "The runner makes one extra check per update. A lane that pushes in the seconds right after the check can still collide, though git will refuse to overwrite it."
+    },
+    {
+      "gain": "A lane always knows before its branch changes.",
+      "id": "ask-first",
+      "key": "c",
+      "label": "The runner asks the lane (or the coordinator) first and updates only after a yes",
+      "lose": "Slower, and one more message per PR; it is the opposite of the speed you asked of the runner."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) and runner 10 (session_013NEJL2f1YCYsvLdpFqtWP3); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 22:24 CST Nov 13; runner 10 22:23 CST",
+  "reply": "Closed on your d. Filed as ruling own-806-d-handed-in-only; ruling runner-merge-main-grant is rewritten: the runner merges main only into a PR a lane has handed in, no 2-hour clock, and a lane that pushes again says so first. The coordinator is asked to have the grant text in draft #3233 drop the 2 hours.",
+  "repo": "shivinate7/claude-settings",
+  "short": "How the runner avoids stepping on a lane's branch",
+  "status": "closed",
+  "title": "When the batch runner brings the newest main into a PR's branch, how does it know a lane is not still working there?",
+  "why": "The grant you said yes to has a rule to avoid clashing with a lane, and its \"2 hours\" was never your number."
+}

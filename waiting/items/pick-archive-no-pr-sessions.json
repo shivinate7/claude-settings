@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-13T23:36:30-06:00",
+  "closed": "2026-11-14T05:41:00Z",
+  "context": "Goal: finished chats are archived so the session list shows only live work, with nothing lost.\nProblem (rule): the archive sweep sorts sessions by what happened to their PR. About 373 sessions have no PR and no branch that the sweep could find (class UNKNOWN, item 800's sweep). Archiving is hard to undo for a chat you still wanted, so the rule needs your word. Plan part 7 says to archive an idle session whose PR merged or closed, or whose work is on an archive branch with no open PR, and to keep the rest; it does not cover these.\nBased on (read): the consultant's count and options, relayed 23:35 CST; unchecked by triage. Plan part 7 (read by triage).\nDeparts from: main's sweep rule (plan part 7) \u2014 a archives these after a transcript read finds no PR or branch named; b keeps them.\nMeanwhile: these sessions are kept; nothing is archived.",
+  "home": "plan part 7 (archive sweep); step archive-sweep-runs-per-merge; page item 800",
+  "id": "pick-archive-no-pr-sessions",
+  "kind": "decision",
+  "lastAnswer": "815: b, keep them all (23:40 CST Nov 13).",
+  "n": 815,
+  "options": [
+    {
+      "gain": "About 373 finished chats leave the list; each is checked first.",
+      "id": "archive-after-read",
+      "key": "a",
+      "label": "Archive them after a transcript read finds no PR or branch named in the chat (recommended by the consultant)",
+      "lose": "A chat whose work sits somewhere the read misses is archived; an archive can be undone from the session list."
+    },
+    {
+      "gain": "Nothing archived by a read that could miss.",
+      "id": "keep-them",
+      "key": "b",
+      "label": "Keep them all",
+      "lose": "About 373 chats stay in the list."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ), asked you 23:35 CST; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "consultant 23:35 CST Nov 13",
+  "reply": "Closed on your b. Filed as ruling own-815-b-keep-no-pr. The sweep archives none of the chats that name no PR or branch.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Archive 373 sessions that name no PR or branch?",
+  "status": "closed",
+  "title": "About 373 chats name no PR and no branch. Archive them after a transcript check (a), or keep them (b)?",
+  "why": "Archiving a chat you wanted is hard to notice; the sweep rule does not cover chats with no PR."
+}

@@ -1,0 +1,49 @@
+{
+  "added": "2026-11-14T04:12:00-06:00",
+  "closed": "2026-11-14T10:38:00Z",
+  "context": "Goal: a test-support helper (like hooks/cost_probe.py, used by 12 test files) can live in the repo without an owner act each time.\nProblem (rule): the guard splits writers: builders write non-test paths, test-authors write test paths. A helper with no test cases must sit on a builder path, under a flat name `_test_<name>.py` (the repo's existing convention: lint/_test_git.py, lint/_test_temp.py; the checks match only test_, mutate_ and prove_). So helper code that tests rely on is written by a builder, not by a test-author. Only you can accept that.\nBased on (read, relayed): the lane of step test-helper-has-a-home (PR #3395, draft, head 5038d21cb) read guard.py TEST_BASENAME, lint/test_windows_split.py CiCoverage and touched-tests.py, and ran the layout, landed-dirs, hook-stub, dup-names, glossary and record-slug checks on an empty probe (all pass). Via the coordinator, 04:12 CST; triage read none of it.\nDeparts from: main \u2014 main refuses a helper in a subfolder of a landed folder and names no way out; #3395 adds the named way out (a flat `_test_<name>.py` that a builder writes) and a record section; the lane says no check is widened.\nMeanwhile: #3395 does not merge until you answer. This item does not remove the owner act for the cost helper in #3238: a role split of that one move was refused by the classifier, so item 829 (your hand move to hooks/cost_probe.py, or your typed grant of the split) still stands either way.\nNo option is starred: the coordinator gave no recommendation and triage has not read the diff.\nAdded 04:14 CST (the lane's own message, 04:13, same question; not read by triage): the lane recommends a (its words: one role creates the helper, no shared check changes). Triage does not star it: triage has not read #3395. The lane's two other options are added as c and d. Reads it cites: hooks/guard.py TEST_BASENAME is anchored ^test_, so _test_x.py is a non-test path (a builder writes it, a test-author is refused); a plain test_<name>.py helper fails lint/test_windows_split.py CiCoverage (it needs a checks.yml run step) and .github/scripts/touched-tests.py would run it as a script. The decision record builders-cannot-edit-tests would state the builder-writes-helper rule.",
+  "home": "step test-helper-has-a-home; PR #3395; item 829",
+  "id": "pick-test-helper-home",
+  "kind": "decision",
+  "lastAnswer": "831: withdrawn as moot by the coordinator at 04:38 CST Nov 14, before you answered.",
+  "n": 831,
+  "options": [
+    {
+      "gain": "Later helpers need no owner act.",
+      "id": "flat-underscore-builder-helper",
+      "key": "a",
+      "label": "Accept the flat `_test_<name>.py` name, written by a builder, as the repo's rule for a helper (PR #3395 records it)",
+      "lose": "Helper code that tests rely on is written by a builder, not a test-author; your act on the cost helper in #3238 is still needed (item 829)."
+    },
+    {
+      "gain": "Test-author independence stays as it is.",
+      "id": "keep-owner-act-per-helper",
+      "key": "b",
+      "label": "Keep today: every helper in a subfolder of a landed folder needs your act",
+      "lose": "An owner act each time; #3238 stays stuck until you act on item 829; #3395 does not merge."
+    },
+    {
+      "gain": "The helper stays test-author code; no shared check changes.",
+      "id": "test-author-writes-test-named-helper",
+      "key": "c",
+      "label": "A test-author writes the helper as test_<name>.py, with its own checks.yml run step",
+      "lose": "Every helper needs a CI step and runs as a script, so each costs CI time (unmeasured)."
+    },
+    {
+      "gain": "Fewer limits on where a helper may live.",
+      "id": "exempt-underscore-test-from-two-checks",
+      "key": "d",
+      "label": "Add _test_ to the skip lists of check_layout and check_hook_dup_names so a helper is exempt from those two checks (a widening of two shared checks)",
+      "lose": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo. Two shared checks widen.",
+      "widens": true
+    }
+  ],
+  "owner": "lane of step test-helper-has-a-home via the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), 04:12 CST Nov 14; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 04:12 CST Nov 14",
+  "reply": "Withdrawn, nothing for you to do. The lane found the repo already has a shared test-helper folder, testing/, where a test-author writes a helper, so no new rule and no guard or check change is needed (the coordinator read PR #3395 at head a6fbef47b4d9, draft, 3 files, no guard or check change). Item 829 (the cost helper in #3238) stays open until that lane's move to testing/cost_probe.py is tried.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Let a builder write test helpers at a flat _test_<name>.py name, or keep an owner act for each one?",
+  "status": "closed",
+  "title": "May a test helper live at a flat `_test_<name>.py` name that a builder writes, as the repo's rule (a), keep an owner act per helper (b), have a test-author write it as test_<name>.py with a CI step (c), or exempt it from two shared checks (d)?",
+  "why": "The guard keeps builders off test paths and test-authors off other paths, so a helper with no test cases fits neither side. Choosing a trades test-author independence for no owner act on later helpers."
+}

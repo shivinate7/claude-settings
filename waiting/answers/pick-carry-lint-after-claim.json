@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-15T17:39:47.156Z",
+  "choice": "a",
+  "item": "pick-carry-lint-after-claim",
+  "label": "A: Lift the limit: carry the lane lint across a claim or page commit made after a clean merge",
+  "n": 868,
+  "note": "",
+  "optionId": "lift-carry-limit"
+}

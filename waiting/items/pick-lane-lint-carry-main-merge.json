@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-14T20:33:00-06:00",
+  "closed": "2026-11-14T23:08:00-06:00",
+  "context": "Goal: no repeated run for the same change: \"max efficiency with no waste and remaining accurate\" (your 20:17 CST Nov 14 goal).\nProblem (rule): the lane lint is not carried across a clean merge of main, though the review record is (your ruling 2026-11-10 14:07 CST, pr-review-record line 78). Each time main moves, runner 10 merges main and runs the lane lint again. Carrying it would widen a check, so it needs your word.\nBased on (measured): runner 10's read (20:31 CST Nov 14, evening logs; unverified by triage): 6 lints ran only because a clean merge of main moved the head (#3318 9 min, #3426 8, #3429 8, #3400 11, #3367 12, #3427 8) = 56 min, and a 7th (#3435) was running. Three lints at once cost 3 to 4 min each over the 8 min alone (n=2). Lints that were the first at the final head are not counted.\nBased on (read): the review-carries-by-tree lane's read of merge/merge.py at main 90feff981bfc (unverified by triage): lint_check takes claim_only commits, not main merges, so the lint reads the exact head today.\nBased on (ruling): own-lint-skip-green-rollup-a (your answer a, 21:01 CST Nov 13, relayed by the consultant): the merge skips lane lint when the head's all-jobs-passed check is green. Triage read the ruling, not the merge code. Unknown: whether the 6 lints above ran before a green all-jobs-passed check existed on the moved head; if they did, that ruling does not cover them.\nDeparts from: main \u2014 the lane lint reads the exact head only; option a adds the form \"equal tree plus a clean merge of main\" to the lint's carry.\nMeanwhile: runner 10 keeps one lint per final head and merges main once, as ordered. The coordinator recommends b (named 20:31 CST).",
+  "home": "ruling own-lint-skip-green-rollup-a; pr-review-record line 78; ruling own-846-a-clean-merge-main-no-verifier; step carry-forgives-main-merge",
+  "id": "pick-lane-lint-carry-main-merge",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T05:04:25.937Z",
+    "choice": "a",
+    "note": "owner page save; ruling own-850-a-lane-lint-carries-clean-main-merge; widening pick, chosen knowingly"
+  },
+  "n": 850,
+  "options": [
+    {
+      "gain": "No 8 to 12 min lint after each move of main (6 lints and 56 min this evening).",
+      "id": "carry-lint-over-main-merge",
+      "key": "a",
+      "label": "Carry the lane lint across a clean merge of main; the merge tool proves it: two parents, the second on main, the tree equals git's own merge, nothing else changed",
+      "lose": "The lint's pass then covers a tree it never ran on; batch CI and the PR's own run still run it. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "The check stays as narrow as main today.",
+      "id": "keep-lint-exact",
+      "key": "b",
+      "label": "Leave the lane lint exact-head",
+      "lose": "About 56 min of runner time per evening at this pace (6 to 7 lints; n=1 evening).",
+      "recommended": true
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 20:31 CST Nov 14; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator message 20:31 CST Nov 14",
+  "repo": "shivinate7/claude-settings",
+  "short": "Should the lane lint be carried across a clean merge of main?",
+  "status": "closed",
+  "title": "The lane lint runs again every time main moves, 6 times and 56 min this evening. Carry it across a clean merge of main (a), or keep it exact-head (b)?",
+  "why": "Only you can widen a check's verdict beyond the act your rulings name."
+}

@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-15T17:33:40.618Z",
+  "choice": "a",
+  "item": "pick-ls-remote-per-prompt",
+  "label": "A: Accept one ls-remote per cloud prompt; add decision text and a cost test in a follow-up lane (recommended by the coordinator and the lane)",
+  "n": 870,
+  "note": "",
+  "optionId": "accept-ls-remote-add-cost-test"
+}

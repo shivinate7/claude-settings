@@ -1,0 +1,55 @@
+{
+  "added": "2026-11-14T03:57:00-06:00",
+  "closed": "2026-11-14T11:10:00Z",
+  "command": {
+    "mac": "cd \"$HOME\"\ngit clone --depth 20 --branch lane/watcher-cost-main https://github.com/shivinate7/claude-settings.git cost-probe-move\ncd \"$HOME/cost-probe-move\"\ngit fetch origin e202cfedb840f8b84df86ebec22652d42bf1ccaf\ngit checkout --detach e202cfedb840f8b84df86ebec22652d42bf1ccaf\ngit mv hooks/test_support/cost_probe.py hooks/cost_probe.py\nperl -pi -e 's/os\\.path\\.join\\(HERE, \"test_support\"\\)/HERE/; s/os\\.path\\.join\\(REPO_ROOT, \"hooks\", \"test_support\"\\)/os.path.join(REPO_ROOT, \"hooks\")/; s/os\\.path\\.join\\(HOOKS, \"test_support\"\\)/HOOKS/; s#hooks/test_support/cost_probe\\.py#hooks/cost_probe.py#g' hooks/test_call_judge.py hooks/test_ci_wake.py hooks/test_decision_watch.py hooks/test_feedback_inbox.py hooks/test_local_time.py hooks/test_prose_judge.py hooks/test_reply_judge.py hooks/test_sendmessage_state.py hooks/test_stall_watch.py janitor/test_install_launchd.py janitor/test_install_schtasks.py lint/test_report_guard.py docs/plans/align-watchers.md\nperl -pi -e 's/os\\.path\\.join\\(HERE, \"\\.\\.\", \"\\.\\.\"\\)/os.path.join(HERE, \"..\")/' hooks/cost_probe.py\ngit add -u\ngit commit -m \"Move the shared cost helper to hooks/cost_probe.py so a test-author and a builder can each own one side of it\"\ngit push origin HEAD:lane/watcher-cost-main\ncd \"$HOME\"\nrm -rf \"$HOME/cost-probe-move\"",
+    "powershell": "Set-Location $HOME\ngit clone --depth 20 --branch lane/watcher-cost-main https://github.com/shivinate7/claude-settings.git cost-probe-move\nSet-Location \"$HOME\\cost-probe-move\"\ngit fetch origin e202cfedb840f8b84df86ebec22652d42bf1ccaf\ngit checkout --detach e202cfedb840f8b84df86ebec22652d42bf1ccaf\ngit mv hooks/test_support/cost_probe.py hooks/cost_probe.py\n$utf8 = New-Object System.Text.UTF8Encoding $false\n$root = (Get-Location).Path\n$files = @('hooks/test_call_judge.py', 'hooks/test_ci_wake.py', 'hooks/test_decision_watch.py', 'hooks/test_feedback_inbox.py', 'hooks/test_local_time.py', 'hooks/test_prose_judge.py', 'hooks/test_reply_judge.py', 'hooks/test_sendmessage_state.py', 'hooks/test_stall_watch.py', 'janitor/test_install_launchd.py', 'janitor/test_install_schtasks.py', 'lint/test_report_guard.py', 'docs/plans/align-watchers.md')\nforeach ($f in $files) { $p = Join-Path $root $f; $t = [IO.File]::ReadAllText($p); $t = $t.Replace('os.path.join(HERE, \"test_support\")', 'HERE').Replace('os.path.join(REPO_ROOT, \"hooks\", \"test_support\")', 'os.path.join(REPO_ROOT, \"hooks\")').Replace('os.path.join(HOOKS, \"test_support\")', 'HOOKS').Replace('hooks/test_support/cost_probe.py', 'hooks/cost_probe.py'); [IO.File]::WriteAllText($p, $t, $utf8) }\n$p = Join-Path $root 'hooks/cost_probe.py'\n$t = [IO.File]::ReadAllText($p)\n[IO.File]::WriteAllText($p, $t.Replace('os.path.join(HERE, \"..\", \"..\")', 'os.path.join(HERE, \"..\")'), $utf8)\ngit add -u\ngit commit -m \"Move the shared cost helper to hooks/cost_probe.py so a test-author and a builder can each own one side of it\"\ngit push origin HEAD:lane/watcher-cost-main\nSet-Location $HOME\nRemove-Item -Recurse -Force \"$HOME\\cost-probe-move\""
+  },
+  "context": "Goal: land watcher cost pins on main (step watcher-builtin-hook-survey, PR #3238, now a draft).\nProblem (rule): the cost helper hooks/test_support/cost_probe.py fails check_landed_dirs (a subfolder of a landed folder). Moving it to hooks/cost_probe.py needs one agent to write both a test path and a non-test path; the guard builders-cannot-edit-tests refuses any one role both, and the auto-mode classifier refused a create-here delete-there split. A rename to hooks/test_cost_probe.py breaks the CI wiring (lint/test_windows_split.py CiCoverage wants a run step for every tracked test_*.py; .github/scripts/touched-tests.py:47 would run a test_ helper as a script). Cost of waiting: #3238 stays draft.\nBased on (read): the lane of #3238's reads of the guard and the CI wiring, relayed by the coordinator at 03:39 and 03:40 CST (not read by triage); triage read the 12 importing files and the helper on lane/watcher-cost-main e202cfedb840 and proved the move command below on a throwaway copy of that branch (measured: all 12 cost test files pass on the moved copy, and pass on an untouched copy; the push was a dry run, the branch tip stayed e202cfedb840). The PowerShell block was not run (no PowerShell on this machine); the Mac block was run end to end except the real push.\nDeparts from: main \u2014 on the lane's branch the helper lives in hooks/test_support/; the move puts it at hooks/cost_probe.py and rewrites the 12 import lines and 2 doc lines to match; option a does it by your hand; option b leaves it to the lane of step test-helper-has-a-home.\nWhy yours: the move crosses the role line a guard keeps (builder may not write the test path, test-author may not write the product path) and the classifier refused a split by agents; no session of yours is connected to any computer (measured 2026-11-14, list_computer_folders returned no folders); a commit you type yourself is not an agent's write.\nMeanwhile: #3238 stays draft and its lane waits; lane test-helper-has-a-home (session_013NEJL3kAdP2WqoWYSYypxM) may make the move unnecessary by letting a helper live in the test folder; nothing is pushed until you run option a.\nAdded 04:03 CST (coordinator 03:59 and the lane of #3238, relayed; not read by triage): the lane's new rule for helpers (step test-helper-has-a-home) puts a helper at a flat underscore name, `_test_<name>.py`, in the hooks folder. A split of this one move by role (a builder creates hooks/_test_cost_probe.py; a test-author deletes hooks/test_support/cost_probe.py and re-points the 12 imports; a record-writer fixes the 2 cites in docs/plans/align-watchers.md) was tried and the auto-mode classifier refused it twice (03:38 and 03:58 CST, 'Undermining Oversight': it read the split as a way around the guard that keeps a builder off tests). The lane did not retry. Option c is your typed grant for that one split. Option a is the plain-name move at hooks/cost_probe.py (the command below); the underscore name in option c is a different target, so the command below does not serve it.",
+  "home": "steps watcher-builtin-hook-survey, test-helper-has-a-home; PR #3238; branch lane/watcher-cost-main",
+  "id": "act-move-cost-probe",
+  "kind": "task",
+  "lastAnswer": "829: withdrawn as moot by the coordinator at 05:10 CST Nov 14, before you answered.",
+  "minutes": "3 min",
+  "n": 829,
+  "options": [
+    {
+      "gain": "#3238 can leave draft on this route; the cost tests pass on the moved copy.",
+      "how": "Open a terminal, paste the command below, wait for the push line.",
+      "id": "run-move",
+      "key": "a",
+      "label": "Run the move command on your computer (one commit on the #3238 branch lane/watcher-cost-main) (recommended: unblocks #3238 now, 3 minutes of yours)",
+      "lose": "One commit by you on the lane's branch touching 14 files; the PR needs a fresh review round on the new head; the PowerShell block is untested."
+    },
+    {
+      "gain": "No hand edit; one rule for every future helper.",
+      "id": "wait-helper-home-lane",
+      "key": "b",
+      "label": "Wait for the lane of step test-helper-has-a-home (it may let a helper live in the test folder)",
+      "lose": "#3238 stays draft until that lane reports, and its rule alone does not move this helper: a role split of it was refused by the classifier (how long the wait is, unmeasured)."
+    },
+    {
+      "gain": "The lane finishes the move with no hand edit, at the flat underscore name the new helper rule uses.",
+      "how": "Type in chat or on the page: yes to the role split for cost_probe on lane/watcher-cost-main at e202cfedb840.",
+      "id": "grant-role-split",
+      "key": "c",
+      "label": "Grant one role split on lane/watcher-cost-main at e202cfedb840: builder creates hooks/_test_cost_probe.py, test-author deletes the old file and re-points the 12 imports, record-writer fixes the 2 cites",
+      "lose": "A typed grant for an act the classifier refused as a bypass; it covers this one split and no other helper; three agent steps and the new file's repo-root path to fix (one folder up, not two); not tried end to end."
+    }
+  ],
+  "owner": "lane of PR #3238 via the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), 03:40 CST Nov 14; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "recommended": "a",
+  "ref": "coordinator 03:40 CST Nov 14",
+  "reply": "Withdrawn, nothing for you to do and no command to run. The lane of PR #3238 moved the helper itself to testing/cost_probe.py (commit cdc7d41a0e, 12 imports re-pointed) with one test-author and one record-writer, no builder. Triage read the lane's branch (head 6280df4b7ffd, draft): testing/cost_probe.py is there. The lane reports check_landed_dirs and its fixture suite pass, and lane lint passes (05:08 CST); none of that was re-run by triage.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Move the cost helper to hooks/cost_probe.py by hand so #3238 can leave draft",
+  "status": "closed",
+  "steps": [
+    "Paste the command below into a terminal (it clones the branch into a folder named cost-probe-move under your home folder, makes one commit, pushes it to lane/watcher-cost-main, and deletes the folder).",
+    "If the push is refused as not fast-forward, the lane moved the branch: stop and tell the coordinator; nothing was changed on GitHub.",
+    "Tell the coordinator it is pushed; the lane then runs its round on the new head."
+  ],
+  "title": "Run one command to move the cost helper to hooks/cost_probe.py on the #3238 branch (a), or wait for the helper-home lane (b)?",
+  "updatedAt": "2026-11-14T04:03:00-06:00",
+  "why": "No single agent may make the move: the role guard splits test paths from product paths and the classifier refused a split. A commit you type yourself is the one way through today."
+}

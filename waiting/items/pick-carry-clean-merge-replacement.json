@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-14T20:16:00-06:00",
+  "closed": "2026-11-15T00:13:49-06:00",
+  "context": "WITHDRAWN by the coordinator 20:16 CST Nov 14: a ruling answers it; no answer needed.\nGoal: a replacement PR keeps the earlier review record when main moves, so nobody re-prints it by hand and the PR does not stall.\nProblem (rule): the merge tool's carry (carry_source in merge/merge.py) accepts only a replacement PR whose tree equals the reviewed tree. Accepting \"the reviewed head plus a clean merge of main\" on a replacement PR lets a record cover a tree its reviewer never read, bounded to main's own commits. That widens a check's verdict. Your rulings 846 a and 847 a cover a clean merge of main on the SAME PR only, and a ruling covers the act it names, never a variant, so only you can say whether it extends to a replacement PR.\nBased on (ruling): own-846-a-clean-merge-main-no-verifier (18:30 CST Nov 14) covers line 18's sentence only; own-835-b-into-a (14:56 CST Nov 14, the consultant's relay of your \"835 approved b into a\") carries a record to a replacement PR whose tree is byte-identical, one source PR. No ruling covers a replacement PR with a clean merge of main (roadmap records, read by triage).\nBased on (read): the lane's read of merge/merge.py at main 90feff981bfc, unverified by triage: live_review_state and clean_merges_after forgive a clean merge of main on the same PR by walking its commits; a replacement PR has no such chain.\nBased on (read): the one case so far is #3429 (record at b0b2f3bbed) to #3435 (head ffc085233a9e), where lane g1 re-printed the record by hand (comment 6887765565): one stall, n=1 (the coordinator's read, unverified by triage).\nDeparts from: main (the carry accepts equal trees only) \u2014 option a adds one more accepted form: the equal tree plus a clean merge of main.\nMeanwhile: lane review-carries-by-tree (session_013NEJKzVWixDqQgAjMzTCgV) listed the eight checks that read a record by head or tree (read-only; its verdict: only the carry, the lint-carried row and `--fix-check` on a replacement share the gap) and builds nothing. The lane lint is not forgiven over a clean merge of main even on one PR today, so widening it for replacements would be wider than main; the lane says leave it exact (the coordinator's call, undoable). If you pick a, the lane builds the carry and the `--fix-check` source gate only. The coordinator recommends b (named at 20:15 CST).",
+  "home": "step carry-forgives-main-merge; ruling own-846-a-clean-merge-main-no-verifier; ruling own-835-b-into-a; lane review-carries-by-tree",
+  "id": "pick-carry-clean-merge-replacement",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T06:09:16.492Z",
+    "choice": "a",
+    "note": "your save on a item the coordinator had withdrawn in text; treated as your answer; ruling own-849-a-replacement-carry-clean-merge"
+  },
+  "n": 849,
+  "options": [
+    {
+      "gain": "No hand re-print of the record after main moves.",
+      "id": "carry-equal-tree-plus-clean-merge",
+      "key": "a",
+      "label": "Add the form: equal tree plus a clean merge of main, exact tree only, an unreadable merge-tree reads unknown",
+      "lose": "The carry trusts main's changes that nobody reviewed on this PR. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "The check stays as narrow as today.",
+      "id": "carry-equal-tree-only",
+      "key": "b",
+      "label": "Leave the carry equal-tree only; the lane re-prints the record by hand on the replacement",
+      "lose": "One hand re-print per replacement PR when main has moved (1 case so far, n=1).",
+      "recommended": true
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 20:15 CST Nov 14; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator message 20:15 CST Nov 14",
+  "repo": "shivinate7/claude-settings",
+  "short": "Should a replacement PR keep the review record over a clean merge of main?",
+  "status": "closed",
+  "title": "The merge tool carries a review record to a replacement PR only when the tree is identical. Also carry it over a clean merge of main (a), or keep identical-tree only (b)?",
+  "why": "Only you can widen a check's verdict beyond the act your rulings name."
+}

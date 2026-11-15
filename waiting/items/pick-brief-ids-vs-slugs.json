@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-13T23:59:58-06:00",
+  "closed": "2026-11-14T06:21:45Z",
+  "context": "Goal: a lane brief tells the lane who to message, and the ids it names do not go stale.\nProblem (rule): two of your rules disagree. R22 (your words 19:19 CST Nov 10, after a respawn left old session ids everywhere) says point 3: a page item, brief or handoff names a lane slug or role, never a session id. The roadmap branch's CLAUDE.md roster header says: \"Lane briefs name these ids. Triage rewrites a line when a role changes hands.\" So one tells briefs to carry ids and the other forbids it. The new check in PR #3352 (brief-ids-in-roster) and its record, docs/decisions/brief-ids-in-roster.md, state both and settle neither. The roster line is triage's own file; triage will not edit it without your word.\nBased on (read): ruling R22 point 3 (read by triage); the roster header in the roadmap CLAUDE.md (read by triage); lane brief-ids-from-roster's note, 00:05 CST, unchecked.\nDeparts from: main \u2014 the check lets a brief carry an id that is in the roster; a keeps that (the ids in the roster, rewritten by triage on a respawn); b makes briefs name a slug or role only.\nMeanwhile: nothing changes; PR #3352 states both and is not blocked on this.",
+  "home": "ruling R22 (point 3); roadmap branch CLAUDE.md, Standing sessions; PR #3352; docs/decisions/brief-ids-in-roster.md",
+  "id": "pick-brief-ids-vs-slugs",
+  "kind": "decision",
+  "lastAnswer": "819: b, a brief names a slug or role only (00:19 CST Nov 14).",
+  "n": 819,
+  "options": [
+    {
+      "gain": "A lane can message the coordinator or triage straight from its brief; one roster is the only source of ids.",
+      "id": "ids-from-roster",
+      "key": "a",
+      "label": "A brief may name a standing session by the id in the roster, which triage rewrites on a respawn; R22 point 3 is narrowed to ids not in the roster",
+      "lose": "R22 point 3 is narrowed; a missed roster rewrite leaves a stale id again."
+    },
+    {
+      "gain": "A respawn cannot leave a stale id in a brief.",
+      "id": "slug-or-role-only",
+      "key": "b",
+      "label": "A brief names a slug or role only; the lane looks the id up in the roster (R22 point 3 as written)",
+      "lose": "Every lane needs one more read to find an id; the roster header and the check in #3352 change."
+    }
+  ],
+  "owner": "lane brief-ids-from-roster (session_013NEJKzfF8ADFGPK5pb7EdJ); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane brief-ids-from-roster 00:05 CST Nov 14",
+  "reply": "Closed on your b. Filed as ruling own-819-b-slug-or-role. A brief names a lane slug or role only, never a session id; the lane looks the id up in the roster. The roster header in the roadmap branch's CLAUDE.md is rewritten to say so. Lane brief-ids-from-roster changes its check in PR #3352 and its decision record to match.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Brief naming session ids: roster header or R22 point 3?",
+  "status": "closed",
+  "title": "Your rule R22 says briefs never carry a session id, but the roster header says they name the roster's ids. Which stands?",
+  "why": "Two of your own words disagree; only you settle which."
+}

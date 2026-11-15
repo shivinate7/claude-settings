@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-14T05:24:00-06:00",
+  "closed": "2026-11-14T21:07:00Z",
+  "context": "Goal: PR #3005 (it drops the Windows run of the unknown-reads lint from CI) merges with a review record that is true.\nProblem (rule): the merge gate holds a record whose round 1 model row is known to be false, and rule roles-each-layer-proves-once (root CLAUDE.md) says a test-author writes the new cases first and shows them red on the old code; that was not followed. The tool refuses a second record at this head (\"restarts the review ... a new branch with a new PR is the only way out\"). Both are your rules, so only you can say whether to accept either gap.\nBased on (read, relayed): the lane of #3005 and the coordinator; the coordinator read the posted record comment 6876422660 by REST (head 013e6d573d61, ls-remote 05:13). The record shows round 1 sonnet FAIL and round 2 sonnet PASS. Round 1's real reviewer was haiku: a fresh haiku reviewer re-read the diff and gave FAIL on one flag, checks 1 and 2 PASS. The lane wrote the test and the change itself (rule G12, no test-author; G12, owner 2026-11-10 14:55 CST, lets a lane build a short list of edits itself when nothing can run in parallel, and whether it covers writing the test too is unread); the red run on main 06ccf55df is the lane's own. Triage read none of this. The lane called the test-author step \"the grant\"; the coordinator corrected it (05:26): it is rule roles-each-layer-proves-once, not a grant.\nDeparts from: main \u2014 the record on a main-bound PR is true on its model rows; option a merges with one false row, option b leaves that row false, option c costs a new PR.\nMeanwhile: #3005 is held out of runner 10's order; everything else continues.\nThe coordinator recommends c (its words: the false row cannot be fixed on this PR and the record is the merge gate). Triage does not star it.",
+  "home": "step unknown-reads-lint-linux-only; PR #3005; record comment 6876422660",
+  "id": "pick-3005-false-record-row",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-14T21:02:30Z",
+    "choice": "a",
+    "note": "its not even wrong. message retrospective theres just a bug that needs patching here its transcript has it"
+  },
+  "n": 832,
+  "options": [
+    {
+      "gain": "No more CI cycle; #3005 keeps its place in the order.",
+      "id": "accept-false-row-lane-red-run",
+      "key": "a",
+      "label": "Merge as it is: accept the wrong round-1 model row and the lane's own red-first run",
+      "lose": "A record with a row known to be false stays on main-bound work, and the test-author step of rule roles-each-layer-proves-once is skipped once."
+    },
+    {
+      "gain": "The rule's test-author step is followed.",
+      "id": "fresh-test-author-round-3",
+      "key": "b",
+      "label": "A fresh test-author re-derives the cases red, and a round 3 runs on a new head of the same PR",
+      "lose": "Another head, lane lint and CI cycle (unmeasured); the false round-1 row stays on the record."
+    },
+    {
+      "gain": "The record is true and the rule's test-author step is followed.",
+      "id": "new-branch-new-pr",
+      "key": "c",
+      "label": "Restart: a new branch and PR from the same diff, with a test-author and a clean record",
+      "lose": "A full cycle of lane lint and CI (unmeasured), and the old PR's record and rounds are dropped."
+    }
+  ],
+  "owner": "lane of #3005 (step unknown-reads-lint-linux-only) via the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), 05:24 CST Nov 14; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 05:24 CST Nov 14",
+  "repo": "shivinate7/claude-settings",
+  "short": "Merge #3005 with a wrong round-1 model row and no test-author, or redo it as a new PR?",
+  "status": "closed",
+  "title": "PR #3005 has a record that names the wrong model for round 1 and a test written by the lane, not a test-author. May it merge as it is (a), get a test-author on the same PR (b), or restart as a new PR from the same diff (c)?",
+  "updatedAt": "2026-11-14T05:25:00-06:00",
+  "why": "The tool will not take a second record at this head, so the wrong row cannot be fixed on this PR. The only ways out are to accept it or to restart."
+}

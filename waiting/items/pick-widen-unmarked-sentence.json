@@ -1,9 +1,11 @@
 {
   "added": "2026-11-13T18:46:00Z",
+  "closed": "2026-11-13T18:29:53-06:00",
   "context": "Goal: the widening check warns about an option that adds an exception for one repo, and does not warn about an option meant for every repo.\nProblem (rule): the check already flags an option that adds an exception for one repo (your item 278 rule). A second sentence in the code also flags an option unless it says it applies to every repo. That sentence has no words of yours behind it. It may be why the warning on item 729 showed up.\nBased on (read): your item 278 words cover only the one-repo rule; the extra sentence came in with commit eb351e2bbc.\nDeparts from: main \u2014 main has no extra sentence; PR #3201 adds it, and a drops it again.\nMeanwhile: lane wave-88-rebuilds holds #3201; nothing waits on this.",
   "home": "PR #3201 (rebuild of #2705); item 278",
   "id": "pick-widen-unmarked-sentence",
   "kind": "decision",
+  "lastAnswer": "742 a: drop the extra sentence.",
   "n": 742,
   "options": [
     {
@@ -25,7 +27,7 @@
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "coordinator 12:47 CST Nov 13, lane wave-88-rebuilds",
-  "reply": "Reworded 13:23 CST in plain words, same two choices. Your 'none of these' was about the wording, so this stays open for your pick.",
+  "reply": "Filed as ruling own-742-a-cut-extra-sentence and sent to the lane of PR #3201.",
   "repo": "shivinate7/claude-settings",
   "short": "Widening check: drop one extra sentence?",
   "shown": [
@@ -40,7 +42,7 @@
       "label": "Keep the extra sentence"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "Should the widening check drop one extra sentence that flags some options?",
   "why": "A sentence in two guards claims your ruling that your words do not cover."
 }

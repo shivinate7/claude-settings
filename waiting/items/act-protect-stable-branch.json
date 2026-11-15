@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-13T16:02:59-06:00",
+  "closed": "2026-11-14T01:59:13Z",
+  "context": "Goal: the stable branch that every child repo reads cannot be deleted or force-pushed by mistake.\nProblem (rule): the coordinator asked for `python3 protect.py --repo shivinate7/claude-settings --branch stable --confirm`, which puts a ruleset on `stable` (blocks delete and force-push, no required check). Your standing grant for acts the cloud refuses names three acts: move main to the shared ruleset, remove main's old protection, and delete a branch already on main or an archive. It does not name `stable`, so this is a variant it does not cover. Only your word opens it.\nBased on (read): the coordinator's request 16:01 CST, with `stable` on origin at f80eaa57b0 (merge-flow lane, 15:54 CST) and main's run ab27336489 green (coordinator, 16:01 CST); the grant text in .claude/CLAUDE.md as loaded in this session; debt stable-has-no-ruleset. I found no past ruling about protecting `stable`. Triage has read neither protect.py nor the branch.\nDeparts from: main \u2014 `stable` has no ruleset today; this adds one on `stable` only.\nMeanwhile: nothing waits on it; child repos fall back to main when `stable` is missing, and act 6 waits on your word for work in other repos.",
+  "home": "step stable-ruleset-protect-test; debt stable-has-no-ruleset; standing grant in .claude/CLAUDE.md",
+  "id": "act-protect-stable-branch",
+  "kind": "decision",
+  "lastAnswer": "771: b, Not yet, at 19:58 CST Nov 13.",
+  "n": 771,
+  "options": [
+    {
+      "gain": "The branch every child repo reads cannot be deleted or force-pushed.",
+      "key": "a",
+      "label": "Yes: a session on your computer runs protect.py --repo shivinate7/claude-settings --branch stable --confirm, reads the ruleset back, and sends the coordinator the verdict line (Recommended)",
+      "lose": "One live change to the repo's settings, undone by removing the ruleset."
+    },
+    {
+      "gain": "No settings change.",
+      "key": "b",
+      "label": "Not yet",
+      "lose": "`stable` stays unprotected."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 16:01 CST Nov 13",
+  "reply": "Not yet: no ruleset on stable for now. The coordinator is told; nothing is run.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Put a ruleset on the stable branch?",
+  "status": "closed",
+  "title": "Protect the stable branch with a ruleset (no delete, no force-push)?",
+  "why": "Your standing grant names main, not stable, so this act needs your word."
+}

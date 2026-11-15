@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-15T02:41:02-06:00",
+  "context": "This item asks you to lift a limit in a recorded ruling. It does not block anything.\nGoal: fewer repeat lane lints after main moves (your 23:04 CST Nov 14 words, \"850 a\").\nProblem (rule): ruling own-850-a lets the lane lint carry across a clean merge of main, in the form the merge tool proves, and nothing else. A claim commit or a page commit made after a clean merge does not carry the lint. Decision lanes-run-no-full-ci-job (PR 3481) says so, citing that ruling. Lifting the limit needs your word, and it changes what a lint pass covers.\nBased on (ruling): own-850-a, your pick a, saved 23:04 CST Nov 14. It reads: \"Not covered: a merge with any other change, a conflict-resolved merge, a merge whose tree differs from git's own merge, an unreadable merge-tree (reads unknown, not carried), or any other lint-carried form.\" A claim or page commit after the merge is such an other form.\nBased on (read): the review-carries lane, 02:40 CST Nov 15, relayed by the coordinator at 02:41 CST: its tests test_b_a_claim_after_a_clean_merge_is_not_carried and test_b_a_records_page_after_a_clean_merge_is_not_carried assert the current rule.\nBased on (unmeasured): how often this costs a re-lint. Your own number for the clean-merge case was 6 lints and 56 min in one evening (runner 10's read, unverified by triage); nobody has counted the claim-or-page case.\nDeparts from: ruling own-850-a \u2014 adds a carry for a claim or page commit made after a clean merge of main, which that ruling leaves out.\nWho recommends what: the coordinator recommends keeping the limit (option b) until the cost is measured.\nMeanwhile: lane review-carries builds without this. Its next PR builds only the no-stamp page carry (step lint-carries-page-commit-no-stamp), which stays inside own-850-a's proved form.",
+  "home": "ruling own-850-a-lane-lint-carries-clean-main-merge; steps carry-forgives-main-merge and lint-carries-page-commit-no-stamp; decision lanes-run-no-full-ci-job (PR 3481)",
+  "kind": "decision",
+  "n": 868,
+  "options": [
+    {
+      "gain": "Fewer repeat lane lints after main moves.",
+      "how": "The merge tool and lane lint also accept the earlier lint pass after a claim or page commit that follows a clean merge. The two tests that assert the current rule are re-pointed.",
+      "id": "lift-carry-limit",
+      "key": "a",
+      "label": "Lift the limit: carry the lane lint across a claim or page commit made after a clean merge",
+      "lose": "A lint pass then covers a tree it never ran on, in a wider form than the one you accepted; two tests re-point; a page commit made before the merge needs its own ruling. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo, if the carry widens the tool beyond the proved form.",
+      "widens": true
+    },
+    {
+      "gain": "The proved form stays exact; no test changes.",
+      "how": "No change. A claim or page commit after a clean merge still gets a new lane lint. The cost is measured first, then you are asked again if it is high.",
+      "id": "keep-carry-limit",
+      "key": "b",
+      "label": "Keep the limit: carry only across a clean merge, as own-850-a says (recommended by the coordinator)",
+      "lose": "A lane re-lints after a claim or page commit that follows a clean merge (8 to 12 min each, your own number for the clean-merge case; unmeasured here)."
+    }
+  ],
+  "owner": "lane review-carries via coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 02:41 CST Nov 15; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "recommended": "b",
+  "ref": "ruling own-850-a-lane-lint-carries-clean-main-merge (your \"850 a\", 23:04 CST Nov 14); page item 850; step carry-forgives-main-merge (PR 3448, merged); step lint-carries-page-commit-no-stamp; decision lanes-run-no-full-ci-job (PR 3481)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Lint carry: after a claim?",
+  "shown": [
+    {
+      "id": "lift-carry-limit",
+      "key": "a",
+      "label": "Lift the limit: carry the lane lint across a claim or page commit made after a clean merge"
+    },
+    {
+      "id": "keep-carry-limit",
+      "key": "b",
+      "label": "Keep the limit: carry only across a clean merge, as own-850-a says (recommended by the coordinator)"
+    }
+  ],
+  "status": "open",
+  "title": "Lane lint carry: extend it to a claim or page commit made after a clean merge of main? (asks to lift a limit in your ruling)",
+  "why": "Your ruling carries the lint only across a clean merge. The coordinator recommends keeping that until someone counts how many re-lints a claim or page commit really causes."
+}

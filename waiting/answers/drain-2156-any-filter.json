@@ -1,8 +1,9 @@
 {
-  "at": "2026-11-13T18:11:30.646Z",
-  "choice": "none",
+  "at": "2026-11-15T17:57:48.288Z",
+  "choice": "b",
   "item": "drain-2156-any-filter",
-  "label": "none of these",
+  "label": "B: Keep the widening",
   "n": 716,
-  "note": "what is glued and reader?"
+  "note": "",
+  "optionId": "keep"
 }

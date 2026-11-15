@@ -1,0 +1,41 @@
+{
+  "added": "2026-11-14T00:32:30-06:00",
+  "closed": "2026-11-14T08:38:00Z",
+  "context": "Goal: q_max's CI-speed lanes merge tonight, one lane per merge, as you picked on item 820.\nProblem (rule): q_max's decision only-a-batch-runs-ci runs CI only on a PR whose head branch starts with batch-. A ready lane PR from any other branch never goes green: q_max PR #1171, run 43566092927 is red, all-jobs-passed fails with every other job skipped. So item 820 c's act (merge a lane's own PR on its own green run) cannot happen in q_max. The coordinator picked a way round it, undoable and not yours: runner 12 opens a batch-<slug> branch on each lane head and merges that on its green run, a batch of one.\nBased on (record): the coordinator's 00:32 CST message, relayed; q_max's decision only-a-batch-runs-ci (quoted by the coordinator, not read by triage); your ruling own-820-c-five-repos (read by triage). Unchecked: PR #1171's run.\nDeparts from: main \u2014 your grant (item 820 c) names a lane's own PR; a lets runner 12 merge a second PR per lane (the batch-<slug> branch) in q_max; b changes q_max's own rule so CI runs on any ready PR; c leaves q_max waiting.\nMeanwhile: the lanes in q_max keep working; the coordinator's pick stands as its own undoable pick, and runner 12 opens the batch branches. Triage recommends runner 12 does not merge in q_max until you answer; the coordinator decides that.",
+  "home": "step tci-11-qmax-shards; ruling own-820-c-five-repos; batch runner 12; q_max PR #1171",
+  "id": "pick-qmax-batch-of-one",
+  "kind": "decision",
+  "lastAnswer": "a",
+  "n": 821,
+  "options": [
+    {
+      "gain": "q_max's lanes merge tonight in the form q_max's CI allows; no rule changes.",
+      "id": "batch-of-one",
+      "key": "a",
+      "label": "Runner 12 merges a one-lane batch-<slug> branch on its green run in q_max (recommended by the coordinator)",
+      "lose": "A second PR per lane in q_max; your grant is read to cover a batch of one."
+    },
+    {
+      "gain": "One merge route: a lane's own PR, as you picked.",
+      "id": "change-qmax-rule",
+      "key": "b",
+      "label": "Change q_max's rule so CI runs on any ready PR (a separate step in q_max)",
+      "lose": "q_max's lanes wait for that change; q_max CI runs on every ready PR, which costs more minutes."
+    },
+    {
+      "gain": "No variant of your grant.",
+      "id": "wait",
+      "key": "c",
+      "label": "Wait: no merge in q_max until you decide",
+      "lose": "q_max's CI-speed work (tci-11 q_max re-shard, 15.3 min wall) does not land tonight."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), 00:32 CST Nov 14; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 00:32 CST Nov 14",
+  "reply": "Answered 02:36 CST in chat (consultant relay 02:37): \"A is fine\". Filed as ruling own-821-a: runner 12 merges a one-lane batch-<slug> branch on its green run in q_max. Covers q_max and that form only.",
+  "repo": "shivinate7/claude-settings",
+  "short": "q_max: merge a batch-of-one branch, change q_max's CI rule, or wait?",
+  "status": "closed",
+  "title": "q_max's CI only runs on a PR whose branch starts with batch-, so a lane's own PR can never go green there. May runner 12 merge a one-lane batch-<slug> branch instead (a), will you change q_max's rule so CI runs on any ready PR (b), or wait (c)?",
+  "why": "Your 00:19 CST pick (item 820 c) lets runner 12 merge a lane's own PR on its own green run. In q_max that PR can never go green, so the grant cannot be used as written. A batch-of-one is a second PR per lane, which is a variant of what you named, and only you widen a grant."
+}

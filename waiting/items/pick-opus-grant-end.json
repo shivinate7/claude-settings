@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-13T17:15:27-06:00",
+  "closed": "2026-11-13T18:40:00-06:00",
+  "context": "Goal: an Opus grant ends in a way the guard can actually read, so it never lingers or cuts off early.\nProblem (rule): your ruling own-761-d (14:21 CST Nov 13, item 761 d, \"agreed\") says a plain Opus ask grants Opus to the agents spawned for it, and the grant ends when those agents end. Lane owner-override-one-route built a different end: \"to your next typed prompt, or 2 hours\". The lane says an agent-end read needs a watch, and the SubagentStop event listed the stopping agent as still running in 29 of 60 captures. So it cannot tell reliably when the agents have ended. The coordinator did not measure that count.\nBased on (measured): the lane's count of 60 SubagentStop captures (unchecked by the coordinator and by triage), via the coordinator 17:14 CST Nov 13; the ruling own-761-d. It was your ruling that the middle ground sits between \"until the session ends\" (too generous) and one act (too tight).\nDeparts from: ruling own-761-d (the grant ends when the granted agents end) \u2014 the lane's draft PRs #2850 (head a9cfa6697b, override length form, no departure) and #2928 (head 81231d70a3, stacked on #2850) end it at your next typed prompt or 2 hours.\nMeanwhile: #2928 stays out of the merge order and gets no go; #2850 keeps its place after the gate fixes. Also from the lane: a bare number with trailing words (`override 15 please`) goes to the judge, not the fast path.",
+  "home": "ruling own-761-d-task-scoped-opus; step opus-ask-grants-one-spawn; PRs #2850 and #2928; lane owner-override-one-route (session_013NEJL1ymdMFYoj4wQG9oUR)",
+  "id": "pick-opus-grant-end",
+  "kind": "decision",
+  "lastAnswer": "779: build B, but only switch to it once it works well.",
+  "n": 779,
+  "options": [
+    {
+      "gain": "The end is something the guard can read, and #2928 can go as built.",
+      "key": "a",
+      "label": "Accept: an Opus grant ends at your next typed prompt or after 2 hours (Recommended)",
+      "lose": "A grant may outlast the agents it was for, up to your next prompt or 2 hours; your ruling own-761-d is rewritten."
+    },
+    {
+      "gain": "The grant follows the agents, as you ruled.",
+      "key": "b",
+      "label": "Hold to your ruling: the grant ends when the granted agents end, and the lane builds an agent-end read",
+      "lose": "More work and a watch; the lane says the agent-end event is unreliable (29 of 60 captures, unchecked), so the grant may end too early or too late."
+    }
+  ],
+  "owner": "lane owner-override-one-route (session_013NEJL1ymdMFYoj4wQG9oUR), via the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 17:14 CST Nov 13",
+  "reply": "Filed as ruling own-779-b-agent-end-later and sent to the lane. My reading, please correct me if wrong: the lane builds the read that ends the grant when the granted agents end, but the grant keeps ending the way main does today until that read works well. PR #2928 is not merged.",
+  "repo": "shivinate7/claude-settings",
+  "short": "End an Opus grant at your next prompt or 2 hours?",
+  "status": "closed",
+  "title": "End an Opus grant at your next typed prompt or after 2 hours, not when the granted agents end?",
+  "why": "The lane built a different end than your ruling own-761-d; only you can change your ruling."
+}

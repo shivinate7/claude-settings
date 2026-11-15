@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-13T23:09:30-06:00",
+  "closed": "2026-11-14T05:40:00Z",
+  "context": "Goal: the red-main check never says green while main is red, and never blocks merges while main is green.\nProblem (rule): you picked c on item 781: measure first. The number is in. Main skips its full test run after a green PR run of the same code (your ruling own-769), and a skipped run proves nothing, so the red-main check must look back to a run that really ran the tests. Option a judges only runs that ran the tests; b is a plus a full test run on main when the judged run is old. Only you can pick; PR #3297 waits on it.\nThe number (30 days, 302 pushes to main, 2026-10-15 to 2026-11-14): only 2 of 302 push runs were skipped. Loose reading (the checks or gates job ran): the newest run that ran tests was 0 commits back for 290, 1 back for 6, 2 or more back for 6 (most 5). Strict reading (also every non-Mac test shard ran, 298 counted): 0 back for 183, 1 back for 20, 2 or more back for 95 (90th percentile 49, worst 79), mostly cancelled Windows shards in the newer gates era. Today's head: the newest finished test run was 2.57 hours old at push.\nBased on (measure): a read-only Explore agent's read of the REST runs list, relayed by the coordinator 23:10 CST; not re-run by triage. Your pick c on item 781 (19:42 CST), ruling own-781-c-measure-first.\nUnknown: what each shard covers; whether skipped Mac jobs are by design; 10 runs had a second attempt and only the last was read.\nDeparts from: main's red-main check \u2014 the 16:06 CST wording on step red-gate-reads-suite-run and the cover signal; a drops the cover, b drops it and adds a full run on main when the judged run is old. Your ruling own-769 (the skip itself) stays.\nMeanwhile: PR #3297 waits on this pick.",
+  "home": "PR #3297; step red-gate-reads-suite-run; ruling own-781-c-measure-first; ruling own-769-a-narrowed-pr-push",
+  "id": "pick-red-gate-a-or-b",
+  "kind": "decision",
+  "lastAnswer": "812: a, judge only runs that ran the tests (23:38 CST Nov 13).",
+  "n": 812,
+  "options": [
+    {
+      "gain": "A red main can never read green by mistake; no extra reads; skips are rare, so it costs little.",
+      "id": "judge-suite-runs",
+      "key": "a",
+      "label": "Judge only runs that ran the tests (recommended by the coordinator)",
+      "lose": "A docs-only fix of a red main stays red until a code push goes green, or someone uses --base-red-ok."
+    },
+    {
+      "gain": "The judged run is never stale.",
+      "id": "a-plus-full-run",
+      "key": "b",
+      "label": "Same as a, plus a full test run on main when the judged run is old",
+      "lose": "An extra full run on main each time, so more CI minutes and Mac spend, for a case the measure shows is rare."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), from lane merge-flow-after-anthropic's PR #3297; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 23:10 CST Nov 13",
+  "reply": "Closed on your a. Filed as ruling own-812-a-judge-suite-runs. The red-main check judges only runs that ran the tests, with no extra full run on main. FLAG (coordinator, 00:08 CST Nov 14, relayed): the number this item rested on (302 push runs in 30 days, 2 skipped, 290 with tests 0 commits back) came from an Explore read whose query and date were not recorded. The lane reviewer read REST and found 179 completed push runs on main in retained history. Treat the number as UNMEASURED. Your pick a stands as a ruling. PR #3297 fails review round 3 (it counts a skipped push run's two bookkeeping successes as suites), so the lane rebuilds the gate as a new lane, gate-reads-suite-run, which replaces #3297. Guard queued: step owner-question-measure-has-query.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Red-main check: judge only test-running runs, or add a full run?",
+  "status": "closed",
+  "title": "Now that the measure is in, should the red-main check judge only runs that ran the tests (a), or also add a full run on main when that run is old (b)?",
+  "why": "You picked c on item 781: measure first, then choose between a and b. The measure shows skips are rare."
+}

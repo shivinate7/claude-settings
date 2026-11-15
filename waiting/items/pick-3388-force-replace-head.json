@@ -1,0 +1,43 @@
+{
+  "added": "2026-11-14T15:23:00-06:00",
+  "closed": "2026-11-14T21:24:40Z",
+  "context": "Goal: PR #3388 (carry a review log by tree sha) reaches runner 10 with a valid review record at its head.\nProblem (rule): main moved, so the lane merged main into the PR. The merge tool refuses the fix-check record for that head, because the merge's first parent is a tests-only commit, not the record's Head 3828002230b4ec77d11c42f680b7f3ca973efc6d. The refusal text, exit 2: \"After a PASS one, a head that is a merge must be a merge of the base into that Head\" (merge/merge.py, `--fix-check` chain). The fix is one force-with-lease push of a replacement head, and the standing rule says no force push, so it needs your word.\nBased on (read, the lane's own words, relayed unedited; triage read no code and has no REST read of #3388): REST shows #3388 head f1181190c82114a6448e6e168eb5d612c8d09585, draft; the fix verifier (reviewer sonnet) PASSED that head's delta.\nBased on (ruling, read by triage): the force-push limits in runner-merge-main-grant and own-overlaps-standing-grant (\"no rebase, no force push\") bind the batch runner's merge of main into a handed-in branch; no ruling names a lane force-pushing its own PR branch.\nDeparts from: main \u2014 the merge tool refuses a fix check on a merge whose first parent is not the record's Head, and the standing rule is no force push on a PR branch. The change: one force-with-lease push replacing f1181190c by a head with the same tree and the same parents (3828002230b4 and main dff2cf430350).\nTriage's note, not the lane's: the archive rule (push the old head to archive/<branch> first, then the old head is kept) would apply to option a; the lane did not say it would do that.\nMeanwhile: the lane pushes nothing more, posts no record for f1181190c, and #3388 stays draft.\nNo option is starred: the lane recommends a, and a is a force push, which no ruling lets a lane do on its own branch.",
+  "home": "step review-carries-by-tree; PR #3388; ruling own-835-b-into-a",
+  "id": "pick-3388-force-replace-head",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-14T21:24:40Z",
+    "note": "WITHDRAWN, not an owner answer. At 15:23 CST Nov 14 the coordinator ruled no force push and told the lane to take option c in its cheap form: one `--review-record` at the live head f1181190c82114a6448e6e168eb5d612c8d09585, rounds 1 and 2 copied from the newest record, a fresh Sonnet round 3 (the #3253 route; in the record rules; undoable). No rewrite was made, and the lane forces nothing. If the tool refuses that shape too, the coordinator sends its exact text and the force-push question comes back."
+  },
+  "n": 843,
+  "options": [
+    {
+      "gain": "The fix verifier's PASS stands and no round repeats.",
+      "id": "force-with-lease-same-tree",
+      "key": "a",
+      "label": "One force-with-lease push of a replacement head with the same tree and parents (the lane's recommendation)",
+      "lose": "One force push on this PR branch, which the standing rule forbids; the old head f1181190c is not kept unless the lane pushes it to archive/<branch> first."
+    },
+    {
+      "gain": "No force push.",
+      "id": "child-commit-fix-check",
+      "key": "b",
+      "label": "A plain child commit with a real change on top, then a fix check over the large delta",
+      "lose": "A gimmick commit, and a verifier reading all of main's changes."
+    },
+    {
+      "gain": "No force push and no new record shape.",
+      "id": "fresh-review-chain",
+      "key": "c",
+      "label": "A fresh review chain at the new head",
+      "lose": "Rounds 1 to 3 are repeated for a carry whose tree did not change."
+    }
+  ],
+  "owner": "lane review-carries-by-tree (session_013NEJKzVWixDqQgAjMzTCgV), 15:22 CST Nov 14, copy sent to the coordinator; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane review-carries-by-tree message 15:22 CST Nov 14",
+  "repo": "shivinate7/claude-settings",
+  "short": "May the lane of #3388 force-push a replacement head so its fix-check record is accepted?",
+  "status": "closed",
+  "title": "The merge tool refuses #3388's fix-check record because the lane merged main into the PR. May the lane force-push a replacement head with the same tree (a), add a plain child commit and re-run the fix check (b), or run a fresh review chain (c)?",
+  "why": "The lane merged main into #3388 after its fix check passed, and the tool wants the merge's first parent to be the record's Head. The one-push fix breaks the no-force-push rule, so it needs your word."
+}

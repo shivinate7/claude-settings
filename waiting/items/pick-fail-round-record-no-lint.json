@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-13T20:34:01Z",
+  "closed": "2026-11-13T21:05:00Z",
+  "context": "Goal: a reviewer FAIL round is never lost.\nProblem (rule): lane R67-drain's PR #3222 (rebuild of #1760) makes the record path run lane lint first and refuse when it is red. A FAIL round on a lint-red head therefore cannot be recorded, so the round count never sees it (merge.py line 5776, the lane's reading). Your rule says a change gets at most three review rounds; a lost FAIL round breaks that count.\nBased on (read): the lane's hand-in message 14:30 CST Nov 13; triage has not read merge.py or #3222. Past rulings: none found in roadmap/rulings for a FAIL-only record.\nDeparts from: main \u2014 main prints a FAIL record with no lint (lane's words); option b keeps that for FAIL only, option a drops it.\nMeanwhile: nothing changes; #3222 is handed in as built. The lane's candidate debt (no check refuses a push after a FAIL round with no record for that head) is filed as step fail-round-needs-record-before-push.",
+  "home": "step record-post-runs-lane-lint; PR #3222",
+  "id": "pick-fail-round-record-no-lint",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T21:01:19.388Z",
+    "choice": "b",
+    "label": "B: Allow a FAIL-only record without the lint",
+    "note": ""
+  },
+  "n": 764,
+  "options": [
+    {
+      "gain": "One rule for every record; no second path.",
+      "key": "a",
+      "label": "Accept it: the lint always runs first, so a FAIL round on a lint-red head is not recorded (Recommended)",
+      "lose": "That round is unrecorded and the round count misses it; the new step's push check is the cover."
+    },
+    {
+      "gain": "Every round is counted.",
+      "key": "b",
+      "label": "Allow a FAIL-only record without the lint",
+      "lose": "A second path prints a record, which widens the shared tool. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    }
+  ],
+  "owner": "lane R67-drain (session_013NEJL2Cw94Wfw4xZUeRJwA); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane R67-drain 14:30 CST Nov 13",
+  "reply": "Filed as ruling own-764-b-fail-only-record: a FAIL-only record is allowed without lane lint; a PASS or mixed record still runs it first. Sent to lane R67-drain to build into #3222 (red case first, reviewer).",
+  "repo": "shivinate7/claude-settings",
+  "short": "Record a FAIL round on a lint-red head?",
+  "status": "closed",
+  "title": "Should a reviewer FAIL round on a lint-red head be recordable without the lint?",
+  "why": "Option b adds a second record path to the shared merge tool; option a leaves that round uncounted."
+}

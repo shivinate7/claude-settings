@@ -1,0 +1,41 @@
+{
+  "added": "2026-11-13T20:25:30-06:00",
+  "closed": "2026-11-14T03:45:00Z",
+  "context": "Goal: every session's replies to you follow only rules that still help you.\nProblem (rule): the review of the reply-style rules (restart-plan R44 part 3) was folded into the CLAUDE.md scope audit on Nov 12 to be signed off with the section reviews, but no page item ever asked it, so you never saw it. The step's lane (session_013NEJKzRnzW9oYuFZAxseXz) is idle and disconnected; its last work was PR #2852 (CLAUDE.md sections, handed to runner 10); nothing shows it drafted this review. The step says 23 rules; the file has 29 today (triage counted 29 rule marks).\nBased on (read): output-styles/shiv-stylisms.md in a local checkout that may be behind main (29 rule marks); the step global-claude-md-scope-audit note; the lane's session record (idle, disconnected). Triage has not measured which rules are followed or which cost you.\nDeparts from: main \u2014 main keeps all 29 rules with no recorded sign-off; a and b change that.\nMeanwhile: nothing waits on this; the rules stay as they are.\nThe 29 rules, by name and what each says: output-start-with-point (lead with the result); style-cut-narration (no narration or recaps); style-limits-kept-silently (name a limit only if it blocks); output-tracking-turn-one-line (a turn that only tracks work gets one line); output-landing-turn-ends-with-report (a landing turn ends with the report); output-never-echo-agent-report (never echo an agent's report); style-simple-answer-short (simple answers in 1 to 3 sentences); style-full-detail-on-request (full detail when asked); style-keep-critical-full (errors and warnings stay full length); style-correct-over-brief (never trade correctness for brevity); reports-blockquote-no-fence (reports in one blockquote, no code fence); style-plain-words (plain words); style-question-form (the question form with Goal, Problem, Based on, Departs from, Gain and Lose); style-question-inside-box (all a question needs inside the box); output-never-hand-off-doable-step (do an act before handing it over); style-hand-off-cleanup (clean up what you made); style-hand-off-irreversible (one yes or no on an act that cannot be undone); style-hand-off-runs-as-is (a handed block runs as is); style-hand-off-gh-login (a gh block opens with a login switch); style-hand-off-one-shell (one shell per block); style-offer-screen-takeover (offer to take over the screen); style-press-has-link (a press-in-a-web-app step carries the link); style-command-in-item (a command sits in the item's command field); style-table-gold-column (a table has a gold-standard column); style-time-central-24h (times in US Central 24-hour with the zone); style-no-unmeasured-estimate (no time estimate without a measure); style-status-is-report (status answers use the report shape); style-offer-override-line (offer a printed override line); style-wrong-session-one-line (name the right session in one line).",
+  "home": "step global-claude-md-scope-audit (restart-plan R44 part 3); file output-styles/shiv-stylisms.md",
+  "id": "pick-stylisms-rules-review",
+  "kind": "decision",
+  "lastAnswer": "a: a lane drafts the table first; note: \"i thought an audit was already done somewhere in a plan somewhere maybe?\"",
+  "n": 795,
+  "options": [
+    {
+      "gain": "You sign off on a table with evidence, not on 29 bare rules.",
+      "id": "lane-table",
+      "key": "a",
+      "label": "Have a lane draft a table first: each rule with keep, change or drop, the evidence for it, and a recommendation (recommended)",
+      "lose": "The review waits for a lane; no rule changes until you sign the table."
+    },
+    {
+      "gain": "The rules you name change at once.",
+      "id": "review-now",
+      "key": "b",
+      "label": "Review now: tell me which rules to change or drop in the note box; the rest stay",
+      "lose": "No evidence behind the keeps; triage cannot recommend per rule without measuring."
+    },
+    {
+      "gain": "No work; nothing changes.",
+      "id": "keep-all",
+      "key": "c",
+      "label": "Keep all 29 as they are",
+      "lose": "The review stays undone; rules that no longer help stay."
+    }
+  ],
+  "owner": "you asked via the consultant (session_013NEJKz5AWFJhGvmCUoi6wQ); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "consultant 20:24 CST Nov 13",
+  "reply": "Filed: a lane drafts the table, and no rule changes until you sign it. Your memory is half right. An audit exists in docs/plans/restart-plan.md, R41 (your 13:36 CST Nov 11 \"r41 yes on all\"): it judged that the output style sits in the right folder and earns its place. It did not go rule by rule. R44 part 3 left the rules themselves to this review. So the table is new work.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Are the 29 reply-style rules (shiv-stylisms) still right?",
+  "status": "closed",
+  "title": "Are the rules for how every session writes to you (shiv-stylisms) still right? Review them rule by rule, keep all, or have a lane draft the table first?",
+  "why": "The rules shape every reply you read; only you can say which still serve you. It was folded into another step and never put to you."
+}

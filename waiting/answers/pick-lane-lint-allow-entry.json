@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-15T17:30:50.078Z",
+  "choice": "b",
+  "item": "pick-lane-lint-allow-entry",
+  "label": "B: Amend settings.json autoMode.allow entry \"Merge Tool Read Checks\" now, without the refusal words",
+  "n": 863,
+  "note": "",
+  "optionId": "widen-now"
+}

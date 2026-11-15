@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-15T02:45:13-06:00",
+  "context": "This item asks for a grant: a successor to a held change. It stops one idle lane.\nGoal: stop a question a ruling already answers (your goal: max efficiency, remaining accurate).\nProblem (rule): PR 3476 (lane question-checks-rulings-first) is HELD: round 3 judged its net safety value negative. Its Departs-line refusal closed nothing measured on the real store and fires on common words: 6 of 8 process Departs lines hit 3 to 26 rulings, and 5 refusals were needed to clear 15 hits. Decision hold-unsafe-after-round-3 parks a held change: no fix lane and no more work until you decide. The round-3 reviewer's smallest positive change (drop departs_ruling_hits, departs_ruling_refusal, their tests and the focus ranking; keep only the Departs-first sentence in PAST_RULING_ITEM) would be a new lane at round 1, so it needs your grant.\nBased on (ruling): decision hold-unsafe-after-round-3, a held change is parked. Precedent only: your word \"a\" on PR 3381 (ruling own-3381-a, relayed 01:43 CST Nov 15) accepted the loss on a different held change; it says nothing about a successor.\nBased on (measurement): the round-3 live-store read in the lane hand-in, 02:43 CST Nov 15; review record 6891614019 (rounds 1 to 3 FAIL, fix check PASS, net value negative), relayed by the coordinator, not read by triage. Lane lint 6891856777 PASS, relayed; the lane notes that comment's author may not be the repo owner, and runner 10 reads it.\nDeparts from: main (a model judge ranks the filed rulings by whole-question overlap, and PR 3476 would add a refusal) \u2014 adds a one-sentence instruction only, no refusal, in a new change.\nWho recommends what: the coordinator recommends option a, because the successor deletes the harmful parts and is a new change at round 1. Triage checked the rulings: none says whether a held change may get a successor.\nMeanwhile: PR 3476 stays a draft (head 4d90bb599e2a, base main e46ab08f, 6 files, read by triage 02:45 CST Nov 15) and the lane is idle. The coordinator starts nothing on it.",
+  "holds": "Lane question-checks-rulings-first is idle and PR 3476 gets no new work until you answer.",
+  "home": "PR 3476; step question-checks-rulings-first; decision hold-unsafe-after-round-3",
+  "kind": "decision",
+  "n": 869,
+  "options": [
+    {
+      "gain": "The useful part ships cheaply: the judge reads the Departs line first, and the refusal that fires on common words is gone.",
+      "how": "A new change, at round 1, deletes departs_ruling_hits, departs_ruling_refusal, their tests and the focus ranking, and keeps one sentence in PAST_RULING_ITEM. PR 3476 stays held and is closed later.",
+      "id": "start-successor-lane",
+      "key": "a",
+      "label": "Start a new round-1 lane that keeps only the Departs-first sentence (recommended by the coordinator)",
+      "lose": "A held change gets a successor before you rule, which the park rule (decision hold-unsafe-after-round-3) does not allow without your word. This does not widen a shared tool: it deletes the harmful parts."
+    },
+    {
+      "gain": "The park rule stands as written; no new lane.",
+      "how": "No change. PR 3476 stays a draft and its lane stays idle until you decide.",
+      "id": "leave-3476-held",
+      "key": "b",
+      "label": "Leave PR 3476 held and close it later",
+      "lose": "The useful Departs-first sentence waits, and you keep seeing questions that a ruling already answers."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 02:44 CST Nov 15; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "recommended": "a",
+  "ref": "PR 3476 (held, net value negative); step question-checks-rulings-first; decision hold-unsafe-after-round-3; ruling own-3381-a (precedent for a held change); page item 865",
+  "repo": "shivinate7/claude-settings",
+  "short": "Held 3476: successor?",
+  "shown": [
+    {
+      "id": "start-successor-lane",
+      "key": "a",
+      "label": "Start a new round-1 lane that keeps only the Departs-first sentence (recommended by the coordinator)"
+    },
+    {
+      "id": "leave-3476-held",
+      "key": "b",
+      "label": "Leave PR 3476 held and close it later"
+    }
+  ],
+  "status": "open",
+  "title": "Held PR 3476: may a new round-1 lane keep only its Departs-first sentence? (asks a grant against the park rule)",
+  "why": "Round 3 found the refusal harmful and parked the PR. The useful part is one sentence; a successor lane needs your word because a held change is parked."
+}

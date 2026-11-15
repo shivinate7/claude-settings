@@ -1,8 +1,9 @@
 {
-  "at": "2026-11-13T18:11:30.646Z",
-  "choice": "none",
+  "at": "2026-11-15T17:57:48.288Z",
+  "choice": "a",
   "item": "pick-1938-pin-design",
-  "label": "none of these",
+  "label": "A: Keep `pin_tree`, port the per-step pins onto it, drop `--pinned` (coordinator's pick)",
   "n": 727,
-  "note": "did retro agree wiht this too?"
+  "note": "",
+  "optionId": "archive"
 }

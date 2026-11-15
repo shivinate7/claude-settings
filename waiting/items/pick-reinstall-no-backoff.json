@@ -1,0 +1,51 @@
+{
+  "added": "2026-11-15T03:20:00-06:00",
+  "closed": "2026-11-15T17:41:00Z",
+  "context": "This item asks which way to settle a known gap. It does not block the PR.\nGoal: a cloud session that cannot reinstall does not waste work on every prompt, and a failed first install does not stay silent.\nProblem (rule): debt reinstall-no-backoff. After a failed landing the old install record stays, so the hook retries on every prompt: one `git ls-remote` plus one installer run, with no backoff. A failed first install of a session leaves no record, so no retry runs and the hook prints \"install freshness unknown\". Whether to leave this as a debt or build a backoff is your call, since a backoff changes what the hook does.\nBased on (read): PR 3487 body, \"Retry cost for debt reinstall-no-backoff\", read by triage at 03:15 CST Nov 15; the coordinator relayed the lane's wording at 03:12 CST. Triage read no code.\nBased on (unmeasured): how often a landing fails in a cloud session, and what one installer run costs.\nDeparts from: main \u2014 adds a retry on every prompt after a failed landing, with no limit; a backoff would change that.\nWho recommends what: nobody has recommended an option; no star.\nMeanwhile: PR 3487 is not held on this answer. The debt stays filed as reinstall-no-backoff.",
+  "home": "step refresh-backoff-and-cost (follow-up lane on #3487's head); debt reinstall-no-backoff; PR 3487 comment 6898557129",
+  "kind": "decision",
+  "lane": "refresh-backoff-and-cost",
+  "lastAnswer": {
+    "at": "2026-11-15T17:33:40.618Z",
+    "choice": "b",
+    "note": ""
+  },
+  "n": 871,
+  "options": [
+    {
+      "gain": "No new work; PR 3487 merges and the gap stays on record.",
+      "how": "The debt reinstall-no-backoff stays open. A backoff gets built only after a real incident, as the debt rule reads.",
+      "id": "keep-as-debt",
+      "key": "a",
+      "label": "Keep it as a debt; build a backoff only after a real incident",
+      "lose": "A cloud session whose install keeps failing runs one ls-remote plus one installer run on every prompt."
+    },
+    {
+      "gain": "A failing install stops costing work on every prompt.",
+      "how": "A follow-up lane adds a backoff: after a failed landing the hook waits a set time before the next try, and prints that it is waiting.",
+      "id": "build-backoff",
+      "key": "b",
+      "label": "Build a backoff in a follow-up lane now",
+      "lose": "More hook logic to build and test before any failure is seen, and a stale install stays stale for the wait."
+    }
+  ],
+  "owner": "lane cloud-hooks-stale-copy (session_013NEJKzpBdiBYXja9cj5CoP), via coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 03:12 CST Nov 15; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator message 03:12 CST Nov 15; PR 3487; debt reinstall-no-backoff",
+  "repo": "shivinate7/claude-settings",
+  "short": "Retry backoff after failed install?",
+  "shown": [
+    {
+      "id": "keep-as-debt",
+      "key": "a",
+      "label": "Keep it as a debt; build a backoff only after a real incident"
+    },
+    {
+      "id": "build-backoff",
+      "key": "b",
+      "label": "Build a backoff in a follow-up lane now"
+    }
+  ],
+  "status": "closed",
+  "title": "PR 3487: after a failed reinstall, may the hook keep retrying on every prompt, or should it back off?",
+  "why": "The hook retries each prompt after a failed landing (one ls-remote plus one installer run). A failed first install leaves no record and no retry. Nothing measures how often this happens."
+}

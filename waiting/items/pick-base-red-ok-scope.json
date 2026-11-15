@@ -1,0 +1,48 @@
+{
+  "added": "2026-11-13T19:31:30-06:00",
+  "closed": "2026-11-14T20:34:00-06:00",
+  "context": "CONSULTANT'S ANSWER 20:32 CST Nov 14 (relayed to triage; it speaks for you under ruling own-consultant-speaks-for-owner): pick option 2, narrow first. Why: the only merge your rules allow onto a red main is the revert of the blamed commit (rules git-red-main-reverts and git-never-merge-failing-ci). Option 1 lets any merge typed with --base-red-ok and a reason run with no prompt, so a non-revert can land on a red main unseen: it loses accuracy and gains no speed, because the revert is just as fast under option 2. Option 3 keeps a prompt on every revert, which is waste. So a lane adds the merge-tool check that the PR reverts the breaking merge, and the no-prompt rule follows. PR #3097 waits for it. STILL OPEN: your own page pick on 01:42 CST Nov 14 reads B (option 1, the widening option) with the note \"ask consultsnt for a or b and why\". That is a pick plus a request for advice, so triage does not read it as handing the choice over, and the consultant's option 2 differs from your B. Say \"2\" (or \"B\") and triage closes it. Meanwhile building the revert check is safe under both options, so the coordinator is told to start it; the no-prompt rule in #3097 waits.\n\nANSWER to your question 20:30 CST Nov 14: You asked \"ask the consultant for a or b and why\". Its answer, relayed 22:59 CST Nov 13 (triage did not see it typed): option 2, narrow first, because the merge tool lets --base-red-ok push any PR onto a red main for any reason, so a no-prompt rule would let a session merge a non-fix by mistake; the tool check that the PR reverts the broken merge is built in another lane. Your pick on the page is B, option 1 (keep as written), the widening option. Triage asked the consultant again at 20:30 CST Nov 14 now that it speaks for you (ruling own-consultant-speaks-for-owner); nothing changes until it answers.\n\nGoal: a red-main revert merges with no prompt, and no other merge onto a red main does.\nProblem (risk): the rule from your 786 c pick, `Bash(merge * --confirm --head * --base-red-ok *)`, matches any merge typed with --base-red-ok and any reason. The merge tool lifts the red-main check on any non-blank reason (merge/merge.py lines 2972 to 2974), so a non-fix merge onto a red main would also pass with no prompt, and the glob also absorbs --undo-check-unknown-ok typed before it. A permission rule cannot say \"revert only\". The round 1 reviewer (Sonnet-class haiku) called this a safety hole (lane's report; unchecked by triage). In the cloud the same is already true: merge/cloud_allow.json allows `merge * --confirm *`. Item 786 did not say the rule was this wide.\nBased on (review): round 1 FAIL at head 5e921534c, findings 1 and 3, per the lane.\nDeparts from: main \u2014 main asks before any local --base-red-ok merge; option 1 adds a no-prompt rule for all of them.\nMeanwhile: the lane waits on this scope pick: no push, no hand-in.",
+  "home": "PR #3097; ruling own-786-c-base-red-ok-settings; step allow-merge-base-red-ok; merge/merge.py lines 2972-2974; merge/cloud_allow.json",
+  "id": "pick-base-red-ok-scope",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T02:34:00Z",
+    "choice": "2",
+    "note": "consultant's pick, read as handed over; he was told in chat 20:33 CST. His own page answer was B with 'ask consultsnt for a or b and why'; reopens if he says otherwise.",
+    "optionId": "narrow-first"
+  },
+  "n": 791,
+  "options": [
+    {
+      "gain": "Only reverts pass with no prompt, as you meant.",
+      "id": "narrow-first",
+      "key": "2",
+      "label": "Narrow first: a lane adds a merge-tool check that the PR reverts the breaking merge; the rule follows (triage recommends)",
+      "lose": "A new tool lane, and #3097 waits for it."
+    },
+    {
+      "gain": "Smallest change; local sessions match the cloud.",
+      "how": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "id": "keep-as-written",
+      "key": "1",
+      "label": "Keep the rule as written, record that it covers any --base-red-ok merge with a reason, add tests of what the glob matches",
+      "lose": "A non-fix merge onto a red main, typed with a reason, passes with no prompt.",
+      "widens": true
+    },
+    {
+      "gain": "The red-main check keeps its prompt.",
+      "id": "drop-rule",
+      "key": "3",
+      "label": "Drop the rule from #3097 and keep the prompt",
+      "lose": "Revert merges keep prompting, which your 786 c pick wanted to end."
+    }
+  ],
+  "owner": "lane merge-base-red-ok-refresh (session_013NEJKzyVUbeFsmoQeuaUP2); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane report 19:31 CST Nov 13",
+  "reply": "You asked for the consultant's pick and why (relayed 22:59 CST; triage did not see it typed). Its pick is option 2, narrow first. Why: today the merge tool lets --base-red-ok push any PR onto a red main for any reason, so a no-prompt rule for that flag would let a session merge a non-fix onto a red main by mistake. The tool check that the PR reverts the broken merge is already being built in another lane; #3097 waits for it, then its rule lands safely. Option 1 (keep as written) records the width but leaves that mistake open; option 3 drops the speed-up. Unchecked by triage: the consultant's reading of the merge tool's lines. Your pick is still open: you chose B before this; say if you now want 2.",
+  "repo": "shivinate7/claude-settings",
+  "short": "PR 3097: the allow rule covers every --base-red-ok merge, not only reverts",
+  "status": "closed",
+  "title": "The rule you picked on 786 c lets any merge with --base-red-ok and a reason run with no prompt, not only a revert. Keep it, narrow it first, or drop it?",
+  "why": "Your 786 c pick named the rule; round 1 found it covers more than the revert you meant, and a permission rule cannot say revert only."
+}

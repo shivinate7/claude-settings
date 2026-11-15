@@ -1,0 +1,36 @@
+{
+  "added": "2026-11-13T20:19:39Z",
+  "closed": "2026-11-13T20:27:30Z",
+  "context": "Goal: every merged PR carries a review record the merge tool really posted and read back.\nProblem (rule): `merge --review-record` printed \"nothing was posted\" for #3226 (head 29e2b9461) and for #3192 and others, so their lanes hand-posted the exact lines the tool printed, through the GitHub tool with the footer (#3226: comment 6863843498, 14:18 CST, read back at that head). The coordinator and batch runner 10 agreed this as a stopgap. You have not ruled on hand-posting. The cure is PR #3235 (record read-back fix), which the runner puts in the earliest batch. A second sighting: under `verdict` the tool's \"nothing was posted\" line is hidden and only PASS shows; the log has it (lane mutate-sweep-control, #3226).\nBased on (read): the coordinator's and runner 10's messages, 14:18 and 14:42 CST Nov 13; triage has read neither the comments nor #3235.\nDeparts from: main \u2014 the tool posts the record; this lets a lane post the tool's printed lines by hand until #3235 lands.\nMeanwhile: lanes keep hand-posting under the stopgap; nothing typed, only the tool's printed lines.",
+  "home": "step review-record-failed-post; PR #3235",
+  "id": "pick-hand-post-record-stopgap",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T20:24:52Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 762,
+  "options": [
+    {
+      "gain": "Lanes keep moving; the record text is the tool's own.",
+      "key": "a",
+      "label": "Allow the stopgap until #3235 lands: a lane hand-posts only the exact lines the tool printed, with the footer (Recommended)",
+      "lose": "A record exists that the tool did not post, and a read-back may not catch a mistyped line."
+    },
+    {
+      "gain": "Every record is the tool's own post.",
+      "key": "b",
+      "label": "No hand-posting: a record counts only when the tool posts it",
+      "lose": "Affected lanes (#3226, #3192, others) wait for #3235 to merge."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) and batch runner 10 (session_013NEJL2f1YCYsvLdpFqtWP3); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 14:42 CST, runner 10 14:18 CST Nov 13",
+  "reply": "Filed: ruling own-762-a-hand-post-stopgap (roadmap e5bfe7919). A lane may hand-post the exact lines the tool printed, with the footer, until PR #3235 lands.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Hand-post the review record until #3235 lands?",
+  "status": "closed",
+  "title": "May a lane hand-post the review record the tool printed but did not post, until PR #3235 lands?",
+  "why": "The stopgap is already in use on #3226 and #3192; it departs from the tool posting the record, and you have not ruled on it."
+}

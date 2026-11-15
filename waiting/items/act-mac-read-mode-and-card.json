@@ -1,0 +1,26 @@
+{
+  "added": "2026-11-13T22:38:00-06:00",
+  "closed": "2026-11-14T04:44:00Z",
+  "context": "Goal: a session on your Mac creates sessions as freely as a cloud one, and the fix is the right one, not a guess (lane local-autonomy-equals-cloud).\nProblem (goal): the lane does not know your Mac's permission mode or what the confirm card says when a session asks you before creating a session. The Mac check you ran answered the rest (the session has an id; your settings file is the repo's file; no default mode set), but a session cannot see the mode indicator or the card. Only you can read them. The answers settle whether the lane's last commit (set the default permission mode to auto) is the fix, or whether an allow entry for one named tool is.\nBased on (read): the Mac session's own reply to item 802 (unchecked by triage); the lane's message 22:28 CST.\nDeparts from: main \u2014 main sets no default permission mode; the lane's draft sets it to auto, or adds one allow entry, depending on your answers.\nMeanwhile: the lane holds both options and changes nothing.",
+  "home": "step local-session-id-measure; lane local-autonomy-equals-cloud (session_013NEJL2xbx9cwQLXuRSA66d)",
+  "id": "act-mac-read-mode-and-card",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-14T04:41:08Z",
+    "note": "Mode: bypass permissions. A Mac session found the home coordinator's start_session calls."
+  },
+  "n": 808,
+  "owner": "lane local-autonomy-equals-cloud (session_013NEJL2xbx9cwQLXuRSA66d); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane 22:28 CST Nov 13",
+  "reply": "Read 22:44 CST Nov 13 and relayed to the lane. (1) Mode: bypass permissions, by your word; the Mac session could not check it. (2) The Mac session found the home coordinator session (1030fba8) calling mcp__ccd_session__start_session with initiation user_asked at 19:58-20:00 CST: five probe sessions; four started with no confirm recorded; the last was refused by a permission prompt (\"The user doesn't want to proceed with this tool use\"). The log does not say which setting let the earlier calls skip the prompt. Not answered: which app you were in (terminal or Desktop). The lane can ask again if it matters.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Two quick Mac facts: permission mode and the confirm card",
+  "status": "closed",
+  "steps": [
+    "Look at a Claude Code window on your Mac. Under the input box there is a permission mode label. Type what it says (Default, Accept edits, Plan, Auto, or something else) into this item's note box.",
+    "Think of the last time a Mac session asked you to confirm creating a session. Say which app it was (the terminal command line or the Desktop app) and what the confirm card named (the tool name or its words). A screenshot of the card is best; if you do not have one, say \"none\".",
+    "Press Done. Triage relays your note to the lane."
+  ],
+  "title": "Tell the lane two things from your Mac: the permission mode label, and what the last session-start confirm card said",
+  "why": "Only you can read your Mac's mode label and the confirm card; no session can see either."
+}

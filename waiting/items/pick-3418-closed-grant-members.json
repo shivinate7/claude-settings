@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-14T15:15:00-06:00",
+  "closed": "2026-11-14T22:31:30Z",
+  "context": "Goal: combined PR #3418 (21 members) merges, and your two rulings on closed routed answers land, without a new way for a named act to run twice.\nProblem (rule): the round 1 reviewer of #3418 (PASS, record comment 6884294991, relayed by lane g1 at 15:14 CST) found one narrow path in two members, #3224 (rule 4, routed_close) and #3308 (a Relayed Grant entry): the owning session counts its own kept routed answer before the receiver reports done (docs/decisions/relayed-grant-read-from-page.md, around line 60). Harm: the named act runs a second time. Only you can say whether that path is inside your rulings.\nBased on (ruling): own-748-b-rule-4 (owner 13:20 CST Nov 13): the lane lands page_grant rule 4 as in closed PR #1383, so a closed routed answer keeps a counted grant route; \"he chose it knowing the label\". And own-753-a-relayed-grant-entry (owner 18:24 CST Nov 13): edit the \"Relayed Grant\" entry (settings.json line 56) and its pinned test so a routed closed item counts. #3224 and #3308 are the implementation of those two rulings (coordinator, 15:17 CST, after it read both), so the receiver's routed case is NOT at stake. Neither ruling names the owning session counting its own kept answer before the receiver reports done; a grant covers the act it names, never a variant.\nBased on (read): main's settings.json line 56 (\"Relayed Grant\") carries \"Never covers ... a closed item\" (coordinator, 15:14). Based on (unread): the versions of #3224 and #3308 inside the combine; the reviewer's words only.\nDeparts from: main refuses a grant on a closed item; #3224 and #3308 land your 748 b and 753 a, so a routed closed item counts for the receiver; the narrow path above comes with them unless a lane fixes it.\nCorrected 15:17 CST Nov 14 (coordinator, 15:17): the first text of this item said #3418 allows a grant on a closed item, with options a, b and c where c read as refusing a closed item again. The coordinator wrote that without searching your rulings; that option c is withdrawn, because it undid your two rulings.\nMeanwhile: lane g1 holds the lane lint and hands nothing in until you answer; it reads a merge-tree of the other 19 members. Nothing else waits.\nOption a is starred at the coordinator's recommendation (it undoes neither ruling, it only delays them).\nAlso, as a note, not a question (the reviewer, relayed): it could not run runtime verdicts for the archive guard, because its sandbox refused the probes (they include a deny-expected branch delete, so they need a plain checkout with that branch absent): unknown. Pre-existing: the archive guard reads one command only.",
+  "home": "step page-grant-closed-item-leftovers; PRs #3224 and #3308; combined PR #3418; rulings own-748-b-rule-4 and own-753-a-relayed-grant-entry",
+  "id": "pick-3418-closed-grant-members",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-14T22:30:57Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 842,
+  "options": [
+    {
+      "gain": "The other 19 members merge now, and the narrow path never reaches main. Your two rulings are not undone.",
+      "id": "leave-two-out-fix-each",
+      "key": "a",
+      "label": "Leave #3224 and #3308 out of #3418 now and fix each in its own lane (the receiver's routed case counts; the owning session's own count before done is refused), then merge each alone",
+      "lose": "Both of your rulings land later."
+    },
+    {
+      "gain": "Both rulings land now.",
+      "id": "keep-both-in-as-they-are",
+      "key": "b",
+      "label": "Keep both in #3418 as they are",
+      "lose": "The narrow path opens: the owning session can count its own kept answer before the receiver reports done, so the named act can run a second time. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "One rebuild and nothing split.",
+      "id": "hold-the-combine",
+      "key": "c",
+      "label": "Hold the whole combine until both members are fixed",
+      "lose": "The other 19 members wait."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 15:14 CST Nov 14, from lane g1's relay of the round 1 reviewer of #3418; revised 15:17; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "recommended": "a",
+  "ref": "coordinator messages 15:14 and 15:17 CST Nov 14; record comment 6884294991 on #3418",
+  "repo": "shivinate7/claude-settings",
+  "short": "Keep #3224 and #3308 in the combined PR #3418, or fix the owning-session count first?",
+  "status": "closed",
+  "title": "Two members of combined PR #3418, #3224 and #3308, land your closed-routed-answer rulings but also let the owning session count its own kept answer before the receiver is done. Leave them out and fix each alone (a), keep them in as they are (b), or hold the whole combine until both are fixed (c)?",
+  "why": "The #3418 round 1 reviewer found that the two members, which implement your 748 b and 753 a, also let the owning session count its own kept routed answer before the receiver reports done, so a named act can run twice. Your rulings cover the receiver's routed case, not this path."
+}

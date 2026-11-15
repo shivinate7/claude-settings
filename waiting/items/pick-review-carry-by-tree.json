@@ -1,0 +1,48 @@
+{
+  "added": "2026-11-14T09:04:00-06:00",
+  "closed": "2026-11-14T20:58:00Z",
+  "context": "Goal: a replacement PR with the same code as a reviewed PR does not repeat the review and the lint, and no unreviewed code merges.\nProblem (rule): decision pr-review-record says \"a review record names the head it reviewed and only an open pull request takes one\", and that a second fix after a fix check takes a fresh chain from round 1, a new PR. The coordinator names the outcome that sentence protected: a record describes the code that merges. On an identical tree nothing needs the head name, because a tree sha names the same code. Only you can lift the sentence.\nBased on (measured, lane merge-tool-beats-every-phase's own n=1, read by neither the coordinator nor triage): one test-file fix to #3272's phase beat, red reported 08:00, handed in ready at 09:37 CST (about 97 min wall, updated 09:40 from the lane's log; the coordinator read the record comments itself): 3 PRs on one tree (#3272, #3403, #3404), lane lints of 22 min (FAIL on the lane's two Red-run trailers) + 11 s (stopped at a main conflict) + 7 min (PASS), 5 lane-touched-tests runs, 8 reviewer agents; the only blocking finding in 3 rounds was round 1's (an unpinned 120 s claim); rounds 2 and 3 on #3403 found nothing blocking. #3404's tree is byte-identical to #3403's head 7bc1717bac09 (empty git diff, the lane's claim); that head holds round 1 FAIL (fixed), round 2 PASS, round 3 PASS, net value zero. Earlier case: #3376 re-cut from #2980 only to fix a trailer, same tree; its carry by tree was refused by the --fix-check chain test (coordinator 00:28 CST).\nBased on (ruling): owner priority fb-1556-6, cut repetition (consultant 00:21 CST Nov 14, relayed; not a ruling on this sentence). Step review-carries-by-tree (doing, a lane since 00:25 CST) builds the carry; a check change that moves a decision sentence needs your yes first.\nDeparts from: main \u2014 a record names a head and only an open PR takes one; option a lets a new PR cite the record of a PR whose reviewed tree is byte-identical, read by the tool by tree sha and never by hand.\nAlready built (the lane of step review-carries-by-tree, 09:04 CST, its own report; REST read by the lane: #3388 open, draft, head 3828002230b4, not merged; unchecked by triage): option a is built and reviewed in #3388 (round 1 FAIL, round 2 FAIL, round 3 PASS, net value zero, fix check PASS, lane lint PASS). A replacement PR names its source with a `Replaces #M` or `Carries #M` body line; the source's newest review log and lane-lint PASS then count when the tree sha of the log's reviewed head equals the tree sha of the live head. A PR with no named source is NOT carried; carrying with no named source would be a further widening and needs your word too. It stays draft until you answer; if you pick b it is dropped or cut back to a remedy-text change.\nMeanwhile: the coordinator's own undoable pick: #3404 gets one fresh round 1, and the tool says what else is owed. No check changes until you answer.\nOption b is starred at the consultant's recommendation (consultant 11:05 CST Nov 14, relayed; it put this item to you in chat at 11:05, and a chat answer closes the item). Options a and c widen the tool and are never starred: a lets a record from another PR count on the lane's unchecked claim that the trees match, and c is unbuilt.",
+  "home": "decision pr-review-record; step review-carries-by-tree; steps replacement-pr-carries-review, record-replacement-pr-rounds",
+  "id": "pick-review-carry-by-tree",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-14T20:56:00Z",
+    "choice": "b, then a",
+    "note": "Owner in chat to the consultant, 14:56 CST Nov 14, verbatim as relayed: \"835 approved b into a\". Consultant's reading (relayed at 14:58, not the owner's own text to triage): b now, so combined PR #3406 gets one fresh review chain and lane lint on its own head, then one CI run and one merge; then a, so #3388 (carry a review log and lane lint to a replacement PR whose tree is byte-identical, one source PR) goes to runner 10 for merge. Filed on step review-carries-by-tree."
+  },
+  "n": 835,
+  "options": [
+    {
+      "gain": "No repeat review or lint on a replacement PR with the same code.",
+      "id": "carry-by-tree-sha",
+      "key": "a",
+      "label": "A new PR whose tree is byte-identical to a reviewed PR may cite that record; the tool reads it by tree sha, never by hand",
+      "lose": "A record names a head from another PR; the tool must prove the tree match itself, and a mistake there merges unreviewed code. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo. It covers ONE source PR only (the lane's read of #3388, 10:42 CST), so it does not carry a combined PR such as #3406 (23 members): the combine train does not move on option a.",
+      "widens": true
+    },
+    {
+      "gain": "Each PR carries a record of its own head; no new tool check.",
+      "id": "keep-head-named",
+      "key": "b",
+      "label": "Keep today: each PR is reviewed on its own head",
+      "lose": "About 97 min wall, 3 PRs, 3 lane lints (22 min, 11 s, 7 min), 5 lane-touched-tests runs and 8 reviewer agents on the one measured case (the lane's own n=1; the only blocking finding came in round 1). A combined PR such as #3406 needs a fresh review chain on its own head (72 files, 185 commits), because `merge --reviewed` reads only the combined PR's own record (lane of combine-train-tool's read of main, not run against #3406)."
+    },
+    {
+      "gain": "A combined PR such as #3406 (23 lanes) takes one CI run and one merge on the members' existing reviews, with no fresh chain on its 72 files and 185 commits.",
+      "id": "carry-many-members",
+      "key": "c",
+      "label": "A combined PR may carry the review records of its member lanes into one record, each member read by its own head; the tool proves every member head is inside the combined tree",
+      "lose": "Nobody has built it: the tool must read each member record at that member's head and prove each head is in the combined tree, and a mistake there merges unreviewed code. A new check, so it takes its own review rounds before it can carry anything. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), 09:03 CST Nov 14, stale-decision protocol on decision pr-review-record; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "rank": 1,
+  "recommended": "b",
+  "ref": "coordinator 09:03 CST Nov 14",
+  "repo": "shivinate7/claude-settings",
+  "short": "May a new PR with the same code as a reviewed PR reuse that review?",
+  "status": "closed",
+  "title": "May a new pull request whose code is byte-identical to a reviewed PR cite that PR's review record, read by the tool by tree sha (a), or does each PR keep its own review on its own head (b)? Or may a combined PR carry its members' records (c)?",
+  "why": "A record that names a head from another PR is a change to decision pr-review-record. The one measured replacement chain cost about 97 min wall (the lane's n=1, record comments read by the coordinator). Second measure, 10:41 CST Nov 14 (coordinator, from runner 10's own count: 11 merges from 04:00 to 10:32 CST, about 35 min per merge, n=11, arithmetic only; relayed, unchecked by triage): combined PR #3406 (combine-g1h, draft, head e233aa0a4bef, 72 files, 185 commits, base main 0806bf59d284) folds 23 reviewed lanes. Without the carry (option a), #3406 has no record at its head, and the 23 lanes go one by one at runner 10's rate: about 13 h by that arithmetic. With the carry, one CI run and one merge is possible. But the carry as built (#3388) cites one source PR per `Replaces #M`, so a 23-member combine needs a form the lane did not build; ANSWERED 10:42 CST (the lane review-carries-by-tree, from #3388 head 3828002230b4, merge/merge.py `replaces_source`, `carry_source`, `same_tree`; triage read no code): option a as built covers ONE source PR only. `replaces_source` takes the one number on a `Replaces #M` or `Carries #M` line, and two different numbers name no source. `carry_source` reads only the newest record on that source, by that record's own head, and holds only when that head's tree equals the new PR's live tree. It never reads each member of a combined PR. #3406's tree differs from every member's, so option a does not carry it: picking a does not move the combine train. Not read by the lane: how #3406's body names its lanes, and #3347's `Replaces` parser. How the tool judges a combined PR, answered 10:44 CST (coordinator, from the lane of step combine-train-tool, reading merge/merge.py on main 15e889991, a short sha as the lane gave it; not run against #3406; refusal text unmeasured; triage read no code): `merge --reviewed <combined>` reads ONLY the combined PR's own newest record comment (`reviewed_read`, `rec[\"n\"] == n`, then the live-head check that forgives clean merges of main). It never reads a member's record at the member's head. A combined PR needs a done record on its own head and a lane-lint PASS at that head. With only the members' records done, #3406 reads \"no record\" and `--release-check` gives `#N FAIL`. So a combined PR needs either a fresh review chain on its own head (option b) or a carry from many members that nobody has built (option c, added 10:50 CST at the coordinator's suggestion; it widens a check). #3393 is replaced by #3406; runner 10 closes it."
+}

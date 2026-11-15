@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-13T20:56:00-06:00",
+  "closed": "2026-11-14T02:52:30Z",
+  "context": "Goal: a merge tool whose every gate stops a real mistake and costs less than it saves.\nProblem (goal): merge/merge.py has 337 commits in 8 days, 4,617 lines, and 27 debts name it (the consultant's count; unchecked by triage). Gates are fixed one misfire at a time, and nobody has read the whole. Whether it is stale is unmeasured.\nBased on (measured): the consultant's counts above, unchecked; your 20:49 CST chat.\nDeparts from: main \u2014 adds one read-only audit; no gate changes until you pick from its table.\nMeanwhile: the tool keeps running as it is; the wave plan does not wait on this.",
+  "home": "step merge-tool-audit",
+  "id": "pick-merge-tool-audit",
+  "kind": "decision",
+  "lastAnswer": "a, with an Opus agent: \"yes send a opus agent to audit the merge tool\" (owner 20:50 CST via the consultant).",
+  "n": 798,
+  "options": [
+    {
+      "gain": "You see which gates are stale before more fixes pile on; nothing changes without your pick.",
+      "id": "audit",
+      "key": "a",
+      "label": "Audit it: one Sonnet agent tables each gate in merge.py with the ruling behind it and keep, fix or cut (recommended)",
+      "lose": "One agent's run and your time reading its table."
+    },
+    {
+      "gain": "No work now.",
+      "id": "no-audit",
+      "key": "b",
+      "label": "No audit: fix gates as they misfire",
+      "lose": "The fix pile keeps growing and a stale gate stays unseen."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ), from your 20:49 CST chat; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "consultant 20:50 CST Nov 13",
+  "reply": "Filed. The consultant's read-only Opus audit agent is running; its gate table (keep, fix, cut) comes back to you through the consultant, and nothing changes until you pick from it.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Audit every gate in the merge tool: keep, fix or cut?",
+  "status": "closed",
+  "title": "A read-only audit of the merge tool?",
+  "why": "You asked 20:49 whether the merge tool is any good and said it may be stale; one read-only agent can table every gate and say which to keep, fix or cut, with no change to the tool."
+}

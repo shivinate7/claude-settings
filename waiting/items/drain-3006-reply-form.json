@@ -1,9 +1,15 @@
 {
   "added": "2026-11-13T17:31:00Z",
-  "context": "Goal: you answer from one place without retyping options.\nProblem (rule): R18 (2026-11-10 16:46 CST) says chat holds one line, \"on the page, item N\". Main's guard option-labels-match-chat enforces `Page item: <id>` plus `a) <label>` lines, from your 2026-11-08 12:35 CST words \"A and B mean the same\". #3006 follows R18 and fights that guard.\nBased on (ruling): R18; decision option-keys-are-letters.\nDeparts from: main \u2014 main keeps the option lines; choosing b drops them.\nMeanwhile: #3006 holds until you answer.",
-  "home": "rulings R18 and R60; guard option-labels-match-chat",
+  "closed": "2026-11-15T18:07:27Z",
+  "context": "ANSWER to \"is there tokens lost too with A?\" (20:30 CST Nov 14): yes. With a, every reply that holds options repeats one line per option in chat, about 15 to 30 words each (unmeasured per reply). b saves those words but removes the chat copy that the guard option-labels-match-chat compares with the page, so a mismatch between page and chat would go unnoticed. a costs words; b costs a quiet mismatch. #3006 is still an open draft and holds until you answer (GitHub read 20:30 CST Nov 14).\nGoal: you answer from one place without retyping options.\nProblem (rule): R18 (2026-11-10 16:46 CST) says chat holds one line, \"on the page, item N\". Main's guard option-labels-match-chat enforces `Page item: <id>` plus `a) <label>` lines, from your 2026-11-08 12:35 CST words \"A and B mean the same\". #3006 follows R18 and fights that guard.\nBased on (ruling): R18; decision option-keys-are-letters.\nDeparts from: main \u2014 main keeps the option lines; choosing b drops them.\nMeanwhile: #3006 holds until you answer.",
+  "home": "ruling own-713-a-reply-page-item-plus-lines",
   "id": "drain-3006-reply-form",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T17:57:48.288Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 713,
   "options": [
     {
@@ -25,7 +31,8 @@
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "backlog-drain lane, #3154",
-  "reply": "Yes, a costs tokens. A reply that holds options repeats one line per option in chat, about 15 to 30 words each (unmeasured per reply), every time. b saves those words but removes the chat copy that the guard option-labels-match-chat compares with the page, so a page and a chat that disagree would go unnoticed. a costs words; b costs a quiet mismatch.",
+  "replied": "2026-11-15T12:07:27-06:00",
+  "reply": "ruled own-713-a-reply-page-item-plus-lines; nothing to build, main already works this way",
   "repo": "shivinate7/claude-settings",
   "short": "#3006: which reply form?",
   "shown": [
@@ -40,7 +47,7 @@
       "label": "One line, 'on the page, item N' (R18)"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "When a reply to you holds options, does chat carry one line (\"on the page, item N\"), or the page item plus its option lines?",
   "why": "Backlog-drain lane ledger in #3154; no past ruling settles it (triage read of rulings, steps and main's decisions 11:30 CST Nov 13)."
 }

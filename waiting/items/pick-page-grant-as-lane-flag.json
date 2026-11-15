@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-14T16:38:00-06:00",
+  "closed": "2026-11-15T01:59:39Z",
+  "context": "Goal: stop the owning session from counting its own kept routed answer before the receiver is done (harm: the named act runs twice), without changing more than you ruled.\nProblem (rule): page_grant.py has no input that names the caller (its flags are --root --page-url --item --fetched --pick), so it cannot tell the receiver from the owning session. Refusing the owner path needs one new flag. The \"Relayed Grant\" allow entry in settings.json autoMode quotes the full command (built from CHECK_FLAGS), and hooks/test_auto_mode_allow.py pins it, so a new flag turns #3224 red unless the entry's quoted command changes in the same PR. That is an edit of an allow-list entry, so it needs your word.\nBased on (read): the lane's words, relayed; triage read no code: page_grant.py (CHECK_FLAGS, COMMAND, routed_close) and the decision relayed-grant-read-from-page (\"What counts\", \"Deleted answers\").\nBased on (ruling): read by triage in roadmap/rulings: own-748-b-rule-4 (13:20 CST Nov 13) lands page_grant rule 4 as in closed PR #1383, so a closed routed answer keeps a counted grant route. own-753-a-relayed-grant-entry (18:24 CST Nov 13) edits the \"Relayed Grant\" entry (settings.json autoMode.allow, line 56) and its pinned test hooks/test_auto_mode_allow.py so a routed closed item counts. own-842-a-leave-out-fix-alone (16:30 CST Nov 14) leaves #3224 and #3308 out of #3418, fixes each in its own lane (the receiver's routed case counts; the owning session's own count before done is refused), then merges each alone; \"this one narrow path; nothing wider\".\nTriage's reading of those rulings: 842 a orders the refusal of the owner path but names no flag and no entry edit. 753 a names the entry and its pinned test, for the closed-item clause; it does not name the command text or a new flag. The coordinator reads both as not covering the command edit, and triage reads them the same way. One could read 753 a's \"edit the entry\" wider; no ruling says so. So it is asked.\nDeparts from: main (page_grant takes no caller identity; the entry's quoted command has five flags) \u2014 adds a sixth flag --as-lane <slug> and changes the entry's quoted command.\nMeanwhile: the lane waits (it builds fix-3224-own-count-closed and fix-3308-own-count-closed); nothing else runs on it; #3224 and #3308 stay unpushed.\nNo option is starred. The coordinator recommends none of a, b or c (its 16:40 CST word; it first recommended a, then withdrew it). Whether b (prose only) counts as \"refused\" under ruling own-842-a is unmeasured; you read that. Option a edits an allow-list entry's command text, which counts as widening, so it is never starred.\nYOU ASKED 18:34 CST Nov 14, \"is a best?\" Triage's answer: no session recommends any option today. The coordinator withdrew its recommendation at 16:44 CST (\"I recommend none of a, b, c\"). What each option does: a is the only one where a check, not prose, closes the path; its price is one flag added to your edited allow entry's command text, and the receiver must pass its lane. b changes no entry and is smallest, but only prose stops the double run. c fails closed for every receiver, so it works only if you want the flag later. Unmeasured: whether prose alone (b) counts as \"refused\" under your 842 a, and how often the owning session would hit this path. Triage has asked the coordinator and lane page-grant whether either now recommends one. Nothing is starred until a named session recommends a non-widening option. Your pick stands open.\n\nCoordinator 18:39 CST Nov 14 (replaces its 18:37 text): its recommendation is now b, and lane page-grant recommends b too. Basis (lane read; coordinator checked page_grant.py line 299 and test_page_grant.py lines 239-242): main already counts an open item with a lane and a kept answer for any caller, so rule 4 (#3224) only moves the same case onto closed items. A fourth way (compare the item's lane to the caller's branch) fails closed for tier receivers and worktree-agent branches, so it is unsafe. b = ship rule 4 as built, plus the sentence \"the owning session never counts its own kept answer\" in the decision and the skill; no flag, no allow-entry edit. Gain: your two rulings land and nothing widens. Lose: prose refuses nothing, the same as main's open-lane case today; it departs from the wording of your 842 a. Unmeasured: how often the owning session does this. a and c still widen. b carries no widens flag and has a gain and a lose. #3224 and #3308 stay out of main until you pick.",
+  "home": "steps fix-3224-own-count-closed and fix-3308-own-count-closed; PRs #3224 and #3308; rulings own-748-b-rule-4, own-753-a-relayed-grant-entry, own-842-a-leave-out-fix-alone",
+  "id": "pick-page-grant-as-lane-flag",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T01:56:45.799Z",
+    "choice": "a",
+    "note": "",
+    "optionId": "add-as-lane-flag"
+  },
+  "n": 844,
+  "options": [
+    {
+      "gain": "A check closes the path, not prose.",
+      "id": "add-as-lane-flag",
+      "key": "a",
+      "label": "Add --as-lane <slug>: rule 4 counts a routed close only when it equals the item's lane, so the owning session, on another lane, is refused. #3224 also edits the entry's quoted command (one flag added, nothing else) so its pin stays green; #3308 then edits only the Never-covers clause on top. #3224 lands first, #3308 second, each alone.",
+      "lose": "You let #3224 edit your owner-edited entry's command text. The receiver must pass its lane. A session can still pass another lane (a form only an attacker writes). Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "No entry edit, and both PRs stay small.",
+      "id": "no-new-flag-prose-only",
+      "key": "b",
+      "label": "No new flag: the refusal lives in SKILL.md and the decision text only (\"the owning session never counts its own kept answer\")",
+      "lose": "No check. The named act running twice is stopped by prose only.",
+      "recommended": true
+    },
+    {
+      "gain": "No entry edit.",
+      "id": "flag-outside-entry-command",
+      "key": "c",
+      "label": "Add the flag but keep it out of the entry's quoted command",
+      "lose": "The receiver's instructions never tell it to pass the flag, so it fails closed for every receiver."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 16:37 CST Nov 14, from lane page-grant's 16:36 report; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator message 16:37 CST Nov 14; lane page-grant report 16:36 CST Nov 14",
+  "repo": "shivinate7/claude-settings",
+  "short": "Add a --as-lane flag to page_grant, and edit the Relayed Grant entry's command, to refuse the owning session's own count?",
+  "status": "closed",
+  "title": "Stopping the owning session from counting its own kept routed answer needs a new page_grant flag and an edit of the Relayed Grant allow entry's command. Add --as-lane and edit the entry (a), refuse it in prose only (b), or add the flag but leave the entry alone (c)?",
+  "why": "The fix for #3224 and #3308, under your 842 a, needs a flag that names the caller, and the allow entry quotes the command, so it must change too. No ruling names that edit, so it needs your word."
+}

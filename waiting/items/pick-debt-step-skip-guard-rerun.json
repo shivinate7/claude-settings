@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-14T23:42:00-06:00",
+  "closed": "2026-11-15T00:16:00-06:00",
+  "context": "YOUR WORD (page save 00:09 CST Nov 15): \"2\", note: \"B or A are good since botj avoid repeat run, ask consultant\". Not taken as option 2: your word names two options (the page lists the Retire-line choice as 2/B and the shard-tree skip as 1/A) and says to ask the consultant, so triage is asking it. Option 2 widens a shared tool and goes against your ruling, so it is not taken on an unclear word. The item stays open, the lane waits, and nothing is built.\nGoal: CI proves hooks/test_guard.py once per tree, with no repeat run and no weaker proof (your 20:17 CST Nov 14 goal).\nProblem (rule): the lane's first fix would read the checks-guard shard jobs through `needs`. That accepts weaker evidence than main does today, so it widens what the debt check accepts, and only you can allow that.\nBased on (measured): (1) when scope flag checks_guard is false, every shard step is skipped but the job result is still success, so a debt close would pass with no test run; (2) on a PR event the shards check out the merge commit, while the debt step runs $HEAD_SHA, a different tree; (3) job `checks` would wait about 16 min for the shards, against about 15 min today. (The lane's read of the workflow; triage read no workflow code.)\nBased on (measured): the duplicate runs only on a PR that closes a debt whose Retire line names hooks/test_guard.py: 11 of 151 debts. Run 43678092611 closed none, so 0 extra min. Extra minutes per affected PR are unmeasured; the only figure is a pre-split workflow comment (median 21.1 min).\nDeparts from: main runs the whole Retire-named suite on the PR head inside `checks`; the debt step would skip that run when the shards ran on the same tree.\nMeanwhile: the lane builds nothing and waits. Triage found no past owner ruling on this (searched the rulings for debt-close-runs-retire, Retire line, checks_guard; r2 and r15 name the decision only for the PR template, keep-merge-commit-skips-debt rewrites one debt's Retire line).",
+  "home": "step ci-debt-step-duplicates-guard-suite; decision debt-close-runs-retire",
+  "id": "pick-debt-step-skip-guard-rerun",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T06:16:00Z",
+    "note": "consultant's pick, not typed by you: option 1 (skip only when the shards ran on this tree), asked by your own words \"ask consultant\"; ruling own-852-1; reopens if you say otherwise"
+  },
+  "n": 852,
+  "options": [
+    {
+      "gain": "No repeat run and no weaker proof.",
+      "id": "skip-only-when-shards-ran-this-tree",
+      "key": "1",
+      "label": "Skip the debt step's run only when the shards ran on this tree: read the shard result and the scope flag; run the suite as now when the flag is false or the tree differs",
+      "lose": "A more complex step; `checks` waits for the shards on PRs that close such a debt.",
+      "recommended": true
+    },
+    {
+      "gain": "No repeat run.",
+      "id": "retire-line-names-shard",
+      "key": "2",
+      "label": "Make the Retire line name the shard",
+      "lose": "A new Retire-line form, a change to decision debt-close-runs-retire, and the same weaker-proof gaps. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "No change.",
+      "id": "leave-it",
+      "key": "3",
+      "label": "Leave it as it is",
+      "lose": "A repeat run, of unmeasured length, on each affected PR."
+    }
+  ],
+  "owner": "lane ci-debt-step-duplicates-guard-suite (session_013NEJL27N29gMxcUwtwKHXW) 23:41 CST Nov 14; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane message 23:41 CST Nov 14",
+  "repo": "shivinate7/claude-settings",
+  "short": "Debt step and guard shards: skip the repeat run safely, or not?",
+  "status": "closed",
+  "title": "CI runs hooks/test_guard.py twice on a PR that closes a debt naming it. Skip the repeat only when the shards ran this tree (1), name the shard in the Retire line (2), or leave it (3)?",
+  "why": "Option 2 and the plain `needs` fix would let the debt check pass on weaker proof, which only you can allow."
+}

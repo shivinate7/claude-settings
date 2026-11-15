@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-15T11:50:00-06:00",
+  "closed": "2026-11-15T17:48:08Z",
+  "context": "Goal: lane lane-lint-allow-entry starts, so it can carry out your pick b on item 863.\nWhat happened: the coordinator's create_session call that starts this lane was refused by the auto-mode check, \"[Undermining Oversight]\". No override line was printed. Source: the consultant, 11:49 CST, relayed; triage has not read the refusal.\nWhat your word covers: only the start of lane lane-lint-allow-entry. It covers no other act and no other session.\nUnmeasured: whether a typed `override` reaches the auto-mode check. Decision owner-override names only the guard, not this check. If the start is refused again, the coordinator says so and this item reopens.\nWhy yours: a start of this lane needs your own typed word in the coordinator's own session, and the coordinator's attempt was refused (measured 2026-11-15, the coordinator's create_session was refused by the auto-mode check with \"[Undermining Oversight]\", relayed by the consultant, not read by triage).",
+  "holds": "Lane lane-lint-allow-entry does not start until the coordinator's start of it goes through.",
+  "home": "item 863 b; step lane-lint-background-refused; lane lane-lint-allow-entry",
+  "id": "act-type-override-lint-lane",
+  "kind": "task",
+  "links": [
+    {
+      "label": "Coordinator session",
+      "url": "https://claude.ai/code/session_013NEJL1gw6EdrSyvHkTUEx6"
+    }
+  ],
+  "minutes": 1,
+  "n": 882,
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6), for the consultant (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "ref": "item 863 (pick-lane-lint-allow-entry), answered b; consultant 11:49 CST Nov 15, relayed, not owner-typed",
+  "replied": "2026-11-15T17:48:08Z",
+  "reply": "Done: the owner typed `override 1h` at 11:46 CST in the coordinator's session (hook-confirmed, used once); coordinator report 11:47 CST says lane lane-lint-allow-entry started.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Type override: start lint lane",
+  "status": "closed",
+  "steps": [
+    "Open the coordinator's session (link below).",
+    "Type `override` in its chat, then say in one line: start lane lane-lint-allow-entry.",
+    "Press Done here."
+  ],
+  "title": "Type `override` in the coordinator's session so lane lane-lint-allow-entry can start"
+}

@@ -1,0 +1,49 @@
+{
+  "added": "2026-11-15T11:41:00-06:00",
+  "context": "Goal: PR 2701 (lane solo-batch-hat) gets a review record the merge tool counts, so it can be handed in and merged.\nProblem (rule): the auto-mode classifier refused the lane's print of the carried record twice, the second time after the consultant's 11:39 CST pick, with the reason \"Undermining Oversight\". Only you lift a classifier refusal; a session or the consultant cannot.\nBased on (ruling): item 862 (post the old head's rounds plus a fix check on the change since) was answered \"none of these\" at 11:37 CST with your note \"A is better than B but arent both bending for rules rather than thinking from outcomes\". The consultant then ruled from the outcome (an undoable pick, 11:39 CST, not owner-typed): post the old head's rounds as they stand plus one Sonnet fix check that reads only the diff from the old head to the current head. That is the print this item is about.\nBased on (read): docs/decisions/owner-override.md puts the override check at the top of refuse() in hooks/guard_core.py, the guard's one deny or ask. It does not name the auto-mode classifier, so whether your typed override lifts this refusal is unmeasured. Your `override 2h` (11:16 CST, relayed, unverified by triage) and \"i alrdys ent the override\" (11:25 CST, confirmed by the consultant) cover an act triage does not know, and the refusal came after both. Ruling own-consultant-speaks-for-owner (20:24 CST Nov 14) says the consultant's word does not lift a classifier refusal, and decision relayed-grant-read-from-page says auto mode trusts only words typed in the session's own chat.\nBased on (measured): the lane's words, relayed, not read by triage: the classifier refused this print twice and printed no override line (as far as triage knows). Triage has not seen the old head's rounds or the fix-check result. Triage checked the rulings and decisions first: none lifts this refusal or says a typed override covers merge-tool prints for a time window.\nDeparts from: main refuses this print (the classifier's \"Undermining Oversight\") \u2014 adds one permitted print: `merge 2701 --review-record` with the old head's rounds plus `--fix-check 35df574ffd55:reviewer:sonnet:PASS`, in lane solo-batch-hat only.\nWhat the lift covers: option A covers that one print and no other act (a grant covers only the act it names). No allow rule widens; no shared tool changes (decided by triage: A is a one-time lift, a typed word in the lane's own session). No option is marked widens.\nWhat to type: no override line was printed. If you pick A, type your words in the lane's own session (solo-batch-hat, session_013NEJKzruqvkmdxZx6AXoH8), where you read, naming that print. Triage supplies no override string and invents none.\nWho recommends what: option A is the lane's recommendation, not yours and not the consultant's.\nMeanwhile: the lane waits; PR 2701 is untouched.",
+  "holds": "Lane solo-batch-hat waits and PR 2701 is untouched until this is answered.",
+  "home": "PR 2701, step merge-role-raw-paths; decision pr-review-record; this item is the follow-up to item 862",
+  "id": "pick-lift-record-print-2701",
+  "kind": "decision",
+  "n": 879,
+  "options": [
+    {
+      "gain": "The carried record posts, so PR 2701 can be handed in.",
+      "how": "You type your words in lane solo-batch-hat's own session naming this one print: `merge 2701 --review-record` with the old head's rounds plus `--fix-check 35df574ffd55:reviewer:sonnet:PASS`. The lane then runs it once.",
+      "id": "type-override-one-print",
+      "key": "a",
+      "label": "Type an override for this one print (the lane's recommendation)",
+      "lose": "One classifier refusal is lifted once, for this print only. It may not take: the typed override may not reach the classifier (unmeasured)."
+    },
+    {
+      "gain": "No refusal is lifted.",
+      "how": "The lane hands in PR 2701 with the round ledger as text and posts no record.",
+      "id": "hand-in-ledger-as-text",
+      "key": "b",
+      "label": "Hand in with the ledger as text, no record",
+      "lose": "The merge tool counts no record for PR 2701, so it refuses the merge."
+    }
+  ],
+  "owner": "lane solo-batch-hat (session_013NEJKzruqvkmdxZx6AXoH8) 11:39 CST Nov 15, page writer copy relayed to triage; posted by triage's helper (triage session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "recommended": "a",
+  "ref": "item 862 (post old-head rounds, answered none at 11:37 CST); consultant pick 11:39 CST (not owner-typed); PR 2701; step merge-role-raw-paths",
+  "replied": "2026-11-15T11:46:00-06:00",
+  "reply": "Task 883 (Type `override` in lane solo-batch-hat's session) now asks the same thing as one typed act. Answer here or do task 883; the lane reads whichever you give. Whether a typed `override` reaches the auto-mode check is unmeasured.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Lift record print for 2701?",
+  "shown": [
+    {
+      "id": "type-override-one-print",
+      "key": "a",
+      "label": "Type an override for this one print (the lane's recommendation)"
+    },
+    {
+      "id": "hand-in-ledger-as-text",
+      "key": "b",
+      "label": "Hand in with the ledger as text, no record"
+    }
+  ],
+  "status": "open",
+  "title": "PR 2701: lift the classifier's refusal of one record print?",
+  "why": "The lane recommends a: the print is undoable and one-time, and the consultant ruled the content from the outcome. Only your word lifts a classifier refusal, and it may not take."
+}

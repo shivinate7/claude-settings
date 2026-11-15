@@ -1,8 +1,9 @@
 {
-  "at": "2026-11-13T18:11:30.646Z",
-  "choice": "none",
+  "at": "2026-11-15T17:57:48.288Z",
+  "choice": "a",
   "item": "pick-qmax-test-beside-checks",
-  "label": "none of these",
+  "label": "A: Start both together on the batch run",
   "n": 724,
-  "note": "can one fail fail the other? and should both even be running at the same time depending on the bathc/merge? liekl is it just a testing fault?"
+  "note": "note that while both can run in parallel is what immapproving im not saying to do these runs that often anywyas remember how i say tjese checks need to ofcur more effectively its aprt of our larger ci plans",
+  "optionId": "side-by-side"
 }

@@ -1,0 +1,51 @@
+{
+  "added": "2026-11-15T11:26:00-06:00",
+  "closed": "2026-11-15T17:38:36Z",
+  "context": "This item asks you to pick how a ruling names the earlier ruling it overtakes. It stops nothing: the lane builds on what exists meanwhile.\nGoal: the later-ruling check can find overtaken rulings without guessing from prose.\nProblem (rule): the ruled store has a field `supersedes` (a list of the things a ruling replaces), but no field names the overtaken ruling by id: a `ruling`-kind ref is free prose. So the check falls back to prose words. That is the cry-wolf shape of PR 3476, the held PR whose word matching fired on common words (6 of 8 process Departs lines hit 3 to 26 rulings).\nBased on (read): lane's read, relayed by the coordinator at 11:27 CST Nov 15, not read by triage. The incident ruling is own-820-c-five-repos. The record-vs-later-ruling lane read `git show origin/roadmap:roadmap/rulings/own-820-c-five-repos.json` (keys id, at, title, ruling, quote, source, status, step: no `supersedes`, no `supersedes_none`). Running `python3 lint/ruled_store.py check .` on origin/roadmap at 11:08 CST flags it (\"neither supersedes nor supersedes_none is set\"; 322 lines in all, 273 of that kind). The coordinator's \"had neither\" was that measured read.\nBased on (read): decision ruled-store-one-home, line 13, and check_entry (lint/ruled_store.py): a new entry needs a non-empty `supersedes` list or a non-empty `supersedes_none` reason. Nothing runs `check` on the whole store today (the decision's own text says so), so older entries lack the field unchecked. A `ruling`-kind ref is free prose (drop-nightly-schedule: \"R61 nightly skip when main's newest commit is green (...)\"); ruled_store.py reads only the first token of such a ref, for the shared-ref check. The lane agrees ruling refs are free prose. Earlier text of this item called the coordinator's reading unmatched and unmeasured; that was wrong, and is corrected here.\nBased on (ruling): none found. Searched origin/roadmap roadmap/rulings, docs/decisions and lint/ruled_store.py for supersedes, supersedes_none and overtake: no ruling says a ruling that overtakes one must name it, or that a ref must hold an id.\nDeparts from: main (check_entry asks a new entry for `supersedes` or `supersedes_none`, any `supersedes_none` text passes, a `ruling` ref is free prose, and no check runs over the whole store) \u2014 option A: a `ruling` ref must begin with the id of an entry in the store, and a ruling that overtakes an earlier one must list it; option B changes nothing.\nWho recommends what: option A is the coordinator's recommendation, not yours. Neither option widens what a shared tool accepts: A makes check_entry stricter, B leaves it as is. Limit of A: whether a ruling overtakes another stays a human judgment at filing; the check can only keep the ref well formed.",
+  "home": "ruling own-ruling-names-overtaken-a; step record-vs-later-ruling-check; follow-up step supersedes-names-an-id",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T17:33:40.618Z",
+    "choice": "a",
+    "note": "what diffs old prs from new ones in a sense to confirm they dont just share a similar name"
+  },
+  "n": 877,
+  "options": [
+    {
+      "gain": "The check keys on a field, so it can name the overtaken ruling without word guessing, and the false alarms of PR 3476's shape stop.",
+      "how": "A ruling that overtakes an earlier ruling lists it in `supersedes`, kind `ruling`, with that ruling's id as the first token of the ref. check_entry refuses a `ruling` ref whose first token is no id in the store. The later-ruling check reads the field, not prose.",
+      "id": "require-supersedes-ref",
+      "key": "a",
+      "label": "Require the overtaken ruling's id in `supersedes` (recommended by the coordinator)",
+      "lose": "One more checked field per overtaking ruling, and triage must fill it at filing. The check cannot tell that a ruling overtakes one, so a missed field stays missed."
+    },
+    {
+      "gain": "No new field and no new refusal for triage's filing.",
+      "how": "No change to the store. The later-ruling check keeps reading words in the ruling text when no field names the overtaken ruling.",
+      "id": "keep-prose-fallback",
+      "key": "b",
+      "label": "Leave the prose fallback",
+      "lose": "False alarms risk: matching on prose is the shape that cried wolf in PR 3476, and a cry-wolf check is spent."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 11:24 CST Nov 15; posted by triage's helper (triage session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "recommended": "a",
+  "ref": "step record-vs-later-ruling-check (the lane building the later-ruling check in actions/claude-md-cites); PR 3476 (held, prose-word matching that fired on common words); draft PR 3507; decision ruled-store-one-home; lint/ruled_store.py check_entry",
+  "repo": "shivinate7/claude-settings",
+  "short": "Name the overtaken ruling",
+  "shown": [
+    {
+      "id": "require-supersedes-ref",
+      "key": "a",
+      "label": "Require the overtaken ruling's id in `supersedes` (recommended by the coordinator)"
+    },
+    {
+      "id": "keep-prose-fallback",
+      "key": "b",
+      "label": "Leave the prose fallback"
+    }
+  ],
+  "status": "closed",
+  "title": "Name the ruling a new ruling overtakes",
+  "why": "The coordinator's recommendation, not the owner's: a check keyed on a field cannot cry wolf on common words, at the cost of one field per overtaking ruling."
+}

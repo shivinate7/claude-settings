@@ -4,6 +4,7 @@
   "home": "step brief-write-needs-writer",
   "id": "drain-2886-keep-or-close",
   "kind": "decision",
+  "lastAnswer": "a: keep #2886",
   "n": 712,
   "options": [
     {
@@ -25,6 +26,7 @@
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "backlog-drain lane, #3154; coordinator 11:22 CST",
+  "reply": "Filed as ruling keep-2886-spawn-check.",
   "repo": "shivinate7/claude-settings",
   "short": "#2886: keep or close?",
   "shown": [
@@ -39,7 +41,7 @@
       "label": "Close #2886 and #2693 (the lane's verdict)"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "Keep PR #2886 (a spawn-time check on a brief that orders a file write), or close it?",
   "why": "Backlog-drain lane ledger in #3154; no past ruling settles it (triage read of rulings, steps and main's decisions 11:30 CST Nov 13)."
 }

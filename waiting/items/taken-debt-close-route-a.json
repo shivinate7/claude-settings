@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-15T00:23:00-06:00",
+  "closed": "2026-11-15T17:41:53Z",
+  "context": "Goal: you see and can overrule every pick a session takes for you (\"Nothing can't be undone don't wait on me\", your 20:18 CST Nov 14 words; and your 00:11 CST Nov 15 question where the picks went).\nProblem (rule): the coordinator took this pick for you, not typed by you, under your 15:06 CST Nov 14 chat question, your 20:17 goal and your 20:18 words. The coordinator reads it as not a pass on weaker evidence at the merge; that reading is unverified by triage.\nBased on (ruling): coord-debt-close-route-a. Triage read neither #3251 nor any code; the route is the lane's read of 21:20 CST. A close that cannot read CI stays refused.\nDeparts from: main - a debt close on a draft runs its Retire test; the pick defers it to the ready PR's CI.\nMeanwhile: the pick stands and the work under it continues. Undo: say Overrule; the ruling reopens. An answer of Keep closes this with no act.\nTAKEN FOR YOU: route A for debt closes: `--ready` defers the debt close for a draft (\"deferred to confirm: no run exists yet\"); the ready PR's CI step judges every close; `confirm` refuses a missing, running, red, wrong-head or unreadable result. Taken by coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) at 21:20 CST Nov 14.",
+  "home": "ruling coord-debt-close-route-a; step debt-close-reads-ci",
+  "id": "taken-debt-close-route-a",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T17:39:47.156Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 855,
+  "options": [
+    {
+      "gain": "a debt closes on the ready PR's own CI result, with no repeat run.",
+      "id": "keep-taken-debt-close-route-a",
+      "key": "a",
+      "label": "Keep: the pick stands",
+      "lose": "it changes #3251's own test for drafts (re-pointed red then green, not deleted)."
+    },
+    {
+      "gain": "you choose another route for debt closes.",
+      "id": "overrule-taken-debt-close-route-a",
+      "key": "b",
+      "label": "Overrule: the ruling reopens",
+      "lose": "the rebuild on top of #3251 (step debt-close-reads-ci) stops until you choose."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 21:20 CST Nov 14; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "ruling coord-debt-close-route-a",
+  "repo": "shivinate7/claude-settings",
+  "short": "Taken for you: debt close reads the ready PR's CI",
+  "status": "closed",
+  "title": "Taken for you: a debt close reads the ready PR's CI result (route A). Overrule?",
+  "why": "A session took this pick for you. Keep it, or overrule it and the ruling reopens."
+}

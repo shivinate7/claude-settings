@@ -1,0 +1,52 @@
+{
+  "added": "2026-11-15T03:20:00-06:00",
+  "closed": "2026-11-15T17:41:00Z",
+  "context": "This item asks you to accept a cost. It does not block the PR.\nGoal: a cloud session gets main's new hooks mid-session, so a stale guard stops letting through what main refuses.\nProblem (rule): the freshness hook (hooks/stale_install.py:123) runs one `git ls-remote` on every cloud prompt, and reruns the installer when main moved. That is a watch that is not one of the three ruled timer exceptions, and your rule says watching must cost less than what it watches (outcomes-mechanize-rules). The cost is unmeasured. The PR carries no decision text and no cost test for it. Only you can accept a per-prompt network read.\nBased on (premise): the hook's docstring states one ls-remote per prompt and nothing more; no measurement exists (lane cloud-hooks-stale-copy, relayed by the coordinator 03:12 CST Nov 15, not read by triage).\nBased on (read): triage read PR 3487 on GitHub at 03:15 CST: open draft, head b6b1d652ac26, mergeable clean, base ef36c765df2d, 13 files. It replaces PR 3020 (closed 02:53 CST, unmerged).\nDeparts from: main \u2014 adds a per-prompt network read in cloud sessions.\nWho recommends what: the coordinator and the lane both recommend a. The star is theirs, not yours. The lane builds the decision text and the cost test only after you pick.\nMeanwhile: PR 3487 is not held on this answer; it stays a draft in the merge queue.",
+  "home": "step refresh-backoff-and-cost (follow-up lane on #3487's head); PR 3487 comment 6898557129; decision stale-install-cost",
+  "kind": "decision",
+  "lane": "refresh-backoff-and-cost",
+  "lastAnswer": {
+    "at": "2026-11-15T17:33:40.618Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 870,
+  "options": [
+    {
+      "gain": "A hook merged to main mid-session reaches a running cloud session.",
+      "how": "PR 3487 merges as is. A follow-up lane writes the decision text and a cost test (processes started per prompt, files written) as a note.",
+      "id": "accept-ls-remote-add-cost-test",
+      "key": "a",
+      "label": "Accept one ls-remote per cloud prompt; add decision text and a cost test in a follow-up lane (recommended by the coordinator and the lane)",
+      "lose": "One network read on every cloud prompt until the cost is measured."
+    },
+    {
+      "gain": "No new per-prompt read in cloud sessions.",
+      "how": "PR 3487 does not merge as written; the lane drops the per-prompt check.",
+      "id": "refuse-per-prompt-read",
+      "key": "b",
+      "label": "Refuse the per-prompt read",
+      "lose": "The PR's purpose: a cloud session keeps running the hooks it installed at start, as seven bare lane starts showed."
+    }
+  ],
+  "owner": "lane cloud-hooks-stale-copy (session_013NEJKzpBdiBYXja9cj5CoP), via coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 03:12 CST Nov 15; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "recommended": "a",
+  "ref": "coordinator message 03:12 CST Nov 15 and 03:1x addendum; PR 3487; hooks/stale_install.py:123; outcomes-mechanize-rules",
+  "repo": "shivinate7/claude-settings",
+  "short": "One ls-remote per cloud prompt?",
+  "shown": [
+    {
+      "id": "accept-ls-remote-add-cost-test",
+      "key": "a",
+      "label": "Accept one ls-remote per cloud prompt; add decision text and a cost test in a follow-up lane (recommended by the coordinator and the lane)"
+    },
+    {
+      "id": "refuse-per-prompt-read",
+      "key": "b",
+      "label": "Refuse the per-prompt read"
+    }
+  ],
+  "status": "closed",
+  "title": "PR 3487: may the cloud freshness hook run one git ls-remote on every prompt?",
+  "why": "The check guards a stale install, which is the harm the step exists to stop. The cost is unmeasured and not covered by a ruling, so the pick is yours."
+}

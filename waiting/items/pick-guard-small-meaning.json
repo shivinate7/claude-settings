@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-13T18:40:00-06:00",
+  "context": "Goal: guards stop mistakes Claude is likely to make, and cost less than the harm they stop.\nProblem (rule): You said keep the guard only if a replay shows no false refusals and the build is small. The lane measured the build: about 275 added hook lines plus 755 test lines, as a 38-commit stack on an old base that must be rebuilt on main (the lane's numbers, unchecked by triage). The replay needs a session on your computer, since the real runner commands are in your batch-runner transcripts there; guard.log lists refusals only, so it cannot give a false-refusal rate. By these numbers the build is not small.\nBased on (measured): the lane's count, via the coordinator 18:32 CST Nov 13.\nDeparts from: main, which has none of this guard; a drops it and closes the stack's PRs, b keeps it with a line limit you set.\nMeanwhile: the lane builds and closes nothing until your answer.",
+  "home": "ruling own-715-c-guard-replay; step runner-repos-in-parallel; lane runner-repos-in-parallel-rest",
+  "id": "pick-guard-small-meaning",
+  "kind": "decision",
+  "n": 782,
+  "options": [
+    {
+      "gain": "Nothing to rebuild; no false-refusal risk.",
+      "id": "drop",
+      "key": "a",
+      "label": "Drop the guard and close the stack's PRs (the coordinator's reading; recommended)",
+      "lose": "No guard against a runner dropping --root; no incident shows one."
+    },
+    {
+      "gain": "The guard comes back if the build fits your limit.",
+      "id": "keep-with-limit",
+      "key": "b",
+      "label": "Keep it, and I tell you what small means in lines",
+      "lose": "A rebuild on main plus a replay on your computer."
+    }
+  ],
+  "owner": "lane runner-repos-in-parallel-rest (session_013NEJL4RgQWEJ7kqZC5AfMD), via the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 18:32 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "715 follow-up: what counts as a small build for the guard?",
+  "status": "open",
+  "title": "Your pick keeps the merge-roots guard only if its build is small. It is about 275 lines. Drop it, or say what small means?",
+  "why": "Your pick used the word small without a number, and the lane's measure says it is not small."
+}

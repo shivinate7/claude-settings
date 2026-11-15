@@ -4,6 +4,7 @@
   "home": "ruling keep-merge-commit-skips-debt; PR #3184",
   "id": "pick-keep-merge-skips-debt",
   "kind": "decision",
+  "lastAnswer": "a: accepted pick",
   "n": 731,
   "options": [
     {
@@ -25,6 +26,7 @@
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "coordinator 11:50 CST Nov 13, built 12:10 CST",
+  "reply": "Filed as ruling keep-merge-commit-skips-debt.",
   "repo": "shivinate7/claude-settings",
   "short": "Keep debt merge-commit-skips-review",
   "shown": [
@@ -39,7 +41,7 @@
       "label": "Delete the debt as closed"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "Keep the debt merge-commit-skips-review as true, with its Retire line naming the real gap?",
   "why": "The coordinator took this pick; it stands unless you choose b."
 }

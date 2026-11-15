@@ -1,9 +1,11 @@
 {
   "added": "2026-11-13T17:02:00Z",
+  "closed": "2026-11-13T18:40:00-06:00",
   "context": "Goal: a report that admits a mistake names a PR, commit, step or debt, never a habit.\nProblem (rule): \"The builders broke X \u2014 Guard: future briefs run Y first.\" passes today with no ref.\nBased on (read): lint/report_guard.py MISTAKE_FIRST_PERSON_RE counts only \"I\" and \"my\" as admitting a mistake.\nBased on (ruling): decision mistake-means-missing-guard, Incident line (\"named the builders, not I\").\nDeparts from: main, where an admission needs \"I\" or \"my\" and the label must lead its sentence \u2014 widens the label forms, and option b also adds role subjects.",
   "home": "step habit-is-not-a-guard",
   "id": "guard-line-blind-reask",
   "kind": "decision",
+  "lastAnswer": "700: a, and a count.",
   "n": 700,
   "options": [
     {
@@ -42,7 +44,7 @@
   "owner": "lane habit-is-not-a-guard (session_013NEJL4HbEaurThYorsKFGD)",
   "pick": "a",
   "ref": "your 10:57 CST answer on item 629; lane 11:01 CST with a blind agent",
-  "reply": "Triage opinion, 13:4x CST: pick a, not b, for now. Why: a closes the dash form that slipped through today and adds no new false-alarm risk. b would also catch lines like \"the builders broke X\", but nobody has counted how many role-subject lines are real admissions and how many are plain review findings (\"the reviewer found the builder's test wrong\"). A check that cries wolf gets ignored, and b rewrites your decision's Incident line. If you agree, I file a small step to count the last reports first, and bring you b only with that number. Answer a, b, or \"a, then count\".",
+  "reply": "Filed as ruling own-700-a-labels-then-count and sent to the lane. Option a is built now. The lane counts how many role-subject lines (\"the builders broke X\") are real admissions before any b comes back to you.",
   "repo": "shivinate7/claude-settings",
   "short": "Guard line: blind agent beside lane",
   "shown": [
@@ -68,7 +70,7 @@
     }
   ],
   "stands": false,
-  "status": "open",
+  "status": "closed",
   "title": "How should the check find a report that admits a mistake with no guard named?",
   "why": "You asked for an independent blind agent's view on 629. It picked differently from the lane, so both are here. This replaces 629."
 }

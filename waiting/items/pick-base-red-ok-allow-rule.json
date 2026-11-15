@@ -1,0 +1,42 @@
+{
+  "added": "2026-11-13T18:51:29-06:00",
+  "context": "Goal: a revert of a red main merges without stopping on a prompt, with no check lifted that you did not allow.\nProblem (rule): PR 3097 adds the rule `Bash(merge * --confirm --head * --base-red-ok *)` to settings.json. Two things stop it. (1) Decision auto-mode-owner-acts (lines 66 and 76) says the merge allow entries never cover a flag that lifts a check, naming --base-red-ok. Decision no-merge-onto-red-main (line 21) lets Claude type that flag with a logged reason, so only the prompt is at stake. (2) A repo test (merge/test_merge.py, test_the_repo_settings_json_has_no_merge_allow_rule) refuses any merge allow rule in settings.json, and PR 3097's run 43375520417 failed on exactly that, not on main's red. A lane may not weaken a test.\nBased on (read): the lane's report; I read the decision lines and the test myself.\nDeparts from: main \u2014 a drops the rule; b adds it to merge/cloud_allow.json, which changes the decision text that says entries never cover this flag; c also changes the test to allow one rule in settings.json.\nMeanwhile: the lane waits; no push, draft flip or hand-in. Closing PR 3097 is your act and is not offered here.",
+  "home": "PR #3097; step allow-merge-base-red-ok; decisions auto-mode-owner-acts (lines 66 and 76) and no-merge-onto-red-main (line 21); test test_the_repo_settings_json_has_no_merge_allow_rule",
+  "id": "pick-base-red-ok-allow-rule",
+  "kind": "decision",
+  "lastAnswer": "786 c: rule in settings.json too, test re-pointed.",
+  "n": 786,
+  "options": [
+    {
+      "gain": "No check-lifting flag is ever pre-approved; no test or decision change.",
+      "id": "no-rule",
+      "key": "a",
+      "label": "No allow rule: the flag keeps stopping for a prompt, as today",
+      "lose": "A red-main revert merge prompts in the cloud and locally; PR 3097 is reworked without the rule."
+    },
+    {
+      "gain": "Cloud sessions never stall on a red-main revert; no test change.",
+      "id": "cloud-allow-only",
+      "key": "b",
+      "label": "Rule in merge/cloud_allow.json only (the lane's pick)",
+      "lose": "The decision sentence \"never covers --base-red-ok\" is rewritten; local sessions still prompt."
+    },
+    {
+      "gain": "Local sessions stop prompting as well.",
+      "how": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "id": "settings-too",
+      "key": "c",
+      "label": "Rule in settings.json too, with the test re-pointed (red then green)",
+      "lose": "A new carve-out in a guard test, plus a decision sentence and a guard review.",
+      "widens": true
+    }
+  ],
+  "owner": "lane merge-base-red-ok-refresh (session_013NEJKzyVUbeFsmoQeuaUP2); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane report 18:37 CST Nov 13",
+  "reply": "Answered 786 c (19:21 CST Nov 13), filed as ruling own-786-c-base-red-ok-settings. The same PR rewrites the two decision sentences that say entries never cover --base-red-ok, and gets a guard review. Kept open with your answer on the page until the lane fetches it; nothing for you to do.",
+  "repo": "shivinate7/claude-settings",
+  "short": "PR 3097: allow rule for --base-red-ok, and where?",
+  "status": "open",
+  "title": "May a merge allow rule cover --base-red-ok, so a red-main revert never stops for a prompt? If so, where does it live?",
+  "why": "Decision auto-mode-owner-acts says allow entries never cover this flag; the PR does the opposite, and a repo test forbids the settings.json form."
+}

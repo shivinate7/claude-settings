@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-15T00:23:00-06:00",
+  "context": "Goal: PR 2940 (red-job wakes for the fix check) is handed in with main's review rule unchanged, unless you say otherwise.\nProblem (rule): merging main into 2940 leaves 4 of its new tests failing. Main reads a passing fix verifier as done even when no round is recorded at its head (the log sits at another head or PR, an earlier log carries its own fix check, or a bare hold). The PR's tests expect \"open: the fix check passed, but no round is recorded\". Your pick on item 741 covers a fix after a round that passed. It does not name this case, so only you can say which reading holds.\nBased on (ruling): your 741 a, filed as own-741-a-lint-fix-no-r3: \"if round 1 passed and the only later edits fix lint (no finding fixed), the change is done at the passing fix check ... a lint-only fix after a pass ends review at the fix verifier's pass.\" Item 741's reply: \"a change is done at the first round that passes; a fix after a pass is checked by a fix verifier and its pass ends review; round 3 only after a round 2 fail.\"\nBased on (rule): roles-review-cap-three in CLAUDE.md: \"A small fix to a round's finding gets a fix verifier and merges on green, unless a guard or check change still owes round 3. A FAIL or a wider diff starts a new lane at round 1.\"\nBased on (read): main's decision pr-review-record, done rules, which already says a change is done when \"a fix verifier PASSes after that round (a FAIL round too)\" and when it \"holds a Fix check line that PASSes and no Round line, and its review row owes a round\". Triage read those lines only; it did not read the tool's code or the PR's diff.\nAlready settled, not asked: a round 1 FAIL followed by a passing fix verifier reads done under CLAUDE.md and the decision above, so the PR test that expects it open is a plain re-point for the lane. Only the case with no round recorded is open.\nDeparts from: main reads a passing fix verifier with no round recorded as done; PR 2940's tests read it as open.\nMeanwhile: the lane holds 2940, pushes nothing, and re-points only the usage phrase. PR 2860 stays blocked by 2940. The lane first favoured option A on a reading of 741 a that does not cover this case, so none is starred.",
+  "home": "PR 2940, step fix-check-reads-red-job-wakes; decision pr-review-record; ruling own-741-a-lint-fix-no-r3",
+  "id": "pick-fix-verifier-no-round-recorded",
+  "kind": "decision",
+  "n": 858,
+  "options": [
+    {
+      "gain": "No extra rounds; the 3 tests re-point to done; matches main today.",
+      "id": "fix-verifier-ends-review-always",
+      "key": "a",
+      "label": "A passing fix verifier ends review even when no round is recorded at its head",
+      "lose": "A change with no recorded round can end review on a fix check alone."
+    },
+    {
+      "gain": "No review ends without a round on record; PR 2940's tests stand.",
+      "id": "needs-a-round-at-same-head",
+      "key": "b",
+      "label": "It ends review only when a round is recorded at the same head or tree",
+      "lose": "More rounds on hand-ins such as the rebase lanes, and main changes: a decision-record edit and a new ruling."
+    },
+    {
+      "gain": "A short rule for the hand-ins that already carry a round on an earlier head.",
+      "id": "earlier-round-same-pr-counts",
+      "key": "c",
+      "label": "It ends review when a round is recorded on the same PR at an earlier head; a bare hold with no round anywhere on the PR stays open",
+      "lose": "A new in-between rule to write and test."
+    }
+  ],
+  "owner": "lane fix-check-reads-red-job-wakes (session_013NEJKz4FSdVUgu9fC5JMhw) 00:21 CST Nov 15; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane message 00:21 CST Nov 15",
+  "repo": "shivinate7/claude-settings",
+  "short": "Does a passing fix verifier end review with no round recorded?",
+  "status": "open",
+  "title": "PR 2940: does a passing fix verifier end review when no round is recorded at its head? (a) yes, as main reads today, (b) only with a round at the same head, (c) a round on the same PR counts",
+  "why": "Your 741 a covers a lint fix after a passed round, not a passing fix check with no round at all; main and the PR read it two ways."
+}

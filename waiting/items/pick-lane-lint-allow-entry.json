@@ -1,0 +1,61 @@
+{
+  "added": "2026-11-15T01:21:30-06:00",
+  "context": "Goal: a lane runs its own lane lint (merge --lane-lint) without waiting on runner 10, so a hand-in does not wait on one more command.\nProblem (rule): the step says the harness refused a lane's background lint run. Any fix changes what the classifier lets through, which is your call. The coordinator does not pick, because both fixes widen the classifier's allow rule.\nBased on (report): the lane could not reproduce the refusal in its cloud session; the background `verdict merge --lane-lint` call passed. The consultant's first report (23:45 CST Nov 14, n=1) gave no refusal words and named no lane. The coordinator also reports that many lanes posted lane-lint PASS comments tonight, so the refusal may be narrower than the step says. Triage read none of the lanes' sessions and no code.\nBased on (ruling): your 14:59 CST Nov 14 pick on page item 839 a added one allow entry for `merge --review-record` knowingly, and your 13:49 CST Nov 12 pick on item 618 b widened the same entry's text; each covers its own act, not this one (rule outcomes-grant-covers-named-act).\nDeparts from: settings.json autoMode.allow entry \"Merge Tool Read Checks\" on main names the read and print forms of merge --review-record and the lane-lint PASS comment; options a and b change what it allows, option c changes nothing.\nMeanwhile: runner 10 runs the lane lint for each rebase lane; the lane waits.",
+  "holds": "The lane on step lane-lint-background-refused waits on this answer; until then runner 10 runs the lane lint for each rebase lane.",
+  "home": "step lane-lint-background-refused; settings.json autoMode.allow, entry \"Merge Tool Read Checks\"",
+  "id": "pick-lane-lint-allow-entry",
+  "kind": "decision",
+  "n": 863,
+  "options": [
+    {
+      "gain": "The entry is widened only as far as a refusal that was seen, so it stays narrow.",
+      "how": "The coordinator asks the lane that hit the refusal for its exact words, then the entry is amended to match them.",
+      "id": "widen-after-exact-words",
+      "key": "a",
+      "label": "First get the exact refusal words from the lane that hit it, then amend settings.json autoMode.allow entry \"Merge Tool Read Checks\" to cover that run",
+      "lose": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo. The lane waits until the words arrive, and they may never arrive (no lane has been named).",
+      "widens": true
+    },
+    {
+      "gain": "Lanes stop waiting on runner 10 for the lint now.",
+      "how": "The entry is widened to let a lane run merge --lane-lint in the background, at once.",
+      "id": "widen-now",
+      "key": "b",
+      "label": "Amend settings.json autoMode.allow entry \"Merge Tool Read Checks\" now, without the refusal words",
+      "lose": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo. The entry may be widened for a refusal that does not exist, since the lane could not reproduce it.",
+      "widens": true
+    },
+    {
+      "gain": "No change to the classifier; runner 10 keeps running the lane lint, which already works.",
+      "how": "The step becomes a note that says the refusal was reported once and not reproduced; a lane that is refused again reopens it with the exact words.",
+      "id": "close-as-note",
+      "key": "c",
+      "label": "Close the step as a note: the refusal is unconfirmed, and nothing is widened",
+      "lose": "A lane that is refused later still waits on runner 10 for one more command until a new report arrives."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 01:20 CST Nov 15, from lane lane-lint-background-refused (session_013NEJL1wSE7ZhZPanwHfFio); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator message 01:20 CST Nov 15; step lane-lint-background-refused (consultant 23:45 CST Nov 14)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Widen the lint allow entry?",
+  "shown": [
+    {
+      "id": "widen-after-exact-words",
+      "key": "a",
+      "label": "First get the exact refusal words from the lane that hit it, then amend settings.json autoMode.allow entry \"Merge Tool Read Checks\" to cover that run"
+    },
+    {
+      "id": "widen-now",
+      "key": "b",
+      "label": "Amend settings.json autoMode.allow entry \"Merge Tool Read Checks\" now, without the refusal words"
+    },
+    {
+      "id": "close-as-note",
+      "key": "c",
+      "label": "Close the step as a note: the refusal is unconfirmed, and nothing is widened"
+    }
+  ],
+  "status": "open",
+  "title": "Lane lint refused in the background: (a) ask the lane for its exact words, then widen the \"Merge Tool Read Checks\" entry, (b) widen it now, (c) close as a note",
+  "why": "No session recommended an option: the coordinator did not pick because a and b both widen a shared tool's allow rule, and c is yours as the owner of the rule."
+}

@@ -1,0 +1,36 @@
+{
+  "added": "2026-11-13T15:27:32-06:00",
+  "closed": "2026-11-13T21:36:00Z",
+  "context": "Goal: land the roughly 400 open lane PRs fast and correct under per-lane merge.\nProblem (rule): a ruling of yours rests on a tool that is gone. Record: ruling backlog-drain-plan (owner 10:45 CST Nov 13, Cockpit item 691 a), the sentence \"Runner 10 batches keep rows\". Measured: main 59da758a3 has no batch build or drop (act 4, your force-merge at 15:15 CST). Outcome it protected: one CI run for many lanes. What protects it now: nothing. The rest of the plan stands.\nBased on (measured): the retrospective's reading of main 59da758a3 and its run times, 33 to 52 minutes per run, about 400 PR runs plus 400 main push runs for one by one. Based on (read): the rulings backlog-drain-plan and drain-first-hold (10:50 CST, item 693 a, big batches) are both open on the record.\nAlso recorded: never cancelling main push runs stays (skill ci-hygiene step 4; R42 design P3, one verdict per commit for the blame walk).\nDeparts from: your ruling backlog-drain-plan \u2014 runner 10 no longer batches the lanes; a lane per step group combines that group's reviewed commits into one PR that merges alone on its own green run. Main's per-lane rule does not change: the PRs change shape to fit the tool.\nMeanwhile: lanes merge one by one as today.",
+  "home": "step merge-flow-after-anthropic; step backlog-drain; rulings backlog-drain-plan and drain-first-hold",
+  "id": "pick-drain-under-per-lane",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T21:33:00Z",
+    "choice": "a",
+    "note": "yup A is good (chat with the retrospective)"
+  },
+  "n": 767,
+  "options": [
+    {
+      "gain": "One CI run for many lanes, as the plan intended; no rule changes.",
+      "key": "a",
+      "label": "A lane per step group combines that group's reviewed commits into one PR, which merges alone on its own green run (Recommended)",
+      "lose": "A red combined PR must be split."
+    },
+    {
+      "gain": "No new lane work and no combined PRs.",
+      "key": "b",
+      "label": "Runner 10 merges lanes one by one in ledger order under the standing merge grant; the rest of the plan stands",
+      "lose": "One PR run plus one main run per lane, about 400 each at 33 to 52 minutes."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "retrospective 15:26 CST Nov 13",
+  "reply": "Filed as ruling own-767-a-combined-pr (your 15:33 CST words to the retrospective, \"yup A is good\"): a PR merges alone, and may combine several reviewed lanes when that saves CI. The drain is one combined PR per step group, each merging alone on its own green run. backlog-drain-plan's \"Runner 10 batches\" is rewritten to that. Only the wording of the CLAUDE.md rule git-integration-branch-merge changes (step claude-md-merge-alone-or-combined); the tool does not.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Drain the backlog: one-time groups or one by one?",
+  "status": "closed",
+  "title": "Your drain plan says runner 10 batches; main has no batch builder. Group the backlog once, or merge one by one?",
+  "why": "The sentence of your drain ruling (runner 10 batches) has nothing to run on now; one by one costs about 400 PR runs and 400 main runs."
+}

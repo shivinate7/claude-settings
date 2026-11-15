@@ -4,42 +4,66 @@
   "home": "ruling drops-lines-body-411a; step silent-undo-cli-ignores-pr-body",
   "id": "pick-411a-body-event-file",
   "kind": "decision",
+  "lastAnswer": "a: keep 411 a, body read from the event file in CI",
   "n": 738,
   "options": [
     {
-      "gain": "Works for a body of any size, and CI never reads a stale body.",
-      "how": "CI reads the body from its event file; locally the check takes --pr-body. Every reader still takes the body, as you picked.",
+      "gain": "A drop explained in the PR body clears CI with no commit rewrite; no 128 KB env limit.",
       "id": "event-file",
       "key": "a",
-      "label": "Read the PR body from the event file in CI (triage's pick, stands)",
-      "lose": "CI does not use the env PR_BODY your option named."
+      "label": "Keep 411 a, body read from the event file in CI (recommended)",
+      "lose": "A weak reason in an editable body can pass, and the body can change after review with no new commit."
     },
     {
-      "gain": "Follows the option's words literally.",
-      "how": "CI sets PR_BODY; the lane rewrites its test cases.",
-      "id": "env-literal",
+      "gain": "Exactly your 411 a wording.",
+      "id": "env-body",
       "key": "b",
-      "label": "Pass the body as the env PR_BODY in CI, exactly as your option said",
+      "label": "Keep 411 a, body passed as env PR_BODY, as your option said",
       "lose": "An env string past 128 KB does not run on Linux, so a long body breaks the check."
+    },
+    {
+      "gain": "One place, fixed at review time.",
+      "id": "trailer-only",
+      "key": "c",
+      "label": "Reverse 411: trailer only; the merge tool stops reading the body",
+      "lose": "A lane that explains in the PR needs a commit rewrite; reverses your ruling."
+    },
+    {
+      "gain": "No CI change.",
+      "id": "ci-strict",
+      "key": "d",
+      "label": "Merge tool reads the body, CI stays strict",
+      "lose": "CI stays red on a fine lane, as on PR 1785."
     }
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "rebuild lane #2826/#2892, 12:25 CST Nov 13",
+  "reply": "Filed as ruling own-738-a-body-event-file. It was saved at 19:42 CST and filed 93 minutes later; sorry.",
   "repo": "shivinate7/claude-settings",
   "short": "411 a: PR body from event file, not env",
   "shown": [
     {
       "id": "event-file",
       "key": "a",
-      "label": "Read the PR body from the event file in CI (triage's pick, stands)"
+      "label": "Keep 411 a, body read from the event file in CI (recommended)"
     },
     {
-      "id": "env-literal",
+      "id": "env-body",
       "key": "b",
-      "label": "Pass the body as the env PR_BODY in CI, exactly as your option said"
+      "label": "Keep 411 a, body passed as env PR_BODY, as your option said"
+    },
+    {
+      "id": "trailer-only",
+      "key": "c",
+      "label": "Reverse 411: trailer only; the merge tool stops reading the body"
+    },
+    {
+      "id": "ci-strict",
+      "key": "d",
+      "label": "Merge tool reads the body, CI stays strict"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "For your 411 a (CI reads the PR body), read it from the event file instead of the env PR_BODY?",
   "why": "Triage took this pick (undoable); it stands unless you choose b."
 }

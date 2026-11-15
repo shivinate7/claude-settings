@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-13T16:58:09-06:00",
+  "closed": "2026-11-13T18:29:53-06:00",
+  "context": "Goal: no lane reads an instruction it cannot follow.\nProblem (rule): when a lane's act is refused, the refusal text still prints \"type override\". A lane cannot type it, so the line is dead there. The lane wants to reword that shared line in hooks/override.py (the offer text), which edits a hook every session uses, so it waits for your word.\nBased on (read): lane lane-cards, via the coordinator 16:57 CST Nov 13; triage has not read hooks/override.py. Ruling R13 point 3 says an act that needs your typed word becomes a page item.\nDeparts from: main \u2014 the refusal text says \"type override\" in every session; this words it for a lane as \"routes to its parent\".\nMeanwhile: the lane keeps the old line.",
+  "home": "hooks/override.py offer; ruling r13 point 3; lane lane-cards",
+  "id": "pick-reword-override-offer-lane",
+  "kind": "decision",
+  "lastAnswer": "778 a: reword the line for a lane.",
+  "n": 778,
+  "options": [
+    {
+      "gain": "No dead instruction in a lane.",
+      "key": "a",
+      "label": "Reword the line for a lane (Recommended)",
+      "lose": "A shared-hook edit."
+    },
+    {
+      "gain": "No hook edit.",
+      "key": "b",
+      "label": "Leave it",
+      "lose": "A lane keeps reading \"type override\", which it cannot do."
+    }
+  ],
+  "owner": "lane lane-cards, via the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 16:57 CST Nov 13",
+  "reply": "Filed as ruling own-778-a-reword-offer-for-lane and sent to the lane.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Reword the override line a lane sees?",
+  "status": "closed",
+  "title": "Reword the refusal's \"type override\" line so a lane is not told to do what it cannot?",
+  "why": "A shared hook line needs your word before a lane edits it."
+}

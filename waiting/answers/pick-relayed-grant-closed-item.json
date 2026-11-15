@@ -1,0 +1,8 @@
+{
+  "at": "2026-11-14T00:24:29.832Z",
+  "choice": "a",
+  "item": "pick-relayed-grant-closed-item",
+  "label": "A: settings.json autoMode.allow: edit the entry holding the closed-item clause (\"Relayed Grant\", line 56) and its pinned test hooks/test_auto_mode_allow.py to match your 748 b",
+  "n": 753,
+  "note": ""
+}

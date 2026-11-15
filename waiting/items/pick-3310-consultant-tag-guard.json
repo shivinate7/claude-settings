@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-14T16:52:00-06:00",
+  "closed": "2026-11-15T00:31:45Z",
+  "context": "Goal: stop the consultant tag from tripping the lane pick guard (it misfired on the consultant 3 times today: 11:05, 14:56 and 16:26 CST, each on an owner question asked in chat), without letting a lane pick through by mistake.\nProblem (rule): member #3310 of combined PR #3429 changes a guard verdict. lint/report_guard.py:1186 lets a session tagged cs-build:consultant, with a parent id and no lane tag, pass the lane pick guard, which main refuses. The step source calls it owner-ruled. Your words do not name the guard, and no ruling file names it. #3310's own PR had round 2 PASS (head a384eea0e); no net-value read was owed there.\nBased on (read): relayed, not read by triage: the consultant's 16:52 CST report; the source line of step consultant-tag-owner-facing; the #3429 round 1 record 6885432996 and its reviewer's finding (via lane g1, 16:49 CST).\nBased on (ruling): none found. Triage searched roadmap/rulings: no filed ruling names this verdict change. The only owner words stamped 18:36 CST Nov 13 are in r9 and r20 and are about other things. Step consultant-tag-owner-facing quotes no owner words. Your words are filed only in the consultant's inbox fb-1836-5: \"relabel / tag yourself correctly as consultant\" (consultant's 16:52 CST report, relayed). You tag the session; you say nothing about the lane pick guard.\nDeparts from: main \u2014 the lane pick guard refuses a consultant-tagged session with a parent id; #3310 lets it pass.\nMeanwhile: #3429 goes on through lane lint. The coordinator does not hand it to runner 10 for marking until you answer. If you pick b or c, lane g1 rebuilds without #3310 before any mark.\nThe consultant put the same question to you in chat at 16:51 CST and relays any chat answer.\nOption b is starred at the coordinator's recommendation (it does not widen a guard).",
+  "home": "step consultant-tag-owner-facing; member #3310; combined PR #3429",
+  "id": "pick-3310-consultant-tag-guard",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T00:31:00.382Z",
+    "choice": "a",
+    "note": "i asked for the consultant role"
+  },
+  "n": 845,
+  "options": [
+    {
+      "gain": "No more false alarms on the consultant, and no rebuild.",
+      "id": "keep-3310-in",
+      "key": "a",
+      "label": "Keep #3310 in #3429 as built",
+      "lose": "The guard loosens for a role you have not named for it. A consultant could pick a lane by mistake and the guard would not stop it. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "The verdict change is read for harm before it lands, and the rest of the combine merges.",
+      "id": "take-3310-out-round-3",
+      "key": "b",
+      "label": "Take #3310 out of #3429 and give it its own round 3 with the net-value read, so it lands alone",
+      "lose": "One more rebuild of the combine (a new PR), and a later fix for the misfires."
+    },
+    {
+      "gain": "The guard stays as main has it.",
+      "id": "drop-3310",
+      "key": "c",
+      "label": "Drop #3310",
+      "lose": "The consultant keeps tripping the guard and asks you its questions another way."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 16:51 CST Nov 14, from lane g1's #3429 round 1; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "recommended": "b",
+  "ref": "coordinator message 16:51 CST Nov 14; #3429 round 1 record 6885432996",
+  "repo": "shivinate7/claude-settings",
+  "short": "Keep #3310 (the consultant passes the lane pick guard) in #3429, take it out for its own round 3, or drop it?",
+  "status": "closed",
+  "title": "Member #3310 of combined PR #3429 lets a consultant-tagged session pass the lane pick guard, which main refuses, and no ruling names that. Keep it in as built (a), take it out for its own round 3 and merge it alone (b), or drop it (c)?",
+  "why": "#3310 changes a guard verdict so the consultant stops tripping the lane pick guard. Your words say to tag the consultant correctly, not to loosen that guard, and no ruling covers the loosening, so it needs your word."
+}

@@ -1,0 +1,74 @@
+{
+  "added": "2026-11-15T01:59:29-06:00",
+  "context": "This item asks you to change a recorded ruling.\nGoal: a session can merge its own small docs or rule-text edit without waiting for a batch runner, and nothing that moves a safety verdict gets through that way.\nProblem (rule): PR 3474 builds a guard role named standing (hooks/guard_merge.py, merge/merge.py, merge/cloud_allow.json). It lets the coordinator and triage merge their own docs-only or rule-text PRs that touch no guard path. Your later words (00:50 and 00:53 CST Nov 15, ruling own-tiny-fixes-b) already say a standing session may do this. Two points are still open and only you can set them: how big a small rule-text edit may be (the gate has no size bound), and which sessions count (the lane built coordinator and triage only; the ruling says any standing session).\nBased on (ruling): decision standing-merge-grant, your 2026-11-01 21:34 CST words: a batch runner runs every merge under the coordinator's grant, and the coordinator never merges. Ruling own-tiny-fixes-b (your 00:50 CST \"so B\" and 00:53 CST words, read by triage on roadmap) already supersedes that for docs-only and small rule-text edits; this item does not reopen that. It leaves two points.\nBased on (read): lane hand-in 01:58 CST, relayed by the coordinator 01:59 CST: PR 3474 is open, draft, clean, head 02cc0586deab (triage read it on GitHub at 01:59 CST: 7 files, 333 additions, 43 deletions); round 1 sonnet PASS with no safety hole, a sonnet fix check passed. Built: coordinator and triage only. The consultant and the arbiter are refused.\nBased on (read): the PR also adds the exact rule merge --role standing to the shared allow list (cloud_allow.json). Triage marks the merging options as widening because the page marks every allow-list entry. Your words at 00:59 CST (relayed by the consultant) already call the self-merge your own act, not a per-repo exception, so the mark is for the record.\nDeparts from: decision standing-merge-grant (the coordinator never merges; a batch runner runs every merge) and main's guard (only cs-build:batch-runner passes merge --role) \u2014 the coordinator and triage merge their own off-guard docs or rule edits; PR 3474 would set the size and the session list that your 00:50 CST ruling left open.\nWho recommends what: the coordinator recommends adding a size bound first (option b). No option is starred, because the page never stars an option that adds an allow-list entry.\nMeanwhile: PR 3474 queues behind PR 3381 and the docs combines at runner 10, and nothing merges through the new role until you answer. Leftover lines that still say the coordinator never merges (session-tiers about lines 86 and 97, hooks/session_start.sh, settings.json, records auto-mode-owner-acts and standing-merge-grant) get their own lane after your answer.",
+  "holds": "The merge of PR 3474, which lets a standing session merge its own small edit, waits on this answer.",
+  "home": "step merge-role-proof-follows-b; PR 3474; decisions standing-merge-grant and session-tiers; ruling own-tiny-fixes-b",
+  "kind": "decision",
+  "n": 867,
+  "options": [
+    {
+      "gain": "Small rule edits stop waiting on a runner today; no further lane.",
+      "how": "The lane's design is merged unchanged. The coordinator and triage merge their own docs-only or rule-text PRs on green. Consultant and arbiter stay refused.",
+      "id": "merge-as-built",
+      "key": "a",
+      "label": "Merge PR 3474 as built: coordinator and triage only, no size bound",
+      "lose": "Nothing limits how large a rule-text edit a standing session merges; the coordinator merges, which reverses the recorded 2026-11-01 ruling for these edits.",
+      "widens": true
+    },
+    {
+      "gain": "A cap on what a standing session merges alone; a large edit still goes to a runner.",
+      "how": "A lane follow-up adds a limit on lines and files for a standing merge (you name the limit, or the lane proposes one for you to confirm), then PR 3474 merges. Coordinator and triage only.",
+      "id": "add-size-bound",
+      "key": "b",
+      "label": "Add a size bound first, then merge (recommended by the coordinator)",
+      "lose": "One more lane, and PR 3474 waits for it.",
+      "widens": true
+    },
+    {
+      "gain": "Matches the ruling's own wording: no session is left out.",
+      "how": "As b, and the guard role also passes the consultant and the arbiter, as your 00:50 ruling's words any standing session read.",
+      "id": "bound-and-any-session",
+      "key": "c",
+      "label": "Add the size bound and let any standing session merge, consultant and arbiter included",
+      "lose": "More sessions can merge; the arbiter and consultant roles were refused on purpose by the lane.",
+      "widens": true
+    },
+    {
+      "gain": "The 2026-11-01 ruling stands unchanged; no allow-list entry.",
+      "how": "PR 3474 is parked or closed. Runner 10 keeps merging these PRs, and ruling own-tiny-fixes-b gets no guard to match it.",
+      "id": "runner-only",
+      "key": "d",
+      "label": "Do not merge PR 3474: keep runner-only merges",
+      "lose": "Your 00:50 ruling cannot work as written: a standing session still cannot merge its own edit; the lane's work is parked."
+    }
+  ],
+  "owner": "merge-role-proof-follows-b lane (session_013NEJL2NPAD2v6x5CWD4mUb) via coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 01:59 CST Nov 15; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "decision standing-merge-grant (the coordinator never merges); ruling own-tiny-fixes-b (your 00:50 and 00:53 CST words); PR 3474 (lane merge-role-proof-follows-b); decision uniform-over-variants (one allow-list form); page item 861 (closed on b)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Self-merge: size, sessions",
+  "shown": [
+    {
+      "id": "merge-as-built",
+      "key": "a",
+      "label": "Merge PR 3474 as built: coordinator and triage only, no size bound"
+    },
+    {
+      "id": "add-size-bound",
+      "key": "b",
+      "label": "Add a size bound first, then merge (recommended by the coordinator)"
+    },
+    {
+      "id": "bound-and-any-session",
+      "key": "c",
+      "label": "Add the size bound and let any standing session merge, consultant and arbiter included"
+    },
+    {
+      "id": "runner-only",
+      "key": "d",
+      "label": "Do not merge PR 3474: keep runner-only merges"
+    }
+  ],
+  "status": "open",
+  "title": "PR 3474: how small is a small edit, and which sessions may merge their own? (asks to change a recorded ruling)",
+  "why": "Your 00:50 ruling already lets a standing session merge its own docs-only or small rule-text edit. The lane built it for the coordinator and triage with no size bound; the coordinator recommends a bound."
+}

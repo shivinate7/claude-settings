@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-14T01:27:00-06:00",
+  "closed": "2026-11-14T21:07:00Z",
+  "context": "Goal: a revert of a broken commit on main lets merges resume without a full test run of the old, broken tree.\nProblem (rule): your 745 b (13:20 CST Nov 13) says merges resume when the revert merges; your 812 a (23:38 CST Nov 13) says the red-main check judges only runs that ran the tests. For a revert whose push run is skipped, the two disagree, and the live check follows 812 a. It needs your word which one governs here.\nBased on (ruling): own-745-b-resume-at-revert and own-812-a-judge-suite-runs, both read by triage.\nBased on (measured, lane's own probe, relayed): a reviewer probed runs [skipped, failed, green]; the check printed \"latest completed run is red\". Unchecked by triage. The 812 a number about skipped runs (2 of 302) is flagged unmeasured on the ruling.\nDeparts from: main \u2014 the check reads the newest run that ran the tests, so a skipped revert run leaves main red; b makes the revert's merge lift red even when its run was skipped; c adds a CI write by the merge tool.\nMeanwhile: nothing waits. `--base-red-ok` lifts it today; the lane files the wrong remedy text as a debt in PR #3384 whichever you pick.\nGoes against: b is the only option that loosens a check. No repo asked for it. It follows your own 745 b.",
+  "home": "step merge-flow-after-anthropic; rulings own-745-b-resume-at-revert and own-812-a-judge-suite-runs; PR #3384",
+  "id": "pick-revert-skipped-run-red-main",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-14T21:04:29Z",
+    "choice": "b",
+    "note": ""
+  },
+  "n": 823,
+  "options": [
+    {
+      "gain": "No rule change; the safe full run proves the revert.",
+      "id": "keep-check-fix-text",
+      "key": "a",
+      "label": "Keep the live check; fix the refusal text to name the dispatch (a debt, in PR #3384) (recommended by the lane)",
+      "lose": "One extra dispatch after each revert, and 745 b stays a target, not live."
+    },
+    {
+      "gain": "Merges resume at once, as 745 b says.",
+      "id": "revert-merge-lifts-red",
+      "key": "b",
+      "label": "A revert merged with its tree already proven lifts red main (745 b made live)",
+      "lose": "A revert that does not fix the failure reads clear until the next full run.",
+      "widens": true
+    },
+    {
+      "gain": "No manual step; full proof.",
+      "id": "tool-dispatches-full-run",
+      "key": "c",
+      "label": "Keep main red until a full run, and let the merge tool dispatch it after a revert",
+      "lose": "A new CI write by the merge tool (a rule change and a cost)."
+    }
+  ],
+  "owner": "lane merge-flow-after-anthropic (session_013NEJL2oxYMVKoXseeKacVG), 01:20 CST Nov 14, coordinator copied; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane merge-flow-after-anthropic 01:20 CST Nov 14",
+  "repo": "shivinate7/claude-settings",
+  "short": "Red main after a revert: dispatch a full run, or let the revert's merge lift red?",
+  "status": "closed",
+  "title": "After a revert merges, its push run is usually skipped (the tree is already proven), so the red-main check keeps main red until someone dispatches a full run or merges with --base-red-ok. Your two rulings meet here: 745 b says merges resume when the revert merges, 812 a says the check judges only runs that ran the tests. Keep the live check and fix the refusal text (a), let the revert's merge lift red (b), or have the merge tool dispatch the full run itself (c)?",
+  "why": "The lane says ruling 745 b is a target, not live: after a revert merges, the check still reads the newest run that ran the tests, which is the old red one. Ruling 812 a (23:38 CST Nov 13) dropped the cover signal for a skipped run, so a skipped revert run no longer clears main. Today only `--base-red-ok` or a dispatched full run (`gh workflow run checks.yml --ref main`) lifts it. The refusal text also says `gh run rerun <id> --failed`, which re-tests the old broken commit."
+}

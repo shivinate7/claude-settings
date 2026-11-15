@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-14T02:16:00-06:00",
+  "closed": "2026-11-14T21:07:00Z",
+  "context": "Goal: each degen PR has exactly one merger.\nProblem (rule): your 22:13 CST Nov 13 word (ruling own-degen-home-switch-now) has runner 11 merge degen's lanes per lane. Runner 11's REST read at 02:13 CST, and the coordinator's own read, show six degen PRs merged on main by actor shivinate7: #700 at 07:42:29 UTC, #693 at 07:35, #682 at 07:43:08, #676 at 07:43:34, #688 at 07:43:40, #684 at 07:43:52. Each carries the reason line \"--base-red-ok: checks on main 034cab4 green; red runs are old schedule runs on c0df4f22d\"; the PR bodies hold no session id. Degen main is now 26ddd5098; runner 11's PRs sit on 034cab4c. None of the coordinator's sessions did it. It could be Degen's own coordinator or runner (the Degen feedback came from them), or you by hand; nobody can tell.\nBased on (measured, relayed; triage did not read the PRs, which are outside this session's GitHub scope): runner 11's REST read and the coordinator's own read, the same list and times. Based on (ruling): own-degen-home-switch-now (runner 11 merges degen per lane).\nDeparts from: main \u2014 runner 11 is the one merger for degen; a keeps that and tells the other party to stop; b hands merging to Degen's own runner and runner 11 stops merging in degen; c changes nothing if it was you.\nMeanwhile: runner 11 merges only on fresh reads (the coordinator told it); lanes keep working. Triage adds a sighting on the step for a --base-red-ok reason that blames old schedule runs (see item 823).",
+  "home": "rulings own-degen-home-switch-now, own-820-c-five-repos; batch runner 11; degen PRs #700 #693 #682 #676 #688 #684",
+  "id": "pick-who-merges-degen",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-14T21:03:43Z",
+    "choice": "c",
+    "note": "it was me, nothing on degens merging rn but ideally u finish up on degen fast and hand it off to me (but get it fully done)"
+  },
+  "n": 827,
+  "options": [
+    {
+      "gain": "One merger per PR, as your ruling already says.",
+      "id": "runner-11-holds",
+      "key": "a",
+      "label": "Runner 11 holds merging for degen; whoever else merged stops, and you tell Degen's coordinator (recommended: it matches your 22:13 CST word)",
+      "lose": "Degen's own runner stops merging; one message from you to Degen's side."
+    },
+    {
+      "gain": "Degen's own side keeps its flow.",
+      "id": "degen-runner-holds",
+      "key": "b",
+      "label": "Degen's own runner holds merging for degen; runner 11 stops merging there",
+      "lose": "Your 22:13 CST ruling changes for degen; runner 11's open degen PRs wait for the other runner."
+    },
+    {
+      "gain": "No change; the question is answered.",
+      "id": "it-was-me",
+      "key": "c",
+      "label": "It was you, or a session you started: say which, and nothing changes",
+      "lose": "Two mergers can still overlap later."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), 02:14 CST Nov 14, from batch runner 11's REST read; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 02:14 CST Nov 14",
+  "repo": "shivinate7/claude-settings",
+  "short": "Who holds merging for degen, so no PR has two mergers?",
+  "status": "closed",
+  "title": "Six degen PRs (#700, #693, #682, #676, #688, #684) merged between 07:35 and 07:43 UTC from an actor nobody on this build owns, beside batch runner 11. Who holds merging for degen: runner 11 (a), Degen's own runner (b), or was it you (c)?",
+  "why": "Every merge shows the actor shivinate7, because all sessions merge under your account, so the log cannot say who. The coordinator and runner 11 both read the merges; neither started them. Two mergers on one repo can lift the same red main on different readings."
+}

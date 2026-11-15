@@ -4,6 +4,7 @@
   "home": "q_max decisions D-695 and D-537",
   "id": "pick-qmax-skip-push-suite",
   "kind": "decision",
+  "lastAnswer": "a: skip it",
   "n": 722,
   "options": [
     {
@@ -25,6 +26,7 @@
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "coordinator 11:48 CST Nov 13, runner 11 child-repo CI audit",
+  "reply": "Filed as ruling qmax-skips-push-suite.",
   "repo": "shivinate7/claude-settings",
   "short": "q_max: skip the push-to-main suite",
   "shown": [
@@ -39,7 +41,7 @@
       "label": "Keep full CI on main"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "In q_max, skip the full suite on push to main when the batch PR run already proved the same tree?",
   "why": "Overturns q_max records D-695 and D-537, which need your word."
 }

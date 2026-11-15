@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-13T22:12:00-06:00",
+  "closed": "2026-11-14T04:15:00Z",
+  "context": "Goal: degen PRs #703 (six Playwright shards) and #704 merge now, since you want to work in degen and home.\nProblem (rule): degen has no way to merge them today. Its lane PRs stay draft, so their checks skip. Decision draft-until-reviewed and decision all-repos-switch-together keep per-lane merge off until every repo switches, and the batch tool they need (--batch-build) is not on the stable tool (9f8ea0e3c). Runner 11 will not run an old tool by hand. Triage has not read those two decisions; the coordinator cites them.\nBased on (read): runner 11 reads of #703 (run 43478243400) and #704 (run 43498238812), both skipped because draft, relayed by the coordinator 22:09 CST; unchecked by triage.\nBased on (ruling): your 16:09 CST Nov 13 words (ruling own-act6-draft-prs-when-green): child-repo switch waits for the drain to end.\nDeparts from: main \u2014 child repos get no batch build today; a adds a pin branch of the removed tool for degen only, b changes degen alone to per-lane merge, c changes nothing.\nMeanwhile: the coordinator keeps working and holds only degen #703 and #704.",
+  "home": "step merge-flow-after-anthropic; ruling own-act6-draft-prs-when-green; coordinator 22:09 CST Nov 13",
+  "id": "pick-degen-703-704-merge-path",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-14T04:13:00Z",
+    "note": "Owner 22:13 CST: \"ya switch degen now (and home repo too)\". Option b, widened to home. Relayed by the consultant."
+  },
+  "n": 801,
+  "options": [
+    {
+      "gain": "No rule changes; batches work for degen now.",
+      "how": "One branch push on claude-settings origin at f1b8031f1, the last tool with --batch-build, by runner 10 or a session on your computer; the coordinator does not push. Runner 11 sets CLAUDE_SETTINGS_REF to it for degen only. The branch is deleted at the cutover.",
+      "id": "pin-branch",
+      "key": "a",
+      "label": "Push a pin branch of the last tool with --batch-build; degen alone uses it (recommended by the coordinator)",
+      "lose": "A removed tool stays alive for degen until the cutover."
+    },
+    {
+      "gain": "Fastest, and no old tool.",
+      "how": "Runner 11 marks #703 then #704 ready, one run each, and merges each.",
+      "id": "degen-per-lane",
+      "key": "b",
+      "label": "Degen alone switches to per-lane merge now",
+      "lose": "Goes against your ruling that all repos switch together, and decision all-repos-switch-together."
+    },
+    {
+      "gain": "No exception at all.",
+      "id": "wait",
+      "key": "c",
+      "label": "Wait for the cutover",
+      "lose": "Degen work waits for the drain."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), asked 22:09 CST; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 22:09 CST Nov 13",
+  "reply": "Closed 22:15 CST Nov 13: you said \"ya switch degen now (and home repo too)\" (relayed by the consultant; triage did not see it). Option b, widened to home: degen and home switch to per-lane merge now, ahead of the drain. Filed as ruling own-degen-home-switch-now, an exception to all-repos-switch-together for these two repos. The pin branch is not needed.",
+  "repo": "shivinate7/claude-settings",
+  "short": "How degen #703 and #704 merge",
+  "status": "closed",
+  "title": "How should degen PRs #703 and #704 merge: pin branch, degen-only per-lane merge, or wait for the cutover?",
+  "why": "You want to work in degen and home now; degen has no merge path that follows your all-repos-together ruling."
+}

@@ -1,0 +1,40 @@
+{
+  "added": "2026-11-15T00:43:00-06:00",
+  "closed": "2026-11-15T17:39:30Z",
+  "context": "Goal: the Recovered guard accepts the carry-line form that the report rules teach.\nProblem (rule): the guard now counts `- OTHER: Recovered: x (git)` (a bullet, then the Done tag). It still refuses the label-first form `**Done** OTHER: Recovered: x (git)`. Counting that form too would add a second accepted form to a shared tool, which needs your word.\nBased on (read): the round 1 reviewer of PR 3456 found the label-first form refused and the bullet form passing (lint/report_guard.py, CARRY_START). Triage read the lane's message, not the code.\nBased on (ruling): your 23:50 CST Nov 14 \"we need to fix the guard\" (step recovered-guard-remedy; the meaning is the consultant's reading). Your earlier cull ruling r5 covers wrong refusals of the Recovered line (15:18 CST Nov 10: \"A is fine ...\"); it does not say whether a second form is accepted.\nDeparts from: main refuses `- OTHER: Recovered: ...`; PR 3456 accepts it; the label-first form stays refused.\nMeanwhile: the lane keeps PR 3456 as it is (a draft, handed in to its coordinator). Nothing else waits.",
+  "home": "step recovered-guard-label-first (lint/report_guard.py)",
+  "id": "pick-recovered-label-first-form",
+  "kind": "decision",
+  "lane": "recovered-guard-label-first",
+  "lastAnswer": {
+    "at": "2026-11-15T17:34:32.268Z",
+    "choice": "b",
+    "note": ""
+  },
+  "n": 860,
+  "options": [
+    {
+      "gain": "No second form; the guard stays as PR 3456 has it.",
+      "id": "keep-bullet-form-only",
+      "key": "a",
+      "label": "Keep the guard as PR 3456 has it: sessions use the bullet form",
+      "lose": "A session that writes the label-first form is refused once.",
+      "recommended": true
+    },
+    {
+      "gain": "One tag rule: both forms count.",
+      "id": "accept-label-first-too",
+      "key": "b",
+      "label": "Accept the label-first form too",
+      "lose": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    }
+  ],
+  "owner": "lane recovered-guard-remedy (session_013NEJKzx6PD7bcXBgrwfy8h) 00:42 CST Nov 15; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane message 00:42 CST Nov 15",
+  "repo": "shivinate7/claude-settings",
+  "short": "Does the Recovered guard accept the label-first carry form too?",
+  "status": "closed",
+  "title": "PR 3456: does the Recovered guard accept the label-first carry form too? (a) keep the bullet form only, (b) accept label-first too",
+  "why": "Accepting a second form changes a shared tool, so only you can say yes; the lane recommends keeping the bullet form only."
+}

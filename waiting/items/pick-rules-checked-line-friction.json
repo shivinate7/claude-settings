@@ -1,0 +1,51 @@
+{
+  "added": "2026-11-15T03:19:30-06:00",
+  "closed": "2026-11-15T17:39:05Z",
+  "context": "This item asks how often a PR must carry a Rules checked line. It does not block the PR.\nGoal: a changed decision record is never left with a stale rule sentence, without a required line on edits that never needed one.\nProblem (rule): PR 3492 makes a changed decision record need either each citing rule sentence changed or one line in the PR body, \"Rules checked: <record> \u2014 no change\". The lane measured that 90 of 135 main merges in the last 20 days that touched a record left CLAUDE.md unchanged. That is an upper bound by commit. A required line would fire on most record edits, so the cost lands on you and on every lane; whether to accept it is your call.\nBased on (read): PR 3492 body and lane hand-in, relayed by the coordinator at 03:19 CST Nov 15; triage read no history.\nBased on (measured): 90 of 135 record-touching main merges in 20 days left CLAUDE.md unchanged (lane's count, upper bound by commit; triage did not re-run it).\nDeparts from: main \u2014 adds a required PR-body line, or a rule-sentence change, on a PR that changes a decision record; today nothing is required.\nWho recommends what: nobody has recommended an option; no star.\nMeanwhile: PR 3492 is not held on this answer.",
+  "home": "PR 3492 (merged d274f5ec); step aligned-check-agents-skills carries the note (follow-up lane session_013NEJL2QjJLfn1yAkPQmzr9)",
+  "kind": "decision",
+  "lane": "aligned-check-agents-skills",
+  "lastAnswer": {
+    "at": "2026-11-15T17:33:40.618Z",
+    "choice": "a",
+    "note": "and remember it shudnt check the rules only to defer to them its checking them to ensure the rot is cleaned deeply"
+  },
+  "n": 873,
+  "options": [
+    {
+      "gain": "Every record edit shows its rule sentences were checked, so no sentence stays stale unseen.",
+      "how": "PR 3492 merges as built.",
+      "id": "keep-required-line",
+      "key": "a",
+      "label": "Keep the required Rules checked line as built",
+      "lose": "A line to write on about two of three record edits, from lanes and from you."
+    },
+    {
+      "gain": "Fewer PRs need the line; the check fires only where a rule sentence plausibly moved.",
+      "how": "The lane proposes a narrower trigger and a test, and the PR waits for that change.",
+      "id": "narrow-the-trigger",
+      "key": "b",
+      "label": "Ask the lane to narrow when the line is required, then merge",
+      "lose": "Some stale rule sentences could pass, and the lane must rebuild and re-test the trigger."
+    }
+  ],
+  "owner": "lane rules-decisions-aligned (session_013NEJKzbYsMZZPNx5LnoNMN), via coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 03:19 CST Nov 15; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator message 03:19 CST Nov 15; PR 3492",
+  "repo": "shivinate7/claude-settings",
+  "short": "Required Rules checked line: keep or narrow?",
+  "shown": [
+    {
+      "id": "keep-required-line",
+      "key": "a",
+      "label": "Keep the required Rules checked line as built"
+    },
+    {
+      "id": "narrow-the-trigger",
+      "key": "b",
+      "label": "Ask the lane to narrow when the line is required, then merge"
+    }
+  ],
+  "status": "closed",
+  "title": "PR 3492: a required Rules checked line would fire on most record edits. Keep it, or narrow it?",
+  "why": "The lane counted 90 of 135 record-touching main merges in 20 days that left CLAUDE.md unchanged (upper bound), so the line fires often. Accepting that cost is your call."
+}

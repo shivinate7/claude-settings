@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-13T19:10:00-06:00",
+  "closed": "2026-11-13T18:51:29-06:00",
+  "context": "Goal: the rule file says what you ruled: a red main is held only until the revert merges.\nProblem (rule): PR #3304 changes CLAUDE.md line 54 (rule git-red-main-reverts) to say a red main is held \"until the revert merges\", as you picked on 772 a. A rule-file edit needs your named yes before it merges. Lane lint passed and the round 1 record is a Sonnet PASS (record 6868600207), per the coordinator; unchecked by triage. The coordinator names only CLAUDE.md line 54; whether the ci-hygiene SKILL.md line 61 edit from 772 a is in the same PR is unchecked.\nBased on (ruling): own-772-a-revert-merges-lines and own-745-b-resume-at-revert.\nDeparts from: main \u2014 CLAUDE.md line 54 today says the hold lasts until the revert's run on main is green; the PR changes it to when the revert merges.\nMeanwhile: the PR stays out of the combined PR until your answer.",
+  "home": "PR #3304; ruling own-772-a-revert-merges-lines; ruling own-745-b-resume-at-revert; step red-main-owner-two-picks",
+  "id": "act-merge-3304-rule-line",
+  "kind": "decision",
+  "n": 787,
+  "options": [
+    {
+      "gain": "The rule file matches your 745 b and 772 a rulings.",
+      "id": "yes-merge",
+      "key": "a",
+      "label": "Yes: merge PR #3304 (recommended)",
+      "lose": "One rule-file edit lands on main."
+    },
+    {
+      "gain": "No rule-file change now.",
+      "id": "not-yet",
+      "key": "b",
+      "label": "Not yet",
+      "lose": "CLAUDE.md keeps the old wording, which contradicts your ruling."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), lane red-main-owner-two-picks (session_013NEJL3KFBPuQT45U4xo8mE); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 18:43 CST Nov 13",
+  "reply": "Withdrawn, not for you to answer. Your decision claude-md-change-is-flagged (2026-10-16) says a green PR that changes a rule file merges under the standing grant, with a report only. PR #3304 (head 6d13320da) merges on green and the report names CLAUDE.md in bold. I should have checked that before posting.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Merge PR 3304: red main held until the revert merges",
+  "status": "closed",
+  "title": "Merge PR 3304, which rewrites the red-main line in CLAUDE.md to \"until the revert merges\"?",
+  "why": "A rule-file edit merges only on your named yes; your 772 a picked the wording, not the merge."
+}

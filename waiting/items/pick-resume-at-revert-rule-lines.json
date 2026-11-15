@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-13T16:14:14-06:00",
+  "closed": "2026-11-13T18:29:53-06:00",
+  "context": "Goal: the written rules say the same as your ruling on when merges resume after a revert, so no session reads the old wording.\nProblem (rule): two rule lines still say merges resume \"until the revert's run on main is green\": CLAUDE.md line 54 and skills/ci-hygiene/SKILL.md line 61. Your ruling own-745-b-resume-at-revert (and item 622 b) says merges resume when the revert merges. Rule-file edits need your word, and your grant covers only the act it names.\nBased on (read): the coordinator's note 16:13 CST Nov 13, from lane red-main-owner-two-picks (replacement branch red-main-resume-at-revert-2); ruling own-745-b-resume-at-revert on the roadmap branch. Triage has not read the two lines or the lane's PR text.\nDeparts from: main \u2014 both lines say a green run on main after the revert; this changes them to the revert's merge. The exact new wording is the lane's, shown in its PR for your yes.\nMeanwhile: the lane builds its PR as a draft; the two rule-file edits wait for your yes.",
+  "home": "ruling own-745-b-resume-at-revert; step red-main-owner-two-picks; CLAUDE.md line 54; skills/ci-hygiene/SKILL.md line 61",
+  "id": "pick-resume-at-revert-rule-lines",
+  "kind": "decision",
+  "lastAnswer": "772 a: edit CLAUDE.md line 54 and ci-hygiene SKILL.md line 61.",
+  "n": 772,
+  "options": [
+    {
+      "gain": "The rule files match your ruling.",
+      "key": "a",
+      "label": "Yes: edit CLAUDE.md line 54 and skills/ci-hygiene/SKILL.md line 61 to say merges resume when the revert merges (Recommended)",
+      "lose": "Two rule-file edits go in one PR for your yes."
+    },
+    {
+      "gain": "No rule-file change.",
+      "key": "b",
+      "label": "Not yet: leave the old wording",
+      "lose": "The two lines keep contradicting your ruling, and a session may follow them."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); lane red-main-owner-two-picks (session_013NEJL3KFBPuQT45U4xo8mE); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 16:13 CST Nov 13",
+  "reply": "Filed as ruling own-772-a-revert-merges-lines and sent to the lane. Both rule lines will say merges resume when the revert merges.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Fix the two rule lines on when merges resume?",
+  "status": "closed",
+  "title": "Edit the two rule lines that still say merges resume when the revert's run is green?",
+  "why": "Two rule lines contradict your ruling that merges resume when the revert merges; a rule-file edit needs your word."
+}

@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-13T20:52:00-06:00",
+  "closed": "2026-11-14T02:58:30Z",
+  "command": {
+    "mac": "echo \"CLAUDE_CODE_SESSION_ID=[$CLAUDE_CODE_SESSION_ID]\"",
+    "powershell": "echo \"CLAUDE_CODE_SESSION_ID=[$env:CLAUDE_CODE_SESSION_ID]\""
+  },
+  "context": "Goal: local sessions get cloud's autonomy, with the role-file guard still bounding who merges.\nProblem (goal): the lane's design reads the variable CLAUDE_CODE_SESSION_ID to match a session to its role file. Only a local session on your own computers can show whether it exists there. The lane cannot run this from the cloud.\nBased on (read): the coordinator's relay of the lane's request, 20:49 CST (unchecked by triage).\nDeparts from: main \u2014 adds a one-time check on your Mac and your Windows machine; nothing on main changes.\nMeanwhile: the lane builds its tests red first; a second check (claude-role) comes after its first PR lands and is not asked yet.",
+  "home": "step local-autonomy-equals-cloud; ruling own-local-autonomy-like-cloud",
+  "id": "act-local-session-id-var",
+  "kind": "decision",
+  "lastAnswer": "none of these: \"yes session ids are for local too (thats how messaging is going to work too)\"",
+  "n": 797,
+  "options": [
+    {
+      "gain": "The lane learns if its design works on Mac and Windows, before it builds more.",
+      "id": "ran",
+      "key": "a",
+      "label": "Done: I ran it on each machine; the result is in the note box",
+      "lose": "A few minutes at each computer, once."
+    },
+    {
+      "gain": "No work now.",
+      "id": "later",
+      "key": "b",
+      "label": "Not now",
+      "lose": "The lane builds for cloud only and the local design stays unproven on both computers."
+    }
+  ],
+  "owner": "lane local-autonomy-equals-cloud (session_013NEJL2xbx9cwQLXuRSA66d), via the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 20:49 CST Nov 13",
+  "reply": "Filed as your word: a local session has a session id. The lane builds on that. Triage did not run the command and nobody has printed the id on your Mac or Windows, so the lane's own tests still prove it before it relies on it.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Run one command in a local session on Mac and on Windows, and say if it prints an id",
+  "status": "closed",
+  "title": "In a local Claude Code session on your Mac, then on Windows, does the command below print a session id?",
+  "why": "Cloud cannot read your computers; the lane that gives local sessions cloud's autonomy needs to know whether a local session can tell who it is."
+}

@@ -1,0 +1,8 @@
+{
+  "at": "2026-11-14T00:24:29.832Z",
+  "choice": "b",
+  "item": "pick-batch-label-allow-entry",
+  "label": "B: settings.json autoMode.allow: add one entry named \"Merge Batch Label\" for `merge --batch-label <pr>`",
+  "n": 759,
+  "note": ""
+}

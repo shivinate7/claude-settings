@@ -1,45 +1,50 @@
 {
   "added": "2026-11-13T18:23:00Z",
-  "context": "Goal: you review only what needs your word, not all 31.\nProblem (rule): the retrospective checked the 33 rulings that carry your 11:47 CST Nov 12 source against main. 16 are new, 6 are already ruled, 9 change a rule and 2 conflict. Only the 2 conflicts need a pick now. (1) merge-lock-gitlock-on-mac says GitLock on a Mac; decision merge-lock says GitLock only in the cloud, GhLock otherwise. (2) sim-drive-needs-lease says a sim drive takes a lease; sim-lease-tool item 4 and sim-test-is-the-one-boot-path rule 5 say the reuse path takes no lease.\nThe 9 that change a rule (not asked here, the retrospective's reading in brackets): close-replaced-at-open [owner words; may be narrowed by your 11:45 'batch runner closes']; guard-imports-fail-closed [ruling looks right]; dead-host-lock-keeps-tree [unclear; ruling says owner pick, PR 2783 says coordinator pick]; past-head-fail-own-commit [ruling looks right]; record-first-needs-shas and record-own-rounds-withdrawn [coordinator pick, not owner]; pr-ledger-stack-by-base-ref [every limit unmeasured, your R37]; retire-run-lane-tip-deferred [loosens a check]; page-tests-served-font [a lane CI run main forbids]. Two rulings the item missed: close-replaced-at-open, dead-host-lock-keeps-tree.\nBased on (read): retrospective audit, main fccff95e, roadmap 5da6664b.\nDeparts from: main \u2014 a keeps main on both; b changes main to match the rulings.\nMeanwhile: the 9 changes wait; I bring them one at a time if you want.",
+  "context": "ANSWER to your note (20:29 CST Nov 14): 'i should handle this on a mac i think with degen repo // any repo that uses ios'. From records: degen is named as the iOS repo (this item; ruling ios-27-2-duo); ios-adblock is named by its repo name only, and no record I read says it ships an app, so unknown. Neither a nor b is picked, so the item stays open; nothing waits on it and main's rules stand until you say. Both options are about your own Nov 12 words, so only you or the consultant (who speaks for you) can rule here.\nGoal: you only rule on what needs your word.\nProblem (rule): Two of your Nov 12 rulings say one thing and main's rules say another. For each, one side has to give.\n(1) The merge lock. You said: a Mac uses GitLock. Main says: GitLock only in the cloud; anywhere else uses GhLock.\n(2) The simulator drive. You said: a drive takes a lease (a booking so two sessions never share one phone simulator). Main says: a drive that reuses a simulator already booted takes no lease.\nWhat I found: the iOS repo degen follows main on (2), though one line of the iOS skill reads the other way. No repo shows a real case where the two versions gave different answers.\nBased on (read): the retrospective's audit of 33 rulings; runner 11's read of degen.\nDeparts from: main \u2014 a keeps main as it is and rewrites your two Nov 12 rulings to match; b changes main to match your words.\nMeanwhile: main's rules stand. Nothing waits on this.",
   "home": "item 725 (confirm-31-pick-rulings)",
   "id": "pick-725-two-conflicts",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T02:29:34Z",
+    "note": "Answered 20:29 CST Nov 14: your Mac note read; degen is the iOS repo, ios-adblock unknown; no pick; main's rules stand."
+  },
   "n": 737,
   "options": [
     {
-      "gain": "No change to main; the two rulings stop contradicting it.",
-      "how": "The two rulings are rewritten to match main: GitLock only in the cloud for the merge lock, and the reuse path takes no lease for the sim drive.",
+      "gain": "Nothing to change or build; the two old rulings stop contradicting main.",
+      "how": "The two rulings are rewritten to match main.",
       "id": "main-wins",
       "key": "a",
-      "label": "Main's decisions win on both (retrospective's reading, recommended)",
-      "lose": "Your 11:47 words on these two are narrowed."
+      "label": "Main's rules win on both",
+      "lose": "Your Nov 12 words on these two are narrowed."
     },
     {
       "gain": "Your words stand as given.",
       "how": "Main's decisions merge-lock and sim-lease-tool change to match the rulings.",
       "id": "rulings-win",
       "key": "b",
-      "label": "Your 11:47 rulings win on both",
-      "lose": "Main changes, and the retrospective says the rulings cite a 'ruling 12' that main lacks."
+      "label": "Your Nov 12 words win on both",
+      "lose": "Main's two rules change, though no real case needs it."
     }
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "retrospective 12:21 CST Nov 13 (audit of 33 rulings, main fccff95e)",
+  "reply": "Read your note: you will handle this on a Mac with the degen repo or any repo that uses iOS. Neither a nor b is picked, so this stays open. Nothing waits on it; main's rules stand.",
   "repo": "shivinate7/claude-settings",
   "short": "725: two rulings conflict with main",
   "shown": [
     {
       "id": "main-wins",
       "key": "a",
-      "label": "Main's decisions win on both (retrospective's reading, recommended)"
+      "label": "Main's rules win on both"
     },
     {
       "id": "rulings-win",
       "key": "b",
-      "label": "Your 11:47 rulings win on both"
+      "label": "Your Nov 12 words win on both"
     }
   ],
   "status": "open",
-  "title": "Of the 31 rulings in item 725, two conflict with main's decisions. Should main win on both?",
+  "title": "Two things you said on Nov 12 disagree with main's rules today. Whose word wins on each?",
   "why": "A ruling that conflicts with a main decision needs your word."
 }

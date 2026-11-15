@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-15T17:39:47.156Z",
+  "choice": "a",
+  "item": "pick-fix-verifier-no-round-recorded",
+  "label": "A: A passing fix verifier ends review even when no round is recorded at its head",
+  "n": 858,
+  "note": "",
+  "optionId": "fix-verifier-ends-review-always"
+}

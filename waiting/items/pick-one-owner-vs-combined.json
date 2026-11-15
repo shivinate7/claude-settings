@@ -1,0 +1,43 @@
+{
+  "added": "2026-11-13T18:55:26-06:00",
+  "closed": "2026-11-14T01:59:13Z",
+  "context": "Goal: every PR has one session as its owner, and combined PRs still merge.\nProblem (rule): PR #3231 adds a check that fails any PR whose commits name more than one session (\"25 sessions ... rebuild the lane as one new PR\"). Your ruling own-767-a lets a PR combine several reviewed lanes, so a combined PR carries many sessions by design and would fail the check once it is on main. Combine-g1's lane lint on PR #3313 (head 25d4be445) already failed on it at 18:54 CST (the coordinator's read, unchecked by triage). The coordinator's undoable pick: combine-g1 rebuilds without #3231 as combine-g1b, so #3231 waits for your word. The check's own reason was an incident: PRs #1166 and #2366 went to two sessions.\nBased on (read): the coordinator's report and the step's record.\nDeparts from: main \u2014 main has no such check; #3231 adds it. a exempts combined PRs, b reads only a PR's own lane commits, c drops the check.\nMeanwhile: #3231 does not merge; the combined PR is built without it.",
+  "home": "PR #3231; step one-owner-per-pr; ruling own-767-a-combined-pr; PR #3313 (combine-g1)",
+  "id": "pick-one-owner-vs-combined",
+  "kind": "decision",
+  "lastAnswer": "788: none of these, \"just pick a recommended easy option for now and we review again later\" (19:58 CST Nov 13). Triage picked b as the interim.",
+  "n": 788,
+  "options": [
+    {
+      "gain": "The check keeps working for ordinary PRs, with no exemption form.",
+      "id": "own-commits-only",
+      "key": "b",
+      "label": "The check reads only the PR's own lane commits, so a combined PR's member commits do not count (recommended)",
+      "lose": "The lane must define \"own commits\" for a combined PR; more code and a review."
+    },
+    {
+      "gain": "Smallest change.",
+      "how": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "id": "exempt-combined",
+      "key": "a",
+      "label": "Exempt combined PRs from the check",
+      "lose": "A second form the check accepts; a PR can claim to be combined to skip it.",
+      "widens": true
+    },
+    {
+      "gain": "Nothing to build; combined PRs merge as ruled.",
+      "id": "drop-check",
+      "key": "c",
+      "label": "Drop the check",
+      "lose": "The two-session PRs (#1166, #2366) can happen again with no check."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), lane one-owner-per-pr (session_013NEJL27Zw8otLsDBqaNN61); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 18:54 CST Nov 13",
+  "reply": "Triage took the recommended option b for now (the check reads only a PR's own lane commits), as an interim pick. Undo: you pick another option when you review it again, and the lane changes. Nothing merges on this until the check is rebuilt and reviewed.",
+  "repo": "shivinate7/claude-settings",
+  "short": "PR 3231: one-session-per-PR check vs combined PRs",
+  "status": "closed",
+  "title": "PR 3231 would fail any PR whose commits come from more than one session. Combined PRs do that by design. Which side gives?",
+  "why": "The new check and your combined-PR ruling clash; one needs a ruling before PR 3231 merges alone."
+}

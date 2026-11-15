@@ -1,0 +1,42 @@
+{
+  "added": "2026-11-13T20:05:30-06:00",
+  "closed": "2026-11-14T02:09:31Z",
+  "context": "Goal: the merge tool backs off when the GitHub quota runs low, and never merges under a running batch.\nProblem (rule): your grant 789 a covers one fix: serve any armed hold before the batch-brake read and arm none from there through the merge call. The fresh review of head 361faeb3e found a second spot: a hold is still served after the base fetch (records_proof, holds_base) and before the batch-brake read, so up to 900 s can pass between the base fetch and the merge call. A push to the base in that pause is not flagged, because strict is false. The lane's fix serves the hold before the base fetch and keeps holds off from there through the merge call. Your ruling covers the named act, never a variant, so the lane waits on this part (rule outcomes-grant-covers-named-act).\nBased on (read): the lane's report and the fresh review, per the lane (unchecked by triage); ruling own-789-a-round-5-one-fix, read in full by triage; no past ruling covers moving the serve point earlier.\nDeparts from: main \u2014 main sends the merge call right after the base fetch with no wait; this branch can pause first. a changes the branch once more (a second fix beyond the three-round cap), b leaves the gap as a debt, c parks the PR.\nMeanwhile: the lane fixes finding 1 (a test double lacks the new seams; a test fix, no new grant needed) and holds finding 2.",
+  "dismissed": "2026-11-14T04:24:22.682Z",
+  "home": "PR #3288 (head 361faeb3e); step gh-quota-budget; ruling own-789-a-round-5-one-fix",
+  "id": "pick-quota-hold-before-base",
+  "kind": "decision",
+  "lastAnswer": "794: c, Park the PR, at 20:09 CST Nov 13.",
+  "n": 794,
+  "options": [
+    {
+      "gain": "The back-off ships with no pause between the base fetch and the merge call.",
+      "id": "serve-before-base",
+      "key": "a",
+      "label": "Grant one more fix: serve the hold before the base fetch and keep holds off through the merge call (the lane's pick; recommended)",
+      "lose": "One more fix and a fresh review round, the second grant beyond the three-round cap on this PR."
+    },
+    {
+      "gain": "No more rounds on this PR.",
+      "id": "debt-gap",
+      "key": "b",
+      "label": "Ship without it and record the gap as a debt",
+      "lose": "A base push during a pause of up to 900 s can go unflagged until the debt is fixed."
+    },
+    {
+      "gain": "No more cost.",
+      "id": "park",
+      "key": "c",
+      "label": "Park the PR",
+      "lose": "The quota back-off does not ship."
+    }
+  ],
+  "owner": "lane gh-quota-budget (session_013NEJKzVtYq71orELDCuDRV), via the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane gh-quota-budget 20:04 CST Nov 13",
+  "reply": "Parked: PR #3288 gets no more work, and the quota back-off does not ship. The lane and coordinator are told.",
+  "repo": "shivinate7/claude-settings",
+  "short": "PR 3288: serve the quota hold before the base fetch (one more fix)?",
+  "status": "closed",
+  "title": "A fresh review of PR #3288 found the quota hold can still pause the merge after the base fetch. Grant one more fix, or leave it?",
+  "why": "Your grant 789 a named one fix; this is a second spot, so only your word covers it."
+}

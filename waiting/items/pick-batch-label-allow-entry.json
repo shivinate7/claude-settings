@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-13T20:13:11Z",
+  "context": "Goal: the batch label gets set without hand work.\nProblem (rule): you picked b at 14:24 CST, and I closed the item and removed your answer too early. The answer check counts a settings.json change only when the saved answer's option label names settings.json and the entry's title. Your b did not, so the lane cannot add the entry on it. Please pick again on the label below; the answer stays until the lane has fetched it.\nBased on (code): the new command `merge --batch-label <pr>` adds the `batch` label to a batch's integration PR only (open, head branch starts with `batch-`; any other PR is refused). PR #3252. The lane's reading, unread by triage.\nDeparts from: main \u2014 autoMode.allow names three read flags of the merge tool and no label write; b adds one entry.\nMeanwhile: PR #3252 does not wait; the note batch-label-no-allow-entry stays filed.",
+  "home": "PR #3252; step batch-label-setter",
+  "id": "pick-batch-label-allow-entry",
+  "kind": "decision",
+  "lastAnswer": "759 b: add the Merge Batch Label allow entry.",
+  "n": 759,
+  "options": [
+    {
+      "gain": "Your allow list stays as it is.",
+      "key": "a",
+      "label": "Add no entry; see whether auto mode asks",
+      "lose": "The batch runner may stop on a prompt the first time it sets the label."
+    },
+    {
+      "gain": "The batch runner's call never stops for a prompt.",
+      "key": "b",
+      "label": "settings.json autoMode.allow: add one entry named \"Merge Batch Label\" for `merge --batch-label <pr>`",
+      "lose": "Your allow list covers one more write. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    }
+  ],
+  "owner": "lane batch-label-setter (session_013NEJKz9DMAhnNimZfuBt2L); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane batch-label-setter, 14:12 CST Nov 13; replaces item 618 on the new command name",
+  "reply": "Answered 759 b (18:24 CST Nov 13), filed as ruling own-759-b-label-allow-entry. Kept open with your answer on the page until the lane fetches it; nothing for you to do.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Allow-list entry for merge --batch-label?",
+  "status": "open",
+  "title": "Should the auto-mode allow list get an entry for the new `merge --batch-label` write?",
+  "why": "An allow entry for a write widens what the merge tool may do without a prompt; the old 618 pick no longer matches the command."
+}

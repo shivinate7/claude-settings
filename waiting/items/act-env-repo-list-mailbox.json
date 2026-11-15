@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-13T20:31:49Z",
+  "context": "Goal: every cloud session can use the session mail store.\nProblem (rule): you ruled 754 a, add session-mailbox to the cloud environment's GitHub repo list. No session can edit that list; it is your own act in claude.ai. This is also your word for attaching that repo.\nBased on (read): the coordinator's reading of Anthropic's cloud setup docs, 14:58 CST: the cloud environment menu in a session's title bar, then Edit, then Repositories, \"where offered (the Default environment has none)\". Each new session must start with that environment selected. Triage has not read the docs page.\nDeparts from: main \u2014 the list holds the repos it holds today; this adds session-mailbox.\nMeanwhile: if your environment is the Default one, the option may not exist; then the fallback is a per-session add_repo of session-mailbox, which is also your word under 754 a. Nothing else waits.",
+  "home": "ruling own-754-a-mailbox-env-repo; step mail-send-cloud-auth",
+  "id": "act-env-repo-list-mailbox",
+  "kind": "task",
+  "lastAnswer": "note: sessions can just add it; note to always add it",
+  "n": 763,
+  "options": [
+    {
+      "gain": "Every cloud session can use mail.",
+      "how": "In claude.ai, open a cloud session, use the environment menu in the title bar, then Edit, then Repositories, and add session-mailbox. Then start new sessions with that environment selected.",
+      "key": "a",
+      "label": "Edit the cloud environment's repo list and add session-mailbox",
+      "links": [
+        {
+          "label": "Anthropic cloud setup docs",
+          "url": "https://code.claude.com/docs/en/claude-code-on-the-web"
+        }
+      ],
+      "lose": "A few clicks; the Default environment may not offer the list."
+    },
+    {
+      "gain": "No environment edit; each session attaches the store itself.",
+      "key": "b",
+      "label": "My environment is the Default one: use the per-session add_repo fallback",
+      "lose": "Every session attaches it again; it is your word each time unless you grant it once."
+    },
+    {
+      "gain": "Nothing to do now.",
+      "key": "c",
+      "label": "Later",
+      "lose": "Mail stays unavailable to cloud sessions that cannot attach the store."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 14:58 CST Nov 13; owner 754 a 14:24 CST",
+  "reply": "Filed as ruling own-763-add-repo-self. Your words say nothing about push access, so an attach with push stays your word only.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Add session-mailbox to the cloud environment's repo list",
+  "status": "closed",
+  "title": "Add the session-mailbox store to your cloud environment's GitHub repo list",
+  "why": "Only you can edit the environment in claude.ai; no session can."
+}

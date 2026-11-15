@@ -1,0 +1,41 @@
+{
+  "added": "2026-11-13T16:38:44-06:00",
+  "closed": "2026-11-14T04:25:30Z",
+  "context": "Goal: the lanes' PRs reach the batch runner without a half-hour wait on a macOS runner.\nProblem (rule): the lane lint reads unknown because each draft run's macOS job has queued with no runner. At least six PRs are blocked: #3259 (since 16:05 CST), #3269 (16:05), #3263 (16:03), #3281 (16:03), #3210 (16:09) and #3251 (16:12; round 3 PASS, net positive). The coordinator granted `--lint-unknown-ok` for #3259, but the auto-mode classifier refused the lane's run (\"Undermining Oversight\", no override line printed). A coordinator's grant is not yours, so a lift per head needs your typed `override` in that lane's chat.\nBased on (read): runner 10's read 16:53 CST plus the lanes' own messages, via the coordinator; earlier read 16:38 CST: 11 lane-touched-tests runs queued, main's own run queued since 15:15 CST, macOS waits of 35-80 minutes, cause unmeasured (step macos-runner-queue-wait). Triage has read none of the runs. Past rulings: none found on a lint lift for a queued macOS job.\nDeparts from: main \u2014 no flag lifts a lint unknown without a classifier pass today; option a lifts it per head, option c sets a standing rule.\nMeanwhile: the lanes wait; #3259's lane reruns its lint at 17:08 CST. #3282 (macOS leg only for macOS-subject files) merges right after #3290, and its own lint also waits on a macOS job unless its draft run finishes (coordinator's note).",
+  "home": "PR #3259; step operating-model-role-handoffs; lane operating-model-role-handoffs (session_013NEJL4MvvuGoWiASrAAHwo)",
+  "id": "act-lint-unknown-ok-3259",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-14T04:24:20Z",
+    "note": "Asked: still true or no?"
+  },
+  "n": 775,
+  "options": [
+    {
+      "gain": "The PRs move now.",
+      "key": "a",
+      "label": "Override per lane: you type `override` in each blocked lane's chat, with a reason per head",
+      "lose": "Six typings, and a lifted check each time."
+    },
+    {
+      "gain": "No lifted check.",
+      "key": "b",
+      "label": "Wait: #3282 merges right after #3290 and clears the cause (Recommended; a for only the docs-only PRs if #3282 is late)",
+      "lose": "More waiting, and how long the queue lasts is unmeasured."
+    },
+    {
+      "gain": "No per-lane typing.",
+      "key": "c",
+      "label": "Set a rule: a macOS job queued over a named time may be lifted per head, with a reason line, by your word",
+      "lose": "A standing lift of a check, which goes against the guard unless you rule it."
+    }
+  ],
+  "owner": "lane operating-model-role-handoffs (session_013NEJL4MvvuGoWiASrAAHwo), via the coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane operating-model-role-handoffs 16:38 CST Nov 13",
+  "reply": "Closed 22:25 CST Nov 13, no lift. To your \"still true or no?\": partly stale. #3269 merged at 22:06 CST. #3259, #3263, #3210, #3251 and #3281 are still open drafts (REST read 22:25 CST). Triage cannot read from the cloud whether their lane lint still says unknown. The cause fix, #3302 (macOS runs once per batch), merged at 21:51 CST; #3282 was closed, not merged. Nothing is overridden. If a PR still reads unknown after #3302, its lane posts a new item with the then-current measure.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Six PRs wait on a macOS runner: lift, wait, or a rule?",
+  "status": "closed",
+  "title": "Six PRs wait on a macOS job with no runner: lift the lane lint's unknown for each, wait, or set a rule?",
+  "why": "A classifier refusal of the lint-unknown flag blocks at least six lanes, and only you can lift it."
+}

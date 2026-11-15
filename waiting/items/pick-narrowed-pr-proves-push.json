@@ -1,0 +1,42 @@
+{
+  "added": "2026-11-13T15:57:47-06:00",
+  "closed": "2026-11-13T22:05:00Z",
+  "context": "Goal: CI much faster by cutting repetition (your 15:49 CST words, relayed by the consultant).\nProblem (goal): under per-lane merge, PR #3217 skips the push run only after a full PR run, and lane PR runs are narrowed, so the skip rarely fires and main still runs all 26 jobs after every merge.\nBased on (read): the consultant's CI audit, 15:56 CST: #3217 skips on full runs, and ci-scope.sh sets all flags only for batch-* heads. Your ruling 729 a (12:18 CST Nov 13, step push-skip-proven-tree) skips the push re-run when the pushed tree equals the tree the PR tested; it does not say whether a narrowed PR run counts as tested. Triage has not read #3217 or ci-scope.sh.\nDeparts from: main \u2014 a full push run after every merge becomes a skip after a green PR run; the options differ on what the skip covers.\nMeanwhile: #3217 stays as built; steps ci-mac-once-per-batch, ci-linux-windows-once, push-skip-proven-tree and drop-nightly-schedule are marked top priority, tracked until each lands on main (your 15:56 CST words).",
+  "home": "step push-skip-proven-tree; ruling push-skip-proven-tree (729 a); PRs #3217, #3042, #3088, #3278",
+  "id": "pick-narrowed-pr-proves-push",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-13T22:03:00Z",
+    "choice": "a",
+    "note": "a1 (recommended): main skips the whole run after a passing PR run. (chat with the consultant)"
+  },
+  "n": 769,
+  "options": [
+    {
+      "gain": "Most merges skip most jobs.",
+      "key": "a",
+      "label": "A green narrowed PR run proves the push: the push run runs only the suites the PR scoped out (Recommended)",
+      "lose": "An untouched suite is not re-run on main until a later change touches it."
+    },
+    {
+      "gain": "Every tree is fully tested once.",
+      "key": "b",
+      "label": "Lane PR runs go all-on, then the push skips",
+      "lose": "Each lane PR run is as slow as today's push run."
+    },
+    {
+      "gain": "No change.",
+      "key": "c",
+      "label": "Keep #3217 as built (skips only after a full PR run)",
+      "lose": "The skip rarely fires, so main keeps running all 26 jobs."
+    }
+  ],
+  "owner": "consultant (session_013NEJKz5AWFJhGvmCUoi6wQ); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "consultant 15:58 CST Nov 13",
+  "reply": "Filed as ruling own-769-a-narrowed-pr-push, reading 2 (your 16:03 CST words to the consultant): after a passing PR run, narrowed or full, main skips the whole push run; an untouched suite is not re-run until a later change touches it. A direct push still runs its suites. The reading question is closed. Sent to the push-skip lane and the CI-speed stack lane.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Does a narrowed PR run let main skip its push run?",
+  "status": "closed",
+  "title": "Should a green narrowed PR run prove the push, so main skips most of its 26 jobs?",
+  "why": "Under per-lane merge #3217's skip rarely fires, so CI stays as slow as before."
+}

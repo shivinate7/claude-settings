@@ -1,0 +1,55 @@
+{
+  "added": "2026-11-15T11:50:00-06:00",
+  "closed": "2026-11-15T17:56:30Z",
+  "context": "Goal: merges flow as fast as CI capacity allows, and a break on main is still caught.\nProblem (rule): after a merge whose tree no PR run proved, main reruns the full Linux and Windows suites, 30-45 min (4 of the last 5 runs). That run does not hold merges back, because the merge tool reads only the last finished run. But it takes runner slots the PR runs need, and merges run at 2.0 per hour (n=17) against 247 waiting. Cutting it changes ruling r62, so it needs your word.\nBased on (ruling): r61 (no macOS on a push to main) and r62 (the Windows full shards run in the PR run, and the push run skips only when its tree is proven), both in the roadmap rulings, home decision test-strategy-reset. Main push run 43741257797 (11:28 CST Nov 15) ran no macOS, so r61 holds, but 13 Windows jobs ran, because the merged tree was unproven. Ruling drop-nightly-schedule (owner 22:19 CST Nov 12) dropped the nightly run, so option B needs a Windows schedule back.\nBased on (measured): degen merges under the same current-base rule (34 of its last 40 merges were behind main), and its main runs are full too, 9 of 10, but take 11-31 min, because it runs 13 Linux-only jobs. Our unproven pushes also run 13 Windows jobs.\nBased on (read): merge-needs-current-base is not the cause. Requiring a current base would force a fresh PR run on every merge and starve merging.\nDeparts from: r62 \u2014 a main push whose tree is unproven still runs the Windows shards; option B moves Windows to a schedule and the PR runs, and a main push runs Linux only.",
+  "holds": "Lane push-skip-measure waits.",
+  "home": "decision test-strategy-reset; ruling r62; step ci-defer-slow-legs; ruling own-880-free-slots",
+  "kind": "decision",
+  "lane": "ci-defer-slow-legs",
+  "lastAnswer": {
+    "at": "2026-11-15T17:52:54.418Z",
+    "choice": "none",
+    "note": "go further than this free as many slots as u can if stuff can be ran later that works for me"
+  },
+  "n": 880,
+  "options": [
+    {
+      "gain": "Every merged tree is tested on Windows as well as Linux.",
+      "how": "No change. r62 stays as ruled: a main push whose tree is unproven runs every Linux and Windows suite.",
+      "id": "keep-windows-on-push",
+      "key": "a",
+      "label": "Keep as is: an unproven main push runs the Windows shards too",
+      "lose": "Each unproven push costs 13 Windows jobs and 30-45 runner-minutes that PR runs need."
+    },
+    {
+      "gain": "Main runs near degen's ~18 min, freeing slots for PR runs.",
+      "how": "A main push runs Linux only, near degen's ~18 min. The Windows full shards stay in the PR run and also run on a nightly. The nightly is off by ruling drop-nightly-schedule, so B brings back a Windows-only schedule. B changes r62 part 3. It widens no shared tool.",
+      "id": "push-linux-only",
+      "key": "b",
+      "label": "A main push runs the Linux suites only; Windows runs on PRs and on a schedule",
+      "lose": "A break that only Windows shows, from two merges combining, surfaces up to 24 h later. How often that happened is unmeasured, and the lane counts it first. It also reverses part of your drop-nightly-schedule ruling."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), for the consultant (session_013NEJKz5AWFJhGvmCUoi6wQ); replaces item 878 main-push-skip-how",
+  "recommended": "b",
+  "ref": "ruling r61 (owner 15:29 CST Nov 12); ruling r62 (owner 15:55 CST Nov 12); ruling drop-nightly-schedule (owner 22:19 CST Nov 12); decision merge-needs-current-base; decision test-strategy-reset; replaces item 878 (main-push-skip-how)",
+  "replied": "2026-11-15T11:56:30-06:00",
+  "reply": "ruled own-880-free-slots; lane ci-defer-slow-legs started 12:06 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Main push runs: tests",
+  "shown": [
+    {
+      "id": "keep-windows-on-push",
+      "key": "a",
+      "label": "Keep as is: an unproven main push runs the Windows shards too"
+    },
+    {
+      "id": "push-linux-only",
+      "key": "b",
+      "label": "A main push runs the Linux suites only; Windows runs on PRs and on a schedule"
+    }
+  ],
+  "status": "closed",
+  "title": "Main push runs: what they test",
+  "why": "The consultant's recommendation, not the owner's: B frees runner slots for PR runs, and the Windows break it can miss is unmeasured until the lane counts it."
+}

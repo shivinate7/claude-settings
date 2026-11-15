@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-15T00:23:00-06:00",
+  "closed": "2026-11-15T18:04:42Z",
+  "context": "Goal: you see and can overrule every pick a session takes for you (\"Nothing can't be undone don't wait on me\", your 20:18 CST Nov 14 words; and your 00:11 CST Nov 15 question where the picks went).\nProblem (rule): the coordinator took this pick for you under your 20:18 words, not typed by you. It changes what the Stop check demands of a session that waits on a ready PR.\nBased on (ruling): coord-836-b-one-wait-per-ready-pr (filed by triage; triage did not read the chat or the Stop check code). Your own question on 836 (18:37 CST Nov 14, \"is B better\") was answered in the item as a reading.\nDeparts from: main - the Stop check demands a check-in per waiting session; the pick narrows it to one wait per ready PR.\nMeanwhile: the pick stands and the work under it continues. Undo: say Overrule; the ruling reopens. An answer of Keep closes this with no act.\nTAKEN FOR YOU: your item 836, option b: the Stop check keeps one wait per ready PR. Taken by coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) at 20:20 CST Nov 14.",
+  "home": "ruling own-853-a-keep-836-b-one-wait (filed by triage, roadmap 7cadce121); step ci-wait-stop-needs-checkin",
+  "id": "taken-836-b-one-wait",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T17:57:48.288Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 853,
+  "options": [
+    {
+      "gain": "no ready PR goes unchecked.",
+      "id": "keep-taken-836-b-one-wait",
+      "key": "a",
+      "label": "Keep: the pick stands",
+      "lose": "a green line with no PR must close all waits or none, a new rule to write and test."
+    },
+    {
+      "gain": "you choose the Stop check again from the options on item 836.",
+      "id": "overrule-taken-836-b-one-wait",
+      "key": "b",
+      "label": "Overrule: the ruling reopens",
+      "lose": "the build that follows this pick (step ci-wait-stop-needs-checkin) stops until you choose."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6) 20:20 CST Nov 14; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "ruling coord-836-b-one-wait-per-ready-pr",
+  "repo": "shivinate7/claude-settings",
+  "short": "Taken for you: one wait per ready PR",
+  "status": "closed",
+  "title": "Taken for you: the Stop check keeps one wait per ready PR. Overrule?",
+  "why": "A session took this pick for you. Keep it, or overrule it and the ruling reopens."
+}

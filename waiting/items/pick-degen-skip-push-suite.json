@@ -4,6 +4,7 @@
   "home": "step ci-once-per-batch (home precedent)",
   "id": "pick-degen-skip-push-suite",
   "kind": "decision",
+  "lastAnswer": "a: skip it",
   "n": 723,
   "options": [
     {
@@ -25,6 +26,7 @@
   ],
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "coordinator 11:48 CST Nov 13, runner 11 child-repo CI audit",
+  "reply": "Filed as ruling degen-skips-push-suite.",
   "repo": "shivinate7/claude-settings",
   "short": "degen: skip the push-to-main suite",
   "shown": [
@@ -39,7 +41,7 @@
       "label": "Keep the suite on main"
     }
   ],
-  "status": "open",
+  "status": "closed",
   "title": "In degen, skip the full suite on push to main when the batch PR run already proved the same tree?",
   "why": "A CI change in another repo needs your word."
 }

@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-15T17:33:40.618Z",
+  "choice": "b",
+  "item": "pick-reinstall-no-backoff",
+  "label": "B: Build a backoff in a follow-up lane now",
+  "n": 871,
+  "note": "",
+  "optionId": "build-backoff"
+}

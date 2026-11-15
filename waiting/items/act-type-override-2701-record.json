@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-15T11:50:00-06:00",
+  "closed": "2026-11-15T17:48:08Z",
+  "context": "Goal: PR 2701 gets a review record the merge tool counts, so the lane can hand it in.\nWhat happened: the lane's `merge 2701 --review-record ... --net-value zero` was refused twice by the auto-mode check, \"[Undermining Oversight]\", with no override line printed. Source: the consultant, relayed; triage has not read the refusals.\nWhat your word covers: only that one record print for PR 2701 in lane solo-batch-hat. It covers no other act and no other PR.\nUnmeasured: whether a typed `override` reaches the auto-mode check. Decision owner-override names only the guard, not this check. If the print is refused again, the lane says so and this item reopens.\nSame ask as item 879, which offers it as a choice; either answer works, and the lane reads whichever you give.\nWhy yours: the print needs your own typed word in the lane's own session, and the lane's print was refused twice (measured 2026-11-15, the lane's merge 2701 --review-record was refused twice by the auto-mode check with \"[Undermining Oversight]\", relayed by the consultant, not read by triage).",
+  "holds": "Lane solo-batch-hat waits and PR 2701 is untouched until the record print goes through.",
+  "home": "PR 2701; step merge-role-raw-paths; item 879",
+  "id": "act-type-override-2701-record",
+  "kind": "task",
+  "links": [
+    {
+      "label": "Lane solo-batch-hat",
+      "url": "https://claude.ai/code/session_013NEJKzruqvkmdxZx6AXoH8"
+    }
+  ],
+  "minutes": 1,
+  "n": 883,
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6), for the consultant (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "ref": "item 879 (pick-lift-record-print-2701), same ask as a choice; consultant's 11:39 CST pick on item 862, not owner-typed; PR 2701",
+  "replied": "2026-11-15T17:48:08Z",
+  "reply": "Done: after the owner's typed `override 1h` at 11:46 CST, lane solo-batch-hat's receipt 11:47 CST says the record posted on PR 2701 (comment 6898659188, carry note 6898659844).",
+  "repo": "shivinate7/claude-settings",
+  "short": "Type override: 2701 record print",
+  "status": "closed",
+  "steps": [
+    "Open lane solo-batch-hat's session (link below).",
+    "Type `override` in its chat, then say in one line: post the review record for PR 2701.",
+    "Press Done here."
+  ],
+  "title": "Type `override` in lane solo-batch-hat's session so it can post PR 2701's review record"
+}

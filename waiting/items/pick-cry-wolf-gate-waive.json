@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-13T22:19:00-06:00",
+  "closed": "2026-11-14T04:25:30Z",
+  "context": "Goal: a session that waits on CI subscribes to the PR first, so a finished run wakes it at once (incident: #3302 woke its waiter about 4 minutes late; the consultant's account, unchecked).\nProblem (rule): the step says to count, before the warning ships, how often a ready mark comes in a session that merges without waiting, because that is how often the warning would cry wolf. That count is not made. Only you can waive a step's own ship gate (rule verification-cry-wolf-guard-is-spent).\nBased on (read): the step note (roadmap/data/steps/ci-wait-subscribes-first.json) names the count as a gate.\nBased on (read): the hook only warns, never refuses, fails open on any unreadable input, and costs one transcript read per ready mark (docs/decisions/ci-wait-subscribes-first.md, per the lane; triage did not read it).\nBased on (unmeasured): the cry-wolf rate. No count exists. Also unmeasured: whether a PreToolUse warning reaches the model at all; the lane's record says so.\nDeparts from: main \u2014 main has no warning on a ready mark and a rule that names only check-ins; PR #3346 adds a warn-only hook and rewrites the rule to name the subscription first.\nMeanwhile: PR #3346 (head cc3dc9ef59c7) stays draft; runner 10 owns the ready mark and merge; the lane starts nothing else.",
+  "home": "step ci-wait-subscribes-first; ruling own-ci-wait-subscribe-guard; PR #3346 (draft)",
+  "id": "pick-cry-wolf-gate-waive",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-14T04:24:20Z",
+    "note": "a: ship now, measure after"
+  },
+  "n": 804,
+  "options": [
+    {
+      "gain": "The 4-minute wake gap closes now; a false warning costs you one ignored line.",
+      "id": "ship-measure-after",
+      "key": "a",
+      "label": "Ship now, measure the false-alarm rate after (recommended by the lane)",
+      "lose": "The step's own gate is skipped; the false-alarm rate stays unknown until a lane measures it."
+    },
+    {
+      "gain": "It ships with a known false-alarm rate.",
+      "id": "measure-first",
+      "key": "b",
+      "label": "Order a measuring lane first",
+      "lose": "PR #3346 waits on that lane, and the wake gap stays open meanwhile."
+    },
+    {
+      "gain": "No false-warning risk.",
+      "id": "rule-text-only",
+      "key": "c",
+      "label": "Ship the rule text only; hold the hook",
+      "lose": "The rule stays unenforced, which is what caused the incident."
+    }
+  ],
+  "owner": "lane ci-wait-subscribes-first (session_013NEJL1wEaNASvF4Y98ouaW) via the coordinator; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane 22:17 CST Nov 13; coordinator 22:16 CST",
+  "reply": "Closed 22:25 CST Nov 13: you chose a, ship the CI-wait warning now and measure its false alarms after. Filed as ruling own-cry-wolf-gate-waived, which waives the step's own ship gate for PR #3346 only. Step ci-wait-warning-cry-wolf-count holds the measurement after it ships. Triage has told lane ci-wait-subscribes-first and the coordinator.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Waive the cry-wolf count before the CI-wait warning ships?",
+  "status": "closed",
+  "title": "Ship the CI-wait warning now and measure its false alarms after, or measure first?",
+  "why": "Only you can waive a step's own ship gate; the measurement the gate asks for was never made."
+}

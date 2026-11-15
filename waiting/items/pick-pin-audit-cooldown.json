@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-14T08:03:00-06:00",
+  "closed": "2026-11-15T00:42:00Z",
+  "context": "Goal: the version pins in child repos stay current without a lane taking a release that is only days old.\nProblem (rule): degen #704 is a pin audit. Its PR body asks: \"`.github/dependabot.yml` sets `cooldown: default-days: 7` (lines 7-8 and 19-20). It binds dependabot's own PRs. No ruling applies it to a lane, and the npm lock already holds a package released two days ago. This PR takes the newest passing version and does not apply the cooldown. Should a lane honor it?\" Only you can say whether the 7-day wait is a rule for lanes too.\nBased on (rule): root rule `verification-newest-that-passes`: take the newest version that passes its checks, read its changelog first, and if it breaks a check pin the newest one that passes and say why. It names no waiting period.\nBased on (read, runner 11's word, unchecked by triage): the cooldown sits in degen's dependabot configuration, lines 7-8 and 19-20; the PR names no ruling for lanes; its audit row is `audit-569-degen-pins` (owner, 2026-11-13 12:50 CST; triage has no record of that row in its rulings). Which pins in #704 are under 7 days old is unmeasured; runner 11 has not counted them.\nDeparts from: main takes the newest passing version with no waiting period; option a adds a 7-day wait to lane pin audits. Option b keeps main.\nMeanwhile: nothing waits. #704 takes the newest passing version as its PR says, and it is held only by an unrelated CI fix (a pin revert for one workflow step). Either answer changes only how future pin audits pick versions.\nNo option is starred: the cost of a wait on a security fix is unmeasured, and the count of young pins in #704 is unmeasured.\nYour question, 15:01 CST Nov 14: \"whats my rule on updating things?\" Answer: the root rule verification-newest-that-passes, in your global CLAUDE.md under Verification: \"Take the newest version that passes its checks. Read its changelog first. If it breaks a check, pin the newest one that passes and say why.\" It names no waiting period. The 7-day wait is only dependabot's own setting in degen (.github/dependabot.yml lines 7-8 and 19-20, runner 11's read) and binds dependabot's PRs, not lanes. So option b is what your rule already says; option a adds a waiting period to it. Nothing waits on this item.",
+  "home": "degen #704; audit row audit-569-degen-pins; rule verification-newest-that-passes",
+  "id": "pick-pin-audit-cooldown",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-15T00:37:37Z",
+    "choice": "b",
+    "note": ""
+  },
+  "n": 834,
+  "options": [
+    {
+      "gain": "A brand-new release gets a week to show a fault before a lane takes it.",
+      "id": "lane-honors-cooldown",
+      "key": "a",
+      "label": "A lane skips any version released under 7 days before the audit and keeps the older pin",
+      "lose": "A rule change to `verification-newest-that-passes` for pin audits; a fix released under 7 days ago waits; the lock already holds a two-day-old package, so #704 would need a change (the count is unmeasured)."
+    },
+    {
+      "gain": "One rule as it stands; #704 needs no change; a security fix is taken at once.",
+      "id": "newest-passing",
+      "key": "b",
+      "label": "A lane keeps taking the newest version that passes its checks, as #704 did (no new rule)",
+      "lose": "A fresh release with a hidden fault can reach a pin before its checks show it; dependabot and lanes then follow different waiting rules."
+    }
+  ],
+  "owner": "runner 11 (session_013NEJKzRugXqBZrZ8xwXmW7), from the PR body of degen #704, 08:02 CST Nov 14; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "degen #704 PR body, \"Question for the owner\"; runner 11 message 08:02 CST Nov 14",
+  "repo": "shivinate7/degen",
+  "short": "Should a pin audit lane wait 7 days after a release before taking a new version?",
+  "status": "closed",
+  "title": "Does the 7-day wait that dependabot uses in degen also bind a lane that audits pins (a), or does a lane keep taking the newest passing version (b)?",
+  "why": "The dependabot setting binds only dependabot PRs. No ruling says whether a lane follows it. A silent choice either way sets the pattern for every pin audit."
+}

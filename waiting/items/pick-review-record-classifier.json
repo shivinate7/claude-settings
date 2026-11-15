@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-14T11:50:00-06:00",
+  "closed": "2026-11-14T21:01:00Z",
+  "context": "Goal: #3407 (child-repo pin text, 4 files, round 1 owed) gets a recorded review.\nProblem (rule): the classifier denied `merge --review-record` in the #3407 lane five times: with `--guard no`, with `--guard yes`, for a round 1 PASS and for a round 1 FAIL (the last two right after a fresh reviewer spawn in the same turn), and a fifth time for a round 1 PASS. The same command form was allowed in the lanes of #3158, #3402, #3400, #3405, #3409 and #3411. The merge tool printed nothing for the denied calls, so its own guard-path rule was not the cause. The cause is unknown. A fifth denial came at the coordinator's 11:56 CST report, with a fresh reviewer's PASS directly before it: `bin/merge 3407 --review-record --head a10d57eb83efa02e48ca97e61c5a4d2ffb1806d2 --kind normal --guard yes --round 1:reviewer:haiku:PASS` (head live by REST: draft, unstable). #3407 now has a clean fixed head and a reviewer PASS with no blocking findings, and no recordable row. The lane has stopped and tried no other form. Only you can change a permission rule or post from your computer.\nBased on (coordinator's account of the lane, unchecked by triage): the denials and the six lanes where it was allowed. Across all lanes the coordinator names 5 denied calls and 11 allowed calls as a floor; the rate is unmeasured.\nBased on (ruling): own-759-b-label-allow-entry (owner 18:24 CST Nov 13): you added one allow entry for `merge --batch-label <pr>`, knowing it goes against \"a repo changes to fit a shared tool, never the tool to fit a repo\". own-786-c-base-red-ok-settings (owner 19:21 CST Nov 13): you added an allow rule for `--base-red-ok` the same way.\nTried first: triage looked for a session on your computer (list of computer folders: empty at 11:49 CST), so option b has no session to run it today.\nDeparts from: main \u2014 no rule names `merge --review-record`, and the classifier decides each call alone; option a adds one allow entry.\nMeanwhile: the lane applies a fix commit first (reverts a test file to main, q_max scoping), tries the command once more on the new head, and then stops. Nothing else waits on this item.\nNo option is starred: option a widens what the classifier lets through, and the cause of the denials is unknown, so a rule might not fix it.",
+  "home": "decision pr-review-record (line \"Unmeasured: whether the auto-mode classifier allows --reviewed and --review-record\"); rulings own-759-b-label-allow-entry and own-786-c-base-red-ok-settings; step record-after-each-round",
+  "id": "pick-review-record-classifier",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-14T20:59:19Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 839,
+  "options": [
+    {
+      "gain": "A lane can post its own record without a stop; the owner-chosen way for the other two merge commands.",
+      "id": "allow-entry-review-record",
+      "key": "a",
+      "label": "Add one allow entry for `merge --review-record` in lane sessions; the pattern comes from the lane and a guard review checks it",
+      "lose": "A permission entry is a new way past the classifier for every lane, and the cause of the denials is unknown, so it may not stop them. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "No permission rule changes.",
+      "id": "computer-session-posts",
+      "key": "b",
+      "label": "A session on your computer posts the record for #3407 (and for any later denied lane)",
+      "lose": "No session on your computer is reachable today, so it waits for you to open one, for every denied lane."
+    },
+    {
+      "gain": "No permission rule changes and no wait for your computer.",
+      "id": "runner-posts-record",
+      "key": "c",
+      "label": "Runner 10's own session posts the record for #3407",
+      "lose": "Unmeasured: runner 10 has never run the command, so the classifier may deny it too; and whether decision pr-review-record lets the batch runner post a lane's record is unread by triage."
+    }
+  ],
+  "owner": "coordinator 11:48 CST Nov 14, from the lane of #3407 (push-skip-text-says-stable); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator message 11:48 CST Nov 14, item 3",
+  "repo": "shivinate/claude-settings",
+  "short": "How does #3407 get a review record when the classifier denies `merge --review-record` in its lane?",
+  "status": "closed",
+  "title": "Do you add a permission rule so lane sessions may run `merge --review-record` (a), does a session on your computer post #3407's record (b), or does runner 10's own session post it (c)?",
+  "why": "The auto-mode classifier denied `merge --review-record` five times in the lane of #3407, the last with a fresh reviewer's PASS directly before it. The same command form was allowed in six other lanes. Without the record #3407 cannot get a lane record. Only you can change a permission rule."
+}

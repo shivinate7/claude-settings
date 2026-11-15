@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-13T17:19:45-06:00",
+  "closed": "2026-11-13T18:29:53-06:00",
+  "context": "Goal: the merge tool backs off when the GitHub quota runs low, without opening a way to merge a blocked PR.\nProblem (risk): PR #3288 failed round 3 review with a small negative net safety value, so it is held (decision hold-unsafe-after-round-3). The back-off can delay the final merge call by up to 15 minutes after the BLOCKED/BEHIND check. A PR that turns BLOCKED in that window could be merged by the admin-bypass token. A held change gets no fix lane and no more work until you decide. My earlier pick (wait for GitHub's reset time, step gh-quota-budget) did not say where the wait may sit; that gap is what round 3 found.\nBased on (measured): the reviewer's probe on a scratch copy with the quota at 20 of 5000: PR read, wait 900 s, then the merge call; main sends the merge call within milliseconds. Lane gh-quota-budget's account via its message 17:19 CST Nov 13; triage has not read the review. Past rulings: hold-unsafe-after-round-3 and pr-review-record (round 4 needs your grant).\nDeparts from: main \u2014 main sends the merge call right after the check; the branch can wait first.\nMeanwhile: the lane waits and does nothing more; the quota back-off does not ship.",
+  "home": "PR #3288; step gh-quota-budget; decision hold-unsafe-after-round-3; lane gh-quota-budget (session_013NEJKzVtYq71orELDCuDRV)",
+  "id": "pick-quota-pr-held-round-3",
+  "kind": "decision",
+  "lastAnswer": "780 c: grant round 4 on PR #3288.",
+  "n": 780,
+  "options": [
+    {
+      "gain": "The back-off ships safely.",
+      "key": "a",
+      "label": "Start a fix lane at round 1 for one change: hold only before the PR read, never between it and the merge call (Recommended)",
+      "lose": "One more review cycle."
+    },
+    {
+      "gain": "No more cost.",
+      "key": "b",
+      "label": "Park the PR as it is",
+      "lose": "The quota back-off does not ship."
+    },
+    {
+      "gain": "No new lane.",
+      "key": "c",
+      "label": "Grant round 4 on this PR",
+      "lose": "Bends the three-round cap."
+    }
+  ],
+  "owner": "lane gh-quota-budget (session_013NEJKzVtYq71orELDCuDRV); posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "lane gh-quota-budget 17:19 CST Nov 13",
+  "reply": "Filed as ruling own-780-c-round-4-3288 and sent to the lane through the coordinator. The grant covers PR #3288 and the one held defect only.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Quota back-off PR held at round 3: fix lane, park, or round 4?",
+  "status": "closed",
+  "title": "PR #3288 (quota back-off) is held after round 3: start a fix lane, park it, or grant round 4?",
+  "why": "A held change waits for your word; round 3 found the wait could let a blocked PR through the admin-bypass token."
+}

@@ -1,0 +1,35 @@
+{
+  "added": "2026-11-14T01:48:00-06:00",
+  "closed": "2026-11-14T07:55:00Z",
+  "context": "Goal: a lane's finished PR reaches the batch runner with the fewest hand-offs.\nProblem (rule): your grant ruling lane-draft-pr-grant-owner (owner typed go, 17:18 CST Nov 12, and 'A for sure' 17:19 CST) lets any lane open its own draft PR and never mark it ready, per decision draft-until-reviewed. Degen's feedback, relayed, asks for ready hand-in. They conflict, and only you change a grant.\nYour earlier word: decision draft-until-reviewed, Q2 (your ruling 09:44 CST Nov 12) says a lane may move its PR from draft to ready once, after its last review and lane lint; never per push; it is target until the cutover, which has happened for claude-settings. Your later word (the grant, 17:19 CST) says never. The later word is live until you say otherwise.\nBased on (ruling): lane-draft-pr-grant-owner (read by triage) and draft-until-reviewed Q2 (read by triage on main). Based on (record): the coordinator's 01:44 CST message, relayed; the Degen feedback itself is unread. Mailaudit lane ci-fixes-mailaudit already marked its own PR #328 ready (step lane-pr-opens-as-draft incident); that is the case in point.\nDeparts from: main \u2014 the standing grant says a lane never marks ready; b lets a lane mark its own PR ready after its review records and lint; a changes nothing.\nMeanwhile: the coordinator tells no lane to hand in ready; lanes keep opening drafts. Triage recommends a only because the feedback text is unread; b is yours to give.",
+  "home": "ruling lane-draft-pr-grant-owner; decision draft-until-reviewed; step lane-pr-opens-as-draft",
+  "id": "pick-lane-hands-in-ready",
+  "kind": "decision",
+  "lastAnswer": "withdrawn",
+  "n": 824,
+  "options": [
+    {
+      "gain": "The later grant stays live as written; CI starts only when the runner marks ready.",
+      "id": "keep-draft-grant",
+      "key": "a",
+      "label": "Keep the 17:19 CST grant: a lane hands in a draft; only the batch runner marks it ready (recommended: it is the later word)",
+      "lose": "Q2 (09:44 CST) stays unused: the runner keeps the mark-ready step Degen's feedback calls a hand-off cost."
+    },
+    {
+      "gain": "One hand-off fewer: the runner finds a ready PR with its records; matches your 09:44 CST word.",
+      "id": "lane-marks-own-ready",
+      "key": "b",
+      "label": "Live Q2: a lane marks its own PR ready once, after its last review and lane lint, never per push",
+      "lose": "The 17:19 grant changes: a lane starts CI on its own PR; a lane that marks early costs CI minutes, as #328 did."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), 01:44 CST Nov 14, from Degen coordinator and batch-runner feedback relayed by the consultant; posted by triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 01:44 CST Nov 14",
+  "reopened": "2026-11-14T07:50:00Z",
+  "reply": "Withdrawn by triage at about 01:50 CST Nov 14, no answer needed (second close; the coordinator's 01:47 and 01:48 CST messages crossed). The live word is your standing grant \"Lane draft PR\" (17:19 CST Nov 12): a lane never marks ready; only the batch runner does. Q2 of draft-until-reviewed (09:44 CST Nov 12) is the earlier word, so it does not let a lane mark ready. The speed gain Degen wants comes from runners marking handed-in PRs ready, which the grant already allows; your later word (01:52 CST, ruling own-ready-by-priority) says not instantly: by priority, so a ready PR does not hog CI from lanes that need it first. Mailaudit #328, marked ready by its lane before its rounds ended, stays an incident on step lane-pr-opens-as-draft.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Should a lane hand in its PR ready instead of draft?",
+  "status": "closed",
+  "title": "Degen's feedback asks that lanes hand in PRs ready, not draft. Your standing grant (17:19 CST Nov 12) says a lane opens its own draft and never marks it ready; only the batch runner marks ready. Keep that (a), or let a lane mark its own PR ready once its review records are posted and its lint passes (b)?",
+  "why": "The coordinator found the two in conflict and told no lane meanwhile. The Degen feedback text itself was read by nobody on this side (the consultant relays it from your paste), so what hurts Degen today is unconfirmed. Marking ready starts CI on the PR, so a lane that marks early costs CI minutes. A variant of a grant is yours to give."
+}
