@@ -800,8 +800,8 @@ def job_if_of(text, name):
 
 
 CHECKS_JOB = "checks"
-GATE_RESULTS = ("success", "failure", "skipped", "cancelled")
-GATE_EVENTS = ("pull_request", "push", "schedule")
+JOB_RESULTS = ("success", "failure", "skipped", "cancelled")
+EVENT_NAMES = ("pull_request", "push", "schedule")
 
 
 def checks_needs_problems(needs):
@@ -818,7 +818,7 @@ def checks_if_problems(needs, expr):
     `expr` is the job-level `if:` as written, None for no `if:`, which GitHub reads as success() over the needs."""
     cond = condition_of(expr if expr is not None else "${{ success() }}")
     bad = []
-    for scope, s1, s2, event in itertools.product(GATE_RESULTS, GATE_RESULTS, GATE_RESULTS, GATE_EVENTS):
+    for scope, s1, s2, event in itertools.product(JOB_RESULTS, JOB_RESULTS, JOB_RESULTS, EVENT_NAMES):
         results = {"scope": scope, "checks-guard": s1, "checks-guard-2": s2}
         try:
             ran = bool(eval_value(cond, event, "true", results=results, needs=needs))
@@ -3410,7 +3410,7 @@ def run_step_script(script, folder, head_sha):
 
 
 
-class ChecksShardGate(unittest.TestCase):
+class ChecksShardCases(unittest.TestCase):
     """checks waits for the two guard shards, and the Debt retire check takes their proof from them (owner item 852, the debt step's repeat run of the guard suite). A shard
     job's result alone is no proof: a job whose steps all skip reads success. So the var is set only when both shards succeeded
     and the scope flag says the shards ran, and the merge commit they checked out holds the PR head's tree (TREE_STEP)."""
@@ -3436,7 +3436,7 @@ class ChecksShardGate(unittest.TestCase):
         self.assertIn(DEBT_PROOF_VAR, env, "checks.yml: the Debt retire check sets no %s, so the guard shards' proof never reaches it" % DEBT_PROOF_VAR)
         needs = ("scope", *LINUX_GUARD_SHARD)
         wrong = []
-        for s1, s2, flag, equal in itertools.product(GATE_RESULTS, GATE_RESULTS, ("true", "false", ""), ("true", "false")):
+        for s1, s2, flag, equal in itertools.product(JOB_RESULTS, JOB_RESULTS, ("true", "false", ""), ("true", "false")):
             results = {"scope": "success", "checks-guard": s1, "checks-guard-2": s2}
             try:
                 got = eval_value(env[DEBT_PROOF_VAR], "pull_request", flag, results=results, needs=needs,

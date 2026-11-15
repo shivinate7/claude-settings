@@ -608,7 +608,7 @@ def job_with_if(text, job, expr):
     return text.replace(anchor, anchor + "    if: %s\n" % expr, 1)
 
 
-class ExemptionGate(unittest.TestCase):
+class ExemptionCases(unittest.TestCase):
     """off_problems exempts checks from the rule that a needed job keeps no job-level if, when checks_if_problems finds its if
     sound (test_windows_split.py). These cases pin the exemption through off_problems: a control, the ifs it must refuse, and an
     if on another needed job, which keeps the rule. An exemption that takes any if fails (b), (c) and (d): the scratch mutant
@@ -619,7 +619,7 @@ class ExemptionGate(unittest.TestCase):
         with open(CHECKS, encoding="utf-8") as f:
             self.text = f.read()
 
-    def test_a_checks_with_its_gate_if_is_not_flagged(self):
+    def test_a_checks_with_its_pinned_if_is_not_flagged(self):
         # Control: the if the workflow has now passes the exemption, so off_problems reads checks clean.
         self.assertIsNotNone(all_jobs(self.text).get("checks", {}).get("if"), "scope: checks has no job-level if, so the control reads nothing")
         self.assertEqual(off_problems(self.text), [], "checks with its gate if is flagged, so the exemption refuses the if it should keep")
