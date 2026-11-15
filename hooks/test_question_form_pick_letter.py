@@ -18,8 +18,9 @@ Two layers, one file:
         The letter is checked on the matched text only: the static part of a reason carries standalone letters, so a
         letter in the reason proves nothing.
 
-Red on the current head: the rule is not built, so each refusal case fails on its own assertion (no rule named, or an allow).
-Each pass case is a control and stays green there. The docs case fails until the record names the rule.
+Red on the round-1 build (82a58829): the spelling forms of section 4 pass unrefused, the reason still carries the reword
+remedy, and the record names neither the no-options limit nor the shared-tool ruling. Each pass case is a control and stays
+green there.
 
 Standard library only, no test runner. Run from the repository root:
 
@@ -256,13 +257,154 @@ def case_docs_name_the_rule():
           "docs/decisions/option-keys-are-letters.md does not name the rule")
 
 
+# ------------------------------------------------------------------ 4. round 2: the spelling forms, the reason, the record
+
+SHARED_TOOL = "a repo changes to fit a shared tool"
+QUESTIONS_DOC = os.path.join(tcj.REPO, "docs", "decisions", "questions-go-to-owner.md")
+PICK_BLOCK_OPENER = "A pick sentence in an item also names"
+
+
+def pick_block(text):
+    """The pick-letter block of the decision record: its opening paragraph and the bullets under it, up to the next line that
+    is neither a bullet nor blank."""
+    lines = text.splitlines()
+    start = next((i for i, line in enumerate(lines) if PICK_BLOCK_OPENER in line), None)
+    if start is None:
+        return ""
+    block = []
+    for line in lines[start:]:
+        if block and line and not line.startswith("  - "):
+            break
+        block.append(line)
+    return "\n".join(block)
+
+
+def bullet_with(text, marker):
+    """The bullet that holds `marker`: the `- ` line it sits on or under, and the lines that wrap below that line."""
+    lines = text.splitlines()
+    hit = next((i for i, line in enumerate(lines) if marker in line), None)
+    if hit is None:
+        return ""
+    top = hit
+    while top > 0 and lines[top] and not lines[top].startswith("- "):
+        top -= 1
+    end = hit + 1
+    while end < len(lines) and lines[end] and not lines[end].startswith("- "):
+        end += 1
+    return "\n".join(lines[top:end])
+
+
+def case_recommended_tail_is_refused():
+    """A pick whose words end in a parenthesised tail, such as (Recommended), names the option its words name."""
+    refuses_pick("pick-recommended-tail", item(why="Pick a: bookmark plus 100 rows a page (Recommended)."), LABEL_B, "b")
+
+
+def case_comma_tail_is_refused():
+    """A pick whose words run on past a comma names the option its words name: a comma does not end the words."""
+    refuses_pick("pick-comma-tail", item(why="Pick a: bookmark plus 100 rows a page, which the owner should take."),
+                 LABEL_B, "b")
+
+
+def case_dash_tail_is_refused():
+    """A pick whose words end in an em dash and a tail names the option its words name."""
+    refuses_pick("pick-dash-tail", item(why="Pick a: bookmark plus 100 rows a page \u2014 recommended."), LABEL_B, "b")
+
+
+def case_curly_quoted_words_are_refused():
+    """The words of a pick in curly quotes name the option the quoted words name."""
+    refuses_pick("pick-curly-quotes", item(why="Pick a: \u201cbookmark plus 100 rows a page\u201d."), LABEL_B, "b")
+
+
+def case_straight_quoted_words_are_refused():
+    """The words of a pick in straight quotes name the option the quoted words name."""
+    refuses_pick("pick-straight-quotes", item(why='Pick a: "bookmark plus 100 rows a page".'), LABEL_B, "b")
+
+
+def case_bold_letter_is_refused():
+    """A pick whose letter is in markdown emphasis, as in Pick **a**, names the option its words name."""
+    refuses_pick("pick-bold-letter", item(why="Pick **a**: bookmark plus 100 rows a page."), LABEL_B, "b")
+
+
+def case_newline_before_words_is_refused():
+    """A pick whose words start on the line after its letter names the option the words name."""
+    refuses_pick("pick-newline", item(why="Pick a:\nbookmark plus 100 rows a page"), LABEL_B, "b")
+
+
+def case_paren_after_letter_is_refused():
+    """A pick whose letter is followed by a closing paren, as in Pick a), names the option its words name."""
+    refuses_pick("pick-closing-paren", item(why="Pick a) bookmark plus 100 rows a page"), LABEL_B, "b")
+
+
+def case_agreeing_recommended_pick_passes():
+    """Control: the letter names the option whose label the words are, with the (Recommended) tail."""
+    passes_pick("pick-agree-recommended", item(why="Pick b: bookmark plus 100 rows a page (Recommended)."),
+                open_decision(item()), "an open decision that carries options")
+
+
+def case_reason_has_no_reword_remedy():
+    """The remedy is the letter the label has, and the label decides. A reason that tells the writer to reword the sentence
+    offers a second fix that the rule does not ask for."""
+    decision_word, reason = wire("pick-reason-remedy", write(item(why=INCIDENT_PICK)))
+    check("pick-reason-remedy (scope: the incident is denied)", decision_word == "deny",
+          "want deny, got %s" % decision_word)
+    if decision_word != "deny":
+        return
+    check("pick-reason-remedy (reason: no reword remedy)", "reword the sentence" not in reason.lower(),
+          "the reason carries the phrase reword the sentence")
+
+
+def case_reason_keeps_the_letter_remedy():
+    """Control: the reason still tells the writer to write the letter the label has, so the no-reword case cannot pass by
+    dropping the whole remedy."""
+    decision_word, reason = wire("pick-reason-letter", write(item(why=INCIDENT_PICK)))
+    check("pick-reason-letter (scope: the incident is denied)", decision_word == "deny",
+          "want deny, got %s" % decision_word)
+    if decision_word != "deny":
+        return
+    check("pick-reason-letter (reason: writes the letter the label has)",
+          re.search(r"write the letter (?:that )?the label has", reason, re.I) is not None,
+          "the reason does not tell the writer to write the letter the label has")
+
+
+def case_docs_block_names_no_options_limit():
+    """The pick-letter block names, as a known limit, that an update with no `options` is not judged. A pass bullet with the
+    same words is not a limit, so the case reads only the `Known limit:` bullets of the block."""
+    with open(DECISION_DOC, encoding="utf-8") as handle:
+        block = pick_block(handle.read())
+    limits = [line for line in block.splitlines() if line.startswith("  - Known limit:")]
+    check("docs: the pick-letter block names the known limit of an update with no `options`",
+          any("no `options`" in line and "update" in line for line in limits),
+          "no Known limit bullet of the pick-letter block names an update with no `options`")
+
+
+def case_option_keys_doc_names_shared_tool_rule():
+    """The pick-letter block of the option-keys record names the shared-tool ruling."""
+    with open(DECISION_DOC, encoding="utf-8") as handle:
+        block = pick_block(handle.read())
+    check("docs: the pick-letter block names the shared-tool ruling", SHARED_TOOL in block,
+          "the pick-letter block does not contain %r" % SHARED_TOOL)
+
+
+def case_questions_doc_names_shared_tool_rule():
+    """The bullet of the questions record that names rule pick-letter-matches-label names the shared-tool ruling."""
+    with open(QUESTIONS_DOC, encoding="utf-8") as handle:
+        bullet = bullet_with(handle.read(), "pick-letter-matches-label")
+    check("docs: the questions record's pick-letter bullet names the shared-tool ruling", SHARED_TOOL in bullet,
+          "the bullet that names pick-letter-matches-label does not contain %r" % SHARED_TOOL)
+
+
 CASES = (case_incident_is_refused, case_incident_update_is_refused, case_step_text_is_refused,
          case_context_text_is_refused, case_option_gain_text_is_refused, case_upper_case_and_spacing_is_refused,
          case_full_size_is_refused, case_agreeing_pick_passes, case_letter_then_parenthesis_passes,
          case_closed_item_passes, case_task_passes, case_note_passes, case_bare_letter_passes,
          case_words_fitting_two_labels_pass, case_words_of_own_label_pass, case_words_matching_no_label_pass,
          case_option_word_prose_passes, case_no_options_passes, case_empty_options_passes,
-         case_full_size_agreeing_pass, case_docs_name_the_rule)
+         case_full_size_agreeing_pass, case_docs_name_the_rule,
+         case_recommended_tail_is_refused, case_comma_tail_is_refused, case_dash_tail_is_refused,
+         case_curly_quoted_words_are_refused, case_straight_quoted_words_are_refused, case_bold_letter_is_refused,
+         case_newline_before_words_is_refused, case_paren_after_letter_is_refused, case_agreeing_recommended_pick_passes,
+         case_reason_has_no_reword_remedy, case_reason_keeps_the_letter_remedy, case_docs_block_names_no_options_limit,
+         case_option_keys_doc_names_shared_tool_rule, case_questions_doc_names_shared_tool_rule)
 
 
 def main():
