@@ -155,12 +155,15 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             handle.write("@%s/CLAUDE.md\n" % pointer.replace("\\", "/"))
 
     def hook_launch(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False,
-                    remote_session_id=None, path_dir=None, trace_file=None):
+                    remote_session_id=None, path_dir=None, trace_file=None, ref=None, session_id=SESSION, role=None):
         """The hook's argv, environment, stdin payload and cwd, as the harness starts it. The arguments are run_hook's,
-        and run_hook and the cut-off runs both start here, so the environment is built in one place."""
+        and run_hook and the cut-off runs both start here, so the environment is built in one place.
+        session_id: the payload's session_id, or None to send none. role: the launcher's CS_SESSION_ROLE, or None to unset it."""
         where = self.primary if session_cwd is None else session_cwd
         # Forward slashes: the hook reads "cwd" with sed, and a doubled backslash is not a path.
-        body = {"cwd": where.replace("\\", "/"), "session_id": SESSION}
+        body = {"cwd": where.replace("\\", "/")}
+        if session_id is not None:
+            body["session_id"] = session_id
         if source is not None:
             body["source"] = source
         payload = json.dumps(body, separators=(",", ":") if compact else None)
@@ -172,6 +175,13 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         # The test runner may itself be a cloud session, so each run sets the variable it means.
         env.pop("CLAUDE_CODE_REMOTE", None)
         env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+        env.pop("CLAUDE_CODE_SESSION_ID", None)
+        env.pop("CLAUDE_SETTINGS_REF", None)
+        env.pop("CS_SESSION_ROLE", None)
+        if ref is not None:
+            env["CLAUDE_SETTINGS_REF"] = ref
+        if role is not None:
+            env["CS_SESSION_ROLE"] = role
         if remote is not None:
             env["CLAUDE_CODE_REMOTE"] = remote
         if remote_session_id is not None:
@@ -179,7 +189,7 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         return sh_argv(path_dir, HOOK), env, payload, where
 
     def run_hook(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False,
-                 remote_session_id=None, path_dir=None, trace_file=None):
+                 remote_session_id=None, path_dir=None, trace_file=None, ref=None, session_id=SESSION, role=None):
         """The hook's stdout lines. Its stderr lands in self.last_stderr.
 
         remote: the CLAUDE_CODE_REMOTE value, or None to unset it as a non-cloud runner does.
@@ -189,11 +199,13 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         compact: send the payload with no spaces after its separators, the way the hook's sed must also read it.
         path_dir: a folder put first on PATH, such as a git shim's folder, or None for the runner's own PATH.
         trace_file: a file git appends its own trace to (GIT_TRACE), or None for no trace.
+        ref: the CLAUDE_SETTINGS_REF value, or None to unset it (the recovery is off unless a case turns it on).
+        session_id: the payload's session_id, or None to send none. role: the launcher's CS_SESSION_ROLE, or None.
         """
         argv, env, payload, where = self.hook_launch(remote=remote, fetch_timeout=fetch_timeout,
                                                      session_cwd=session_cwd, source=source, compact=compact,
                                                      remote_session_id=remote_session_id, path_dir=path_dir,
-                                                     trace_file=trace_file)
+                                                     trace_file=trace_file, ref=ref, session_id=session_id, role=role)
         answer = subprocess.run(argv, input=payload, capture_output=True, text=True, env=env, cwd=where,
                                 timeout=120)
         self.last_stderr = answer.stderr
@@ -2281,6 +2293,130 @@ class SessionStartStopHookPatchTests(SessionStartAgentWorktreeNoticeTests):
         noise = [line for line in lines if STOP_MARKER in line or "not applied" in line or "stop-hook" in line]
         self.assertEqual(noise, [], "the hook printed about a missing platform script: %r" % noise)
         self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+
+
+# The freshness line for the pointer checkout, once origin has a stable branch (the pin follows it; decision
+# merge-reinstalls-from-main). A pin behind origin/stable is counted against it. A pin at its tip counts as on main.
+# With no origin/stable the count stays against origin/main, as before stable existed.
+STALE_LINE = re.compile(r"^claude-settings: .+ is (\d+) commits behind (origin/\S+); global rules and hooks are stale$")
+
+
+class SessionStartStableFreshnessTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTests):
+    """The primary checkout is the pointer, detached or on main, with a local origin. Each case fixes what origin's
+    main and stable hold, then runs the hook once and reads its stale line."""
+
+    # The 51-worktree case builds 51 worktrees; this class does not repeat it.
+    test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
+
+    def setUp(self):
+        super().setUp()
+        self.origin_repo = os.path.join(self.root, "origin.git")
+        vcs(self.root, "init", "-q", "--bare", "-b", "main", "origin.git")
+        vcs(self.primary, "remote", "add", "origin", self.origin_repo)
+        vcs(self.primary, "push", "-q", "origin", "main")
+        self.put(os.path.join(self.config, "CLAUDE.md"), "@%s/CLAUDE.md\n" % self.primary.replace("\\", "/"))
+
+    def other_commit(self, message, refspec):
+        """Another clone commits once and pushes HEAD to `refspec` on origin. Returns the new commit's sha."""
+        other = os.path.join(self.root, "other")
+        if not os.path.isdir(other):
+            vcs(self.root, "clone", "-q", self.origin_repo, other)
+        vcs(other, "commit", "-q", "--allow-empty", "-m", message)
+        vcs(other, "push", "-q", "origin", "HEAD:%s" % refspec)
+        return vcs(other, "rev-parse", "HEAD").stdout.strip()
+
+    def stale_lines(self, lines):
+        return [(found.group(1), found.group(2)) for found in map(STALE_LINE.match, lines) if found]
+
+    def test_a_pin_behind_origin_stable_prints_the_count_against_origin_stable(self):
+        stable = self.other_commit("stable", "stable")
+        self.other_commit("main moves on", "main")
+        vcs(self.primary, "checkout", "-q", "--detach")
+        self.assertIsNone(self.resolve("origin/stable"), "scope: the primary already holds origin/stable")
+        self.assertEqual(self.resolve("origin/main"), self.resolve("main"), "scope: the hook's fetch already moved origin/main")
+        lines = self.run_hook()
+        self.assertEqual(self.resolve("origin/stable"), stable, "the hook did not fetch origin's stable")
+        self.assertEqual(self.stale_lines(lines), [("1", "origin/stable")],
+                         "want one stale line counting the pin 1 behind origin/stable, got %r" % lines)
+
+    def test_a_pin_at_origin_stable_tip_counts_as_main_and_prints_no_stale_line(self):
+        stable = self.other_commit("stable", "stable")
+        self.other_commit("main moves on", "main")
+        vcs(self.primary, "fetch", "-q", "origin", "stable")
+        vcs(self.primary, "checkout", "-q", "--detach", stable)
+        self.assertEqual(self.head_sha(), self.resolve("origin/stable"), "scope: the pin is not at origin/stable")
+        self.assertEqual(self.resolve("origin/main"), self.resolve("main"), "scope: the hook's fetch already moved origin/main")
+        lines = self.run_hook()
+        self.assertEqual([line for line in lines if "not main" in line], [],
+                         "the pin at origin/stable's tip printed a pointer-not-main line: %r" % lines)
+        self.assertEqual(self.stale_lines(lines), [],
+                         "the pin at origin/stable's tip printed a stale line: %r" % lines)
+
+    def test_no_origin_stable_counts_the_pin_behind_origin_main(self):
+        # Characterization of the fallback (the builder's; a reviewer rules on it): with no origin/stable the stale
+        # line counts main..origin/main, as it did before stable existed.
+        self.other_commit("main one", "main")
+        self.other_commit("main two", "main")
+        self.assertIsNone(self.resolve("origin/stable"), "scope: origin has a stable branch")
+        self.assertEqual(self.resolve("origin/main"), self.resolve("main"), "scope: the hook's fetch already moved origin/main")
+        lines = self.run_hook()
+        self.assertEqual(self.stale_lines(lines), [("2", "origin/main")],
+                         "want one stale line counting main 2 behind origin/main, got %r" % lines)
+
+    def test_under_ref_main_the_stale_line_counts_against_origin_main_though_stable_exists(self):
+        # CLAUDE_SETTINGS_REF=main, the recovery, makes main the ref the pin follows, so the count is against origin/main,
+        # even though origin has a stable branch that the pin sits at.
+        vcs(self.primary, "push", "-q", "origin", "main:refs/heads/stable")
+        vcs(self.primary, "checkout", "-q", "--detach")
+        pin = self.head_sha()
+        self.assertEqual(self.resolve("origin/stable"), pin, "scope: origin/stable is not the pin's commit")
+        main_next = self.other_commit("main moves on", "main")
+        self.assertNotEqual(main_next, pin, "scope: origin's main did not move past the pin")
+        lines = self.run_hook(ref="main")
+        self.assertEqual(self.resolve("origin/main"), main_next, "scope: the hook did not fetch origin's main")
+        self.assertEqual(self.stale_lines(lines), [("1", "origin/main")],
+                         "under CLAUDE_SETTINGS_REF=main want one stale line counting the pin 1 behind origin/main, got %r" % lines)
+
+
+class SessionStartRoleFileTests(SessionStartAgentWorktreeNoticeTests):
+    """The launcher's role (bin/claude-role sets CS_SESSION_ROLE) is written at session start to
+    <CLAUDE_CONFIG_DIR>/state/session-roles/<session id>.json, and that file is removed when the variable is unset. The guard
+    and the merge read it for a local session (lane local-tier-file). A /clear gives a session a new id, so the entry that runs
+    the hook must fire on clear as well: the entry test is a scope check, then the subject."""
+
+    def role_file(self, sid=SESSION):
+        return os.path.join(self.config, "state", "session-roles", sid + ".json")
+
+    def test_a_session_start_with_the_launcher_role_writes_the_role_file(self):
+        self.run_hook(role="triage")
+        path = self.role_file()
+        self.assertTrue(os.path.isfile(path), "session start with CS_SESSION_ROLE=triage wrote no role file at %s" % path)
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        self.assertEqual(data.get("session"), SESSION, "the role file names session %r" % (data.get("session"),))
+        self.assertEqual(data.get("role"), "triage", "the role file names role %r" % (data.get("role"),))
+
+    def test_a_session_start_with_no_role_variable_removes_the_own_role_file(self):
+        self.put(self.role_file(), json.dumps({"session": SESSION, "role": "triage"}))
+        self.run_hook(role=None)
+        self.assertFalse(os.path.exists(self.role_file()),
+                         "session start with no CS_SESSION_ROLE left the own role file in place")
+
+    def test_no_session_id_writes_no_role_file(self):
+        # Control, green on the old code, which writes no role file at all. It pins that a file is never keyed on a missing id.
+        self.run_hook(session_id=None, role="triage")
+        folder = os.path.join(self.config, "state", "session-roles")
+        found = os.listdir(folder) if os.path.isdir(folder) else []
+        self.assertEqual(found, [], "a session start with no session id wrote a role file: %r" % (found,))
+
+    def test_the_entry_that_runs_the_hook_fires_on_clear(self):
+        with open(os.path.join(HERE, "..", "settings.json"), encoding="utf-8") as handle:
+            entries = json.load(handle)["hooks"]["SessionStart"]
+        runs = [e for e in entries if any("session_start" in h.get("command", "") for h in e.get("hooks", []))]
+        self.assertTrue(runs, "scope: no SessionStart entry runs session_start.sh")
+        matchers = [e.get("matcher", "") for e in runs]
+        self.assertTrue(any(re.fullmatch(m or ".*", "clear") for m in matchers),
+                        "no SessionStart entry that runs session_start.sh fires on clear: matchers %r" % (matchers,))
 
 
 if __name__ == "__main__":

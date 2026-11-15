@@ -1,6 +1,6 @@
 # The push chain ignores a Red-run line in the chained commit's own message
 
-- **What.** The push-chain refusal ignores a valid Red-run trailer in the chained commit's own `-m`. So `git add <test> && git commit -m m -m "Red-run: ..." && git push` is refused, though it complies. The test-author commits and then pushes in normal work. Workaround: push in a call of its own. Frequency unmeasured. The code lands with #1582 (red-run push check).
-- **Where.** `hooks/guard_merge.py`: `_commit_stages_tests`, and the red-chain gate in `conflict_markers_hit`.
-- **Decision.** `red-run-trailer-on-test-commits` (red-run trailer on test commits), item 9 (push time). Item 9 lands with #1582 (red-run push check).
-- **Retire.** A new case in `hooks/test_guard.py`, red before the fix and green after. When the commit's own message holds a valid Red-run line, the call `git add <test> && git commit -m m -m "Red-run: ..." && git push` is allowed.
+- **What.** The red-run push guard lane (slug red-run-push-guard, PR #3400) covers it. When a commit runs earlier in the same call, the push chain reads its own `-m` text, so a valid Red-run line there counts. Covering case: the call named "add a test file, commit with a Red-run line, then a push of a fresh branch" in tests/guard/s43400-red-run-push.py. The heredoc form is the call named "a heredoc commit message with a Red-run trailer in its body, then a push" in the same file. Frequency unmeasured.
+- **Where.** `hooks/guard_merge.py`: `_commit_paragraphs` and `_note_commit` (the message read), fed by `conflict_markers_hit` (the chain walk).
+- **Decision.** `red-run-trailer-on-test-commits` (red-run trailer on test commits), item 9 (push time). The red-run push guard lane (slug red-run-push-guard, PR #3400) builds item 9.
+- **Retire.** Close this debt with a Retire-run cite in the PR body (`Retire-run: <slug> -- <passing CI run URL>`) naming a green CI run of the guard suite on the PR head. The covering case is the call named "add a test file, commit with a Red-run line, then a push of a fresh branch" in tests/guard/s43400-red-run-push.py.

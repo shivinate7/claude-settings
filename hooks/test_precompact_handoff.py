@@ -153,8 +153,11 @@ class Case(object):
         # Each case sets its own window and flags. This run's shell may set the remote knobs (a
         # cloud session sets CLAUDE_CODE_REMOTE and CLAUDE_AUTOCOMPACT_PCT_OVERRIDE), and
         # CLAUDE_CODE_ENTRYPOINT picks the flag table's column, so none of them leaks in.
+        # CLAUDE_CODE_REMOTE_SESSION_ID is the cloud session's own id (cse_<x>): a case that needs it sets
+        # it through extra_env, so no other case inherits the run's own id.
         for name in ("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_REMOTE",
-                     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "CLAUDE_CODE_ENTRYPOINT"):
+                     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "CLAUDE_CODE_ENTRYPOINT",
+                     "CLAUDE_CODE_REMOTE_SESSION_ID"):
             env.pop(name, None)
         env["CLAUDE_CONFIG_DIR"] = self.cfg
         env["PATH"] = self.bin + os.pathsep + env.get("PATH", "")
@@ -412,11 +415,13 @@ def usage_line(inp, cc=0, cr=0, model=None):
 NUDGE_OVERHEAD = 1000  # the first-turn entry the helper prepends: messages = last - this
 
 
-def nudge(c, size, active=False, lines=None, seed=None, overhead=NUDGE_OVERHEAD, model=None):
+def nudge(c, size, active=False, lines=None, seed=None, overhead=NUDGE_OVERHEAD, model=None,
+          extra=None, via=None):
     """Run --nudge once. A first-turn entry of `overhead` tokens comes first, so the hook
     reads messages = `size` (default: last entry = size + overhead, split across the three
     input counters). With explicit `lines`, they follow the overhead entry. overhead=None
-    prepends nothing. model, when set, names the model of the default entry."""
+    prepends nothing. model, when set, names the model of the default entry. extra adds keys
+    to the payload (an agent_id, for one); via runs the hook some way other than c.run."""
     tp = os.path.join(c.root, "t.jsonl")
     if lines is None:
         lines = [usage_line(size + (overhead or 0) - 60000 - 30000, 30000, 60000, model=model)]
@@ -427,7 +432,8 @@ def nudge(c, size, active=False, lines=None, seed=None, overhead=NUDGE_OVERHEAD,
         put(c.nudge_path(), json.dumps({"bucket": seed}))
     payload = {"session_id": c.session_id, "transcript_path": tp,
                "hook_event_name": "Stop", "stop_hook_active": active}
-    return c.run(["--nudge"], payload)
+    payload.update(extra or {})
+    return (via or c.run)(["--nudge"], payload)
 
 
 def stored_bucket(c):
@@ -1149,21 +1155,20 @@ LIST_HOME_WANTS = (
 )
 
 
-def list_home_missing(step_text):
-    """The wants the closest window of step_text lacks; empty when one window holds all four.
+def window_missing(step_text, wants, span=2):
+    """The wants the closest window of step_text lacks; empty when one window holds them all.
 
-    A window is one sentence or bullet, or that unit plus the sentence right after it. All
-    four wants must sit in one window, so words spread over the step (a "never" far from any
-    list) cannot satisfy it.
+    A window is up to `span` sentences or bullets in a row. All wants must sit in one window,
+    so words spread over the step (a "never" far from any list) cannot satisfy it.
     """
     # A bullet marker after a sentence end splits twice, which leaves an empty unit: drop it,
     # or it would sit between two neighbours and break their window.
     units = [squash(u) for u in re.split(r"(?<=[.!?])\s+|^\s*[-*]\s+", step_text, flags=re.M)]
     units = [u for u in units if u]
-    windows = units + [a + " " + b for a, b in zip(units, units[1:])]
-    best = [label for label, _ in LIST_HOME_WANTS]
+    windows = [" ".join(units[i:i + k]) for k in range(1, span + 1) for i in range(len(units) - k + 1)]
+    best = [label for label, _ in wants]
     for window in windows:
-        miss = [label for label, rx in LIST_HOME_WANTS if not re.search(rx, window)]
+        miss = [label for label, rx in wants if not re.search(rx, window)]
         if len(miss) < len(best):
             best = miss
     return best
@@ -1175,6 +1180,10 @@ def case_prompt_step5_names_checked_stamp():
     step5 = step_body(prompt_source(), 5) or ""
     check("prompt step 5: names the handoff-checked-stamp rule",
           "handoff-checked-stamp" in step5, "step 5 holds %d characters and no rule name" % len(step5))
+
+
+def list_home_missing(step_text):
+    return window_missing(step_text, LIST_HOME_WANTS)
 
 
 def case_prompt_names_list_home_not_copy():
@@ -1770,9 +1779,9 @@ def text_entry(text, ts):
     return transcript_line("user", [{"type": "text", "text": text}], timestamp=ts)
 
 
-def tool_result(content, ts, is_error=True):
+def tool_result(content, ts, is_error=True, tool_use_id="tu-1"):
     """A user entry holding one tool_result. is_error None leaves the key out."""
-    block = {"type": "tool_result", "tool_use_id": "tu-1", "content": content}
+    block = {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}
     if is_error is not None:
         block["is_error"] = is_error
     return transcript_line("user", [block], timestamp=ts)
@@ -2322,6 +2331,747 @@ def case_prompt_names_audit_agent():
         check("audit step: the prompt names " + name, needle in prompt, "missing %r" % needle)
 
 
+# --------------------------------------------------------------------------- owner waits
+# Decision precompact-handoff, item 17. A coordinator's handoff keeps every item
+# waiting on the owner in this session under OWNER_HEADING. The Stop nudge blocks once when that
+# heading is missing, or when a refused act has no later success and the section does not name
+# it. Each case runs the hook as a subprocess, the way the Stop hook runs it.
+
+OWNER_HEADING = "## Waiting on the owner in this session"
+OWNER_TITLE = "Waiting on the owner in this session"
+COORD_TAG = "cs-build:coordinator"
+LANE_TAG = "cs-build:lane"
+REFUSED_CMD = "gh pr merge 2046 --squash"
+REFUSED_TEXT = "PreToolUse:Bash hook error: [guard] blocked: a merge needs the owner's yes"
+OWNER_TS = "2026-11-08T10:00:00Z"
+OWNER_PROMPT_WANTS = (
+    ("one line per item", r"\bone line\b"),
+    ("the owner", r"\bowner\b"),
+    ("a page item named by its number", r"\bnumber\b"),
+    ("none when empty", r"\bnone\b"),
+)
+# The audit hook logs each process start the hook makes, to the file named by OWNER_WAITS_AUDIT_LOG.
+AUDIT_WRAPPER = "\n".join([
+    "import os, runpy, sys",
+    "log = os.environ['OWNER_WAITS_AUDIT_LOG']",
+    "def audit(event, args):",
+    "    if event.startswith(('subprocess.', 'os.exec', 'os.spawn', 'os.posix_spawn', 'os.fork', 'os.system')):",
+    "        with open(log, 'a', encoding='utf-8') as f:",
+    "            f.write(event + '\\n')",
+    "sys.addaudithook(audit)",
+    "sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[1])))",
+    "sys.argv = sys.argv[1:]",
+    "runpy.run_path(sys.argv[0], run_name='__main__')",
+]) + "\n"
+
+
+def as_coordinator(c, tags, sid=None):
+    """A get_session result for the own session (or for sid, the record id it is known by), carrying these tags."""
+    record_id = sid or c.session_id
+    body = json.dumps({"ccr": {"id": record_id, "tags": tags}})
+    call = {"type": "tool_use", "id": "tu-get", "name": "mcp__claude-code-remote__get_session",
+            "input": {"session_id": record_id}}
+    return [transcript_line("assistant", [call], timestamp=OWNER_TS),
+            transcript_line("user", [{"type": "tool_result", "tool_use_id": "tu-get", "content": body}],
+                            timestamp=OWNER_TS)]
+
+
+def tagged_by_call(c, add, sid=None):
+    """A set_session_tags call that adds these tags to sid (the own session by default)."""
+    call = {"type": "tool_use", "id": "tu-set", "name": "mcp__claude-code-remote__set_session_tags",
+            "input": {"session_ids": [sid or c.session_id], "add": add}}
+    return [transcript_line("assistant", [call], timestamp=OWNER_TS),
+            transcript_line("user", [{"type": "tool_result", "tool_use_id": "tu-set", "content": "ok"}],
+                            timestamp=OWNER_TS)]
+
+
+def bash_call(tu, command, description=None):
+    inp = {"command": command}
+    if description is not None:
+        inp["description"] = description
+    call = {"type": "tool_use", "id": tu, "name": "Bash", "input": inp}
+    return transcript_line("assistant", [call], timestamp=OWNER_TS)
+
+
+def refused_act(tu, command, description=None):
+    """A Bash call and the hook's refusal of it, with no answer after it."""
+    return [bash_call(tu, command, description), tool_result(REFUSED_TEXT, OWNER_TS, tool_use_id=tu)]
+
+
+def coord_refusal(c, command=REFUSED_CMD):
+    """A coordinator's transcript with one unanswered refused Bash call of this command."""
+    return as_coordinator(c, [COORD_TAG]) + refused_act("tu-r", command)
+
+
+def owner_handoff(section, rest=None):
+    """A complete handoff (handoff_text, every section but Next steps) with the owner section before
+    Next steps, so only the owner check can block it. section None leaves the heading out."""
+    lines = [handoff_text(omit=("Next steps",)).rstrip("\n"), ""]
+    if section is not None:
+        lines += [OWNER_HEADING, section, ""]
+    lines += ["## Next steps", rest or "- Check the batch once the owner answers.", ""]
+    return "\n".join(lines)
+
+
+def stop_reason(proc):
+    """The reason of a Stop block, or None when the Stop did not block. Empty or non-JSON output is no block."""
+    try:
+        obj = json.loads(proc.stdout or "")
+    except ValueError:
+        return None
+    if isinstance(obj, dict) and obj.get("decision") == "block":
+        return str(obj.get("reason", ""))
+    return None
+
+
+def owner_stop(c, lines, handoff, active=False, extra=None, via=None):
+    """One Stop with this transcript. handoff None writes no handoff."""
+    if handoff is not None:
+        put(c.handoff_path(), handoff)
+    return nudge(c, 0, active=active, lines=lines, extra=extra, via=via)
+
+
+def coordinator_scope(make_lines):
+    """The scope, asserted before each subject: a coordinator's Stop blocks on a handoff with no
+    heading. The subject checks read the hook through this scope, so it is checked first."""
+    c = Case("ow_scope")
+    try:
+        blocked = stop_reason(owner_stop(c, make_lines(c), handoff=owner_handoff(None))) is not None
+        check("owner waits scope: a coordinator's Stop blocks on a handoff with no heading", blocked,
+              "no block: the subject checks after this read an unread scope")
+    finally:
+        c.cleanup()
+
+
+def config_state(cfg):
+    """Every file under the config dir, as {relative path: bytes}."""
+    state = {}
+    for root, _dirs, files in os.walk(cfg):
+        for name in files:
+            path = os.path.join(root, name)
+            with open(path, "rb") as f:
+                state[os.path.relpath(path, cfg)] = f.read()
+    return state
+
+
+def run_audited(c, args, payload):
+    """Case.run, with an audit hook in the interpreter that logs each process start the hook makes."""
+    env = c.env()
+    env["OWNER_WAITS_AUDIT_LOG"] = os.path.join(c.root, "audit.log")
+    return subprocess.run([sys.executable, "-c", AUDIT_WRAPPER, MODULE] + list(args),
+                          input=json.dumps(payload), capture_output=True, text=True, env=env, cwd=c.repo)
+
+
+def audit_events(c):
+    """The process starts the hook logged for this case, as event names."""
+    path = os.path.join(c.root, "audit.log")
+    if not os.path.isfile(path):
+        return []
+    with open(path, "r", encoding="utf-8") as f:
+        return [ln.strip() for ln in f if ln.strip()]
+
+
+def case_prompt_owner_waits_section():
+    with open(os.path.join(HERE, "precompact_handoff_prompt.md"), "r", encoding="utf-8") as f:
+        text = f.read()
+    step4 = step_body(text, 4) or ""
+    check("prompt owner waits: step 4 still exists", bool(step4.strip()), "no '## 4.' step")
+    pos_head = step4.find(OWNER_HEADING)
+    pos_rulings = step4.lower().find("rulings with no home yet")
+    check("prompt owner waits: step 4 names the section %r" % OWNER_HEADING, pos_head >= 0,
+          "no heading in step 4")
+    check("prompt owner waits: the section comes after the Rulings with NO HOME YET bullet",
+          pos_rulings >= 0 and pos_head > pos_rulings,
+          "heading at %d, rulings bullet at %d" % (pos_head, pos_rulings))
+    missing = window_missing(step4, OWNER_PROMPT_WANTS, span=3)
+    check("prompt owner waits: three sentences or bullets of step 4 say one line per thing the owner "
+          "clears, a page item by its number, and none when empty", not missing,
+          "closest window lacks: %s" % "; ".join(missing))
+
+
+def case_owner_waits_heading_missing_blocks():
+    for name, label, make in (
+            ("ow_heading_get", "get_session tags", lambda c: as_coordinator(c, [COORD_TAG])),
+            ("ow_heading_set", "set_session_tags add", lambda c: tagged_by_call(c, [COORD_TAG]))):
+        c = Case(name)
+        try:
+            proc = owner_stop(c, make(c), handoff=owner_handoff(None))
+            reason = stop_reason(proc)
+            check("owner waits heading (%s): exits 0" % label, proc.returncode == 0,
+                  "rc=%r" % proc.returncode)
+            check("owner waits heading (%s): a coordinator's Stop blocks when the handoff lacks %r"
+                  % (label, OWNER_HEADING), reason is not None, "stdout: %r" % (proc.stdout or "")[:200])
+            low = squash(reason)
+            check("owner waits heading (%s): the block names the heading and step 4" % label,
+                  OWNER_TITLE.lower() in low and "step 4" in low, "reason: %r" % reason)
+        finally:
+            c.cleanup()
+
+
+def case_owner_waits_refused_act_blocks():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_refused")
+    try:
+        proc = owner_stop(c, coord_refusal(c), handoff=owner_handoff(
+            "- Page item 219: owner allow-once for an open prompt.",
+            rest="- After the owner's yes, run `%s`." % REFUSED_CMD))
+        reason = stop_reason(proc)
+        check("owner waits refused act: exits 0", proc.returncode == 0, "rc=%r" % proc.returncode)
+        check("owner waits refused act: the coordinator's Stop blocks when the section does not name the "
+              "refused act (a Next steps line outside the section names it)",
+              reason is not None, "stdout: %r" % (proc.stdout or "")[:200])
+        check("owner waits refused act: the block names the refused act",
+              reason is not None and (REFUSED_CMD in reason or "Bash" in reason), "reason: %r" % reason)
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_none_with_refusal_blocks():
+    coordinator_scope(coord_refusal)
+    for count in (1, 60):  # one refused act, then a full transcript of sixty
+        c = Case("ow_none_%d" % count)
+        try:
+            lines = as_coordinator(c, [COORD_TAG])
+            for i in range(count):
+                lines += refused_act("tu-%d" % i, "echo step-%02d" % i)
+            reason = stop_reason(owner_stop(c, lines, handoff=owner_handoff("none")))
+            check("owner waits none (%d refused): section none with an unanswered refusal blocks" % count,
+                  reason is not None, "reason: %r" % reason)
+            named = [i for i in range(count) if ("echo step-%02d" % i) in (reason or "")]
+            check("owner waits none (%d refused): the block names one of the refused acts" % count,
+                  bool(named), "reason: %r" % (reason or "")[:200])
+        finally:
+            c.cleanup()
+
+
+def case_owner_waits_other_call_does_not_clear_refusal():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_other_call")
+    try:
+        lines = coord_refusal(c) + [bash_call("tu-ok", "echo ok"),
+                                    tool_result("ok", OWNER_TS, is_error=False, tool_use_id="tu-ok")]
+        reason = stop_reason(owner_stop(c, lines, handoff=owner_handoff("none")))
+        check("owner waits other call: a later success of another command does not clear the refused act",
+              reason is not None and (REFUSED_CMD in reason or "Bash" in reason), "reason: %r" % reason)
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_cleared_by_later_success():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_cleared")
+    try:
+        lines = coord_refusal(c) + [bash_call("tu-ok", REFUSED_CMD),
+                                    tool_result("merged", OWNER_TS, is_error=False, tool_use_id="tu-ok")]
+        reason = stop_reason(owner_stop(c, lines, handoff=owner_handoff("none")))
+        check("owner waits cleared: a refused act that a later identical call completed does not block",
+              reason is None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+    c = Case("ow_clean")
+    try:
+        reason = stop_reason(owner_stop(c, as_coordinator(c, [COORD_TAG]), handoff=owner_handoff("none")))
+        check("owner waits none, nothing refused: section none with no unanswered refusal does not block",
+              reason is None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_plain_error_is_not_refusal():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_plain_error")
+    try:
+        lines = as_coordinator(c, [COORD_TAG]) + [bash_call("tu-e", "ls /nope"),
+                                                  tool_result("Exit code 2", OWNER_TS, tool_use_id="tu-e")]
+        reason = stop_reason(owner_stop(c, lines, handoff=owner_handoff("none")))
+        check("owner waits plain error: a failed call that no hook or permission refused is not an "
+              "omitted act", reason is None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_named_section_passes():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_named")
+    try:
+        items = ["- Page item %d: owner allow-once, still open." % i for i in range(1, 16)]
+        section = "\n".join(items + ["- Gate: `%s` waits for the owner's yes." % REFUSED_CMD])
+        proc = owner_stop(c, coord_refusal(c), handoff=owner_handoff(section))
+        check("owner waits named: a 16-line section that names the refused act on its last line passes",
+              stop_reason(proc) is None and proc.returncode == 0, "reason: %r" % stop_reason(proc))
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_blocks_once_per_stop():
+    c = Case("ow_once")
+    try:
+        lines = coord_refusal(c)
+        first = owner_stop(c, lines, handoff=owner_handoff(None))
+        check("owner waits once: the first Stop blocks", stop_reason(first) is not None,
+              "stdout: %r" % (first.stdout or "")[:200])
+        again = owner_stop(c, lines, handoff=owner_handoff(None), active=True)
+        check("owner waits once: a Stop with stop_hook_active set exits quietly",
+              stop_reason(again) is None and again.returncode == 0, "stdout: %r" % (again.stdout or "")[:200])
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_agent_payload_stays_quiet():
+    main_case = Case("ow_agent_main")
+    try:
+        blocked = stop_reason(owner_stop(main_case, coord_refusal(main_case), handoff=owner_handoff(None)))
+        check("owner waits agent: a session's own Stop with this transcript blocks (the scope)",
+              blocked is not None, "reason: %r" % blocked)
+    finally:
+        main_case.cleanup()
+    c = Case("ow_agent")
+    try:
+        proc = owner_stop(c, coord_refusal(c), handoff=owner_handoff(None), extra={"agent_id": "a1b2c3"})
+        check("owner waits agent: a Stop whose payload has an agent_id exits quietly",
+              stop_reason(proc) is None and proc.returncode == 0, "stdout: %r" % (proc.stdout or "")[:200])
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_non_coordinator_stays_quiet():
+    for name, label, make in (
+            ("ow_lane", "lane tag", lambda c: as_coordinator(c, [LANE_TAG]) + refused_act("tu-r", REFUSED_CMD)),
+            ("ow_untagged", "no tag", lambda c: refused_act("tu-r", REFUSED_CMD)),
+            ("ow_tag_elsewhere", "tag set on another session",
+             lambda c: tagged_by_call(c, [COORD_TAG], sid="sess-other") + refused_act("tu-r", REFUSED_CMD))):
+        c = Case(name)
+        try:
+            proc = owner_stop(c, make(c), handoff=owner_handoff(None))
+            check("owner waits non-coordinator (%s): a Stop with no heading stays quiet" % label,
+                  stop_reason(proc) is None and proc.returncode == 0, "stdout: %r" % (proc.stdout or "")[:200])
+        finally:
+            c.cleanup()
+
+
+def case_owner_waits_no_handoff_stays_quiet():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_no_handoff")
+    try:
+        proc = owner_stop(c, coord_refusal(c), handoff=None)
+        check("owner waits no handoff: a coordinator's Stop with no handoff file exits 0 and does not block",
+              stop_reason(proc) is None and proc.returncode == 0, "stdout: %r" % (proc.stdout or "")[:200])
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_fails_open():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_open_transcript")
+    try:
+        payload = {"session_id": c.session_id, "transcript_path": os.path.join(c.root, "missing.jsonl"),
+                   "hook_event_name": "Stop", "stop_hook_active": False}
+        proc = c.run(["--nudge"], payload)
+        check("owner waits fails open: an unreadable transcript exits 0 and does not block",
+              proc.returncode == 0 and stop_reason(proc) is None,
+              "rc=%r stdout=%r" % (proc.returncode, (proc.stdout or "")[:200]))
+    finally:
+        c.cleanup()
+    c = Case("ow_open_handoff")
+    try:
+        os.makedirs(os.path.dirname(c.handoff_path()), exist_ok=True)
+        with open(c.handoff_path(), "wb") as f:
+            f.write(b"## Goal\n\xff\xfe not UTF-8\n")
+        proc = nudge(c, 0, lines=coord_refusal(c))
+        check("owner waits fails open: an undecodable handoff exits 0 and does not block",
+              proc.returncode == 0 and stop_reason(proc) is None,
+              "rc=%r stdout=%r" % (proc.returncode, (proc.stdout or "")[:200]))
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_writes_no_file_and_starts_no_process():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_cost")
+    try:
+        put(c.handoff_path(), owner_handoff(None))
+        # The nudge bookkeeping every Stop rewrites with the same bytes: a run that changes nothing
+        # else leaves the config dir exactly as it was.
+        put(c.nudge_path(), json.dumps({"bucket": -1}))
+        before = config_state(c.cfg)
+        proc = nudge(c, 0, lines=coord_refusal(c), via=lambda args, payload: run_audited(c, args, payload))
+        check("owner waits cost: the coordinator's Stop blocks on this run",
+              stop_reason(proc) is not None, "stdout: %r" % (proc.stdout or "")[:200])
+        after = config_state(c.cfg)
+        changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
+        check("owner waits cost: the run changes no file in the config dir", not changed,
+              "changed: %r" % changed)
+        started = audit_events(c)
+        check("owner waits cost: the run starts no process", not started, "started: %r" % started)
+    finally:
+        c.cleanup()
+
+
+# --- owner waits: cloud record id, act-keyed answers, scan cost, fenced sections ------------------
+# A cloud session names itself three ways: the Stop payload by UUID, its env by cse_<x>, and its
+# get_session record and set_session_tags calls by session_<x>. The hook must read the record id.
+REMOTE_PAYLOAD_ID = "5f2b8c1e-3d4a-4b6e-9c7f-0a1b2c3d4e5f"
+REMOTE_CSE = "cse_Hq3vN8rT"
+REMOTE_SESSION = "session_Hq3vN8rT"
+OTHER_SESSION = "session_Zp7kLw2b"
+MERGE_PR12 = "gh pr merge 12"
+COST_PAIRS = 1000  # a plain transcript of 2000 lines: Bash calls and their successful results
+FENCED_SECTION = "\n".join([
+    "- Page item 219: owner allow-once for an open prompt.",
+    "```bash",
+    "# merge after the owner's yes",
+    "echo waiting",
+    "```",
+    "- Gate: `%s` waits for the owner's yes." % REFUSED_CMD,
+])
+UNFENCED_SECTION = "\n".join([
+    "- Page item 219: owner allow-once for an open prompt.",
+    "# merge after the owner's yes",
+    "echo waiting",
+    "- Gate: `%s` waits for the owner's yes." % REFUSED_CMD,
+])
+
+
+def cloud_case(name):
+    """A Case for a cloud session: the Stop payload names it by UUID, and the env names it cse_<x>."""
+    c = Case(name, extra_env={"CLAUDE_CODE_REMOTE_SESSION_ID": REMOTE_CSE})
+    c.session_id = REMOTE_PAYLOAD_ID
+    return c
+
+
+def case_owner_waits_cloud_record_id_blocks():
+    coordinator_scope(coord_refusal)
+    c = cloud_case("ow_cloud_get")
+    try:
+        proc = owner_stop(c, as_coordinator(c, [COORD_TAG], sid=REMOTE_SESSION), handoff=owner_handoff(None))
+        reason = stop_reason(proc)
+        check("owner waits cloud id (get_session): a cloud coordinator whose record is session_<x> blocks when "
+              "its handoff lacks the heading", reason is not None and proc.returncode == 0,
+              "rc=%r stdout: %r" % (proc.returncode, (proc.stdout or "")[:200]))
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_cloud_set_tags_blocks():
+    coordinator_scope(coord_refusal)
+    c = cloud_case("ow_cloud_set")
+    try:
+        reason = stop_reason(owner_stop(c, tagged_by_call(c, [COORD_TAG], sid=REMOTE_SESSION),
+                                        handoff=owner_handoff(None)))
+        check("owner waits cloud id (set_session_tags): a set_session_tags call that names session_<x> tags a "
+              "cloud coordinator, and its Stop blocks", reason is not None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_cloud_other_record_stays_quiet():
+    coordinator_scope(coord_refusal)
+    c = cloud_case("ow_cloud_other")
+    try:
+        reason = stop_reason(owner_stop(c, as_coordinator(c, [COORD_TAG], sid=OTHER_SESSION),
+                                        handoff=owner_handoff(None)))
+        check("owner waits cloud id (other record): a coordinator record for another session does not make "
+              "this cloud session a coordinator", reason is None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_answer_key_is_the_act():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_answer_key")
+    try:
+        lines = as_coordinator(c, [COORD_TAG]) + refused_act("tu-r", MERGE_PR12, description="Merge PR 12") + [
+            bash_call("tu-ok", MERGE_PR12, description="Merge pull request 12 now"),
+            tool_result("merged", OWNER_TS, is_error=False, tool_use_id="tu-ok")]
+        reason = stop_reason(owner_stop(c, lines, handoff=owner_handoff("none")))
+        check("owner waits answer key: a refused act that a later success of the same command answers does not "
+              "block, though the two descriptions differ", reason is None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+    c = Case("ow_answer_other")
+    try:
+        lines = as_coordinator(c, [COORD_TAG]) + refused_act("tu-r", MERGE_PR12, description="Merge PR 12") + [
+            bash_call("tu-ok", "gh pr merge 13", description="Merge PR 12"),
+            tool_result("merged", OWNER_TS, is_error=False, tool_use_id="tu-ok")]
+        reason = stop_reason(owner_stop(c, lines, handoff=owner_handoff("none")))
+        check("owner waits answer key control: a success of another command with the same description does not "
+              "answer the refused act", reason is not None and MERGE_PR12 in reason, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+
+
+def plain_lines(pairs):
+    """Bash calls and their successful results. No coordinator tag text anywhere."""
+    lines = []
+    for i in range(pairs):
+        tu = "tu-p%d" % i
+        lines.append(bash_call(tu, "echo step-%04d" % i))
+        lines.append(tool_result("step-%04d done" % i, OWNER_TS, is_error=False, tool_use_id=tu))
+    return lines
+
+
+def gap_with_decodes(c, lines):
+    """owner_waits_gap over these transcript lines, in-process, as (reason, error, JSON decodes it made).
+    Every json.loads reaches JSONDecoder.raw_decode, so counting there sees a parse in any module."""
+    tp = os.path.join(c.root, "cost-transcript.jsonl")
+    write_transcript(tp, lines)
+    decodes = [0]
+    original = json.decoder.JSONDecoder.raw_decode
+
+    def counting(self, s, idx=0):
+        decodes[0] += 1
+        return original(self, s, idx)
+
+    json.decoder.JSONDecoder.raw_decode = counting
+    try:
+        with Env(CLAUDE_CONFIG_DIR=c.cfg, CLAUDE_CODE_REMOTE_SESSION_ID=None):
+            reason, err = call_under_test("owner_waits_gap", {"session_id": c.session_id, "transcript_path": tp})
+    finally:
+        json.decoder.JSONDecoder.raw_decode = original
+    return reason, err, decodes[0]
+
+
+def case_owner_waits_cost_skips_plain_transcripts():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_cost_parse")
+    try:
+        # A handoff must exist, or the hook returns before it reads the transcript at all.
+        put(c.handoff_path(), owner_handoff(None))
+        plain = plain_lines(COST_PAIRS)
+        reason, err, decodes = gap_with_decodes(c, plain)
+        check("owner waits cost (parse): the owner waits check runs without error on a plain transcript",
+              err is None, "error: %r" % err)
+        check("owner waits cost (parse): a session with no coordinator tag text gets no reason",
+              not reason, "reason: %r" % reason)
+        check("owner waits cost (parse): a plain transcript of %d lines is not decoded line by line "
+              "(%d decodes)" % (len(plain), decodes), decodes * 10 < len(plain),
+              "%d decodes for %d lines" % (decodes, len(plain)))
+        coord_reason, coord_err, _ = gap_with_decodes(c, as_coordinator(c, [COORD_TAG]) + plain)
+        check("owner waits cost (parse): a coordinator's transcript of the same size still blocks when the "
+              "handoff lacks the heading", coord_err is None and bool(coord_reason),
+              "error: %r reason: %r" % (coord_err, coord_reason))
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_fenced_comment_keeps_section():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_fenced")
+    try:
+        proc = owner_stop(c, coord_refusal(c), handoff=owner_handoff(FENCED_SECTION))
+        reason = stop_reason(proc)
+        check("owner waits fence: a '# comment' line inside a fenced block does not end the section, so the "
+              "refused act named after the block is named", reason is None and proc.returncode == 0,
+              "rc=%r reason: %r" % (proc.returncode, reason))
+    finally:
+        c.cleanup()
+    c = Case("ow_unfenced")
+    try:
+        proc = owner_stop(c, coord_refusal(c), handoff=owner_handoff(UNFENCED_SECTION))
+        reason = stop_reason(proc)
+        check("owner waits fence control: the same comment line outside a fence still ends the section, so the "
+              "act named after it blocks", reason is not None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+
+
+# --- owner waits: act names, odd transcript lines, tag spelling -----------------------------------
+# The handoff check names a refused act by the whole first line of its command. Two commands that
+# share their first 60 characters must each be named, or one name would cover both.
+SAME_HEAD = "cd /home/user/claude-settings/.claude/worktrees/agent-release-candidate && npm publish"
+PUBLISH_A = SAME_HEAD + " a"
+PUBLISH_B = SAME_HEAD + " b --force"
+ONLY_A_SECTION = "- Gate: `%s` waits for the owner's yes." % PUBLISH_A
+ONLY_B_SECTION = "- Gate: `%s` waits for the owner's yes." % PUBLISH_B
+ODD_MESSAGE_LINE = json.dumps({"type": "system", "message": "hello"})
+SPELLED_TAG = "CS-Build:Coordinator "
+NEAR_MISS_TAG = "cs-build:coordinatorx"
+# An assistant text line with the lowercase tag text. The raw read finds it; no record or call carries it.
+TAG_TEXT_LINE = transcript_line("assistant", [{"type": "text", "text": "Tagged cs-build:coordinator on the record."}])
+
+
+def two_refusals(c):
+    """A coordinator's transcript with two unanswered refusals of commands that share their first 60 characters."""
+    return as_coordinator(c, [COORD_TAG]) + refused_act("tu-a", PUBLISH_A) + refused_act("tu-b", PUBLISH_B)
+
+
+def case_owner_waits_same_head_acts():
+    coordinator_scope(two_refusals)
+    check("owner waits same head (data): the two refused commands differ and share their first 60 characters",
+          PUBLISH_A != PUBLISH_B and PUBLISH_A[:60] == PUBLISH_B[:60],
+          "A: %r B: %r" % (PUBLISH_A, PUBLISH_B))
+    c = Case("ow_head_only_a")
+    try:
+        reason = stop_reason(owner_stop(c, two_refusals(c), handoff=owner_handoff(ONLY_A_SECTION)))
+        check("owner waits same head (names A only): a section that names only the first refused command does "
+              "not cover the second, so the Stop blocks", reason is not None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+    c = Case("ow_head_only_b")
+    try:
+        reason = stop_reason(owner_stop(c, two_refusals(c), handoff=owner_handoff(ONLY_B_SECTION)))
+        check("owner waits same head (names B only): a section that names only the second refused command does "
+              "not cover the first, so the Stop blocks", reason is not None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+    c = Case("ow_head_both")
+    try:
+        proc = owner_stop(c, two_refusals(c), handoff=owner_handoff("\n".join([ONLY_A_SECTION, ONLY_B_SECTION])))
+        check("owner waits same head (names both): a section that names both refused commands passes",
+              stop_reason(proc) is None and proc.returncode == 0,
+              "rc=%r reason: %r" % (proc.returncode, stop_reason(proc)))
+    finally:
+        c.cleanup()
+    c = Case("ow_head_labels")
+    try:
+        reason = stop_reason(owner_stop(c, two_refusals(c), handoff=owner_handoff("none")))
+        check("owner waits same head (blocks): a section of 'none' with two refusals blocks",
+              reason is not None, "reason: %r" % reason)
+        labels = re.findall(r"Bash `([^`]*)`", reason or "")
+        check("owner waits same head (labels): the block labels the two refused commands with distinct text",
+              len(labels) == 2 and labels[0] != labels[1], "labels: %r" % labels)
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_odd_message_line_still_blocks():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_odd_message")
+    try:
+        lines = as_coordinator(c, [COORD_TAG]) + [ODD_MESSAGE_LINE] + refused_act("tu-r", REFUSED_CMD)
+        proc = owner_stop(c, lines, handoff=owner_handoff("none"))
+        reason = stop_reason(proc)
+        check("owner waits odd line: a transcript line whose message is a string does not switch the check off, "
+              "so a coordinator's unnamed refusal after it blocks", reason is not None,
+              "reason: %r stderr: %r" % (reason, (proc.stderr or "")[-200:]))
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_tag_precheck_reads_any_spelling():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_tag_precheck")
+    try:
+        put(c.handoff_path(), owner_handoff("none"))
+        lines = as_coordinator(c, [SPELLED_TAG]) + plain_lines(50) + refused_act("tu-r", REFUSED_CMD)
+        reason, err, decodes = gap_with_decodes(c, lines)
+        check("owner waits tag spelling (pre-check): a record tagged 'CS-Build:Coordinator ' is read, so the "
+              "transcript is parsed", err is None and decodes > 0,
+              "error: %r decodes: %r reason: %r" % (err, decodes, reason))
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_tag_spelling_record_blocks():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_tag_record")
+    try:
+        lines = [TAG_TEXT_LINE] + as_coordinator(c, [SPELLED_TAG]) + refused_act("tu-r", REFUSED_CMD)
+        reason = stop_reason(owner_stop(c, lines, handoff=owner_handoff("none")))
+        check("owner waits tag spelling (record): a get_session record tagged 'CS-Build:Coordinator ' makes the "
+              "session a coordinator, so its unnamed refusal blocks", reason is not None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_tag_spelling_set_tags_blocks():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_tag_set")
+    try:
+        lines = [TAG_TEXT_LINE] + tagged_by_call(c, [SPELLED_TAG]) + refused_act("tu-r", REFUSED_CMD)
+        reason = stop_reason(owner_stop(c, lines, handoff=owner_handoff("none")))
+        check("owner waits tag spelling (set_session_tags): a call that adds 'CS-Build:Coordinator ' makes the "
+              "session a coordinator, so its unnamed refusal blocks", reason is not None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_near_miss_tag_stays_quiet():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_tag_near")
+    try:
+        lines = [TAG_TEXT_LINE] + as_coordinator(c, [NEAR_MISS_TAG]) + refused_act("tu-r", REFUSED_CMD)
+        reason = stop_reason(owner_stop(c, lines, handoff=owner_handoff("none")))
+        check("owner waits tag near miss: a record tagged 'cs-build:coordinatorx' is no coordinator, so its "
+              "refusal stays quiet", reason is None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+
+
+# --- owner waits: a name that is text inside another name ---------------------------------------
+# The handoff check looks for each refused act's identifier as text in the section. The plain push is
+# text inside the force push, so a section that names only the force push must still leave the plain
+# push unnamed.
+PUSH_PLAIN = "git push"
+PUSH_FORCE = "git push --force origin main"
+PUSH_PLAIN_LINE = "- Gate: `%s` waits for the owner's yes." % PUSH_PLAIN
+PUSH_FORCE_LINE = "- Gate: `%s` waits for the owner's yes." % PUSH_FORCE
+
+
+def two_pushes(c):
+    """A coordinator's transcript with two unanswered refusals: a command, and a longer command that holds it as text."""
+    return as_coordinator(c, [COORD_TAG]) + refused_act("tu-push", PUSH_PLAIN) + refused_act("tu-force", PUSH_FORCE)
+
+
+def case_owner_waits_substring_act_blocks():
+    coordinator_scope(two_pushes)
+    check("owner waits substring (data): the first refused command is text inside the second",
+          PUSH_FORCE.startswith(PUSH_PLAIN) and PUSH_PLAIN != PUSH_FORCE,
+          "plain: %r force: %r" % (PUSH_PLAIN, PUSH_FORCE))
+    c = Case("ow_substring_only_force")
+    try:
+        reason = stop_reason(owner_stop(c, two_pushes(c), handoff=owner_handoff(PUSH_FORCE_LINE)))
+        check("owner waits substring: a section that names only `%s` does not name the refused `%s`, which "
+              "it holds as text, so the Stop blocks on the plain push" % (PUSH_FORCE, PUSH_PLAIN),
+              reason is not None and "Bash `%s`" % PUSH_PLAIN in reason and "Bash `%s`" % PUSH_FORCE not in reason,
+              "reason: %r" % reason)
+    finally:
+        c.cleanup()
+    c = Case("ow_substring_both")
+    try:
+        proc = owner_stop(c, two_pushes(c), handoff=owner_handoff("\n".join([PUSH_PLAIN_LINE, PUSH_FORCE_LINE])))
+        check("owner waits substring (control): a section that names both refused commands passes",
+              stop_reason(proc) is None and proc.returncode == 0,
+              "rc=%r reason: %r" % (proc.returncode, stop_reason(proc)))
+    finally:
+        c.cleanup()
+
+
+# --- owner waits: a command alone on its line -----------------------------------------------------
+# A section line that holds only the refused command, with no backticks, names it: the whole line,
+# with its list marker removed, is one entry. The same words as prose name no act, since the line is
+# not the command.
+PROSE_PUSH_LINE = "- git push waits for the owner's yes"
+
+
+def case_owner_waits_alone_on_line_names_act():
+    coordinator_scope(coord_refusal)
+    for label, section in (("no marker", REFUSED_CMD), ("list marker", "- " + REFUSED_CMD)):
+        c = Case("ow_alone_" + label.replace(" ", "_"))
+        try:
+            proc = owner_stop(c, coord_refusal(c), handoff=owner_handoff(section))
+            check("owner waits alone on its line (%s): a section line that holds only the refused command names "
+                  "it, so the Stop passes" % label,
+                  stop_reason(proc) is None and proc.returncode == 0,
+                  "rc=%r reason: %r" % (proc.returncode, stop_reason(proc)))
+        finally:
+            c.cleanup()
+
+
+def case_owner_waits_prose_line_names_no_act():
+    coordinator_scope(lambda c: coord_refusal(c, PUSH_PLAIN))
+    c = Case("ow_prose_line")
+    try:
+        proc = owner_stop(c, coord_refusal(c, PUSH_PLAIN), handoff=owner_handoff(PROSE_PUSH_LINE))
+        reason = stop_reason(proc)
+        check("owner waits prose line (control): a section line of prose that holds `git push` as text does not "
+              "name it, so the Stop blocks on the plain push",
+              reason is not None and "Bash `%s`" % PUSH_PLAIN in reason,
+              "rc=%r reason: %r" % (proc.returncode, reason))
+    finally:
+        c.cleanup()
+
+
 def main() -> int:
     case_prompt_names_audit_agent()
     case_precompact_writes_digest_and_state()
@@ -2354,6 +3104,7 @@ def main() -> int:
     case_prompt_lists_working_premises()
     case_prompt_step5_names_checked_stamp()
     case_prompt_names_list_home_not_copy()
+    case_prompt_owner_waits_section()
     case_reorient_lists_weak_premises()
     case_reorient_premise_lines_survive_odd_text()
     case_reorient_flags_missing_premises()
@@ -2386,6 +3137,34 @@ def main() -> int:
     case_nudge_sections_flags_an_empty_handoff()
     case_nudge_sections_count_numbered_headings()
     case_one_reader_for_the_premises_section()
+    case_owner_waits_heading_missing_blocks()
+    case_owner_waits_refused_act_blocks()
+    case_owner_waits_none_with_refusal_blocks()
+    case_owner_waits_other_call_does_not_clear_refusal()
+    case_owner_waits_cleared_by_later_success()
+    case_owner_waits_plain_error_is_not_refusal()
+    case_owner_waits_named_section_passes()
+    case_owner_waits_blocks_once_per_stop()
+    case_owner_waits_agent_payload_stays_quiet()
+    case_owner_waits_non_coordinator_stays_quiet()
+    case_owner_waits_no_handoff_stays_quiet()
+    case_owner_waits_fails_open()
+    case_owner_waits_writes_no_file_and_starts_no_process()
+    case_owner_waits_cloud_record_id_blocks()
+    case_owner_waits_cloud_set_tags_blocks()
+    case_owner_waits_cloud_other_record_stays_quiet()
+    case_owner_waits_answer_key_is_the_act()
+    case_owner_waits_cost_skips_plain_transcripts()
+    case_owner_waits_fenced_comment_keeps_section()
+    case_owner_waits_same_head_acts()
+    case_owner_waits_odd_message_line_still_blocks()
+    case_owner_waits_tag_precheck_reads_any_spelling()
+    case_owner_waits_tag_spelling_record_blocks()
+    case_owner_waits_tag_spelling_set_tags_blocks()
+    case_owner_waits_near_miss_tag_stays_quiet()
+    case_owner_waits_substring_act_blocks()
+    case_owner_waits_alone_on_line_names_act()
+    case_owner_waits_prose_line_names_no_act()
 
     if FAILED:
         print()
