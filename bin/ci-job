@@ -574,8 +574,8 @@ def local_action(name, step, ctx, log, dry):
             else:
                 state, detail = run_step(sname, st, False, detail, shell, {**env, "GITHUB_WORKSPACE": top}, cwd, ctx, log)
                 # verdict names a run's shell and its temp script, which differ on every run: name the step's own lines instead
-                detail = re.sub(r"^(PASS|SKIP|FAIL) .*? (rc=\d+ )", lambda m: "%s %s %s" % (m.group(1), " ; ".join(run_lines(st)), m.group(2)),
-                                detail, count=1)
+                detail = re.sub(r"^(PASS|SKIP|FAIL) .*? (?=(?:rc=\d+ )?\(\d+\.\d+s\))",
+                                lambda m: "%s %s " % (m.group(1), " ; ".join(run_lines(st))), detail, count=1)
                 parts.append("%s: %s" % (sname, detail))
         else:
             parts.append("%s: %s: %s" % (sname, state, detail))
