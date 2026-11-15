@@ -167,8 +167,8 @@ gh workflow run <workflow-file> --ref <branch>           # none ran: dispatch on
 ```
 
 `gh workflow run` needs a `workflow_dispatch` trigger in the workflow. A dispatch run skips
-`all-jobs-passed`, which runs only on a pull request. In a repo that requires it, run `gh pr ready`
-or push anew instead.
+`all-jobs-passed`, which runs only on a pull request. In a repo that requires it, mark the PR ready
+(`gh pr ready`, or in cloud MCP `update_pull_request` with `draft=false`) or push anew instead.
 
 ## 6. Read every run after a merge
 
@@ -231,6 +231,11 @@ ZIZMOR_PATHS=".github/ actions/" bash actions/zizmor/run.sh
 gh pr ready <pr-number>                               # the CI-wake hook waits and wakes you
 gh run view <run-id> --json status,conclusion         # one read, after the notice
 ```
+
+The order on a lane's draft, in cloud: `merge <pr> --ready` on the draft (the records step), then the
+MCP `update_pull_request` call with `draft=false` after the draft run shows, then
+`merge <pr> --confirm`. A ready PR with a stale records page goes back to draft first (decision
+`records-index-at-merge`).
 
 Never run `gh run watch`: it makes about 131 API calls a minute. Never send a command's output
 to `/dev/null`.

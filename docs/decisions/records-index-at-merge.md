@@ -25,7 +25,7 @@ The same two allow rules cover both steps, so no new rule is needed.
 Take a ready PR on the default branch with no record number to claim or resume. When its rebuilt page would
 change the tree, `--confirm` refuses before any wait, claim or push. The refusal and the preview name
 the remedy: return the PR to draft (route pr-draft-mcp-cloud), run
-`merge <n> --confirm` on the draft, then mark it ready after its draft run shows. A head that holds a
+`merge <n> --ready` on the draft, mark it ready after its draft run shows (in cloud: MCP `update_pull_request` with `draft=false`), then run `merge <n> --confirm`. A head that holds a
 Record-claim on a base with no stamp kinds first reverts that claim commit, since the draft step refuses a
 claim head. A push that changes only docs/records.md after a head whose run was fully green starts no
 second full run of the jobs. CI scope turns off the job and suite flags for that push

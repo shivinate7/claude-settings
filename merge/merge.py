@@ -3863,7 +3863,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
             if records != "current" and not (info["draft"] or trailer or resumed):  # confirm refuses a page with no claim to ride, so a ready PR never gets a page-only push
                 records += ". --confirm refuses it. " + stale_page_remedy(n, head_claim(wt))
             elif info["draft"] and records != "current" and not (trailer or resumed or stale):  # a claim commits at confirm anyway, so the draft step would save no run; it refuses a stale head
-                records += f". merge {n} --confirm on the draft pushes it before ready, so the ready run is the merge run"
+                records += f". merge {n} --ready on the draft pushes it before ready, so the ready run is the merge run"
     finally:
         drop_worktree(root, tmp, wt)
     m = cfg.get("merge", {})
@@ -3874,21 +3874,26 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         f"  head checks: {host.head_state(n)}",
         f"  {base} run: {verdict}" + (f": {detail}. --confirm refuses it unless --base-red-ok \"<reason>\" is given." if verdict != "green" else ""),
         "  base:   " + (current or f"holds {base}'s tip"),
-        "  claim:  " + (f"already claimed ({resumed}); " + ((f"run `merge {n} --confirm` on the draft first: it runs the ready checks (" + ", ".join(m["readyChecks"]) + "), then refuses this head, so mark it ready by hand after they pass (route pr-ready-mcp-cloud in cloud)"
-                         if m.get("readyChecks") else "--confirm on the draft refuses this head, so mark it ready by hand (route pr-ready-mcp-cloud in cloud)") if info["draft"] else "a run resumes at the wait")
+        "  claim:  " + (f"already claimed ({resumed}); " + ((f"run `merge {n} --ready` on the draft first: it runs the ready checks (" + ", ".join(m["readyChecks"]) + "), then refuses this head, so mark it ready by hand after they pass (route pr-ready-mcp-cloud in cloud)"
+                         if m.get("readyChecks") else "--ready on the draft refuses this head, so mark it ready by hand (route pr-ready-mcp-cloud in cloud)") if info["draft"] else "a run resumes at the wait")
                         if resumed and not trailer else trailer or "nothing to claim"),
         *([f"  records: {records}"] if records else []),
         *([] if base == cfg["defaultBranch"] else [f"  ids:    stay pending: {base} is not the default branch ({cfg['defaultBranch']}); they are claimed when it merges there."]),
         f"  then:   push HEAD:{info['branch']} (the claim, if any), PUT pulls/<n>/merge with merge_method={m.get('method', '?')} and the head sha as the guard, no wait for checks. A confirm that pushes a claim stops there: run it again when the new head is green.",
         f"          move local {base}, run {len(m.get('afterMerge', []))} afterMerge command(s)" + (", delete the branch." if m.get("deleteBranch") else "."))
 
+def ready_hint(n):
+    """The one text of what follows a draft step that left the PR a draft: the ready mark after the draft run shows, then --confirm. The
+    `--ready` run prints it after its stays-a-draft reason, and `stale_page_remedy` carries it, so the two orders cannot drift."""
+    return (f"Mark it ready after its draft run shows (in cloud: MCP update_pull_request draft=false, route pr-ready-mcp-cloud), "
+            f"then run merge {n} --confirm to merge.")
+
 def stale_page_remedy(n, claim=""):
     """The one text of the remedy for a stale records page on a ready PR, for `confirm` and `preview`. The session returns the
     PR to draft by its own route (route pr-draft-mcp-cloud). `claim`: the Record-claim the head holds, if any.
     The draft step refuses a claim head, so the claim commit is reverted first or the remedy would loop."""
     steps = (f"Return #{n} to draft (in cloud: MCP update_pull_request draft=true; on a computer: gh pr ready {n} --undo, route pr-draft-gh-cli-local; "
-             f"route pr-draft-mcp-cloud), run merge {n} --confirm on the draft (the records step), "
-             f"then mark it ready after its draft run shows.")
+             f"route pr-draft-mcp-cloud), run merge {n} --ready on the draft (the records step). {ready_hint(n)}")
     if not claim:
         return steps
     return (f"The head holds a Record-claim ({claim}) that this base claims nothing for. "
@@ -4176,7 +4181,7 @@ def draft_step(root, cfg, n, host, info, merge_main=False):
     if ok:
         say(f"merge: #{n} is ready now. No pull request was merged. When its run is green, run --confirm again to merge.")
     else:
-        say(f"merge: #{n} stays a draft ({' '.join(why.split()) or 'no reason given'}). Mark it ready after its draft run shows, then run --confirm again to merge. No pull request was merged.")
+        say(f"merge: #{n} stays a draft ({' '.join(why.split()) or 'no reason given'}). {ready_hint(n)} No pull request was merged.")
     return 0
 
 READY_PAGE_CLEANUP_SECONDS = 10  # the worktree's removal gets its own budget: a read that spent its deadline must still clean up
