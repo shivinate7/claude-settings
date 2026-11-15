@@ -144,7 +144,8 @@ on a claim with a slug in parentheses, one read of the rule files per run; no fi
 Probe check (decision cant-claim-needs-probe, rule output-never-hand-off-doable-step): a prose sentence that says this session
 cannot do an act outside the table (the cannot-claim check's phrases, which also hold "have no access", "no access to" and
 "unable") passes only when the turn after the last incoming message holds a main-session tool call (a peer's ack of a send of
-the turn starts no turn), or the sentence says `unchecked` as a whole word or carries a route or measured cite. A table act
+the turn starts no turn), or the sentence is in the past tense (could not), names its check (a backtick span, a tool name, an
+exit code, an HTTP status), says `unchecked` as a whole word or carries a route or measured cite. A table act
 keeps the cannot-claim verdict, and the one block joins any other reason. Not read, for this form only: a blockquote with no
 report label (an agent's report or a pasted refusal) and a Why yours line. The remedy names no act. Cost: the cannot-claim
 check's regex and the turn's records already in hand; no file, no process, no timer, no log.
@@ -2608,15 +2609,15 @@ def cannot_problem(records, text, refused=()):
     failure and is let pass; a present claim (cannot) after that later success still blocks.
     A sentence with no try is listed under the no-try reason, one with a try and no check under the no-check reason. The remedy names no act (git-remedy-never-names-target).
     The probe form (decision cant-claim-needs-probe): a sentence that claims an act outside the table (PROBE_ACT) is listed
-    under the probe reason when `records` hold no main-session tool call, unless it says `unchecked` as a whole word or
-    carries a route or measured cite. The one refusal joins whichever reasons apply."""
+    under the probe reason when `records` hold no main-session tool call, unless it reports a failure (a past phrase:
+    could not), names its check (_names_check), says `unchecked` as a whole word or carries a route or measured cite. The one refusal joins whichever reasons apply."""
     claims = _read_claims(text)
     if not claims:
         return ""
     table = [claim for claim in claims if claim[1]]
     probes = [] if _main_tool_calls(records) else list(dict.fromkeys(
-        claim[0] for claim in claims if not claim[1] and not UNCHECKED_RE.search(claim[0])
-        and not _cited(claim[0], refused, PROBE_ACT)))
+        claim[0] for claim in claims if not claim[1] and not claim[3] and not UNCHECKED_RE.search(claim[0])
+        and not _names_check(claim[0], claim[6]) and not _cited(claim[0], refused, PROBE_ACT)))
     no_try, no_check = [], []
     if table and guard is None:
         _load_guard()
