@@ -33,7 +33,7 @@ Cost: one python start per child CI run, and one per run of skill `compliance-ch
 ## Not mechanized
 
 - A paraphrase. A line that says a ruling in other words passes. A line with under 12 shared words passes, a citation included.
-- Copies of rule text from the root `CLAUDE.md`. The check reads decision records only. For example, a child line that repeats "A lone lane is its own integration PR" passes.
+- Copies of rule text from the root `CLAUDE.md`. The check reads decision records only. For example, a child line that repeats the root rule on how a lane merges passes. That rule changes at the cutover (decision `all-repos-switch-together`), so the copy then goes stale and nothing flags it.
 - A shared run under 5 words.
 - A copy inside a heading, an HTML comment or a code span.
 - A copy shorter than 12 words, such as a one-sentence grant line. See debt `short-copy-passes` (the gap for short copies).

@@ -37,9 +37,14 @@ Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
 A file git pairs as renamed (its own 50 percent similarity) is read as the same file: its edits
 are the diff of old name to new name, as they would be in place. A file below that stays a delete and an add.
 
+A line the merge only added to is no drop: every token survives in order and the line starts the same way. A
+negation in the added text voids that only when it lands inside the original words. A negation after the last
+original word is a new clause beside the old, but only in a prose file (.md, .txt, .rst). In code any added
+negation voids it (`retry = 3` became `retry = 3 if not CI else 0`; see `extends`).
+
 Blank lines and whitespace never count. The escape is a trailer in a commit message, one per
 path: `Drops-lines: <path> -- <reason>`. The PR body is read too: the same line in it
-excuses its path. A trailer or line with no reason excuses nothing. A deleted debt file is also excused by a
+excuses its path. Among commits the oldest reason for a path wins, and a later commit does not replace it. In the merge tool (the CLI and CI pass no body) a PR-body line wins over the commits. A trailer or line with no reason excuses nothing. A deleted debt file is also excused by a
 `Retire-run: <slug> -- <run URL>` line in the PR body's last paragraph that the debt-close check
 (check_debt_retire.retired) accepts: a green run on the PR head or above, a Retire that holds. It needs a
 run reader (run_state); with none, or a read that fails, the finding stays. Only a whole delete is excused, not a rename out of
@@ -47,6 +52,11 @@ the debts folder. Only the merge tool passes a PR body and a run reader: the CLI
 in the body, and CI's way out is a Drops-lines commit trailer. Each use prints
 `ALLOWED <path>: <reason>`. On a branch it may be on any commit of the branch. In history it is
 the commit, plus the branch it merged for a reversal.
+
+A refusal prints the remedy as a complete commit message between `--- begin commit message ---` and
+`--- end commit message ---` (subject, blank line, then one last paragraph of the Drops-lines, Co-Authored-By
+and Claude-Session lines, which is where git reads trailers), then the command that proves it after the commit.
+`remedy_text` is its one home; the merge tool prints the same text.
 
 A read that cannot run prints UNKNOWN. Exit 0 locally, exit 1 when env CI is set or with
 --strict, and exit 1 always when the UNKNOWN carries a finding (ruling: unknown in CI is red).
@@ -228,6 +238,7 @@ def pool_of(cwd, p, m):
 
 
 TOKEN = re.compile(r"[A-Za-z_]+|\d+(?:\.\d+)?|[<>=!]=?|[-+*/%&|^~]|\S")
+OPENER = re.compile(r"#|//|--|/\*")  # a comment opener of the languages the repo holds
 NEGATION = re.compile(r"\b(?:not|no|never|none|nor|cannot|without)\b|n't\b", re.I)
 
 
@@ -243,12 +254,42 @@ def trailing_only(g, base):
     return any(g.startswith(b) and len(g) > len(b) and not (g[len(b)].isalnum() or g[len(b)] == "_") for c in base for b in c)
 
 
-def extends(line, g):
-    """True when every token of line survives, in order, in g, starts the same way, and g adds no negation, so a line pasted into a comment is not one: the merge
-    only added to the line (`subprocess.run(a, b)` became `subprocess.run(a, b, timeout=T)`)."""
-    lt, gt = TOKEN.findall(line), TOKEN.findall(g)
-    it = iter(gt)
-    return bool(lt) and lt[0] == gt[0] and all(tok in it for tok in lt) and len(NEGATION.findall(g)) <= len(NEGATION.findall(line))
+PROSE_EXTS = (".md", ".txt", ".rst")  # the files whose appended negation clause is new text beside the old
+
+
+def is_prose(path):
+    """True for a prose file by its lower-cased extension. No path (a 2-argument call) reads as prose."""
+    return path is None or os.path.splitext(path)[1].lower() in PROSE_EXTS
+
+
+def extends(line, g, path=None):
+    """True when g only adds to line: every token of line survives in g, in order, and g starts the same way. A line
+    pasted into a comment is not one (`subprocess.run(a, b)` became `subprocess.run(a, b, timeout=T)`).
+    In a prose file (`is_prose`), a negation in g voids this only when it sits inside the original words. A negation
+    after the last original word is new text beside the old, so it is no drop (`... pending record.` became
+    `... pending record, for an unproven push, not for a proven one.`). The count runs to the end of the last
+    matched word. Trailing punctuation of line is no word: a final `.` of line may match the final `.` of g.
+    g may not hold more negations in that span than line does (`deploy now` became `deploy not now`).
+    In a code file the plain rule holds: a negation anywhere in g counts (`retry = 3` became `retry = 3 if not CI else 0`).
+    Two more cases keep the plain rule in prose, a negation anywhere in g counts. A line with no word has no original words
+    to keep in order (`}` became `} not reachable`). A g with a comment opener (`#`, `//`, `--`, `/*`) that line
+    lacks may hold the original words inside a comment (`x = run(cfg)` became `x = true  // run(cfg) is not needed`)."""
+    lt = list(TOKEN.finditer(line))
+    gm = list(TOKEN.finditer(g))
+    if not lt or not gm or lt[0].group() != gm[0].group():
+        return False
+    spans, pos = [], 0  # spans[i]: where in g the i-th token of line matched, by greedy order
+    for t in lt:
+        while pos < len(gm) and gm[pos].group() != t.group():
+            pos += 1
+        if pos == len(gm):
+            return False
+        spans.append(gm[pos])
+        pos += 1
+    words = [m for t, m in zip(lt, spans) if t.group()[0].isalnum() or t.group()[0] == "_"]
+    pasted = len(OPENER.findall(g)) > len(OPENER.findall(line))
+    end = words[-1].end() if words and not pasted and is_prose(path) else len(g)
+    return len(NEGATION.findall(g[:end])) <= len(NEGATION.findall(line))
 
 
 def wrapped(line, new):
@@ -268,7 +309,7 @@ def wrapped(line, new):
     return False
 
 
-def rewritten(line, hs, base=(), modified=False):
+def rewritten(line, hs, base=(), modified=False, path=None):
     """True when the merge rewrote this line inside its hunk, so it is no silent drop. Either the
     whole line is a re-wrapped run of the hunk's new lines (`wrapped`), or a new line reads 0.9
     like it. 0.8 would excuse `A new 1` against `B new 1` (0.86), which is a drop. A line that
@@ -278,7 +319,9 @@ def rewritten(line, hs, base=(), modified=False):
     to it, is a restore, never a rewrite: A changed `timeout = 30` to 60, and a stale copy put
     `timeout = 30 #s` back. Whatever the ratio, a new line whose operators or negation differ
     from the lost line is a different statement and never excuses it (`x < 5` to `x >= 5`, `do not`
-    to `do`). Numbers differ only in the `modified` case, the third value above."""
+    to `do`). Numbers differ only in the `modified` case, the third value above. The one exception to the
+    negation rule is `extends`: in a prose file (path), a line that keeps every original word in order and adds a negation
+    only after the last of them is a longer line, not a changed one. A code file has no such exception."""
     num, ops, neg = kinds(line)
     for o, n in hs:
         if line not in o:
@@ -287,7 +330,7 @@ def rewritten(line, hs, base=(), modified=False):
         if wrapped(line, new):
             return True
         for g in new:
-            if extends(line, g):
+            if extends(line, g, path):
                 return True
             gnum, gops, gneg = kinds(g)
             if (gops, gneg) != (ops, neg) or (gnum != num and not modified):
@@ -468,7 +511,7 @@ def lost_in_parent(cwd, m, p, bases, refs, blobs):
             if missing > moved:
                 hs = (hunks(cwd, pairs[path][1], pairs[path][2]) if path in pairs else hunks(cwd, p, m, path)) if hs is None else hs
                 mod = any(l in hn and ho for b in bases for ho, hn in (hunks(cwd, *from_base[b][path][1:]) if path in from_base[b] else hunks(cwd, b, p, path)))
-                if not rewritten(l, hs, in_b, mod):
+                if not rewritten(l, hs, in_b, mod, path):
                     lost.append(l)
         if refs and lost:
             own = branch_only_lines(cwd, p, bases, path, lost, refs)
@@ -540,7 +583,7 @@ def misses(small, big):
     return min(sum(x != y for x, y in zip(small, big[i:])) for i in range(len(big) - len(small) + 1))
 
 
-def undone(o, n, mine):
+def undone(o, n, mine, path=None):
     """True when a hunk of `mine` reverses the earlier hunk (o -> n). Exact. Or the earlier hunk,
     whole and line for line, inside a bigger hunk that holds other edits (a stale value put back
     beside an edited neighbour). Or, with 6 lines or more, on all but one line (a re-worded line).
@@ -552,7 +595,7 @@ def undone(o, n, mine):
         if not o:
             if wrapped(" ".join(n), list(big_n)):
                 continue  # the whole block survives, only its line breaks moved
-            if n and misses(n, big_o) == 0 and any(not rewritten(l, [(big_o, big_n)]) for l in n):
+            if n and misses(n, big_o) == 0 and any(not rewritten(l, [(big_o, big_n)], path=path) for l in n):
                 return True
             continue
         if misses(o, big_n) + misses(n, big_o) <= (1 if len(o) + len(n) >= 6 else 0):
@@ -581,7 +624,7 @@ def reversals(cwd, old, new, files, earlier):
             ea, eb = e.files[path]
             whole = ea == b and eb == a and a != b
             theirs = hunks(cwd, e.parent, e.sha, path) if e.parent else []
-            if not whole and not any(undone(o, n, mine) for o, n in theirs):
+            if not whole and not any(undone(o, n, mine, path) for o, n in theirs):
                 continue
             if elsewhere is None:
                 elsewhere = pool_of(cwd, old, new)
@@ -843,11 +886,44 @@ def history(cwd, rev, window):
     return len(line), out
 
 
+REMEDY_BEGIN, REMEDY_END = "--- begin commit message ---", "--- end commit message ---"  # the marker lines a refusal prints around its message
+PROOF = "git log -1 --format='%%(trailers:key=%s)'" % TRAILER  # the command that reads the trailer back after the commit
+
+
+def remedy_text():
+    """The remedy a refusal prints, one home for the CLI and the merge tool: a complete commit message between the two
+    marker lines, then the command that proves git reads its trailer. Git reads trailers only in the last paragraph.
+    So the Drops-lines, Co-Authored-By and Claude-Session lines are one paragraph, with no blank line inside it.
+    The first line is the sentence the caller prefixes. The rest is printed as it stands, so the message can be
+    copied whole."""
+    return "\n".join([
+        "put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message, in its last paragraph."
+        " The two marker lines are not part of the message: drop them when you copy it." % TRAILER,
+        "The scan keeps the oldest commit's reason for a path and prints it. A later commit does not replace it, so write"
+        " the reason right the first time. A PR-body line replaces it only where the merge tool reads the body:",
+        REMEDY_BEGIN,
+        "Drop lines from <path> on purpose",
+        "",
+        "%s: <path> -- <reason>" % TRAILER,
+        "Co-Authored-By: <model> <noreply@anthropic.com>",
+        "Claude-Session: <session url>",
+        REMEDY_END,
+        "After the commit, read the trailer back: " + PROOF])
+
+
 def say(line):
     """The one home for printed output. A non-UTF-8 name holds surrogates, which a strict stream cannot encode:
     write them as backslash escapes, so the finding prints and the exit code holds."""
     enc = getattr(sys.stdout, "encoding", None) or "utf-8"
     print(line.encode(enc, "backslashreplace").decode(enc))
+
+
+def say_remedy():
+    """Prints remedy_text(): its first line with the check's prefix, the rest as it stands."""
+    first, *rest = remedy_text().splitlines()
+    say("silent-undo: " + first)
+    for line in rest:
+        say(line)
 
 
 def main(argv):
@@ -876,7 +952,7 @@ def main(argv):
         for p in e.problems:
             say("silent-undo: FAIL: " + p)
         if e.problems:
-            say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
+            say_remedy()
         say("silent-undo: UNKNOWN: %s" % e)
         return 1 if (e.problems or a.strict or os.environ.get("CI")) else 0
     for n in notes:
@@ -884,7 +960,7 @@ def main(argv):
     for p in problems:
         say("silent-undo: FAIL: " + p)
     if problems:
-        say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
+        say_remedy()
     return 1 if problems else 0
 
 
