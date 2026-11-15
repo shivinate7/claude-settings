@@ -48,6 +48,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import unittest
 from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -55,6 +56,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # line. These cases check the Central line alone, so no child sees a store.
 for _name in ("MAILBOX_REPO", "MAILBOX_CACHE"):
     os.environ.pop(_name, None)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 MODULE_PATH = os.environ.get("LOCAL_TIME_UNDER_TEST") or os.path.join(HERE, "local_time.py")
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
@@ -2581,6 +2584,129 @@ def case_override_ask_judge_kill_keeps_the_inbox_capture():
             check("%s: the owner's prompt is in the inbox" % label,
                   text is not None and prompt in text,
                   "inbox %r" % (text[-120:] if text else text))
+# The cost of one owner prompt at the prompt hook (decision owner-override). The hook runs as a child under
+# cost_probe.run_hook, which stands in decision_watch.invoke_model and counts each model call and child start.
+# A prompt appends to the session's inbox; its repo sidecar is written once per session.
+INBOX = "handoffs/%s.inbox.md" % OV_SESSION
+REPO_SIDECAR = "handoffs/%s.inbox.repo" % OV_SESSION
+GUARD_LOG = "guard.log"
+OPUS_STATE = "state/override/opus/%s.json" % OV_SESSION
+
+
+class CostTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.folder = os.path.join(ROOT, "cost")  # a subfolder of this run's ROOT: the run removes ROOT, not this
+        os.makedirs(cls.folder, exist_ok=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.folder, ignore_errors=True)
+
+    def repo_in(self, folder):
+        """A folder the hook reads as inside a git repo: it holds a `.git` folder, and no git runs. Set here, so the
+        sidecar case does not depend on where the test file sits."""
+        repo = os.path.join(folder, "repo")
+        os.makedirs(os.path.join(repo, ".git"), exist_ok=True)
+        return repo
+
+    def fire(self, prompt, answers, earlier=None):
+        """The owner types `prompt` after the earlier owner turns `earlier` (transcript lines; None means no transcript).
+        `answers` are the model's (verdict, error) pairs in call order. The cloud variable is unset for the child, so the
+        prompt is judged as in a local session, whatever the test runner's own environment holds."""
+        folder = tempfile.mkdtemp(dir=self.folder)
+        payload = {"hook_event_name": "UserPromptSubmit", "session_id": OV_SESSION, "prompt": prompt,
+                   "cwd": self.repo_in(folder)}
+        if earlier is not None:
+            path = os.path.join(folder, "transcript.jsonl")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("".join(line + "\n" for line in earlier + [owner_turn(prompt)]))
+            payload["transcript_path"] = path
+        with remote_env(None):
+            return cost_probe.run_hook(MODULE_PATH, json.dumps(payload), folder, answers)
+
+    def test_a_prompt_with_no_opus_word_makes_no_model_call(self):
+        run = self.fire("fix the parser and run the tests", [[{"ok": True}, None]])
+        self.assertEqual((run["code"], run["models"], run["children"]), (0, [], []),
+                         "a prompt with no Opus word makes no model call and starts no child; got %r"
+                         % ((run["models"], run["children"]),))
+        self.assertEqual(sorted(run["files"]), [INBOX, REPO_SIDECAR],
+                         "the first prompt of a session saves to the inbox and writes the repo sidecar; got %r"
+                         % (run["files"],))
+
+    def test_a_second_prompt_in_a_session_writes_only_the_inbox(self):
+        folder = tempfile.mkdtemp(dir=self.folder)
+        payload = {"hook_event_name": "UserPromptSubmit", "session_id": OV_SESSION, "cwd": self.repo_in(folder)}
+        with remote_env(None):
+            for prompt in ("fix the parser", "and now the docs"):
+                run = cost_probe.run_hook(MODULE_PATH, json.dumps(dict(payload, prompt=prompt)), folder,
+                                          [[{"ok": True}, None]])
+        self.assertEqual((run["code"], run["models"], run["children"]), (0, [], []),
+                         "a later prompt makes no model call and starts no child; got %r"
+                         % ((run["models"], run["children"]),))
+        self.assertEqual(run["files"], [INBOX],
+                         "a later prompt appends to the inbox only; the sidecar is written once; got %r"
+                         % (run["files"],))
+
+    def test_the_keyword_opus_grant_makes_no_model_call(self):
+        run = self.fire("opus 2h", [[{"ok": True}, None]])
+        self.assertEqual((run["code"], run["models"], run["children"]), (0, [], []),
+                         "a keyword grant is read without the model or a child; got %r"
+                         % ((run["models"], run["children"]),))
+        self.assertEqual(sorted(run["files"]), sorted([GUARD_LOG, INBOX, REPO_SIDECAR, OPUS_STATE]),
+                         "a keyword grant writes the inbox, the sidecar, the guard log and the grant file; got %r"
+                         % (run["files"],))
+
+    def test_an_owner_opus_ask_the_judge_refuses_makes_one_call_and_no_scope_read(self):
+        run = self.fire("send opus judges", [[{"ok": False, "reason": "not a request"}, None]],
+                        earlier=[owner_turn("builders should review the refactor")])
+        self.assertEqual(run["code"], 0)
+        self.assertEqual(len(run["models"]), 1,
+                         "a refused ask makes the judge call only, the scope read waits for a yes; got %r"
+                         % (run["models"],))
+        self.assertEqual((run["children"], sorted(run["files"])), ([], sorted([INBOX, REPO_SIDECAR])),
+                         "a refused ask starts no child and writes no grant file or guard line; got %r"
+                         % ((run["children"], run["files"]),))
+
+    def test_an_owner_opus_ask_the_judge_grants_makes_two_calls_the_ask_then_the_scope_read(self):
+        hooks_modules()
+        import call_judge  # the timeouts this case pins
+        answers = [[{"ok": True}, None], [{"ok": True, "roles": ["builder"]}, None]]
+        run = self.fire("send opus judges", answers, earlier=[owner_turn("builders should review the refactor")])
+        self.assertEqual(run["code"], 0)
+        self.assertEqual([call["timeout"] for call in run["models"]],
+                         [call_judge.OPUS_ASK_TIMEOUT, call_judge.OPUS_SCOPE_TIMEOUT],
+                         "a yes makes the ask call, then the scope read; got %r" % (run["models"],))
+        self.assertEqual(run["children"], [], "the two reads start no child; got %r" % (run["children"],))
+        self.assertEqual(sorted(run["files"]), sorted([GUARD_LOG, INBOX, REPO_SIDECAR, OPUS_STATE]),
+                         "a granted ask writes the grant file and one guard line; got %r" % (run["files"],))
+
+    def test_an_owner_opus_ask_that_names_a_role_makes_one_call(self):
+        run = self.fire("send opus builders", [[{"ok": True}, None]], earlier=[owner_turn("the refactor is next")])
+        self.assertEqual(run["code"], 0)
+        self.assertEqual(len(run["models"]), 1,
+                         "an ask that names a role reads no scope, so one call; got %r" % (run["models"],))
+        self.assertEqual(run["children"], [], "the ask starts no child; got %r" % (run["children"],))
+
+    def test_a_plain_override_ask_the_judge_refuses_makes_one_call_and_no_grant(self):
+        # Main's plain override ask: a prompt that holds the whole word `override` goes to one judge call (override.grant_override_ask).
+        run = self.fire("yes override that", [[{"ok": False}, None]])
+        self.assertEqual(run["code"], 0)
+        self.assertEqual(len(run["models"]), 1,
+                         "a prompt with the word override makes one judge call; got %r" % (run["models"],))
+        self.assertEqual((run["children"], sorted(run["files"])), ([], sorted([INBOX, REPO_SIDECAR])),
+                         "a refused plain override starts no child and writes no grant file or guard line; got %r"
+                         % ((run["children"], run["files"]),))
+
+    def test_a_plain_override_ask_the_judge_grants_makes_one_call_and_one_grant(self):
+        run = self.fire("yes override that", [[{"ok": True}, None]])
+        self.assertEqual(run["code"], 0)
+        self.assertEqual(len(run["models"]), 1,
+                         "a granted plain override is one judge call; got %r" % (run["models"],))
+        self.assertEqual(run["children"], [], "the granted override starts no child; got %r" % (run["children"],))
+        self.assertIn(INBOX, run["files"], "the prompt is still saved to the inbox; got %r" % (run["files"],))
+        self.assertTrue(any(name.startswith("state/override/") for name in run["files"]),
+                        "a granted plain override writes its grant file; got %r" % (run["files"],))
 
 
 def main():
@@ -2694,6 +2820,8 @@ def main():
         case_override_ask_plain_one_act_logs_its_words_once()
         case_override_ask_off_in_the_reason_grants_once()
         case_override_ask_judge_kill_keeps_the_inbox_capture()
+        if not cost_probe.run_class(CostTests):
+            FAILED.append("CostTests")
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if FAILED:

@@ -20,11 +20,15 @@ import subprocess
 import sys
 import tempfile
 import time
+import unittest
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 MODULE_PATH = os.environ.get("DECISION_WATCH_UNDER_TEST") or os.path.join(HERE, "decision_watch.py")
 
 _spec = importlib.util.spec_from_file_location("decision_watch_under_test", MODULE_PATH)
@@ -478,13 +482,17 @@ def case_early_exit_before_transcript_read():
 # own invocations. The key holds the file's bytes, so an edited file is judged again, even
 # when the edit falls past the 4000 characters of diff the model is shown.
 
-def _fake_claude(name, verdict='{"verdict": "ALLOW"}'):
-    """Put a fake `claude` first on PATH. Return (count_file, restore)."""
+def _fake_claude(name, verdict='{"verdict": "ALLOW"}', record_cwd=False):
+    """Put a fake `claude` first on PATH. Return (count_file, restore). With record_cwd, each run also writes
+    its working directory to a `cwd` file beside the count file."""
     bindir = os.path.join(ROOT, name + "_bin")
     os.makedirs(bindir, exist_ok=True)
     count = os.path.join(bindir, "count")
     py = os.path.join(bindir, "fake_claude.py")
-    write(py, "import json, sys\nopen(%r, 'a').write('x')\nprint(json.dumps({'result': %r}))\n" % (count, verdict))
+    body = "import json, sys\nopen(%r, 'a').write('x')\n" % count
+    if record_cwd:
+        body += "import os\nopen(%r, 'w').write(os.getcwd())\n" % os.path.join(bindir, "cwd")
+    write(py, body + "print(json.dumps({'result': %r}))\n" % verdict)
     launcher = os.path.join(bindir, "claude")
     write(launcher, '#!/bin/sh\nexec "%s" "%s" "$@"\n' % (sys.executable, py))
     os.chmod(launcher, 0o755)
@@ -1331,6 +1339,30 @@ def case_parse_verdict_default_shape():
         check("parse_verdict: %s gives no verdict and an error" % label, v is None and bool(e), (v, e))
 
 
+def case_parse_verdict_reads_a_places_reply():
+    # The where-else judge's shape (PLACES): a list of {path, why}, a section optional. An empty list is the one clean empty reply.
+    pv, shape = dw.parse_verdict, dw.PLACES
+    v, e = pv('{"places": [{"path": "hooks/x.py", "section": 442, "why": "r"}]}', shape)
+    check("parse_verdict places: a list with an integer section reads",
+          v == {"places": [{"path": "hooks/x.py", "section": 442, "why": "r"}]} and e is None, (v, e))
+    v, e = pv('{"places": [{"path": "hooks/x.py", "section": null, "why": "r"}]}', shape)
+    check("parse_verdict places: a null section reads", v is not None and e is None, (v, e))
+    v, e = pv('{"places": []}', shape)
+    check("parse_verdict places: an empty list is a clean reply", v == {"places": []} and e is None, (v, e))
+
+
+def case_parse_verdict_places_gives_an_error_for_every_other_reply():
+    pv, shape = dw.parse_verdict, dw.PLACES
+    for text, label in [("no json here", "prose with no JSON"),
+                        ('{"places": [{"path": "hooks/x.py", "why": "r"', "a truncated reply"),
+                        ("null", "null"),
+                        ("{}", "an object with no places key"),
+                        ('{"places": [{"path": 5, "why": "r"}]}', "an entry with a non-text path"),
+                        ('{"places": [{"path": "hooks/x.py", "why": 7}]}', "an entry with a non-text why")]:
+        v, e = pv(text, shape)
+        check("parse_verdict places: %s gives no verdict and an error" % label, v is None and bool(e), (v, e))
+
+
 def case_parse_verdict_honours_a_custom_shape():
     # reply_judge's shape: one key, ok true or false. A value outside it is an error, never a pass.
     shape = {"ok": (True, False)}
@@ -1976,6 +2008,87 @@ def case_unread_zone_less_line_reads_as_local_under_cst():
                           local_turn="2026-11-01T12:00:00-06:00")
 
 
+# The cost of one invoke_model call: one `claude` child and no other, and one isolation temp root
+# made and removed inside the call. Once per call, on success, timeout and start failure alike.
+# A stub of _nowindow.run would count no child start, so each case starts the fake claude for real.
+
+class CostTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.base = os.path.join(ROOT, "cost")  # a subfolder of this run's ROOT: the run removes ROOT, not this
+        os.makedirs(cls.base, exist_ok=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.base, ignore_errors=True)
+
+    def setUp(self):
+        # The isolation root is made under self.sub (tempfile.tempdir), so self.sub holds nothing
+        # but what invoke_model leaves. The config is a scratch dir, never the machine's own.
+        self.sub = tempfile.mkdtemp(dir=self.base)
+        self.cfg = tempfile.mkdtemp(dir=self.base)
+        prior = tempfile.tempdir
+        tempfile.tempdir = self.sub
+        self.addCleanup(setattr, tempfile, "tempdir", prior)
+        env = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def call(self):
+        # One model call, with each child start counted at Popen. The claude child is the fake on PATH, so its start is real.
+        with cost_probe.children() as log:
+            result = dw.invoke_model("P")
+        return result, log
+
+    def assert_one_claude_and_clean(self, log):
+        self.assertEqual(cost_probe.names(log.argvs), ["claude"],
+                         "one model call starts exactly one child, the claude binary; got %r" % (log.argvs,))
+        self.assertEqual(cost_probe.leftovers(self.sub), [],
+                         "the isolation root is removed when the call ends; this is left behind")
+
+    def test_a_reply_starts_one_claude_child_and_leaves_no_temp_folder(self):
+        if sys.platform == "win32":
+            self.skipTest("the fake claude is a POSIX launcher")
+        count, restore = _fake_claude("cost_reply", record_cwd=True)
+        self.addCleanup(restore)
+        (verdict, error), log = self.call()
+        self.assertIsNone(error, "a valid reply is no error")
+        self.assertEqual(verdict, ALLOW)
+        self.assert_one_claude_and_clean(log)
+        with open(os.path.join(os.path.dirname(count), "cwd"), encoding="utf-8") as f:
+            cwd = f.read()
+        self.assertEqual(os.path.realpath(os.path.dirname(cwd)), os.path.realpath(self.sub),
+                         "the isolation root is made under this case's folder; cwd is %r" % cwd)
+
+    def test_a_timeout_starts_one_claude_child_and_leaves_no_temp_folder(self):
+        if sys.platform == "win32":
+            self.skipTest("the fake claude is a POSIX launcher")
+        _count, restore = _fake_claude("cost_timeout")
+        self.addCleanup(restore)
+        # The claude child starts for real. Its wait ends as a timeout at once, so no clock runs here.
+        real_communicate = subprocess.Popen.communicate
+
+        def late_for_claude(proc, *args, **kwargs):
+            if cost_probe.names([proc.args])[0] == "claude":
+                raise subprocess.TimeoutExpired(["claude"], dw.MODEL_TIMEOUT)
+            return real_communicate(proc, *args, **kwargs)
+
+        with mock.patch.object(subprocess.Popen, "communicate", late_for_claude):
+            (verdict, error), log = self.call()
+        self.assertIsNone(verdict)
+        self.assertTrue(error, "a timeout is an error, not a verdict")
+        self.assert_one_claude_and_clean(log)
+
+    def test_a_start_failure_starts_one_claude_attempt_and_leaves_no_temp_folder(self):
+        nobin = os.path.join(self.cfg, "nobin")  # an empty folder: no claude on PATH, so the start fails
+        os.makedirs(nobin)
+        with mock.patch.dict(os.environ, {"PATH": nobin}):
+            (verdict, error), log = self.call()
+        self.assertIsNone(verdict)
+        self.assertTrue(error, "a start failure is an error, not a verdict")
+        self.assert_one_claude_and_clean(log)
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -2048,8 +2161,12 @@ def main():
         case_unread_fallback_dst_forward_line_is_collected_under_utc,
         case_unread_fallback_dst_reverse_line_stays_out_under_utc,
         case_unread_zone_less_line_reads_as_local_under_cst,
+        case_parse_verdict_reads_a_places_reply,
+        case_parse_verdict_places_gives_an_error_for_every_other_reply,
     ):
         run_case(case)
+    if not cost_probe.run_class(CostTests):
+        FAILED.append("CostTests")
 
     if FAILED:
         print("test_decision_watch FAIL: %d failing check(s)" % len(FAILED))
