@@ -22,7 +22,8 @@ prompt, with its measured figures.
 
 THE STAMP. A cloud run that names a tip (CS_STALE_TIP) writes <config dir>/.claude-settings-install-attempt.json
 when it starts, and removes it when its record lands at that tip. The hook skips the installer for that same tip
-within the backoff, prints one skip line, and never writes the stamp. The stub installer models the stamp. No case
+within the backoff, prints one skip line, and never writes the stamp. A stamp whose epoch is later than the clock is not
+trusted: the installer runs, as for an aged stamp. The stub installer models the stamp. No case
 runs install.sh's own write_attempt_stamp, and none covers the install lock wait.
 
 THE SEAM. Each fixture is a bare origin, a seed that pushes to it, and a source clone at the recorded sha,
@@ -69,6 +70,10 @@ STAMP_NAME = ".claude-settings-install-attempt.json"
 DEFAULT_BACKOFF = 900
 # Seconds an aged stamp is moved back by. Far past the default backoff, so the reinstall is not a near miss.
 AGED_BY = 3600
+# The hook's clock in the cases that set it. CLOCK_SITE, on the hook's PYTHONPATH, makes time.time() read CS_TEST_CLOCK,
+# so a stamp's age is exact and no assert reads the machine's clock (P5).
+CLOCK_NOW = 1700000000
+CLOCK_SITE = 'import os\nimport time\ntime.time = lambda: float(os.environ["CS_TEST_CLOCK"])\n'
 SKIPPED = re.compile(r"claude-settings: reinstall skipped \(install started at ([0-9a-f]{7}) not finished, "
                      r"retry in (\d+) s\)")
 # A timeout case waits out the installer bound the hook has on the code under test (100 s), so its guard sits above.
@@ -78,7 +83,7 @@ GIT_LOCATORS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECT
 HOOK_ENV_DROP = GIT_LOCATORS + ("CLAUDE_CODE_REMOTE", "CLAUDE_CONFIG_DIR", "CLAUDE_SETTINGS_FETCH_TIMEOUT",
                                 "CLAUDE_SETTINGS_REF", "CLAUDE_SETTINGS_REINSTALL_TIMEOUT",
                                 "CLAUDE_SETTINGS_REINSTALL_BACKOFF", "CS_HOOK_INPUT", "CS_STALE_TIP",
-                                "GIT_SHIM_LS_REMOTE", "GIT_SHIM_DIFF", "STUB_EXIT", "STUB_RECORD_SHA")
+                                "GIT_SHIM_LS_REMOTE", "GIT_SHIM_DIFF", "STUB_EXIT", "STUB_RECORD_SHA", "CS_TEST_CLOCK")
 HOOK_ONLY = {"hooks/config_watch.py": "pass  # tweak\n"}
 COST_TERMS = (
     ("the process starts", r"(?i)process(?:es)? starts?|python starts?|starts? (?:one|a|1) python"),
@@ -263,6 +268,7 @@ class Fixture:
         self.home = os.path.join(self.root, "home")
         self.config = os.path.join(self.root, "config")
         self.shim_dir = os.path.join(self.root, "shim")
+        self.clock_dir = os.path.join(self.root, "clock")
         self.origin = os.path.join(self.root, "origin.git")
         self.seed = os.path.join(self.root, "seed")
         self.gitconfig = os.path.join(self.root, "gitconfig")
@@ -276,10 +282,11 @@ class Fixture:
         self.stamp_path = os.path.join(self.config, STAMP_NAME)
         self.source = None
         self.ref = "main"
-        for folder in (self.home, self.config, self.shim_dir, self.seed):
+        for folder in (self.home, self.config, self.shim_dir, self.clock_dir, self.seed):
             os.makedirs(folder)
         write_file(self.gitconfig, "")
         write_file(os.path.join(self.shim_dir, "git"), SHIM, mode=0o755)
+        write_file(os.path.join(self.clock_dir, "sitecustomize.py"), CLOCK_SITE)
         self.git("init", "-q", "--bare", "-b", "main", self.origin)
         self.git("init", "-q", "-b", "main", self.seed)
         write_tree(self.seed, SEED_FILES)
@@ -308,7 +315,7 @@ class Fixture:
         return env
 
     def hook_env(self, cloud=True, ls_remote=None, timeout=None, diff=None, stub_exit=None, settings_ref=None,
-                 record_sha=None, reinstall_timeout=None, stale_tip=None, backoff=None):
+                 record_sha=None, reinstall_timeout=None, stale_tip=None, backoff=None, clock=None):
         env = dict(os.environ)
         for key in HOOK_ENV_DROP:
             env.pop(key, None)
@@ -338,6 +345,9 @@ class Fixture:
             env["CS_STALE_TIP"] = stale_tip
         if backoff:
             env["CLAUDE_SETTINGS_REINSTALL_BACKOFF"] = backoff
+        if clock is not None:
+            env["CS_TEST_CLOCK"] = str(clock)
+            env["PYTHONPATH"] = os.pathsep.join(p for p in (self.clock_dir, os.environ.get("PYTHONPATH")) if p)
         return env
 
     def sha(self, repo, rev):
@@ -1051,6 +1061,48 @@ class StaleInstallBackoff(unittest.TestCase):
         self.assertEqual(len(fx.installer_runs()), 1,
                          "turn 2 ran the installer again: %d runs in all" % len(fx.installer_runs()))
         self.assert_skipped(run, new)
+
+    # A stamp whose epoch is later than the clock is not trusted. A clock stepped back would hold the retry past the
+    # backoff, so the hook reads that stamp as aged and runs the installer. The hook's clock is CLOCK_NOW (CLOCK_SITE).
+
+    def set_epoch(self, fx, epoch):
+        """Sets the epoch of the attempt stamp the stub installer seeded, so the stamp is still the installer's."""
+        stamp = fx.read_stamp()
+        self.assertIsNotNone(stamp, "scope: no attempt stamp to set the epoch of")
+        stamp["epoch"] = epoch
+        fx.write_stamp(json.dumps(stamp) + "\n")
+
+    def assert_future_stamp_reinstalls(self, ahead):
+        fx, old, new = behind(self._testMethodName)
+        base = self.seed_stamp(fx, new)
+        self.set_epoch(fx, CLOCK_NOW + ahead)
+        run = fx.run_hook(clock=CLOCK_NOW)
+        self.assertEqual(run.lines, [REINSTALL % (new[:SHORT], old[:SHORT])],
+                         "a stamp %d s after the clock was trusted: lines %r, want the reinstall line; stderr: %s"
+                         % (ahead, run.lines, run.tail()))
+        self.assertEqual(len(fx.installer_runs()) - base, 1,
+                         "a stamp %d s after the clock ran the installer %d times, want 1"
+                         % (ahead, len(fx.installer_runs()) - base))
+
+    def test_future_stamp_an_hour_ahead_reinstalls(self):
+        self.assert_future_stamp_reinstalls(AGED_BY)
+
+    def test_future_stamp_one_second_ahead_reinstalls(self):
+        self.assert_future_stamp_reinstalls(1)
+
+    # The green control: a stamp 10 s before the clock still holds the retry at 890 s. The exact figure also shows the
+    # clock took effect in the hook: on the machine's real clock, which is past CLOCK_NOW, the stamp would be aged.
+
+    def test_recent_past_stamp_still_skips_on_the_clock(self):
+        fx, old, new = behind(self._testMethodName)
+        base = self.seed_stamp(fx, new)
+        self.set_epoch(fx, CLOCK_NOW - 10)
+        run = fx.run_hook(clock=CLOCK_NOW)
+        want = "claude-settings: reinstall skipped (install started at %s not finished, retry in 890 s)" % new[:SHORT]
+        self.assertEqual(run.lines, [want],
+                         "a stamp 10 s before the clock did not skip the retry at 890 s: lines %r; stderr: %s"
+                         % (run.lines, run.tail()))
+        self.assertEqual(len(fx.installer_runs()) - base, 0, "the skipped retry ran the installer")
 
 
 class HookFile(unittest.TestCase):
