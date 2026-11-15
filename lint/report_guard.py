@@ -958,7 +958,7 @@ def asks_a_question(text):
 # did not), each until one lands. A label counts only where it starts an item: at line start (after
 # `>`, a bullet, a Done-item tag (BUILT, RECORDED or OTHER) after that bullet, and bold, backtick or
 # quote marks), right after a report label (also after a Done-item tag that follows the label, as in
-# `**Done** OTHER: Recovered: x (git)`; owner, waiting page item 860 pick b, 2026-11-15 11:34 CST), or
+# `**Done** OTHER: Recovered: x (git)`), or
 # after "; " or ". ". So a mid-sentence "recovered:" or a backticked name of the guard is never a carry
 # line, and neither is a bullet or report label tagged with a non-Done word.
 CARRY_MARKS = "*_`\"'“”‘’"
