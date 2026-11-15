@@ -13964,8 +13964,11 @@ class CloudSession(Env):
                     os.environ[name] = value
             yield
 
-    def put_role(self, role, session=ROLE_SESSION):
-        put(self.role_file, json.dumps({"session": session, "role": role}))
+    def put_role(self, role, session=ROLE_SESSION, step=None):
+        data = {"session": session, "role": role}
+        if step is not None:
+            data["step"] = step  # a lane's record names the step its own pull request carries (ruling own-lanes-merge-claude-settings-prs)
+        put(self.role_file, json.dumps(data))
 
     def put_bytes(self, data):
         os.makedirs(os.path.dirname(self.role_file), exist_ok=True)
@@ -14041,9 +14044,9 @@ class MergeRoleCheck(CloudSession):
         return err
 
     # ---- the constants and the reader
-    # decision session-tiers: only a batch runner merges
-    def test_the_merge_roles_are_the_batch_runner_only(self):
-        self.assertEqual(set(merge.MERGE_ROLES), {"batch-runner"})
+    # Ruling own-lanes-merge-claude-settings-prs (owner, 11:12 CST Nov 15, 2026): a lane joins the batch runner, for its own pull request only
+    def test_the_merge_roles_are_the_batch_runner_and_the_lane(self):
+        self.assertEqual(set(merge.MERGE_ROLES), {"batch-runner", "lane"})
 
     def test_the_role_path_is_the_state_file_under_the_config_dir(self):
         with self.cloud():
@@ -14265,6 +14268,105 @@ class MergeRoleCheck(CloudSession):
                 self.assert_writer_refused(*argv, rc_is=2)  # 2 is argparse's usage-error code, as p.error gives today
                 self.assertEqual(self.role_files(), {})
                 self.assertEqual(self.host.pr_calls, [])
+
+class LaneOwnMerge(CloudSession):
+    """Ruling own-lanes-merge-claude-settings-prs (owner, 11:12 CST Nov 15, 2026; the merge act only): a cloud lane session may run
+    `merge <pr> --confirm --head <sha>` on its OWN ready pull request. Its role file is {"session", "role": "lane", "step": <slug>}, and
+    its own pull request is one whose head ref is lane_head_refs(<slug>): the bare slug or lane/<slug>. The fixture's own pull request
+    is branch `feat`, so the step is `feat`. Every other merge check stays, and a lane never runs --ready (the batch runner marks ready)."""
+
+    def setUp(self):
+        super().setUp()
+        self.put_role("lane", step="feat")
+
+    def assert_role_file(self, step="feat"):
+        """The case probes the lane branch, so the role file it writes is read back first (P7). The file, not the reader, is read."""
+        with open(self.role_file, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"session": ROLE_SESSION, "role": "lane", "step": step}, "the case did not write the lane role it probes")
+
+    def test_a_lane_merges_its_own_ready_pull_request_at_the_head_it_ran_on(self):
+        self.assert_role_file()
+        rc, out, err = self.run_main("7", "--confirm", "--head", self.head())
+        self.assertEqual(rc, 0, "a lane's confirm on its own ready pull request was refused: " + out + err)
+        self.assertTrue(self.host.merged, "a lane's confirm on its own ready pull request did not merge: " + out + err)
+        self.assertNotIn("Traceback", err)
+
+    def test_a_lane_merges_a_pull_request_whose_head_is_its_lane_branch(self):
+        self.assert_role_file()
+        self.push_branch("lane/feat")
+        self.host.branch = "lane/feat"
+        rc, out, err = self.run_main("7", "--confirm", "--head", self.head("lane/feat"))
+        self.assertEqual(rc, 0, "a lane's confirm on a pull request whose head is lane/<step> was refused: " + out + err)
+        self.assertTrue(self.host.merged, "a lane's confirm on a pull request whose head is lane/<step> did not merge: " + out + err)
+
+    def test_a_lane_confirm_with_no_head_names_the_head_the_ci_ran_on(self):
+        self.assert_role_file()
+        refs = self.refs()
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assertEqual(rc, 1, out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "a lane's confirm with no --head merged: " + out + err)
+        self.assertEqual(self.refs(), refs, "a lane's confirm with no --head pushed before it was refused")
+        self.assertRegex(err, r"(?i)needs the head the CI ran on", "a lane's confirm with no --head does not say the merge needs the head the CI ran on")
+        self.assertNotIn("--confirm", err)
+        self.assertNotIn("Traceback", err)
+
+    def test_a_lane_cannot_mark_its_own_draft_ready(self):
+        self.assert_role_file()
+        self.host.draft = True
+        rc, out, err = self.run_main("7", "--ready")
+        self.assertEqual(self.host.readies, [], "a lane's --ready marked its own draft ready: " + out + err)
+        self.assertNotEqual(rc, 0, "a lane's --ready on its own draft exited 0: " + out + err)
+        self.assertNotIn("Traceback", err)
+
+
+class LaneRefusals(CloudSession):
+    """Pins for ruling own-lanes-merge-claude-settings-prs: a lane's confirm is refused on another lane's pull request, on a near-miss
+    step, on its own draft (the draft step would mark it ready), on a red check, and with no step in its role file. Each refusal
+    names neither --confirm nor --ready. These are green on the old code too, since it refuses every lane; LaneOwnMerge holds the red
+    for the lane's own pull request."""
+
+    def setUp(self):
+        super().setUp()
+        self.put_role("lane", step="feat")
+
+    def assert_refused_quietly(self, *argv):
+        """A lane's run refused: rc 1, nothing merged, nothing pushed, a line on stderr that names neither --confirm nor --ready. -> stderr"""
+        refs, claims = self.refs(), self.claims()
+        rc, out, err = self.run_main(*argv)
+        self.assertEqual(rc, 1, out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "a lane's refused run merged: " + out + err)
+        self.assertEqual(self.refs(), refs, "a lane's refused run pushed")
+        self.assertEqual(self.claims(), claims, "a lane's refused run pushed a claim to main")
+        self.assertTrue(err.strip(), "the refusal said nothing on stderr")
+        self.assertNotIn("Traceback", err)
+        self.assertNotIn("--confirm", err)
+        self.assertNotIn("--ready", err)
+        return err
+
+    def test_a_lane_cannot_merge_another_lanes_pull_request(self):
+        self.push_branch("lane/other")
+        self.host.branch = "lane/other"
+        self.assert_refused_quietly("7", "--confirm", "--head", self.head("lane/other"))
+
+    def test_a_near_miss_step_does_not_match_the_pull_request_branch(self):
+        self.put_role("lane", step="fea")  # lane_head_refs("fea") is fea and lane/fea; the pull request's branch is feat
+        self.assert_refused_quietly("7", "--confirm", "--head", self.head())
+
+    def test_a_lane_cannot_merge_its_own_draft(self):
+        self.host.draft = True
+        self.assert_refused_quietly("7", "--confirm", "--head", self.head())
+        self.assertEqual(self.host.readies, [], "a lane's confirm on its own draft ran the draft step and marked it ready")
+
+    def test_a_lane_is_refused_on_a_red_check(self):
+        self.host.state = "red: checks: fail"
+        self.host.seq = [(False, "a check is red: checks: fail")]
+        self.assert_refused_quietly("7", "--confirm", "--head", self.head())
+        self.assertEqual(self.host.waits, [], "a lane's confirm waited on a red head under the lock")
+
+    def test_a_lane_role_with_no_step_is_refused_at_confirm(self):
+        self.put_role("lane")
+        self.assert_refused_quietly("7", "--confirm", "--head", self.head())
+
 
 class StandingGrantSwitch(CloudSession):
     """merge.standingGrant (decision standing-merge-grant) switches the standing merge grant.
@@ -22941,6 +23043,12 @@ class LocalSessionRoleCheck(CloudSession):
     # RED: the old local confirm reads no role file, so a coordinator file does not refuse it.
     def test_a_coordinator_file_refuses_a_local_confirm(self):
         self.put_local_role("coordinator")
+        self.assert_refused()
+
+    # Pin, green on the old code: a local session's lane file names no tier a local confirm may run as, so the confirm is refused.
+    # The lane role joins MERGE_ROLES for cloud sessions only, so this pins the local path that must not follow it.
+    def test_a_lane_file_refuses_a_local_confirm(self):
+        self.put_local_role("lane")
         self.assert_refused()
 
     # RED: the old local confirm reads no role file, so a file for another session does not refuse it.
