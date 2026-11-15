@@ -339,7 +339,7 @@ class NightlySkipReadErrors(unittest.TestCase):
     http.client.IncompleteRead (a body cut short; not an OSError) and any other Exception (owner page item 880, 11:53 CST
     Nov 15). The stand-in records each URL, so a case first shows the read it means was reached, then judges the outcome."""
 
-    def gate(self, errors):
+    def run_skip(self, errors):
         """Run the gate on the live read, with the reads named in `errors` raising. -> (result, the URLs requested)."""
         urls = []
 
@@ -371,31 +371,31 @@ class NightlySkipReadErrors(unittest.TestCase):
 
     def test_an_incomplete_read_of_the_runs_list_is_unknown_not_a_crash(self):
         # Mistake: runs_page catches URLError, OSError and ValueError only, and http.client.IncompleteRead is none of them.
-        got, urls = self.gate({"runs": http.client.IncompleteRead(b"")})
+        got, urls = self.run_skip({"runs": http.client.IncompleteRead(b"")})
         self.assert_reached(urls, "event=schedule", "runs")
         self.assert_unknown(got, "runs")
 
     def test_a_runtime_error_on_the_runs_list_is_unknown_not_a_crash(self):
         # Mistake: any Exception other than the three runs_page catches escapes main() as a traceback and exit 1.
-        got, urls = self.gate({"runs": RuntimeError("the runs read broke")})
+        got, urls = self.run_skip({"runs": RuntimeError("the runs read broke")})
         self.assert_reached(urls, "event=schedule", "runs")
         self.assert_unknown(got, "runs")
 
     def test_an_incomplete_read_of_a_jobs_list_is_unknown_not_a_crash(self):
         # Mistake: jobs_reader catches the same three, so a push run's jobs read cut short escapes main() the same way.
-        got, urls = self.gate({"jobs": http.client.IncompleteRead(b"")})
+        got, urls = self.run_skip({"jobs": http.client.IncompleteRead(b"")})
         self.assert_reached(urls, "/jobs?", "jobs")
         self.assert_unknown(got, "jobs")
 
     def test_a_runtime_error_on_a_jobs_list_is_unknown_not_a_crash(self):
         # Mistake: an Exception from the jobs read, past jobs_reader's three catches, escapes proven() and main().
-        got, urls = self.gate({"jobs": RuntimeError("the jobs read broke")})
+        got, urls = self.run_skip({"jobs": RuntimeError("the jobs read broke")})
         self.assert_reached(urls, "/jobs?", "jobs")
         self.assert_unknown(got, "jobs")
 
     def test_control_a_url_error_on_the_runs_list_is_already_unknown(self):
         # Control, green on the old code: URLError is one of the three runs_page catches, so this read is already unknown.
-        got, urls = self.gate({"runs": urllib.error.URLError("unreachable")})
+        got, urls = self.run_skip({"runs": urllib.error.URLError("unreachable")})
         self.assert_reached(urls, "event=schedule", "runs")
         self.assert_unknown(got, "runs")
 
