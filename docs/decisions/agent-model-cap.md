@@ -30,7 +30,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | reviewer, per round (the round rows below) | the round rows: haiku on a round 1 of a change with no guard or check, sonnet from round 2, on a guard or check change, and on a fix verifier; set per spawn, which overrides the frontmatter `haiku` | the round rows |
 | record-writer (`agents/record-writer.md`) | haiku | xhigh |
 | builder | sonnet | high |
-| builder, try 3 after a FAIL at review round 2 | the round rows: opus, the owner's standing grant; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | the round rows |
+| builder, try 3 after a FAIL at review round 2, or a round 1 FAIL with failed fix verifiers | the round rows: opus, the owner's standing grant; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | the round rows |
 | Plan (`agents/plan.md`) | opus | high |
 | designer (`agents/designer.md`) | opus, the owner's standing grant of 2026-10-26 | high |
 | design-reviewer (`agents/design-reviewer.md`) | opus, the owner's standing grant of 2026-10-26 | high |
