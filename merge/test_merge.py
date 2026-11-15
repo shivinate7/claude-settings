@@ -6409,6 +6409,9 @@ class SilentUndo(Env):
 DEBT_FIXTURE = "# Retire target\n\n- **What.** A fixture debt for the merge tests.\n- **Where.** None.\n- **Decision.** none\n- **Retire.** %s\n"
 RETIRE_TEST = "Delete the fixture. Check: `tests/test_retire_target.py`."
 PROSE_RETIRE = "Confirm it on a phone."  # names no runnable check: the close needs a cited run
+CI_YML = ("name: checks\non: pull_request\njobs:\n"  # two shard jobs, each with a step that runs the retire test: the CI step runs the suite
+          "  shard-1:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Retire suite\n        run: python3 tests/test_retire_target.py\n"
+          "  shard-2:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Retire suite\n        run: python3 tests/test_retire_target.py\n")
 
 
 def names_kind(test, out, slug, kind):
@@ -6443,9 +6446,10 @@ class DebtRetire(Env):
     """A PR that closes a debt (deletes the debt file) runs that debt's Retire check on the PR head before preview or confirm
     lets it through. The fixture debt names tests/test_retire_target.py, which exits with the code each case gives it."""
 
-    def pr_on_debt(self, test_exit, closes=True, retire=RETIRE_TEST, test_text=None):
+    def pr_on_debt(self, test_exit, closes=True, retire=RETIRE_TEST, test_text=None, ci_yml=None):
         """main gains a debt file. feat is cut from that main, adds the pending record and the test, and then either deletes
-        the debt (closes) or edits it in place. feat is cut from main after the debt lands, so no main commit is a reversal of it."""
+        the debt (closes) or edits it in place. feat is cut from main after the debt lands, so no main commit is a reversal of it.
+        ci_yml, when given, is the head's .github/workflows/checks.yml: a CI step that runs the test."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
@@ -6457,6 +6461,8 @@ class DebtRetire(Env):
         sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main")
         put(os.path.join(o, "docs/decisions/second.md"), record("pending", "second"))
         put(os.path.join(o, "tests/test_retire_target.py"), test_text or "import sys\nsys.exit(%d)\n" % test_exit)
+        if ci_yml:
+            put(os.path.join(o, ".github/workflows/checks.yml"), ci_yml)
         if closes:
             sh(o, "git", "rm", "-q", "docs/debts/retire-target.md")
         else:
@@ -6501,6 +6507,30 @@ class DebtRetire(Env):
         self.assertEqual(rc, 0, out)
         self.assertIn("PREVIEW", out)
         self.assertNotIn("BLOCKED", out)
+
+    def test_a_draft_closing_a_debt_whose_suite_a_ci_step_runs_is_deferred_and_not_run_here(self):
+        """The suite exits 1 when run here, so a local run would refuse the draft. A draft's close is deferred to confirm instead."""
+        self.pr_on_debt(1, ci_yml=CI_YML)
+        self.host.draft = True
+        rc, out = self.run_merge("7")
+        self.assertNotIn("BLOCKED", out, "a draft's close whose suite a CI step runs was refused by a local run: " + out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("deferred to confirm: no run exists yet", out, "the draft's deferred close is not printed: " + out)
+
+    def test_a_closed_debt_whose_suite_a_ci_step_runs_reads_the_pr_heads_ci_steps_and_passes_on_green(self):
+        """The suite exits 1 when run here, so a pass can only come from the CI steps the reader gives for the PR head."""
+        self.pr_on_debt(1, ci_yml=CI_YML)
+        head = self.head()
+        reads = []
+
+        def ci_steps(sha):
+            reads.append(sha)
+            return [{"job": job, "name": "Retire suite", "conclusion": "success", "status": "completed", "run_sha": sha}
+                    for job in ("shard-1", "shard-2")]
+        self.host.ci_steps = ci_steps
+        rc, out = self.run_merge("7")
+        self.assertIn(head, reads, "the PR head's CI steps were not read for a non-draft close whose suite a CI step runs: " + out)
+        self.assertEqual(rc, 0, out)
 
     def test_confirm_with_a_claim_keeps_a_cited_run_on_the_pr_head(self):
         """The claim commit goes on top of the PR head. The cited run is on that head, so the re-check after the claim must accept it."""

@@ -4,9 +4,9 @@
 Every case builds a throwaway git repo in its own folder under this run's temp root (decision test-temp-standard),
 commits a base and a head, and asks the check for its findings. A fixture test script appends its own name and its
 working folder to the file named by RETIRE_MARKS, so a case shows that a Retire check ran, or did not, from that file.
-No case waits on a clock. The Retire-run cases pass a fake run_state, so no case reads the network.
+No case waits on a clock. The Retire-run cases pass a fake run_state, and the CI-step cases a fake ci_steps reader, so no case reads the network.
 """
-import atexit, json, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
+import atexit, inspect, json, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -42,6 +42,9 @@ RUN_URL = "https://github.com/fixture/repo/actions/runs/42"
 ATTRIBUTION = "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
 SESSION_URL = "https://claude.ai/code/session_013NEJL2SdAA1CCG5eTFVFVr"
 NO_RETIRED = "check_debt_retire has no retired(): a Retire-run cite cannot excuse a debt close (decision debt-close-runs-retire)"
+NO_CI_CHECK = ("check() has no ci_steps, draft or deferred parameter: a debt close whose Retire suite a CI step runs is not judged "
+               "from the PR's CI run yet (ruling 2026-11-14 20:32 CST)")
+WORKFLOW = ".github/workflows/checks.yml"
 
 
 def sh(cwd, *cmd):
@@ -62,6 +65,31 @@ def debt(retire):
 
 def pairs(findings):
     return sorted((f.slug, f.kind) for f in findings)
+
+
+def checks_yml(run="python3 tests/test_fail.py", name="Guard suite", jobs=("shard-1", "shard-2")):
+    """A head workflow: one job per name in `jobs`, each with one step `name` that runs `run`. Two jobs, as two shards of a suite are."""
+    out = ["name: checks", "on: pull_request", "jobs:"]
+    for job in jobs:
+        out += ["  %s:" % job, "    runs-on: ubuntu-latest", "    steps:", "      - uses: actions/checkout@v4",
+                "      - name: %s" % name, "        run: %s" % run]
+    return "\n".join(out) + "\n"
+
+
+def big_workflow():
+    """Twelve jobs of six steps each. The suite is step 4 of job-03 and of job-07; no other step names it."""
+    out = ["name: checks", "on: pull_request", "jobs:"]
+    for j in range(12):
+        out += ["  job-%02d:" % j, "    runs-on: ubuntu-latest", "    steps:"]
+        for s in range(6):
+            run = "python3 tests/test_fail.py" if s == 4 and j in (3, 7) else "echo step %d of job %d" % (s, j)
+            out += ["      - name: step %d" % s, "        run: %s" % run]
+    return "\n".join(out) + "\n"
+
+
+def ci_row(job, conclusion="success", status="completed", sha=None, name="Guard suite"):
+    """One step of the PR's CI run, as the reader gives it: {job, name, conclusion, status, run_sha}."""
+    return {"job": job, "name": name, "conclusion": conclusion, "status": status, "run_sha": sha}
 
 
 class Runs:
@@ -549,6 +577,207 @@ class RetireRun(Case):
         body = "Retire-run: d-prose -- %s\n" % RUN_URL
         self.assertEqual(pairs(self.findings(pr_body=body)), [("d-prose", "unknown")], "scope")
         self.assertEqual(self.retired_of(body, None), {})
+
+
+class CiSteps(Case):
+    """A debt whose Retire names a suite that a CI step runs is judged from the PR's own CI run, and that suite never runs here
+    (ruling 2026-11-14 20:32 CST). The suite is tests/test_fail.py: red if a run here reaches it, and it leaves a mark, so ran() shows a local run."""
+
+    def ci_findings(self, ci_steps=None, draft=False, pr_body="", run_state=None, head=None):
+        """check() with the CI-step read and the draft flag. The deferred list is self.deferred. A check without the parameters is a named red."""
+        self.assertTrue({"ci_steps", "draft", "deferred"} <= set(inspect.signature(D.check).parameters), NO_CI_CHECK)
+        self.deferred = []
+        return D.check(self.dir, self.base, head=head or self.head, pr_body=pr_body, run_state=run_state,
+                       ci_steps=ci_steps, draft=draft, deferred=self.deferred)
+
+    def ci_close(self, retire=FAIL, files=None):
+        """The base holds the debt `d-ci` with `retire`. The head deletes it and adds `files` (default: a workflow whose two shard jobs run the suite)."""
+        self.repo(debts={"d-ci": retire})
+        self.change(write={WORKFLOW: checks_yml()} if files is None else files, rm=["docs/debts/d-ci.md"])
+
+    def test_c1_a_draft_defers_a_close_whose_ci_step_runs_its_suite_and_runs_that_suite_nowhere(self):
+        self.ci_close()
+        found = self.ci_findings(ci_steps=Runs([]), draft=True)
+        self.assertEqual(self.ran(), [], "a draft ran a suite that a CI step runs, so the suite runs twice")
+        self.assertEqual(pairs(found), [], "a draft's close gave a finding: a deferred close neither passes nor refuses")
+        self.assertEqual(len(self.deferred), 1, "the draft's close is not in the deferred list")
+        self.assertIn("d-ci", str(self.deferred[0]), "the deferred entry does not name the debt")
+
+    def test_c2_a_draft_still_runs_a_suite_no_ci_step_names_here(self):
+        self.ci_close(files={WORKFLOW: checks_yml(run="python3 tests/test_pass.py")})
+        found = self.ci_findings(ci_steps=Runs([ci_row("shard-1", sha=self.head)]), draft=True)
+        self.assertEqual(self.ran(), [("test_fail.py", self.dir)], "a draft did not run a suite that no CI step names")
+        self.assertEqual(pairs(found), [("d-ci", "red")], "the local run of a suite no CI step names did not decide a draft's close")
+        self.assertEqual(self.deferred, [], "a suite no CI step names was deferred")
+
+    def test_c3_a_non_draft_with_both_shards_green_on_the_head_passes_and_runs_nothing_here(self):
+        self.ci_close()
+        reader = Runs([ci_row("shard-1", sha=self.head), ci_row("shard-2", sha=self.head)])
+        found = self.ci_findings(ci_steps=reader)
+        self.assertEqual(reader.urls, [self.head], "the CI steps of the PR head were not read")
+        self.assertEqual(self.ran(), [], "a green CI run still ran the suite here")
+        self.assertEqual(pairs(found), [], "two green CI steps on the PR head gave a finding")
+
+    def test_c4_a_green_ci_run_on_a_commit_above_the_head_passes(self):
+        self.ci_close()
+        pr_head = self.head
+        self.change(write={"notes/after.txt": "later\n"})  # the run's commit: one on top of the PR head
+        reader = Runs([ci_row("shard-1", sha=self.head), ci_row("shard-2", sha=self.head)])
+        found = self.ci_findings(ci_steps=reader, head=pr_head)
+        self.assertEqual(reader.urls, [pr_head], "the CI steps of the PR head were not read")
+        self.assertEqual(self.ran(), [], "a green CI run on a commit above the head still ran the suite here")
+        self.assertEqual(pairs(found), [], "a green CI run on a descendant of the PR head did not pass the close")
+
+    def test_c5_a_missing_ci_run_refuses_as_unknown_and_runs_nothing_here(self):
+        self.ci_close()
+        found = self.ci_findings(ci_steps=Runs([]))
+        self.assertEqual(self.ran(), [], "a missing CI run sent the suite to a local run")
+        self.assertEqual(pairs(found), [("d-ci", "unknown")], "a missing CI run did not refuse as unknown")
+
+    def test_c6_a_ci_step_still_running_refuses_as_unknown_and_runs_nothing_here(self):
+        self.ci_close()
+        reader = Runs([ci_row("shard-1", sha=self.head), ci_row("shard-2", conclusion=None, status="in_progress", sha=self.head)])
+        found = self.ci_findings(ci_steps=reader)
+        self.assertEqual(self.ran(), [], "a CI step still running sent the suite to a local run")
+        self.assertEqual(pairs(found), [("d-ci", "unknown")], "a CI step still running did not refuse as unknown")
+
+    def test_c7_a_red_ci_step_refuses_as_red_and_runs_nothing_here(self):
+        self.ci_close()
+        reader = Runs([ci_row("shard-1", conclusion="failure", sha=self.head), ci_row("shard-2", sha=self.head)])
+        found = self.ci_findings(ci_steps=reader)
+        self.assertEqual(self.ran(), [], "a red CI step sent the suite to a local run")
+        self.assertEqual(pairs(found), [("d-ci", "red")], "a red CI step did not refuse as red")
+
+    def test_c8_a_ci_run_on_another_head_refuses_as_unknown_and_runs_nothing_here(self):
+        self.ci_close()
+        tree = sh(self.dir, "git", "rev-parse", self.head + "^{tree}")
+        other = sh(self.dir, "git", "commit-tree", tree, "-m", "a commit of another head")  # unrelated to the PR head
+        self.assertNotEqual(subprocess.run(["git", "merge-base", "--is-ancestor", self.head, other], cwd=self.dir, capture_output=True).returncode, 0,
+                            "scope: the other commit is on the PR head's history")
+        reader = Runs([ci_row("shard-1", sha=other), ci_row("shard-2", sha=other)])
+        found = self.ci_findings(ci_steps=reader)
+        self.assertEqual(self.ran(), [], "a CI run of another head sent the suite to a local run")
+        self.assertEqual(pairs(found), [("d-ci", "unknown")], "a CI run of another head did not refuse as unknown")
+
+    def test_c9_a_ci_read_that_raises_refuses_as_unknown_and_runs_nothing_here(self):
+        self.ci_close()
+        found = self.ci_findings(ci_steps=Runs(RuntimeError("the run list read failed: HTTP 502")))
+        self.assertEqual(self.ran(), [], "a CI read that raised sent the suite to a local run")
+        self.assertEqual(pairs(found), [("d-ci", "unknown")], "a CI read that raised did not refuse as unknown")
+
+    def test_c10_a_ci_read_that_returns_garbage_refuses_as_unknown(self):
+        self.ci_close()
+        found = self.ci_findings(ci_steps=Runs("not a list of steps"))
+        self.assertEqual(self.ran(), [], "a garbage CI read sent the suite to a local run")
+        self.assertEqual(pairs(found), [("d-ci", "unknown")], "a garbage CI read did not refuse as unknown")
+
+    def test_c11_a_skipped_shard_falls_back_to_the_local_run_and_one_green_shard_does_not_clear_it(self):
+        self.ci_close()
+        reader = Runs([ci_row("shard-1", sha=self.head), ci_row("shard-2", conclusion="skipped", sha=self.head)])
+        found = self.ci_findings(ci_steps=reader)
+        self.assertEqual(self.ran(), [("test_fail.py", self.dir)], "a skipped CI step did not fall back to a local run of its suite")
+        self.assertEqual(pairs(found), [("d-ci", "red")], "the local run a skipped step fell back to did not decide the close")
+
+    def test_c12_two_skipped_shards_fall_back_to_the_local_run_which_passes_here(self):
+        self.ci_close(retire=PASS, files={WORKFLOW: checks_yml(run="python3 tests/test_pass.py")})
+        reader = Runs([ci_row("shard-1", conclusion="skipped", sha=self.head), ci_row("shard-2", conclusion="skipped", sha=self.head)])
+        found = self.ci_findings(ci_steps=reader)
+        self.assertEqual(self.ran(), [("test_pass.py", self.dir)], "two skipped CI steps did not fall back to a local run of their suite")
+        self.assertEqual(pairs(found), [], "the local run that two skipped steps fell back to did not pass the close")
+
+    def test_c13_a_head_with_no_workflow_file_runs_the_suite_here_even_with_a_green_reader(self):
+        self.ci_close(files={})
+        reader = Runs([ci_row("shard-1", sha=self.head), ci_row("shard-2", sha=self.head)])  # green: a read that decided here would pass the close
+        found = self.ci_findings(ci_steps=reader)
+        self.assertEqual(self.ran(), [("test_fail.py", self.dir)], "a head with no workflow file did not run the suite here")
+        self.assertEqual(pairs(found), [("d-ci", "red")], "a suite no workflow names did not decide the close by its local run")
+
+    def test_c14_a_debt_with_no_retire_line_stays_a_prose_finding_on_a_draft(self):
+        self.repo()
+        put(os.path.join(self.dir, "docs/debts/d-none.md"), "# A debt\n\n- **What.** %s\n- **Where.** None.\n- **Decision.** none\n" % WHAT)
+        sh(self.dir, "git", "add", "-A")
+        sh(self.dir, "git", "commit", "-q", "-m", "a debt with no Retire line")
+        self.base = self.head = sh(self.dir, "git", "rev-parse", "HEAD")
+        self.change(rm=["docs/debts/d-none.md"])
+        found = self.ci_findings(ci_steps=Runs([ci_row("shard-1", sha=self.head)]), draft=True)
+        self.assertEqual(self.deferred, [], "a debt with no Retire line was deferred")
+        self.assertEqual(pairs(found), [("d-none", "prose")], "a debt with no Retire line stopped being a prose finding on a draft")
+
+    def test_c15_a_green_cited_run_still_clears_a_prose_close_on_a_draft_and_is_read(self):
+        self.repo(debts={"d-prose": PROSE})
+        self.change(rm=["docs/debts/d-prose.md"])
+        runs = Runs(("success", self.head))
+        found = self.ci_findings(ci_steps=Runs([]), draft=True, pr_body="Retire-run: d-prose -- %s\n" % RUN_URL, run_state=runs)
+        self.assertEqual(runs.urls, [RUN_URL], "a draft's prose close did not read its cited run")
+        self.assertEqual(pairs(found), [], "a green cited run did not clear a draft's prose close")
+
+    def test_c16_a_green_cited_run_never_clears_a_red_ci_step(self):
+        self.ci_close()
+        reader = Runs([ci_row("shard-1", conclusion="failure", sha=self.head), ci_row("shard-2", sha=self.head)])
+        found = self.ci_findings(ci_steps=reader, pr_body="Retire-run: d-ci -- %s\n" % RUN_URL, run_state=Runs(("success", self.head)))
+        self.assertEqual(self.ran(), [], "a red CI step sent the suite to a local run, where a cite could clear it")
+        self.assertEqual(pairs(found), [("d-ci", "red")], "a green cited run cleared a red CI step")
+
+    def test_c17_a_commented_out_step_that_names_the_suite_does_not_count(self):
+        """The suite is named only in a comment. A scanner that reads a comment as a step would find a CI step and skip the local run."""
+        wf = ("name: checks\non: pull_request\njobs:\n  shard-1:\n    runs-on: ubuntu-latest\n    steps:\n"
+              "      - name: Guard suite\n        run: python3 tests/test_pass.py\n"
+              "  # shard-2:\n  #   runs-on: ubuntu-latest\n  #   steps:\n  #     - name: Guard suite\n  #       run: python3 tests/test_fail.py\n")
+        self.ci_close(files={WORKFLOW: wf})
+        found = self.ci_findings(ci_steps=Runs([ci_row("shard-1", sha=self.head)]))
+        self.assertEqual(self.ran(), [("test_fail.py", self.dir)], "a commented-out step counted as a CI step, so the suite did not run here")
+        self.assertEqual(pairs(found), [("d-ci", "red")], "the commented-out step decided the close instead of the local run")
+
+    def test_c18_a_hash_inside_a_quoted_run_does_not_cut_the_step_short(self):
+        self.ci_close(files={WORKFLOW: checks_yml(run="'echo \"shard # 1 of 2\"; python3 tests/test_fail.py'")})
+        reader = Runs([ci_row("shard-1", sha=self.head), ci_row("shard-2", sha=self.head)])
+        found = self.ci_findings(ci_steps=reader)
+        self.assertEqual(self.ran(), [], "a # inside a quoted run cut the step short, so the suite ran here")
+        self.assertEqual(pairs(found), [], "two green steps whose quoted run names the suite gave a finding")
+
+    def test_c19_a_block_run_that_names_the_suite_on_a_later_line_counts_as_a_ci_step(self):
+        block = ("name: checks\non: pull_request\njobs:\n"
+                 "  shard-1:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Guard suite\n        run: |\n          set -e\n          python3 tests/test_fail.py\n"
+                 "  shard-2:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Guard suite\n        run: |\n          python3 tests/test_fail.py\n")
+        self.ci_close(files={WORKFLOW: block})
+        reader = Runs([ci_row("shard-1", sha=self.head), ci_row("shard-2", sha=self.head)])
+        found = self.ci_findings(ci_steps=reader)
+        self.assertEqual(self.ran(), [], "a block run that names the suite on a later line did not count as a CI step")
+        self.assertEqual(pairs(found), [], "two green block-run steps that name the suite gave a finding")
+
+    def test_c20_a_lone_quote_in_a_comment_or_a_step_name_does_not_hide_the_step(self):
+        self.ci_close(files={WORKFLOW: "# Don't edit this by hand.\n" + checks_yml(name="Don't skip the guard suite")})
+        reader = Runs([ci_row("shard-1", name="Don't skip the guard suite", sha=self.head),
+                       ci_row("shard-2", name="Don't skip the guard suite", sha=self.head)])
+        found = self.ci_findings(ci_steps=reader)
+        self.assertEqual(self.ran(), [], "a lone quote hid the step that names the suite, so the suite ran here")
+        self.assertEqual(pairs(found), [], "two green steps with a quote in their name gave a finding")
+
+    def test_c21_a_full_size_workflow_is_judged_per_named_step_not_per_job(self):
+        """Twelve jobs of six steps. Step 5 of job-03 is red and names no suite, so it must not refuse the close the named steps pass."""
+        self.ci_close(files={WORKFLOW: big_workflow()})
+        rows = [ci_row("job-%02d" % j, name="step %d" % s, sha=self.head, conclusion="failure" if (j, s) == (3, 5) else "success")
+                for j in range(12) for s in range(6)]
+        reader = Runs(rows)
+        found = self.ci_findings(ci_steps=reader)
+        self.assertEqual(reader.urls, [self.head], "the CI steps of the PR head were not read for a full-size workflow")
+        self.assertEqual(self.ran(), [], "a full-size workflow with its named steps green still ran the suite here")
+        self.assertEqual(pairs(found), [], "a red step that names no suite refused the close: judged per job, not per named step")
+
+    def test_c22_a_refusal_of_a_ci_judged_close_names_no_local_run_and_no_forced_route(self):
+        """A remedy never names the action the rule refuses (rule git-remedy-never-names-target, check stack_reason_hygiene_case): the suite
+        runs in CI, so a refusal offers no local run of it, and no forced or no-verify push."""
+        self.ci_close()
+        refusals = (("a missing CI run", Runs([])),
+                    ("a red CI step", Runs([ci_row("shard-1", conclusion="failure", sha=self.head), ci_row("shard-2", sha=self.head)])))
+        for name, reader in refusals:
+            with self.subTest(refusal=name):
+                found = self.ci_findings(ci_steps=reader)
+                self.assertTrue(found, "scope: %s did not refuse the close" % name)
+                text = " ".join(f.text for f in found)
+                self.assertNotIn("python3 tests/test_fail.py", text, "%s: the remedy names a local run of the suite CI runs" % name)
+                self.assertNotIn("--force", text, "%s: the remedy names a forced push" % name)
+                self.assertNotIn("--no-verify", text, "%s: the remedy names a no-verify commit" % name)
 
 
 class TemplateExcuses(unittest.TestCase):
