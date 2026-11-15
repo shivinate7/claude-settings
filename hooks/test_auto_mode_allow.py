@@ -46,8 +46,8 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   Its Covers text names the consultant that relays (cs-build:consultant), the triage session the relay
   may pass through (cs-build:triage), the batch runner that merges (cs-build:batch-runner), and the pull
   request the relay names. Its Never covers names each act in CONSULTANT_MERGE_REFUSED, the reason flags,
-  a head the relay did not name, a merge with no `--head`, and a session not tagged cs-build:batch-runner
-  (decision `auto-mode-owner-acts`).
+  a head the relay did not name, a merge with no `--head`, a yes that started at triage with no consultant
+  relay, and a session not tagged cs-build:batch-runner (decision `auto-mode-owner-acts`).
 - One "Batch Runner Merge:" entry quotes the same derived merge command with the head flag
   (`--head <sha>`) in its Covers text. Its Covers text names the coordinator that sends the merge go
   (cs-build:coordinator), the batch runner (cs-build:batch-runner), `merge go`, and the pull request
@@ -155,7 +155,7 @@ CONSULTANT_MERGE_REFUSED = tuple(item for item in RELAYED_MERGE_REFUSED if item[
     ("a relay from a session not tagged consultant or triage",
      r"a relay from a session not tagged `cs-build:consultant` or `cs-build:triage`"),)
 # Each act the Batch Runner Merge entry's "Never covers" sentence must name (decision `auto-mode-owner-acts`).
-BATCH_MERGE_REFUSED =(("not tagged cs-build:batch-runner", "not tagged `cs-build:batch-runner`"),
+BATCH_MERGE_REFUSED = (("not tagged cs-build:batch-runner", "not tagged `cs-build:batch-runner`"),
                        ("nobody named", "nobody named"),
                        ("failing", "failing"), ("running", "running"), ("approval", "approv"),
                        ("review", "review"), ("admin", "admin"), ("force push", "force[- ]push"),
@@ -623,6 +623,33 @@ class ConsultantRelayedMergeYesIsAllowed(unittest.TestCase):
         self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the relayed head")
         self.assertIn("a merge with no `%s`" % flag, clause,
                       "Never covers does not name a merge with no `%s`" % flag)
+
+    def test_yes_binds_to_the_head_the_consultant_relayed(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("the head the pull request had when the consultant relayed it", bounds_text(entry),
+                      "Covers text must bind the yes to the head the pull request had when the consultant relayed it")
+        self.assertNotRegex(entry, r"(?i)later head|review record names",
+                            "the entry must not allow a later head or lean on a review record")
+
+    def test_head_text_says_what_the_merge_tool_reads(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("relayed_head_holds", bounds_text(entry),
+                      "Covers text must name relayed_head_holds, the merge tool's relayed-head check")
+        self.assertIn("reads no review record", bounds_text(entry),
+                      "Covers text must say the merge tool reads no review record")
+        self.assertNotRegex(entry, r"(?i)with no record",
+                            "the entry must not say a head is allowed with no record")
+
+    def test_covers_says_triage_forwards_what_the_consultant_relayed(self):
+        entry = self.consultant_merge_entry()
+        self.assertIn("forwards what the consultant relayed", bounds_text(entry),
+                      "Covers text must say the triage session forwards what the consultant relayed")
+
+    def test_never_covers_names_a_yes_that_started_at_triage(self):
+        clause = never_covers(self.consultant_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Consultant Relayed Merge Yes entry")
+        self.assertIn("a yes that started at triage with no consultant relay", clause,
+                      "Never covers does not name a yes that started at triage with no consultant relay")
 
 
 class BatchRunnerMergeIsAllowed(unittest.TestCase):
