@@ -16,7 +16,9 @@ After an installer run the hook reads the record again. A record that still name
 the reinstall did not reach the tip, never a reinstall line. The installer gets the record's ref, and a hook input
 that no SessionStart entry fires on. At its timeout the installer gets SIGTERM before SIGKILL, and its child goes
 with it.
-The hook never names `main` itself, and it is wired once, under UserPromptSubmit.
+A prompt that reads origin writes no file in the config dir, the source clone or HOME. The hook never names `main`
+itself, and it is wired once, under UserPromptSubmit. The cost record's Ruling section accepts that one read per cloud
+prompt, with its measured figures.
 
 THE SEAM. Each fixture is a bare origin, a seed that pushes to it, and a source clone at the recorded sha,
 all under the run folder. HOME and CLAUDE_CONFIG_DIR point into the run folder, so the real ~/.claude is
@@ -46,6 +48,7 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 
 ROOT = _test_temp.run_folder()
 HOOK = os.path.join(HERE, "stale_install.py")
+DECISION = os.path.join(REPO, "docs", "decisions", "stale-install-cost.md")
 SETTINGS = os.path.join(REPO, "settings.json")
 REAL_GIT = shutil.which("git") or "git"
 RECORD = ".claude-settings-install.json"
@@ -155,6 +158,39 @@ def read_text(path):
             return handle.read()
     except (OSError, UnicodeDecodeError):
         return ""
+
+
+def ruling_text():
+    """The cost record's Ruling section, from its heading to the next "## " heading or the end, with each run of
+    whitespace made one space. "" when the record has no Ruling heading."""
+    match = re.search(r"(?m)^## Ruling[ \t]*$(.*?)(?=^## |\Z)", read_text(DECISION), re.S)
+    return " ".join(match.group(1).split()) if match else ""
+
+
+def tree_state(root):
+    """{path: (size, mtime_ns)} for `root` and everything under it, each path relative to `root`.
+    An absent root is {}."""
+    state = {}
+    if not os.path.isdir(root):
+        return state
+    for dirpath, dirnames, filenames in os.walk(root):
+        for name in [dirpath] + [os.path.join(dirpath, rest) for rest in dirnames + filenames]:
+            st = os.lstat(name)
+            state[os.path.relpath(name, root)] = (st.st_size, st.st_mtime_ns)
+    return state
+
+
+def state_changes(before, after):
+    """One row per path the two snapshots disagree on: created, removed or changed. [] when they match."""
+    rows = []
+    for path in sorted(set(before) | set(after)):
+        if path not in before:
+            rows.append("%s created" % path)
+        elif path not in after:
+            rows.append("%s removed" % path)
+        elif before[path] != after[path]:
+            rows.append("%s changed" % path)
+    return rows
 
 
 def write_file(path, text, mode=None):
@@ -382,6 +418,11 @@ class Fixture:
         except OSError:
             return []
 
+    def watched(self):
+        """The trees a prompt could write: the config dir, the source clone, and the home dir, which is both the hook's
+        cwd and its HOME. Each maps its paths to (size, mtime_ns)."""
+        return {"config": tree_state(self.config), "source": tree_state(self.source), "home": tree_state(self.home)}
+
 
 def behind(name, changes=HOOK_ONLY, layout="checkout", ref="main"):
     """A cloud fixture whose record holds the base sha while origin has moved on by one commit."""
@@ -455,6 +496,12 @@ class StaleInstall(unittest.TestCase):
             self.assertIn(name, restarts[0], "restart line does not name %r: %r" % (name, restarts[0]))
         self.assertEqual(len(run.lines), 2, "output beyond the reinstall and restart lines: %r" % run.lines)
 
+    def assert_wrote_no_file(self, fx, before):
+        after = fx.watched()
+        for label in ("config", "source", "home"):
+            rows = state_changes(before[label], after[label])
+            self.assertEqual(rows, [], "the prompt changed files under the %s tree: %s" % (label, "; ".join(rows)))
+
     # Behind origin: one reinstall, one read, the recorded installer.
 
     def test_behind_origin_reinstalls_once_and_names_both_shas(self):
@@ -498,6 +545,32 @@ class StaleInstall(unittest.TestCase):
                          "ls-remote reads did not name only the recorded ref")
         self.assertEqual(run.lines, [], "current install on stable printed %r, want silence" % run.lines)
         self.assertEqual(fx.installer_runs(), [], "current install on stable ran the installer")
+
+    # A prompt that reads origin writes no file. The current tip reads once; a missing record reads nothing.
+
+    def test_current_prompt_makes_one_ls_remote_and_writes_no_file(self):
+        fx = current(self._testMethodName)
+        self.assertEqual(fx.origin_tip("main"), fx.record_sha(), "scope: origin and the record differ")
+        before = fx.watched()
+        run = fx.run_hook()
+        self.assertEqual(run.lines, [], "scope: the current prompt printed %r, want silence" % run.lines)
+        self.assertEqual(fx.subcommands(), ["ls-remote"],
+                         "git calls were %r, want one ls-remote and no other" % fx.subcommands())
+        self.assert_wrote_no_file(fx, before)
+
+    def test_unknown_record_prompt_writes_no_file(self):
+        fx = current(self._testMethodName)
+        os.remove(fx.record_path)
+        self.assertFalse(os.path.exists(fx.record_path), "scope: the record is still there")
+        before = fx.watched()
+        run = fx.run_hook()
+        self.assert_unknown(run)
+        calls = fx.subcommands()
+        self.assertEqual([call for call in calls if call != "ls-remote"], [],
+                         "git calls other than ls-remote: %r" % calls)
+        self.assertLessEqual(calls.count("ls-remote"), 1,
+                             "the prompt made %d ls-remote reads, want at most 1" % calls.count("ls-remote"))
+        self.assert_wrote_no_file(fx, before)
 
     # Not a cloud session: silent, exit 0, no git.
 
@@ -759,6 +832,37 @@ class HookFile(unittest.TestCase):
             doc = ""
         missing = [name for name, pattern in COST_TERMS if not re.search(pattern, doc)]
         self.assertEqual(missing, [], "the cost record does not state: %s" % ", ".join(missing))
+
+    # The cost record's Ruling section: the accepted read, its measured figures, and what is not measured.
+
+    def ruling(self):
+        text = ruling_text()
+        self.assertTrue(text, "scope: the cost record has no Ruling section to read")
+        return text
+
+    def test_ruling_is_no_longer_open(self):
+        text = self.ruling()
+        self.assertFalse("Not ruled" in text, "the Ruling section still says Not ruled")
+        self.assertFalse(text.startswith("Open:"), "the Ruling section still opens with the open question")
+
+    def test_ruling_accepts_one_ls_remote_per_cloud_prompt(self):
+        text = self.ruling()
+        self.assertTrue(re.search(r"(?i)\bruling a\b", text), "the Ruling section does not name ruling a")
+        self.assertTrue(re.search(r"(?i)\baccepted\b", text), "ruling a does not say accepted")
+        self.assertTrue(re.search(r"(?i)one `?(?:git )?ls-remote`? per cloud prompt", text),
+                        "ruling a does not name one ls-remote per cloud prompt")
+
+    def test_ruling_states_the_measured_read_figures(self):
+        text = self.ruling()
+        self.assertTrue(re.search(r"367 ms[^.]*median|median[^.]*367 ms", text),
+                        "the Ruling section has no 367 ms median")
+        self.assertTrue(re.search(r"610 ms[^.]*p95|p95[^.]*610 ms", text), "the Ruling section has no 610 ms p95")
+        self.assertTrue(re.search(r"20 reads", text), "the Ruling section does not give the 20 reads")
+
+    def test_ruling_says_a_mac_network_is_not_measured(self):
+        text = self.ruling()
+        self.assertTrue(re.search(r"(?i)mac.s own network is not measured", text),
+                        "the Ruling section does not say a Mac's own network is not measured")
 
 
 class Harness(unittest.TestCase):
