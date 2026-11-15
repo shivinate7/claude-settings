@@ -551,12 +551,18 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         told = [s for s in sentences(hook_role_line()) if self.is_no_parent_merge(s)]
         self.assertTrue(told, "no affirmative sentence says a session with no parent merges its own PR under the merge grant")
 
-    # decision session-tiers: only a solo or one-lane session the owner started merges its own PR, so its sentence names that shape
-    def test_the_no_parent_merge_sentence_names_solo_or_one_lane(self):
-        told = [s for s in sentences(hook_role_line()) if self.is_no_parent_merge(s)]
-        self.assertTrue(told, "no affirmative sentence says a session with no parent merges its own PR under the merge grant")
-        for sentence in told:
-            self.assertIn("solo or one-lane", sentence, "the no-parent merge sentence does not name solo or one-lane: %r" % sentence)
+    # Ruling own-lanes-merge-claude-settings-prs (owner, 11:12 CST Nov 15, 2026) and roles-pick-mode-from-request: the session the owner
+    # starts with no parent is a coordinator for a standing build, else a lane. A lane merges only its own ready PR, and never runs --ready.
+    def test_the_no_parent_sentence_names_the_coordinator_or_a_lane(self):
+        told = [s for s in sentences(hook_role_line()) if "no parent_session_id" in s]
+        self.assertEqual(len(told), 1, "expected one sentence naming no parent_session_id, found %d: %r" % (len(told), told))
+        sentence = told[0]
+        self.assertIn("standing build", sentence, "the no-parent sentence does not name a standing build: %r" % sentence)
+        self.assertIn("coordinator", sentence.lower(), "the no-parent sentence names no coordinator: %r" % sentence)
+        self.assertIn("lane", sentence, "the no-parent sentence names no lane: %r" % sentence)
+        self.assertNotIn("solo", sentence.lower(), "the no-parent sentence still names a solo session: %r" % sentence)
+        self.assertNotIn("one-lane", sentence, "the no-parent sentence still names a one-lane session: %r" % sentence)
+        self.assertFalse(self.says_coordinator_merges(sentence), "the no-parent sentence says a coordinator merges: %r" % sentence)
 
     def hand_off_sentence(self):
         """The tier line's one sentence that hands a branch to the batch runner. Asserts that scope before any content."""
@@ -614,6 +620,59 @@ class SessionStartMergeRoleTests(unittest.TestCase):
                                            "runner (list_sessions, tag cs-build:batch-runner, same repo) and never merges."))
         self.assertTrue(self.names_a_lane("A lane session (tag cs-build:lane) hands its reviewed branch, head and PR to the batch "
                                           "runner and never merges."))
+
+    # ---- the lane's own merge (ruling own-lanes-merge-claude-settings-prs, 11:12 CST Nov 15, 2026): a lane runs merge --role lane --step
+    # for its own step, merges only its own ready PR, and never runs --ready, because the batch runner marks a pull request ready.
+    @staticmethod
+    def get_session_before_lane_role(sentence):
+        """True when get_session is named before the lane role command in the sentence."""
+        get, role = sentence.find("get_session"), sentence.find("merge --role lane --step")
+        return 0 <= get < role
+
+    @staticmethod
+    def only_own_ready_pr(sentence):
+        """True when the sentence limits the lane's merge to its own ready pull request."""
+        return re.search(r"\bonly\b[^.;]*\bown\b[^.;]*\bready\b", sentence) is not None
+
+    @staticmethod
+    def lane_never_merges(sentence):
+        """True when the sentence names a lane and says it never merges."""
+        return SessionStartMergeRoleTests.names_a_lane(sentence) and re.search(r"\bnever merges\b", sentence, re.IGNORECASE) is not None
+
+    def lane_role_sentence(self):
+        """The one sentence that names `merge --role lane --step`. Asserts that scope before any content."""
+        found = [s for s in sentences(hook_role_line()) if "merge --role lane --step" in s]
+        self.assertEqual(len(found), 1, "expected one sentence naming merge --role lane --step, found %d: %r" % (len(found), found))
+        return found[0]
+
+    def test_the_lane_role_sentence_runs_get_session_first(self):
+        self.assertTrue(self.get_session_before_lane_role(self.lane_role_sentence()),
+                        "the lane role sentence does not run get_session before merge --role lane --step")
+
+    def test_the_lane_role_sentence_limits_the_merge_to_its_own_ready_pr(self):
+        self.assertTrue(self.only_own_ready_pr(self.lane_role_sentence()), "the lane role sentence does not limit the merge to its own ready PR")
+
+    def test_the_lane_role_sentence_says_a_lane_never_runs_ready(self):
+        self.assertTrue(self.binds(self.lane_role_sentence(), r"\b(?:never|not|no)\b", r"--ready"),
+                        "the lane role sentence does not say a lane never runs --ready")
+
+    def test_no_sentence_of_the_tier_line_says_a_lane_never_merges(self):
+        told = [s for s in sentences(hook_role_line()) if self.lane_never_merges(s)]
+        self.assertEqual(told, [], "the tier line still says a lane never merges: %r" % told)
+
+    # green controls (P2): the helpers pass a sentence built like the lane rule, and reject its wrong forms
+    def test_the_lane_helpers_pass_the_rule_and_reject_its_wrong_forms(self):
+        rule = "A lane runs get_session, then ~/.claude/bin/merge --role lane --step <slug>, and may merge only its own ready PR; never --ready."
+        self.assertTrue(self.get_session_before_lane_role(rule), "the get_session order is not read")
+        self.assertFalse(self.get_session_before_lane_role("A lane runs ~/.claude/bin/merge --role lane --step <slug>, then get_session."),
+                         "a get_session after the role command is read as first")
+        self.assertTrue(self.only_own_ready_pr(rule), "the own ready PR limit is not read")
+        self.assertFalse(self.only_own_ready_pr("A lane may merge any ready PR; never --ready."), "a merge with no own-PR limit is read as limited")
+        self.assertTrue(self.binds(rule, r"\b(?:never|not|no)\b", r"--ready"), "the never --ready negation is not read")
+        self.assertFalse(self.binds("A lane may run --ready on its own PR.", r"\b(?:never|not|no)\b", r"--ready"),
+                         "a permission to run --ready is read as a negation")
+        self.assertTrue(self.lane_never_merges("A lane session never merges its own PR."), "a lane that never merges is not read")
+        self.assertFalse(self.lane_never_merges("A lane session merges only its own ready PR."), "a lane that merges is read as never merging")
 
     # batch-runner-start-names-idle-lanes: the scope comes first, so a missing sentence fails the scope, never passes empty
     def test_one_sentence_of_the_role_line_names_the_idle_lanes_command(self):
