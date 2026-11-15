@@ -295,7 +295,7 @@ The seven opt-in templates of that decision:
 - `claude-md-cites`: fails a run when a unit of the caller's rule files (`CLAUDE.md`, `.claude/**/*.md`,
   `docs/rules/**/*.md`) copies claude-settings record text instead of naming the record. On a pull request it also
   fails when a record and a rule unit that cites it change without each other (probe group `aligned`), unless
-  the PR body has `Rules checked: <record> — no change`. It reads the PR body from the event through env. The
+  the PR body has `Rules checked: <record> — no change`, which the author writes after re-reading the rule against the change and cleaning what rotted. It reads the PR body from the event through env. The
   caller needs checkout first, at `fetch-depth: 0`, and must not skip it on a docs-only change: records are `.md`.
 - `githooks/main-ref`: refuses a local move of main to a commit that origin lacks. Run
   `sh githooks/main-ref/install.sh` in each clone. `sh githooks/main-ref/install.sh --check` writes

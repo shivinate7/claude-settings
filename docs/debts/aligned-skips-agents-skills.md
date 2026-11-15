@@ -1,9 +1,9 @@
-# The aligned check reads rule files only, not agents/ or skills/
+# The aligned check does not read output-styles Markdown
 
-**What.** Round 1 review found `agents/reviewer.md` lines 75-77 copy text of `hold-unsafe-after-round-3` and cite it. Probe group `aligned` reads `CLAUDE.md`, `.claude/rules`, `docs/rules` and the root rule files, so a record change leaves that copy stale and nothing flags it. 29 records are cited only from `agents/`, `skills/`, `hooks/`, `lint/` or `output-styles/` Markdown. Measure: round 1 reviewer's census on `17336c1e`; not re-run.
+**What.** Probe group `aligned` reads rule files and the `agents/` and `skills/` Markdown, but not `output-styles/` Markdown, so a sentence there that cites a record can go stale when the record changes and nothing flags it. The owner picked `agents/` and `skills/` only (waiting-page item 872, option b, 2026-11-15 11:33 CST); `output-styles/` is unruled.
 
-**Where.** `lint/compliance_probes.py`, probe groups `aligned` and `restates`: the rule-file scope (`rule_scope`).
+**Where.** `lint/compliance_probes.py`, `rule_scope` with `agents_skills`.
 
 **Decision.** `child-cites-not-copies`.
 
-**Retire.** Not yet built. Owner picks whether `agents/`, `skills/` and `output-styles/` Markdown join the scope. Write the test first, red on the current code: a record changes, an `agents/*.md` sentence that cites it stays, the group names that line.
+**Retire.** Not yet built. Owner picks whether `output-styles/` Markdown joins the scope. Write the test first, red on the current code: a record changes, an `output-styles/*.md` sentence that cites it stays, the group names that line. `lint/test_compliance_probes.py`

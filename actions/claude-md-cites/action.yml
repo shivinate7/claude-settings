@@ -3,7 +3,8 @@ description: >
   Fails a run when the caller's rule files copy the text of a claude-settings record instead of naming
   it, or when a record and the rule units that cite it change in a pull request without each other.
   Step 1 runs `compliance_probes.py restates` from this action's own checkout, which holds the records,
-  against the caller's checkout. Step 2 runs `compliance_probes.py aligned` on a pull_request run.
+  against the caller's checkout. Step 2 runs `compliance_probes.py aligned` on a pull_request run,
+  over the rule files and the Markdown under `agents/` and `skills/`.
   BASE_SHA is the PR base branch, so the diff runs from the merge base. The probe reads the checked-out
   commit as the head, so the diff's line numbers match the files on disk, and reads the PR body from the
   event file. Exit 1 is a gap, with the file, the line and the record named; exit 2

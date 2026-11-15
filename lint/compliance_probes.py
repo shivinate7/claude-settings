@@ -598,11 +598,14 @@ def child_unit_spans(root, in_scope=None, listing=None, span_continues=False, se
 
 
 RULES_DOCS = "docs/rules/"  # a folder of rule files that no layout kind names
+AGENT_SKILL_DOCS = ("agents/", "skills/")  # top-level folders of agent and skill Markdown: rule lines live there too
 
 
-def rule_scope(root):
+def rule_scope(root, agents_skills=False):
     """The test of a path in the rule Markdown that restates and aligned read: the supersede files, every docs/rules
-    file, each shared rule file (rule_audit.RULE_FILES) and the layout's rules folder. A layout that cannot be read
+    file, each shared rule file (rule_audit.RULE_FILES) and the layout's rules folder; with `agents_skills`, also the
+    Markdown under the top-level agents/ and skills/ folders (aligned only: a rule line there cites a record as a CLAUDE.md line
+    does, and restates keeps its own scope). A layout that cannot be read
     makes the group unknown: the rule file list would be unknowable."""
     shared = {p.replace(os.sep, "/") for p in rule_audit.RULE_FILES}
     try:
@@ -612,7 +615,8 @@ def rule_scope(root):
 
     def in_scope(rel):
         return bool(SUPERSEDE_SCOPE.search(rel)) or rel in shared or (
-            rel.endswith(".md") and (rel.startswith(RULES_DOCS) or rel.startswith(folder)))
+            rel.endswith(".md") and (rel.startswith(RULES_DOCS) or rel.startswith(folder) or (
+                agents_skills and rel.startswith(AGENT_SKILL_DOCS))))
 
     return in_scope
 
@@ -1612,7 +1616,7 @@ def probe_aligned(root):
         gone = [line for where in wheres for _, _, lines in hunks.get(where + "/" + slug + ".md", []) for line in lines]
         old = records.setdefault(slug, [])
         old.extend(a for a in home_anchors("\n".join(gone)) if a not in old)
-    units, files = child_unit_spans(root, rule_scope(root), walked(root), span_continues=True, sentences=True)
+    units, files = child_unit_spans(root, rule_scope(root, agents_skills=True), walked(root), span_continues=True, sentences=True)
     hits, was = [], {}
     for rel, first, last, unit in units:
         # A diff line touches the sentence, and its text is not a sentence of the file's base side: a sibling edited on
@@ -1640,8 +1644,10 @@ def probe_aligned(root):
     else:
         hits = []
     if hits:
-        hits.append("  fix: change the sentence or the record, or add one PR body line per record, "
-                    "`Rules checked: <record> \u2014 no change`, then push a commit")
+        hits.append("  fix: re-read each citing sentence against this change and clean what rotted, in the sentence, "
+                    "the record or both. Only when both still hold after that read, add one PR body line per record, "
+                    "`Rules checked: <record> \u2014 no change`, then push a commit. The line says you re-read and "
+                    "cleaned; it is no way to cite and move on")
         return finish("aligned", hits, "out - %d line(s) to read in %d file(s)" % (len(hits) - 1, files), 1)
     return finish("aligned", hits, "in shape - %d rule file(s) read, %d record(s) changed" % (files, len(changed)), 0)
 
