@@ -3263,7 +3263,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                                       'Run it where the test can finish, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
     if state == "pass":
         if pushed_merge:  # last, after every check above passed: a refusal (the branch moved) posts nothing and prints no PASS
-            push_branch(root, info["branch"], source=pushed_merge)
+            push_branch(root, info["branch"], source=pushed_merge, cite=LANE_LINT_CITE)
             short = pushed_merge[:9]
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
         counts = f"; touched tests: {touched[0]} run, {len(touched[1])} skipped" if touched is not None else ""
