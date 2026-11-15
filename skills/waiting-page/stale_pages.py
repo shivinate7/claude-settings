@@ -66,11 +66,12 @@ Session-start mode, run by hooks/session_start.sh in a repo whose extras name a 
 
     python3 ~/.claude/skills/waiting-page/stale_pages.py --session-line <repo toplevel> [--main-checkout <dir>]
 
-The stamp is the record file roadmap/data/meta/page-built.json on origin/roadmap of the repo (JSON {"blob", "at"}; triage
-writes it at each republish), else the local stamp an allowed publish wrote (<git common dir>/waiting-page-built, main's
-page.html blob sha). It prints one line when the stamp differs from main's blob sha, and the line `waiting page may be
-behind: no stamp ...` when neither source holds a stamp (an unparseable record counts as missing). A repo with no waiting
-page, or an unreadable main with a stamp, prints nothing. It always exits 0. One python process and at most two read-only git
+Two stamps hold main's page.html blob sha at the last publish: the page-built stamp roadmap/data/meta/page-built.json on
+origin/roadmap of the repo (JSON {"blob", "at"}; triage writes it at each republish), and the local stamp an allowed publish
+wrote (<git common dir>/waiting-page-built). It prints nothing when either stamp equals main's blob sha, the behind line when
+at least one stamp exists and none equals it, and the line `waiting page may be behind: no stamp ...` when neither exists
+(an unparseable page-built stamp counts as missing; this line is printed before main is read). A repo with no page in its
+extras, or a stamp with main unreadable, prints nothing. It always exits 0. One python process and at most two read-only git
 processes: `git show` of the record in the repo, and the read of main's page.html in the claude-settings clone (two repos, so
 one process cannot read both).
 
@@ -421,14 +422,14 @@ def read_published(root):
         return None
 
 
-# The record file: triage writes it on the record branch at each republish of the live page, so a fresh
+# The page-built stamp: triage writes it on the record branch at each republish of the live page, so a fresh
 # cloud container (no local stamp) still has one. JSON {"blob": <main's page.html blob sha>, "at": <ISO UTC>}.
 RECORD_REF = "origin/roadmap"
 RECORD_PATH = "roadmap/data/meta/page-built.json"
 
 
 def read_record_stamp(root):
-    """The blob sha in the record file on origin/roadmap of `root`, or None: no branch, no file, unparseable text and a
+    """The blob sha in the page-built stamp on origin/roadmap of `root`, or None: no branch, no file, unparseable text and a
     missing or non-hex `blob` all read as missing. One git process, read only."""
     try:
         import _nowindow  # the one home of a no-window child start, as read_origin_main
@@ -443,20 +444,20 @@ def read_record_stamp(root):
 
 
 def session_line(root, main_checkout=None):
-    """One line about the repo's waiting page, or "". A repo with no waiting page gives "".
-    The stamp is the record file on origin/roadmap, else the local stamp. With a stamp that differs from main's blob, the
-    behind line; with no stamp from either source, the no-stamp line (decision page-stale-publish); with main unreadable, "":
-    an unread main is never reported as behind."""
+    """One line about the repo's page, or "". A repo with no page in its extras gives "".
+    Either stamp (the page-built stamp on origin/roadmap, the local stamp) equal to main's blob gives "". Otherwise: the behind
+    line when at least one stamp exists, the no-stamp line when neither does (decision page-stale-publish). With stamps but
+    main unreadable, "": an unread main is never reported as behind."""
     import layout
     url = layout.waiting_page(root)
     if url == "unknown":
         return ""
-    stamp = read_record_stamp(root) or read_stamp(root)
-    if not stamp:
+    stamps = [x for x in (read_record_stamp(root), read_stamp(root)) if x]
+    if not stamps:
         return ("waiting page may be behind: no stamp for %s (no %s on %s, no local stamp). Compare the live page with main's "
                 "page.html (skill waiting-page, \"Keep the page on main's code\")." % (url, RECORD_PATH, RECORD_REF))
     blob = main_blob(main_checkout)
-    if not blob or blob == stamp:
+    if not blob or blob in stamps:
         return ""
     return ("waiting page %s is behind main's page.html: it was last published from another version. "
             "The writer runs stale_pages.py --page <file> --write <out> and publishes <out> "
