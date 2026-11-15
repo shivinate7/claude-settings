@@ -3355,9 +3355,13 @@ class AlignedSteps:
         for name in names:
             self.assertIn(name, out, "the refusal does not name %s: %s" % (name, out))
 
-    def assert_clear(self, repo, **kw):
-        """The probe reads the PR and clears it: in shape, exit 0."""
+    def assert_clear(self, repo, files=None, **kw):
+        """The probe reads the PR and clears it: in shape, exit 0. `files`: the rule files the probe must read before its
+        verdict, checked first, so a clear is never a file the probe did not read."""
         code, out, err = self.probe_pr(repo, **kw)
+        if files is not None:
+            self.assertIn("in shape - %d rule file(s) read" % files, head(out),
+                          "the probe did not read %d rule file(s) first: %s%s" % (files, out, err))
         self.assertTrue(head(out).startswith("aligned: in shape"), "the PR is refused or not read: %s%s" % (out, err))
         self.assertEqual(code, 0, "the verdict is in shape but the exit is not 0: %s%s" % (out, err))
 
@@ -3447,15 +3451,8 @@ ALIGNED_RUN_PY_EDITED = "# Decision `%s` holds the round rules and a fix check.\
 
 
 class AlignedScopeSkillsAgents(AlignedSteps, unittest.TestCase):
-    """The scope of the aligned group: Markdown under top-level agents/ and skills/, at any depth. A case that clears a PR
-    first reads the scope (`0 rule file(s) read`), so a clear is never a file the probe did not read."""
-
-    def assert_clear_reading_nothing(self, repo, **kw):
-        """The probe reads no rule file in the PR, then clears it: the scope is checked before the verdict."""
-        code, out, err = self.probe_pr(repo, **kw)
-        self.assertIn("0 rule file(s) read", head(out), "the probe read a file outside its scope: %s%s" % (out, err))
-        self.assertTrue(head(out).startswith("aligned: in shape"), "the PR is refused or not read: %s%s" % (out, err))
-        self.assertEqual(code, 0, "the verdict is in shape but the exit is not 0: %s%s" % (out, err))
+    """The scope of the aligned group: Markdown under top-level agents/ and skills/, at any depth. The clear cases that
+    name a `files` count read the scope first, so a clear is never a file the probe did not read."""
 
     def test_a_citing_sentence_changed_without_its_record_is_refused_under_skills_or_agents(self):
         changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
@@ -3508,7 +3505,7 @@ class AlignedScopeSkillsAgents(AlignedSteps, unittest.TestCase):
                    ("the record", {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)}))
         for label, change in changes:
             with self.subTest(changed=label):
-                self.assert_clear_reading_nothing(self.pr(base, change))
+                self.assert_clear(self.pr(base, change), files=0)
 
     def test_a_folder_that_only_ends_in_skills_or_agents_is_out_of_scope(self):  # green control
         changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
@@ -3518,7 +3515,7 @@ class AlignedScopeSkillsAgents(AlignedSteps, unittest.TestCase):
                        ("the record", {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)}))
             for label, change in changes:
                 with self.subTest(rel=rel, changed=label):
-                    self.assert_clear_reading_nothing(self.pr(base, change))
+                    self.assert_clear(self.pr(base, change), files=0)
 
 
 class AlignedScanner(AlignedSteps, unittest.TestCase):
