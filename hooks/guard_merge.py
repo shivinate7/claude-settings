@@ -1447,12 +1447,45 @@ def _own_get_session_tags(transcript: str, session_id: str):
     return _own_session_read(transcript, session_id)[0]
 
 
+def _nested_segments(text: str, depth: int = 0):
+    """Yield (segment, too_deep) for each non-blank segment of `text`, then for each script a segment hands on (inner_commands, the one reader of
+    `bash -c`, `$(...)` and the other wrappers), down to MERGE_NEST_DEPTH, and for each command substitution of `text`. A script nested deeper, or text whose
+    substitutions nest too deep to cut, is yielded whole, with too_deep True."""
+    try:
+        from guard_env import _substitutions  # the one cut of `$(...)`, backtick and process substitutions outside single quotes
+        found, deep = _substitutions(text)
+        texts = [part for part, _in_message in found]
+    except Exception:
+        texts, deep = [text], True   # an unreadable cut is read whole and judged as a refusal where it holds the flag
+    if deep:
+        yield text, True
+    for part in texts:
+        for segment in split_segments(part):
+            if not segment.strip():
+                continue
+            yield segment, False
+            tokens = segment_tokens(segment)
+            for script in (inner_commands(tokens) if tokens else []):
+                if depth >= MERGE_NEST_DEPTH:
+                    yield script, True
+                else:
+                    yield from _nested_segments(script, depth + 1)
+
+
 def role_proof_hit(stripped: str, transcript: str) -> str:
     """Return the matched call when a segment runs the merge tool with a role the own record does not
     prove, else ''. Fails closed inside the clause: any error in the reads is a refusal, because the
-    allow rule has no classifier behind it and the guard-wide crash path fails open."""
-    for segment in split_segments(stripped):
-        tier = role_call_of(segment) if segment.strip() else None
+    allow rule has no classifier behind it and the guard-wide crash path fails open.
+    A script a wrapper hands on (`bash -c`, `$(...)`: _nested_segments) is judged as a top-level call is; one nested deeper than
+    MERGE_NEST_DEPTH that holds a role flag is refused."""
+    if "--role" not in stripped:   # the cheap filter: every spelling of the flag holds this text, so no other call is cut or read
+        return ""
+    for segment, too_deep in _nested_segments(stripped):
+        if too_deep:
+            if "--role" in segment:
+                return "merge role in a deep wrapper"
+            continue
+        tier = role_call_of(segment)
         if tier is None:
             continue
         try:  # cost: one transcript read, only on a role-flag call
@@ -1770,6 +1803,42 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int, local_se
             pass
         return True
     return False
+
+
+LANE_READY_REASON = (
+    "merge-role-proof: this session's own record is a lane's, and the batch runner marks a pull request ready, not a lane. "
+    "Leave the draft as it is. The batch runner finds it (list_sessions, tag cs-build:batch-runner, same cs-repo). "
+    "(decision session-tiers, a session's tier decides which merge acts it may run)"
+)
+
+
+def lane_ready_hit(stripped: str, transcript: str) -> str:
+    """Return a label when a cloud session whose own newest get_session record carries cs-build:lane runs the merge tool's ready mark, else ''.
+    A batch runner, a session with another or no cs-build tag, and a session with no readable record are not judged here: the repo proof
+    (repo_proof_hit) still judges each. A script a wrapper hands on is read as a top-level call is (_nested_segments); one nested deeper
+    than MERGE_NEST_DEPTH that holds the flag counts as a call. Cost: one parse per merge-tool segment, and one transcript read when a ready flag is found."""
+    if not is_cloud() or "--ready" not in stripped:   # the cheap filter: a call with no ready flag reads no transcript
+        return ""
+    for segment, too_deep in _nested_segments(stripped):
+        if too_deep:
+            called = "--ready" in segment
+        else:
+            rest = merge_tool_args(segment)
+            try:
+                called = rest is not None and "--ready" in _command_words(rest)
+            except Exception:
+                called = True   # an unreadable merge-tool segment fails closed, as the other clauses do
+        if not called:
+            continue
+        try:
+            from override import remote_session_id
+            own_id = remote_session_id()
+            tags = _own_get_session_tags(transcript, own_id) if own_id and transcript else None
+        except Exception:
+            tags = None
+        if tags is not None and ROLE_TAG_PREFIX + ROLE_STEP_TIER in tags:
+            return "merge --ready from a lane"
+    return ""
 
 
 # ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)
