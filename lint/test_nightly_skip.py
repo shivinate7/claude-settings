@@ -21,6 +21,10 @@ The test never reaches the network.
 
     python3 lint/test_nightly_skip.py
 """
+import contextlib
+import http.client
+import importlib.util
+import io
 import itertools
 import json
 import os
@@ -28,7 +32,10 @@ import shutil
 import subprocess
 import sys
 import unittest
+import urllib.error
+import urllib.parse
 import uuid
+from unittest import mock
 
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
 
@@ -78,9 +85,25 @@ def linux_only(sha=HEAD, created=LATE, id_=None):
     return run("push", sha=sha, created=created, id_=id_, jobs=jobs)
 
 
-def run_skip(runs=None, raw=None, head=HEAD, token=None, run_id=None):
+def run_in_process(env, api_get):
+    """The gate's main() in this process, with `api_get` standing in for the live read. A read error that escapes main() comes
+    back as rc 1 and the escaped type named in the text, which is what an uncaught exception does to the step's exit status."""
+    spec = importlib.util.spec_from_file_location("nightly_skip_under_test", SKIP)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    buf = io.StringIO()
+    with mock.patch.object(module, "api_get", api_get), contextlib.redirect_stdout(buf):
+        try:
+            rc = module.main(env)
+        except Exception as ex:  # the uncaught read error the gate must never let out
+            return 1, buf.getvalue() + "escaped main(): %s: %s" % (type(ex).__name__, ex)
+    return rc, buf.getvalue()
+
+
+def run_skip(runs=None, raw=None, head=HEAD, token=None, run_id=None, api_get=None):
     """Run the gate once on a stand-in read. Returns a dict: rc, value (the one skip value, or None), text (stdout and stderr) and
-    summary (the step summary the gate wrote, '' when none)."""
+    summary (the step summary the gate wrote, '' when none). With `api_get`, the live read runs in this process with that
+    function in place of the API call; without it, the gate runs as a subprocess on RUNS_JSON or no read."""
     folder = os.path.join(RUN_FOLDER, uuid.uuid4().hex)
     os.makedirs(folder)
     out, summary = os.path.join(folder, "output"), os.path.join(folder, "summary.md")
@@ -98,7 +121,11 @@ def run_skip(runs=None, raw=None, head=HEAD, token=None, run_id=None):
         env["GH_TOKEN"] = token
     if run_id is not None:
         env["GITHUB_RUN_ID"] = str(run_id)
-    done = subprocess.run([sys.executable, SKIP], env=env, capture_output=True, text=True, timeout=60)
+    if api_get is None:
+        done = subprocess.run([sys.executable, SKIP], env=env, capture_output=True, text=True, timeout=60)
+        rc, text = done.returncode, done.stdout + done.stderr
+    else:
+        rc, text = run_in_process(env, api_get)
     skips = []
     if os.path.isfile(out):
         with open(out, encoding="utf-8") as f:
@@ -107,8 +134,7 @@ def run_skip(runs=None, raw=None, head=HEAD, token=None, run_id=None):
     if os.path.isfile(summary):
         with open(summary, encoding="utf-8") as f:
             text_summary = f.read()
-    return {"rc": done.returncode, "value": skips[0] if len(skips) == 1 else None,
-            "text": done.stdout + done.stderr, "summary": text_summary}
+    return {"rc": rc, "value": skips[0] if len(skips) == 1 else None, "text": text, "summary": text_summary}
 
 
 class NightlySkip(unittest.TestCase):
@@ -305,6 +331,73 @@ class NightlySkipJobWiring(unittest.TestCase):
         header = job_text.split("    steps:", 1)[0]
         self.assertNotIn("\n    if:", header,
                          "nightly-skip must run on every event: a skipped job it leaves behind skips scope's descendants")
+
+
+class NightlySkipReadErrors(unittest.TestCase):
+    """A read error on the live path is unknown, never a crash. The gate's contract (its docstring): it exits 0 on every path,
+    writes skip=false and says unknown. The stand-in raises what a read can raise and urllib does not wrap:
+    http.client.IncompleteRead (a body cut short; not an OSError) and any other Exception (owner page item 880, 11:53 CST
+    Nov 15). The stand-in records each URL, so a case first shows the read it means was reached, then judges the outcome."""
+
+    def gate(self, errors):
+        """Run the gate on the live read, with the reads named in `errors` raising. -> (result, the URLs requested)."""
+        urls = []
+
+        def api_get(url, token):
+            urls.append(url)
+            if "/jobs?" in url:
+                if "jobs" in errors:
+                    raise errors["jobs"]
+                return {"jobs": [job("push-skip"), job("scope", "skipped")]}
+            if "runs" in errors:
+                raise errors["runs"]
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+            if int(query.get("page", ["1"])[0]) > 1:
+                return {"workflow_runs": []}
+            served = [run("schedule", created=OLDER), run("push", created=LATE)]  # the push run has no jobs: the jobs read decides it
+            return {"workflow_runs": [r for r in served if r["event"] == query["event"][0]]}
+
+        got = run_skip(token="t", run_id=SELF_RUN, api_get=api_get)
+        return got, urls
+
+    def assert_reached(self, urls, fragment, read):
+        self.assertTrue(any(fragment in u for u in urls), "scope: the %s read was never requested, so the case proves nothing" % read)
+
+    def assert_unknown(self, got, read):
+        self.assertEqual(got["rc"], 0, "the gate exits %d when the %s read raises, so the nightly step goes red: %s"
+                         % (got["rc"], read, got["text"][-300:]))
+        self.assertEqual(got["value"], "false", "a %s read that raises must give skip=false" % read)
+        self.assertIn("unknown", got["text"].lower(), "a %s read that raises must say unknown in the log" % read)
+
+    def test_an_incomplete_read_of_the_runs_list_is_unknown_not_a_crash(self):
+        # Mistake: runs_page catches URLError, OSError and ValueError only, and http.client.IncompleteRead is none of them.
+        got, urls = self.gate({"runs": http.client.IncompleteRead(b"")})
+        self.assert_reached(urls, "event=schedule", "runs")
+        self.assert_unknown(got, "runs")
+
+    def test_a_runtime_error_on_the_runs_list_is_unknown_not_a_crash(self):
+        # Mistake: any Exception other than the three runs_page catches escapes main() as a traceback and exit 1.
+        got, urls = self.gate({"runs": RuntimeError("the runs read broke")})
+        self.assert_reached(urls, "event=schedule", "runs")
+        self.assert_unknown(got, "runs")
+
+    def test_an_incomplete_read_of_a_jobs_list_is_unknown_not_a_crash(self):
+        # Mistake: jobs_reader catches the same three, so a push run's jobs read cut short escapes main() the same way.
+        got, urls = self.gate({"jobs": http.client.IncompleteRead(b"")})
+        self.assert_reached(urls, "/jobs?", "jobs")
+        self.assert_unknown(got, "jobs")
+
+    def test_a_runtime_error_on_a_jobs_list_is_unknown_not_a_crash(self):
+        # Mistake: an Exception from the jobs read, past jobs_reader's three catches, escapes proven() and main().
+        got, urls = self.gate({"jobs": RuntimeError("the jobs read broke")})
+        self.assert_reached(urls, "/jobs?", "jobs")
+        self.assert_unknown(got, "jobs")
+
+    def test_control_a_url_error_on_the_runs_list_is_already_unknown(self):
+        # Control, green on the old code: URLError is one of the three runs_page catches, so this read is already unknown.
+        got, urls = self.gate({"runs": urllib.error.URLError("unreachable")})
+        self.assert_reached(urls, "event=schedule", "runs")
+        self.assert_unknown(got, "runs")
 
 
 def tearDownModule():
