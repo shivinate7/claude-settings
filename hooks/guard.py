@@ -4949,10 +4949,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # another folder) and one `git diff --check`; none for an add alone, or a command with no commit or push.
     # A push of a test commit with no Red-run trailer is refused here too (rule red-run): it shares the push's
     # range, and adds one `git log` per push. A commit in the same call, before the push, is read from its
-    # `-m` text; guard_merge states the cost.
+    # `-m` text; so is a lone commit with no push after it, which adds one `git diff --numstat` only when its
+    # message holds no trailer. guard_merge states the cost.
     kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel, raw)
-    if kind == "red-run":
-        red_reason, red_shown = red_run_reason(matched)
+    if kind in ("red-run", "red-run-commit"):
+        red_reason, red_shown = red_run_reason(matched, kind == "red-run-commit")
         refuse(tool, "deny", "red-run", red_reason, red_shown)
     elif matched:
         markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else

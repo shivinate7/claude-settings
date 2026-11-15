@@ -112,6 +112,15 @@ def _shown(paths):
     return ", ".join(paths[:MAX_PATHS]) + (" and %d more" % (len(paths) - MAX_PATHS) if len(paths) > MAX_PATHS else "")
 
 
+def pending_gap(message, paths):
+    """The `found` row `("new", subject, test paths shown)` for a commit that has not landed, when it adds test lines
+    with no valid trailer and is no revert (item 7), else None. The guard judges a lone `git commit` through it,
+    with the staged test paths and the `-m` text."""
+    if not paths or REVERT.search(message) or has_trailer(message):
+        return None
+    return ("new", message.strip().split("\n", 1)[0], _shown(paths))
+
+
 def judge(root, base, head="HEAD", exclude="", *, is_test_rel=None, tip=None, pending=()):
     """(found, last) for the commits of base..head, minus those `exclude` holds. `found` is one (short sha,
     subject, test paths shown) per commit that adds test lines with no valid trailer, and `last` the short sha of
@@ -143,8 +152,9 @@ def judge(root, base, head="HEAD", exclude="", *, is_test_rel=None, tip=None, pe
             continue
         found.append((sha[:7], subject, _shown(paths)))
     for message, paths in pending:
-        if paths and not has_trailer(message):
-            found.append(("new", message.strip().split("\n", 1)[0], _shown(paths)))
+        row = pending_gap(message, paths)
+        if row:
+            found.append(row)
             last = "new"
     return found, last
 
