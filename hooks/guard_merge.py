@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 from guard_core import (
     SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    command_indexes, dir_before_segment, heredoc_heads, inline_script, inner_commands, own_heredoc_bodies, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    REPLAY_MARKS, command_indexes, dir_before_segment, heredoc_heads, inline_script, inner_commands, own_heredoc_bodies, resolve_command, resolve_default_base, segment_tokens, split_segments,
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
@@ -1189,9 +1189,9 @@ def _note_commit(virtual, args, paths, bodies=()):
 
 
 def _replaying(top):
-    """True when a merge or a revert is in progress at TOP: MERGE_HEAD or REVERT_HEAD sits in its git dir, which is
-    `.git`, or the folder a `.git` file names. Read from files alone: no git is spawned. Its commit holds lines
-    that other commits already carry, so it is not judged."""
+    """True when a merge or another replay is in progress at TOP: MERGE_HEAD or a `REPLAY_MARKS` entry sits in its git
+    dir, which is `.git`, or the folder a `.git` file names. Read from files alone: no git is spawned. Its commit
+    holds lines that other commits already carry, so it is not judged."""
     git_dir = os.path.join(top, ".git")
     try:
         if not os.path.isdir(git_dir):
@@ -1202,7 +1202,7 @@ def _replaying(top):
             git_dir = os.path.join(top, first[len("gitdir:"):].strip())
     except (OSError, UnicodeDecodeError):
         return False
-    return any(os.path.exists(os.path.join(git_dir, mark)) for mark in ("MERGE_HEAD", "REVERT_HEAD"))
+    return any(os.path.exists(os.path.join(git_dir, mark)) for mark in ("MERGE_HEAD", *REPLAY_MARKS))
 
 
 def _commit_red_run(args, bodies, check_red_run, top, read_adds):
@@ -1210,7 +1210,7 @@ def _commit_red_run(args, bodies, check_red_run, top, read_adds):
     and whose own `-m` message holds no valid Red-run trailer, else None. `read_adds()` gives the test paths the
     commit stages (`_commit_test_adds`): the one git read, made only when the message could be a gap. No hit for a
     message the guard cannot read (`_commit_message`; an `-m` with a `$` or a backtick but no heredoc body is a
-    substitution it cannot read), an `--amend` with no `-m`, a merge or a revert in progress, a revert's own
+    substitution it cannot read), an `--amend` with no `-m`, a merge or another replay in progress, a revert's own
     message, and a commit with no test line added."""
     readable, message = _commit_message(args, bodies)
     if not readable or message is None or (not bodies and set(message) & set("$`")):
