@@ -495,6 +495,13 @@ class GuardInputsList(unittest.TestCase):
     def test_the_import_walk_reaches_the_guard(self):
         self.assertIn("hooks/guard.py", import_closure(IMPORT_ROOTS))
 
+    # Named failure: a hooks/ or lint/ module that the guard suite imports is not a reader, so the strings it names are never scanned.
+    def test_the_guard_readers_include_the_hook_and_lint_modules_it_imports(self):
+        readers = guard_reader_files()
+        for module in ("hooks/guard_core.py", "lint/layout.py"):
+            with self.subTest(module=module):
+                self.assertIn(module, readers, f"the guard suite imports {module}, and the name scan does not read it")
+
     # Named failure: a module the guard imports is not in the list, so a diff to it runs no guard shard.
     def test_every_module_the_guard_imports_matches_a_glob(self):
         globs = self.globs()
