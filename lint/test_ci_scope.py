@@ -1109,7 +1109,7 @@ class MutationReport(unittest.TestCase):
 # case states what the workflow does with the scope outputs, not the value of one output. Cost: parses checks.yml once per call.
 GUARD_SHARDS = ("checks-windows-guard", "checks-windows-guard-2", "checks-windows-guard-3")
 # Flags the old script sets true for SNAPSHOT_DIFFS, each run() with its default arguments. windows_guard is left out of the
-# comparison: it is the one output the gate adds. Recorded on the pre-gate script (1f850981).
+# comparison: it is the one output the gate adds. Recorded on the script before the gate existed.
 SNAPSHOT_DIFFS = [
     (["docs/x.md"], {}, []),
     (["README.md"], {}, []),
