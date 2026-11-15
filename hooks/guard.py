@@ -411,6 +411,15 @@ Other tools, in `judge` order:
                        (`FACT_CLOSE_PLACEHOLDER`, `PR_NUMBER`) or a `__X__` word. A sentence that holds one, a
                        short all-caps word, no args and empty args pass. A bare env var name as the whole value
                        is refused too; an override lifts it for a real one. (workflow-args-shape-check)
+  brief-checks-answered-claims-match-page
+                       deny. A claude-code-remote send_message or create_session, or a SendMessage, whose text
+                       (`message`, or `prompt` for create_session) has a sentence that holds an item reference (`item <n>`,
+                       `item #<n>`, `page:<n>`; any case), the whole word answered, approved or ruled, and no negator before
+                       it in its clause (lint/report_guard.py ANSWERED_NEGATOR_RE), when the waiting page's data in git
+                       (hooks/answered_claims.py, local and origin record branch) holds that item and no owner answer for
+                       it: no answers file and no lastAnswer. A sentence ending in `?`, text in a fence or inline code,
+                       and a claim by an id slug alone pass. A number not in the store, an absent ref or registry, a git
+                       error or a timeout passes with one stderr line. An override lifts it. (answered-claims-match-page)
   ci-wait-cap
                        deny. A claude-code-remote send_later whose message says it waits on CI (the whole word CI,
                        checks, pipeline, check run, PR run(s), workflow run(s) or GitHub Actions, in any case,
@@ -6980,6 +6989,10 @@ def ci_wait_hit(tool: str, tool_input: dict) -> str:
     return CI_WAIT_REASON % (cap, cap, cap) if wait > cap else ""
 
 
+# The cite of the answered-claim refusal. The reason itself is built by answered_claim_hit (hooks/answered_claims.py).
+ANSWERED_CLAIM_CITE = "(decision answered-claims-match-page, a claim of an answer matches the page)"
+
+
 def judge(payload) -> None:
     if payload.get("hook_event_name") == "SubagentStop":
         judge_stop(payload)
@@ -7181,6 +7194,14 @@ def judge(payload) -> None:
     stamped = stamp_hit(tool, tool_input)
     if stamped:
         refuse(tool, "deny", "message-time-matches-clock", stamped[1], stamped[0])
+
+    # A message or brief that says a waiting-page item is answered when the page's data holds no owner answer for it
+    # (rule brief-checks-answered-claims-match-page). The page is read from git, only for a text that holds a claim.
+    import answered_claims  # the one home of the claim test and the page read
+    answered = answered_claims.answered_claim_hit(tool, tool_input, cwd)
+    if answered:
+        refuse(tool, "deny", "brief-checks-answered-claims-match-page", answered[1] + " " + ANSWERED_CLAIM_CITE,
+               answered[0][:120])
 
     # A check-in that waits on CI past the cap (rule ci-wait-cap). An agent's call was refused at 8b before this point.
     ci_wait = ci_wait_hit(tool, tool_input)
