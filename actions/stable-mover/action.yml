@@ -1,0 +1,26 @@
+name: Stable mover
+description: >
+  Moves the stable branch to the head of a green main run. Fast-forward only: it refuses a run
+  that did not succeed and a head that does not descend from stable, and it never forces. The
+  caller needs actions/checkout with fetch-depth 0 so the history reaches stable, and a token
+  that can push to the repository (the job's contents: write).
+inputs:
+  head-sha:
+    description: "The commit the finished run ran on, such as github.event.workflow_run.head_sha."
+    required: true
+  conclusion:
+    description: "The finished run's conclusion, such as github.event.workflow_run.conclusion."
+    required: true
+  token:
+    description: "A token that can push to the repository, such as secrets.GITHUB_TOKEN."
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Fast-forward stable to the green head
+      shell: bash
+      env:
+        HEAD_SHA: ${{ inputs.head-sha }}
+        RUN_CONCLUSION: ${{ inputs.conclusion }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: bash "${{ github.action_path }}/run.sh"
