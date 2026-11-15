@@ -25,6 +25,14 @@ guard rule, so the watcher does the waiting and the session is told once.
   and never scans the command text. A parent dies before it can start another child. A job with no child
   (builtins only) lists its own pid. The table lists the same processes. Two limits: an orphan (`(sleep N &); sleep N`) is adopted by
   init and not listed, and a TERM trap that returns respawns a loop body (SIGKILL ends it).
+- A planned pause is quiet by design, so the quiet time starts after it. The pause is the one `sleep` with a
+  command after it, anywhere in the background command: the one pause that the `waiter` guard allows
+  (`guard_stream.waiter_verdict`). Its length is the sum of the operands (`sleep 5m 30s` is 330 s); an
+  operand that expands (`sleep $X`) counts 600 s (consultant's pick). A `sleep` with nothing after it or piped
+  on, in a loop, or as quoted, commented or heredoc text gives nothing. Nor do two or more `sleep`
+  commands (the guard refuses them), a fractional length, or a `sleep` that is not first and is under 25 s
+  (the guard's short-sleep bound; the base quiet time covers it). `pause_seconds` is the one parse, read
+  with the guard's tokenizer. The hook adds it to `--quiet`, and `--stop` adds it to the quiet age of the job.
 - The watcher (`--watch-pid`) prints a STALL report and exits 3 after 300 quiet seconds. The job keeps
   running and the watcher never stops it. The wrapper keeps exit 3 after a stall, so the session gets no
   exit code from the job, even a healthy silent one such as `python3 hooks/test_guard.py` (owner ruling,
