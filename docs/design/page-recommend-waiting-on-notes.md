@@ -79,5 +79,5 @@ this work does not change it.
 
 ## 9. Measured verdicts
 
-Headless Chromium, all 11 states at 360, 390 and 430, light and dark (66 frames): no sideways scroll, no card element
-past the page edge, no option card or button under 44 px (More context stays 32 px, as today), no console error. All pass.
+Headless Chromium, all 11 states at 360, 390 and 430, light and dark (66 frames). No sideways scroll. No card element
+past the page edge. No option card or button under 44 px (More context stays 32 px, as today). No console error. All pass.
